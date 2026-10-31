@@ -516,7 +516,7 @@ export interface ScriptRule {
  */
 const DEPOSIT_TITLE: Record<Language, string> = {
   en: 'Service call deposit',
-  es: 'Depósito de visita de servicio',
+  es: 'Service call deposit',
 };
 
 /** The verification code the invoice rule sends to the Demo inbox. */

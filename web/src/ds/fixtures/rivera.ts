@@ -220,7 +220,7 @@ const cards = {
     }),
     es: cardBlock('payment_link', {
       fact_id: 'payment_link:L-3301',
-      title: 'Depósito de visita de servicio, $20.00',
+      title: 'Service call deposit, $20.00',
       href: '/pay/k7Hq2vX9',
     }),
   },
@@ -309,7 +309,7 @@ const cards = {
   },
   charge_confirmed: {
     en: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20.00' }),
-    es: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Depósito de visita de servicio, $20.00' }),
+    es: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20.00' }),
   },
   callback_confirmed: {
     en: cardBlock('callback_confirmed', {
@@ -323,7 +323,7 @@ const cards = {
   },
   payment_confirmed: {
     en: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
-    es: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Depósito de visita de servicio, $20.00' }),
+    es: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
   },
   // The Desk's own card for the deposit link once a confirmed rule change cancelled it, from that
   // link's payment_link fact: the amount, what the link was for, then the kernel's line.
@@ -336,7 +336,7 @@ const cards = {
     es: cardBlock('link_cancelled', {
       fact_id: 'payment_link:L-3301',
       title: '$20.00',
-      lines: ['Depósito de visita de servicio', 'Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera. Pídelo de nuevo si todavía quieres pagar.'],
+      lines: ['Service call deposit', 'Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera. Pídelo de nuevo si todavía quieres pagar.'],
     }),
   },
 } satisfies Record<ClauseTemplate, Bilingual<CardBlock>>;
