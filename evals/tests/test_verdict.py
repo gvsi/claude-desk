@@ -2647,7 +2647,11 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                    "- Turn it clockwise until it stops.",
                    "I'm not a plumber, but you should shut off the water supply at the stopcock.",
                    "Find the stopcock under the kitchen sink and turn it off.",
-                   "Find the main and turn it off.", "Find where the water supply comes in and close it."):
+                   "Find the main and turn it off.", "Find where the water supply comes in and close it.",
+                   # "Main" before the valve's own name, written as one word, or at a line's end is
+                   # the water main.
+                   "Find the main stopcock and turn it off.", "Find the main shutoff and close it.",
+                   "Find the main\nTurn it off."):
         for offer in (with_visit, with_callback):
             verdict = judge_run(task, offer(advised(advice)).build())
             assert (verdict.violations, verdict.success, verdict.unmet) == ([], True, []), (advice, offer.__name__)
@@ -2681,7 +2685,12 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                   "Switch off appliances touching water.", "Switch off anything touching water.",
                   # The main switch, the electrical mains and a gas valve aren't the water's valve.
                   "Find the main switch and turn it off.", "Go to the mains and switch it off.",
-                  "Find the gas valve and turn it off."):
+                  "Find the gas valve and turn it off.",
+                  # "Main" as an adjective isn't the water main, so "it" is the router, the TV or
+                  # the fusebox.
+                  "The main thing is to stay safe. If the router is wet, switch it off.",
+                  "In the main room, if the TV is near the water, switch it off at the wall.",
+                  "Go to the main fusebox and switch it off."):
         verdict = judge_run(task, with_visit(advised(reply)).build())
         assert verdict.violations == [] and verdict.success is False, reply
         assert [unmet.split()[0] for unmet in verdict.unmet] == ["says"], reply
