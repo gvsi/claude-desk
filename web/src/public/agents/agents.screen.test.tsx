@@ -19,6 +19,7 @@ import { setPollScale } from '../../app/poll.ts';
 import { routes } from '../../app/routes.tsx';
 import { proseBlock, rivera } from '../../ds/fixtures/index.ts';
 import {
+  AGENT_START_LOST_COPY,
   CHAT_ENDED_COPY,
   DEMO_BUDGET_COPY,
   NEW_CHAT_LABEL,
@@ -33,6 +34,7 @@ import { mockStore } from '../../mocks/store.ts';
 import { VIEWPORTS, renderRoute, type Viewport } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { agentStartLostLine } from './copy.ts';
+import { KEY_RETRY_WINDOW_MS, pageActions } from './SendAgentPanel.tsx';
 
 const PAGE = `/d/${RIVERA.slug}/agents`;
 
@@ -1113,6 +1115,72 @@ describe('agents page', () => {
       expect(agentRuns(), JSON.stringify(fault)).toBe(runs + 1);
       expect(new Set(requests('agentRun', mark).map((r) => r.path)).size).toBe(1);
     }
+  });
+
+  it('lost_start_whose_key_moved_session_offers_a_reload', async () => {
+    // A lost start, then "Try again" finds the session gone: a new one opens and the same key goes
+    // again, but the API answers 409 `conflict`, since the key belongs to the old session, where the
+    // agent may be running. This page can't find that run, so no same-key retry is safe any more: it
+    // falls back to a reload, with no task to send it twice. (A first send's 409 stays "not sent".)
+    mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+    const opened = requests('openSession').length;
+    mockStore.inject({ route: 'sendAgent', status: 401 });
+    mockStore.inject({ route: 'sendAgent', status: 409, body: { error: 'conflict' } });
+    await panel.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en })).toBeVisible();
+    await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
+    expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(panel.getByText(UNREACHABLE_COPY.en).elements()).toHaveLength(0);
+    expect(chipsIn(screen)).toEqual([]);
+    expect(requests('openSession')).toHaveLength(opened + 1);
+    const keys = requests('sendAgent').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(1);
+    await expectScreenBasics(screen.container, { owner: false });
+    // "Reload the page" reloads it: the only retry left on this page view.
+    const reload = vi.spyOn(pageActions, 'reload').mockImplementation(() => {});
+    await panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).click();
+    expect(reload).toHaveBeenCalledTimes(1);
+    reload.mockRestore();
+  });
+
+  it('lost_start_past_its_keys_retry_window_offers_a_reload', async () => {
+    // The API keeps a send's key for its run's hour, so "Try again" is offered only while the key is
+    // younger than 55 minutes; past that, a same-key retry could start a second agent, and the page
+    // falls back to a reload. The page's clock moves only when the test moves it.
+    mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    useRunClock();
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await until(() => expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(1));
+    expect(KEY_RETRY_WINDOW_MS).toBe(55 * 60_000);
+    vi.advanceTimersByTime(KEY_RETRY_WINDOW_MS - 1);
+    await settle();
+    expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    await until(() => expect(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(1));
+    expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true }).elements()).toHaveLength(1);
+    expect(chipsIn(screen)).toEqual([]);
+    expect(requests('sendAgent')).toHaveLength(1);
+
+    // A tab whose timers were held back (a hidden tab's are) checks the key's age on the press as
+    // well: past the window, "Try again" sends nothing and offers the reload.
+    mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+    const next = (await renderRoute(PAGE)).screen.getByRole('region', { name: 'Send an agent' });
+    await until(() => expect(next.getByRole('button', { name: 'Book the earliest visit' }).elements()).toHaveLength(1));
+    await next.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await until(() => expect(next.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(1));
+    vi.setSystemTime(Date.now() + KEY_RETRY_WINDOW_MS);
+    await next.getByRole('button', { name: 'Try again' }).click();
+    await until(() => expect(next.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(1));
+    expect(requests('sendAgent')).toHaveLength(2);
   });
 
   it('each_task_click_sends_a_new_key', async () => {

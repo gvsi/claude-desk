@@ -26,6 +26,7 @@ import { ApiError, isUncertain, newIdempotencyKey, request } from '../../api/htt
 import type { AgentTurn, DemoAgentRun } from '../../api/views.ts';
 import { agentRunPollMs } from '../../app/poll.ts';
 import {
+  AGENT_START_LOST_COPY,
   AgentMessage,
   Button,
   CHAT_ENDED_COPY,
@@ -36,6 +37,7 @@ import {
   MarginReceipt,
   NEW_CHAT_LABEL,
   Notice,
+  RELOAD_PAGE_LABEL,
   SignedLimitPanel,
   SuggestionChips,
   SystemLine,
@@ -53,6 +55,19 @@ import { useRunInView } from './runInView.ts';
 
 /** The panel's title's id, which the public page's "Send an agent" link names (`#send`). */
 export const SEND_ID = 'send';
+
+/** What the page does for "Reload the page", here so a test can stand in for the browser's reload. */
+export const pageActions = {
+  reload(): void {
+    window.location.reload();
+  },
+};
+
+/**
+ * How long after a click its key may be sent again: 55 minutes, a margin under the hour the API
+ * keeps a send's key (plan 02b's `RUN_LIFE`). Past it, a repeat could start a second agent.
+ */
+export const KEY_RETRY_WINDOW_MS = 55 * 60_000;
 
 /** The language of the Desk's replies to the built-in agent, which writes in English. */
 const RUN_LANGUAGE: CopyLanguage = 'en';
@@ -78,21 +93,26 @@ const MAX_MISSES = 5;
  * - `stopped`: the run failed, or the API no longer has it (404) or refuses to show it for good;
  * - `busy`: the API refused to start it (429);
  * - `budget`: the demo's model budget is spent, and the API refused to start it (503 `demo_budget`);
- * - `not_sent`: it clearly didn't start (the session couldn't open, a 409 `conflict` for its key, or
- *   another refusal);
+ * - `not_sent`: it clearly didn't start (the session couldn't open, a first send's 409 `conflict`
+ *   for its key, or another refusal);
  * - `lost`: the start's answer was lost (no answer, a timeout or a 5xx), so the agent may be on its
  *   way and no read can find its run: only "Try again" is offered, which sends the same task with
  *   the same key and so finds the run if the agent started, or starts it if it didn't;
+ * - `reload`: a lost start that no same-key retry can settle safely any more (its key now belongs to
+ *   a session this page no longer has, or is older than `KEY_RETRY_WINDOW_MS`), so the agent may be
+ *   on its way and only a reload is offered, with no task to send it twice, as before the API took
+ *   keys;
  * - `ended`: the chat ended (a 401 the session couldn't recover from).
  */
-type Status = 'idle' | 'sending' | 'running' | 'done' | 'stopped' | 'busy' | 'budget' | 'not_sent' | 'lost' | 'ended';
+type Status = 'idle' | 'sending' | 'running' | 'done' | 'stopped' | 'busy' | 'budget' | 'not_sent' | 'lost' | 'reload' | 'ended';
 
 interface PanelState {
   status: Status;
   /** The task last chosen. */
   task: DemoTask | null;
-  /** The idempotency key of that click, sent with each of its tries. */
+  /** The idempotency key of that click, sent with each of its tries, and when it was made (ms). */
   key: string | null;
+  keyMadeAt: number | null;
   /** The run's id once the API started it, or null. */
   runId: string | null;
   /** The run as last read. */
@@ -101,14 +121,17 @@ interface PanelState {
   readsFailing: boolean;
 }
 
-const IDLE: PanelState = { status: 'idle', task: null, key: null, runId: null, run: null, readsFailing: false };
+const IDLE: PanelState = { status: 'idle', task: null, key: null, keyMadeAt: null, runId: null, run: null, readsFailing: false };
 
 /** The states that offer the tasks: before a run, after one ended, and after a start that clearly didn't go ahead. */
 const OFFERS_TASKS: ReadonlySet<Status> = new Set<Status>(['idle', 'done', 'stopped', 'busy', 'budget', 'not_sent']);
 
-/** What a failed start means for the panel. */
-function sendFailure(err: unknown): Status {
+/** What a failed start means for the panel; `retry` when it was "Try again" after a lost start. */
+function sendFailure(err: unknown, retry: boolean): Status {
   if (!(err instanceof ApiError)) return 'not_sent';
+  // The key came from another session (a 401 opened a new one): the lost start's run, if any, is the
+  // old session's, out of this page's reach. A first send's conflict started nothing.
+  if (err.kind === 'conflict' && retry) return 'reload';
   if (err.kind === 'unauthorized') return 'ended';
   if (err.kind === 'rate_limited') return 'busy';
   // The API checks the demo's budget before it starts anything.
@@ -189,24 +212,27 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
     [],
   );
 
-  /** Sends the agent on `task` with `key`: a new key for a click, the same one to try that click again. */
-  const send = async (task: DemoTask, key: string) => {
+  /**
+   * Sends the agent on `task` with `key`: a new key for a click, the same one to try that click again
+   * after its answer was lost (`retry`).
+   */
+  const send = async (task: DemoTask, key: string, keyMadeAt: number, retry = false) => {
     reading.current?.abort();
     const controller = new AbortController();
     reading.current = controller;
     const { signal } = controller;
-    setState({ status: 'sending', task, key, runId: null, run: null, readsFailing: false });
+    setState({ status: 'sending', task, key, keyMadeAt, runId: null, run: null, readsFailing: false });
     let runId: string;
     try {
       const started = await session.call(() => request('sendAgent', { params: { slug }, body: { task, idempotency_key: key } }));
       if (typeof started?.run_id !== 'string') throw new ApiError('unavailable', { route: 'sendAgent', method: 'POST', status: 202 });
       runId = started.run_id;
     } catch (err) {
-      if (!signal.aborted) setState({ status: sendFailure(err), task, key, runId: null, run: null, readsFailing: false });
+      if (!signal.aborted) setState({ status: sendFailure(err, retry), task, key, keyMadeAt, runId: null, run: null, readsFailing: false });
       return;
     }
     if (signal.aborted) return;
-    setState({ status: 'running', task, key, runId, run: null, readsFailing: false });
+    setState({ status: 'running', task, key, keyMadeAt, runId, run: null, readsFailing: false });
     // The run is read until it ends: done, failed, or gone. There is no deadline, since the agent
     // goes on whatever the page does.
     const startedAt = Date.now();
@@ -221,11 +247,11 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
         if (signal.aborted) return;
         misses = 0;
         if (run.state === 'done' || run.state === 'failed') {
-          setState({ status: run.state === 'done' ? 'done' : 'stopped', task, key, runId, run, readsFailing: false });
+          setState({ status: run.state === 'done' ? 'done' : 'stopped', task, key, keyMadeAt, runId, run, readsFailing: false });
           return;
         }
         // Running, or a state this build doesn't know, which isn't an end: read on.
-        setState({ status: 'running', task, key, runId, run, readsFailing: false });
+        setState({ status: 'running', task, key, keyMadeAt, runId, run, readsFailing: false });
       } catch (err) {
         if (signal.aborted) return;
         const ended = readFailure(err);
@@ -247,15 +273,34 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
     // the run into view is `runInView`'s, and a scroll here would cut its smooth one short.
     titleRef.current?.focus({ preventScroll: true });
     runInView.follow();
-    void send(task, newIdempotencyKey());
+    void send(task, newIdempotencyKey(), Date.now());
   };
 
-  /** "Try again" after a lost start: the same task with the same key, so the agent runs once. */
+  /**
+   * "Try again" after a lost start: the same task with the same key, so the agent runs once, while
+   * the key is inside its window; past it (a tab whose timers were held back), the reload instead.
+   */
   const tryAgain = () => {
-    if (state.task === null || state.key === null) return;
+    const { task, key, keyMadeAt } = state;
+    if (task === null || key === null || keyMadeAt === null) return;
+    if (Date.now() - keyMadeAt >= KEY_RETRY_WINDOW_MS) {
+      setState((prev) => ({ ...prev, status: 'reload' }));
+      return;
+    }
     runInView.follow();
-    void send(state.task, state.key);
+    void send(task, key, keyMadeAt, true);
   };
+
+  // A lost start's "Try again" lasts as long as its key's window: then the reload takes its place.
+  const { status: shown, key: shownKey, keyMadeAt: shownMadeAt } = state;
+  useEffect(() => {
+    if (shown !== 'lost' || shownMadeAt === null) return;
+    const timer = setTimeout(
+      () => setState((prev) => (prev.status === 'lost' && prev.key === shownKey ? { ...prev, status: 'reload' } : prev)),
+      Math.max(0, shownMadeAt + KEY_RETRY_WINDOW_MS - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [shown, shownKey, shownMadeAt]);
 
   const newChat = () => {
     // "New chat" goes with its notice, and the tasks come back: its focus moves to the title before
@@ -286,6 +331,20 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
         {agentStartLostLine(language)}
       </Notice>
     );
+  } else if (status === 'reload') {
+    // No retry here can find the agent's run any more: a reload is the retry.
+    notice = (
+      <Notice
+        tone="error"
+        action={
+          <Button variant="secondary" onClick={() => pageActions.reload()}>
+            {RELOAD_PAGE_LABEL[language]}
+          </Button>
+        }
+      >
+        {AGENT_START_LOST_COPY[language]}
+      </Notice>
+    );
   } else if (status === 'not_sent' || readsFailing) notice = <Notice tone="error">{UNREACHABLE_COPY[language]}</Notice>;
   else if (status === 'ended') {
     notice = (
@@ -309,7 +368,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   const chipsAtEnd = status === 'done' || status === 'stopped';
   // While a run is starting or exists (or may, after a lost start), the chosen task takes the lead's
   // place (boards 04 and 05). A start that never ran keeps the lead.
-  const ran = status === 'sending' || status === 'lost' || runId !== null;
+  const ran = status === 'sending' || status === 'lost' || status === 'reload' || runId !== null;
   const lead =
     task !== null && ran ? DEMO_TASK_COPY[language][task] : copy.sendLead(<span data-copy="user">{business}</span>);
 
