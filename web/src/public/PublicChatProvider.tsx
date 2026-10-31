@@ -389,7 +389,8 @@ class VisitorChat {
   private async open(epoch: number): Promise<void> {
     const { session, transcript } = await openChat(this.slug, this.previewDeskId);
     if (epoch !== this.epoch) return;
-    this.set({ session: transcript === null ? this.laterSession(session, session.mode) : this.openedSession(transcript) });
+    if (transcript === null) this.set({ session: this.laterSession(session, session.mode) });
+    else this.set({ session: this.openedSession(transcript) });
     if (transcript === null) {
       this.loaded = true;
       this.end();

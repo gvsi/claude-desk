@@ -185,9 +185,19 @@ const STATUS_TIME = /\.(?:until|opens_at|as_of|refresh_at)\b|\[\s*['"`](?:until|
 // anywhere under `public/` may only pass `chat.ownerInChat`, with `chat` from `useVisitorChat`.
 const OWNER_IN_CHAT_PROP = /(?<![\w.$'"`])ownerInChat(?![\w$'"`]|\s*\??:)(?:\s*=\s*(\{(?:[^{}]|\{[^{}]*\})*\}|"[^"]*"|'[^']*'))?/g;
 const CHAT_FROM_THE_HOOK = /\bconst\s+chat\s*=\s*useVisitorChat\(/;
+const OWNER_IN_CHAT_ASSIGNED = /[\w$.]*(?:\.ownerInChat|\[\s*['"`]ownerInChat['"`]\s*\])\s*=(?![=>])/g;
+const OWNER_IN_CHAT_QUOTED_KEY = /['"`]ownerInChat['"`]\s*:/g;
 const CHAT_ASSIGNED = /(?<![\w.$])chat\s*=(?![=>])/g;
 const OTHER_CHAT_DECLARATION = /\b(?:let|var)\s+chat\b|\bfunction\s+\w*\s*\([^)]*(?<![\w.$])chat\b/;
-const OWNER_IN_CHAT_FIELD = /(?<![\w.$])ownerInChat\s*:\s*([^;\n]+)/g;
+const OWNER_IN_CHAT_FIELD = /(?<![\w.$'"`])ownerInChat\s*\??:\s*/g;
+/** What could say yes on its own in a value or a body: a literal `true`, an OR, a fallback or a ternary. */
+const ANOTHER_YES = /\btrue\b|\|\||\?(?!\.)/;
+/** A write of a session's mode: a key (quoted or not, but not a variable's type), a shorthand key, or an assignment. */
+const MODE_WRITE = /(?<![\w.$'"`])(?<!(?:const|let|var)\s+)mode\s*:|['"`]mode['"`]\s*:|[{,]\s*mode\s*(?=[,}])|\.mode\s*=(?![=>])|\[\s*['"`]mode['"`]\s*\]\s*=(?![=>])/g;
+/** The helpers that may give the visitor chat its session: the open path's, and the two that may only lower the mode. */
+const SESSION_HELPER = /^this\.(?:openedSession|laterSession|laterRead)\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)$/;
+/** Exactly one call of `ownerInChatNow`, its arguments balanced, with nothing around it. */
+const EXACTLY_THE_CALL = /^ownerInChatNow\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)$/;
 const VISITOR_CHAT_FILE = 'public/PublicChatProvider.tsx';
 const CHAT_REDUCER_FILE = 'public/chatReducer.ts';
 
@@ -389,37 +399,143 @@ function codeOf(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
 }
 
+/** The index just past the brace, bracket or parenthesis that closes the one at `open` in `code`. */
+function pastTheClose(code: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < code.length; i += 1) {
+    const c = code[i] ?? '';
+    if ('{[('.includes(c)) depth += 1;
+    else if ('}])'.includes(c) && (depth -= 1) === 0) return i + 1;
+  }
+  return code.length;
+}
+
+/** The expression that starts at `start` in `code`: up to the first `,`, `;`, closing brace or line end outside brackets. */
+function expressionAt(code: string, start: number): string {
+  let i = start;
+  while (i < code.length && !',;}\n'.includes(code[i] ?? '')) i = '{[('.includes(code[i] ?? '') ? pastTheClose(code, i) : i + 1;
+  return code.slice(start, i).trim();
+}
+
+/** Each spread (`{...x}`) among PublicShell's own props, wherever it is opened, as written. */
+function spreadsIntoTheShell(code: string): string[] {
+  const spreads: string[] = [];
+  for (const opened of code.matchAll(/<PublicShell\b/g)) {
+    // Its opening tag ends at the first `>` outside braces and quotes; a prop's JSX value is inside braces.
+    for (let i = opened.index + opened[0].length; i < code.length && code[i] !== '>'; ) {
+      const c = code[i] ?? '';
+      if (c === '"' || c === "'") i = code.indexOf(c, i + 1) + 1 || code.length;
+      else if (c === '{') {
+        const end = pastTheClose(code, i);
+        if (/^\{\s*\.\.\./.test(code.slice(i, end))) spreads.push(code.slice(i, end).replace(/\s+/g, ' '));
+        i = end;
+      } else i += 1;
+    }
+  }
+  return spreads;
+}
+
 /**
- * `ownerInChat` props whose value isn't the visitor chat's own (`{chat.ownerInChat}`), bare ones,
- * and files that pass it where `chat` doesn't come from `useVisitorChat` alone.
+ * Every way in `shellFiles` that something but the visitor chat's own value could reach PublicShell's
+ * `ownerInChat`: a prop whose value isn't `{chat.ownerInChat}` (a bare one included), a file that
+ * passes it where `chat` doesn't come from `useVisitorChat` alone, a spread into PublicShell, an
+ * `ownerInChat` key outside the visitor chat (as an object a spread or `createElement` would pass),
+ * a quoted `ownerInChat` key anywhere, and anything assigned to an `ownerInChat`.
  */
 function ownerInChatNotFromTheChat(scanned: Source[]): string[] {
   return scanned.flatMap(({ file, text }) => {
     const code = codeOf(text);
+    const bad = spreadsIntoTheShell(code).map((spread) => `${file}: PublicShell takes a spread: ${spread}`);
+    if (file !== VISITOR_CHAT_FILE) {
+      for (const key of code.matchAll(OWNER_IN_CHAT_FIELD)) bad.push(`${file}: ownerInChat: ${expressionAt(code, key.index + key[0].length)}`);
+    }
+    for (const key of code.matchAll(OWNER_IN_CHAT_QUOTED_KEY)) bad.push(`${file}: ${key[0].replace(/\s*:$/, '')}: ${expressionAt(code, key.index + key[0].length)}`);
+    for (const assigned of code.matchAll(OWNER_IN_CHAT_ASSIGNED)) bad.push(`${file}: ${assigned[0].replace(/\s*=$/, '')} = ${expressionAt(code, assigned.index + assigned[0].length)}`);
     const props = [...code.matchAll(OWNER_IN_CHAT_PROP)].map((m) => m[1] ?? '');
-    if (props.length === 0) return [];
-    const bad = props.filter((value) => value !== '{chat.ownerInChat}').map((value) => `${file}: ownerInChat${value === '' ? '' : `=${value}`}`);
+    if (props.length === 0) return bad;
+    bad.push(...props.filter((value) => value !== '{chat.ownerInChat}').map((value) => `${file}: ownerInChat${value === '' ? '' : `=${value}`}`));
     if (!CHAT_FROM_THE_HOOK.test(code)) bad.push(`${file}: chat doesn't come from useVisitorChat`);
     if ((code.match(CHAT_ASSIGNED) ?? []).length !== 1 || OTHER_CHAT_DECLARATION.test(code)) bad.push(`${file}: chat is declared or assigned elsewhere`);
     return bad;
   });
 }
 
+/** The files the owner line's guard reads: everything under `public/`, and every other file that renders PublicShell. */
+function shellFiles(all: Source[]): Source[] {
+  return all.filter(({ file, text }) => /\.tsx?$/.test(file) && (file.startsWith('public/') || /<PublicShell\b|\bcreateElement\(\s*PublicShell\b/.test(codeOf(text))));
+}
+
+/** The [start, end) of the body of the class method `name` in `code`, or null when it isn't declared there. */
+function methodBody(code: string, name: string): [number, number] | null {
+  const head = new RegExp(`^[ \\t]*(?:(?:private|protected|public|static|async|readonly)\\s+)*${name}\\s*\\(`, 'm').exec(code);
+  if (!head) return null;
+  const open = code.indexOf('{', pastTheClose(code, head.index + head[0].length - 1));
+  return open === -1 ? null : [open, pastTheClose(code, open)];
+}
+
 /**
- * Where the visitor chat's `ownerInChat` could come from anything but the session's mode: a value
- * in the chat other than its type, `false` or `ownerInChatNow(…)`, and an `ownerInChatNow` that
- * doesn't read `session?.mode === 'owner'` or has another way to say yes.
+ * Where the visitor chat could put the chat in the owner's hands but the open path and her join: a
+ * session it keeps (`this.set`) that isn't `null` or one of `SESSION_HELPER`'s calls, outside
+ * `followMode`; a write of a session's mode outside `openedSession` and `followMode`, but for one that
+ * can only lower it (`mode: lowerOnly(…)`); and a `followMode` that gives the owner's mode for
+ * anything but `owner_joined`.
+ */
+function sessionModeWrites(chat: string): string[] {
+  const code = codeOf(chat);
+  const inside = (at: number, method: string) => {
+    const body = methodBody(code, method);
+    return body !== null && at >= body[0] && at < body[1];
+  };
+  const bad: string[] = [];
+  for (const set of code.matchAll(/\bthis\.set\(/g)) {
+    const open = set.index + set[0].length - 1;
+    const args = code.slice(open, pastTheClose(code, open));
+    for (const key of args.matchAll(/(?<![\w.$'"`])session\s*:|[{,]\s*session\s*(?=[,}])/g)) {
+      const at = open + key.index;
+      if (!key[0].includes(':')) {
+        bad.push(`${VISITOR_CHAT_FILE}: session (shorthand)`);
+        continue;
+      }
+      const value = expressionAt(args, key.index + key[0].length);
+      if (value === 'null' || SESSION_HELPER.test(value) || (inside(at, 'followMode') && value === '{ ...session, mode }')) continue;
+      bad.push(`${VISITOR_CHAT_FILE}: session: ${value}`);
+    }
+  }
+  for (const write of code.matchAll(MODE_WRITE)) {
+    if (inside(write.index, 'openedSession') || inside(write.index, 'followMode')) continue;
+    if (/^mode\s*:$/.test(write[0]) && /^\s*lowerOnly\(/.test(code.slice(write.index + write[0].length))) continue;
+    bad.push(`${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: ${write[0].trim()}`);
+  }
+  const follow = methodBody(code, 'followMode');
+  const said = follow === null ? '' : code.slice(...follow);
+  for (const owner of said.matchAll(/(===|!==|==|!=)?\s*'owner'/g)) {
+    if (owner[1] !== undefined) continue;
+    if (!/ev\.type === 'owner_joined' \?\s*$/.test(said.slice(0, owner.index))) bad.push(`${VISITOR_CHAT_FILE}: followMode sets the owner's mode for something but owner_joined`);
+  }
+  return bad;
+}
+
+/** The values the visitor chat gives its `ownerInChat`, its type included, each as written. */
+function ownerInChatValues(chat: string): string[] {
+  const code = codeOf(chat);
+  return [...code.matchAll(OWNER_IN_CHAT_FIELD)].map((m) => expressionAt(code, m.index + m[0].length));
+}
+
+/**
+ * Where the visitor chat's `ownerInChat` could come from anything but the session's mode: a value in
+ * the chat other than its type, `false` or exactly one `ownerInChatNow(…)` call with nothing in it
+ * that could say yes on its own, and an `ownerInChatNow` that doesn't read `session?.mode === 'owner'`
+ * or has another way to say yes.
  */
 function ownerInChatSources(chat: string, reducer: string): string[] {
-  const bad = [...codeOf(chat).matchAll(OWNER_IN_CHAT_FIELD)]
-    .map((m) => (m[1] ?? '').replace(/[\s,}]+$/, '').trim())
-    .filter((value) => value !== 'boolean' && value !== 'false' && !(/\bownerInChatNow\(/.test(value) && !/\btrue\b|\|\||\?\?/.test(value)))
+  const bad = ownerInChatValues(chat)
+    .filter((value) => value !== 'boolean' && value !== 'false' && !(EXACTLY_THE_CALL.test(value) && !ANOTHER_YES.test(value)))
     .map((value) => `${VISITOR_CHAT_FILE}: ownerInChat: ${value}`);
   const code = codeOf(reducer);
   const body = functionBody(code, 'ownerInChatNow');
   const said = body === null ? '' : code.slice(...body);
   if (!/\bsession\?\.mode === 'owner'/.test(said)) bad.push(`${CHAT_REDUCER_FILE}: ownerInChatNow doesn't read the session's mode`);
-  if (/\btrue\b|\|\||\?\?/.test(said)) bad.push(`${CHAT_REDUCER_FILE}: ownerInChatNow has another way to say yes`);
+  if (ANOTHER_YES.test(said)) bad.push(`${CHAT_REDUCER_FILE}: ownerInChatNow has another way to say yes`);
   return bad;
 }
 
@@ -741,7 +857,11 @@ describe('app source guards', () => {
   });
 
   it('owner_in_chat_comes_only_from_the_sessions_mode', () => {
-    const visitor = sources.filter((s) => s.file.startsWith('public/') && /\.tsx?$/.test(s.file));
+    // Every file under `public/`, and every other file that renders PublicShell, the vision pages among them.
+    const visitor = shellFiles(sources);
+    expect(visitor.map(({ file }) => file)).toEqual(expect.arrayContaining(['public/PublicChat.tsx', 'vision/CityOfficePage.tsx', 'vision/ClaudeAccountPage.tsx']));
+    const planted: Source = { file: 'vision/Planted.tsx', text: 'export const Page = () => <PublicShell ownerInChat brand={brand} />;' };
+    expect(ownerInChatNotFromTheChat(shellFiles([...sources, planted]))).toContain('vision/Planted.tsx: ownerInChat');
     const hook = "const chat = useVisitorChat(slug, previewDeskId);\n";
 
     // Props: only the visitor chat's own value, by its own name, from the hook.
@@ -749,28 +869,87 @@ describe('app source guards', () => {
     expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell ownerInChat />`))).toEqual(['sample.tsx: ownerInChat']);
     expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell ownerInChat={ready && joined(state)} />`))).toHaveLength(1);
     expect(ownerInChatNotFromTheChat(sample(`${hook}const { ownerInChat } = chat;\n<PublicShell ownerInChat={ownerInChat} />`))).toHaveLength(2);
-    expect(ownerInChatNotFromTheChat(sample('const chat = { ownerInChat: true };\n<PublicShell ownerInChat={chat.ownerInChat} />'))).toHaveLength(1);
+    expect(ownerInChatNotFromTheChat(sample('const chat = { ownerInChat: true };\n<PublicShell ownerInChat={chat.ownerInChat} />'))).toHaveLength(2);
     expect(ownerInChatNotFromTheChat(sample(`${hook}chat = other;\n<PublicShell ownerInChat={chat.ownerInChat} />`))).toHaveLength(1);
     expect(ownerInChatNotFromTheChat(sample(`${hook}// ownerInChat={true} in a comment\n<PublicShell ownerInChat={chat.ownerInChat} />`))).toEqual([]);
     expect(ownerInChatNotFromTheChat(sample("type Set = Omit<Snapshot, 'ownerInChat'>;"))).toEqual([]);
+    // Nothing reaches PublicShell another way: no spread into it, and no `ownerInChat` key outside the
+    // visitor chat, as an object a spread or `createElement` would pass.
+    expect(ownerInChatNotFromTheChat(sample(`${hook}const shellProps = { ownerInChat: true };\n<PublicShell {...shellProps} />`))).toEqual([
+      'sample.tsx: PublicShell takes a spread: {...shellProps}',
+      'sample.tsx: ownerInChat: true',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell\n  brand={brand}\n  composer={<div onInput={(e) => typed(e)}>{box}</div>}\n  {...rest}\n/>`))).toEqual([
+      'sample.tsx: PublicShell takes a spread: {...rest}',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample('createElement(PublicShell, { ...props, ownerInChat: enabled });'))).toEqual(['sample.tsx: ownerInChat: enabled']);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell brand={brand} composer={<Composer {...composerProps} />} ownerInChat={chat.ownerInChat} />`))).toEqual([]);
+    // Nor assigned to anything, or written as a quoted key.
+    expect(ownerInChatNotFromTheChat(sample('shellProps.ownerInChat = true;'))).toEqual(['sample.tsx: shellProps.ownerInChat = true']);
+    expect(ownerInChatNotFromTheChat(sample("shellProps['ownerInChat'] = enabled;"))).toEqual(["sample.tsx: shellProps['ownerInChat'] = enabled"]);
+    expect(ownerInChatNotFromTheChat(sample("const shellProps = { 'ownerInChat': true, \"ownerInChat\": joined };"))).toEqual([
+      "sample.tsx: 'ownerInChat': true",
+      'sample.tsx: "ownerInChat": joined',
+    ]);
+    expect(ownerInChatNotFromTheChat(sample('if (shellProps.ownerInChat === chat.ownerInChat) show();'))).toEqual([]);
     expect(ownerInChatNotFromTheChat(visitor)).toEqual([]);
     // It is passed where it is meant to be, so the check can't pass by finding nothing.
     expect(visitor.filter(({ text }) => /\bownerInChat=\{chat\.ownerInChat\}/.test(codeOf(text))).map(({ file }) => file)).toEqual(['public/PublicChat.tsx']);
 
     // In the visitor chat, the value is `ownerInChatNow`'s, which reads the session's mode and only
     // ANDs on what keeps it false.
-    const now = "export function ownerInChatNow(session: SessionState | null, state: ChatState): boolean {\n  return session?.mode === 'owner' && !state.catchingUp;\n}\n";
-    expect(ownerInChatSources("ownerInChat: boolean;\nownerInChat: false,\nownerInChat: ready && ownerInChatNow(session, state),", now)).toEqual([]);
+    const now = "export function ownerInChatNow({ session, state }: OwnerInChatFacts): boolean {\n  return session?.mode === 'owner' && !state.catchingUp;\n}\n";
+    const call = 'ownerInChatNow({\n      session: next.session,\n      state: next.state,\n      ready: next.status === \'ready\',\n    })';
+    expect(ownerInChatSources(`ownerInChat: boolean;\nownerInChat: false,\nthis.snapshot = { ...next, ownerInChat: ${call} };`, now)).toEqual([]);
     expect(ownerInChatSources('ownerInChat: state.rows.some(joined),', now)).toHaveLength(1);
-    expect(ownerInChatSources('ownerInChat: ownerInChatNow(session, state) || joined,', now)).toHaveLength(1);
+    expect(ownerInChatSources('ownerInChat: ownerInChatNow(facts) || joined,', now)).toHaveLength(1);
+    // Exactly the call: nothing around it that could say yes on its own.
+    expect(ownerInChatSources('ownerInChat: enabled ? enabled : ownerInChatNow(facts),', now)).toEqual([
+      'public/PublicChatProvider.tsx: ownerInChat: enabled ? enabled : ownerInChatNow(facts)',
+    ]);
+    expect(ownerInChatSources('ownerInChat: ready && ownerInChatNow(facts),', now)).toHaveLength(1);
+    expect(ownerInChatSources('ownerInChat: ownerInChatNow({ session, state, ready: true }),', now)).toHaveLength(1);
     expect(ownerInChatSources('', now.replace("session?.mode === 'owner'", 'joined(state)'))).toHaveLength(1);
     expect(ownerInChatSources('', now.replace('&& !state.catchingUp', '|| joined(state)'))).toHaveLength(1);
+    expect(ownerInChatSources('', now.replace("return session?.mode === 'owner'", "return enabled ? session?.mode === 'owner' : joined(state)"))).toHaveLength(1);
+
+    // In the visitor chat, only the open path (`openedSession`) and `followMode` set the session's
+    // mode, and `followMode` sets the owner's only for `owner_joined`. Every other session it keeps
+    // goes through a helper that can only lower the mode, and nothing else writes one.
+    const chatSample = (method: string, body: string) => `class VisitorChat {\n  private ${method}(ev: SseEvent): void {\n${body}\n  }\n}\n`;
+    const follow = "    const mode = ev.type === 'owner_joined' ? 'owner' : ev.type === 'message' && ev.author !== 'owner' ? 'ai' : null;\n    this.set({ session: { ...session, mode } });";
+    const opened = "    return { ...read, mode: read.mode === 'owner' && out ? 'ai' : read.mode };";
+    const fine = [
+      chatSample('followMode', follow),
+      chatSample('openedSession', opened),
+      chatSample('laterSession', '    return { ...next, mode: lowerOnly(this.snapshot.session?.mode ?? null, said) };'),
+      chatSample('open', '    if (gone) this.set({ session: this.laterSession(session, session.mode) });\n    else this.set({ session: this.openedSession(transcript) });'),
+      chatSample('checkCode', "    this.set(ok ? { verifyStatus: 'idle', session: this.laterRead(read.transcript, read.since) } : { verifyStatus: 'unreachable' });\n    this.set({ session: null, status: 'loading' });"),
+      chatSample('confirmMode', "    if (this.snapshot.session?.mode === 'owner') void this.read();\n    const mode: SessionMode | null = null;"),
+    ].join('');
+    expect(sessionModeWrites(fine)).toEqual([]);
+    expect(sessionModeWrites(chatSample('checkCode', "    this.set(state.verified ? { verifyStatus: 'idle', session: state } : { verifyStatus: 'failed' });"))).toEqual([
+      `${VISITOR_CHAT_FILE}: session: state`,
+    ]);
+    expect(sessionModeWrites(chatSample('open', '    this.set({ session });'))).toEqual([`${VISITOR_CHAT_FILE}: session (shorthand)`]);
+    expect(sessionModeWrites(chatSample('open', '    this.set({ session: gone ? this.laterSession(session, session.mode) : transcript.state });'))).toHaveLength(1);
+    expect(sessionModeWrites(chatSample('confirmMode', "    this.set({ session: this.laterSession({ ...read, mode: 'owner' }, null) });"))).toEqual([
+      `${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: mode:`,
+    ]);
+    expect(sessionModeWrites(chatSample('confirmMode', "    session.mode = 'owner';"))).toEqual([`${VISITOR_CHAT_FILE}: sets the mode outside the open path and followMode: .mode =`]);
+    expect(sessionModeWrites(chatSample('followMode', follow.replace("ev.type === 'owner_joined' ? 'owner'", "ev.type === 'owner_typing' ? 'owner'")))).toEqual([
+      `${VISITOR_CHAT_FILE}: followMode sets the owner's mode for something but owner_joined`,
+    ]);
+    expect(sessionModeWrites(chatSample('followMode', `${follow}\n    this.set({ session: { ...session, mode: 'owner' } });`))).toHaveLength(2);
     const chat = visitor.find((s) => s.file === VISITOR_CHAT_FILE);
     const reducer = visitor.find((s) => s.file === CHAT_REDUCER_FILE);
     expect(chat, VISITOR_CHAT_FILE).toBeDefined();
     expect(reducer, CHAT_REDUCER_FILE).toBeDefined();
     expect(ownerInChatSources(chat?.text ?? '', reducer?.text ?? '')).toEqual([]);
-    expect([...codeOf(chat?.text ?? '').matchAll(OWNER_IN_CHAT_FIELD)].some((m) => /\bownerInChatNow\(/.test(m[1] ?? '')), 'the chat sets it from ownerInChatNow').toBe(true);
+    expect(sessionModeWrites(chat?.text ?? '')).toEqual([]);
+    // The rules read the methods they name, so they can't pass by finding nothing.
+    for (const method of ['openedSession', 'followMode', 'laterSession', 'laterRead']) expect(methodBody(codeOf(chat?.text ?? ''), method), method).not.toBeNull();
+    expect(ownerInChatValues(chat?.text ?? '').some((value) => EXACTLY_THE_CALL.test(value)), 'the chat sets it from ownerInChatNow').toBe(true);
   });
 
   it('mark_tile_only_in_the_app_icon', () => {
