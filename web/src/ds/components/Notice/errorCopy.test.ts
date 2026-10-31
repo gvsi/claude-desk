@@ -10,6 +10,7 @@ import {
   NEW_CHAT_LABEL,
   RATE_LIMITED_COPY,
   RELOAD_PAGE_LABEL,
+  SETUP_START_LOST_COPY,
   UNREACHABLE_COPY,
   errorCopy,
   evErrorCopy,
@@ -175,5 +176,12 @@ describe('static error copy', () => {
     // The plain-word exception covers one sentence of one line, the owner's auth line in English,
     // so it can't quietly spread to another line.
     expect(lines.filter((line) => PLAIN_PHRASES.some((phrase) => line.includes(phrase)))).toEqual([errorCopy('auth', 'en')]);
+  });
+
+  it('setup_start_lost_copy_word_for_word', () => {
+    // Starting setup whose answer was lost: the setup interview may already exist, so starting it
+    // again may leave two drafts. An owner line, in English only, as owner screens are.
+    expect(SETUP_START_LOST_COPY).toBe('Setup may have started, but we lost the answer. If you reload and start again, you may get two drafts.');
+    expect(shownCodes(SETUP_START_LOST_COPY)).toEqual([]);
   });
 });
