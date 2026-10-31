@@ -242,7 +242,7 @@ describe('rule drafts', () => {
     // Each word tagged with its field, in order: who, limits, hours, the second look.
     expect(ruleWords(ruleCards['rv-book-wk'], PEOPLE)).toEqual([
       { field: 'who', text: 'Anyone' },
-      { field: 'hours', text: 'Mon to Fri, 8:00 am to 6:00 pm' },
+      { field: 'hours', text: 'Weekdays, 8:00 am to 6:00 pm' },
       { field: 'review', text: 'Claude takes a second look first' },
     ]);
     expect(ruleWords(ruleCards['rv-link'], PEOPLE)).toEqual([
@@ -269,16 +269,16 @@ describe('rule drafts', () => {
     expect(who({ who: 'person', person_id: 'per-unknown' })).toEqual({ field: 'who', text: 'Only this customer' });
     expect(who({ who: 'agent', agent_key_id: 'demo-agent' })).toEqual({ field: 'who', text: 'Only this agent' });
 
-    // Hours in the business's own local times, the days grouped.
+    // Hours in the business's own local times, the days grouped as the boards say them.
     const hours = (days: string[], start: string, end: string) => formatHours({ days, start, end } as Parameters<typeof formatHours>[0]);
-    expect(hours(['mon', 'tue', 'wed', 'thu', 'fri'], '08:00:00', '18:00:00')).toBe('Mon to Fri, 8:00 am to 6:00 pm');
-    expect(hours(['sat'], '09:00:00', '13:00:00')).toBe('Sat, 9:00 am to 1:00 pm');
-    expect(hours(['sat', 'sun'], '12:00:00', '12:30:00')).toBe('Sat and Sun, 12:00 pm to 12:30 pm');
-    expect(hours(['fri', 'mon', 'wed'], '07:05:00', '23:59:00')).toBe('Mon, Wed and Fri, 7:05 am to 11:59 pm');
-    expect(hours(['mon', 'tue', 'wed', 'thu', 'fri', 'sun'], '08:00:00', '00:00:00')).toBe('Mon to Fri and Sun, 8:00 am to midnight');
+    expect(hours(['mon', 'tue', 'wed', 'thu', 'fri'], '08:00:00', '18:00:00')).toBe('Weekdays, 8:00 am to 6:00 pm');
+    expect(hours(['sat'], '09:00:00', '13:00:00')).toBe('Saturdays, 9:00 am to 1:00 pm');
+    expect(hours(['sat', 'sun'], '12:00:00', '12:30:00')).toBe('Weekends, 12:00 pm to 12:30 pm');
+    expect(hours(['fri', 'mon', 'wed'], '07:05:00', '23:59:00')).toBe('Mondays, Wednesdays and Fridays, 7:05 am to 11:59 pm');
+    expect(hours(['mon', 'tue', 'wed', 'thu', 'fri', 'sun'], '08:00:00', '00:00:00')).toBe('Weekdays and Sundays, 8:00 am to midnight');
     expect(hours(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], '00:00:00', '00:00:00')).toBe('Every day, all day');
     const saturday = ruleWords(ruleCards['rv-book-sat'], PEOPLE).find((word) => word.field === 'hours');
-    expect(saturday).toEqual({ field: 'hours', text: 'Sat, 9:00 am to 1:00 pm' });
+    expect(saturday).toEqual({ field: 'hours', text: 'Saturdays, 9:00 am to 1:00 pm' });
   });
 
   it('money_cap_words', () => {

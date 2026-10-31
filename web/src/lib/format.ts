@@ -222,30 +222,43 @@ export function aboveMoneyCapCopy(capCents: number | null): string {
 }
 
 const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
-const DAY_WORDS = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' } as const;
+const DAY_NAMES = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' } as const;
 
 /** "a", "a and b", "a, b and c". */
-function listWords(items: readonly string[]): string {
+export function listWords(items: readonly string[]): string {
   if (items.length <= 1) return items[0] ?? '';
   return `${items.slice(0, -1).join(', ')} and ${items.at(-1) ?? ''}`;
 }
 
-/** A window's days, Monday first: three or more in a row as a range ("Mon to Fri"), every day as "Every day". */
+/** Day `i` of the week, Monday first, by name: "Monday". */
+const dayName = (i: number) => DAY_NAMES[WEEK[i] ?? 'mon'];
+
+/**
+ * A window's days as the boards say them: "Weekdays" (Monday to Friday), "Weekends", "Every day";
+ * else each day by its plural name, Monday first ("Mondays, Wednesdays and Fridays"), three or more
+ * in a row as a range ("Monday to Thursday"), with Monday to Friday as "Weekdays" and Saturday and
+ * Sunday as "weekends" where they come with other days ("Weekdays and Saturdays", "Mondays and weekends").
+ */
 function daysWords(days: readonly string[]): string {
   const on = WEEK.map((day) => days.includes(day));
   if (on.every(Boolean)) return 'Every day';
   const parts: string[] = [];
-  for (let i = 0; i < WEEK.length; i += 1) {
+  let from = 0;
+  if (on.slice(0, 5).every(Boolean)) {
+    parts.push('weekdays');
+    from = 5;
+  }
+  for (let i = from; i < WEEK.length; i += 1) {
     if (!on[i]) continue;
     let end = i;
     while (end + 1 < WEEK.length && on[end + 1]) end += 1;
-    const first = DAY_WORDS[WEEK[i] ?? 'mon'];
-    const last = DAY_WORDS[WEEK[end] ?? 'mon'];
-    if (end - i >= 2) parts.push(`${first} to ${last}`);
-    else for (let d = i; d <= end; d += 1) parts.push(DAY_WORDS[WEEK[d] ?? 'mon']);
+    if (i === 5 && end === 6) parts.push('weekends');
+    else if (end - i >= 2) parts.push(`${dayName(i)} to ${dayName(end)}`);
+    else for (let d = i; d <= end; d += 1) parts.push(`${dayName(d)}s`);
     i = end;
   }
-  return listWords(parts);
+  const words = listWords(parts);
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
 }
 
 /** A contract time of day ("18:00:00") as the owner reads it, "6:00 pm"; midnight as "midnight". Null when it can't be read. */
@@ -259,14 +272,22 @@ function timeOfDay(time: string): string | null {
 }
 
 /**
- * A rule's hours, in the business's own local times (a window carries no time zone of its own):
- * "Mon to Fri, 8:00 am to 6:00 pm", "Sat, 9:00 am to 1:00 pm", "Every day, all day". An end at
- * 00:00 is midnight, the day's end. A time that can't be read is shown as it came.
+ * A window's two parts, in the business's own local times (a window carries no time zone of its
+ * own): its days ("Weekdays", "Saturdays", "Mondays, Wednesdays and Fridays", `daysWords`) and its
+ * times ("8:00 am to 6:00 pm", or "all day" from midnight to midnight). An end at 00:00 is midnight,
+ * the day's end. A time that can't be read is shown as it came. Settings joins them with a space
+ * ("Weekdays 8:00 am to 6:00 pm"); `formatHours` with a comma.
  */
-export function formatHours(w: HoursWindow): string {
+export function hoursParts(w: HoursWindow): { days: string; times: string } {
   const days = daysWords(w.days);
   const start = timeOfDay(w.start);
   const end = timeOfDay(w.end);
-  if (start === 'midnight' && end === 'midnight') return `${days}, all day`;
-  return `${days}, ${start ?? w.start} to ${end ?? w.end}`;
+  if (start === 'midnight' && end === 'midnight') return { days, times: 'all day' };
+  return { days, times: `${start ?? w.start} to ${end ?? w.end}` };
+}
+
+/** A rule's hours in the boards' words: "Weekdays, 8:00 am to 6:00 pm", "Saturdays, 9:00 am to 1:00 pm", "Every day, all day". */
+export function formatHours(w: HoursWindow): string {
+  const { days, times } = hoursParts(w);
+  return `${days}, ${times}`;
 }
