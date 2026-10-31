@@ -13,7 +13,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
-import { OUTCOME_GROUP_WORDS, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { OUTCOME_GROUP_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { worker } from '../mocks/browser.ts';
@@ -223,7 +223,9 @@ describe('setup', () => {
   it('lost_start_is_tried_again_with_its_key', async () => {
     // A start whose answer was lost (no answer, a timeout or a 5xx) may have made a Desk: it is
     // never called not done, "Start" stays off, and "Try again" sends the same start with the same
-    // key, which goes on to the interview the first made, or makes it now: one Desk either way.
+    // key, which goes on to the interview the first made, or makes it now: one Desk either way. Its
+    // line is the design system's retry-safe one, which says so.
+    expect(setupStartLostLine()).toBe(SETUP_START_RETRY_COPY);
     const lost = [{ status: 503 as const }, { status: 'network' as const, afterCommit: true }, { status: 'network' as const }];
     for (const fault of lost) {
       const page = (await renderRoute('/app/setup')).screen;
@@ -309,6 +311,7 @@ describe('setup', () => {
   });
 
   it('start_under_way_after_its_retries_says_it_is_taking_longer', async () => {
+    expect(setupStartSlowLine()).toBe(SETUP_START_SLOW_COPY);
     // A start that runs long: its own answer is lost, "Try again" finds it under way, and after
     // three more tries the page says it's taking longer, with "Try again" and "Start" still off.
     // Once it has made the Desk, "Try again" goes on to its interview: one Desk, one key.

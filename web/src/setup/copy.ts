@@ -4,7 +4,7 @@
  * `moneyLimitLine`, `checkStatus`, `RuleDraftReview`) aren't repeated here.
  */
 import type { QuestionKey, SetupStep } from '../api/views.ts';
-import { SETUP_START_LOST_COPY, UNREACHABLE_COPY } from '../ds/index.ts';
+import { SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY } from '../ds/index.ts';
 
 /**
  * What setup says when its checking ran out of time on this side (the proving give-up) and the
@@ -18,11 +18,11 @@ export function stillCheckingLine(): string {
 
 /**
  * What the start page says when the answer to "Start" was lost: setup may have started, and "Try
- * again" sends the same start with the same key, which goes on to the interview if it did.
+ * again" sends the same start with the same key, which goes on to the interview if it did. The
+ * design system's retry-safe line.
  */
 export function setupStartLostLine(): string {
-  // pending: the design system's retry-safe lost-start line
-  return SETUP_START_LOST_COPY;
+  return SETUP_START_RETRY_COPY;
 }
 
 /**
@@ -30,8 +30,7 @@ export function setupStartLostLine(): string {
  * page's own retries (409 `in_progress`): "Try again" asks once more, with the same key.
  */
 export function setupStartSlowLine(): string {
-  // pending: the design system's line for a start taking longer than usual
-  return UNREACHABLE_COPY.en;
+  return SETUP_START_SLOW_COPY;
 }
 
 /**
@@ -39,7 +38,7 @@ export function setupStartSlowLine(): string {
  * (409 `key_spent`): setup didn't start, and "Start" starts anew with a new key.
  */
 export function setupStartSpentLine(): string {
-  // pending: the design system's line for a start that didn't happen
+  // pending: the design system's SETUP_START_SPENT_COPY, once its wording is approved
   return UNREACHABLE_COPY.en;
 }
 
