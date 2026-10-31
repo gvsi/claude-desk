@@ -233,7 +233,7 @@ export interface TeamTurn {
 /**
  * Luis's conversation. Owner's copy ruling, 2026-10-30, for invariant 2: Claude's words state no
  * date, not even "today" or "last week"; the visit's date and time are in a job card and the week's
- * dates in an hours card beside them.
+ * dates in an hours card beside them. The kernel's prose check reads the receipts too.
  */
 export const TEAM_TURNS: readonly TeamTurn[] = [
   {
@@ -256,7 +256,8 @@ export const TEAM_TURNS: readonly TeamTurn[] = [
     receipts: [
       {
         source: CHECKED,
-        plain: 'From job records and her customer file. Luis is assigned to her 10:30 am visit, so the address and gate code are open to him.',
+        // A receipt states no time either: the visit's time is on the Job card.
+        plain: 'From job records and her customer file. Luis is assigned to her visit, so the address and gate code are open to him.',
       },
     ],
   },
@@ -264,7 +265,8 @@ export const TEAM_TURNS: readonly TeamTurn[] = [
     asked: 'Send me the warranty in case it’s the tank.',
     reply: 'Here it is.',
     facts: [{ label: 'Document, only for Luis', icon: 'document', title: 'Water heater warranty, Ana Ruiz' }],
-    receipts: [{ source: decided('executed'), plain: 'Warranty released to the assigned plumber. Logged on Ana’s file.' }],
+    // "Warranty" is a promise word to the kernel's prose check; the card names the document.
+    receipts: [{ source: decided('executed'), plain: 'Document released to the assigned plumber. Logged on Ana’s file.' }],
   },
   {
     asked: 'Also, what did Ben make on the Harbor Street job last week?',

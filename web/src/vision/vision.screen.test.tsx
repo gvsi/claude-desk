@@ -9,7 +9,6 @@ import { page as browserPage, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import {
-  FACT_IN_PROSE,
   SPEC,
   expectConversationType,
   expectFooter,
@@ -18,6 +17,7 @@ import {
   expectReceiptsUnderMessages,
   expectTabOrder,
   expectVisionBar,
+  factsInProse,
   one,
   some,
 } from '../ds/boards/spec.ts';
@@ -226,8 +226,8 @@ describe('Vision pages', () => {
       expect(shown[0]?.closest('.cd-card'), `${fact}: in a card`).not.toBeNull();
     }
     const transcript = log.element() as HTMLElement;
-    expect(await expectNoFactsInProse(transcript)).toBe(5);
-    for (const line of linesOutsideCards(transcript)) expect(line, 'outside a card in the conversation').not.toMatch(FACT_IN_PROSE);
+    expect(await expectNoFactsInProse(transcript)).toEqual({ prose: 5, receipts: 8 });
+    for (const line of linesOutsideCards(transcript)) expect(factsInProse(line), `outside a card in the conversation: "${line}"`).toEqual([]);
     for (const line of linesOutsideCards(page)) expect(line, 'outside a card on the page').not.toMatch(CITY_FACT_ANYWHERE);
   });
 
@@ -516,7 +516,7 @@ describe('Vision pages against their boards', () => {
     expectConversationType(log);
     // Claude's words state no date, not even a relative one ("today", "last week"), and nothing else
     // only a card may say; the cards carry the dates.
-    expect(await expectNoFactsInProse(log)).toBe(3);
+    expect(await expectNoFactsInProse(log)).toEqual({ prose: 3, receipts: 4 });
     expect(await expectReceiptsUnderMessages(log)).toBe(3);
     expect(some(log, '.cd-visitor-message__bubble').map((bubble) => bubble.textContent)).toEqual([
       'Heading to Ana Ruiz in Eastshore. What’s the history there?',
@@ -542,8 +542,8 @@ describe('Vision pages against their boards', () => {
     // The payroll request is refused, sharing no pay; Luis's own hours, from his time records, are shown.
     const receipts = some(log, '.cd-margin-line');
     expect(receipts.map((receipt) => receipt.textContent)).toEqual([
-      'From job records and her customer file. Luis is assigned to her 10:30 am visit, so the address and gate code are open to him.',
-      'Warranty released to the assigned plumber. Logged on Ana’s file.',
+      'From job records and her customer file. Luis is assigned to her visit, so the address and gate code are open to him.',
+      'Document released to the assigned plumber. Logged on Ana’s file.',
       'Declined by team access: payroll is owner and office manager only. No pay was shared.',
       'Luis’s own hours, from his time records.',
     ]);
@@ -617,7 +617,7 @@ describe('Vision pages against their boards', () => {
     await expect.element(log.getByText('Signed in with your Claude account.', { exact: true })).toBeVisible();
     expectConversationType(transcript);
     // Claude's words state no booking, date or promise: her past booking is its card beside them.
-    expect(await expectNoFactsInProse(transcript)).toBe(3);
+    expect(await expectNoFactsInProse(transcript)).toEqual({ prose: 3, receipts: 5 });
     expect(some(transcript, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual([
       ACCOUNT.ask,
       ACCOUNT.matched,
@@ -728,7 +728,7 @@ describe('Vision pages against their boards', () => {
     expectConversationType(log);
     // The booking is confirmed only by its card: Claude's words state no date, time or booking, and
     // promise nothing the card doesn't back.
-    expect(await expectNoFactsInProse(log)).toBe(1);
+    expect(await expectNoFactsInProse(log)).toEqual({ prose: 1, receipts: 1 });
     expect(await expectReceiptsUnderMessages(log)).toBe(1);
     expect(one(log, '.cd-margin-line').textContent).toBe('Booked on Maria Rivera’s calendar');
     // The booking is the kernel's booking card, in the same message as Claude's words.
