@@ -126,6 +126,27 @@ async def test_intake_default_ask_auto_execution_and_owner_only_answers(app, cli
     assert 'desk.new-enquiry' in {profile.tool for profile in seen.tools_declared}
 
 
+@pytest.mark.parametrize('kind', ['visitor', 'agent'])
+@pytest.mark.parametrize('status', ['needs_review', 'disabled'])
+async def test_unreviewed_business_text_is_not_declared_to_conversations(app, client, frozen_clock, kind, status):
+    from .test_agent_auth import mint, open_agent, turn
+
+    copy = await rivera(app, client)
+    marker = 'Unaccepted configuration marker'
+    assert (await put(client, copy, [intake(description=marker)])).status_code == 200
+    if status == 'disabled':
+        assert (await put(client, copy, [])).status_code == 200
+    if kind == 'agent':
+        agent = await mint(client, copy.owner, copy.desk_id)
+        opened = await open_agent(client, copy.slug, agent, frozen_clock)
+        caller = turn(agent, copy.slug, opened.state.session_id, frozen_clock)
+    else:
+        caller = await open_visitor(client, copy)
+    seen = await context_of(client, caller.session_id, caller.headers)
+    assert 'desk.new-enquiry' not in {profile.tool for profile in (*seen.tools, *seen.tools_declared)}
+    assert marker not in seen.model_dump_json()
+
+
 async def test_batches_refuse_duplicates_limits_canaries_and_other_copies(app, client):
     copy, other = await rivera(app, client), await rivera(app, client)
     assert (await put(client, copy, [intake()])).status_code == 200

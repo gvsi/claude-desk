@@ -92,6 +92,7 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     given = await resolved_tools(ctx, principal, session_row, desk_row)
     declared = decide.declared_tools(principal.kind)
     valid_business = {tool for tool, profile in profiles.items() if profile.source == "business"
+                      and profile.status == "enabled"
                       and await adapters.resolve(ctx, desk_id, tool) is not None}
     given = {tool for tool, profile in profiles.items() if tool in given
              and (profile.source != "business" or tool in valid_business)}
