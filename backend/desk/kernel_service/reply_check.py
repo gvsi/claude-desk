@@ -648,6 +648,10 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
                              booking_card=any(card.template == "booking_confirmed" for card in cards))
     violations += refused
+    detected_language = detected if detected in ("en", "es") else None
+    if any(violation.kind == "unsupported_language" for violation in violations):
+        # The scan can reject mixed-script prose even when ordinary markers detected English.
+        language, detected_language = fallback, None
     usage = None
     handoff_backed = False                  # the soft-promise check was shown an open handoff's card
     if not violations and prose.strip():
@@ -664,7 +668,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         blocks = ([RenderedBlock(kind="prose", text=prose)] if prose.strip() else []) + cards
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
                           author="claude", fact_ids=fact_ids, soft_promise=usage, seen=True,
-                          detected=detected if detected in ("en", "es") else None, canaries=canaries,
+                          detected=detected_language, canaries=canaries,
                           handoff_backed=handoff_backed, final=final, rendered_claims=rendered_claims)
 
 

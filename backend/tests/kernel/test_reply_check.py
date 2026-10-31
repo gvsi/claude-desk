@@ -894,6 +894,28 @@ async def test_an_unmarked_reply_gets_one_rewrite_and_never_shows(app, client, p
     assert lang.detect(prose) == "unmarked"
 
 
+@pytest.mark.parametrize(("prose", "detected", "kind", "rule_id"), [
+    ("Absolutely. Payment link below.", "unmarked", "uncertain_language", "language_uncertain"),
+    ("Je peux vous aider avec ça.", "other", "unsupported_language", "language"),
+    ("H\u0435llo, how can I help?", "en", "unsupported_language", "mixed_script"),
+], ids=["uncertain", "other-language", "mixed-script"])
+@pytest.mark.parametrize("final", [False, True])
+async def test_refused_prose_preserves_the_visitors_turn_language(app, client, prose, detected, kind, rule_id, final):
+    from .test_turn_language import SPANISH, turn
+
+    copy, visitor = await visitor_of(app, client)
+    assert await turn(client, visitor, SPANISH) == "es"
+    assert lang.detect(prose) == detected
+    verdict = await checked(client, visitor, prose, final=final)
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [(kind, rule_id)]
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+    if final or kind == "unsupported_language":
+        assert_handed_off(verdict, "es")
+    else:
+        assert not verdict.ok and verdict.blocks == [] and verdict.language == "es"
+    assert (await session_of(app, copy, visitor)).last_language == "es"
+
+
 async def own_slots(client: httpx.AsyncClient, visitor: Visitor, call_id: str = "call-slots") -> Fact:
     """The open times `native.find_slots` lists for the visitor (the six earliest): their fact."""
     decision = await decided(client, visitor, "native.find_slots", {}, call_id=call_id)
