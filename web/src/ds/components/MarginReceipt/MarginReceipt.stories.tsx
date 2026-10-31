@@ -100,13 +100,18 @@ function leadIn(receipt: HTMLElement): HTMLElement {
 }
 
 /**
- * The words lead in primary ink, in the line's caption size and weight; the rest stays secondary,
- * and brightens to primary only while the pointer is over the line. Read once the line's color
- * transition has ended, so a hover that starts as the story renders isn't caught halfway.
+ * The color an owner's receipt line rests at: secondary, brightening to primary only while the
+ * pointer is over it. Read once the line's color transition has ended, so a hover that starts as
+ * the story renders isn't caught halfway.
  */
-async function expectLeadLook(receipt: HTMLElement): Promise<void> {
+async function restingColor(receipt: HTMLElement): Promise<string> {
   await settled(receipt);
-  const rest = receipt.matches(':hover') ? TEXT_PRIMARY : TEXT_SECONDARY;
+  return receipt.matches(':hover') ? TEXT_PRIMARY : TEXT_SECONDARY;
+}
+
+/** The words lead in primary ink, in the line's caption size and weight; the rest stays secondary. */
+async function expectLeadLook(receipt: HTMLElement): Promise<void> {
+  const rest = await restingColor(receipt);
   const line = getComputedStyle(receipt);
   expectComputed(leadIn(receipt), {
     color: TEXT_PRIMARY,
@@ -152,7 +157,7 @@ export const Executed: Story = {
     await expect(receipt).toHaveTextContent(executed.plain);
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
     // The line is a secondary caption.
-    expectComputed(receipt, { fontFamily: /Hanken Grotesk/, fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(receipt, { fontFamily: /Hanken Grotesk/, fontSize: '12px', lineHeight: '17px', color: await restingColor(receipt) });
 
     // receipt_opens_trace_by_keyboard: Tab reaches it, Enter opens the trace for its entry, once.
     await userEvent.tab();
@@ -387,7 +392,7 @@ export const ReplyIgnoresReason: Story = {
     await expect(visibleText(receipt)).toBe(replyHandedOff.plain);
     await expect(receipt.querySelector('.cd-margin-line__lead')).toBeNull();
     await expect(canvas.queryByText(rivera.decisions.held.reason_plain, { exact: false })).toBeNull();
-    expectComputed(receipt, { color: TEXT_SECONDARY });
+    expectComputed(receipt, { color: await restingColor(receipt) });
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--held');
   },
 };
