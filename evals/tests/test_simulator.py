@@ -214,6 +214,49 @@ SAID = "Dana here, my code is 482913"   # what the answer held: never in the err
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
+@pytest.mark.parametrize(("stop_reason", "texts"), [
+    ("max_tokens", ['{"message":']),
+    ("tool_use", ["not JSON"]),
+    ("stop_sequence", ["not JSON"]),
+    ("pause_turn", ["not JSON"]),
+    ("end_turn", ["not JSON", "also not JSON"]),
+    ("end_turn", []),
+])
+async def test_incomplete_or_multiple_text_answers_fail_before_json_retry(provider, stop_reason, texts):
+    calls = []
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        first = len(calls) == 1
+        return httpx2.Response(200, json={
+            "id": "msg_stopped", "type": "message", "role": "assistant", "model": body["model"],
+            "content": [{"type": "text", "text": text} for text in
+                        (texts if first else [json.dumps(turn("Retry accepted.").obj)])],
+            "stop_reason": stop_reason if first else "end_turn",
+            "stop_sequence": None, "stop_details": None,
+            "usage": {"input_tokens": 50, "output_tokens": 10},
+        })
+
+    attacker = Simulator.attacker(provider, fake_url="http://127.0.0.1:9",
+                                  http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(answer)))
+    run = attacker.new_run()
+    try:
+        with pytest.raises(sim.SimulatorError) as failed:
+            await attacker.next_turn(ATTACK, [], run)
+        assert failed.value.kind == "infra"
+        assert failed.value.detail == (
+            f"the simulator's answer stopped with {stop_reason} and {len(texts)} text blocks, "
+            "not one visitor turn")
+        assert len(calls) == 1
+        assert run.served_models == [OPUS]
+        assert run.usage[0]["input_tokens"] == 50
+        assert run.usage[0]["stop_reason"] == stop_reason
+    finally:
+        await attacker.aclose()
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
 async def test_invalid_json_is_retried_once_and_both_calls_usage_is_counted(fake, provider):
     primary = model_id(provider, OPUS)
     fake.script(primary, Text(SAID, usage=Usage(input_tokens=40, output_tokens=8,
@@ -233,6 +276,39 @@ async def test_invalid_json_is_retried_once_and_both_calls_usage_is_counted(fake
     assert sum(usage["cache_creation_input_tokens"] for usage in run.usage) == 10
     assert run.fallback_turns == 0 and run.switches == 0
     fake.check()
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+async def test_invalid_json_retry_keeps_usage_from_an_unexpected_model(provider):
+    calls = []
+    unexpected = "claude-haiku-5-5"
+
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        first = len(calls) == 1
+        return httpx2.Response(200, json={
+            "id": "msg_unexpected", "type": "message", "role": "assistant",
+            "model": body["model"] if first else unexpected,
+            "content": [{"type": "text", "text": "not JSON" if first else json.dumps(turn().obj)}],
+            "stop_reason": "end_turn", "stop_sequence": None, "stop_details": None,
+            "usage": {"input_tokens": 40 if first else 60, "output_tokens": 8 if first else 12},
+        })
+
+    attacker = Simulator.attacker(provider, fake_url="http://127.0.0.1:9",
+                                  http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(answer)))
+    run = attacker.new_run()
+    try:
+        with pytest.raises(sim.SimulatorError) as failed:
+            await attacker.next_turn(ATTACK, [], run)
+        assert failed.value.kind == "config_mismatch"
+        assert unexpected in failed.value.detail
+        assert len(calls) == 2
+        assert run.served_models == [OPUS, unexpected]
+        assert [usage["input_tokens"] for usage in run.usage] == [40, 60]
+        assert [usage["output_tokens"] for usage in run.usage] == [8, 12]
+    finally:
+        await attacker.aclose()
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)

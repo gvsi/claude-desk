@@ -16,8 +16,9 @@ the re-served response and leaves its `usage` as the serving model's. Served mod
 their production names through `BEDROCK_MODEL_IDS`. A turn both models refuse raises
 `SimulatorRefused`.
 
-**Invalid JSON.** A non-JSON structured answer is retried once with the same request and run
-state. Both calls' serving models and usage are recorded; other validation errors fail at once.
+**Invalid JSON.** A complete `end_turn` answer with exactly one text block is retried once if it
+isn't JSON, with the same request and run state. Both calls' serving models and usage are recorded;
+other stops, block counts and validation errors fail at once.
 
 **What it sees.** Only observations (`observe_events`, `observe_a2a`): the Desk's prose, its cards
 as `[card: <template>] <text>`, status lines as `[status] <visitor_plain>`, the visitor's own
@@ -316,9 +317,11 @@ class Simulator:
                 message = await self._request_turn(system, text, run, max_tokens)
                 if message.stop_reason == "refusal":
                     raise SimulatorRefused(f"{self.model} and its fallback {self.fallback_model} refused the turn")
-                turns = [VisitorTurn.model_validate_json(block.text) for block in message.content
-                         if block.type == "text"]
-                break
+                blocks = [block for block in message.content if block.type == "text"]
+                if message.stop_reason != "end_turn" or len(blocks) != 1:
+                    raise SimulatorError("infra", f"the simulator's answer stopped with {message.stop_reason} and "
+                                                  f"{len(blocks)} text blocks, not one visitor turn")
+                return VisitorTurn.model_validate_json(blocks[0].text)
             except ValidationError as error:   # pydantic's own text quotes the answer
                 if attempt == 0 and all(item["type"] == "json_invalid" for item in error.errors()):
                     continue
@@ -327,10 +330,6 @@ class Simulator:
             except ValueError as error:
                 raise SimulatorError("infra", f"the simulator's answer isn't a visitor turn ({type(error).__name__})") \
                     from None
-        if message.stop_reason != "end_turn" or len(turns) != 1:
-            raise SimulatorError("infra", f"the simulator's answer stopped with {message.stop_reason} and "
-                                          f"{len(turns)} text blocks, not one visitor turn")
-        return turns[0]
 
     async def _request_turn(self, system: str, text: str, run: SimulatorRun,
                             max_tokens: int) -> BetaMessage:
@@ -347,9 +346,6 @@ class Simulator:
                     "type": "json_schema", "schema": anthropic.transform_schema(VisitorTurn)}},
             )
         served = production_name(message.model)
-        if served not in (self.model, self.fallback_model):
-            raise SimulatorError("config_mismatch", f"a simulator turn was served by {served!r}, which is neither "
-                                                    f"{self.model} nor its fallback {self.fallback_model}")
         usage = message.usage
         run.turns.append(ServedTurn(
             model=served, fallback=served != self.model,
@@ -360,6 +356,9 @@ class Simulator:
                    "output_tokens": usage.output_tokens, "stop_reason": message.stop_reason,
                    "latency_ms": round((time.monotonic() - started) * 1000)},
         ))
+        if served not in (self.model, self.fallback_model):
+            raise SimulatorError("config_mismatch", f"a simulator turn was served by {served!r}, which is neither "
+                                                    f"{self.model} nor its fallback {self.fallback_model}")
         return message
 
 
