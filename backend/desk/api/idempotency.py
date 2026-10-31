@@ -53,6 +53,10 @@ class Admissions:
     def __len__(self) -> int:
         return len(self._locks)
 
+    def users(self) -> int:
+        """How many requests hold or wait for an admission lock."""
+        return sum(users for _, users in self._locks.values())
+
 
 def body_sha256(body: dict[str, Any] | None) -> str:
     """The sha256 of a request body's canonical JSON (keys sorted, no spaces), or of no body."""

@@ -697,7 +697,10 @@ async def test_a_repeat_during_the_first_ones_admission_waits_for_it_and_is_neve
     first = asyncio.create_task(send_keyed(client, slug))
     await asyncio.wait_for(entered.wait(), 5)
     repeat = asyncio.create_task(send_keyed(client, slug))
-    await asyncio.sleep(0.3)
+    admissions = app.state.runtime.agents.admissions
+    async with asyncio.timeout(5):                                  # the first holds the key's lock, the repeat waits
+        while admissions.users() < 2:
+            await asyncio.sleep(0.01)
     assert not repeat.done()
     release.set()
     first, repeat = await asyncio.wait_for(asyncio.gather(first, repeat), 5)

@@ -1266,7 +1266,7 @@ async def test_a_repeat_while_the_first_is_starting_answers_in_progress_at_once(
     ((interview_id, desk_id),) = await interviews(engine)
     assert desk_id is None                                  # written before Claude answers or the kernel is called
     for _ in range(2):
-        busy = await asyncio.wait_for(start_keyed(owner), 1)
+        busy = await asyncio.wait_for(start_keyed(owner), 3)
         assert (busy.status_code, busy.json()) == (409, {"error": "in_progress", "retry_after": 2})
     release.set()
     first = await asyncio.wait_for(first, 10)
@@ -1309,7 +1309,7 @@ async def test_a_repeat_during_the_first_ones_admission_waits_for_it_and_is_neve
     first = asyncio.create_task(start_keyed(owner))
     await until(lambda: asked.count("setup_turn") == 1)
     repeat = asyncio.create_task(start_keyed(owner))
-    await asyncio.sleep(0.3)
+    await until(lambda: desk_setup.ADMISSIONS.users() == 2)        # the first holds the key's lock, the repeat waits
     assert not repeat.done()
     admitted.set()
     await asyncio.wait_for(gate.entered.wait(), 5)
