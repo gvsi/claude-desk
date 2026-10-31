@@ -47,13 +47,13 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    handoff clause, in the reply's language, or no block at all for a first attempt the API
    rewrites (`final` false, every violation one a rewrite can fix), which is never shown.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
-   lines, until the next turn starts (its row written only now, so no lock on it is held while the model reads the draft); a
-   reply that passed step 5 with an open handoff's card passes only if a handoff is still open,
-   held until the verdict commits (`handoff_still_open`), and otherwise fails as the check would
-   have failed it without the card (`soft.handoff_closed`); when the verdict shows the handoff
-   card, an owner handoff is opened for the session unless one is open already
-   (`open_card_handoff`, the owner's decision of 2026-10-30); and the verdict is ledgered
-   (`reply`) and signed in the same transaction.
+   lines, until the next turn starts (its row written only now, so no lock on it is held while the
+   model reads the draft); a reply that passed step 5 with an open handoff's card passes only if a
+   handoff is still open, held until the verdict commits (`handoff_still_open`), and otherwise fails
+   as the check would have failed it without the card (`soft.handoff_closed`); when the verdict
+   shows the handoff card, an owner handoff is opened for the session unless one is open already
+   (`open_card_handoff`, the owner's decision of 2026-10-30); and the verdict is ledgered (`reply`)
+   and signed in the same transaction.
 
 The owner's messages (`owner_message`) end in the same record: a say is checked for canaries
 alone and shown as typed in an `owner_said` card, and a whisper is only ledgered.

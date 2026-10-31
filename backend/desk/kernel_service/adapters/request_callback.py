@@ -2,21 +2,21 @@
 
 The call names who to call, how to reach them and why, all text Claude writes into the call from
 what the visitor said (untrusted, and the owner reads it under "Claude's note"); it can't name a
-time. `execute` opens a new handoff of kind `callback`: a reason carrying that text for the owner,
-a window that is the Desk's next open hour (`desks.next_open_window`), or none, the action's id and
+time. `execute` opens a new handoff of kind `callback`: a reason carrying that text for the owner, a
+window that is the Desk's next open hour (`desks.next_open_window`), or none, the action's id and
 the kernel's time, with a `handoff:<id>` fact labelled for the session (the callback confirmed card)
 whose only claims are the window, so no visitor text reaches a card. The kernel keeps one open
 handoff per session, so first it closes the session's open ones, the handoff card's or an earlier
-call-back's (`close_open`), each as the owner's mark of done closes one: `done`, its fact
-expired, ledgered `desk_data` `{part: "handoffs", refs: [its id], replaced_by: <this call-back's
-handoff id>}`, which tells the owner's history it was replaced, not marked done by the owner. A row's kind never changes,
-so an owner's stale mark of done on the card answers 409, never closing the call-back, and each
-call-back's reconciliation finds its own row by its action. A session may hold several open from
-before, or from the previous release during a deploy, and all of them close. The execution holds
-the session row `FOR UPDATE` (`locks_session`), so two such executions, or one and a reply check
-opening a card's handoff, take turns; the table itself holds no such rule. The fact expires when
-its window ends, and when the owner closes the handoff (`POST /handoffs/{id}/done`), so a callback
-that happened is never promised again.
+call-back's (`close_open`), each as the owner's mark of done closes one: `done`, its fact expired,
+ledgered `desk_data` `{part: "handoffs", refs: [its id], replaced_by: <this call-back's handoff
+id>}`, which tells the owner's history it was replaced, not marked done by the owner. A row's kind
+never changes, so an owner's stale mark of done on the card answers 409, never closing the
+call-back, and each call-back's reconciliation finds its own row by its action. A session may hold
+several open from before, or from the previous release during a deploy, and all of them close. The
+execution holds the session row `FOR UPDATE` (`locks_session`), so two such executions, or one and a
+reply check opening a card's handoff, take turns; the table itself holds no such rule. The fact
+expires when its window ends, and when the owner closes the handoff (`POST /handoffs/{id}/done`), so
+a callback that happened is never promised again.
 The owner is alerted per the Desk's notification defaults; the alert is read only from the Demo
 inbox, so the result's `inbox` stays empty.
 """
