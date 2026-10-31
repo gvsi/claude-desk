@@ -1257,7 +1257,8 @@ describe('agents page', () => {
     expect(requests('sendAgent')).toHaveLength(1);
 
     // A tab whose timers were held back (a hidden tab's are) checks the key's age on the press as
-    // well: past the window, "Try again" sends nothing and offers the reload.
+    // well: past the window, "Try again" sends nothing and offers the reload, which takes the same
+    // button, so the focus stays on it as on the timer's path.
     mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
     const next = (await renderRoute(PAGE)).screen.getByRole('region', { name: 'Send an agent' });
     await until(() => expect(next.getByRole('button', { name: 'Book the earliest visit' }).elements()).toHaveLength(1));
@@ -1266,6 +1267,7 @@ describe('agents page', () => {
     vi.setSystemTime(Date.now() + KEY_RETRY_WINDOW_MS);
     await next.getByRole('button', { name: 'Try again' }).click();
     await until(() => expect(next.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(1));
+    expect(document.activeElement).toBe(next.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).element());
     expect(requests('sendAgent')).toHaveLength(2);
   });
 
