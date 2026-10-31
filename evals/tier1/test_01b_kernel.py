@@ -33,6 +33,7 @@ from evals.tier1.golden_desk import (
     GoldenDesk,
     active_version,
     check_args_schema,
+    confirm_cards,
     decide,
     desk_of,
     golden_desk,
@@ -271,6 +272,44 @@ async def test_a_deleted_desks_held_request_runs_nothing(k: KernelHarness, recor
         reasons = [(summary.get("state"), summary.get("reason"), summary.get("check")) for summary in refused]
         assert ("refused_at_execution", "rules_changed", "desk") in reasons, f"the answer is ledgered as {reasons}"
         assert await desk_quotes(records, desk) == quotes_before, "a deleted Desk's held request made a quote"
+
+
+ASK_FOR_DOCUMENTS = RuleCard(card_id="t1-ask-docs", applies_to="native.release_document", mode="ask",
+                             who="record_owner", reason="Maria checks each document before it goes out.")
+
+
+@pytest.mark.requires("01b")
+@pytest.mark.parametrize("change", ["contact", "removal"])
+async def test_an_owner_approval_releases_no_document_to_a_session_that_ended(k: KernelHarness, records,
+                                                                            change: str):
+    """Dana, verified, asks for her invoice, which the owner's rules hold; the owner then gives Dana another
+    contact (or removes her), which ends the session that asked, and approves the held release. It is refused
+    at execution with nothing run: no document link is written, the answer is ledgered as refused because the
+    session ended, and no entry names a document link."""
+    desk = await golden_desk(k)
+    await confirm_cards(k, desk, [ASK_FOR_DOCUMENTS])
+    dana = await open_caller(k, desk, "dana")
+    args = release_document_args(desk.documents["dana-invoice"])
+    await check_args_schema(k, dana, "native.release_document", args)
+    held = await decide(k, dana, "native.release_document", args,
+                        expect=Expect(fields={"outcome": "hold", "state": "held"}))
+    if change == "contact":
+        await put_people(k, desk, upsert=[person("dana", "Dana Whitfield", "dana.again@example.net")],
+                         expect=updated(desk))
+    else:
+        await put_people(k, desk, remove=["dana"], expect=updated(desk))
+    async with assert_ledgered(records, desk.copy, desk.desk_id, "approval") as new:
+        await k.call("POST /approvals/{decision_id}/answer", path={"decision_id": held.decision_id},
+                     body={"answer": "allow_once"}, auth=desk.owner, expect=Expect(fields={
+                         "decision.decision_id": held.decision_id, "decision.state": "refused_at_execution",
+                         "execution": None}))
+    if k.is_real:
+        refused = [(entry.event.summary.get("state"), entry.event.summary.get("reason"), entry.event.summary.get("check"))
+                   for entry in new if entry.event.ref_id == held.decision_id]
+        ended = "contact_changed" if change == "contact" else "person_removed"
+        assert ("refused_at_execution", "session_ended", ended) in refused, f"the answer is ledgered as {refused}"
+        assert not [entry for entry in new if "document_link" in str(entry.event.summary)], (
+            "an entry names a document link after a release to a session that ended")
 
 
 # Document canaries, however they are written
