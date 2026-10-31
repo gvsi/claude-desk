@@ -1,8 +1,13 @@
 /**
  * "Send an agent": the built-in agent, Alex Kim's assistant, visits the Desk on a task the visitor
- * picks, under its signed spending limit. The panel sends it (`sendAgent`) and reads its run each
- * second (`agentRun`) until the run is done, failed or gone. While a run is unresolved, and after a
- * start whose answer was lost, no task is offered, so the agent is never sent twice by mistake.
+ * picks, under its signed spending limit (`SignedLimitPanel`, from the page's static words). The
+ * panel sends it (`sendAgent`) and reads its run each second (`agentRun`) until the run is done,
+ * failed or gone. The tasks are offered before a run and again after one ends; while a run is
+ * unresolved, and after a start whose answer was lost, none is, so the agent is never sent twice by
+ * mistake.
+ *
+ * The panel's card holds the run and so the Desk's reply cards: it is the one `Card` that
+ * `holdsCards`, which only this file may use.
  *
  * The agent's own words never show. Its turns carry none (plan 02b), and anything a turn of its
  * holds is ignored: each request is drawn by code, titled with the chosen task first and "Signed
@@ -16,14 +21,19 @@ import { ApiError, isUncertain, request } from '../../api/http.ts';
 import type { AgentTurn, DemoAgentRun } from '../../api/views.ts';
 import { agentRunPollMs } from '../../app/poll.ts';
 import {
+  AGENT_START_LOST_COPY,
   AgentMessage,
   Button,
   CHAT_ENDED_COPY,
+  Card,
   ClaudeMessage,
+  DEMO_BUDGET_COPY,
   LoadingLine,
   MarginReceipt,
   NEW_CHAT_LABEL,
   Notice,
+  RELOAD_PAGE_LABEL,
+  SignedLimitPanel,
   SuggestionChips,
   SystemLine,
   Transcript,
@@ -33,11 +43,18 @@ import {
   type CopyLanguage,
 } from '../../ds/index.ts';
 import type { AgentSession } from './agentSession.ts';
-import { AgentsCard } from './AgentsCard.tsx';
+import { AgentsCardContent } from './AgentsCard.tsx';
 import { AGENTS_COPY, DEMO_TASKS, DEMO_TASK_COPY, type DemoTask } from './copy.ts';
 
 /** The panel's title's id, which the public page's "Send an agent" link names (`#send`). */
 export const SEND_ID = 'send';
+
+/** What the page does for "Reload the page", here so a test can stand in for the browser's reload. */
+export const pageActions = {
+  reload(): void {
+    window.location.reload();
+  },
+};
 
 /** The language of the Desk's replies to the built-in agent, which writes in English. */
 const RUN_LANGUAGE: CopyLanguage = 'en';
@@ -62,12 +79,13 @@ const MAX_MISSES = 5;
  * - `done`: it finished;
  * - `stopped`: the run failed, or the API no longer has it (404) or refuses to show it for good;
  * - `busy`: the API refused to start it (429);
+ * - `budget`: the demo's model budget is spent, and the API refused to start it (503 `demo_budget`);
  * - `not_sent`: it clearly didn't start (the session couldn't open, or another refusal);
  * - `lost`: the start's answer was lost (no answer, a timeout or a 5xx), so the agent may be on its
  *   way and no read can find its run: nothing more is sent from this page view;
  * - `ended`: the chat ended (a 401 the session couldn't recover from).
  */
-type Status = 'idle' | 'sending' | 'running' | 'done' | 'stopped' | 'busy' | 'not_sent' | 'lost' | 'ended';
+type Status = 'idle' | 'sending' | 'running' | 'done' | 'stopped' | 'busy' | 'budget' | 'not_sent' | 'lost' | 'ended';
 
 interface PanelState {
   status: Status;
@@ -83,14 +101,16 @@ interface PanelState {
 
 const IDLE: PanelState = { status: 'idle', task: null, runId: null, run: null, readsFailing: false };
 
-/** The states that offer the tasks: before a run, and after one that clearly didn't go ahead. */
-const OFFERS_TASKS: ReadonlySet<Status> = new Set<Status>(['idle', 'stopped', 'busy', 'not_sent']);
+/** The states that offer the tasks: before a run, after one ended, and after a start that clearly didn't go ahead. */
+const OFFERS_TASKS: ReadonlySet<Status> = new Set<Status>(['idle', 'done', 'stopped', 'busy', 'budget', 'not_sent']);
 
 /** What a failed start means for the panel. */
 function sendFailure(err: unknown): Status {
   if (!(err instanceof ApiError)) return 'not_sent';
   if (err.kind === 'unauthorized') return 'ended';
   if (err.kind === 'rate_limited') return 'busy';
+  // The API checks the demo's budget before it starts anything.
+  if (err.code === 'demo_budget') return 'budget';
   // Only a lost answer to the send itself may have started the agent; a session that didn't open sent nothing.
   if (err.route === 'sendAgent' && isUncertain(err)) return 'lost';
   return 'not_sent';
@@ -228,7 +248,22 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   let notice: ReactNode = null;
   if (status === 'stopped') notice = <Notice tone="error">{copy.stopped}</Notice>;
   else if (status === 'busy') notice = <Notice tone="error">{copy.busy}</Notice>;
-  else if (status === 'not_sent' || status === 'lost' || readsFailing) notice = <Notice tone="error">{UNREACHABLE_COPY[language]}</Notice>;
+  else if (status === 'budget') notice = <Notice tone="error">{DEMO_BUDGET_COPY[language]}</Notice>;
+  else if (status === 'lost') {
+    // The agent may be on its way and no read can find its run: a reload is the retry.
+    notice = (
+      <Notice
+        tone="error"
+        action={
+          <Button variant="secondary" onClick={() => pageActions.reload()}>
+            {RELOAD_PAGE_LABEL[language]}
+          </Button>
+        }
+      >
+        {AGENT_START_LOST_COPY[language]}
+      </Notice>
+    );
+  } else if (status === 'not_sent' || readsFailing) notice = <Notice tone="error">{UNREACHABLE_COPY[language]}</Notice>;
   else if (status === 'ended') {
     notice = (
       <Notice
@@ -250,21 +285,23 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
     task !== null && ran ? DEMO_TASK_COPY[language][task] : copy.sendLead(<span data-copy="user">{business}</span>);
 
   return (
-    <AgentsCard title={copy.sendTitle} lead={lead} id={SEND_ID} holdsCards>
-      {/* The signed limit shows in every state, as board 05 draws it during a run. */}
-      <p className="cd-agents-page__quiet cd-type-meta">{copy.limitLine}</p>
-      {OFFERS_TASKS.has(status) ? (
-        <SuggestionChips label={copy.tasksLabel} suggestions={DEMO_TASKS.map((t) => DEMO_TASK_COPY[language][t])} onPick={pick} />
-      ) : null}
-      {run !== null && task !== null && run.turns.length > 0 ? (
-        <Transcript label={copy.conversation}>
-          <RunRows turns={run.turns} task={task} ownerName={ownerName} language={language} />
-        </Transcript>
-      ) : null}
-      {working ? <LoadingLine>{copy.working}</LoadingLine> : null}
-      {status === 'done' ? <SystemLine text={copy.finished} /> : null}
-      {notice}
-    </AgentsCard>
+    <Card as="section" label={copy.sendTitle} padding={16} holdsCards>
+      <AgentsCardContent title={copy.sendTitle} lead={lead} id={SEND_ID}>
+        {/* The signed limit shows in every state, as board 05 draws it during a run. */}
+        <SignedLimitPanel {...copy.limit} language={language} />
+        {OFFERS_TASKS.has(status) ? (
+          <SuggestionChips label={copy.tasksLabel} suggestions={DEMO_TASKS.map((t) => DEMO_TASK_COPY[language][t])} onPick={pick} />
+        ) : null}
+        {run !== null && task !== null && run.turns.length > 0 ? (
+          <Transcript label={copy.conversation}>
+            <RunRows turns={run.turns} task={task} ownerName={ownerName} language={language} />
+          </Transcript>
+        ) : null}
+        {working ? <LoadingLine>{copy.working}</LoadingLine> : null}
+        {status === 'done' ? <SystemLine text={copy.finished} /> : null}
+        {notice}
+      </AgentsCardContent>
+    </Card>
   );
 }
 
@@ -294,6 +331,7 @@ function RunRows({ turns, task, ownerName, language }: RunRowsProps) {
                 signed
                 title={requests === 1 ? DEMO_TASK_COPY[language][task] : copy.signedRequest}
                 meta={copy.request(requests)}
+                language={language}
               />
             </TranscriptRow>
           );

@@ -25,10 +25,12 @@ describe('agents page copy', () => {
   it('limits_line_matches_the_seed', () => {
     const { mandate } = rivera.demoAgentIssued;
     for (const language of ['en', 'es'] as const) {
-      // The panel's one line with amounts: the signed limit, $20 a charge and $100 in total.
+      // The signed limit panel's words: $20 a charge and $100 in total, for one hour, from Alex Kim's wallet.
       const copy = AGENTS_COPY[language];
-      expect(centsIn(copy.limitLine), language).toEqual([mandate.per_charge_cents, mandate.total_cents]);
-      expect(copy.limitLine, language).toContain(mandate.on_behalf_of ?? '');
+      expect(centsIn(copy.limit.perCharge), language).toEqual([mandate.per_charge_cents]);
+      expect(centsIn(copy.limit.total), language).toEqual([mandate.total_cents]);
+      expect(copy.limit.duration.trim(), language).not.toBe('');
+      expect(copy.limit.source, language).toContain(mandate.on_behalf_of ?? '');
       // The lead names the business and who the agent visits for, and states no amount.
       const lead = textOf(copy.sendLead('Rivera Plumbing'));
       expect(lead, language).toContain('Rivera Plumbing');

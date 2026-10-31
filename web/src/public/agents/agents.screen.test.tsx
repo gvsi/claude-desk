@@ -17,13 +17,22 @@ import { App } from '../../app/App.tsx';
 import { setPollScale } from '../../app/poll.ts';
 import { routes } from '../../app/routes.tsx';
 import { proseBlock, rivera } from '../../ds/fixtures/index.ts';
-import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, UNREACHABLE_COPY, errorCopy } from '../../ds/index.ts';
+import {
+  AGENT_START_LOST_COPY,
+  CHAT_ENDED_COPY,
+  DEMO_BUDGET_COPY,
+  NEW_CHAT_LABEL,
+  RELOAD_PAGE_LABEL,
+  UNREACHABLE_COPY,
+  errorCopy,
+} from '../../ds/index.ts';
 import { AGENT_CARD_BLOCKS, agentCardOut } from '../../mocks/agents.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+import { pageActions } from './SendAgentPanel.tsx';
 
 const PAGE = `/d/${RIVERA.slug}/agents`;
 
@@ -39,8 +48,16 @@ const TASKS = ['Book the earliest visit', 'Get a quote and pay the service call 
 /** The panel's lead before a run, as boards 03 to 05 write it. */
 const LEAD = 'A built-in agent visits Rivera Plumbing for Alex Kim. It’s simulated.';
 
-/** The panel's line with the signed spending limit. */
-const LIMIT = 'Its spending limit, signed by Alex Kim’s demo wallet: $20 per charge and $100 in total, for one hour.';
+/** The signed limit panel's values and source, as the agents boards write them. */
+const LIMIT_VALUES = ['$20', '$100', 'One hour'];
+const LIMIT_SOURCE = 'Signed limit from Alex Kim’s demo wallet';
+
+/** The send panel's signed limit: its values, and whose wallet signed it. */
+function limitIn(screen: RenderResult, panelName = 'Send an agent', regionName = 'Signed limit') {
+  const region = screen.getByRole('region', { name: panelName }).getByRole('region', { name: regionName });
+  const el = region.element();
+  return { values: [...el.querySelectorAll('dd')].map((dd) => dd.textContent), source: el.querySelector('p')?.textContent };
+}
 
 /** The task chips the panel offers now, by name. */
 const chipsIn = (screen: RenderResult) =>
@@ -170,6 +187,16 @@ describe('agents page', () => {
     const canDo = es.screen.getByRole('region', { name: 'Qué pueden hacer los agentes aquí' });
     for (const block of AGENT_CARD_BLOCKS.es) await expect.element(canDo.getByText(block.text, { exact: true })).toBeVisible();
     await expectScreenBasics(es.screen.container, { owner: false });
+    // The signed limit and a run in Spanish: the panel's words and the signed request's pill.
+    expect(limitIn(es.screen, 'Enviar un agente', 'Límite firmado')).toEqual({
+      values: ['$20', '$100', 'Una hora'],
+      source: 'Límite firmado por la billetera de demostración de Alex Kim',
+    });
+    await es.screen.getByRole('button', { name: 'Reservar la primera visita libre' }).click();
+    await expect.element(es.screen.getByText('El agente terminó.', { exact: true })).toBeVisible();
+    const pills = [...es.screen.container.querySelectorAll('.cd-agent-message .cd-pill')].map((pill) => pill.textContent);
+    expect(pills).toEqual(['Firmado', 'Firmado']);
+    await expectScreenBasics(es.screen.container, { owner: false });
 
     // Before the Desk shows, and when it can't be read, the page still says who answers.
     mockStore.inject({ route: 'agentCard', status: 503 });
@@ -238,16 +265,17 @@ describe('agents page', () => {
     const { screen } = await renderRoute(PAGE);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
     await expect.element(panel.getByText(LEAD, { exact: true })).toBeVisible();
-    await expect.element(panel.getByText(LIMIT, { exact: true })).toBeVisible();
+    expect(limitIn(screen)).toEqual({ values: LIMIT_VALUES, source: LIMIT_SOURCE });
     expect(chipsIn(screen)).toEqual(TASKS);
     await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
 
-    // The chosen task takes the lead's place, the limit stays, and no task is offered after it finished.
+    // The chosen task takes the lead's place, the limit stays, and the tasks are offered again, so
+    // the visitor can send the agent on another.
     expect(panel.getByText(LEAD, { exact: true }).elements()).toHaveLength(0);
     expect(panel.element().querySelector('.cd-agents-card__lead')?.textContent).toBe('Book the earliest visit');
-    await expect.element(panel.getByText(LIMIT, { exact: true })).toBeVisible();
-    expect(chipsIn(screen)).toEqual([]);
+    expect(limitIn(screen)).toEqual({ values: LIMIT_VALUES, source: LIMIT_SOURCE });
+    expect(chipsIn(screen)).toEqual(TASKS);
 
     // The agent's requests, built by code: signed, the task first, then "Signed request", numbered.
     const run = panel.getByRole('log', { name: 'Alex Kim’s assistant’s visit' });
@@ -544,12 +572,32 @@ describe('agents page', () => {
       const { screen } = await renderRoute(PAGE);
       await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
       const panel = screen.getByRole('region', { name: 'Send an agent' });
-      await expect.element(panel.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+      await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
       expect(chipsIn(screen)).toEqual([]);
       expect(requests('agentRun')).toHaveLength(0);
       await expectScreenBasics(screen.container, { owner: false });
+      // "Reload the page" reloads it: the retry, on a page that reads where things stand.
+      const reload = vi.spyOn(pageActions, 'reload').mockImplementation(() => {});
+      await panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).click();
+      expect(reload).toHaveBeenCalledTimes(1);
+      reload.mockRestore();
     }
     expect(requests('sendAgent')).toHaveLength(2);
+  });
+
+  it('spent_demo_budget_sends_nothing', async () => {
+    // The demo's model budget is spent: the API refused before starting the agent, so the panel
+    // says so and offers the tasks again.
+    mockStore.inject({ route: 'sendAgent', status: 503, body: { error: 'demo_budget' } });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByText(DEMO_BUDGET_COPY.en, { exact: true })).toBeVisible();
+    expect(panel.getByText(AGENT_START_LOST_COPY.en).elements()).toHaveLength(0);
+    expect(chipsIn(screen)).toEqual(TASKS);
+    expect(panel.element().querySelector('.cd-agents-card__lead')?.textContent).toBe(LEAD);
+    expect(requests('agentRun')).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: false });
   });
 
   it('long_run_is_read_until_it_ends', async () => {

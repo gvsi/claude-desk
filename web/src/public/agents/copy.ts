@@ -5,9 +5,9 @@
  * request), the design system's (the disclosure, error lines) or the public page's own (`PUBLIC_COPY`:
  * a Desk that isn't there, "Try again"). Names are passed in as written.
  *
- * The spending limit is static copy, never formatted from a number: `limitLine` states the Rivera
- * seed's demo mandate ($20 a charge, $100 in total, for one hour), and `copy.test.ts` ties the
- * amounts to it.
+ * The spending limit is static copy, never formatted from a number: `limit` holds the signed limit
+ * panel's words for the Rivera seed's demo mandate ($20 a charge, $100 in total, for one hour), and
+ * `copy.test.ts` ties the amounts to it.
  */
 import { Fragment, createElement, type ReactNode } from 'react';
 
@@ -78,8 +78,8 @@ export interface AgentsCopy {
    * `business` is the business's name, marked as its own words by the caller.
    */
   sendLead: (business: ReactNode) => ReactNode;
-  /** The agent's signed spending limit. Static: the only line on the page with amounts. */
-  limitLine: string;
+  /** The agent's signed spending limit, in `SignedLimitPanel`'s props. Static: the only amounts on the page. */
+  limit: { perCharge: string; total: string; duration: string; source: string };
   tasksLabel: string;
   agentName: string;
   signedRequest: string;
@@ -138,7 +138,7 @@ export const AGENTS_COPY: Readonly<Record<CopyLanguage, AgentsCopy>> = {
 
     sendTitle: 'Send an agent',
     sendLead: (business) => createElement(Fragment, null, 'A built-in agent visits ', business, ' for Alex Kim. It’s simulated.'),
-    limitLine: 'Its spending limit, signed by Alex Kim’s demo wallet: $20 per charge and $100 in total, for one hour.',
+    limit: { perCharge: '$20', total: '$100', duration: 'One hour', source: 'Signed limit from Alex Kim’s demo wallet' },
     tasksLabel: 'Tasks for the agent',
     agentName: 'Alex Kim’s assistant',
     signedRequest: 'Signed request',
@@ -194,7 +194,7 @@ export const AGENTS_COPY: Readonly<Record<CopyLanguage, AgentsCopy>> = {
 
     sendTitle: 'Enviar un agente',
     sendLead: (business) => createElement(Fragment, null, 'Un agente integrado visita ', business, ' en nombre de Alex Kim. Es simulado.'),
-    limitLine: 'Su límite de gasto, firmado por la billetera de demostración de Alex Kim: $20 por cobro y $100 en total, durante una hora.',
+    limit: { perCharge: '$20', total: '$100', duration: 'Una hora', source: 'Límite firmado por la billetera de demostración de Alex Kim' },
     tasksLabel: 'Tareas para el agente',
     agentName: 'Asistente de Alex Kim',
     signedRequest: 'Solicitud firmada',

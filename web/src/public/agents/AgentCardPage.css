@@ -1,7 +1,7 @@
 /* The agents page, as the agents boards draw it: the brand header, then one column 32 px under it
    with the way back to the chat, the page's title and the AI disclosure 16 px apart, the cards 16 px
-   apart, and the concept footer at the window's foot. The column is the boards' 760 px, which the
-   design system has no token for. Below 768 px the gutters are 16 px. */
+   apart, and the concept footer at the window's foot. The column is the boards' 760 px
+   (`size-agents-column`). Below 768 px the gutters are 16 px. */
 
 .cd-agents-page {
   display: flex;
@@ -19,7 +19,7 @@
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  max-width: calc(760px + 2 * var(--space-40));
+  max-width: calc(var(--size-agents-column) + 2 * var(--space-40));
   margin: 0 auto;
   padding: var(--space-32) var(--space-40) var(--space-20);
 }
@@ -49,19 +49,6 @@
 .cd-agents-page__main > .cd-concept-footer {
   margin-top: auto;
   padding-top: var(--space-16);
-}
-
-/* stopgap: swap for the design system's card-holding frame (design/knowledge-and-limit). The send
-   panel's card, which holds the Desk's reply cards, drawn on the card tokens. */
-.cd-agents-card--frame {
-  display: block;
-  box-sizing: border-box;
-  min-width: 0;
-  padding: var(--space-16);
-  border: 1px solid var(--line-card);
-  border-radius: var(--radius-card);
-  background: var(--fill-card);
-  overflow-wrap: anywhere;
 }
 
 .cd-agents-card__title {
