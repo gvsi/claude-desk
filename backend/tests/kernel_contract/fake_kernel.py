@@ -1546,7 +1546,11 @@ class FakeKernelState:
             notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"],
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
         desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
-        for item in RIVERA_KNOWLEDGE:
+        for index, item in enumerate(RIVERA_KNOWLEDGE):
+            # Each real insert reads the clock. Move the shared clock forward between seeds so later
+            # writes cannot predate them.
+            if index:
+                self.now += timedelta(microseconds=1)
             self._store_knowledge(desk, item.model_copy(deep=True))
         return desk
 
