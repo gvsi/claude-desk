@@ -309,8 +309,11 @@ it('closing_a_panel_reverses_on_motion_fast', async () => {
   expect(panel.hasAttribute('inert')).toBe(true);
   const slide = heldAtStart(panel);
   expect(properties(slide)).toEqual(['opacity', 'transform']);
-  const [from, to] = ends(slide);
-  expect([from.transform, from.opacity, to.transform, to.opacity]).toEqual(['none', '1', 'translateX(24px)', '0']);
+  // The exit names only where the panel goes, so it starts from wherever the panel is drawn:
+  // fully open here.
+  const frames = (slide.effect as KeyframeEffect).getKeyframes();
+  expect(frames.map((frame) => [frame.transform, frame.opacity])).toEqual([['translateX(24px)', '0']]);
+  expect([left(panel), getComputedStyle(panel).opacity]).toEqual([LAPTOP.width - 400, '1']);
   slide.currentTime = Number.parseFloat(token('--motion-fast'));
   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(LAPTOP.width);
   expect(slide.effect?.getTiming().duration).toBe(Number.parseFloat(token('--motion-fast')));
@@ -385,4 +388,81 @@ it('a_panel_that_becomes_a_sheet_mid_move_lands_at_once', async () => {
   await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude')?.getAttribute('role')).toBe('dialog'));
   expect([slot()?.getAnimations().length, content().getAnimations().length]).toEqual([0, 0]);
   expect(left(container.querySelector('.cd-ask-claude') as HTMLElement)).toBe(960 - 400);
+});
+
+/** Where the panel and the page are drawn right now: the panel's opacity and left edge, and the page's left edge. */
+function drawn(): { opacity: number; panel: number; page: number } {
+  const panel = slot();
+  if (!panel) throw new Error('No panel slot');
+  return { opacity: Number(getComputedStyle(panel).opacity), panel: left(panel), page: left(content()) };
+}
+
+/** Every animation now playing on the panel and the page, paused at `time`. */
+function holdPlaying(time: number): void {
+  for (const animation of [...content().getAnimations(), ...(slot()?.getAnimations() ?? [])]) {
+    if (animation.playState !== 'running') continue;
+    animation.pause();
+    animation.currentTime = time;
+  }
+}
+
+/** The panel and the page are drawn where they were: no flash, no snap. */
+function expectDrawnAt(was: { opacity: number; panel: number; page: number }): void {
+  const now = drawn();
+  expect(Math.abs(now.opacity - was.opacity), `opacity ${now.opacity}, was ${was.opacity}`).toBeLessThanOrEqual(0.01);
+  expect(Math.abs(now.panel - was.panel), `panel at ${now.panel}, was ${was.panel}`).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(now.page - was.page), `page at ${now.page}, was ${was.page}`).toBeLessThanOrEqual(0.5);
+}
+
+it('closing_mid_entrance_starts_from_where_it_is', async () => {
+  await motion();
+  await page.viewport(LAPTOP.width, LAPTOP.height);
+  act(() => root.render(shellWithPanel(false)));
+  act(() => root.render(shellWithPanel(true)));
+  // Closed 20 ms into the entrance: the panel is partly faded in and still sliding.
+  holdPlaying(20);
+  const was = drawn();
+  expect(was.opacity).toBeGreaterThan(0);
+  expect(was.opacity).toBeLessThan(1);
+  act(() => root.render(shellWithPanel(false)));
+  // The exit and the page's glide back start where they were.
+  holdPlaying(0);
+  expectDrawnAt(was);
+});
+
+it('reopening_mid_exit_starts_from_where_it_is', async () => {
+  await motion();
+  await page.viewport(LAPTOP.width, LAPTOP.height);
+  act(() => root.render(shellWithPanel(false)));
+  act(() => root.render(shellWithPanel(true)));
+  for (const animation of [...content().getAnimations(), ...(slot()?.getAnimations() ?? [])]) animation.finish();
+  act(() => root.render(shellWithPanel(false)));
+  // Opened again 20 ms into the exit: the new panel slides in from where the last one was drawn.
+  holdPlaying(20);
+  const was = drawn();
+  expect(was.opacity).toBeGreaterThan(0);
+  expect(was.opacity).toBeLessThan(1);
+  act(() => root.render(shellWithPanel(true)));
+  holdPlaying(0);
+  expectDrawnAt(was);
+});
+
+it('a_late_exit_never_cancels_the_next_panels_fallback', async () => {
+  // Closed, opened again and closed again: the first exit's end, arriving late, leaves the second
+  // panel's own way out, so it goes even when its exit's end never comes.
+  await motion();
+  await page.viewport(LAPTOP.width, LAPTOP.height);
+  act(() => root.render(shellWithPanel(true)));
+  act(() => root.render(shellWithPanel(false)));
+  const first = slot()?.getAnimations()[0];
+  if (!first) throw new Error('No exit');
+  first.pause();
+  act(() => root.render(shellWithPanel(true)));
+  act(() => root.render(shellWithPanel(false)));
+  for (const animation of slot()?.getAnimations() ?? []) animation.pause();
+  await act(async () => {
+    first.finish();
+    await first.finished;
+  });
+  await vi.waitFor(() => expect(slot()).toBeNull(), { timeout: 1000 });
 });

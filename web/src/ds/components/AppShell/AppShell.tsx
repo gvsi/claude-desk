@@ -194,6 +194,14 @@ interface PanelSlotState {
 
 type PanelPhase = 'none' | 'open' | 'leaving';
 
+/** How the panel and the page are drawn just before a change, for the move after it to start from. */
+interface PanelSnapshot {
+  /** The page's left edge, mid-glide included; null without a page. */
+  page: number | null;
+  /** A panel leaving as another opens: where it is drawn, so the new one comes in from there. */
+  panel: { transform: string; opacity: string } | null;
+}
+
 const phaseOf = (state: PanelSlotState): PanelPhase => (state.node ? (state.leaving ? 'leaving' : 'open') : 'none');
 
 /**
@@ -226,27 +234,34 @@ class PanelSlot extends Component<PanelSlotProps, PanelSlotState> {
     return null;
   }
 
-  getSnapshotBeforeUpdate(_props: PanelSlotProps, prev: PanelSlotState): number | null {
+  getSnapshotBeforeUpdate(_props: PanelSlotProps, prev: PanelSlotState): PanelSnapshot | null {
     if (phaseOf(prev) === phaseOf(this.state) && prev.key === this.state.key) return null;
     // A panel that has slid out was already out of the row: its going moves nothing.
     if (phaseOf(prev) === 'leaving' && phaseOf(this.state) === 'none') return null;
-    // Where the page is drawn now, mid-glide included, so a glide taken over starts from there.
-    return this.props.contentRef.current?.getBoundingClientRect().left ?? null;
+    // Where the page is drawn now, mid-glide included, so a glide taken over starts from there; and
+    // a panel opened again as the last one leaves comes in from where that one is drawn.
+    const leaving = phaseOf(prev) === 'leaving' ? this.slot.current : null;
+    const drawn = leaving ? getComputedStyle(leaving) : null;
+    return {
+      page: this.props.contentRef.current?.getBoundingClientRect().left ?? null,
+      panel: drawn ? { transform: drawn.transform, opacity: drawn.opacity } : null,
+    };
   }
 
-  componentDidUpdate(props: PanelSlotProps, _prev: PanelSlotState, first: number | null): void {
+  componentDidUpdate(props: PanelSlotProps, _prev: PanelSlotState, snapshot: PanelSnapshot | null): void {
     // A panel that became a sheet mid-move (a sheet is fixed, and a moving slot would carry it), or
     // motion reduced mid-move: the move's end state, at once.
     if (props.moves && !this.props.moves) {
       for (const animation of this.slot.current?.getAnimations() ?? []) animation.finish();
       this.glide?.finish();
     }
-    if (first === null) return;
+    if (snapshot === null) return;
     const phase = phaseOf(this.state);
     const content = this.props.contentRef.current;
     this.glide?.cancel();
     this.glide = null;
-    if (!content || reducesMotion()) return;
+    if (!content || snapshot.page === null || reducesMotion()) return;
+    const first = snapshot.page;
     const opening = phase === 'open';
     const timing = { duration: tokenMillis(opening ? '--motion-base' : '--motion-fast'), easing: tokenValue('--motion-ease-emphasis') };
     const shift = first - content.getBoundingClientRect().left;
@@ -267,12 +282,14 @@ class PanelSlot extends Component<PanelSlotProps, PanelSlotState> {
     const here = { transform: 'none', opacity: 1 };
     if (opening) {
       // Only a panel beside the page slides in: a sheet takes no room in the row.
-      if (slot.offsetWidth > 0) slot.animate([away, here], timing);
+      if (slot.offsetWidth > 0) slot.animate([snapshot.panel ?? away, here], timing);
       return;
     }
     if (phase === 'leaving') {
       const { key } = this.state;
-      const leave = slot.animate([here, away], { ...timing, fill: 'forwards' });
+      // Only where it goes: the exit starts from where the panel is drawn, its entrance included
+      // if that hasn't ended, so closing mid-entrance never flashes it back to fully open.
+      const leave = slot.animate([away], { ...timing, fill: 'forwards' });
       leave.finished.then(() => this.drop(key), () => {});
       // If the animation's end never comes (a hidden tab), the panel still goes.
       window.clearTimeout(this.fallback);
@@ -284,8 +301,9 @@ class PanelSlot extends Component<PanelSlotProps, PanelSlotState> {
     window.clearTimeout(this.fallback);
   }
 
-  /** The panel that was leaving goes, unless another has opened since. */
+  /** The panel that was leaving goes, unless another has opened since, whose way out it leaves alone. */
   private drop(key: number): void {
+    if (this.state.key !== key) return;
     window.clearTimeout(this.fallback);
     this.setState((state) => (state.leaving && state.key === key ? { node: null, leaving: false } : null));
   }
