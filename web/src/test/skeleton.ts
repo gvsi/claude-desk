@@ -2,6 +2,7 @@ import { expect, onTestFinished, vi } from 'vitest';
 
 import { SKELETON_DELAY_MS } from '../ds/index.ts';
 import { expectComputed } from '../ds/test/expectComputed.ts';
+import { CONCEPT_FOOTER_TEXT } from '../ds/test/copy.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
 import { partsOf, type LayerState, type RegionParts } from '../ds/test/skeletonRegion.ts';
@@ -156,7 +157,12 @@ async function checkLoad(load: SkeletonLoad, still: boolean): Promise<void> {
   expect(shapesLayer.hasAttribute('inert')).toBe(true);
   expect(shapesLayer.querySelector('button, a[href], input, select, textarea, [tabindex]')).toBeNull();
   const words = shapesLayer.cloneNode(true) as HTMLElement;
-  words.querySelectorAll('[data-ds="concept-footer"]').forEach((footer) => footer.remove());
+  words.querySelectorAll('.cd-concept-footer').forEach((footer) => {
+    const powered = footer.querySelector('.cd-concept-footer__powered');
+    const expected = CONCEPT_FOOTER_TEXT + (powered ? 'Powered by Claude Desk' : '');
+    expect(footer.textContent?.replace(/\s+/g, ' ').trim()).toBe(expected);
+    footer.remove();
+  });
   expect(words.textContent?.trim()).toBe('');
 
   const painted = [...shapesLayer.querySelectorAll<HTMLElement>('.cd-skeleton')].filter((el) => el.getClientRects().length > 0);
