@@ -162,7 +162,10 @@ export function keepSectionWhileTypeLoads(heading: HTMLElement, behavior: Scroll
   return act;
 }
 
-/** Whether the window is moving because the page moved it, not the reader: a correction still settling. */
+/**
+ * Whether the window is moving because the page moved it, not the reader: a correction still settling, until the
+ * window goes still or the reader acts.
+ */
 let pageMoving = false;
 
 /**
@@ -172,15 +175,19 @@ let pageMoving = false;
 function movedByThePage(move: () => void): void {
   pageMoving = true;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // Settled once the window has gone still, or at once when the reader acts: their scroll is theirs, not the page's.
   const settled = () => {
+    clearTimeout(timer);
     pageMoving = false;
     window.removeEventListener('scroll', later);
+    for (const kind of READER_ACTIONS) window.removeEventListener(kind, settled);
   };
   const later = () => {
     clearTimeout(timer);
     timer = setTimeout(settled, REST_WAIT);
   };
   window.addEventListener('scroll', later, { passive: true });
+  for (const kind of READER_ACTIONS) window.addEventListener(kind, settled, { passive: true });
   later();
   move();
 }
@@ -287,17 +294,20 @@ export function useCurrentSection(ids: readonly string[]): [current: string | nu
     function scrolledOn() {
       // The page following the section again once the type has loaded is not the reader scrolling on.
       if (pageMoving) return;
-      arrived = false;
-      window.removeEventListener('scroll', scrolledOn);
+      forget();
     }
     function forget() {
       arrived = false;
       window.removeEventListener('scroll', scrolledOn);
+      for (const kind of READER_ACTIONS) window.removeEventListener(kind, forget);
     }
     function arrive() {
       release();
       arrived = true;
       window.addEventListener('scroll', scrolledOn, { passive: true });
+      // The reader acting is them moving on, even while the page's own correction is still settling: what they scroll
+      // to is marked by the rule again, once their scroll rests.
+      for (const kind of READER_ACTIONS) window.addEventListener(kind, forget, { passive: true });
     }
     function letGo() {
       release();

@@ -790,6 +790,40 @@ describe('ReaderPage', () => {
     await screen.unmount();
   });
 
+  it('a_reader_scrolling_during_a_correction_is_followed', async () => {
+    // Following "Business path" stops at the proposal's end, where it stays marked. The type loads on a grown page and
+    // the page follows the section to the new end; while that move is still settling, the reader scrolls up with the
+    // wheel. The mark follows the reader, not the section the page was keeping.
+    withoutScrollAnchoring();
+    const loaded = typeStillLoading();
+    const screen = await renderReader('proposal');
+    const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    await expect.poll(marked).toEqual(['v1 (location)']);
+    followContentsLink('business-path');
+    const end = () => Math.round(document.documentElement.scrollHeight - window.innerHeight);
+    await expect.poll(() => Math.round(window.scrollY)).toBe(end());
+    await expect.poll(marked).toEqual(['Business path (location)']);
+    await twoFrames();
+    swapType();
+    const corrected = new Promise<void>((resolve) => {
+      const onScroll = () => {
+        if (Math.round(window.scrollY) !== end()) return;
+        window.removeEventListener('scroll', onScroll);
+        resolve();
+      };
+      window.addEventListener('scroll', onScroll);
+    });
+    loaded();
+    await corrected;
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 }));
+    await jumpTo(placeOf('who-its-for-and-the-problem') + 100);
+    await expect.poll(marked, { message: 'where the reader stopped' }).toEqual(['Who it’s for and the problem (location)']);
+    await screen.unmount();
+  });
+
   it('a_followed_section_keeps_its_place_while_the_type_loads', async () => {
     // Followed from the contents list before the type has loaded, a section that the swap moves after the jump has
     // arrived is back at its place once the type has loaded. The jump is instant under reduced motion.
