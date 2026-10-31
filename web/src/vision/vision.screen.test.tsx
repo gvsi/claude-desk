@@ -96,6 +96,8 @@ function textOutsideFactCards(root: HTMLElement): string {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // The last Desk opened lives in this browser's storage, which outlives a test.
+  localStorage.clear();
 });
 
 describe('Vision pages', () => {
@@ -146,6 +148,25 @@ describe('Vision pages', () => {
     await expect.poll(() => router.state.location.pathname).toBe(CITY_OFFICE);
     await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
     await expect.element(main(screen).getByRole('heading', { level: 1, name: 'Good morning, Nadia' })).toBeVisible();
+  });
+
+  it('back_to_your_desk_opens_today', async () => {
+    // The owner was last on their Emergencies Desk, then opened a vision page.
+    const desk = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
+    await expect.element(desk.screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    for (const path of VISION_ROUTES) {
+      const { screen, router } = await renderRoute(path);
+      await screen.getByRole('note', { name: 'Vision' }).getByRole('link', { name: 'Back to your Desk' }).click();
+      // Back on the Desk they came from, through the app's entry, which reads the copy's Desks.
+      await expect.poll(() => router.state.location.pathname, path).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+      await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    }
+
+    // Someone with the link and no copy of the demo lands on the intro dialog, not on an error.
+    const stranger = await renderRoute(TEAM_DESK, { seed: { name: 'rivera', signedIn: false } });
+    await stranger.screen.getByRole('link', { name: 'Back to your Desk' }).click();
+    await expect.poll(() => stranger.router.state.location.pathname).toBe('/');
+    await expect.element(stranger.screen.getByRole('dialog', { name: 'A Claude front desk for your business' })).toBeVisible();
   });
 });
 
