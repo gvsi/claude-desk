@@ -62,7 +62,10 @@ export function Mark({ size = 20, ground = 'dark', tile = false }: MarkProps) {
 }
 
 export interface WordmarkProps {
-  /** Adds the "Preview" badge, a `Pill` in capitals, to the name's right, as in the owner app's sidebar. */
+  /**
+   * Adds the "Preview" badge, a `Pill` in capitals, to the name's right: the Claude Desk lockup, as in
+   * the owner app's sidebar, the About pages' desktop top bar and the intro dialog's brand row.
+   */
   preview?: boolean;
 }
 
