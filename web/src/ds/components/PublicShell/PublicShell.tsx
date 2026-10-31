@@ -58,6 +58,13 @@ export interface PublicShellProps {
   /** Asks for the owner in the chat. */
   onAskForOwner: () => void;
   /**
+   * The owner is in the chat (a take-over): the page sets it on the stream's `owner_joined` and
+   * clears it on `owner_left`. While it is set, the chat's head says so on the disclosure's line,
+   * "{owner} is in this chat. Claude, an AI, is paused until {owner} hands it back.", which still
+   * names Claude as an AI, and "Ask for {owner}" isn't shown. `false` by default.
+   */
+  ownerInChat?: boolean;
+  /**
    * Vision pages only, which make no requests: "Ask for {owner}" keeps its look, focus and place,
    * but pressing it does nothing (`onAskForOwner` is never called), and the first press shows the
    * vision line in the chat's pinned head, under its title and the button. Never on a real page.
@@ -97,6 +104,12 @@ const COPY = {
         You&apos;re chatting with Claude, an AI answering for {name}. Ask for {owner} anytime.
       </>
     ),
+    /** In the disclosure's place while the owner is in the chat: Claude is still named as an AI. */
+    ownerInChat: (owner: ReactNode) => (
+      <>
+        {owner} is in this chat. Claude, an AI, is paused until {owner} hands it back.
+      </>
+    ),
     askFor: (owner: ReactNode) => <>Ask for {owner}</>,
     about: (name: ReactNode) => <>About {name}</>,
     forAgents: 'For AI agents',
@@ -106,6 +119,11 @@ const COPY = {
     disclosure: (name: ReactNode, owner: ReactNode) => (
       <>
         Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {owner} cuando quieras.
+      </>
+    ),
+    ownerInChat: (owner: ReactNode) => (
+      <>
+        {owner} está en este chat. Claude, una IA, está en pausa hasta que {owner} le devuelva el chat.
       </>
     ),
     askFor: (owner: ReactNode) => <>Pedir hablar con {owner}</>,
@@ -174,6 +192,20 @@ function verticalPadding(el: HTMLElement | null): number {
   if (!el) return 0;
   const style = getComputedStyle(el);
   return parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+}
+
+/** The chat head's "Ask for {owner}", while it is shown. */
+function askOf(shell: HTMLElement | null): HTMLElement | null {
+  return shell?.querySelector<HTMLElement>('.cd-public-shell__chat-head > .cd-button') ?? null;
+}
+
+/**
+ * Where focus goes when "Ask for {owner}" leaves the chat's head with it: the composer's text box,
+ * or, while that is disabled or there is none, the conversation's scroll region, the stop after Ask.
+ */
+function focusAfterAsk(shell: HTMLElement): void {
+  const box = shell.querySelector<HTMLElement>('.cd-public-shell__composer textarea:not(:disabled)');
+  (box ?? partsOf(shell).region)?.focus();
 }
 
 /** The element that scrolls the conversation now: the shell when it is short, its scroll region when not. */
@@ -396,9 +428,10 @@ function useColumnScrolls(column: RefObject<HTMLElement | null>, beside: boolean
 /**
  * The public page around a conversation, the window's height: the business's brand header (with
  * the kernel's open status when the Desk has hours) and the chat's head with its title, the AI
- * disclosure and "Ask for {owner}" at the top; the composer with the concept footer under it at the
- * bottom; and only the conversation's scroll region scrolling between them, so the disclosure never
- * leaves the screen. A banner, such as the vision bar, sits above the brand header and is pinned
+ * disclosure and "Ask for {owner}" at the top (while the owner is in the chat, the line that says
+ * so and that Claude, an AI, is paused, and no Ask); the composer with the concept footer under it
+ * at the bottom; and only the conversation's scroll region scrolling between them, so the
+ * disclosure never leaves the screen. A banner, such as the vision bar, sits above the brand header and is pinned
  * with it. On a short shell the banner, the brand header and the footer scroll with the conversation
  * and only the chat's head and the composer stay put. The business's charter is an about column at
  * the right, or, when the page is too narrow for it, the start of the conversation's scroll region.
@@ -409,6 +442,7 @@ export function PublicShell({
   language,
   openStatus,
   onAskForOwner,
+  ownerInChat = false,
   inertAsk = false,
   about,
   aboutLinks,
@@ -434,6 +468,23 @@ export function PublicShell({
     setAboutFocused(aboutRef.current !== null && document.activeElement === aboutRef.current);
   }, [aboutBeside]);
   const [inertAskPressed, setInertAskPressed] = useState(false);
+  // The owner joining takes "Ask for {owner}" out of the chat's head. Note, as that renders and while
+  // Ask is still on the page, whether it has focus; nothing drawn depends on it. After the swap, focus
+  // goes on (`focusAfterAsk`) only if Ask had it, so it doesn't drop to the page; focus anywhere
+  // else, or nowhere, stays where it is.
+  const askShown = useRef(!ownerInChat);
+  const askFocusAtSwap = useRef(false);
+  if (askShown.current === ownerInChat && typeof document !== 'undefined') {
+    const ask = askOf(shellRef.current);
+    askFocusAtSwap.current = ask !== null && ask === document.activeElement;
+  }
+  useLayoutEffect(() => {
+    if (askShown.current !== ownerInChat) return;
+    askShown.current = !ownerInChat;
+    const follow = askFocusAtSwap.current;
+    askFocusAtSwap.current = false;
+    if (follow && shellRef.current) focusAfterAsk(shellRef.current);
+  }, [ownerInChat]);
   const name = <Name>{brand.name}</Name>;
   const owner = <Name>{ownerName}</Name>;
 
@@ -510,12 +561,19 @@ export function PublicShell({
               <h2 id={chatId} className="cd-public-shell__heading cd-type-section">
                 {copy.chatWith(name)}
               </h2>
-              <p className="cd-public-shell__disclosure cd-type-meta">{copy.disclosure(name, owner)}</p>
+              {/* The AI disclosure, or while the owner is in the chat, the line that says so and that
+                  Claude, an AI, is paused: either way Claude is named as an AI. */}
+              <p className="cd-public-shell__disclosure cd-type-meta">
+                {ownerInChat ? copy.ownerInChat(owner) : copy.disclosure(name, owner)}
+              </p>
             </div>
-            {/* A vision page's Ask goes nowhere, and says so once, in the pinned head under its row. */}
-            <Button variant="secondary" onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
-              {copy.askFor(owner)}
-            </Button>
+            {/* A vision page's Ask goes nowhere, and says so once, in the pinned head under its row.
+                While the owner is in the chat there is no Ask: the owner is already here. */}
+            {ownerInChat ? null : (
+              <Button variant="secondary" onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
+                {copy.askFor(owner)}
+              </Button>
+            )}
             {inertAsk ? <VisionInertLine shown={inertAskPressed} /> : null}
           </div>
           {/* The one part of the page that scrolls (on a short shell, it grows and the shell

@@ -21,6 +21,12 @@
     - "You're chatting with Claude, an AI answering for {name}. Ask for {ownerName} anytime."
     - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {ownerName} cuando quieras."
   - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`.
+  - **While the owner is in the chat** (`ownerInChat`, take-over option A, N-R2-TakeOver-A-1512-EN and N-R2-TakeOver-A-390-EN), the disclosure's line says so instead, in the same element, type and place, and "Ask for {ownerName}" isn't shown:
+    - "{ownerName} is in this chat. Claude, an AI, is paused until {ownerName} hands it back."
+    - "{ownerName} está en este chat. Claude, una IA, está en pausa hasta que {ownerName} le devuelva el chat."
+
+    The line still names Claude as an AI and says it is paused, so the AI disclosure is never off; it is the shell's own copy, and the consumer can't empty it or pass other words. Each `{ownerName}` is marked as written by someone (`data-copy="user"`), as the other names are. When the owner hands back, the usual disclosure and the button come back. The shell draws only its head: the chat's own lines ("Maria Rivera joined the chat", "Claude is helping again.") are the page's `SystemLine`s in the conversation.
+  - **Focus.** If "Ask for {ownerName}" has focus as the owner joins, focus goes on to the composer's text box (or, while that is disabled, to the conversation's scroll region, the stop after Ask), so it doesn't drop to the page. Focus anywhere else, or nowhere, stays where it is.
   - The conversation (`children`) in its scroll region, then the `composer` with `ConceptFooter poweredBy` under it (see "The page never scrolls"). The conversation sets `--cd-row-max: 100%`, so each `TranscriptRow` fills the chat column, edge to edge with the composer.
 - **The about column**, 300 px on the panel at the right, from the header to the foot of the window, named "About {name}" / "Sobre {name}":
   - The `about` blocks in order: cards as `ReplyCard`s in the page's language, prose as text.
@@ -48,7 +54,7 @@ The header says whether the business is open now, in the kernel's words.
 
 The shell is the window's height (`100dvh`, or `100vh` in a browser without dynamic viewport units), and the document itself never scrolls, as with `AppShell`.
 
-- **Pinned at the top:** the `banner`, if any, then the brand header, and under it the chat's head with "Chat with {name}", the AI disclosure and "Ask for {ownerName}".
+- **Pinned at the top:** the `banner`, if any, then the brand header, and under it the chat's head with "Chat with {name}", the AI disclosure and "Ask for {ownerName}" (while the owner is in the chat, the line that says so, and no button).
 - **Pinned at the bottom:** the composer area (`.cd-public-shell__composer`, the `composer`), and the footer under it.
 - **The scroll region** (`.cd-public-shell__scroll`) between them is the only part that scrolls. It holds the conversation, runs the chat's full width (so the scrollbar is at the chat's edge and the wheel scrolls it anywhere over the chat), and is positioned, so a receipt's screen-reader label scrolls with it instead of stretching the document. It is a stop in the tab order after "Ask for {ownerName}", a group named by the chat's title, so a conversation with nothing to focus in it still scrolls from the keyboard.
 - **The disclosure must stay in view.** It is part of the always-on baseline: however long the chat, and wherever the visitor has scrolled to, the chat's head with the disclosure is on screen and nothing covers it. Nothing may be added to the page that scrolls it away or covers it, such as content under the composer or a page that scrolls as a whole.
@@ -127,6 +133,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
   - `ink` and `inkSecondary` are `var(--text-primary)` and `var(--text-secondary)`.
   - The mapping keeps both inks at 4.5:1 over the field, falling back to `bg-panel` when they can't.
 - `ownerName` (`owner_display_name`), `language`, `onAskForOwner`.
+- `ownerInChat`, whether the owner is in the chat: the web app sets it on the stream's `owner_joined` and clears it on `owner_left`, the events it also draws as the joined and "Claude is helping again." lines in the conversation. While it is set, the chat's head says the owner is in the chat and Claude, an AI, is paused, and "Ask for {ownerName}" isn't shown (see "What it shows"). The chat's head changes height with it, and the shell watches its head, so it judges short or tall again as the owner joins and hands back.
 - `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
 - `composer`, a visitor `Composer` in the page's language, pinned at the bottom, and `children`, the conversation, in the scroll region. Whatever the page adds after the conversation (notices, the element it keeps above the composer) goes in `children` too.
@@ -142,6 +149,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
+| `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Set on `owner_joined`, cleared on `owner_left`. `false` by default. |
 | `inertAsk` | `boolean` | Vision pages only: Ask does nothing and its first press shows the vision line. `false` by default. |
 | `about` | `RenderedBlock[]` | The charter blocks. |
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
