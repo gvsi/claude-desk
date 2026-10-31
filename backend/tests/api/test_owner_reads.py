@@ -523,9 +523,27 @@ async def test_briefing_answers_after_a_stopped_draft(scene, clock):
     assert [(item["kind"], item["ref_id"]) for item in safety] == [("reply_blocked", str(seq))]
 
 
-async def test_briefing_omits_a_stopped_draft_followed_by_handoff(scene, clock):
+async def test_briefing_does_not_count_an_earlier_answer_when_the_chat_ends_in_handoff(scene, clock):
     who = await scene.visitor(local(2026, 10, 29, 19))
     await scene.text(who, local(2026, 10, 29, 19))
+    await scene.reply(who, local(2026, 10, 29, 19, 1))
+    await scene.text(who, local(2026, 10, 29, 19, 2))
+    seq = await scene.blocked_reply(who, local(2026, 10, 29, 19, 3))
+    await scene.reply(who, local(2026, 10, 29, 19, 4), handoff=True)
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    brief = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]
+    assert brief["newest"]["lead_or_answer"] is None and brief["total"] == 0
+    assert (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"] == []
+    assert [(item["kind"], item["ref_id"]) for item in
+            (await owner.get(f"desks/{owner.desk_id}/safety")).json()] == [("reply_blocked", str(seq))]
+
+
+async def test_briefing_omits_stopped_drafts_when_the_only_delivered_reply_is_a_handoff(scene, clock):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    await scene.text(who, local(2026, 10, 29, 19))
+    first = await scene.blocked_reply(who, local(2026, 10, 29, 19, 0, 30))
     seq = await scene.blocked_reply(who, local(2026, 10, 29, 19, 1))
     await scene.reply(who, local(2026, 10, 29, 19, 2), handoff=True)
     clock.now = local(2026, 10, 30, 9)
@@ -533,7 +551,8 @@ async def test_briefing_omits_a_stopped_draft_followed_by_handoff(scene, clock):
 
     assert (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"] == []
     assert [(item["kind"], item["ref_id"]) for item in
-            (await owner.get(f"desks/{owner.desk_id}/safety")).json()] == [("reply_blocked", str(seq))]
+            (await owner.get(f"desks/{owner.desk_id}/safety")).json()] == [
+                ("reply_blocked", str(seq)), ("reply_blocked", str(first))]
 
 
 async def test_briefing_turns_down_refused_requests_with_their_cause(scene, clock):
@@ -886,7 +905,7 @@ def test_the_week_and_the_reports_count_only_refused_requests():
     frame = windows(local(2026, 10, 30, 9), "America/Los_Angeles")
     at = local(2026, 10, 29, 19)
     done = Activity(people=People([], [], []), bookings=[], booked={}, leads=[], holds=[], callbacks=[], stepped=[],
-                    texts=[], replies=[], stopped=[
+                    texts=[], replies=[], handoffs=[], stopped=[
                         Stopped(at=at, session_id="sess-a", ref_id="dec-refused", kind="refused"),
                         Stopped(at=at, session_id="sess-a", ref_id="7", kind="reply_blocked", replayed=True),
                         Stopped(at=at, session_id="sess-b", ref_id="9", kind="reply_blocked")])

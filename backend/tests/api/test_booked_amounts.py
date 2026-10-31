@@ -43,6 +43,6 @@ def test_a_quote_taken_before_the_window_backs_no_booking_inside_it():
     booked = booked_amounts([inside, before], quotes)               # in any order: they are taken in time order
     assert booked == {"dec-before": 15_000, "dec-inside": 0}
     done = Activity(people=People([], [], []), bookings=[before, inside], booked=booked, leads=[], stopped=[],
-                    holds=[], callbacks=[], stepped=[], texts=[], replies=[])
+                    holds=[], callbacks=[], stepped=[], texts=[], replies=[], handoffs=[])
     week = this_week(done, frame)
     assert (week.bookings, week.booked_cents) == (1, 0)

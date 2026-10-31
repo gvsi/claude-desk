@@ -375,6 +375,7 @@ class Activity:
     stepped: list[Timed]                       # the owner stepping into a session
     texts: list[Timed]                         # visitor and agent text rows
     replies: list[Timed]                       # Claude's delivered replies, a handoff clause left out
+    handoffs: list[Timed]                      # Claude's delivered replies carrying a handoff clause
 
 
 def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[str, dict]) -> list[Stopped]:
@@ -482,7 +483,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.created_at >= start,
                MESSAGES.c.kind.in_((*VISITOR_TEXT, "delivered", "owner_say", "whisper")))
         .order_by(MESSAGES.c.n))
-    texts, replies, stepped = [], [], _stepped_in(decisions, ledger)
+    texts, replies, handoffs, stepped = [], [], [], _stepped_in(decisions, ledger)
     for row in rows:
         if row.session_id not in who.sessions:
             continue
@@ -492,9 +493,11 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
             texts.append(at)
         elif row.author == "owner":
             stepped.append(at)                         # a say, a whisper, or a say delivered
-        elif row.kind == "delivered" and row.author == "claude" and not any(
-                block.template == "handoff" for block in row.blocks or []):
-            replies.append(at)
+        elif row.kind == "delivered" and row.author == "claude":
+            if any(block.template == "handoff" for block in row.blocks or []):
+                handoffs.append(at)
+            else:
+                replies.append(at)
     bookings = executed("native.book")
     return Activity(
         people=who, bookings=bookings, booked=booked_amounts(bookings, quotes),
@@ -504,7 +507,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         stopped=_stopped_attempts(decisions, ledger, who.sessions),
         holds=[Timed(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"])
                for row in decisions if row["outcome"] == "hold"],
-        stepped=stepped, texts=texts, replies=replies)
+        stepped=stepped, texts=texts, replies=replies, handoffs=handoffs)
 
 
 def _within(things: Iterable[Timed], start: datetime, end: datetime) -> list[Timed]:
@@ -527,7 +530,7 @@ def _newest_first(items: list[BriefingItem]) -> list[BriefingItem]:
 class Counted:
     """What the briefing from `start` to `end` counts: the refused requests, bookings and leads, the conversations'
     text rows, and each conversation Claude answered alone (a reply it delivered, other than the handoff clause, and no
-    booking, lead, hold, refused request or callback) at its newest such reply, by session. Stopped drafts
+    booking, lead, hold, refused request, callback or delivered handoff) at its newest such reply, by session. Stopped drafts
     do not make a conversation busy."""
 
     stopped: list[Stopped]
@@ -541,7 +544,7 @@ def briefing_counts(done: Activity, start: datetime, end: datetime) -> Counted:
     stopped = [attempt for attempt in _within(done.stopped, start, end) if attempt.kind == "refused"]
     bookings, leads = _within(done.bookings, start, end), _within(done.leads, start, end)
     busy = _sessions([*stopped, *bookings, *leads, *_within(done.holds, start, end),
-                      *_within(done.callbacks, start, end)])
+                      *_within(done.callbacks, start, end), *_within(done.handoffs, start, end)])
     texts = _within(done.texts, start, end)
     conversations = _sessions(texts)
     newest: dict[str, Timed] = {}
