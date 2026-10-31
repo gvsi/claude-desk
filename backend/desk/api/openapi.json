@@ -2656,6 +2656,16 @@
               }
             }
           },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Conflict",
             "content": {
@@ -11352,7 +11362,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent and after the last one) and the conversation so far."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent and after the last one) and the conversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
       },
       "SetupTools": {
         "properties": {

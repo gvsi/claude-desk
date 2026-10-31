@@ -60,7 +60,8 @@ async def _moving_on(request: Request, ctx: OwnerCtx, *, model: bool = True) -> 
     return state
 
 
-@router.post("", status_code=201, response_model=SetupState, responses=error_responses(401, 409, 422, 429, 503))
+@router.post("", status_code=201, response_model=SetupState,
+             responses=error_responses(401, 404, 409, 422, 429, 503))
 async def start_setup(body: SetupStartIn, request: Request,
                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
     """Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with
@@ -140,6 +141,7 @@ async def setup_connect_tools(interview_id: InterviewId, request: Request,
 Work = Callable[[OwnerCtx, Runtime], Awaitable[Any]]
 PROVING_RESPONSES: dict[int | str, dict[str, Any]] = {202: {"model": ProvingPending},
                                                       **error_responses(401, 404, 409, 422, 429, 503)}
+
 
 async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *, started: float,
                          admit: Callable[[], Awaitable[None]], body: BaseModel | None = None,

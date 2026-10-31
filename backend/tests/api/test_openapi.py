@@ -116,3 +116,18 @@ def test_path_parameters_are_named_after_their_resource():
         for operation in document["paths"][path].values():
             assert [(parameter["name"], parameter["in"]) for parameter in operation.get("parameters", [])
                     if parameter["in"] == "path"] == [("id", "path")], path
+
+
+def test_the_keyed_starts_document_their_answers():
+    # The web reads these: the answers a keyed start or send can give, the one failure rule both follow, and that
+    # setup's messages open at Claude's consent question, the owner's description not shown back.
+    document = export_openapi()
+    start = document["paths"]["/api/owner/setup"]["post"]
+    send = document["paths"]["/api/public/desks/{slug}/send_agent"]["post"]
+    assert {"404", "409", "422", "429", "503"} <= set(start["responses"])
+    assert {"409", "422", "429", "503"} <= set(send["responses"])
+    for operation in (start, send):
+        assert "One rule for failures" in operation["description"]
+    assert "a repeat that finds the key never counts" in send["description"]
+    described = " ".join(document["components"]["schemas"]["SetupState"]["description"].split())
+    assert "start at Claude's consent question" in described and "isn't shown back" in described
