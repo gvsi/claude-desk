@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "inputs": "528cea345405e5f4",
+ "inputs": "2efafc7086181189",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
@@ -23,7 +23,7 @@
    "backend/desk/kernel_api.py"
   ],
   [
-   "b3d380a81bb62e9852d7a5fb92bc0e0c46c25b71",
+   "782929297cb03bef29daf8ddb4b1410f366d2a6d",
    "backend/desk/kernel_service"
   ],
   [
@@ -31,7 +31,7 @@
    "backend/desk/mockpay"
   ],
   [
-   "102377bdc818b18e5fe2b6c83cc600a9498becf3",
+   "6b66b2e24e6cc58670e988dfeca68f5cd3d6dde4",
    "backend/desk/money_cap.py"
   ],
   [
@@ -79,9 +79,9 @@
    "kernel"
   ]
  ],
- "git_sha": "2f82a06add1abacedff75085057954ef4e223270",
- "created_at": "2026-10-31T10:18:02.549456Z",
- "pass_id": "20261031-101802-e4278e",
+ "git_sha": "d55d88b2b04373d990d0bacd54d4d99cda25fa48",
+ "created_at": "2026-10-31T10:55:16.632825Z",
+ "pass_id": "20261031-105516-0a3b44",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
