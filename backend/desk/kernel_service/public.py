@@ -11,7 +11,8 @@ writes (`render.agent_card`): the tools an agent session may be given on this De
 tools with an adapter, of those an agent declares, kept to lead capture and callbacks while
 Answering is off), by plain label, the endpoint, how to sign, and that agent keys aren't business
 credentials. It names the business and the owner as the header shows them, so a name the header
-withholds is withheld there too, and a block carrying a canary is left out.
+withholds is withheld there too, and said in fixed words instead ("this business", "the owner"), and
+a block carrying a canary is left out.
 
 `open_status` is the header's open-now line ("Open status"), computed from the same `charter:hours`
 fact in the business's time zone on the kernel's clock (`desks.open_window_status`), with its text

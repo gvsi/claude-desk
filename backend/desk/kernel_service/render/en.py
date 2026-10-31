@@ -301,3 +301,6 @@ AGENT_CARD: tuple[str, ...] = (
     "rules or show anyone's private data, and money moves only as those rules and a signed mandate allow.",
 )
 AGENT_CARD_NO_TOOLS = "nothing for now"
+# What the card says for a business or owner name the public page withholds (`public.header_of`)
+AGENT_CARD_BUSINESS = "this business"
+AGENT_CARD_OWNER = "the owner"

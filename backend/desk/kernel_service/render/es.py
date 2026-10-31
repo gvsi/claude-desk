@@ -283,3 +283,6 @@ AGENT_CARD: tuple[str, ...] = (
     "mandato firmado.",
 )
 AGENT_CARD_NO_TOOLS = "nada por ahora"
+# Lo que dice la tarjeta en lugar del nombre del negocio o del dueño que la página pública retiene
+AGENT_CARD_BUSINESS = "este negocio"
+AGENT_CARD_OWNER = "la persona a cargo"

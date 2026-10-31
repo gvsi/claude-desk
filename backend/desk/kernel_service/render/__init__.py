@@ -113,10 +113,14 @@ def agent_card(lang: str, *, business: str, owner: str, slug: str, tools: Collec
     """The Agent Card of a Desk in `lang`: prose blocks naming who answers (an AI, Claude, within
     `owner`'s rules), what an agent can do there (the labels of `tools`, in the order the card
     lists them), the endpoint and how to sign, and that agent keys aren't business credentials.
-    A tool without a label is left out rather than named; nothing carries an amount or a key."""
+    A tool without a label is left out rather than named; nothing carries an amount or a key. An
+    empty `business` or `owner` (a name the public page withholds) reads as fixed words ("this
+    business", "the owner"), never as a blank."""
     module = en if lang == "en" else es
     labels = [label for tool, label in module.AGENT_TOOLS.items() if tool in tools]
     listed = module.listing(labels) if labels else module.AGENT_CARD_NO_TOOLS
+    business = business if business.strip() else module.AGENT_CARD_BUSINESS
+    owner = owner if owner.strip() else module.AGENT_CARD_OWNER
     return [RenderedBlock(kind="prose", text=line.format(business=business, owner=owner, slug=slug, tools=listed))
             for line in module.AGENT_CARD]
 
