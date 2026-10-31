@@ -573,16 +573,20 @@ describe('Today', () => {
       .map((day) => {
         const room = day.querySelector('.cd-week__bar-room')?.getBoundingClientRect();
         const bar = day.querySelector('.cd-week__bar')?.getBoundingClientRect();
-        const initial = day.querySelector('.cd-week__initial')?.getBoundingClientRect();
+        const initial = day.querySelector('.cd-week__initial');
         if (!room || !bar || !initial) throw new Error('each day has its bar and its initial');
-        return { column: day.getBoundingClientRect(), room, bar, initial };
+        // The letter itself: the initial's own box stretches across the whole column.
+        const letter = document.createRange();
+        letter.selectNodeContents(initial);
+        return { column: day.getBoundingClientRect(), room, bar, letter: letter.getBoundingClientRect() };
       });
     expect(days).toHaveLength(7);
     const center = (r: DOMRect) => r.left + r.width / 2;
-    for (const { column, bar, initial } of days) {
+    for (const { column, bar, letter } of days) {
       expect(bar.width).toBe(24);
       expect(center(bar)).toBeCloseTo(center(column), 1);
-      expect(center(initial)).toBeCloseTo(center(bar), 1);
+      expect(letter.width, 'a letter, narrower than its column').toBeLessThan(column.width / 2);
+      expect(center(letter)).toBeCloseTo(center(bar), 0);
     }
     expect(days[0]?.column.left).toBeCloseTo(box.left, 1);
     expect(days[6]?.column.right).toBeCloseTo(box.right, 1);
