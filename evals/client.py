@@ -299,7 +299,11 @@ class DeskClient:
     async def events(self, last_event_id: str | int | None = None, *,
                      query: dict[str, Any] | None = None) -> AsyncIterator[StreamEvent]:
         """The open chat's event stream, from after `last_event_id` (all of it with None), until the
-        caller stops reading. A refused stream raises `ApiCallFailed`."""
+        caller stops reading. A refused stream raises `ApiCallFailed`.
+
+        An event without data is skipped, as the SSE spec never dispatches one: httpx-sse keeps the last
+        event id across events, so once one has set an id, it hands over the API's keep-alive comment
+        as an event with no data."""
         route = ROUTES["events"]
         headers = {} if last_event_id is None else {"Last-Event-ID": str(last_event_id)}
         timeout = httpx.Timeout(self._timeout_s, read=None)   # a quiet stream isn't a failure; callers bound it
@@ -310,6 +314,8 @@ class DeskClient:
                 await response.aread()
                 raise ApiCallFailed("events", response.status_code, _body(response))
             async for sse in source.aiter_sse():
+                if not sse.data:   # a keep-alive
+                    continue
                 yield StreamEvent(id=sse.id or None, event=sse.event, data=json.loads(sse.data))
 
     async def owner_session(self, session_id: str) -> Any:

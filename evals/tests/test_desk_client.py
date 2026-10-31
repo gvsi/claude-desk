@@ -307,6 +307,26 @@ async def test_events_replay_the_chat_after_the_last_event_id(stand_in):
         b'{"text":"first"}', b'{"text":"second"}']
 
 
+def event_stream(text: str) -> httpx.MockTransport:
+    """A transport whose every answer is `text` as a chat's event stream."""
+    return httpx.MockTransport(lambda request: httpx.Response(
+        200, headers={"content-type": "text/event-stream; charset=utf-8"}, text=text))
+
+
+async def test_events_skip_a_keep_alive_after_an_event_with_an_id():
+    """The API's keep-alive comment, sent as its SSE library frames it, reaches httpx-sse as an event with
+    no data once an event has set an id, since the last event id carries over. The SSE spec never
+    dispatches an event without data, and nor does the client."""
+    stream = ('id: 1\r\nevent: writing\r\ndata: {"type": "writing"}\r\n\r\n'
+              ": keep-alive\r\n\r\n"
+              'id: 2\r\nevent: turn_end\r\ndata: {"type": "turn_end"}\r\n\r\n')
+    async with DeskClient("http://127.0.0.1:8700", PASSCODE, transport=event_stream(stream)) as client:
+        client.desk_slug = SLUG
+        events = [event async for event in client.events()]
+    assert [(event.id, event.event, event.data) for event in events] == [
+        ("1", "writing", {"type": "writing"}), ("2", "turn_end", {"type": "turn_end"})]
+
+
 async def test_a_refused_call_raises_with_its_status_and_body(stand_in):
     """An operation that needs success fails with the API's status and body, and never shows a cookie."""
     api, server = stand_in
