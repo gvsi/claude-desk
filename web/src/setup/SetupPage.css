@@ -1,0 +1,190 @@
+/* Setup's frame, as the signed setup boards draw it (N-R2-Setup-01 to 16): a 65 px bar under a
+   hairline with the mark and the business at the left, the steps in its middle and "Save and exit"
+   at the right; then one 720 px column (960 px for the owner's preview), 40 px under the bar, with
+   the concept footer at the window's foot. On a phone the bar takes two lines: the mark and "Save
+   and exit", then the business and the steps' one line, and the gutters are 16 px. */
+
+.cd-setup {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--bg-app);
+}
+
+.cd-setup__bar {
+  display: grid;
+  /* The steps lay out by their own width, so their column has one: room for all five on a line.
+     No size token fits it, as none fits the 720 px column below. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 600px) minmax(0, 1fr);
+  grid-template-areas: 'brand steps exit';
+  align-items: center;
+  column-gap: var(--space-16);
+  box-sizing: border-box;
+  /* "Save and exit" with 16 px above and below it, and the hairline. */
+  min-height: calc(var(--size-control) + 2 * var(--space-16) + 1px);
+  padding: 0 var(--space-40);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+/* The mark, then the business beside it on a laptop and under it on a phone. */
+.cd-setup__lead {
+  grid-area: brand;
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-setup__brand {
+  grid-area: brand;
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-12);
+}
+
+.cd-setup__business {
+  grid-area: business;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cd-setup__steps {
+  grid-area: steps;
+  min-width: 0;
+}
+
+.cd-setup__exit {
+  grid-area: exit;
+  justify-self: end;
+  /* "Save and exit" keeps one line at every width; a long business name gives way instead. */
+  flex: none;
+  white-space: nowrap;
+}
+
+.cd-setup__main {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(720px + 2 * var(--space-40));
+  margin: 0 auto;
+  padding: var(--space-40) var(--space-40) var(--space-20);
+}
+
+.cd-setup__main--wide {
+  max-width: calc(var(--size-content) + 2 * var(--space-40));
+}
+
+.cd-setup__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-setup__main > .cd-concept-footer {
+  margin-top: auto;
+  padding-top: var(--space-16);
+}
+
+/* A step's parts. */
+
+.cd-setup-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+.cd-setup-step__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.cd-setup-step__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-setup-step__line {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* The safety check's count, in Claude's serif, with the line under it. */
+.cd-setup-safety__summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.cd-setup-safety__summary > p {
+  margin: 0;
+}
+
+.cd-setup-safety__count {
+  color: var(--text-primary);
+}
+
+.cd-setup-rules__checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The preview: the public page in a frame of its own. */
+.cd-setup-live__preview {
+  overflow: hidden;
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-card);
+}
+
+/* Live: "Share it", then the share kit 12 px under it. */
+.cd-setup-live__share {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+/* Narrower than a laptop: the bar takes two lines, the mark and "Save and exit", then the business
+   and the steps, which say where the owner is in one line once they have under 480 px. */
+@media (max-width: 1099.98px) {
+  .cd-setup__bar {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    grid-template-areas:
+      'brand exit'
+      'business steps';
+    row-gap: var(--space-6);
+    padding: var(--space-12) var(--space-40);
+  }
+
+  .cd-setup__lead {
+    display: contents;
+  }
+
+  .cd-setup__steps {
+    text-align: end;
+  }
+}
+
+@media (max-width: 639.98px) {
+  .cd-setup__bar {
+    padding: var(--space-12) var(--space-16);
+  }
+
+  .cd-setup__main {
+    padding: var(--space-24) var(--space-16) var(--space-20);
+  }
+}

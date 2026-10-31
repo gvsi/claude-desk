@@ -14,7 +14,6 @@ import type {
   LedgerEvent,
   OpenStatus,
   PaymentLinkView,
-  PolicyVersion,
   RenderedBlock,
   ReplyVerdict,
   RuleCard,
@@ -22,10 +21,21 @@ import type {
   SessionState,
   SseEvent,
   StatusEvent,
+  ToolProfile,
 } from '../api/contracts.ts';
-import type { CancelReason, DeskSummary, Handoff, RulesDraft, TranscriptItem, TranscriptKind } from '../api/views.ts';
+import type {
+  CancelReason,
+  DeskSummary,
+  Handoff,
+  PolicyVersionOut,
+  RulesDraft,
+  ToolConfirmEntry,
+  ToolConfirmedOut,
+  TranscriptItem,
+  TranscriptKind,
+} from '../api/views.ts';
 import { cardBlock, placeholderHex, rivera } from '../ds/fixtures/index.ts';
-import { BUSINESS, activePolicy, copyIds, type CopyIds, type MockSeed } from './seed.ts';
+import { BUSINESS, activePolicy, copyIds, riveraTools, type CopyIds, type MockSeed } from './seed.ts';
 import {
   DECISIONS,
   EVENT_GAP_MS,
@@ -89,12 +99,54 @@ export interface SessionRecord {
 
 export interface DeskRecord {
   summary: DeskSummary;
-  policy: PolicyVersion;
+  /** The active rules version, with its money cap. */
+  policy: PolicyVersionOut;
   ledger: LedgerEntry[];
   /** The kernel's open status for the Desk's public page, by language; null when it makes no claim. */
   openStatus: Record<Language, OpenStatus> | null;
   /** Rule drafts made from the active rules, by version; none is active until the owner confirms it. */
-  drafts: Map<number, RulesDraft>;
+  drafts: Map<number, DraftRecord>;
+  /** The highest rules version made for the Desk: versions are never reused. */
+  lastVersion: number;
+  /** The Desk's tools, as the kernel's tool rows have them. */
+  tools: ToolProfile[];
+}
+
+/** A rules draft as the kernel keeps one until the owner confirms it. */
+export interface DraftRecord {
+  /** What `ruleDraft` answers. */
+  draft: RulesDraft;
+  /** The version it was drafted from: once another is active, confirming it is refused. */
+  parent: number;
+  /** The tools a tool confirm's draft turns on, each at the hash the owner confirmed. */
+  enables: ToolConfirmEntry[];
+}
+
+/** Why the kernel refuses a tool confirm: a tool the Desk doesn't have, or a hash or a change it won't take. */
+export type ToolConfirmRefusal = 'not_found' | 'conflict';
+
+/**
+ * The hash a tool's connector lists now, which an enable must name, at the tool confirm and again
+ * at the draft's confirm (the master plan's `/tools/confirm` and `/policy/confirm`): a changed
+ * definition's pending hash while it waits for review, else the pinned one.
+ */
+function listedHash(tool: ToolProfile): string | null {
+  return tool.pending_sha256 != null && tool.pending_sha256 !== '' ? tool.pending_sha256 : (tool.definition_sha256 ?? null);
+}
+
+/** A card with every optional field at its default, so two cards compare by what they enforce. */
+function canonicalCard(card: RuleCard): string {
+  const full: Record<string, unknown> = {
+    person_id: null,
+    agent_key_id: null,
+    max_amount_cents: null,
+    max_discount_bp: 0,
+    hours: null,
+    review: false,
+    is_default: false,
+    ...card,
+  };
+  return JSON.stringify(Object.keys(full).sort().map((key) => [key, full[key]]));
 }
 
 export interface DecisionRecord {
@@ -118,9 +170,11 @@ export interface LeadRecord {
   sessionId: string;
   /** As the visitor typed it. Untrusted. */
   displayName: string;
-  /** What they want and how to reach them, as typed. Untrusted. */
-  note: string;
+  /** What they want and how to reach them, as typed, or null when they left no note. Untrusted. */
+  note: string | null;
   createdAt: number;
+  /** Replayed from the recorded history into this copy; a test adds such a lead. */
+  replayed?: boolean;
 }
 
 export interface InboxRecord {
@@ -161,6 +215,11 @@ export class MockWorld {
   readonly leads: LeadRecord[] = [];
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
+  /**
+   * The Desks deleted from this copy, by id. Their chats, decisions and callback requests stay in
+   * the copy, closed: the routes that name one answer 409 `closed` (served.ts), as the kernel does.
+   */
+  readonly deletedDesks = new Set<string>();
   /** Each session's open demo code, by session id: the code and who it confirms. Spent once it works. */
   readonly challenges = new Map<string, { code: string; person: { personId: string; name: string } }>();
   private counter = 0;
@@ -222,25 +281,45 @@ export class MockWorld {
 
   addDesk(fields: Pick<DeskSummary, 'desk_id' | 'slug' | 'name' | 'hours'> & Pick<DeskRecord, 'openStatus'>): DeskRecord {
     const { openStatus, ...summary } = fields;
+    const policy = activePolicy(fields.desk_id);
     const desk: DeskRecord = {
       summary: { ...summary, business_name: BUSINESS.name, answering: true },
-      policy: activePolicy(fields.desk_id),
+      policy,
       ledger: [],
       openStatus,
       drafts: new Map(),
+      lastVersion: policy.version,
+      tools: riveraTools(),
     };
     this.desks.push(desk);
     return desk;
   }
 
-  addSession(desk: DeskRecord, opts: { sessionId?: string; ownerPreview?: boolean } = {}): SessionRecord {
+  /**
+   * Takes `desk` out of the copy, as deleting a Desk does: its public link and its owner pages
+   * answer not found from now on, and so do its chats, which reach it by its slug. Its id is kept
+   * in `deletedDesks`, so what names one of its chats is refused as closed. Its open payment links
+   * are cancelled first, as the kernel cancels them in the delete, so none can be paid after it.
+   */
+  deleteDesk(desk: DeskRecord): void {
+    for (const [token, link] of this.links) {
+      if (link.deskId === desk.summary.desk_id && link.view.state === 'issued') this.cancelLink(token, link, 'desk_deleted');
+    }
+    const index = this.desks.indexOf(desk);
+    if (index !== -1) this.desks.splice(index, 1);
+    this.deletedDesks.add(desk.summary.desk_id);
+  }
+
+  /** A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's, by the name it gave. */
+  addSession(desk: DeskRecord, opts: { sessionId?: string; ownerPreview?: boolean; agent?: string } = {}): SessionRecord {
     const sessionId = opts.sessionId ?? this.id('ses-web');
+    const kind = opts.agent === undefined ? 'visitor' : 'agent';
     const session: SessionRecord = {
-      state: { session_id: sessionId, kind: 'visitor', verified: false, assurance: 'none', mode: 'ai', generation: 1 },
+      state: { session_id: sessionId, kind, verified: false, assurance: 'none', mode: 'ai', generation: 1 },
       deskId: desk.summary.desk_id,
       ownerPreview: opts.ownerPreview ?? false,
       person: null,
-      displayName: null,
+      displayName: opts.agent ?? null,
       language: 'en',
       lastActivity: this.now(),
       lastVisitorText: null,
@@ -257,7 +336,7 @@ export class MockWorld {
       origin: 'kernel',
       session_id: sessionId,
       ref_id: null,
-      summary: { kind: session.ownerPreview ? 'preview' : 'visitor' },
+      summary: { kind: session.ownerPreview ? 'preview' : kind },
     });
     return session;
   }
@@ -294,6 +373,13 @@ export class MockWorld {
     session.lastActivity = this.now();
     session.typingUntil = null;
     session.visitorTypedAt = null;
+  }
+
+  /** A visiting agent's signed request: its words reach the owner's view only, never a visitor's page. */
+  agentText(session: SessionRecord, text: string): void {
+    this.addItem(session, 'agent_text', text, null);
+    session.lastVisitorText = text;
+    session.lastActivity = this.now();
   }
 
   /** The owner's whisper: only Claude sees it, so it joins the owner's view and the record, never the visitor's stream. */
@@ -576,6 +662,24 @@ export class MockWorld {
     return record.decision;
   }
 
+  /**
+   * The owner's answer to a held request of a deleted Desk, as the kernel takes it: an allow is
+   * re-checked at execution and refused there (`refused_at_execution`), so nothing runs, and a deny
+   * is `denied`. The Desk's chat is closed, so it hears nothing, and its ledger went with the Desk.
+   */
+  answerClosed(record: DecisionRecord, answer: ApprovalAnswer): Decision {
+    const state: DecisionState = allows(answer) ? 'refused_at_execution' : 'denied';
+    const language = this.sessions.get(record.decision.session_id)?.language ?? 'en';
+    record.decision = {
+      ...record.decision,
+      state,
+      visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null),
+      inbox: [],
+      signature: sign(`${record.decision.decision_id}:${state}`),
+    };
+    return record.decision;
+  }
+
   /** The visitor cancels their held request, as the kernel records it: no answer can run it now. */
   cancel(record: DecisionRecord): Decision {
     const desk = this.desk(record.deskId);
@@ -686,12 +790,13 @@ export class MockWorld {
   }
 
   /**
-   * The link is cancelled: by the visitor on the checkout, which the chat isn't told of, or by a
-   * change to the business's rules, as the kernel cancels an open link the new rules no longer
-   * allow when the owner confirms them. That one says why on the checkout (`cancel_reason`), and
-   * its chat gets the kernel's `link_cancelled` line, author `desk`.
+   * The link is cancelled: by the visitor on the checkout, which the chat isn't told of; by its
+   * Desk's delete, whose chat is closed; or by a change to the business's rules, as the kernel
+   * cancels an open link the new rules no longer allow when the owner confirms them. That one says
+   * why on the checkout (`cancel_reason`), and its chat gets the kernel's `link_cancelled` line,
+   * author `desk`.
    */
-  cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'rules_changed'): void {
+  cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'desk_deleted' | 'rules_changed'): void {
     const session = this.sessions.get(link.sessionId);
     if (!session) throw new Error(`payment link ${token} has no session`);
     link.view = { ...link.view, state: 'cancelled' };
@@ -867,28 +972,39 @@ export class MockWorld {
    * Default cards are left out of what it shows.
    */
   draft(desk: DeskRecord, add: readonly RuleCard[]): RulesDraft {
-    const before = desk.policy.cards.filter((card) => !card.is_default);
-    const cards = before.map((card) => ({ ...card }));
-    const added: RuleCard[] = [];
-    const changed: [RuleCard, RuleCard][] = [];
+    const cards = desk.policy.cards.filter((card) => !card.is_default).map((card) => ({ ...card }));
     for (const card of add) {
       const at = cards.findIndex((c) => c.card_id === card.card_id);
-      const copy = { ...card };
-      if (at === -1) {
-        cards.push(copy);
-        added.push(copy);
-      } else {
-        const old = cards[at];
-        if (old) changed.push([old, copy]);
-        cards[at] = copy;
-      }
+      if (at === -1) cards.push({ ...card });
+      else cards[at] = { ...card };
     }
-    const reasons = (mode: RuleCard['mode']) => cards.filter((c) => c.mode === mode).map((c) => c.reason);
+    return this.draftCards(desk, cards);
+  }
+
+  /**
+   * A draft of the Desk's rules as `cards`, at the money cap `cap` (the active version's when left
+   * out), turning on `enables`: the next version, its diff with the active rules by `card_id`,
+   * checked, and stored until the owner confirms it. Default cards are left out.
+   */
+  draftCards(desk: DeskRecord, cards: readonly RuleCard[], opts: { cap?: number; enables?: readonly ToolConfirmEntry[] } = {}): RulesDraft {
+    const active = desk.policy.cards.filter((card) => !card.is_default);
+    const next = cards.filter((card) => !card.is_default).map((card) => ({ ...card }));
+    const was = new Map(active.map((card) => [card.card_id, card]));
+    const now = new Set(next.map((card) => card.card_id));
+    const added = next.filter((card) => !was.has(card.card_id));
+    const removed = active.filter((card) => !now.has(card.card_id)).map((card) => ({ ...card }));
+    const changed = next.flatMap((card): [RuleCard, RuleCard][] => {
+      const old = was.get(card.card_id);
+      return old !== undefined && canonicalCard(old) !== canonicalCard(card) ? [[{ ...old }, card]] : [];
+    });
+    const reasons = (mode: RuleCard['mode']) => next.filter((c) => c.mode === mode).map((c) => c.reason);
     const proof = desk.policy.proof;
+    desk.lastVersion += 1;
     const draft: RulesDraft = {
-      version: desk.policy.version + desk.drafts.size + 1,
-      cards,
-      diff: { added, removed: [], changed },
+      version: desk.lastVersion,
+      cards: next,
+      diff: { added, removed, changed },
+      auto_money_cap_cents: opts.cap ?? desk.policy.auto_money_cap_cents ?? 0,
       proof: {
         ok: true,
         method: 'symcc',
@@ -898,8 +1014,102 @@ export class MockWorld {
       },
       summary: { on_its_own: reasons('auto'), asks_you: reasons('ask'), never: reasons('never') },
     };
-    desk.drafts.set(draft.version, draft);
+    desk.drafts.set(draft.version, { draft, parent: desk.policy.version, enables: [...(opts.enables ?? [])] });
     return draft;
+  }
+
+  /** A stored draft as a rules version with `status`, as the kernel keeps its versions. */
+  private versionOf(desk: DeskRecord, record: DraftRecord, status: PolicyVersionOut['status']): PolicyVersionOut {
+    const { draft } = record;
+    const sha = (part: string) => placeholderHex(`sha256:${desk.summary.desk_id}:${draft.version}:${part}`, 32);
+    return {
+      desk_id: desk.summary.desk_id,
+      version: draft.version,
+      parent_version: record.parent,
+      cards: draft.cards.map((card) => ({ ...card })),
+      cedar_sha256: sha('cedar'),
+      schema_sha256: sha('schema'),
+      baseline_sha256: desk.policy.baseline_sha256,
+      profiles_sha256: sha('profiles'),
+      invariants_sha256: desk.policy.invariants_sha256,
+      review_thresholds_version: desk.policy.review_thresholds_version,
+      status,
+      proof: { ...draft.proof, checks: draft.proof.checks.map((check) => ({ ...check })) },
+      auto_money_cap_cents: draft.auto_money_cap_cents ?? 0,
+    };
+  }
+
+  /**
+   * Activates a draft, as the kernel's confirm does: the draft becomes the active version, its
+   * tools turn on at the hashes the owner confirmed, and the record says so. A draft that isn't open
+   * is not found, and one made from a version no longer active is stale. One that turns a tool on at
+   * a hash its connector no longer lists (its definition changed again since) is a conflict, and
+   * nothing changes: the tool waits for the owner's review of the new definition.
+   */
+  confirmDraft(desk: DeskRecord, version: number): PolicyVersionOut | 'not_found' | 'stale' | 'conflict' {
+    const record = desk.drafts.get(version);
+    if (record === undefined) return 'not_found';
+    if (record.parent !== desk.policy.version) return 'stale';
+    const drifted = record.enables.some((entry) => {
+      const tool = desk.tools.find((row) => row.tool === entry.tool);
+      return tool === undefined || entry.definition_sha256 !== listedHash(tool);
+    });
+    if (drifted) return 'conflict';
+    desk.policy = this.versionOf(desk, record, 'active');
+    desk.drafts.delete(version);
+    for (const entry of record.enables) {
+      desk.tools = desk.tools.map((tool) =>
+        tool.tool === entry.tool
+          ? { ...tool, status: 'enabled', definition_sha256: entry.definition_sha256, pending_definition_text: null, pending_sha256: null }
+          : tool,
+      );
+    }
+    this.appendLedger(desk, {
+      kind: 'policy',
+      origin: 'kernel',
+      session_id: null,
+      ref_id: String(version),
+      summary: { version, parent_version: record.parent },
+    });
+    return { ...desk.policy, cards: desk.policy.cards.map((card) => ({ ...card })) };
+  }
+
+  /**
+   * A tool confirm, as the kernel takes its batch: a whole connector in one action. Turning off
+   * applies at once with no draft, except that verification can't be turned off. Turning on names
+   * each tool's listed hash (a changed one's pending hash, never the old one) and drafts one version
+   * for the tools not yet on, at the active rules and cap, which applies only when the owner
+   * confirms it.
+   */
+  confirmTools(desk: DeskRecord, entries: readonly ToolConfirmEntry[], enable: boolean): ToolConfirmedOut | ToolConfirmRefusal {
+    const tools = entries.map((entry) => desk.tools.find((tool) => tool.tool === entry.tool));
+    if (tools.some((tool) => tool === undefined)) return 'not_found';
+    const profileOf = (name: string) => desk.tools.find((tool) => tool.tool === name) as ToolProfile;
+    const [first] = entries;
+    if (first === undefined) return 'not_found';
+    if (!enable) {
+      if (entries.some((entry) => entry.tool === 'native.start_verification')) return 'conflict';
+      const off = new Set(entries.map((entry) => entry.tool));
+      desk.tools = desk.tools.map((tool) => (off.has(tool.tool) ? { ...tool, status: 'disabled' } : tool));
+      for (const entry of entries) {
+        this.appendLedger(desk, { kind: 'tool_pin', origin: 'kernel', session_id: null, ref_id: entry.tool, summary: { tool: entry.tool, enabled: false } });
+      }
+      return { profile: { ...profileOf(first.tool) }, draft: null };
+    }
+    const hashed = entries.every((entry, i) => {
+      const tool = tools[i];
+      return tool !== undefined && entry.definition_sha256 !== '' && entry.definition_sha256 === listedHash(tool);
+    });
+    if (!hashed) return 'conflict';
+    const enables = entries.filter((entry) => {
+      const tool = profileOf(entry.tool);
+      return !(tool.status === 'enabled' && tool.definition_sha256 === entry.definition_sha256);
+    });
+    if (enables.length === 0) return { profile: { ...profileOf(first.tool) }, draft: null };
+    const draft = this.draftCards(desk, desk.policy.cards, { enables });
+    const record = desk.drafts.get(draft.version);
+    if (record === undefined) throw new Error(`draft ${draft.version} was not stored`);
+    return { profile: { ...profileOf(first.tool) }, draft: this.versionOf(desk, record, 'proved') };
   }
 
   /** Writes seeded turns into history from `from`, each step `EVENT_GAP_MS` apart and turns `gap` apart. */

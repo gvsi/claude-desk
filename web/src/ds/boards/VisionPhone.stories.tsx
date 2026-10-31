@@ -15,7 +15,7 @@ const meta = {
     canvas: 'N-R2-Vision-Phone',
     canvasNote: [
       'Signed on 2026-10-30. The owner’s Today and a visitor’s chat as phone apps, each in a PhoneFrame; the owner’s with the five-tab PhoneTabBar.',
-      'The held quote is Today’s ApprovalCard: a limit hold for a visitor not on record, so its answers are the two plain buttons of the signed answer board (N-Answers-TwoButtons), and it says where and when it was held; the board draws two menu buttons and no waiting line.',
+      'The held quote is Today’s ApprovalCard: a limit hold for a visitor not on record, so its answers are the two plain buttons of the signed answer board (N-Answers-TwoButtons), and it says where and when it was held, with the card’s own spacing between its lines; the board draws two menu buttons, no waiting line and tighter lines.',
       'The visitor’s composer is the real Composer with its send button, where the board draws a plain field. Nothing on a vision page is sent: once Send is pressed, “This is a vision page, so nothing is sent.” shows 8 px under the composer (owner’s ruling, 2026-10-30), and the held quote’s answers say the same under them when pressed.',
       'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “Maria will text you when she’s on her way.” promised what no card backs, and its booking was drawn as a plain fact card. Claude now says “You’re all set. Here’s your visit.” beside the kernel’s booking card (booking_confirmed) in its rendered shape: “Tuesday, November 3”, “Arriving 2:00 pm to 4:00 pm”, “With Maria Rivera”, with no booking number; the board is to be redrawn to match.',
       'The board is cut at the window’s foot; the page runs on to the footer under the phones.',
@@ -56,6 +56,9 @@ export const Board: Story = {
     await expect(within(held).getByRole('button', { name: 'Deny this time' })).toBeVisible();
     const live = within(owner).getByRole('region', { name: 'Live now' });
     await expect(within(live).getAllByRole('listitem').map((row) => row.textContent)).toEqual(['Lucía HerreraVisitor', 'Alex Kim’s assistantAgent']);
+    // Live now ends inside the phone's screen, above its tab bar: nothing is cut off.
+    const ownerTabs = within(owner).getByRole('navigation', { name: "The owner app's tabs" });
+    await expect(live.getBoundingClientRect().bottom).toBeLessThanOrEqual(ownerTabs.getBoundingClientRect().top);
     const tabs = within(within(owner).getByRole('navigation', { name: "The owner app's tabs" })).getAllByRole('link');
     await expect(tabs.map((tab) => tab.textContent)).toEqual(['Today', 'Chats', 'Rules', 'Safety', 'More']);
     await expect(tabs[0]).toHaveAttribute('aria-current', 'page');
@@ -96,6 +99,11 @@ export const Board: Story = {
     const deny = within(held).getByRole('button', { name: 'Deny this time' });
     await userEvent.click(allow);
     await expect(within(held).getByRole('group', { name: 'Your answer' })).not.toHaveAttribute('aria-busy');
+    // The press says why nothing was sent: the line, announced, 8 px under the answers' row.
+    const answerLine = within(held).getByText(VISION_INERT_LINE);
+    await expect(answerLine).toHaveAttribute('role', 'status');
+    const answersRow = one(held, '.cd-approval-card__row');
+    await expect(Math.round(answerLine.getBoundingClientRect().top - answersRow.getBoundingClientRect().bottom)).toBe(8);
     for (const answer of [allow, deny]) {
       await expect(answer).not.toHaveAttribute('aria-disabled');
       await expect(answer).not.toHaveAttribute('aria-busy');

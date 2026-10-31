@@ -104,7 +104,7 @@ export function ConversationsPage() {
               <ConversationListItem
                 name={whoLabel(s)}
                 time={formatListTime(s.last_activity, business.timezone, now)}
-                status={conversationStatus(s, s.outcome_counts.held ?? 0)}
+                status={conversationStatus(s, s.outcome_counts.held ?? 0) ?? undefined}
                 href={conversationPath(deskId, s.session_id)}
                 current={s.session_id === sessionId}
                 recorded={s.replayed === true}

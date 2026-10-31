@@ -100,7 +100,7 @@ function Handled({ week }: { week: ThisWeekFigures }) {
               </li>
             ) : (
               <li className="cd-week__legend-item cd-week__legend-item--quiet">
-                <span>No one has needed you in the last 7 days.</span>
+                <span>You haven&apos;t stepped in.</span>
               </li>
             )}
           </ul>

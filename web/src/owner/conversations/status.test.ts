@@ -29,9 +29,20 @@ describe('conversationStatus', () => {
     expect(conversationStatus(everything, 0)).toEqual({ tone: 'info', text: "You're in this chat" });
     expect(conversationStatus({ ...everything, mode: 'paused' }, 0)).toEqual({ tone: 'held', text: 'Paused after blocked attempts' });
     expect(conversationStatus({ ...everything, mode: 'ai' }, 0)).toEqual({ tone: 'info', text: 'Your own preview' });
-    expect(conversationStatus({ ...everything, mode: 'ai', owner_preview: false }, 0)).toEqual({ tone: 'info', text: 'Agent' });
-    expect(conversationStatus(summary({ verified: true }), 0)).toEqual({ tone: 'handled', text: 'Verified customer' });
-    expect(conversationStatus(summary(), 0)).toEqual({ tone: 'handled', text: 'Visitor' });
+    const agent = { ...everything, mode: 'ai', owner_preview: false, display_name: "Alex Kim's assistant" } as const;
+    expect(conversationStatus(agent, 0)).toEqual({ tone: 'info', text: 'Agent' });
+    expect(conversationStatus(summary({ verified: true, display_name: 'Dana Whitfield' }), 0)).toEqual({ tone: 'handled', text: 'Verified customer' });
+    expect(conversationStatus(summary({ display_name: 'Marcus Bell' }), 0)).toEqual({ tone: 'handled', text: 'Visitor' });
+
+    // With no name, the name line already says what they are, so the status doesn't say it again;
+    // what is happening in the chat still shows.
+    expect(conversationStatus(summary(), 0)).toBeNull();
+    expect(conversationStatus(summary({ display_name: '   ' }), 0)).toBeNull();
+    expect(conversationStatus(summary({ kind: 'agent' }), 0)).toBeNull();
+    expect(conversationStatus(summary({ verified: true }), 0)).toBeNull();
+    expect(conversationStatus(summary(), 1)).toEqual({ tone: 'held', text: 'Needs you' });
+    expect(conversationStatus(summary({ mode: 'owner' }), 0)).toEqual({ tone: 'info', text: "You're in this chat" });
+    expect(conversationStatus(summary({ mode: 'paused' }), 0)).toEqual({ tone: 'held', text: 'Paused after blocked attempts' });
 
     // Who it is with: the preview by name, else their name as given, else what they are.
     expect(whoLabel(summary({ owner_preview: true, display_name: 'Maria Rivera' }))).toBe('Your preview');

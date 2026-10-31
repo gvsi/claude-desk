@@ -27,6 +27,7 @@ Static lines in English and Spanish, each a `CopyPair` (`{ en, es }`). No line c
 | `CHAT_ENDED_COPY` with `NEW_CHAT_LABEL` | "This chat ended. Start a new one to keep going." and the button "Start a new chat", which opens a new session. |
 | `RATE_LIMITED_COPY` | "You're sending messages quickly. Wait a moment, then try again." |
 | `AGENT_START_LOST_COPY` with `RELOAD_PAGE_LABEL` | On the agents page, when the answer to starting an agent was lost and the agent may be running: "The agent may have started, but we lost the answer. If you reload and send it again, it may run twice." and the button "Reload the page". |
+| `SETUP_START_LOST_COPY` | An owner line, in English only and so a plain string, not a `CopyPair`: when the answer to starting setup was lost and the setup interview may already exist, "Setup may have started, but we lost the answer. If you reload and start again, you may get two drafts." |
 | `DEMO_BUDGET_COPY` | The demo has spent its model budget for now: "The demo has used its budget for now. Try again later." |
 
 Owner lines by `KernelError.code`:

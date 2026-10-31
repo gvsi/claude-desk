@@ -155,7 +155,7 @@ describe('Conversations', () => {
     await expect.poll(() => receipts.elements().length).toBeGreaterThanOrEqual(6);
     // The list is its own read, which can land after the conversation's.
     const links = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link');
-    await expect.poll(() => links.elements()).toHaveLength(2);
+    await expect.poll(() => links.elements()).toHaveLength(3);
     const rows = links.elements() as HTMLElement[];
 
     // Dana's live conversation as N-Conv-Run1 and N-Conv-TakeOver draw it, at 1440 px: the page
@@ -172,11 +172,11 @@ describe('Conversations', () => {
     named(DANA_LIVE, DANA);
     const { screen, router } = await renderRoute(LIST);
 
-    // Newest first: Dana's live chat, then the visitor whose discount is held.
+    // Newest first: Dana's live chat, the visitor whose discount is held, then Alex Kim's assistant.
     const list = screen.getByRole('navigation', { name: 'Conversations' });
     await expect.element(list.getByRole('link', { name: new RegExp(DANA) })).toBeVisible();
     const rows = list.getByRole('link').elements();
-    expect(rows.map((row) => row.querySelector('[data-copy="user"]')?.textContent)).toEqual([DANA, 'Visitor']);
+    expect(rows.map((row) => row.querySelector('[data-copy="user"]')?.textContent)).toEqual([DANA, 'Visitor', rivera.conversations.alexAgent.name]);
     expect(rows[1]?.textContent).toContain('Needs you');
     expect(rows[0]?.textContent).toContain(formatClock(new Date(session(DANA_LIVE).lastActivity).toISOString(), LA));
     await expectScreenBasics(screen.container, { owner: true });
@@ -919,7 +919,7 @@ describe('Conversations', () => {
   it('recorded_conversations_are_tagged', async () => {
     const label = 'Includes recorded history';
     const note = 'Recorded history, replayed into your copy. It happened before you arrived.';
-    /** The list's rows, newest first: Dana's live chat, then the seeded visitor's. */
+    /** The list's rows, newest first: Dana's live chat, the seeded visitor's, then Alex Kim's assistant's. */
     const rowsOf = (screen: RenderResult) => screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^(?!Includes)/ });
     const tagsIn = (row: Element) => [...row.querySelectorAll('span')].filter((span) => span.textContent?.trim() === 'Recorded');
     named(DANA_LIVE, DANA);
@@ -927,7 +927,7 @@ describe('Conversations', () => {
     // A copy with no recorded history says nothing of it: no caption, no tag, no note.
     const plain = await renderRoute(conversation(SEEDED_HOLD));
     await expect.element(plain.screen.getByRole('heading', { level: 2, name: 'Visitor' })).toBeVisible();
-    await expect.poll(() => rowsOf(plain.screen).elements()).toHaveLength(2);
+    await expect.poll(() => rowsOf(plain.screen).elements()).toHaveLength(3);
     expect(plain.screen.getByRole('link', { name: label }).elements()).toHaveLength(0);
     expect(rowsOf(plain.screen).elements().flatMap(tagsIn)).toHaveLength(0);
     expect(plain.screen.getByText(/^Recorded history/).elements()).toHaveLength(0);
@@ -945,7 +945,7 @@ describe('Conversations', () => {
     const { screen, router } = await renderRoute(conversation(SEEDED_HOLD));
 
     // "Recorded", with its history icon, at the end of the replayed row's status line only.
-    await expect.poll(() => rowsOf(screen).elements()).toHaveLength(2);
+    await expect.poll(() => rowsOf(screen).elements()).toHaveLength(3);
     const [live, replayed] = rowsOf(screen).elements();
     expect(live?.textContent).toContain(DANA);
     expect(tagsIn(live as Element)).toHaveLength(0);

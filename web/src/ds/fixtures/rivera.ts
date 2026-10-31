@@ -1541,7 +1541,7 @@ const paymentLimit = {
 
 /**
  * The setup interview's draft rules for Rivera, by outcome, in the setup board's words: what Claude
- * does and who it's for (N-R2-Setup-08-Rules, in review).
+ * does and who it's for (N-R2-Setup-08-Rules, signed on 2026-10-30).
  */
 const setupOutcomes = {
   auto: [

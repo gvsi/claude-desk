@@ -19,7 +19,6 @@ import type {
   PolicyVersion,
   PublicDesk,
   SessionState,
-  ToolConfirmed,
   ToolProfile,
 } from './contracts.ts';
 import type {
@@ -51,12 +50,14 @@ import type {
   PasscodeBody,
   PaymentLinkOut,
   PeopleOut,
+  PolicyVersionOut,
   PresetBody,
   Reports,
   RuleChatOut,
   RulesDraft,
   RulesView,
   SafetyCheck,
+  SetupAnswerBody,
   SetupState,
   SetupTools,
   SituationResult,
@@ -65,6 +66,7 @@ import type {
   TextBody,
   Today,
   ToolBody,
+  ToolConfirmedOut,
   ToolRow,
   VerifyChecked,
   VerifyCodeBody,
@@ -211,8 +213,8 @@ interface RouteShapes {
   draftRules: { body: DraftAddBody; response: RulesDraft };
   draftPreset: { body: PresetBody; response: RulesDraft };
   draftSuggestion: { body: undefined; response: RulesDraft };
-  confirmRules: { body: ConfirmRulesBody; response: PolicyVersion };
-  confirmTool: { body: ConfirmToolBody; response: ToolConfirmed };
+  confirmRules: { body: ConfirmRulesBody; response: PolicyVersionOut };
+  confirmTool: { body: ConfirmToolBody; response: ToolConfirmedOut };
   setupRules: { body: undefined; response: RulesDraft };
   setupSituations: { body: undefined; response: SituationResult[] };
   setupSafetyCheck: { body: undefined; response: SafetyCheck };
@@ -222,7 +224,7 @@ interface RouteShapes {
   startSetup: { body: StartSetupBody; response: SetupState };
   setup: { body: undefined; response: SetupState };
   setupConsent: { body: ConsentBody; response: SetupState };
-  setupAnswer: { body: TextBody; response: SetupState };
+  setupAnswer: { body: SetupAnswerBody; response: SetupState };
   setupTools: { body: undefined; response: SetupTools };
   setupConnect: { body: ConnectBody; response: ToolRow[] };
 
