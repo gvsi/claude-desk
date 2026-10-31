@@ -5,6 +5,7 @@
  * week stopped or turned down anything at all.
  */
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
+import { handoffEntryOf } from '../../api/handoffEntry.ts';
 import type { Attempt, RefusalCause, ThisWeek, Triage, TriageCategory } from '../../api/views.ts';
 import type { Checkpoint } from '../../ds/index.ts';
 import { localDate } from '../../lib/format.ts';
@@ -128,11 +129,9 @@ export const HANDOFF_ENTRY_COPY = {
  * `kind` this build doesn't know among them, stays "Desk details changed".
  */
 export function entryCopy(event: Pick<LedgerEvent, 'kind' | 'summary'>): string {
-  const { summary } = event;
-  if (event.kind === 'desk_data' && isRecord(summary) && summary.part === 'handoffs') {
-    if (!Object.hasOwn(summary, 'kind')) return HANDOFF_ENTRY_COPY.done;
-    if (summary.kind === 'card') return HANDOFF_ENTRY_COPY.card;
-  }
+  const handoff = handoffEntryOf(event);
+  if (handoff === 'opened') return HANDOFF_ENTRY_COPY.card;
+  if (handoff === 'done') return HANDOFF_ENTRY_COPY.done;
   return kindCopy(event.kind);
 }
 
