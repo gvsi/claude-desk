@@ -4,7 +4,15 @@
 
 ## When to use
 
-- Where a page's content will appear while it is fetched: "Loading your customers" under the Customers header.
+- Where a page's content will appear while it is fetched, on the loaders that don't draw a skeleton (`SkeletonScreen`), which is how the main screens load:
+  - a customer's page;
+  - All rules;
+  - a rule draft and its change;
+  - the Demo inbox's open sheet (not the aside's button, which Today's skeleton draws);
+  - the connector review inside setup's tools step;
+  - setup's "Connecting Stripe";
+  - the agents page's run panel, whose line is an action at work, not a page loading.
+- Until their skeletons land, these keep it too: Customers ("Loading your customers" under its header), Rules, setup's steps, the agents page while it opens, and the Demo inbox beside Today.
 - Not for a button whose click is in flight, which shows its own spinner in place of its label (`Button` `busy`), and not for someone typing (`WritingIndicator`).
 - Not for something that may take a while or needs the reader to wait on purpose ("Reconnecting to the chat"), which is a `waiting` `Notice`.
 

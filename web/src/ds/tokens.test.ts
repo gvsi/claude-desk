@@ -491,6 +491,13 @@ describe('design tokens', () => {
     expect(tokenValue('size-sub-nav')).toBe('200px');
   });
 
+  test('skeleton_band_is_a_token', () => {
+    // The one band of light that sweeps a loading page's shapes, 900 px wide, as the signed skeleton
+    // boards draw it. Its loop is the writing indicator's, so it adds no motion token.
+    expect(tokenValue('size-skeleton-band')).toBe('900px');
+    expect(tokens.motion.tokens.map((t) => t.name).filter((name) => name.includes('skeleton'))).toEqual([]);
+  });
+
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
       'clay',
