@@ -1726,6 +1726,8 @@ describe('setup', () => {
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     // Today's Answering reads on at once: going live refreshed the Desks the page had read.
     await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+    // And the Desk is live, so Today no longer leads back into setup.
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
   });
 
   it('live_step_shows_the_signed_share_card', async () => {

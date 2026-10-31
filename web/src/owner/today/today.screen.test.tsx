@@ -1684,6 +1684,26 @@ describe("Today's unfinished setup", () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
   });
 
+  it('save_and_exit_lands_on_the_card', async () => {
+    // Leaving setup with "Save and exit" opens the new Desk's Today, which leads back in: no loop
+    // between the two, and the card names the step the owner left.
+    const state = await deskAtRules();
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect
+      .element(
+        card.getByText(
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          { exact: true },
+        ),
+      )
+      .toBeVisible();
+    expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+  });
+
   it('unfinished_setup_fits_a_laptop_and_a_phone', async () => {
     // On a laptop "Continue setup" sits at the words' right, level with their top. On a phone the
     // card still comes first, and the button drops under the words, from their left edge, as Today's
