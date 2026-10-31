@@ -103,6 +103,37 @@ describe('verification', () => {
     await expectScreenBasics(screen.container, { owner: false });
   });
 
+  it('cant_get_the_code_closes_the_form_while_the_owner_is_in_the_chat', async () => {
+    const ask = "I'd like to talk to Maria Rivera.";
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    await say(screen, 'Can you send my invoice?');
+    const escape = screen.getByRole('button', { name: 'I can’t get the code' });
+    await expect.element(escape).toBeVisible();
+
+    // Maria takes the chat over. She is already here, so the form's way out asks for nobody: it
+    // closes the form, sends nothing, and focus moves on to the composer. The kernel's card stays.
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(document.querySelector('.cd-public-shell__disclosure')?.textContent).toMatch(/^Maria Rivera is in this chat\./));
+    const sent = requests('sendMessage').length;
+    await escape.click();
+    await expect.element(screen.getByRole('textbox', { name: '6-digit code' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toHaveFocus();
+    expect(screen.getByText(ask, { exact: true }).query()).toBeNull();
+    expect(requests('sendMessage')).toHaveLength(sent);
+    await expect.element(screen.getByRole('article', { name: "Confirm it's you" })).toBeVisible();
+
+    // With Claude answering, the same button asks for her, as the head's Ask does.
+    const again = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(again.screen);
+    await say(again.screen, 'Can you send my invoice?');
+    await again.screen.getByRole('button', { name: 'I can’t get the code' }).click();
+    await expect.element(again.screen.getByText(ask, { exact: true })).toBeVisible();
+    await vi.waitFor(() => expect(requests('sendMessage').map((r) => r.body)).toContainEqual({ text: ask }));
+  });
+
   it('code_goes_only_to_the_verify_route', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);

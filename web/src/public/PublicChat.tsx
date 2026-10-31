@@ -485,6 +485,10 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
   }, [drawn, chat.state.rows, shown]);
 
+  // The verify card whose form the visitor closed with "I can't get the code" while the owner was in
+  // the chat, by its row's key.
+  const [verifyClosed, setVerifyClosed] = useState<string | null>(null);
+
   // Words wait in the composer once it can be used: the link's idea as the page opens, and words
   // that didn't send when the chat ended, in the new chat's. Neither is sent without Send. Words
   // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
@@ -562,8 +566,15 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // written in and the visitor hasn't confirmed it's them, then the verified line.
   const verified = chat.session?.verified === true;
   const verifyRow = latestVerifyRow(state.rows);
+  // "I can't get the code" asks for the owner. While she is in the chat she is already here, so it
+  // asks for nobody: it closes that card's form, sends nothing, and the visitor's place moves to the
+  // composer. A later verify card brings the form back under it.
+  const closeVerify = () => {
+    setVerifyClosed(verifyRow);
+    composerRef.current?.querySelector('textarea')?.focus();
+  };
   const verifyUnder = (row: ChatRow): ReactNode[] =>
-    verifyRow !== null && rowKey(row) === verifyRow && (verified || ready)
+    verifyRow !== null && rowKey(row) === verifyRow && (verified || (ready && verifyClosed !== verifyRow))
       ? [
           <VerifyInline
             key="verify"
@@ -572,7 +583,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
             assurance={chat.session?.assurance ?? 'none'}
             language={language}
             onSubmit={chat.verify}
-            onAskForOwner={askForOwner}
+            onAskForOwner={chat.ownerInChat ? closeVerify : askForOwner}
           />,
         ]
       : [];
