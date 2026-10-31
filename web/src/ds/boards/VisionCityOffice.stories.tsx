@@ -14,7 +14,7 @@ import {
   one,
   some,
 } from './spec.ts';
-import { CityOfficeChat, VISION_BACK_HREF } from './vision.tsx';
+import { CITY_DESK, CITY_INSPECTION_TIMES, CITY_VERIFY_PROMPT, CityOfficeChat, VISION_BACK_HREF } from './vision.tsx';
 
 const DISCLOSURE = "You're chatting with Claude, an AI answering for Meridian Bay Permits. Ask for Permit Center staff anytime.";
 
@@ -70,7 +70,7 @@ const CONVERSATION_CARDS = [
   ],
 ] as const;
 
-/** The about column's cards, the kernel's charter templates, in order. */
+/** The about column's cards, under the charter templates' labels, in order. */
 const ABOUT_CARDS = [
   ['Hours', ['Monday to Friday, 8:00 am to 4:30 pm', 'Inspections, Monday to Friday, 8:00 am to 4:00 pm']],
   ['Policy', ['Plan checkers decide what needs a permit and what’s exempt.']],
@@ -80,11 +80,38 @@ const ABOUT_CARDS = [
 const SUGGESTIONS = ['Book an inspection', 'Pay the fee', 'Talk to staff'];
 
 /**
- * The page's height at the laptop's width: the board's 1485 px, plus 18 px for the shell's own AI
- * disclosure, whose longer sentence takes a second line, less 6 px for each of the two fact cards,
- * 109 px where the board draws 115 px boxes in the reply card's look.
+ * The page's height at the laptop's width, as the board is now drawn on the canvas: the signed
+ * render's 1485 px, plus 18 px for the shell's own AI disclosure, whose longer sentence takes a
+ * second line, less 6 px for each of the two fact cards, 109 px where the render drew 115 px boxes
+ * in the reply card's look.
  */
 const PAGE_HEIGHT = 1485 + 18 - 2 * 6;
+
+/** The master plan's slot id, `S-<yyyymmdd>-<hhmm>`: the slot's start in the business's time zone. */
+const SLOT_ID = /^S-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})$/;
+
+/**
+ * The fact each kernel template reads, by the start of its `fact_id` (the kernel's render
+ * registry): open times read a `slots:` fact, the about cards the charter's. A code's prompt reads none.
+ */
+const TEMPLATE_FACT_IDS: Readonly<Record<string, RegExp>> = {
+  booking_options: /^slots:/,
+  hours: /^charter:hours$/,
+  policy: /^charter:policy:/,
+  contact: /^charter:contact$/,
+};
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** The start a slot id names, as an open time's label writes it ("Wednesday, November 4, 8:00 am"), or null for no slot id. */
+function slotStart(slotId: string): string | null {
+  const match = SLOT_ID.exec(slotId);
+  if (!match) return null;
+  const [year, month, day, hour, minute] = match.slice(1).map(Number) as [number, number, number, number, number];
+  const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+  return `${weekday}, ${MONTHS[month - 1]} ${day}, ${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'am' : 'pm'}`;
+}
 
 /** Each line of text a person reads under `root`, one text node at a time, outside any card. */
 function linesOutsideCards(root: HTMLElement): string[] {
@@ -113,10 +140,11 @@ const meta = {
     canvas: 'N-R2-Vision-CityOffice-Resident',
     canvasNote: [
       'Signed on 2026-10-30. Marcus Bell, a resident, asks Meridian Bay Permits’ public Desk about his kitchen remodel permit; Meridian Bay is a fictional city, and no vision page names a real city office.',
-      'He is verified with a code sent to the email on the application; his permit’s status with the fee due, and the next steps, are fact cards, and the open inspection times are the kernel’s open-times card. The garage conversion is a plan checker’s decision, so it is held for staff. Every status, fee, date and time is in a card; Claude’s words state none.',
-      'The page is PublicShell under the vision bar (its banner), with the kernel’s open status, the city’s charter cards in the about column, and the suggestions under the conversation. The composer and the suggestions send nothing.',
+      'He is verified with a code sent to the email on the application; his permit’s status with the fee due, and the next steps, are fact cards, as no reply card template covers a permit, and the open inspection times are an open-times card. The garage conversion is a plan checker’s decision, so it is held for staff. Every status, fee, date and time is in a card; Claude’s words state none.',
+      'The page is PublicShell under the vision bar (its banner), with the open status, the city’s charter cards in the about column, and the suggestions under the conversation. The composer and the suggestions send nothing. The open times keep the kernel’s contract: a slots fact, and each option’s id the slot id of its start.',
+      'Beyond what the kernel’s templates and lines render today, and drawn as a vision of what they could carry: the code prompt’s “to the email on the application” (the kernel writes “I’ll send a code to the contact on record.”); the open-times card’s title “Rough-in inspection”, its permit line and its time ranges (the kernel writes “Times that are open” and one start time per slot); the hours card’s “Inspections, …” line and the contact card’s second line (the kernel writes each window of the hours, unlabelled, and the contact verbatim, as one line); the system line’s “sent to the email on the application” (the app writes “Verified with a code”); and the receipts “Reply checked against the City’s rules”, “Code sent to the email on the application”, “Read from your own permit file”, “Times read from the inspection calendar” and “Held for a person: whether work needs a permit is a staff decision” (the kernel’s visitor lines are “Reply checked against {owner}’s rules”, “Verification started”, “Times read from {owner}’s calendar” and “Waiting for {owner} to approve”, and no tool reads a permit file). The permit answer is one reply drawn as prose, card, prose, card, where the kernel delivers a reply’s prose, then its cards.',
       'The AI disclosure is the shell’s own sentence, which can’t be changed or turned off, where the board writes DisclosureLine’s shorter “Meridian Bay Permits answers with Claude, an AI.”; it takes a second line, so the page is 18 px longer.',
-      'The permit status and the next steps are FactCards, at most 420 px wide, padded 12 px 14 px, with a 14 px icon and the fact in body type, where the board draws them in the reply card’s look (520 px, padded 16 px, a 16 px icon, the headline in section type); each is 109 px tall where the board’s is 115 px. With the disclosure, the page is 1491 px where the board draws 1485 px.',
+      'The permit status and the next steps are FactCards, at most 420 px wide, padded 12 px 14 px, with a 14 px icon and the fact in body type, where the board draws them in the reply card’s look (520 px, padded 16 px, a 16 px icon, the headline in section type); each is 109 px tall where the board’s is 115 px. With the disclosure, the page is 1491 px where the signed render drew 1485 px; the board is now drawn 1512 × 1491 on the canvas, and its render is captured at its full height.',
       'The footer’s “Powered by” mark is the bell, where the board draws the earlier counter mark.',
     ].join(' '),
   },
@@ -134,7 +162,7 @@ export const Board: Story = {
     await document.fonts.ready;
     const bar = await expectVisionBar(canvasElement, VISION_BACK_HREF);
 
-    // The city's public page right under the bar: its header, its name, the Permit Center and the kernel's open status.
+    // The city's public page right under the bar: its header, its name, the Permit Center and its open status.
     const header = canvas.getByRole('banner');
     await expect(header.getBoundingClientRect().top).toBe(bar.getBoundingClientRect().bottom);
     expectComputed(header, { height: '76px', backgroundColor: 'rgb(45, 61, 76)', borderBottomColor: 'rgb(111, 139, 163)' });
@@ -171,7 +199,7 @@ export const Board: Story = {
     await expect(permitCard?.compareDocumentPosition(verified)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
 
     // Every card in the conversation, word for word: the status and the next steps are fact cards,
-    // the code's prompt and the open times the kernel's reply cards.
+    // the code's prompt and the open times reply cards under their templates' labels.
     const cards = within(log).getAllByRole('article');
     await expect(cards.map((card) => card.getAttribute('aria-label'))).toEqual(CONVERSATION_CARDS.map(([, label]) => label));
     for (const [index, [kind, label, words]] of CONVERSATION_CARDS.entries()) {
@@ -182,6 +210,19 @@ export const Board: Story = {
     // The open times are a list to answer in the chat, not buttons.
     await expect(within(cards[3] as HTMLElement).getAllByRole('listitem')).toHaveLength(3);
     await expect(within(cards[3] as HTMLElement).queryByRole('button')).toBeNull();
+
+    // The city's cards keep the kernel's contract, which the web app's vision page imports: each
+    // open time is a slot id naming the time its label starts at, and each card reads its
+    // template's kind of fact.
+    await expect(CITY_INSPECTION_TIMES.options).toHaveLength(3);
+    for (const option of CITY_INSPECTION_TIMES.options ?? []) {
+      await expect(option.option_id, 'an open time is a slot id').toMatch(SLOT_ID);
+      await expect(option.label.startsWith(`${slotStart(option.option_id)} `), `${option.option_id} starts its label "${option.label}"`).toBe(true);
+    }
+    for (const block of [CITY_INSPECTION_TIMES, ...CITY_DESK.charter]) {
+      await expect(block.fact_id, `${block.template}'s fact`).toMatch(TEMPLATE_FACT_IDS[block.template ?? ''] ?? /^$/);
+    }
+    await expect(CITY_VERIFY_PROMPT.fact_id).toBeNull();
 
     // The fee is in the permit's card and nowhere else on the page.
     const money = linesWith(canvasElement, '$');

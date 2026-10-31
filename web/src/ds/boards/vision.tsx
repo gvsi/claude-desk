@@ -483,9 +483,12 @@ export function PhoneApps() {
 const CITY_STAFF = 'Permit Center staff';
 
 /**
- * The city's public Desk as the kernel would serve it (`PublicDesk`): its name and the Permit
+ * The city's public Desk in the shape the kernel serves (`PublicDesk`): its name and the Permit
  * Center, its colors, its charter (hours, who decides what needs a permit, and how to reach the
- * Permit Center) and the kernel's open status, as the board draws them.
+ * Permit Center) and its open status, as the board draws them. Two charter lines are a vision of
+ * what the templates could carry, beyond what they render today: the hours card's "Inspections, …"
+ * line (the kernel writes each window of the hours, unlabelled) and the contact card's second line
+ * (the kernel writes the contact verbatim, as one line).
  */
 export const CITY_DESK: PublicDesk = {
   business_name: 'Meridian Bay Permits',
@@ -514,9 +517,14 @@ export const CITY_DESK: PublicDesk = {
 
 /**
  * Marcus Bell's visit, word for word as the board writes it: his messages, Claude's words, the
- * line when he's verified and the kernel's receipts. Claude's words lead into the cards and state
- * no status, fee, date or time (invariant 2); the garage question is a plan checker's decision, so
- * it is held for staff.
+ * line when he's verified and the receipts. Claude's words lead into the cards and state no
+ * status, fee, date or time (invariant 2); the garage question is a plan checker's decision, so it
+ * is held for staff.
+ *
+ * The system line and the receipts are a vision of what the kernel's lines could say, beyond what
+ * they say today: the app writes "Verified with a code", and the kernel's visitor lines are "Reply
+ * checked against {owner}'s rules", "Verification started", "Times read from {owner}'s calendar"
+ * and "Waiting for {owner} to approve". No tool reads a permit file ("Read from your own permit file").
  */
 export const CITY_TURNS = {
   status: 'Hi, it’s Marcus Bell. What’s the status of my kitchen remodel permit?',
@@ -535,7 +543,11 @@ export const CITY_TURNS = {
   checked: 'Reply checked against the City’s rules',
 } as const;
 
-/** The kernel's prompt before it sends a code: to the email on the application, the contact on record. */
+/**
+ * The prompt before a code is sent, under the `verify_prompt` template. Its words are a vision of
+ * what the template could carry: the kernel writes "I'll send a code to the contact on record.",
+ * and here the contact on record is the email on the application.
+ */
 export const CITY_VERIFY_PROMPT = cardBlock('verify_prompt', { fact_id: null, title: 'I’ll send a code to the email on the application.' });
 
 /**
@@ -559,17 +571,19 @@ export const CITY_PERMIT = {
 
 /** The inspection calendar's open times for a rough-in, as the board lists them. */
 const INSPECTION_SLOTS = [
-  { option_id: 'I-20261104-AM', label: 'Wednesday, November 4, 8:00 am to 12:00 pm' },
-  { option_id: 'I-20261105-PM', label: 'Thursday, November 5, 1:00 pm to 4:00 pm' },
-  { option_id: 'I-20261109-AM', label: 'Monday, November 9, 8:00 am to 12:00 pm' },
+  { option_id: 'S-20261104-0800', label: 'Wednesday, November 4, 8:00 am to 12:00 pm' },
+  { option_id: 'S-20261105-1300', label: 'Thursday, November 5, 1:00 pm to 4:00 pm' },
+  { option_id: 'S-20261109-0800', label: 'Monday, November 9, 8:00 am to 12:00 pm' },
 ];
 
 /**
- * The open inspection times as the kernel renders open times (`booking_options`): the inspection,
- * when it can happen, then each time as a line and as an option Marcus answers in the chat.
+ * The open inspection times under the `booking_options` template, in its contract: a `slots:` fact,
+ * and each time as a line and as an option whose id is the slot id of its start. Its title
+ * ("Rough-in inspection"), its permit line and its time ranges are a vision of what the template
+ * could carry: the kernel writes "Times that are open" and one start time per slot.
  */
 export const CITY_INSPECTION_TIMES = cardBlock('booking_options', {
-  fact_id: 'inspections:B-2026-0412',
+  fact_id: 'slots:B-2026-0412',
   title: 'Rough-in inspection',
   lines: ['Permit B-2026-0412, once the fee is paid', ...INSPECTION_SLOTS.map((slot) => slot.label)],
   options: INSPECTION_SLOTS,
@@ -616,7 +630,9 @@ export function CityOfficeChat() {
         </TranscriptRow>
         <SystemLine text={t.verified} />
         <TranscriptRow margin={cityReceipts(53, decided('executed'), t.readFile)}>
-          {/* One answer: Claude's words lead into each fact card, as the board draws one message. */}
+          {/* One answer, drawn as the board draws it: Claude's words lead into each fact card. The
+              kernel delivers a reply as its prose, then its cards, so prose, card, prose, card in
+              one reply is the board's vision. */}
           <div className="board-vision-city__answer">
             <CityReply text={t.stands} />
             <FactCard {...CITY_PERMIT.status} />
