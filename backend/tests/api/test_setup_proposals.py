@@ -421,16 +421,27 @@ async def test_a_connector_without_an_accept_does_not_connect(proposals, model, 
     assert connects == []
 
 
-@pytest.mark.parametrize("action", ["decision", "suggestions"])
-async def test_a_decision_while_busy_is_409(proposals, engine, monkeypatch, action):
+@pytest.mark.parametrize("action", ["decision", "typed", "suggestions"])
+async def test_a_decision_while_busy_is_409(proposals, engine, action):
     owner, state, ids = proposals
     path = f"/api/owner/setup/{state['interview_id']}"
-    suffix, body = (f"/proposals/{ids[0]}", {"accept": True}) if action == "decision" else ("/suggestions", {})
+    suffix, body = {
+        "decision": (f"/proposals/{ids[0]}", {"accept": True}),
+        "typed": ("/answer", {"card": ids[0], "text": "Yes"}),
+        "suggestions": ("/suggestions", {}),
+    }[action]
+    row = await stored(engine, state["interview_id"])
+    row["transcript"].append(setup.Entry(role="owner", text="Consent in progress", pending="consent-run")
+                             .model_dump(mode="json"))
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
+                               " WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": state["interview_id"]})
     before = await stored(engine, state["interview_id"])
-    with monkeypatch.context() as patch:
-        patch.setattr(setup.Interview, "busy", property(lambda self: True))
-        reply = await owner.browser.post(path + suffix, json=body)
-        assert reply.status_code == 409, reply.text
+    visible = await owner.browser.get(path + "?cards=1")
+    assert visible.json()["busy"] is True
+    reply = await owner.browser.post(path + suffix, json=body)
+    assert reply.status_code == 409, reply.text
     with setup._turn(state["interview_id"]):
         reply = await owner.browser.post(path + suffix, json=body)
         assert reply.status_code == 409, reply.text
@@ -1050,3 +1061,92 @@ async def test_typing_accept_after_business_tools_are_disabled_uses_the_visible_
     reloaded = await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")
     payment = next(card for card in shown(reloaded) if card["proposal_id"] == ids[1])
     assert payment["state"] == "accepted" and payment["job"]["config"] is None
+
+
+def revised_plan(*, old_shown=True, replacement_shown=True):
+    old, replacement = [entry.card for entry in setup.proposal_entries(
+        [job(title="Original intro", who="Original clients"),
+         job(title="Revised intro", who="New clients", how="Ask before booking a call")], [],
+        business_tools_enabled=True)]
+    old.state = "changed"
+    old.superseded_by = replacement.proposal_id
+    state = interview_with(SetupAnswers(summary="Tax advice"), [
+        setup.Entry(role="claude", text="Understanding", planned=[old, replacement])])
+    for card, show in [(old, old_shown), (replacement, replacement_shown)]:
+        if show:
+            state.transcript.append(setup.Entry(role="claude", text="", card=card.model_copy(deep=True)))
+    return state, old, replacement
+
+
+@pytest.mark.parametrize("old_shown", [False, True])
+@pytest.mark.parametrize("replacement_shown", [False, True])
+def test_settle_plan_preserves_changed_cards_and_settles_only_the_replacement(old_shown, replacement_shown):
+    state, old, replacement = revised_plan(old_shown=old_shown, replacement_shown=replacement_shown)
+    original = old.model_dump(mode="json")
+    setup.settle_plan(state)
+    assert old.model_dump(mode="json") == original
+    assert [card.state for card in state.planned] == ["changed", "accepted"]
+    assert [card.job.who for card in state.planned] == ["Original clients", "New clients"]
+    shown = [entry.card for entry in state.transcript if entry.card]
+    assert [card.proposal_id for card in shown] == ([old.proposal_id] if old_shown else []) + [replacement.proposal_id]
+    assert shown[-1].job.who == "New clients"
+    if old_shown:
+        assert shown[0].model_dump(mode="json") == original
+    before = setup._stored(state)
+    setup.settle_plan(state)
+    assert setup._stored(state) == before
+
+
+@pytest.mark.parametrize("accepted", [False, True])
+def test_finish_preserves_changed_cards_and_summarizes_only_the_accepted_replacement(accepted):
+    state, old, replacement = revised_plan()
+    if accepted:
+        setup.apply_decision(state, replacement.proposal_id, setup.SetupProposalIn(accept=True))
+    before = [card.model_dump(mode="json") for entry in state.transcript for card in [*entry.planned, entry.card]
+              if card is not None]
+    setup.finish(state)
+    assert [card.model_dump(mode="json") for entry in state.transcript for card in [*entry.planned, entry.card]
+            if card is not None] == before
+    assert old.state == "changed" and old.superseded_by == replacement.proposal_id
+    assert state.answers.how_we_help == ("Revised intro: Ask before booking a call" if accepted else None)
+    assert [card.job.who for card in state.planned] == ["Original clients", "New clients"]
+    assert state.step == "tools"
+
+
+@pytest.mark.parametrize("accept", [False, True])
+@pytest.mark.parametrize("replacement_shown", [False, True])
+def test_a_decision_on_a_changed_card_is_409(accept, replacement_shown):
+    state, old, replacement = revised_plan(replacement_shown=replacement_shown)
+    before = setup._stored(state)
+    with pytest.raises(setup.ApiProblem) as refused:
+        setup.apply_decision(state, old.proposal_id, setup.SetupProposalIn(accept=accept))
+    assert (refused.value.status, refused.value.error) == (409, "conflict")
+    assert setup._stored(state) == before
+    assert old.superseded_by == replacement.proposal_id
+
+
+async def test_suggestions_keep_a_typed_revision_and_summarize_its_replacement(proposals, engine, model):
+    owner, initial, ids = proposals
+    interview_id = initial["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    revision = job(title="Revised intro", who="New clients", how="Ask before booking a call")
+    model.add(card_answer("change", revised=[revision.model_dump(exclude={"can_do_today"})]))
+    reply = await owner.browser.post(path + "/answer?cards=1", json={"card": ids[0], "text": "Change the intro"})
+    assert reply.status_code == 200, reply.text
+    replacement_id = reply.json()["pending_card"]
+    old = next(card for card in shown(reply) if card["proposal_id"] == ids[0])
+    assert old["state"] == "changed" and old["superseded_by"] == replacement_id
+    before = await stored(engine, interview_id)
+    refused = await owner.browser.post(path + f"/proposals/{ids[0]}", json={"accept": True})
+    assert refused.status_code == 409, refused.text
+    assert await stored(engine, interview_id) == before
+    reply = await owner.browser.post(path + "/suggestions?cards=1", json={})
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    cards = {card["proposal_id"]: card for card in shown(reply)}
+    assert cards[ids[0]] == old
+    assert cards[replacement_id]["state"] == "accepted"
+    assert cards[replacement_id]["job"]["who"] == "New clients"
+    row = await stored(engine, interview_id)
+    assert row["answers"]["how_we_help"] == "Revised intro: Ask before booking a call"
+    assert (await owner.browser.get(path + "?cards=1")).json() == reply.json()

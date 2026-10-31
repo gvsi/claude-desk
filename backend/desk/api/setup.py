@@ -1381,6 +1381,7 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                     except ApiProblem:
                         busy = None          # rejected before storing; another run's snapshot is never ours
                         raise
+                    busy = _stored(interview)  # _commit may clear disabled card configs before saving.
                     pending = render(interview, slug)
                     busy_stored.set()
                     await turn(ctx, interview, staged)
@@ -1966,6 +1967,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
 
 def settle_plan(interview: Interview) -> None:
     """Settle the remaining plan and emit each never-shown card once, without I/O."""
+    # Changed cards and their superseded_by links stay intact; only proposed replacements can settle.
     pending = interview.pending_card
     for card in interview.unshown:
         config = card.job.config if card.job is not None else None

@@ -971,7 +971,11 @@ def proposal_entries() -> list[dict]:
     ]
 
 
-async def test_card_messages_reach_the_owner_only_with_cards_1(app, browser, kernel_http, model, engine):
+@pytest.mark.parametrize("business_tools_enabled", [False, True])
+async def test_card_messages_reach_the_owner_only_with_cards_1(
+    app, browser, kernel_http, model, engine, business_tools_enabled,
+):
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=business_tools_enabled)
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
@@ -994,6 +998,9 @@ async def test_card_messages_reach_the_owner_only_with_cards_1(app, browser, ker
             ["p-012345abcdef", "p-fedcba543210"] if cards else [])
         assert all(message["role"] == "claude" and message["text"] == "" and message["choices"] == []
                    for message in shown)
+        if cards:
+            assert shown[0]["card"]["job"]["config"] == (proposal_entries()[1]["card"]["job"]["config"]
+                                                        if business_tools_enabled else None)
         if not cards:
             assert all(message["text"] for message in messages)
 
