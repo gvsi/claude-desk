@@ -1729,6 +1729,72 @@ describe('public chat page', () => {
     expect(requests('sendMessage')).toEqual([]);
   });
 
+  it('break_it_idea_types_once_under_strict_mode', async () => {
+    // As the app runs in development, where React renders the page and runs its effects twice as
+    // it mounts: one fill of the chat box, and one replace of the address.
+    const fills: string[] = [];
+    const onInput = (event: Event) => {
+      if (!event.isTrusted && event.target instanceof HTMLTextAreaElement) fills.push(event.target.value);
+    };
+    document.addEventListener('input', onInput, true);
+    onTestFinished(() => document.removeEventListener('input', onInput, true));
+    let navigate: ReturnType<typeof vi.spyOn> | null = null;
+    const { screen, router } = await renderRoute(`${PAGE}?try=${handOff()}&from=today`, {
+      strict: true,
+      beforeRender: (r) => {
+        navigate = vi.spyOn(r, 'navigate');
+      },
+    });
+    await expect.element(chatBox(screen)).toHaveValue(IDEA);
+    await vi.waitFor(() => expect(router.state.location.search).toBe('?from=today'));
+    await frames(10);
+    expect(fills).toEqual([IDEA]);
+    expect(navigate?.mock.calls).toHaveLength(1);
+    expect(navigate?.mock.calls[0]?.[1]).toMatchObject({ replace: true });
+    expect(readLocal('breakItHandoff')).toBeNull();
+  });
+
+  it('break_it_idea_stays_out_through_back_and_forward', async () => {
+    // Away to the page for AI agents and back, then forward and back again: the chat box that
+    // opens each time stays empty, since the hand-off was used and the token left the address.
+    const { screen, router } = await renderRoute(`${PAGE}?try=${handOff()}`);
+    await expect.element(chatBox(screen)).toHaveValue(IDEA);
+    await vi.waitFor(() => expect(router.state.location.search).toBe(''));
+    const agentsPage = () => screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' });
+    await router.navigate(`${PAGE}/agents`);
+    await expect.element(agentsPage()).toBeVisible();
+    for (const step of [-1, 1, -1]) {
+      await router.navigate(step);
+      if (step === 1) {
+        await expect.element(agentsPage()).toBeVisible();
+        continue;
+      }
+      await expect.element(agentsPage()).not.toBeInTheDocument();
+      expect(`${router.state.location.pathname}${router.state.location.search}`).toBe(PAGE);
+      await ready(screen);
+      await frames(10);
+      await expect.element(chatBox(screen)).toHaveValue('');
+    }
+    expect(requests('sendMessage')).toEqual([]);
+  });
+
+  it('break_it_token_is_read_as_decoded', async () => {
+    // Percent-escapes in the link are the token's own characters once decoded: it types the idea.
+    const token = handOff();
+    const escaped = Array.from(token, (char) => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`).join('');
+    const { screen } = await renderRoute(`${PAGE}?try=${escaped}`);
+    await expect.element(chatBox(screen)).toHaveValue(IDEA);
+    // A token that decodes to anything more or less, such as a space or a new line, types nothing.
+    for (const spoil of [(t: string) => `${t}%20`, (t: string) => `%20${t}`, (t: string) => `${t}%0A`, (t: string) => t.slice(0, -1)]) {
+      const link = `${PAGE}?try=${spoil(handOff())}`;
+      const each = await renderRoute(link);
+      await ready(each.screen);
+      await frames(10);
+      expect((chatBox(each.screen).element() as HTMLTextAreaElement).value, link).toBe('');
+    }
+    expect(requests('sendMessage')).toEqual([]);
+  });
+
   it('break_it_idea_waits_out_try_again', async () => {
     // The page can't load at first. The token has left the address already, and once "Try again"
     // opens the chat, the idea is typed in.
