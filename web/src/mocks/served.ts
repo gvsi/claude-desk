@@ -8,8 +8,17 @@
  */
 import type { ApprovalAnswer, Decision, DeskUpdated, PaymentLinkState, PaymentLinkStateResult, RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
-import type { ApprovalAnswerOut, CancelAccepted, CancelReason, MessageAccepted, VerifyChecked, VisitorSession } from '../api/views.ts';
+import type {
+  AgentRunStarted,
+  ApprovalAnswerOut,
+  CancelAccepted,
+  CancelReason,
+  MessageAccepted,
+  VerifyChecked,
+  VisitorSession,
+} from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS } from '../ds/fixtures/index.ts';
+import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
 import {
   attempts,
   briefingList,
@@ -160,6 +169,8 @@ export interface CopyNaming {
 /** The API's side of one copy: the copy itself and the turns in progress. */
 export class Server {
   world: MockWorld;
+  /** The built-in agent's runs in this copy. */
+  readonly agents = new AgentRuns();
   private readonly turns = new Map<string, { queue: Scheduled[]; timer: ReturnType<typeof setTimeout> | null }>();
 
   constructor(
@@ -184,6 +195,7 @@ export class Server {
   stopTurns(): void {
     for (const turn of this.turns.values()) if (turn.timer !== null) clearTimeout(turn.timer);
     this.turns.clear();
+    this.agents.stop();
   }
 
   /** The session the request's visitor cookie names for `slug`, or why there is none. */
@@ -490,6 +502,31 @@ const SERVED: ServedRoutes = {
     // Only the codes this chat started, as the kernel's session form answers: never the owner's alerts.
     const sessionId = visitor.session.state.session_id;
     return ok(sv.world.inbox.filter((record) => record.sessionId === sessionId && record.entry.kind === 'verification_code').map((record) => record.entry));
+  },
+  agentCard(sv, req) {
+    // Built by code from the mock's public origin and the slug; no cookie is read.
+    const desk = sv.world.deskBySlug(req.params.slug);
+    return desk ? ok(agentCardOut(desk.summary.slug)) : NOT_FOUND;
+  },
+  agentKey(sv, req) {
+    // A demo key for this browser's chat with the Desk, shown once and kept nowhere.
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    return isFailure(visitor) ? visitor : ok(demoAgentIssued(sv.world, visitor.desk));
+  },
+  sendAgent(sv, req) {
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    const task = isRecord(req.body) ? req.body.task : undefined;
+    if (req.malformed || !isDemoAgentTask(task)) return INVALID;
+    const runId = sv.agents.start(sv.world, visitor.desk, visitor.session, task);
+    return ok({ run_id: runId } satisfies AgentRunStarted, 202);
+  },
+  agentRun(sv, req) {
+    // Only the chat that sent the agent reads its run; for anyone else there is none.
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    const run = sv.agents.read(req.params.run_id, visitor.session.state.session_id);
+    return run ? ok(run) : NOT_FOUND;
   },
   events(sv, req) {
     // A 200 opens the stream (handlers.ts); `listen` replays and follows it.

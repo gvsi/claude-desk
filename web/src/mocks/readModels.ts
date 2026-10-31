@@ -26,6 +26,7 @@ import type {
   VisitorTranscript,
 } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
+import { AGENT_CARD_BLOCKS } from './agents.ts';
 import type { Language } from './script.ts';
 import { BUSINESS } from './seed.ts';
 import {
@@ -505,6 +506,7 @@ export function publicDesk(desk: DeskRecord, language: Language): PublicDesk {
     ...rivera.publicDesk[language],
     desk_name: desk.summary.name,
     brand: { ...BUSINESS.brand },
+    agent_card: AGENT_CARD_BLOCKS[language].map((block) => ({ ...block })),
     open_status: desk.openStatus?.[language] ?? null,
   };
 }

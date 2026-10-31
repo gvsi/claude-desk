@@ -61,6 +61,7 @@ describe('mock payloads', () => {
     const slug = RIVERA.slug;
     const opened = (await body('openSession', { params: { slug } })) as VisitorSession;
     checks.push(['SessionState', opened.state]);
+    checks.push(['DemoAgentIssued', await body('agentKey', { params: { slug } })]);
     for (const text of Object.values(SAMPLES).flat()) {
       await body('sendMessage', { params: { slug }, body: { text } });
       await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 6);

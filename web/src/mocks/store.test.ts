@@ -920,13 +920,14 @@ describe("Today's windows", () => {
     expect('recorded_history' in quiet).toBe(false);
     expect(await list()).toEqual({ since: '2026-10-28T18:00:00-07:00', items: [] });
 
-    // Rivera's seed: the held visitor, whose drafted reply was stopped, and Dana's chat, where Maria
+    // Rivera's seed: Alex Kim's assistant, whose deposit Claude quoted and charged within its signed
+    // limit; the held visitor, whose drafted reply was stopped; and Dana's chat, where Maria
     // whispered and Claude booked her at the quoted list price.
     mockStore.reset('rivera');
     const seeded = await read();
-    expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 2, handled: 1, stepped_in: 1, stopped: 1 });
-    expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 2, bookings: 1, stopped: 1 });
-    expect(seeded.briefing).toMatchObject({ conversations: 2, bookings: 1, leads: 0, blocked: 1, total: 2 });
+    expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 1 });
+    expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 1 });
+    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, blocked: 1, total: 3 });
     const blockedReply = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.summary.ok === false);
     expect(seeded.briefing.newest.blocked).toMatchObject({
       kind: 'blocked',
@@ -939,7 +940,7 @@ describe("Today's windows", () => {
       session_id: 'ses-dana-web',
       line: DECISIONS.book.reasonPlain,
     });
-    expect(seeded.briefing.newest.lead_or_answer).toBeNull();
+    expect(seeded.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', session_id: 'ses-alex-agent', display_name: "Alex Kim's assistant" });
     // The blocked reply's attempt on Safety has the same ref.
     const attempts = (await call('safety', { params: { desk_id: deskId } })).body as { kind: string; ref_id: string }[];
     expect(attempts.find((a) => a.kind === 'reply_blocked')?.ref_id).toBe(String(blockedReply?.seq));
@@ -948,7 +949,7 @@ describe("Today's windows", () => {
     const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])[0]?.decision;
     await call('answer', { params: { decision_id: held?.decision_id ?? '' }, body: { answer: 'allow_once' } });
     await drain();
-    expect((await read()).this_week).toMatchObject({ bookings: 1, conversations: 2, handled: 0, stepped_in: 2 });
+    expect((await read()).this_week).toMatchObject({ bookings: 1, conversations: 3, handled: 1, stepped_in: 2 });
 
     // A visitor Claude answers, and Maria's own preview that Claude answers too: both count.
     await openChat();
@@ -958,8 +959,8 @@ describe("Today's windows", () => {
     await send('Do you work weekends?');
     await drain();
     const both = await read();
-    expect(both.this_week).toMatchObject({ conversations: 4, stepped_in: 2, handled: 2 });
-    expect(both.briefing).toMatchObject({ conversations: 4, total: 4 });
+    expect(both.this_week).toMatchObject({ conversations: 5, stepped_in: 2, handled: 3 });
+    expect(both.briefing).toMatchObject({ conversations: 5, total: 5 });
     expect(both.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', display_name: null });
 
     // And a visitor who asks for a callback is a lead, not an answer.
@@ -968,7 +969,7 @@ describe("Today's windows", () => {
     await send('Can you call me back?');
     await drain();
     const withLead = await read();
-    expect(withLead.briefing).toMatchObject({ leads: 1, total: 3 });
+    expect(withLead.briefing).toMatchObject({ leads: 1, total: 4 });
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
       display_name: 'Dana Wells',
@@ -989,11 +990,11 @@ describe("Today's windows", () => {
       ref_id: preview?.state.session_id,
       line: null,
     });
-    expect(answered.this_week).toMatchObject({ conversations: 4, stepped_in: 1, handled: 3 });
+    expect(answered.this_week).toMatchObject({ conversations: 5, stepped_in: 1, handled: 4 });
 
     // The full list, newest first, and the short form's rows are its own.
     const full = await list();
-    expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'blocked']);
+    expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'blocked', 'answer']);
     expect(full.items).toHaveLength(answered.briefing.total);
     expect(full.items).toContainEqual(answered.briefing.newest.blocked);
     expect(full.items).toContainEqual(answered.briefing.newest.booking);
