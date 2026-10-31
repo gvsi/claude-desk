@@ -37,8 +37,9 @@ contract test, before the task that first uses them.
   summary. A document link serves its bytes once within a day. A payment link, for the session's own current quote at
   its amount under the seed's `rv-link` card, is read, completed (a `charge` fact and the kernel's `payment_confirmed`
   verdict) or cancelled by its token alone; anything but `issued` is 409 `conflict`. Tokens are kept in memory,
-  never mirrored. `PaymentLinkView` serves the contract's fields: a link's `cancel_reason` is kept here but isn't
-  served until the contract has the field (Plan 01c's contract delta).
+  never mirrored. `PaymentLinkView` serves the contract's fields: the Desk's business name, the verified customer
+  by first name and last initial while the link is issued, and `cancel_reason` `rules_changed` for a link a rule
+  change cancelled. The fake has no reviewer, so the review-gated `rv-link` card allows a link outright.
 - Signed agents (Plan 01c; master "Agent sessions"): `POST /agents/demo` mints a demo agent for the owner or a
   visitor session of the Desk (an Ed25519 key, `agent_key_id` the first 16 hex of its public key's sha256, and a
   mandate the copy's demo wallet signs: $20 a charge, $100 in all, for an hour), ten per copy an hour, then 429
@@ -980,11 +981,12 @@ class PaymentLink:
     expires_at: datetime
     state: str = "issued"                       # issued, paid, expired or cancelled (no provider, so never unknown)
     cancel_reason: str | None = None            # rules_changed: a rule change cancelled it
+    customer_person_id: str | None = None       # the person a verified visitor's session was when the link was issued
 
     def ro_row(self) -> dict:
         return {"link_id": self.link_id, "copy_id": self.copy_id, "desk_id": self.desk_id,
-                "session_id": self.session_id, "quote_id": self.quote_id, "amount_cents": self.amount_cents,
-                "state": self.state, "expires_at": self.expires_at}
+                "session_id": self.session_id, "quote_id": self.quote_id, "action_id": self.action_id,
+                "amount_cents": self.amount_cents, "state": self.state, "expires_at": self.expires_at}
 
 
 @dataclass
@@ -2533,10 +2535,11 @@ class FakeKernelState:
             quote = self.quotes[action.resource.id]
             title = ", ".join(item["title"] + (f" × {item['qty']}" if item["qty"] > 1 else "")
                               for item in quote["items"])
+            customer = session.person_id if session.kind == "visitor" and session.verified else None
             link = PaymentLink(link_id=new_id("link"), token=secrets.token_urlsafe(32), copy_id=desk.copy_id,
                                desk_id=desk.desk_id, session_id=session.session_id, quote_id=quote["quote_id"],
                                action_id=action.action_id, title=title, amount_cents=action.amount_cents,
-                               expires_at=self.now + LINK_TTL)
+                               expires_at=self.now + LINK_TTL, customer_person_id=customer)
             self.payment_links[link.link_id] = link
             self._put("payment_links", (link.link_id,), link.ro_row())
             self.append(desk, "payment", {"link_id": link.link_id, "state": "issued", "version": desk.policy_version},
@@ -3224,13 +3227,14 @@ class FakeKernelState:
     # Connected tools (Plan 01c) -----------------------------------------------------------------------
 
     def tools_connect(self, request: Request, body: ToolsConnectRequest) -> list[ToolProfile]:
-        """The mock payments server's tools, each pinned by its definition's hash and `needs_review` until the owner
-        confirms it (a tool already connected is left as it is), ledgered `tool_pin`."""
+        """The mock payments server's tools, each pinned by its definition's hash and `needs_review` (`review_reason`
+        "new") until the owner confirms it (a tool already connected is left as it is), ledgered `tool_pin`."""
         desk = self._owners_desk(request, body.desk_id)
         profiles = []
         for tool in sorted(MCP_TOOLS):
             if tool not in desk.tools:
-                self._put_tool(desk, tool_profile(tool).model_copy(update={"status": "needs_review"}))
+                self._put_tool(desk, tool_profile(tool).model_copy(update={"status": "needs_review",
+                                                                            "review_reason": "new"}))
             profiles.append(desk.tools[tool])
         self.append(desk, "tool_pin", {"server": body.server, "tools": [profile.tool for profile in profiles]})
         return profiles
@@ -3238,8 +3242,8 @@ class FakeKernelState:
     def tools_simulate_change(self, request: Request, body: ToolsSimulateChangeRequest) -> ToolProfile:
         """The owner's demo action: the mock payments server changes the tool's definition for this copy, and the
         re-listing finds it at once (ledgered `tool_pin`, simulated then drift, with the owner alerted): the tool is
-        `needs_review`, the changed definition waiting as quoted text under its own hash, its pin unchanged. A tool
-        the Desk doesn't have is 404; a native tool, which no server defines, is 422 `invalid`."""
+        `needs_review` ("changed"), the changed definition waiting as quoted text under its own hash, its pin
+        unchanged. A tool the Desk doesn't have is 404; a native tool, which no server defines, is 422 `invalid`."""
         desk = self._owners_desk(request, body.desk_id)
         profile = desk.tools.get(body.tool)
         if profile is None:
@@ -3248,8 +3252,8 @@ class FakeKernelState:
             raise Refusal(422, "invalid")
         listed = canonical({"name": profile.tool.removeprefix("payments."), "inputSchema": profile.input_schema,
                             "description": f"{TOOL_FACTS[profile.tool][3]} {SIMULATED_CHANGE}"})
-        changed = profile.model_copy(update={"status": "needs_review", "pending_definition_text": listed,
-                                             "pending_sha256": sha256_hex(listed)})
+        changed = profile.model_copy(update={"status": "needs_review", "review_reason": "changed",
+                                             "pending_definition_text": listed, "pending_sha256": sha256_hex(listed)})
         self._put_tool(desk, changed)
         self.append(desk, "tool_pin", {"tool": profile.tool, "event": "simulated"})
         self.append(desk, "tool_pin", {"tool": profile.tool, "event": "drift",
@@ -3402,10 +3406,21 @@ class FakeKernelState:
             raise Refusal(409, "conflict")
 
     def payment_link_view(self, request: Request, body: Any) -> PaymentLinkView:
-        """What the mock checkout shows, by the link's token alone, in its session's last language."""
+        """What the mock checkout shows, by the link's token alone, in its session's last language: the Desk's
+        business name as its public page names it, the customer by first name and last initial while the link is
+        issued and was made in a visitor session still verified as that person, who is still on record (else None),
+        and `rules_changed` for a link a rule change cancelled."""
         link = self._payment_link(request)
-        language = self.sessions[link.session_id].last_language or "en"
-        return PaymentLinkView(title=link.title, amount_cents=link.amount_cents, state=link.state, language=language)
+        desk, session = self.desks[link.desk_id], self.sessions[link.session_id]
+        person = desk.people.get(link.customer_person_id) if link.customer_person_id is not None else None
+        customer = None
+        if link.state == "issued" and person is not None and session.person_id == person.person_id:
+            words = person.display_name.split()
+            customer = (words[0] if len(words) == 1 else f"{words[0]} {words[-1][0]}.") if words else None
+        rules_changed = link.state == "cancelled" and link.cancel_reason == "rules_changed"
+        return PaymentLinkView(title=link.title, amount_cents=link.amount_cents, state=link.state,
+                               language=session.last_language or "en", business_name=desk.business_name,
+                               customer_name=customer, cancel_reason="rules_changed" if rules_changed else None)
 
     def payment_link_complete(self, request: Request, body: Any) -> PaymentLinkStateResult:
         """The mock payment: an `issued` link is paid once (no provider in the fake), a `charge` fact goes to its
