@@ -57,6 +57,22 @@
   color: var(--text-secondary);
 }
 
+.cd-setup-tools__job-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--text-secondary);
+}
+
+.cd-setup-tools__row--job .cd-connector-summary__name {
+  overflow-wrap: anywhere;
+}
+
+/* The jobs board keeps the first row clear of a hairline under its heading. */
+.cd-setup-tools__row--job:first-child {
+  border-top: 0;
+}
+
 /* Under 480 px the line keeps the row's width, and where it stands or what to do sits under it,
    8 px down, from the same edge. */
 @container cd-setup-tools (max-width: 479.98px) {

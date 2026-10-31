@@ -1,5 +1,6 @@
 /** Chen & Co. CPA's own tools, as the kernel lists them for setup and the owner's rules. */
 import type { ToolRow } from '../api/views.ts';
+import type { DeskRecord, ToolRecord } from './world.ts';
 
 export const chenBusinessTools: readonly ToolRow[] = [
   {
@@ -8,7 +9,7 @@ export const chenBusinessTools: readonly ToolRow[] = [
     status: 'needs_review',
     effects: ['change'],
     reversible: true,
-    description_confirmed: 'Books a free 20-minute intro call with Linda for a new client.',
+    description_confirmed: 'Offers open times and books a free intro call, 20 minutes.',
     definition_sha256: 'a'.repeat(64),
     pending_definition_text: null,
     pending_sha256: null,
@@ -42,3 +43,13 @@ export const chenBusinessTools: readonly ToolRow[] = [
     },
   },
 ];
+
+/** Seed through the world's store so setup reads and confirms the same rows at their listed hashes. */
+export function seedBusinessTools(desk: DeskRecord, rows: readonly ToolRow[] = chenBusinessTools): void {
+  const names = new Set(rows.map((row) => row.tool));
+  const seeded: ToolRecord[] = structuredClone([...rows]).map((row) => ({
+    ...row,
+    adapter: 'business', resource_kind: 'desk', input_schema: {}, review_reason: row.review_reason ?? null,
+  }));
+  desk.tools = [...desk.tools.filter((row) => !names.has(row.tool)), ...seeded];
+}
