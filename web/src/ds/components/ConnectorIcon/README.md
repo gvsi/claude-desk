@@ -17,9 +17,10 @@
 | --- | --- | --- | --- |
 | `page` | 48 px | 26 px | A connector's page header. |
 | `section` | 36 px | 20 px | The hub's sections, the picker, the offer card. |
-| `inline` | 24 px | 13 px | A line of meta: "From Stripe". |
+| `inline`, built in | 24 px | 13 px | A line of meta: "From Quotes". |
+| `inline`, brand | 20 px | 20 px | A line of meta: "From Stripe". |
 
-A built-in connector's tile fills the box at the 8 px `radius-control`; a brand mark sits in the same box with no tile, so icons line up in a list whichever they are. The line icons are drawn at 20 px and scale with the box, so their stroke matches the boards at every size. N-Explore-Connector-Decided draws the smallest brand mark at 20 px in a 20 px box; here it keeps the `inline` size, 13 px in a 24 px box.
+A built-in connector's tile fills the box at the 8 px `radius-control`; at `page` and `section` a brand mark sits in the same box with no tile, so icons line up in a list whichever they are. The line icons are drawn at 20 px and scale with the box, so their stroke matches the boards at every size. In a line of meta a brand mark has no tile to fill, so it fills its box instead, 20 px in a 20 px box, as N-Explore-Connector-Decided draws it.
 
 ## Props
 

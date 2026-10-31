@@ -41,7 +41,10 @@ const BRAND = {
 
 export interface ConnectorIconProps {
   icon: ConnectorIconName;
-  /** `page` (48 px, a connector's own page), `section` (36 px, the hub and cards) or `inline` (24 px, in a line of meta). */
+  /**
+   * `page` (48 px, a connector's own page), `section` (36 px, the hub and cards) or `inline` (in a line
+   * of meta: 24 px for a built-in tile, 20 px for a brand mark, which fills its box).
+   */
   size: 'page' | 'section' | 'inline';
 }
 

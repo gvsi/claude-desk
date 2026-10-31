@@ -21,6 +21,11 @@ type Story = StoryObj<typeof meta>;
 const SIZES = ['page', 'section', 'inline'] as const;
 const TILE_PX = { page: '48px', section: '36px', inline: '24px' } as const;
 const MARK_PX = { page: '26px', section: '20px', inline: '13px' } as const;
+/** A brand mark, which has no tile, fills its box at `inline`: 20 px in 20 px (N-Explore-Connector-Decided). */
+const BRAND_TILE_PX = { ...TILE_PX, inline: '20px' } as const;
+const BRAND_MARK_PX = { ...MARK_PX, inline: '20px' } as const;
+
+type Sizes = Record<(typeof SIZES)[number], string>;
 
 const GOOGLE_CALENDAR: ConnectorView = {
   id: 'google_calendar',
@@ -47,11 +52,11 @@ function Tiles({ connectors }: { connectors: readonly ConnectorView[] }) {
 }
 
 /** Checks one icon: its box's size, its 8 px radius, its ground, and its mark's size; hidden from screen readers. */
-function expectTile(tile: Element, size: (typeof SIZES)[number], ground: string) {
-  expectComputed(tile, { width: TILE_PX[size], height: TILE_PX[size], borderTopLeftRadius: '8px', backgroundColor: ground });
+function expectTile(tile: Element, size: (typeof SIZES)[number], ground: string, boxes: Sizes = TILE_PX, marks: Sizes = MARK_PX) {
+  expectComputed(tile, { width: boxes[size], height: boxes[size], borderTopLeftRadius: '8px', backgroundColor: ground });
   const mark = tile.querySelector('svg');
   if (mark === null) throw new Error('The tile has no mark');
-  expectComputed(mark, { width: MARK_PX[size], height: MARK_PX[size] });
+  expectComputed(mark, { width: marks[size], height: marks[size] });
 }
 
 const BUILT_IN = ['quotes', 'bookings', 'leads', 'verification', 'documents', 'payments'] as const satisfies readonly ConnectorIconName[];
@@ -84,12 +89,12 @@ export const Brands: Story = {
   play: async ({ canvasElement }) => {
     // brand_marks_have_no_tile: a third-party connector's own mark with no tile behind it (owner,
     // 2026-10-30): Stripe's in white on the dark page, as Stripe's guidelines allow, and Google
-    // Calendar's in its own blue.
+    // Calendar's in its own blue. In a line of meta the mark fills a 20 px box, as the board draws it.
     const fills = { stripe: 'rgb(255, 255, 255)', google_calendar: 'rgb(66, 133, 244)' } as const;
     for (const [id, fill] of Object.entries(fills)) {
       const tiles = [...canvasElement.querySelectorAll(`[data-connector="${id}"] .cd-connector-icon`)];
       await expect(tiles).toHaveLength(3);
-      tiles.forEach((tile, index) => expectTile(tile, SIZES[index] ?? 'section', 'rgba(0, 0, 0, 0)'));
+      tiles.forEach((tile, index) => expectTile(tile, SIZES[index] ?? 'section', 'rgba(0, 0, 0, 0)', BRAND_TILE_PX, BRAND_MARK_PX));
       for (const tile of tiles) {
         await expect(tile).toHaveAttribute('aria-hidden', 'true');
         const path = tile.querySelector('path');

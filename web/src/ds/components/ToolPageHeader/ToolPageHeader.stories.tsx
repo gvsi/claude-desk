@@ -55,11 +55,12 @@ export const Refund: Story = {
     expectComputed(title, { fontSize: '24px', fontFamily: '"Source Serif 4", Georgia, serif' });
     const description = canvas.getByText(args.description);
     expectComputed(description, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
-    // The source line: the 24 px tile, "From Stripe" with its Mock badge, and the status.
+    // The source line: Stripe's mark, 20 px with no tile, "From Stripe" with its Mock badge, and the status.
     const source = canvasElement.querySelector('.cd-tool-page-header__source');
     if (!(source instanceof HTMLElement)) throw new Error('No source line');
     await expect(source).toHaveTextContent('From Stripe Mock');
-    expectComputed(source.querySelector('.cd-connector-icon') as Element, { width: '24px', height: '24px' });
+    expectComputed(source.querySelector('.cd-connector-icon') as Element, { width: '20px', height: '20px' });
+    expectComputed(source.querySelector('.cd-connector-icon svg') as Element, { width: '20px', height: '20px' });
     await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     await expectStatus(canvasElement, 'On · Definition unchanged', 'handled');
     expectComputed(source, { fontSize: '13px' });
@@ -81,6 +82,9 @@ export const Quote: Story = {
     if (!(source instanceof HTMLElement)) throw new Error('No source line');
     await expect(within(source).getByText('Built in')).toBeVisible();
     await expect(source).toHaveTextContent('From Quotes Built in');
+    // A built-in connector keeps its 24 px tile, its line icon 13 px on it.
+    expectComputed(source.querySelector('.cd-connector-icon') as Element, { width: '24px', height: '24px' });
+    expectComputed(source.querySelector('.cd-connector-icon svg') as Element, { width: '13px', height: '13px' });
     await expectStatus(canvasElement, 'On', 'handled');
     // simulate_only_when_on: a built-in tool has no mock server to change, even with the callback.
     await expectNoSimulate(canvasElement);
