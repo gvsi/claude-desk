@@ -436,9 +436,13 @@ async def whoami_as(client: httpx.AsyncClient, signed: SignedTurn) -> httpx.Resp
     return await client.get("/whoami", params={"session_id": signed.session_id}, headers=signed.headers)
 
 
-async def check_as(client: httpx.AsyncClient, signed: SignedTurn, prose: str) -> httpx.Response:
-    return await client.post("/check_reply", headers=signed.headers, json={
-        "draft": {"session_id": signed.session_id, "generation": 0, "prose": prose, "clauses": []}})
+async def check_as(client: httpx.AsyncClient, signed: SignedTurn, prose: str, *,
+                   final: bool | None = None) -> httpx.Response:
+    """The turn's `/check_reply`, with `final` as given, or without it."""
+    body = {"draft": {"session_id": signed.session_id, "generation": 0, "prose": prose, "clauses": []}}
+    if final is not None:
+        body["final"] = final
+    return await client.post("/check_reply", headers=signed.headers, json=body)
 
 
 async def test_nonce_rules(app, client, frozen_clock):
@@ -518,6 +522,27 @@ async def test_resent_opening_request_recovers_its_session(app, client, frozen_c
     other = agent.headers(copy.slug, a2a_body(copy.slug, "Another opening"), ts=signed_time(frozen_clock.now()),
                           nonce=headers[NONCE_HEADER])
     assert (await post_open(client, copy.slug, other, mandate)).json() == {"code": "auth"}
+
+
+@pytest.mark.parametrize("final", [True, False], ids=["final", "first-attempt"])
+async def test_a_blocked_check_sent_as_final_ends_the_turn(app, client, frozen_clock, final):
+    """A blocked check the API says is final (`final: true`, its last attempt, whose handoff it
+    shows) is the turn's answer, so it ends the turn: the same nonce is then replayed. One it says
+    isn't, blocked only for what a rewrite can fix, leaves the turn open for the rewrite."""
+    copy, agent, created = await agent_on_rivera(app, client, frozen_clock)
+    signed = turn(agent, copy.slug, created.state.session_id, frozen_clock)
+    verdict = ReplyVerdict.model_validate((await check_as(client, signed, "It comes to 180 dollars.",
+                                                          final=final)).json())
+    assert (verdict.ok, {v.kind for v in verdict.violations}) == (False, {"number_in_prose"})
+    response = await whoami_as(client, signed)
+    if final:
+        assert (response.status_code, response.json()) == (409, {"code": "replayed"})
+    else:
+        assert response.status_code == 200, response.text
+        assert (await check_as(client, signed, "I can help with that.", final=True)).json()["ok"] is True
+    [row] = [row for row in await rows_of(app, copy.copy_id, select(AgentNonce))
+             if row.nonce == signed.headers[NONCE_HEADER]]
+    assert row.spent_at == frozen_clock.now()
 
 
 async def test_regenerate_after_a_violation_uses_the_same_nonce(app, client, frozen_clock):

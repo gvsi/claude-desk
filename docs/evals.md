@@ -90,7 +90,7 @@ The repo's own gate uses other sizes. The bar comes from a three-run held-out pa
 
 Tier 1 runs in CI on every push. Tier 2 runs locally, with the developer's model credentials, because CI holds no Anthropic key.
 
-Some changes need a tier 2 results file, `evals/results/<inputs>.json`, committed with them. These are changes to the kernel (with the shared contracts it decides over and the mock payment server behind its money tools), the prompts, the policies (setup's rule card templates, the presets and the money cap's cards), the model settings, and the tier 2 scenarios and judges (the scenarios, splits, the plans they wait for, the verdict and the oracles). Other changes rely on tier 1 and CI. `<inputs>` is a hash of those paths at the commit, which `make evals-key` prints. A scenario that needs a part of the product that hasn't landed yet is listed as pending, with no rows.
+Some changes need a tier 2 results file, `evals/results/<inputs>.json`, committed with them. These are changes to the kernel (with the shared contracts it decides over, the violations a rewrite can fix and the mock payment server behind its money tools), the prompts, the policies (setup's rule card templates, the presets and the money cap's cards), the model settings, and the tier 2 scenarios and judges (the scenarios, splits, the plans they wait for, the verdict and the oracles). Other changes rely on tier 1 and CI. `<inputs>` is a hash of those paths at the commit, which `make evals-key` prints. A scenario that needs a part of the product that hasn't landed yet is listed as pending, with no rows.
 
 On pull requests, CI runs `make evals-results-check`. It:
 

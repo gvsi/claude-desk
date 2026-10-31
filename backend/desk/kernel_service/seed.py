@@ -160,7 +160,8 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
                          body="Rivera Plumbing\nWarranty for Bob Okafor\n"
                               "Water heater flush. Parts and labor are covered for 12 months from the service date."),
         ],
-        notifications=NotificationDefaults(now=["approval", "emergency", "breaker", "lockout"],
+        # a handoff the card opens alerts at once, as a held request does (the owner's decision of 2026-10-30)
+        notifications=NotificationDefaults(now=["approval", "emergency", "breaker", "lockout", "handoff"],
                                            briefing=["lead", "callback", "booking"]),
         connections=["mock_payments"],
     )

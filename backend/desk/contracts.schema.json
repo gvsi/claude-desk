@@ -364,6 +364,11 @@
       "properties": {
         "draft": {
           "$ref": "#/$defs/ReplyDraft"
+        },
+        "final": {
+          "default": true,
+          "title": "Final",
+          "type": "boolean"
         }
       },
       "required": [

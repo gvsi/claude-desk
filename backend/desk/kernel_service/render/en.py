@@ -81,6 +81,7 @@ OWNER_PREVIEWS: dict[str, str] = {
     "lockout": "Verification paused for a contact",
     "lead": "New lead",
     "callback": "Callback requested",
+    "handoff": "A conversation was handed to you",
     "rules": "Your rules need checking",
     "public_page": "Hidden from your public page",
     "drift": "A connected tool changed",

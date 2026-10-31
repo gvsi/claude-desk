@@ -312,6 +312,7 @@ export interface CancelRequest {
 }
 export interface CheckReplyRequest {
   draft: ReplyDraft;
+  final?: boolean;
 }
 export interface ReplyDraft {
   session_id: string;
