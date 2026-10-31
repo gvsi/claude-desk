@@ -1803,6 +1803,36 @@ describe("Today's unfinished setup", () => {
     await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
   });
 
+  it('a_draft_that_lands_after_leaving_moves_the_card_on', async () => {
+    // The owner goes on from the tools and leaves while the rules draft is still being made: the API
+    // still has setup at its tools, so Today names them. Once the draft lands and the API moves setup
+    // on, Today names the rules, with no reload.
+    const state = await deskAtTools();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    worker.use(
+      http.post(ROUTES.setupRules.path.replace('{id}', state.interview_id), async () => {
+        await released;
+        return undefined;
+      }),
+    );
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByText('Drafting your rules', { exact: true })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect
+      .element(card.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
+      .toBeVisible();
+
+    release();
+    await expectCardAtRules(screen);
+  });
+
   it('the_card_waits_for_today_to_open', async () => {
     // Leaving setup for Today while what Today first shows is still being read: Today holds its
     // loading line alone, with no card, then opens with the card first.
