@@ -278,6 +278,46 @@ async def test_a_harness_error_is_written_with_its_passwords_masked(repo):
                for error in errors)
 
 
+async def test_a_harness_error_is_masked_before_it_is_cut(repo):
+    """A harness error whose DSN crosses the 500-character cut of an error's detail is written with no
+    part of its password, since the detail is cut only after it is masked."""
+    from evals.tier2.passes import pass_dir
+
+    async def run_one(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        # "ConnectionError: " (17) + 456 + "postgresql://desk_api:" (22) puts the cut 5 characters into the password.
+        raise ConnectionError("x" * 456 + "postgresql://desk_api:Zq9xKw7vRt3Lm@db.example.invalid/desk")
+
+    result = await run_pass(config(runs=1, split="heldout"), deps(repo, run_one))
+    out = pass_dir(repo, result.pass_id)
+    written = "".join(path.read_text() for path in sorted(out.rglob("*")) if path.is_file())
+    assert "Zq9" not in written
+    errors = [json.loads(line) for line in (out / "errors.jsonl").read_text().splitlines()]
+    assert errors and all(len(error["detail"]) <= 500 for error in errors)
+
+
+async def test_a_quoted_password_is_written_masked_whole(repo):
+    """A connection string's quoted password, in single or double quotes and holding spaces and escaped
+    quotes, is masked whole in the run's transcript and `errors.jsonl`, never cut at its first space or
+    quote with the rest written."""
+    from evals.tier2.passes import pass_dir
+
+    async def run_one(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        raise ConnectionError(r"host=db password='fake-review-secret' dbname=desk; "
+                              r"host=db password='fake single \'quoted\' secret' dbname=desk; "
+                              r'host=db password="fake double \"quoted\" secret" dbname=desk')
+
+    result = await run_pass(config(runs=1, split="heldout"), deps(repo, run_one))
+    out = pass_dir(repo, result.pass_id)
+    transcripts = list((out / "transcripts").glob("*.json"))
+    assert transcripts
+    written = "".join(path.read_text() for path in [out / "errors.jsonl", *transcripts])
+    assert not {"fake", "review", "single", "double", "quoted", "secret"} & set(re.findall(r"[a-z]+", written))
+    errors = [json.loads(line) for line in (out / "errors.jsonl").read_text().splitlines()]
+    assert errors and all(error["detail"] == ("ConnectionError: host=db password='***' dbname=desk; "
+                                              "host=db password='***' dbname=desk; "
+                                              'host=db password="***" dbname=desk') for error in errors)
+
+
 def spend_rows(path: Path, *rows: tuple[str, str, int, float, float]) -> None:
     """Spend rows (date, provider, runs, claude_api_usd, total_usd), as earlier passes appended them."""
     from evals.tier2.passes import append_spend

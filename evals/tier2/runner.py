@@ -115,10 +115,15 @@ _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")   # between sentences of a tool's
 REDACTED = "[redacted]"
 MIN_SECRET = 6   # shorter values aren't redacted as text (a code is six digits)
 # A URL's password (`scheme://user:password@host`, up to the token's last @, so an unencoded @ in the password
-# is masked whole) and any `password=` parameter, as a database or HTTP error's message can carry them.
-_URL_PASSWORD = re.compile(r"(?P<head>\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^:/?#@\s'\"]*:)[^\s'\"]*@")
-_PASSWORD_PARAM = re.compile(r"(?i)\b(password=)[^&\s'\"]*")
+# is masked whole, or to the end of the text when a message cut before it reached the runner ends inside it)
+# and any value a password key sets (`password=`, `PGPASSWORD=`, `'password': '…'`, `password: …`), as a
+# database or HTTP error's message can carry them. A quoted value is masked whole, to its closing quote (or the
+# end of the text), its escaped quotes and spaces included, as a libpq connection string quotes one.
+_URL_PASSWORD = re.compile(r"(?P<head>\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^:/?#@\s'\"]*:)(?:[^\s'\"]*(?P<at>@)|[^\s'\"]*\Z)")
+_PASSWORD_VALUE = re.compile(r"""(?i)(?P<key>\b\w*password\b['"]?\s*[:=]\s*)"""
+                             r"""(?:(?P<quote>['"])(?:\\.|(?!(?P=quote))[^\\])*(?P=quote)?|[^\s'"&,}]*)""", re.DOTALL)
 MASKED = "***"
+DETAIL_CHARS = 500   # an error detail's length as written, cut after its credentials are masked
 # What the artifact says when the run left the owner's Demo inbox unread. The kernel writes owner alerts and
 # checkpoint notices to its Demo inbox already; plan 01b adds the route that reads it and the verification codes.
 OWNER_INBOX_UNREAD = ("not read: plan 01b, which adds the kernel's Demo inbox read route and the verification codes "
@@ -131,9 +136,10 @@ NO_VERIFICATION = "This chat doesn't offer verification."
 
 class RunError(BaseModel):
     """Why a run has no verdict. Every error detail a run writes (its transcript, `errors.jsonl`, the
-    report) is built here: a URL's password and any `password=` parameter are masked
-    (`mask_credentials`) and link tokens replaced (`redact`), and the runner also replaces the run's own
-    secrets, so no credential an error's message carried is ever written."""
+    report) is built here: a URL's password and any value a password key sets are masked
+    (`mask_credentials`) and link tokens replaced (`redact`), and the runner replaces the run's own secrets
+    before it builds one, so no credential an error's message carried is ever written. Only then is the
+    detail cut to `DETAIL_CHARS`, so a credential that crosses the cut is masked whole, never written in part."""
 
     model_config = ConfigDict(extra="forbid")
     kind: RunErrorKind
@@ -142,13 +148,18 @@ class RunError(BaseModel):
     @field_validator("detail")
     @classmethod
     def _masked(cls, detail: str) -> str:
-        return redact(mask_credentials(detail), ())
+        return redact(mask_credentials(detail), ())[:DETAIL_CHARS]
 
 
 def mask_credentials(text: str) -> str:
-    """`text` with each URL's password and every `password=` parameter's value replaced by `***`."""
-    text = _URL_PASSWORD.sub(lambda m: m.group("head") + MASKED + "@", text)
-    return _PASSWORD_PARAM.sub(lambda m: m.group(1) + MASKED, text)
+    """`text` with each URL's password and every value a password key sets replaced by `***`."""
+    text = _URL_PASSWORD.sub(lambda m: m.group("head") + MASKED + (m.group("at") or ""), text)
+    return _PASSWORD_VALUE.sub(_masked_value, text)
+
+
+def _masked_value(match: re.Match[str]) -> str:
+    quote = match.group("quote") or ""
+    return match.group("key") + quote + MASKED + quote
 
 
 class SimulatorStats(BaseModel):
@@ -247,7 +258,10 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
     the seed's documents and people (`rivera_seed_data`): test seams, so a stand-in API can play both."""
     run = _Run(scenario, rep, target, simulator, turn_timeout_s=turn_timeout_s, pass_id=pass_id,
                new_client=new_client, seed=seed or rivera_seed_data, landed=landed)
-    artifact = verdict = error = None
+    artifact = verdict = None
+    # The error's kind and its whole detail: the RunError is built once, after the run's own secrets are
+    # replaced in it, since it cuts the detail and a secret crossing the cut would otherwise be written in part.
+    failed: tuple[RunErrorKind, str] | None = None
     try:
         try:
             async with asyncio.timeout(wall_clock_s):
@@ -259,19 +273,19 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
             raise RunFailed(*run.nothing_sent(), artifact)
         verdict = judged
     except RunFailed as failure:
-        error, artifact = RunError(kind=failure.kind, detail=failure.detail), failure.artifact
+        failed, artifact = (failure.kind, failure.detail), failure.artifact
     except SimulatorError as failure:
-        error = RunError(kind=failure.kind, detail=failure.detail)
+        failed = (failure.kind, failure.detail)
     except Exception as failure:   # the stack or the harness failed: never a verdict
-        error = RunError(kind="infra", detail=_describe(failure))
+        failed = ("infra", _describe(failure))
     finally:
         await run.close()
     # A run that failed before its artifact was built keeps the usage it holds, so its spend is never dropped.
-    held = await run.held_usage() if error is not None and artifact is None else None
+    held = await run.held_usage() if failed is not None and artifact is None else None
     sim = run.sim_run
     outcome = RunOutcome(
         scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=pass_id, artifact=artifact, verdict=verdict,
-        error=RunError(kind=error.kind, detail=redact(error.detail, run.secrets)) if error else None,
+        error=RunError(kind=failed[0], detail=redact(failed[1], run.secrets)) if failed else None,
         simulator=SimulatorStats(provider=simulator.provider, model=simulator.model, turns=len(sim.turns),
                                  fallback_turns=sim.fallback_turns, switches=sim.switches,
                                  served_models=sim.served_models),
@@ -287,7 +301,7 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
 def _describe(failure: Exception) -> str:
     if isinstance(failure, ApiCallFailed):
         return str(failure)
-    return f"{type(failure).__name__}: {failure}"[:500]
+    return f"{type(failure).__name__}: {failure}"   # RunError masks it, then cuts it
 
 
 class _Run:

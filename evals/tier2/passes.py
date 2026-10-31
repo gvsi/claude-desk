@@ -752,7 +752,7 @@ class _Pass:
         except Exception as failure:   # run_scenario records its own errors; this is the harness failing
             outcome = RunOutcome(
                 scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=self.pass_id,
-                error=RunError(kind="infra", detail=f"{type(failure).__name__}: {failure}"[:500]),
+                error=RunError(kind="infra", detail=f"{type(failure).__name__}: {failure}"),   # masked, then cut
                 simulator=SimulatorStats(provider=self.providers.simulator, model="", turns=0, fallback_turns=0,
                                          switches=0, served_models=[]))
         self.spend = self.spend + self._cost(outcome, attempt)

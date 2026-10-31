@@ -1523,6 +1523,89 @@ async def test_an_error_detail_never_carries_a_password(tmp_path):
         assert RunError(kind="infra", detail=given).detail == said, given
 
 
+class LongSnapshotFailure(Records):
+    """`Records`, but reading the copy's records fails with a long message whose DSN crosses the
+    500-character cut of an error's detail, its password straddling it."""
+
+    PASSWORD = "zzzzzzzzzzzzz"
+
+    async def snapshot(self, copy_id: str) -> dict[str, list[dict]]:
+        # "ConnectionError: " (17) + 456 + "postgresql://kernel_ro:" (23) puts the cut 4 characters into the password.
+        raise ConnectionError("x" * 456 + f"postgresql://kernel_ro:{self.PASSWORD}@127.0.0.1:5432/desk")
+
+
+async def test_an_error_detail_is_masked_before_it_is_cut(tmp_path):
+    """An error detail is cut to 500 characters only after its credentials are masked, so a DSN that
+    crosses the cut is written with no part of its password, in the outcome and in its transcript."""
+    scenario = attack(max_turns=1)
+    desk = Desk(chat(scenario, 1))
+    on = target(desk)
+    on.kernel.records = LongSnapshotFailure(desk)
+    outcome = await run_scenario(scenario, 1, on, Visitor(desk), new_client=lambda: Client(desk), seed=seed,
+                                 pass_id="pass-test", out_dir=tmp_path)
+    assert outcome.error.kind == "infra"
+    assert "Zq9" not in outcome.error.detail
+    assert "Zq9" not in (tmp_path / f"{scenario.id}-1.json").read_text()
+    assert len(outcome.error.detail) <= 500
+
+    cut = RunError(kind="infra", detail="y" * 480 + f" postgresql://u:{LongSnapshotFailure.PASSWORD}@h/d")
+    assert len(cut.detail) <= 500 and "Zq9" not in cut.detail
+
+
+class CutSnapshotFailure(Records):
+    """`Records`, but reading the copy's records fails with a message its library already cut, which
+    ends inside a URL's password, before its @."""
+
+    async def snapshot(self, copy_id: str) -> dict[str, list[dict]]:
+        raise ConnectionError("could not connect to postgresql://kernel_ro:Zq9xK")
+
+
+async def test_a_url_password_that_runs_to_the_end_of_the_detail_is_masked(tmp_path):
+    """A message cut before the error reaches the runner can end inside a URL's password, before its @:
+    the password is masked to the end of the text."""
+    scenario = attack(max_turns=1)
+    desk = Desk(chat(scenario, 1))
+    on = target(desk)
+    on.kernel.records = CutSnapshotFailure(desk)
+    outcome = await run_scenario(scenario, 1, on, Visitor(desk), new_client=lambda: Client(desk), seed=seed,
+                                 pass_id="pass-test", out_dir=tmp_path)
+    assert outcome.error.detail == "ConnectionError: could not connect to postgresql://kernel_ro:***"
+    assert "Zq9" not in (tmp_path / f"{scenario.id}-1.json").read_text()
+    # A URL that ends at its @ keeps its host, as before.
+    assert RunError(kind="infra", detail="redis://:pw@cache:6379/0").detail == "redis://:***@cache:6379/0"
+
+
+async def test_a_run_secret_that_crosses_the_cut_is_replaced_whole(tmp_path):
+    """The run's own secrets (here the target's passcode) are replaced before the detail is cut too, so
+    one that crosses the cut is never written in part."""
+    scenario = attack(max_turns=1)
+    desk = Desk(chat(scenario, 1))
+    # "enter answered 503: " (20) + 470 puts the cut 10 characters into "a demo passcode".
+    desk.failures["enter"] = ApiCallFailed("enter", 503, "x" * 470 + "a demo passcode")
+    outcome = await run_scenario(scenario, 1, target(desk), Visitor(desk), new_client=lambda: Client(desk),
+                                 seed=seed, pass_id="pass-test", out_dir=tmp_path)
+    assert outcome.error.kind == "infra" and len(outcome.error.detail) <= 500
+    assert "demo" not in outcome.error.detail
+    assert "demo" not in (tmp_path / f"{scenario.id}-1.json").read_text()
+
+
+def test_a_password_named_by_any_key_is_masked():
+    """A password is masked whatever key names it (`PGPASSWORD`, `db_password`) and however it is set:
+    `=`, a dict's `'password': '…'` or a `password: …` line."""
+    masked = {
+        "PGPASSWORD=fake-pg-secret psql failed": "PGPASSWORD=*** psql failed",
+        "connect({'user': 'desk', 'password': 'fake-dict-secret', 'host': 'db'})":
+            "connect({'user': 'desk', 'password': '***', 'host': 'db'})",
+        '{"db_password": "fake-json-secret"}': '{"db_password": "***"}',
+        "password: fake-yaml-secret\nhost: db": "password: ***\nhost: db",
+        "Password = fake-spaced-secret, then": "Password = ***, then",
+        # A message that only names a password keeps its words.
+        'password authentication failed for user "desk_api"': 'password authentication failed for user "desk_api"',
+    }
+    for given, said in masked.items():
+        assert RunError(kind="infra", detail=given).detail == said, given
+
+
 async def test_a_run_that_never_entered_a_copy_holds_only_the_simulators_usage():
     """A run that fails before it enters a copy made no Desk-side call: it carries the simulator's usage
     (none here) and reads no records."""
