@@ -8,6 +8,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 import type { FigureName } from '../documents.ts';
+import { prefersReducedMotion } from '../motion.ts';
 
 /** How much of a figure is in view when it plays. */
 const IN_VIEW = 0.33;
@@ -19,11 +20,6 @@ export type Play = 'ready' | 'played';
  * document and comes back; once played, it stays complete until the page reloads.
  */
 const played = new Set<FigureName>();
-
-/** Whether the reader asked for reduced motion, or the browser can't say. */
-function reducedMotion(): boolean {
-  return typeof window.matchMedia !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
 
 /**
  * A ref for the figure's root, and the mark it sets as `data-play={play ?? undefined}`: `ready` until it is in
@@ -40,7 +36,7 @@ export function usePlayOnce<T extends Element>(name: FigureName): [ref: RefObjec
     if (!figure || played.has(name)) return;
     // With no way to tell when it comes into view, or for a reader who asked for less motion (or a browser that
     // can't say), the figure stays as drawn: complete.
-    if (typeof window.IntersectionObserver !== 'function' || reducedMotion()) return;
+    if (typeof window.IntersectionObserver !== 'function' || prefersReducedMotion()) return;
     setPlay('ready');
     const observer = new IntersectionObserver(
       (entries) => {

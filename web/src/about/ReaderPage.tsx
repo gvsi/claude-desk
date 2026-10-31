@@ -29,6 +29,7 @@ import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { Inlines } from './Inlines.tsx';
 import { DOCUMENT_LINKS, type AboutId } from './links.ts';
 import { MONTHS } from './months.ts';
+import { prefersReducedMotion } from './motion.ts';
 import { PrototypeLink } from './PrototypeLink.tsx';
 import { keepSectionWhileTypeLoads, moveToSection, useCurrentSection } from './useCurrentSection.ts';
 import { useNoIndex } from './useNoIndex.ts';
@@ -249,11 +250,6 @@ interface ContentsListProps {
   current: string | null;
   /** Told of each link followed, as the jump to its section starts. */
   onFollow?: (id: string) => void;
-}
-
-/** Whether the reader asked for reduced motion, or the browser can't say. */
-function prefersReducedMotion(): boolean {
-  return typeof window.matchMedia !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 /**

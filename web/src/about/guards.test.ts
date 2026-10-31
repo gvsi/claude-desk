@@ -129,6 +129,7 @@ function importProblems(sources: Record<string, string>): string[] {
 const ONE_HOME: Record<string, { home: string; copy: RegExp }> = {
   'the month names': { home: 'about/months.ts', copy: /(['"])January\1\s*,\s*(['"])February\2/ },
   'the words of a run of inlines': { home: 'about/markdown.ts', copy: /(['"])children\1\s+in\s+[\w$]+\s*\?/ },
+  'the reduced-motion query': { home: 'about/motion.ts', copy: /prefers-reduced-motion:\s*reduce/ },
 };
 
 /** The shipped About sources that hold each helper. */
@@ -332,10 +333,13 @@ describe('About page source guards', () => {
       'about/Inlines.tsx': "inlines.map((inline) => ('children' in inline ? words(inline.children) : inline.text))",
       'about/months.test.ts': "expect(MONTHS.slice(0, 2)).toEqual(['January', 'February']);",
       'owner/format.ts': "const MONTHS = ['January', 'February'];",
+      'about/figures/usePlayOnce.ts': "window.matchMedia('(prefers-reduced-motion: reduce)').matches",
+      'about/reader.motion.test.ts': "matchMedia('(prefers-reduced-motion:reduce)')",
     };
     expect(helperHomes(copies)).toEqual({
       'the month names': ['about/ReaderPage.tsx', 'about/figures/Chart.tsx'],
       'the words of a run of inlines': ['about/Inlines.tsx'],
+      'the reduced-motion query': ['about/figures/usePlayOnce.ts'],
     });
 
     expect(helperHomes(sources())).toEqual(
