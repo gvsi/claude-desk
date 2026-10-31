@@ -869,6 +869,36 @@ describe('public chat page', () => {
     expectNoWindowScroll();
   }, 30_000);
 
+  it('new_chat_after_one_ends_on_a_phone_opens_at_its_start', async () => {
+    // A chat ends on a phone with the visitor at its end. "Start a new chat" opens the new one at its
+    // start, as a first visit does, with the about column's heading under the chat's head, not
+    // where the browser left the region as the old rows went; and the page follows the new chat's
+    // end from its first message.
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
+    await ready(screen);
+    for (const text of LONG_CHAT.slice(0, 3)) await say(screen, text);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    // The chat's session ends, as when it expires: the stream says so, and it's gone from the API.
+    const ended = mockStore.visitorSession(RIVERA.slug)?.state.session_id ?? '';
+    mockStore.emit(RIVERA.slug, { type: 'error', code: 'session' });
+    await expect.element(screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();
+    expect(mockStore.world.sessions.delete(ended)).toBe(true);
+    const opened = requests('openSession').length;
+    await screen.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
+    await vi.waitFor(() => expect(requests('openSession')).toHaveLength(opened + 1));
+    await ready(screen);
+    await expect.element(screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).not.toBeInTheDocument();
+    await frames();
+    expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(0);
+    const region = chatScroller();
+    const heading = screen.getByRole('heading', { name: 'About Rivera Plumbing' }).element();
+    expect({ scrollTop: region.scrollTop, heading: shownIn(heading, region) }).toEqual({ scrollTop: 0, heading: true });
+
+    await say(screen, 'How much is drain clearing?');
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    expect(region.scrollTop, 'the new chat followed its first message').toBeGreaterThan(0);
+  });
+
   it('a_new_chat_on_a_phone_opens_at_its_start', async () => {
     // A new chat on a phone, before anything is said: the about column opens the conversation's
     // scroll region, taller than the region, and the page shows it from its start, its heading right

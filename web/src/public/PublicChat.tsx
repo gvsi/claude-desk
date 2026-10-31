@@ -287,12 +287,16 @@ interface NewestInView {
  * size, counts as them leaving it (`leftTheEnd`); once they have moved back, any move counts. Only
  * the conversation's own scroller counts at all, looked up afresh each time: not the about column
  * beside the chat, the composer's text box, or a part of the shell that has just stopped scrolling
- * the conversation.
+ * the conversation. The trade-off: a visitor's scroll up in the very frame the shell changes size,
+ * before the page has seen the new size, is taken for the browser's and the end comes back once; a
+ * scroll gesture goes on past that frame and is followed from there.
  *
  * Until the conversation has `started` there is no newest message to keep in view, so nothing is
  * pinned and the conversation's scroll region stays at its start: on a phone, where the about
  * column opens the region above the first message, a new chat opens with the column's heading in
- * view, not scrolled to the empty end below it.
+ * view, not scrolled to the empty end below it. A chat that empties again (the visitor starts a new
+ * one after theirs ended) goes back to its start the same way, rather than where the browser left
+ * the region as the old rows went, and its end is followed again from its first message.
  */
 function useNewestInView(
   end: RefObject<HTMLElement | null>,
@@ -308,6 +312,20 @@ function useNewestInView(
   const noteSeen = useCallback(() => {
     seenAt.current = end.current ? scrollerAt(end.current) : null;
   }, [end]);
+
+  // A conversation that had started and is empty again goes back to its start, at once, and its
+  // end is followed again from its first message.
+  const wasStarted = useRef(started);
+  useLayoutEffect(() => {
+    const emptied = wasStarted.current && !started;
+    wasStarted.current = started;
+    if (!emptied || !end.current) return;
+    atTheEnd.current = true;
+    const scroller = scrollerOf(end.current);
+    if (scroller === document.scrollingElement) window.scrollTo({ top: 0, behavior: 'instant' });
+    else scroller.scrollTo({ top: 0, behavior: 'instant' });
+    noteSeen();
+  }, [started, end, noteSeen]);
 
   // Brings the end of the conversation up to the composer, at once and never animated, while the
   // visitor is at the end of a conversation that has started, and notes that they still are.
