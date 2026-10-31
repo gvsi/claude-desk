@@ -752,9 +752,11 @@ describe('OwnerLayout', () => {
   });
 
   it('owner_shell_links_the_about_pages', async () => {
+    // The two documents, then the Vision article.
     const ABOUT = [
       ['Capability prediction', '/about/prediction'],
       ['Product proposal', '/about/proposal'],
+      ['Vision', '/about/vision'],
     ];
     const rows = (nav: Element) => [...nav.querySelectorAll('a')].map((a) => [a.textContent.trim(), a.getAttribute('href')]);
 
@@ -773,6 +775,15 @@ describe('OwnerLayout', () => {
     // A router link: the app stays loaded and the route changes.
     await about.getByRole('link', { name: 'Product proposal' }).click();
     await expect.poll(() => router.state.location.pathname).toBe('/about/proposal');
+
+    // Vision opens the article, a page of its own like the documents', whose top bar marks it as the page you're on.
+    const again = await renderRoute(TODAY);
+    await again.screen.getByRole('navigation', { name: 'About this prototype' }).getByRole('link', { name: 'Vision', exact: true }).click();
+    await expect.poll(() => again.router.state.location.pathname).toBe('/about/vision');
+    await expect.element(again.screen.getByRole('heading', { level: 1, name: 'A front desk that never closes', exact: true })).toBeVisible();
+    const here = again.screen.getByRole('banner').getByText('Vision', { exact: true });
+    await expect.element(here).toBeVisible();
+    await expect.element(here).toHaveAttribute('aria-current', 'page');
 
     // On a phone, the menu sheet carries the same group, and a link in it closes the sheet.
     const phone = await renderRoute(TODAY, { viewport: 'phone' });

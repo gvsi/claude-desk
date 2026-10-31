@@ -19,7 +19,7 @@ import {
   type Block,
   type Inline,
 } from './documents.ts';
-import { ABOUT_LINKS } from './links.ts';
+import { ABOUT_LINKS, DOCUMENT_LINKS } from './links.ts';
 
 const DOCS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../docs');
 
@@ -159,13 +159,16 @@ describe('the About documents', () => {
   });
 
   it('the_registry_and_the_links_name_each_page', () => {
+    // The two documents, then the Vision article, which the reader's switch between the documents leaves out.
+    const documents = [
+      { id: 'prediction', label: 'Capability prediction', href: '/about/prediction' },
+      { id: 'proposal', label: 'Product proposal', href: '/about/proposal' },
+    ];
     expect(ABOUT_LINKS).toEqual({
       title: 'About this prototype',
-      links: [
-        { id: 'prediction', label: 'Capability prediction', href: '/about/prediction' },
-        { id: 'proposal', label: 'Product proposal', href: '/about/proposal' },
-      ],
+      links: [...documents, { id: 'vision', label: 'Vision', href: '/about/vision' }],
     });
+    expect(DOCUMENT_LINKS).toEqual(documents);
     const { blocks: _proposal, ...proposal } = ABOUT_DOCUMENTS.proposal;
     expect(proposal).toEqual({
       route: '/about/proposal',

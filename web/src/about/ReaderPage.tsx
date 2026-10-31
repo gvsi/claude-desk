@@ -18,7 +18,7 @@ import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { Inlines } from './Inlines.tsx';
-import { ABOUT_LINKS, type AboutId } from './links.ts';
+import { DOCUMENT_LINKS, type AboutId } from './links.ts';
 import { MONTHS } from './months.ts';
 import { PrototypeLink } from './PrototypeLink.tsx';
 import { useNoIndex } from './useNoIndex.ts';
@@ -364,7 +364,7 @@ function ReadNext({ other, compact }: { other: AboutDocument; compact: boolean }
 function DocumentSwitch({ current, compact }: { current: AboutId; compact: boolean }) {
   return (
     <nav className={`cd-about-switch${compact ? ' cd-about-switch--compact' : ''}`} aria-label="Documents">
-      {ABOUT_LINKS.links.map((link) => (
+      {DOCUMENT_LINKS.map((link) => (
         <Link
           key={link.id}
           className="cd-about-switch__link cd-type-control"

@@ -105,11 +105,11 @@ test('open_a_document_from_the_sidebar', async ({ page }) => {
     (window as Window & { aboutStayedInTheApp?: boolean }).aboutStayedInTheApp = true;
   });
 
-  // The sidebar's group lists the prediction first and opens the proposal, whose link into the prototype goes
-  // back to this Desk.
+  // The sidebar's group lists the prediction first, then the proposal and the Vision article, and opens the
+  // proposal, whose link into the prototype goes back to this Desk.
   const about = page.getByRole('navigation', { name: 'About this prototype' });
   await expect(about).toBeVisible();
-  await expect(about.getByRole('link')).toHaveText(['Capability prediction', 'Product proposal']);
+  await expect(about.getByRole('link')).toHaveText(['Capability prediction', 'Product proposal', 'Vision']);
   await about.getByRole('link', { name: 'Product proposal', exact: true }).click();
   await page.waitForURL('**/about/proposal');
   await expect(title(page, 'Product proposal')).toBeVisible(FIRST_DRAW);
