@@ -72,9 +72,10 @@ async def start_setup(body: SetupStartIn, request: Request,
     With an `idempotency_key` (one per click), a repeat in the copy answers the interview the first made, as it stands
     now, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409
     `conflict`, and one sent while the first is still starting answers 409 `in_progress` at once, to be sent again
-    after `retry_after`. A start is admitted (looked up, counted and claimed) under its key's lock in this process, so
-    a repeat sent meanwhile waits for that admission and is never counted; another process admits on its own, so
-    during a deploy's overlap a repeat routed to the other task can be counted twice.
+    after `retry_after`; a first that stopped mid-way (its process did, say) frees the key once it is older than the
+    longest a start can take. A start is admitted (looked up, counted and claimed) under its key's lock in this
+    process, so a repeat sent meanwhile waits for that admission and is never counted; another process admits on its
+    own, so during a deploy's overlap a repeat routed to the other task can be counted twice.
 
     One rule for failures, as when sending the built-in agent: a start that fails before anything is made (refused by
     the limits, or Claude couldn't answer, before the kernel is asked for the Desk) frees its key, so the same request

@@ -43,6 +43,7 @@ from desk.api.prompts import (
     question_text,
 )
 from desk.api.ratelimit import RateLimited
+from desk.api.schemas import SetupStartIn
 from desk.api.setup import owner_name
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest
@@ -1320,6 +1321,32 @@ async def test_a_repeat_during_the_first_ones_admission_waits_for_it_and_is_neve
     assert asked.count("setup_turn") == 1
     assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
     assert len(desk_setup.ADMISSIONS) == 0                           # each key's lock goes once nothing holds it
+
+
+async def test_a_start_abandoned_mid_way_frees_its_key_once_it_is_older_than_any_start(app, browser, fake, kernel_http,
+                                                                                       model, engine, db):
+    # A start whose request stopped (its process did, say) left its row with the key, no Desk and no failure. Until
+    # the row is older than the longest a start can take, a repeat answers 409 `in_progress`; after that, the row is
+    # abandoned, and a repeat deletes it and starts afresh.
+    owner = await new_owner(app, browser, kernel_http)
+    sha = desk_setup.start_sha256(SetupStartIn(description=DESCRIPTION, timezone=TIMEZONE, idempotency_key=KEY))
+    db.execute("INSERT INTO app.setup_interviews (interview_id, copy_id, idempotency_key, request_sha256)"
+               " VALUES ('setup-abandoned', %s, %s, %s)", (owner.copy_id, KEY, sha))
+    busy = await start_keyed(owner)
+    assert (busy.status_code, busy.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    db.execute("UPDATE app.setup_interviews SET created_at = now() - make_interval(secs => %s)"
+               " WHERE interview_id = 'setup-abandoned'", (desk_setup.START_ABANDONED_S - 5,))
+    busy = await start_keyed(owner)
+    assert (busy.status_code, busy.json()) == (409, {"error": "in_progress", "retry_after": 2})
+
+    db.execute("UPDATE app.setup_interviews SET created_at = now() - make_interval(secs => %s)"
+               " WHERE interview_id = 'setup-abandoned'", (desk_setup.START_ABANDONED_S + 5,))
+    model.add(started())
+    fresh = await start_keyed(owner)
+    assert fresh.status_code == 201, fresh.text
+    assert await interviews(engine) == [(fresh.json()["interview_id"], fresh.json()["desk_id"])]
+    assert (await start_keyed(owner)).json() == fresh.json()
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
 
 
 class EachOnItsOwn:
