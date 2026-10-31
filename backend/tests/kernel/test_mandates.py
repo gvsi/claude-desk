@@ -47,7 +47,7 @@ from .test_agent_auth import Agent, SignedTurn, mint, open_agent, turn
 from .test_approvals import answered, post_answer
 from .test_decide import decided, open_visitor, set_session, verify_signature
 from .test_desk_writes import LOPEZ_DESK, new_desk, post_desk
-from .test_execute import executed, post_execute, read
+from .test_execute import Crash, crash, executed, post_execute, read
 from .test_link_completion import cancelled_links, charged, charges, completed, post_cancel
 from .test_money_cap import post_draft
 from .test_payment_links import confirm, delay, nothing_listening, view
@@ -804,17 +804,95 @@ async def test_a_quote_is_charged_once(desk_prove, app, client, frozen_clock):
     assert mandate_spend(copy_id) == [(2_000, 0)]
 
 
+def paying_refusals(entries, session_id: str) -> list[dict]:
+    return [entry for entry in decide_entries(entries, session_id)
+            if entry.get("outcome") == "refuse" and entry.get("check") == "quote_paying"]
+
+
+async def test_a_charge_that_timed_out_keeps_its_quote_unpayable_before_its_outcome_is_written(
+        desk_prove, app, client, frozen_clock, monkeypatch):
+    """A charge whose provider call times out lets go of the quote's row when its T2 rolls back, and
+    only then writes its outcome as `unknown` (T3). A second charge of the same quote asked in that
+    gap finds the first one's intent, fresh as it is, and is refused at step 1 with `quote_paying`:
+    it reserves and sends nothing, so only the first can have reached the provider."""
+    setup = await agent_desk(app, client, frozen_clock)
+    copy_id = setup.desk.copy_id
+    signed = setup.turn()
+    quote_id = await quoted(client, signed)
+    first = await asked(client, signed, CHARGE, quote_id, call_id="call-charge-1")
+    assert first.outcome == "allow", first.reason_plain
+
+    async def timed_out(self, *args, **kwargs):
+        raise payments.ProviderTimeout("the provider didn't answer in time")
+
+    in_the_gap, go_on = asyncio.Event(), asyncio.Event()
+    settle_unknown = execute._settle_unknown
+
+    async def paused_before_its_outcome(*args, **kwargs):
+        in_the_gap.set()
+        await go_on.wait()
+        return await settle_unknown(*args, **kwargs)
+
+    monkeypatch.setattr(payments.ProviderClient, "charge", timed_out)
+    monkeypatch.setattr(execute, "_settle_unknown", paused_before_its_outcome)
+    running = asyncio.create_task(post_execute(client, signed, first))
+    await asyncio.wait_for(in_the_gap.wait(), 5)       # T2 has rolled back; the outcome isn't written yet
+    again = await asked(client, signed, CHARGE, quote_id, call_id="call-charge-2")
+    assert (again.outcome, again.action) == ("refuse", None), again.reason_plain
+    go_on.set()
+    response = await asyncio.wait_for(running, 10)
+    assert ExecResult.model_validate(response.json()).state == "unknown"
+    assert paying_refusals(await ledger_rows(app, setup.desk), setup.session_id) == [
+        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying"}]
+    assert await reservations(app, copy_id) == [(first.action.action_id, 2_000, "reserved")]   # kept while unknown
+    assert agent_charges(copy_id) == []
+    assert await quote_status(app, copy_id, quote_id) != "paid"
+
+
+async def test_a_charge_cut_off_after_its_intent_keeps_its_quote_unpayable_until_it_is_settled(
+        desk_prove, app, client, frozen_clock, monkeypatch):
+    """A charge whose kernel died right after its intent committed may yet have reached the provider,
+    so its quote is unpayable from that moment, not only once the intent is old enough to reconcile:
+    a second charge asked at once is refused at step 1 with `quote_paying`, reserving and sending
+    nothing. Once the first is settled (a read reconciles it; the provider never saw it, so it is
+    `failed` and its $20 released), the quote is payable again."""
+    setup = await agent_desk(app, client, frozen_clock)
+    copy_id = setup.desk.copy_id
+    signed = setup.turn()
+    quote_id = await quoted(client, signed)
+    first = await asked(client, signed, CHARGE, quote_id, call_id="call-charge-1")
+    assert first.outcome == "allow", first.reason_plain
+    with monkeypatch.context() as patch:
+        patch.setattr(execute, "_after_intent", crash)
+        with pytest.raises(Crash):
+            await post_execute(client, signed, first)
+    again = await asked(client, signed, CHARGE, quote_id, call_id="call-charge-2")
+    assert (again.outcome, again.action) == ("refuse", None), again.reason_plain
+    assert paying_refusals(await ledger_rows(app, setup.desk), setup.session_id) == [
+        {"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paying"}]
+    assert agent_charges(copy_id) == []
+
+    frozen_clock.advance(31)                            # an orphan now: a read reconciles it
+    later = setup.turn("Is the deposit paid?")
+    assert (await read(client, later.headers, first)).state == "failed"
+    assert await reservations(app, copy_id) == [(first.action.action_id, 2_000, "released")]
+    third = await asked(client, later, CHARGE, quote_id, call_id="call-charge-3")
+    assert third.outcome == "allow", third.reason_plain
+
+
 @pytest.mark.solver
 @pytest.mark.parametrize("first", ["charge", "completion"])
 async def test_a_charge_and_a_link_completion_of_one_quote_pay_once(desk_prove, app, client, frozen_clock,
                                                                      monkeypatch, first):
     """Of a mandate charge and a link's completion for the same quote, exactly one pays it. The
-    agent has an open link to its deposit quote and an allowed charge of the same quote. Whichever
-    reaches the provider first holds the quote's row across the call (held there by the test); the
-    other waits for that row, then finds the quote paid and sends nothing: a completion is 409, its
-    link cancelled (no `cancel_reason`) and ledgered `quote_paid`, its $20 released; a charge fails
-    with `quote_paid`, its $20 released. One payment reaches the provider, the mandate commits $20
-    and holds nothing, and the quote is paid."""
+    agent has an open link to its deposit quote and an allowed charge of the same quote, and
+    whichever reaches the provider first is held there by the test. A charge holds the quote's row
+    across its call, so a completion arriving meanwhile waits for that row, then finds the quote
+    paid and sends nothing: 409, its link cancelled (no `cancel_reason`) and ledgered `quote_paid`,
+    its $20 released. A completion's marker, committed before it asks the provider, keeps the quote
+    unpayable, so a charge arriving meanwhile is refused at its execution re-check, before it
+    reserves or sends anything. One payment reaches the provider, the mandate commits $20 and holds
+    nothing, and the quote is paid."""
     setup = await agent_desk(app, client, frozen_clock)
     copy_id = setup.desk.copy_id
     signed = setup.turn()
@@ -841,37 +919,40 @@ async def test_a_charge_and_a_link_completion_of_one_quote_pay_once(desk_prove, 
     def complete() -> Awaitable[httpx.Response]:
         return client.post(f"/payment_links/{link.token}/complete", json={})
 
-    holder, waiter = (charge, complete) if first == "charge" else (complete, charge)
     monkeypatch.setattr(payments.ProviderClient, method, held_at_the_provider)
-    with connections_of(app) as pids:
-        holding = asyncio.create_task(holder())
-        await asyncio.wait_for(at_provider.wait(), 5)              # it holds the quote's row at the provider
-        waiting = asyncio.create_task(waiter())
-        await until_waiting(app, waiting, pids, table="kernel.quotes")
-        assert not waiting.done()
-        answer.set()
-        charged_response, completed_response = await asyncio.wait_for(
-            asyncio.gather(*((holding, waiting) if first == "charge" else (waiting, holding))), 10)
-
-    assert charged_response.status_code == 200, charged_response.text
-    charge_result = ExecResult.model_validate(charged_response.json())
-    entries = await ledger_rows(app, setup.desk)
+    entries_of = execute_entries
     if first == "charge":
-        assert charge_result.state == "succeeded"
+        with connections_of(app) as pids:
+            holding = asyncio.create_task(charge())
+            await asyncio.wait_for(at_provider.wait(), 5)          # it holds the quote's row at the provider
+            waiting = asyncio.create_task(complete())
+            await until_waiting(app, waiting, pids, table="kernel.quotes")
+            assert not waiting.done()
+            answer.set()
+            charged_response, completed_response = await asyncio.wait_for(asyncio.gather(holding, waiting), 10)
+        assert charged_response.status_code == 200, charged_response.text
+        assert ExecResult.model_validate(charged_response.json()).state == "succeeded"
         assert (completed_response.status_code, completed_response.json()) == (409, {"code": "conflict"})
         assert await link_state(app, setup, link) == ("cancelled", None, (2_000, "released"))
-        assert payment_entries(entries, link)[-1] == {"link_id": link.link_id, "state": "cancelled",
-                                                      "reason": "quote_paid"}
+        assert payment_entries(await ledger_rows(app, setup.desk), link)[-1] == {
+            "link_id": link.link_id, "state": "cancelled", "reason": "quote_paid"}
         assert await reservation_of(app, copy_id, charging.action.action_id) == (2_000, "committed")
         assert [(key, amount) for key, amount, _ in charges(setup.desk)] == [(charging.action.action_id, 2_000)]
     else:
+        holding = asyncio.create_task(complete())
+        await asyncio.wait_for(at_provider.wait(), 5)              # its marker is committed; it is at the provider
+        refused = await asyncio.wait_for(charge(), 5)              # answered at once: it waits for nothing
+        assert (refused.status_code, refused.json()) == (409, {"code": "conflict"})
+        assert not holding.done()
+        answer.set()
+        completed_response = await asyncio.wait_for(holding, 10)
         assert completed_response.status_code == 200, completed_response.text
         assert PaymentLinkStateResult.model_validate(completed_response.json()).state == "paid"
-        assert charge_result.state == "failed"
-        [failed] = [e for e in execute_entries(entries, charging.decision_id) if e.get("state") == "failed"]
-        assert failed["reason"] == "quote_paid"
+        assert (await read(client, signed.headers, charging)).state == "refused_at_execution"
+        [entry] = entries_of(await ledger_rows(app, setup.desk), charging.decision_id)
+        assert (entry["state"], entry["check"]) == ("refused_at_execution", "args")
         assert await link_state(app, setup, link) == ("paid", None, (2_000, "committed"))
-        assert await reservation_of(app, copy_id, charging.action.action_id) == (2_000, "released")
+        assert await reservation_of(app, copy_id, charging.action.action_id) is None   # it reserved nothing
         assert [(key, amount) for key, amount, _ in charges(setup.desk)] == [(f"{link.action_id}:charge", 2_000)]
     assert mandate_spend(copy_id) == [(2_000, 0)]
     assert await quote_status(app, copy_id, quote_id) == "paid"

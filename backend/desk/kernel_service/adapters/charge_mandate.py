@@ -4,7 +4,7 @@ The call names a quote by its ID and nothing else; `normalize` resolves it as `n
 does (`payment_link.payable_quote`: on this Desk, this session's own, readable by the session,
 available and unexpired, and unpaid), so the amount is the quote's, which the kernel priced, and the
 effect is `charge`. A quote is paid once: a second charge of it is refused at step 1 with
-`quote_paid` ledgered (`quote_paying` while another payment of it may be at the provider). Only an
+`quote_paid` ledgered (`quote_paying` while another payment of it is unsettled). Only an
 agent session holding a mandate is given the tool, and `/decide` bounds the charge by what the
 mandate has left (`mandate_remaining_cents`, read by the baseline).
 

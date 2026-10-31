@@ -35,9 +35,10 @@ A quote is paid once, by a mandate charge or by one of its links. Each payment c
 its row lock (`lock_quote`, `FOR UPDATE`, before its link in repo.py's order) before the provider is
 asked, and holds that lock across the provider call, so of two payments of one quote the second
 waits and then finds it `paid` (`quote_unpayable`); the payment that lands marks it `paid` in the
-transaction that records it (`mark_quote_paid`). A payment of the quote that may be at the provider
-with nobody knowing (an `unknown` link or mandate charge, or one orphaned before its outcome was
-written) keeps the quote unpayable until it is settled.
+transaction that records it (`mark_quote_paid`). Any other payment of the quote not yet settled (a
+charge's intent, a link's completion marker, either one `unknown`, however old) keeps the quote
+unpayable until settlement shows whether money moved, so a payment that let go of the row without
+writing its outcome (a timeout, a crash) is never paid around.
 """
 
 import asyncio
@@ -365,16 +366,22 @@ async def lock_quote_nowait(ctx: KernelCtx, quote_id: str) -> Quote | None:
 async def quote_unpayable(ctx: KernelCtx, quote_row: Quote, *, link_id: str | None = None,
                           action_id: str | None = None) -> str | None:
     """Why no payment of the quote may start now, or None: `quote_paid` once a payment of it has
-    landed (its status, or a paid link or succeeded mandate charge of it); `quote_paying` while
-    another payment of it may be at the provider with nobody knowing, until it is settled: a link
-    of it that is `unknown` or whose completion marker is older than `execute.ORPHAN_AFTER`, or a
-    mandate charge on it whose execution is `unknown` or an intent that old. `link_id` and
-    `action_id` are the caller's own link or action, left out. A payment in progress is not counted:
-    it holds the quote's row across its provider call, so the caller, which holds that row too,
-    finds it either not started or ended (paid, failed or unknown)."""
+    landed (its status, or a paid link or succeeded mandate charge of it); `quote_paying` while any
+    other payment of it is unresolved, whatever its age: a link of it whose completion has started
+    (its marker set, still `issued`) or that is `unknown`, or a mandate charge on it whose execution
+    is an `intent` or `unknown`. `link_id` and `action_id` are the caller's own link or action, left
+    out, so a payment never waits on itself, and its retry or reconciliation settles it.
+
+    Holding the quote's row across a provider call isn't enough on its own: a payment whose call
+    times out, or whose process dies, lets go of the row before its outcome is written, and a
+    payment waiting on the row would then find the quote unpaid. So the other payment's intent or
+    marker, committed before it asked the provider, blocks the quote until settlement proves that
+    money moved (the quote `paid`) or that nothing did: a charge `failed`, by its T3 or by
+    reconciliation's `void`; a link back to `issued` without its marker (a provider that was never
+    reached), or `expired` or `cancelled` by the provider's atomic cancel. An orphan blocks until
+    reconciliation settles it (a read of its decision or of its link, or the kernel's startup)."""
     if quote_row.status == QUOTE_PAID:
         return "quote_paid"
-    orphaned = ctx.clock.now() - execute.ORPHAN_AFTER
     links = (await ctx.db.execute(ctx.repo.scoped(select(
         PaymentLink.link_id, PaymentLink.state, PaymentLink.completion_started_at).where(
         PaymentLink.desk_id == quote_row.desk_id, PaymentLink.quote_id == quote_row.quote_id,
@@ -385,18 +392,18 @@ async def quote_unpayable(ctx: KernelCtx, quote_row: Quote, *, link_id: str | No
             continue
         if state == "paid":
             return "quote_paid"
-        paying = paying or state == "unknown" or (started_at is not None and started_at <= orphaned)
+        paying = paying or state == "unknown" or started_at is not None
     charges = (await ctx.db.execute(ctx.repo.scoped(select(
-        ActionRow.action_id, ActionRow.resource, Execution.state, Execution.started_at).join(
+        ActionRow.action_id, ActionRow.resource, Execution.state).join(
         Execution, Execution.action_id == ActionRow.action_id).where(
         ActionRow.desk_id == quote_row.desk_id, ActionRow.session_id == quote_row.session_id,
         ActionRow.tool == CHARGE_TOOL)))).all()
-    for found_id, resource, state, started_at in charges:
+    for found_id, resource, state in charges:
         if found_id == action_id or resource.id != quote_row.quote_id:
             continue
         if state == "succeeded":
             return "quote_paid"
-        paying = paying or state == "unknown" or (state == "intent" and started_at <= orphaned)
+        paying = paying or state in ("intent", "unknown")
     return "quote_paying" if paying else None
 
 
