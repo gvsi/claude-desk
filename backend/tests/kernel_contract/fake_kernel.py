@@ -28,6 +28,10 @@ contract test, before the task that first uses them.
   copy's answer carrying the events in shown order (`replayed_messages`, kept in `replayed_nights` too) and its
   `replay_id`. With none recorded a copy that asks is live; `without_seeded_night()` makes any request that
   carries `replay_night`, true or false, 422 `invalid`, as a kernel whose request model lacks the field answers it.
+- The turn's language (GitHub issue #121): `POST /sessions/{session_id}/turn` takes a turn's newest visitor or agent
+  message (at most 2,000 characters, else 422 `invalid`) and keeps the language `detect_language` finds in it as the
+  session's `last_language`, which the turn's status lines and verdicts then speak; the one on record stays when it
+  finds neither English nor Spanish. The text is read for that alone, never kept, mirrored or ledgered.
 - Verification (Plan 01b): `/verify/start` sends a fresh code only to a contact on record (a Demo inbox entry
   and its code-free notice) and answers every contact with one message; `/verify/check` takes the session's live
   challenge's code within ten minutes and five attempts, else 422 `invalid`; a session reads only the code entries
@@ -211,6 +215,8 @@ from desk.kernel_api import (
     SessionContext,
     ToolsConnectRequest,
     ToolsSimulateChangeRequest,
+    TurnRequest,
+    TurnStarted,
     VerifyCheckRequest,
     VerifyStarted,
     VerifyStartRequest,
@@ -758,6 +764,7 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "owner_said": "Escrito por {owner}",
                      "owner_say_blocked": "No se envió: incluía texto de un documento privado"}}
 OWNER_TEXT_MAX = 2000                   # an owner's say or whisper, in characters (Plan 01b)
+TURN_TEXT_MAX = 2000                    # a turn's newest visitor or agent message, in characters (GitHub issue #121)
 NUMBER_RULES = (("digit", re.compile(r"\d")), ("currency", re.compile(r"[$€£¥¢]")), ("percent", re.compile(r"%")))
 
 
@@ -2065,6 +2072,22 @@ class FakeKernelState:
             return WhoAmI(kind="owner", copy_id=copy.copy_id, desk_id=None, desk_ids=live, session=session.state())
         return WhoAmI(kind=session.kind, copy_id=copy.copy_id, desk_id=session.desk_id,
                       desk_ids=[session.desk_id], session=session.state())
+
+    def turn(self, request: Request, body: TurnRequest) -> TurnStarted:
+        """A turn starts (GitHub issue #121): the language `detect_language` finds in its newest visitor or agent
+        message becomes the session's, or the one on record stays when it finds neither English nor Spanish (English
+        for a session with none). The text is read for that alone, never kept, mirrored or ledgered, and a repeat
+        detects again and changes nothing else. Over `TURN_TEXT_MAX` characters is 422 `invalid`, then the session
+        checks: 401, 404, 409 `closed`, a stale generation 409 `stale_generation`."""
+        if len(body.text) > TURN_TEXT_MAX:
+            raise Refusal(422, "invalid")
+        session, _ = self.session_call(request, request.path_params["session_id"], body.desk_id)
+        self._check_generation(session, body.generation)
+        detected = detect_language(body.text)
+        if detected in ("en", "es") and detected != session.last_language:
+            session.last_language = detected
+            self._put_session(session)
+        return TurnStarted(language=session.last_language or "en")
 
     # Decisions -----------------------------------------------------------------------------------
 
@@ -3705,6 +3728,7 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /sessions": "create_session",
     "POST /sessions/{id}/mode": "session_mode",
     "GET /whoami": "whoami",
+    "POST /sessions/{session_id}/turn": "turn",
     "GET /context/{session_id}?desk_id=": "context",
     "POST /decide": "decide",
     "GET /decisions/by_call?session_id=&generation=&call_id=": "decision_by_call",

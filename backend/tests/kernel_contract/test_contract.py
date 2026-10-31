@@ -89,6 +89,8 @@ from desk.kernel_api import (
     SessionContext,
     ToolsConnectRequest,
     ToolsSimulateChangeRequest,
+    TurnRequest,
+    TurnStarted,
     VerifyCheckRequest,
     VerifyStarted,
     VerifyStartRequest,
@@ -2836,3 +2838,70 @@ async def test_simulated_change_needs_review(kernel, ro_read):
     elsewhere = http.owner(other.owner_token).call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
         desk_id=desk_id, tool="payments.create_refund"))
     assert await refused(elsewhere) == (404, "not_found")
+
+
+# The turn's language (GitHub issue #121) --------------------------------------------------------------------------
+
+
+async def turn(view: CredentialView, session_id: str, generation: int, said: str) -> TurnStarted:
+    return await view.call("POST /sessions/{session_id}/turn", TurnRequest(generation=generation, text=said),
+                           path={"session_id": session_id})
+
+
+@pytest.mark.kernel_plan("121")
+async def test_a_turn_speaks_the_language_of_the_message_that_started_it(kernel, ro_read):
+    """The API sends each turn's newest visitor or agent message as the turn starts, and the kernel keeps the
+    language it detects as the session's, so the turn's receipts speak it, not the last reply's. A message in neither
+    English nor Spanish keeps the language on record. The text is read for that alone: the session is otherwise as it
+    was, a repeat changes nothing, and no ledger entry holds the text."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug, desk_id = desk_slug(ro_read, ro_schema, copy), copy.desk_ids[0]
+    drain = item_id(ro_read, ro_schema, copy, "Drain clearing")
+    owner = http.owner(copy.owner_token)
+    visitor = await new_visitor(http, slug)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    start = (await ledger_page(owner, desk_id)).entries[-1].seq
+
+    assert (await check_reply(view, session_id, 0, "Happy to help with your drain.")).language == "en"
+    spanish = "Hola, ¿pueden venir mañana a revisar el desagüe?"
+    assert await turn(view, session_id, 0, spanish) == TurnStarted(language="es")
+    assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args(drain))).visitor_plain == (
+        "Revisado con las reglas de Maria Rivera")
+    neither = ("\U0001F44D", "Bonjour, je voudrais un rendez-vous.", "\U0001F44D")
+    for said in neither:
+        assert await turn(view, session_id, 0, said) == TurnStarted(language="es"), said
+    english = "Can someone look at my water heater tomorrow?"
+    assert await turn(view, session_id, 0, english) == TurnStarted(language="en")
+    assert (await decide(view, session_id, 0, "call-2", "native.quote", quote_args(drain))).visitor_plain == (
+        "Checked against Maria Rivera's rules")
+
+    assert (await view.whoami()).session == visitor.state           # mode, generation and verification untouched
+    ledgered = json.dumps([entry.model_dump(mode="json") for entry in (await ledger_page(owner, desk_id)).entries
+                           if entry.seq > start], ensure_ascii=False)
+    for said in (spanish, *neither, english):
+        assert said not in ledgered
+
+
+@pytest.mark.kernel_plan("121")
+async def test_a_turn_is_refused_like_the_other_turn_routes(kernel, ro_read, arrange):
+    """Up to 2,000 characters, else 422 `invalid`; a token for another session 401; a stale generation 409
+    `stale_generation`; a closed session 409 `closed`, before a stale generation."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    visitor, stranger = await new_visitor(http, slug), await new_visitor(http, slug)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+
+    assert await turn(view, session_id, 0, ("Hello " * 400)[:2000]) == TurnStarted(language="en")
+    # read raw, since a request model that bounds the text couldn't even be built over the limit
+    transport = httpx.ASGITransport(app=fake_kernel_app(state)) if state is not None else None
+    async with httpx.AsyncClient(base_url=http.base_url, transport=transport) as raw:
+        too_long = await raw.post(f"/sessions/{session_id}/turn", json={"generation": 0, "text": "Hola " * 401},
+                                  headers={"X-Session-Token": visitor.session_token})
+    assert (too_long.status_code, KernelError.model_validate_json(too_long.content).code) == (422, "invalid")
+    assert await refused(turn(http.session(stranger.session_token), session_id, 0, "Hola")) == (401, "auth")
+    assert await refused(turn(view, session_id, 1, "Hola")) == (409, "stale_generation")
+    arrange.close_idle_sessions(session_id)
+    for generation in (0, 1):
+        assert await refused(turn(view, session_id, generation, "Hola")) == (409, "closed")
