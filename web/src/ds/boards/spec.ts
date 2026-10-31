@@ -7,6 +7,8 @@ import { expect, within } from 'storybook/test';
 
 import { expectComputed, type ComputedExpectation } from '../test/expectComputed.ts';
 
+import { FACT_IN_PROSE } from './factInProse.ts';
+
 const SERIF = /^"Source Serif 4"/;
 const SANS = /^"Hanken Grotesk"/;
 
@@ -454,30 +456,7 @@ export async function expectChannelsContent(content: HTMLElement, lead: string):
   await expect(within(content).queryByRole('switch')).toBeNull();
 }
 
-/**
- * What only a card may say on a Desk, so never Claude's words (invariant 2): money, a clock time, a
- * month or a weekday (English and Spanish), a date relative to now ("today", "last week", "next
- * time"), a permit's recorded status, a booking, or a promise ("will", "she'll"). The kernel's reply
- * check blocks these in prose; the cards carry them. "May" is left out, as it is more often a verb.
- */
-export const FACT_IN_PROSE = new RegExp(
-  [
-    String.raw`\$\s?\d`,
-    String.raw`\b\d{1,2}:\d{2}\b`,
-    String.raw`\b\d{1,2}\s?(?:am|pm)\b`,
-    String.raw`\b(?:january|february|march|april|june|july|august|september|october|november|december)\b`,
-    String.raw`\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b`,
-    String.raw`(?<![\p{L}])(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|lunes|martes|miércoles|jueves|viernes|sábado|domingo)(?![\p{L}])`,
-    String.raw`\b(?:today|tonight|tomorrow|yesterday)\b`,
-    String.raw`(?<![\p{L}])(?:hoy|mañana|ayer)(?![\p{L}])`,
-    String.raw`\b(?:last|next|this) (?:week|weekend|time)\b`,
-    String.raw`\b(?:passed|approved|issued|denied)\b`,
-    String.raw`\bbook(?:ed|ing)?\b`,
-    String.raw`\b(?:will|shall)\b`,
-    String.raw`\b\p{L}+[’']ll\b`,
-  ].join('|'),
-  'iu',
-);
+export { FACT_IN_PROSE } from './factInProse.ts';
 
 /**
  * vision_prose_states_no_facts: Claude's words under `root` state nothing only a card may say
