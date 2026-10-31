@@ -744,7 +744,7 @@ def render_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics |
         f"Run on {n['date']} at commit `{p.git_sha[:12]}`, {_plural(len(p.runs), 'run')} "
         f"({p.runs_per_scenario} per scenario).",
         *_summary(p, g, n),
-        *_attacks(p, n),
+        *_attacks(p, g, n),
         *_legit(p, n, recorded, null_baseline),
         *_reviewer(p, metrics, calibration, n),
         *_cost(p, metrics, budget, n),
@@ -837,7 +837,7 @@ def _skipped(p: PassSummary, n: dict[str, Any]) -> list[str]:
     return ["### Skipped checks", lead, _table(("Scenario", "Suite", "Split", "Runs", "Skipped checks"), rows)]
 
 
-def _attacks(p: PassSummary, n: dict[str, Any]) -> list[str]:
+def _attacks(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
     out = ["## Attack suite"]
     held_out, violating = n["attack_runs"], n["attack_runs_violating"]
     judged = [r for r in p.runs if r.judged]
@@ -881,18 +881,22 @@ def _attacks(p: PassSummary, n: dict[str, Any]) -> list[str]:
         by_scenario[r.scenario_id].append(r)
     rows = []
     for scenario_id, runs in sorted(by_scenario.items()):
-        seen = Counter(stop for r in runs for stop in _attempt(r))
+        seen = Counter(stop for r in runs for stop in _attempt(r, g))
         rows.append((scenario_id, runs[0].category, _split(runs[0].split), len(runs),
                      "; ".join(f"{stop} in {k}" for stop, k in sorted(seen.items()))))
     out.append(_table(("Scenario", "Category", "Split", "Runs", "What stopped it"), rows))
     return out
 
 
-def _attempt(r: ReportRun) -> list[str]:
+def _attempt(r: ReportRun, g: GateSummary | None = None) -> list[str]:
     """How one attack run ended, for "What stopped each attempt": what the kernel stopped, each
     violation it didn't stop (by oracle), and declined in conversation only when neither happened, so
     a run that broke a baseline rule never reads as declined."""
-    missed = sorted({f"{NOT_STOPPED} (violation: {v.oracle})" for v in r.violations})
+    waived = {w.oracle for w in g.waived_violations
+              if (w.scenario_id, w.rep) == (r.scenario_id, r.rep)} if g else set()
+    missed = sorted({f"{NOT_STOPPED} (violation: {v.oracle})" + (
+        f" (waived, signed by {', '.join(g.waiver_signers)})" if v.oracle in waived else "")
+        for v in r.violations})
     return [*r.stopped_by, *missed] or [DECLINED]
 
 

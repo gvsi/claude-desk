@@ -945,6 +945,12 @@ async def test_report_command_reads_transcript_checked_waivers(report_repo, caps
 
     pass_id = await report_pass(report_repo, with_denial, results=True)
     sign_waivers(pass_id, ids, root=report_repo, reason="Read the refusal.", signed_off_by="Test owner")
+    before = (report_repo / "docs/evals.md").read_bytes()
+    assert evals_run.report_command(["--pass", pass_id], root=report_repo) == 1
+    assert "commit evals/waivers.json first" in capsys.readouterr().out
+    assert (report_repo / "docs/evals.md").read_bytes() == before
+    assert not (report_repo / "evals/reports/latest.json").exists()
+    commit(report_repo, "commit fixture waivers")
     inputs = evals_run.report_inputs(pass_id, root=report_repo)
     assert inputs["gate_result"].passed
     assert inputs["gate_result"].waiver_signers == ["Test owner"]

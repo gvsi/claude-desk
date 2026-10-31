@@ -302,8 +302,10 @@ def results_command(argv: list[str]) -> int:
 
 
 def record_rate_command(argv: list[str]) -> int:
-    from evals.results import lowered_notice
+    from evals.gate import gate, waiver_summary
+    from evals.results import GitError, ResultsRefused, checked_committed_waivers, lowered_notice
     from evals.tier2.passes import PassRefused, load_pass, record_rate
+    from evals.tier2.schema import RecordedRates
 
     parser = _pass_parser("record-rate")
     parser.add_argument("--signed-off-by", required=True)
@@ -311,14 +313,18 @@ def record_rate_command(argv: list[str]) -> int:
     parser.add_argument("--lower-bar", action="store_true")
     options = parser.parse_args(argv)
     try:
-        rate = record_rate(load_pass(options.pass_id), signed_off_by=options.signed_off_by, reason=options.reason,
+        finished = load_pass(options.pass_id)
+        waivers = checked_committed_waivers(finished, root=EVALS_DIR.parent)
+        judged = gate(finished, RecordedRates(history=[]), waivers=waivers)
+        rate = record_rate(finished, signed_off_by=options.signed_off_by, reason=options.reason,
                            lower_bar=options.lower_bar)
-    except PassRefused as refused:
+    except (OSError, ValueError, GitError, PassRefused, ResultsRefused) as refused:
         print(f"record-rate: {refused}")
         return 1
     lowered = f"; {notice}" if (notice := lowered_notice(rate)) else ""
+    waived = f"; {waiver_summary(judged)}" if judged.waived_violations else ""
     print(f"record-rate: recorded {rate.completion_lower_95:.3f} (point {rate.completion_point:.3f} over "
-          f"{rate.trials} held-out legitimate runs, {rate.provider}) from pass {rate.run_id}{lowered}; run "
+          f"{rate.trials} held-out legitimate runs, {rate.provider}) from pass {rate.run_id}{waived}{lowered}; run "
           f"results --pass {rate.run_id} to re-export the results file")
     return 0
 
@@ -469,7 +475,7 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
 
     from evals.gate import gate
     from evals.report import PassSummary, kept_out, latest_refusal, load_budget
-    from evals.results import selection_problems, unchecked_refusal
+    from evals.results import GitError, ResultsRefused, checked_committed_waivers, selection_problems, unchecked_refusal
     from evals.tier2.passes import load_pass
     from evals.tier2.suite import load_recorded_rates, load_splits, load_suite, suite_sha256
     from evals.usage import conversation_metrics
@@ -518,8 +524,9 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
                             f"{error.errors()[0]['msg']})") from None
     latest = not kept_out(summary)
     try:
-        waivers = checked_waivers(result, load_waivers(root), root=root)
-    except (OSError, ValueError) as error:
+        waivers = (checked_committed_waivers(result, root=root) if latest
+                   else checked_waivers(result, load_waivers(root), root=root))
+    except (OSError, ValueError, GitError, ResultsRefused) as error:
         raise ReportRefused(f"the pass's waivers can't be checked: {error}") from None
     return {
         "pass_result": summary, "gate_result": gate(result, rates, waivers=waivers), "metrics": metrics,

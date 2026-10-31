@@ -37,7 +37,7 @@ key whatever its tree held. That is read from what the pass recorded before its 
 the uncommitted gated changes it found and whether it built the kernel: `PassResult.start`), never
 from `config.results` alone, and the inputs it names must be its commit's, read from git, so a
 `pass.json` edited to claim `--results` or relabelled to another commit is refused. It holds rows,
-never text, codes or ids beyond scenario ids. It lists the gated map as [object id, path] pairs sorted by path
+never text, codes or ids beyond scenario ids and the names of waiver signers. It lists the gated map as [object id, path] pairs sorted by path
 (`gated_pairs`), never as an object, so CI's secret scan reads no path and object id as a secret.
 
 **`results-check --base <ref>`** (`make evals-results-check`), with no database, network or key:
@@ -686,6 +686,25 @@ _USES = {
 }
 
 
+def checked_committed_waivers(p: Any, *, root: Path = REPO_ROOT,
+                              committed: Sequence[Waiver] | None = None,
+                              supplied: Sequence[Waiver] | None = None) -> list[Waiver]:
+    """Bind this pass's local/supplied waivers to HEAD, then check its transcript evidence."""
+    if committed is None:
+        committed = TypeAdapter(list[Waiver]).validate_json(show(root, "HEAD", WAIVERS_PATH) or "[]")
+
+    def entries_for_pass(entries: Sequence[Waiver]) -> list[str]:
+        return sorted(w.model_dump_json() for w in entries if w.pass_id == p.pass_id)
+
+    offered: list[Sequence[Waiver]] = [load_waivers(root)]
+    if supplied is not None:
+        offered.append(supplied)
+    if any(entries_for_pass(entries) != entries_for_pass(committed) for entries in offered):
+        raise ResultsRefused(f"pass {p.pass_id}'s local or supplied waivers differ from the head's; "
+                             "commit evals/waivers.json first")
+    return checked_waivers(p, list(committed), root=root)
+
+
 def reconcile_pass(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
                    use: Literal["final gate", "recorded rate"],
                    waivers: Sequence[Waiver] | None = None) -> Reconciled:
@@ -713,17 +732,7 @@ def reconcile_pass(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT,
                                  f"{at_inputs}; run a new pass")
         file = results_file(p, rates, root=root)
         at_head = reconcile(file, root, "HEAD", name=f"pass {p.pass_id}'s results file")
-        def entries_for_pass(entries: Sequence[Waiver]) -> list[str]:
-            return sorted(w.model_dump_json() for w in entries if w.pass_id == p.pass_id)
-
-        committed = entries_for_pass(at_head.waivers)
-        offered: list[Sequence[Waiver]] = [load_waivers(root)]
-        if waivers is not None:
-            offered.append(waivers)
-        if any(entries_for_pass(entries) != committed for entries in offered):
-            raise ResultsRefused(f"pass {p.pass_id}'s local or supplied waivers differ from the head's; "
-                                 "commit evals/waivers.json first")
-        checked_waivers(p, list(at_head.waivers), root=root)
+        checked_committed_waivers(p, root=root, committed=at_head.waivers, supplied=waivers)
         return at_head
     except CheckFailed as failure:
         raise ResultsRefused(str(failure)) from None
@@ -827,6 +836,12 @@ def _check(base: str, root: Path) -> str:
         head = reconcile(file, root, "HEAD", name=name)
         rates, landed = head.rates, head.landed
     before = _check_history(rates, landed, base, root)
+    base_waivers = json.loads(show(root, base, WAIVERS_PATH) or "[]")
+    head_waivers = json.loads(show(root, "HEAD", WAIVERS_PATH) or "[]")
+    if not isinstance(base_waivers, list):
+        raise CheckFailed(f"{base}'s waivers.json isn't a list")
+    if head_waivers[:len(base_waivers)] != base_waivers:
+        raise CheckFailed(f"waivers.json rewrites the history {base} holds; it only grows at its end")
     result = gate_of(file, rates, waivers=head.waivers)
     if not result.passed:
         notice = f"; {waiver_summary(result)}" if result.waived_violations else ""
