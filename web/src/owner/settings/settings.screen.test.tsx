@@ -81,20 +81,23 @@ describe('Settings', () => {
     const sidebar = screen.getByRole('complementary', { name: 'Claude Desk' });
     await expect.element(sidebar.getByRole('link', { name: /^Settings/ })).toHaveAttribute('aria-current', 'page');
 
-    // Its sections in order, General current; nothing about connectors, which have their own tab.
+    // Its sections in order, General current once its page is drawn (SubNav's links are there
+    // before, on the way from `settings` to General); nothing about connectors, which have their own tab.
     await expect.poll(() => subNav(screen).getByRole('link').elements().map((link) => link.textContent)).toEqual(SECTIONS);
-    expect(currentSection(screen)).toEqual(['General']);
+    await expect.element(main(screen).getByRole('region', { name: 'Your business' })).toBeVisible();
+    await expect.poll(() => currentSection(screen)).toEqual(['General']);
     expect(main(screen).element().textContent).not.toMatch(/Integrations|Connectors/);
 
-    // Each section at its own address, marked as the current one.
-    for (const [name, path] of [
-      ['Notifications', NOTIFICATIONS],
-      ['Billing', BILLING],
-      ['General', GENERAL],
+    // Each section at its own address, marked as the current one, with its own page drawn.
+    for (const [name, path, region] of [
+      ['Notifications', NOTIFICATIONS, 'Set for a plumber'],
+      ['Billing', BILLING, 'Plan'],
+      ['General', GENERAL, 'Your business'],
     ] as const) {
       await subNav(screen).getByRole('link', { name }).click();
       await expect.poll(() => router.state.location.pathname).toBe(path);
       await expect.poll(() => currentSection(screen)).toEqual([name]);
+      await expect.element(main(screen).getByRole('region', { name: region })).toBeVisible();
       expect(main(screen).element().textContent).not.toMatch(/Integrations|Connectors/);
     }
     expect(requests('setAnswering')).toEqual([]);
