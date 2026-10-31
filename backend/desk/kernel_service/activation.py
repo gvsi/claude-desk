@@ -32,10 +32,10 @@ mode or proved live in `symcc` mode. One it can't rebuild stays as stored, refus
 (`version_outdated`), and each attempt is ledgered and alerts the owner. First, every Desk is given
 the native tools the kernel registers that it has no row for (one created before they were), so a
 version is rebuilt over the tools a Desk made now has, and a seed's from its shipped report. Before
-serving, startup does this from cached reports only, within `STARTUP_REBUILD_S`
-(`rebuild_at_startup`); the Desks it leaves, and every version that needs a live proof, are
-rebuilt one at a time in the background while the kernel serves (`rebuild_in_background`), and
-refuse until then.
+serving, startup does this from cached reports only, finding the Desks one copy at a time, within
+`STARTUP_REBUILD_S` finding included (`rebuild_at_startup`); the copies and Desks it leaves, and
+every version that needs a live proof, are found and rebuilt one at a time in the background while
+the kernel serves (`rebuild_in_background`), and refuse until then.
 
 Loaded versions. A stored version loads into the policy engine on its first use
 (`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first,
@@ -63,7 +63,7 @@ import tempfile
 import threading
 from collections import OrderedDict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from datetime import datetime, time
 from pathlib import Path
@@ -90,8 +90,8 @@ from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain,
                                  review_thresholds, seed)
 from desk.kernel_service.auth import OwnerCtx
 from desk.kernel_service.reference import RefSets
-from desk.kernel_service.repo import (KernelCtx, KernelFailure, KernelRuntime, desks_missing_tools, kernel_transaction,
-                                     log_error, outdated_versions)
+from desk.kernel_service.repo import (KernelCtx, KernelFailure, KernelRuntime, copy_ids, desks_to_bring_up,
+                                     kernel_transaction, log_error)
 from desk.presets import PRESETS
 
 log = logging.getLogger(__name__)
@@ -697,14 +697,16 @@ async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | Non
 # and cap, so nothing the owner chose changes. Before that, each Desk without a native tool the
 # kernel registers is given it (`desks.add_native_tools`), so the profiles a version is rebuilt
 # over are those a Desk made now has. Startup does what it can from cached reports within its
-# budget before the kernel serves (`rebuild_at_startup`); the rest, live proofs included, goes on in
-# the background (`rebuild_in_background`), and a version not yet rebuilt refuses meanwhile.
+# budget, finding the Desks included, before the kernel serves (`rebuild_at_startup`); the rest,
+# finding and live proofs included, goes on in the background (`rebuild_in_background`), and a
+# version not yet rebuilt refuses meanwhile.
 
 # What a rebuild rewrites: the compiled sets, what they were proved against and the proof.
 _REBUILT_COLUMNS = ("cards", "cedar", "schema_json", *VersionHashes._fields, "proof")
-# How long startup starts bringing Desks up to date before the kernel serves (`rebuild_at_startup`).
-# It proves nothing live, so it ends within this and one Desk's compile: with the selftest's 30 s
-# backstop, inside the kernel container's 60 s health check start period.
+# How long startup starts finding and bringing Desks up to date before the kernel serves
+# (`rebuild_at_startup`). It proves nothing live, so it ends within this and one copy's lookup or
+# one Desk's compile: with the selftest's 30 s backstop, inside the kernel container's 60 s health
+# check start period.
 STARTUP_REBUILD_S = 15.0
 # A rebuild startup leaves to the background, since only a live proof would answer it.
 NEEDS_PROOF = "needs_proof"
@@ -723,55 +725,84 @@ Rebuilt = dict[tuple[str, int], str | None]   # (desk_id, version): None when re
 
 @dataclass(frozen=True)
 class StartupRebuild:
-    """What startup did before the kernel served (`rebuild_at_startup`)."""
+    """What startup did before the kernel served (`rebuild_at_startup`), and what it left for
+    `rebuild_in_background`."""
 
     results: Rebuilt                   # each outdated version it rebuilt, or refused to
-    left: list[tuple[str, str]]        # the Desks, `(copy_id, desk_id)`, left for `rebuild_in_background`
+    left: list[tuple[str, str]]        # the Desks, `(copy_id, desk_id)`, it found and didn't bring up
+    unscanned: list[str] = field(default_factory=list)   # the copies it didn't look at, in order
 
 
 async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
-    """Brings the Desks that need it up to date before the kernel serves, in `(copy_id, desk_id)`
-    order (`_bring_up`): each Desk without a native tool the kernel registers, and each whose
-    active version an earlier kernel stored under another baseline. It starts a Desk only within
-    `STARTUP_REBUILD_S` of its own start and rebuilds a version only from a cached report, leaving
-    one that needs a live proof (`NEEDS_PROOF`), so the kernel serves within the budget and one
-    Desk's compile however many Desks there are. The Desks it doesn't finish are left, in order,
-    for `rebuild_in_background`; until then a version left as stored refuses every call
-    (`version_outdated`)."""
-    native = [profile.tool for profile in adapters.registered_profiles(source="native")]
-    work = sorted({*await desks_missing_tools(runtime, native),
-                   *((copy_id, desk_id) for copy_id, desk_id, _ in
-                     await outdated_versions(runtime, compiler.baseline_sha256()))})
+    """Brings the Desks that need it up to date before the kernel serves: each Desk without a
+    native tool the kernel registers, and each whose active version an earlier kernel stored under
+    another baseline (`_bring_up`). It looks at the copies one at a time, in ID order, finding a
+    copy's Desks (`repo.desks_to_bring_up`) and bringing them up, in ID order, and it starts a copy
+    or a Desk only within `STARTUP_REBUILD_S` of its own start, finding included. It rebuilds a
+    version only from a cached report, leaving one that needs a live proof (`NEEDS_PROOF`), so the
+    kernel serves within the budget and one copy's lookup or one Desk's compile, however many
+    copies and Desks there are. What it doesn't reach is left, in order, for
+    `rebuild_in_background`: the Desks it found and the copies it didn't look at, and one whose
+    lookup failed. Until then a version left as stored refuses every call (`version_outdated`)."""
     started = monotonic()
+
+    def spent() -> bool:
+        return monotonic() - started >= STARTUP_REBUILD_S
+
     results: Rebuilt = {}
     left: list[tuple[str, str]] = []
-    for n, (copy_id, desk_id) in enumerate(work):
-        if monotonic() - started >= STARTUP_REBUILD_S:
-            left += work[n:]
+    unscanned: list[str] = []
+    copies = await copy_ids(runtime)
+    for n, copy_id in enumerate(copies):
+        if spent():
+            unscanned += copies[n:]
             break
-        done = await _bring_up(runtime, copy_id, desk_id, prove=False)
-        if done is not None and done[1] == NEEDS_PROOF:
-            left.append((copy_id, desk_id))
-        elif done is not None:
-            results[(desk_id, done[0])] = done[1]
-    if left:
-        log.info("startup_rebuild_left desks=%s", len(left))
-    return StartupRebuild(results=results, left=left)
+        desk_ids = await _desks_of(runtime, copy_id)
+        if desk_ids is None:                  # its lookup failed: the background looks again
+            unscanned.append(copy_id)
+            continue
+        for desk_id in desk_ids:
+            if spent():
+                left.append((copy_id, desk_id))
+                continue
+            done = await _bring_up(runtime, copy_id, desk_id, prove=False)
+            if done is not None and done[1] == NEEDS_PROOF:
+                left.append((copy_id, desk_id))
+            elif done is not None:
+                results[(desk_id, done[0])] = done[1]
+    if left or unscanned:
+        log.info("startup_rebuild_left desks=%s copies=%s", len(left), len(unscanned))
+    return StartupRebuild(results=results, left=left, unscanned=unscanned)
 
 
-async def rebuild_in_background(runtime: KernelRuntime, left: Sequence[tuple[str, str]]) -> Rebuilt:
-    """Brings up the Desks startup left (`StartupRebuild.left`), one at a time while the kernel
-    serves, proving live in `symcc` mode, and returns what became of each outdated version. As at
-    startup, a version it can't rebuild is ledgered and alerts the owner, and one it hasn't reached
-    yet keeps refusing. The app cancels it at shutdown: the Desk in hand rolls back, its prover is
+async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild) -> Rebuilt:
+    """Finishes what startup left (`StartupRebuild`) while the kernel serves: finds the Desks of
+    the copies it didn't look at, then brings up those and the Desks it left, one at a time,
+    proving live in `symcc` mode, and returns what became of each outdated version. As at startup,
+    a version it can't rebuild is ledgered and alerts the owner, and one it hasn't reached yet
+    keeps refusing. The app cancels it at shutdown: the Desk in hand rolls back, its prover is
     killed, and the next start takes it up again."""
+    work = list(startup.left)
+    for copy_id in startup.unscanned:
+        work += [(copy_id, desk_id) for desk_id in await _desks_of(runtime, copy_id) or []]
     results: Rebuilt = {}
-    for copy_id, desk_id in left:
+    for copy_id, desk_id in work:
         done = await _bring_up(runtime, copy_id, desk_id, prove=True)
         if done is not None:
             results[(desk_id, done[0])] = done[1]
-    log.info("background_rebuild_done desks=%s", len(left))
+    log.info("background_rebuild_done desks=%s", len(work))
     return results
+
+
+async def _desks_of(runtime: KernelRuntime, copy_id: str) -> list[str] | None:
+    """The copy's Desks to bring up (`repo.desks_to_bring_up`), or None when the lookup failed,
+    which is logged; a Desk it would have found keeps refusing until a later pass finds it."""
+    native = [profile.tool for profile in adapters.registered_profiles(source="native")]
+    try:
+        return await desks_to_bring_up(runtime, copy_id, native, compiler.baseline_sha256())
+    except Exception as exc:
+        log_error(log, exc, "rebuild_lookup_failed copy_id=%s", copy_id)
+        return None
 
 
 async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *,

@@ -11,11 +11,11 @@ refuses to start, then the policy engine over the always-on baseline
 in its cache, then runs `desk-prove --selftest` once to pick the proof mode for the whole process
 (`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), then
 gives every Desk the native tools it was created without and rebuilds the active rules versions an
-earlier kernel stored under another baseline, within a budget and from cached reports only
-(`activation.rebuild_at_startup`), then reconciles the executions a stopped kernel left behind
-(`execute.reconcile_at_startup`), and last starts the rebuild of the Desks startup left, which runs
-in the background while the kernel serves (`activation.rebuild_in_background`,
-`app.state.rebuilding`) and is cancelled at shutdown.
+earlier kernel stored under another baseline, within a budget that finding them counts against
+too, and from cached reports only (`activation.rebuild_at_startup`), then reconciles the
+executions a stopped kernel left behind (`execute.reconcile_at_startup`), and last starts the
+rebuild of the copies and Desks startup left, which runs in the background while the kernel serves
+(`activation.rebuild_in_background`, `app.state.rebuilding`) and is cancelled at shutdown.
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -150,11 +150,11 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                                          sessions=factory, policies=policies, decisions=reviewer)
         rebuilding: asyncio.Task | None = None
         try:
-            left: list[tuple[str, str]] = []
+            startup: activation.StartupRebuild | None = None
             try:
                 # active versions an earlier kernel stored under another baseline, rebuilt and
                 # proved before anything is decided under them; one that isn't decides nothing
-                left = (await activation.rebuild_at_startup(app.state.kernel)).left
+                startup = await activation.rebuild_at_startup(app.state.kernel)
             except Exception as exc:
                 log_error(log, exc, "startup_rebuild_failed")
             try:
@@ -163,9 +163,10 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                 await execute.reconcile_at_startup(app.state.kernel)
             except Exception as exc:
                 log_error(log, exc, "startup_reconcile_failed")
-            if left:
-                # the Desks startup left, while the kernel serves; each refuses until it is rebuilt
-                rebuilding = asyncio.create_task(activation.rebuild_in_background(app.state.kernel, left))
+            if startup is not None and (startup.left or startup.unscanned):
+                # the Desks and copies startup left, while the kernel serves; each Desk refuses
+                # until it is rebuilt
+                rebuilding = asyncio.create_task(activation.rebuild_in_background(app.state.kernel, startup))
             app.state.rebuilding = rebuilding
             yield
         finally:
@@ -176,7 +177,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
 
     app = FastAPI(title="Claude Desk kernel", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.proof_mode = "bounded"   # until the startup selftest passes
-    app.state.rebuilding = None        # the background rebuild of the Desks startup left, if any
+    app.state.rebuilding = None        # the background rebuild of what startup left, if anything
     app.state.unproved_seeds = set()   # shipped rule sets that couldn't activate for want of a report
     app.add_exception_handler(KernelFailure, _kernel_failure)
     app.add_exception_handler(RequestValidationError, _invalid_request)

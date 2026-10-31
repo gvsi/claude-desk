@@ -6,9 +6,9 @@ the context, which this kernel's baseline reads, so such a version doesn't even 
 the kernel rebuilds each active version stored under another baseline from its own cards, at the
 money cap the money cap revision kept for it, and puts the rebuild in its place only with a proof
 of all seven obligations; a version it can't rebuild and prove refuses every call, and the owner
-is alerted. Startup does this from cached reports within a budget before the kernel serves, and
-leaves the rest, live proofs included, to a background rebuild while the kernel serves; a version
-not yet rebuilt refuses meanwhile.
+is alerted. Startup does this from cached reports within a budget before the kernel serves,
+finding the Desks included, and leaves the rest, finding and live proofs included, to a background
+rebuild while the kernel serves; a version not yet rebuilt refuses meanwhile.
 
 `fixtures/kernel_core_version.json` is a version exactly as the kernel core stored it, with the
 tools it was compiled over: Rivera's cards plus an auto payment link card up to $100, over the
@@ -277,18 +277,73 @@ async def test_startup_starts_no_desk_past_its_budget(app, client, monkeypatch):
     monkeypatch.setattr(activation, "monotonic", lambda: elapsed[0])
     monkeypatch.setattr(activation, "rebuild_version", taking_the_budget)
     startup = await activation.rebuild_at_startup(app.state.kernel)
-    assert startup == activation.StartupRebuild(results={(first.desk_id, 1): None},
-                                                left=[(second.copy_id, second.desk_id)])
+    # the first copy's rebuild took the whole budget, so startup never looked at the second copy
+    assert startup == activation.StartupRebuild(results={(first.desk_id, 1): None}, left=[],
+                                                unscanned=[second.copy_id])
     # the Desk left refuses until the background rebuilds it, with nothing ledgered or alerted for it before
     visitor = await open_visitor(client, second)
     refused = await decided(client, visitor, "native.find_slots", call_id="slots")
     assert (refused.outcome, refused.policy_version) == ("refuse", 1) and REFUSED in refused.reason_plain
     assert all("rebuilt" not in entry for entry in await entries_of(client, second, "policy"))
     assert activation.REBUILD_ALERT not in [alert.body for alert in await owner_alerts(app, second)]
-    assert await activation.rebuild_in_background(app.state.kernel, startup.left) == {(second.desk_id, 1): None}
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(second.desk_id, 1): None}
     allowed = await decided(client, visitor, "native.find_slots", call_id="slots-rebuilt")
     assert (allowed.outcome, allowed.policy_version) == ("allow", 1)
     assert (await entries_of(client, second, "policy"))[-1]["rebuilt"] is True
+
+
+async def test_startup_discovery_counts_against_its_budget(app, client, monkeypatch):
+    # finding the Desks to bring up is part of startup's budget: discovery that takes all of it (two minutes here)
+    # starts no rebuild, and the background finds and brings up the rest
+    first, second = sorted([await rivera(app, client), await rivera(app, client)],
+                           key=lambda copy: (copy.copy_id, copy.desk_id))
+    for copy in (first, second):
+        await seed_from_an_earlier_kernel(app, copy)
+    elapsed = [0.0]
+    discover = activation.desks_to_bring_up
+
+    async def slow(*args, **kwargs):
+        elapsed[0] += 120.0
+        return await discover(*args, **kwargs)
+
+    started = []
+    rebuild = activation.rebuild_version
+
+    async def counted(ctx, desk_id, *args, **kwargs):
+        started.append(desk_id)
+        return await rebuild(ctx, desk_id, *args, **kwargs)
+
+    monkeypatch.setattr(activation, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(activation, "desks_to_bring_up", slow)
+    monkeypatch.setattr(activation, "rebuild_version", counted)
+    startup = await activation.rebuild_at_startup(app.state.kernel)
+    # it found the first copy's Desk and had no time left to start it, and never looked at the second copy
+    assert startup == activation.StartupRebuild(results={}, left=[(first.copy_id, first.desk_id)],
+                                                unscanned=[second.copy_id])
+    assert started == []
+    for copy in (first, second):
+        assert all("rebuilt" not in entry for entry in await entries_of(client, copy, "policy"))
+    background = await activation.rebuild_in_background(app.state.kernel, startup)
+    assert background == {(first.desk_id, 1): None, (second.desk_id, 1): None}
+    assert started == [first.desk_id, second.desk_id]
+
+
+async def test_a_copy_whose_lookup_fails_at_startup_is_looked_at_again_in_the_background(app, client, monkeypatch):
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    discover, calls = activation.desks_to_bring_up, []
+
+    async def failing_once(*args, **kwargs):
+        calls.append(args[1])
+        if len(calls) == 1:
+            raise RuntimeError("the lookup's connection dropped")
+        return await discover(*args, **kwargs)
+
+    monkeypatch.setattr(activation, "desks_to_bring_up", failing_once)
+    startup = await activation.rebuild_at_startup(app.state.kernel)
+    assert startup == activation.StartupRebuild(results={}, left=[], unscanned=[copy.copy_id])
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
+    assert calls == [copy.copy_id, copy.copy_id]
 
 
 async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
@@ -311,7 +366,7 @@ async def test_startup_leaves_a_live_proof_to_the_background(app, client, regist
     refused = await decided(client, visitor, "native.find_slots", call_id="slots")
     assert (refused.outcome, refused.policy_version) == ("refuse", 2) and REFUSED in refused.reason_plain
     # the background proves it, and refuses and alerts as startup did before it had a budget
-    assert await activation.rebuild_in_background(app.state.kernel, startup.left) == {(copy.desk_id, 2): "not_proved"}
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 2): "not_proved"}
     assert len(proved) == 1
     assert (await entries_of(client, copy, "policy"))[-1] == {"version": 2, "rebuilt": False, "refused": "not_proved"}
     assert [alert.body for alert in await owner_alerts(app, copy)][-1:] == [activation.REBUILD_ALERT]

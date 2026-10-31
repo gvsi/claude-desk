@@ -346,9 +346,9 @@ async def copy_of_document_link(ctx: KernelCtx, token_sha256: str) -> str | None
     return await _resolve(ctx, "copy_of_document_link", token_sha256)
 
 
-# Startup's lookups across copies: which copies hold an execution to settle, which hold an active
-# rules version an earlier kernel stored, to rebuild, and which hold a Desk without a native tool
-# this kernel registers, to add.
+# Startup's lookups across copies: which copies hold an execution to settle, and, one copy at a time
+# so the startup rebuild can stop within its budget, which Desks of a copy have an active rules
+# version an earlier kernel stored, to rebuild, or lack a native tool this kernel registers, to add.
 
 async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[tuple[str, str]]:
     """`(copy_id, action_id)` of every execution startup reconciliation must settle: an intent
@@ -370,44 +370,29 @@ async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[t
     return found
 
 
-async def outdated_versions(runtime: KernelRuntime, baseline_sha256: str) -> list[tuple[str, str, int]]:
-    """`(copy_id, desk_id, version)` of every active rules version stored under a baseline other
-    than `baseline_sha256`, the one the kernel enforces. Used only by the startup rebuild
-    (`activation.rebuild_at_startup`), which then works through each copy's `KernelRepo`. It visits
-    every copy (`kernel.copy_ids()`) and reads each through its own `KernelRepo`, as
-    `orphan_intents` does."""
+async def copy_ids(runtime: KernelRuntime) -> list[str]:
+    """Every copy's ID (`kernel.copy_ids()`), in order: the copies the startup rebuild
+    (`activation.rebuild_at_startup`) looks at one at a time, through `desks_to_bring_up`."""
     async with runtime.engine.connect() as conn:
-        copy_ids = list((await conn.scalars(select(func.kernel.copy_ids()))).all())
-    found: list[tuple[str, str, int]] = []
-    for copy_id in copy_ids:
-        copy = KernelRepo(copy_id)
-        async with runtime.sessions() as db:
-            copy.bind(db)
-            rows = await db.execute(copy.scoped(select(PolicyVersion.desk_id, PolicyVersion.version).where(
-                PolicyVersion.status == "active", PolicyVersion.baseline_sha256 != baseline_sha256)
-                .order_by(PolicyVersion.desk_id)))
-            found += [(copy_id, desk_id, version) for desk_id, version in rows]
-    return found
+        return sorted((await conn.scalars(select(func.kernel.copy_ids()))).all())
 
 
-async def desks_missing_tools(runtime: KernelRuntime, tools: Iterable[str]) -> list[tuple[str, str]]:
-    """`(copy_id, desk_id)` of every Desk with no `tools` row for one of `tools`, the native tools
-    the kernel registers: a Desk created before one of them was. Used only by the startup rebuild
-    (`activation.rebuild_at_startup`), which adds them through each copy's `KernelRepo`. It visits
-    every copy (`kernel.copy_ids()`) and reads each through its own `KernelRepo`, as
-    `orphan_intents` does."""
-    wanted = sorted(set(tools))
-    async with runtime.engine.connect() as conn:
-        copy_ids = list((await conn.scalars(select(func.kernel.copy_ids()))).all())
-    found: list[tuple[str, str]] = []
-    for copy_id in copy_ids:
-        copy = KernelRepo(copy_id)
-        async with runtime.sessions() as db:
-            copy.bind(db)
-            desk_ids = (await db.scalars(copy.scoped(select(Desk.desk_id).order_by(Desk.desk_id)))).all()
-            rows = await db.execute(copy.scoped(select(Tool.desk_id, Tool.tool).where(Tool.tool.in_(wanted))))
-            have: dict[str, set[str]] = {}
-            for desk_id, tool in rows:
-                have.setdefault(desk_id, set()).add(tool)
-            found += [(copy_id, desk_id) for desk_id in desk_ids if have.get(desk_id, set()) != set(wanted)]
-    return found
+async def desks_to_bring_up(runtime: KernelRuntime, copy_id: str, tools: Iterable[str],
+                            baseline_sha256: str) -> list[str]:
+    """The Desks of `copy_id`, in ID order, that the startup rebuild brings up: each with no
+    `tools` row for one of `tools`, the native tools the kernel registers (a Desk created before
+    one of them was), and each whose active rules version was stored under a baseline other than
+    `baseline_sha256`, the one the kernel enforces. Read through the copy's own `KernelRepo`, as
+    `orphan_intents` reads each copy, so row-level security still holds the reads to one copy."""
+    wanted = set(tools)
+    copy = KernelRepo(copy_id)
+    async with runtime.sessions() as db:
+        copy.bind(db)
+        desk_ids = (await db.scalars(copy.scoped(select(Desk.desk_id).order_by(Desk.desk_id)))).all()
+        rows = await db.execute(copy.scoped(select(Tool.desk_id, Tool.tool).where(Tool.tool.in_(sorted(wanted)))))
+        have: dict[str, set[str]] = {}
+        for desk_id, tool in rows:
+            have.setdefault(desk_id, set()).add(tool)
+        outdated = set((await db.scalars(copy.scoped(select(PolicyVersion.desk_id).where(
+            PolicyVersion.status == "active", PolicyVersion.baseline_sha256 != baseline_sha256)))).all())
+    return [desk_id for desk_id in desk_ids if have.get(desk_id, set()) != wanted or desk_id in outdated]
