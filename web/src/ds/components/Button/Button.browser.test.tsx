@@ -9,6 +9,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
 
+import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea } from '../../test/touch.ts';
 import { Button } from './Button.tsx';
 import meta, { BusyReducedMotion } from './Button.stories.tsx';
 
@@ -55,5 +56,91 @@ it('button_ref_lets_go_while_the_button_is_on_the_page', () => {
   } finally {
     act(() => root.unmount());
     host.remove();
+  }
+});
+
+/** Renders `ui` into a fresh host on the page; the returned function takes it off again. */
+function mount(ui: React.ReactElement): { host: HTMLDivElement; unmount: () => void } {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  act(() => root.render(ui));
+  return {
+    host,
+    unmount: () => {
+      act(() => root.unmount());
+      host.remove();
+    },
+  };
+}
+
+it('touch_hit_area_reaches_44_px_unseen', async () => {
+  // On a touch phone a 32 px button gets an unseen hit area, centred on it, 44 px tall: a finger
+  // that lands just above or below it still presses it. The button itself doesn't move or grow.
+  const { host, unmount } = mount(
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 40, padding: 40 }}>
+      <Button variant="secondary">Open your public page</Button>
+      <Button variant="primary" size="main">
+        Send counter-offer
+      </Button>
+    </div>,
+  );
+  try {
+    const [inline, main] = [...host.querySelectorAll<HTMLElement>('.cd-button')] as [HTMLElement, HTMLElement];
+    const fine = [inline.getBoundingClientRect().toJSON(), main.getBoundingClientRect().toJSON()];
+    expect(getComputedStyle(inline, '::after').content, 'no hit area under a fine pointer').toBe('none');
+
+    await coarsePointer();
+    expect([inline.getBoundingClientRect().toJSON(), main.getBoundingClientRect().toJSON()], 'the buttons keep their boxes').toEqual(fine);
+    for (const button of [inline, main]) {
+      const own = button.getBoundingClientRect();
+      const area = hitArea(button);
+      expect(area.height, `${button.textContent}: 44 px tall`).toBe(44);
+      expect(area.width, `${button.textContent}: as wide as the button, already over 44 px`).toBe(own.width);
+      expect(own.top - area.top, `${button.textContent}: centred`).toBe(area.bottom - own.bottom);
+      expectHitAreaLands(button);
+      expectUnseen(button);
+    }
+  } finally {
+    unmount();
+  }
+});
+
+it('touch_hit_areas_of_neighbours_never_overlap', async () => {
+  // Side by side, 8 px apart as an approval's answers are: each button is wider than 44 px, so its
+  // hit area only grows up and down, and a tap between them lands on the nearer one or on neither.
+  // Stacked 8 px apart, where 6 px each way would meet in the gap, the layout caps the reach at
+  // half its gap (--cd-touch-reach-block), so the two hit areas meet in its middle and never overlap.
+  const { host, unmount } = mount(
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 40, padding: 40 }}>
+      <div className="row" style={{ display: 'flex', gap: 'var(--space-8)' }}>
+        <Button variant="secondary">Allow this time</Button>
+        <Button variant="danger">Deny this time</Button>
+      </div>
+      <div className="stack" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 'var(--space-8)' }}>
+        <Button variant="ghost" size="inline">
+          Share your Desk
+        </Button>
+        <Button variant="ghost" size="inline">
+          Start over
+        </Button>
+      </div>
+    </div>,
+  );
+  try {
+    await coarsePointer();
+    const [allow, deny] = [...host.querySelectorAll<HTMLElement>('.row .cd-button')] as [HTMLElement, HTMLElement];
+    expect(hitArea(allow).height, 'side by side: still 44 px tall').toBe(44);
+    expectApart(hitArea(allow), hitArea(deny), 'side by side');
+
+    const stack = host.querySelector<HTMLElement>('.stack');
+    stack?.style.setProperty('--cd-touch-reach-block', 'calc(var(--space-8) / 2)');
+    const [share, start] = [...host.querySelectorAll<HTMLElement>('.stack .cd-button')] as [HTMLElement, HTMLElement];
+    expect(hitArea(share).bottom, 'stacked: the hit area stops halfway across the gap').toBe(share.getBoundingClientRect().bottom + 4);
+    expectApart(hitArea(share), hitArea(start), 'stacked');
+    for (const button of [allow, deny, share, start]) expectHitAreaLands(button);
+  } finally {
+    unmount();
   }
 });
