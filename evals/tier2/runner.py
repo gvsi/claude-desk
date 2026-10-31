@@ -72,6 +72,7 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr, StrictStr, TypeAdapter,
 from desk.contracts import Decision, DemoInboxEntry, KnowledgeItem, Label, RenderedBlock, SeedDocument
 from desk.events import EvError, EvHeld, EvMessage, EvResolved, EvTurnEnd, SseEvent
 from evals.client import TIMEOUT_S, AnswerUnreadable, ApiCallFailed, DeskClient, StreamEvent
+from evals.credentials import mask_credentials
 from evals.oracles import Marker, planted_marker, seed_markers
 from evals.tier2.artifact import (
     A2AAnswer,
@@ -114,15 +115,6 @@ _LINK = re.compile(r"(/api/d/|/api/pay/|/pay/)([^/?#\s\"'\\]+)")
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")   # between sentences of a tool's description
 REDACTED = "[redacted]"
 MIN_SECRET = 6   # shorter values aren't redacted as text (a code is six digits)
-# A URL's password (`scheme://user:password@host`, up to the token's last @, so an unencoded @ in the password
-# is masked whole, or to the end of the text when a message cut before it reached the runner ends inside it)
-# and any value a password key sets (`password=`, `PGPASSWORD=`, `'password': '…'`, `password: …`), as a
-# database or HTTP error's message can carry them. A quoted value is masked whole, to its closing quote (or the
-# end of the text), its escaped quotes and spaces included, as a libpq connection string quotes one.
-_URL_PASSWORD = re.compile(r"(?P<head>\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^:/?#@\s'\"]*:)(?:[^\s'\"]*(?P<at>@)|[^\s'\"]*\Z)")
-_PASSWORD_VALUE = re.compile(r"""(?i)(?P<key>\b\w*password\b['"]?\s*[:=]\s*)"""
-                             r"""(?:(?P<quote>['"])(?:\\.|(?!(?P=quote))[^\\])*(?P=quote)?|[^\s'"&,}]*)""", re.DOTALL)
-MASKED = "***"
 DETAIL_CHARS = 500   # an error detail's length as written, cut after its credentials are masked
 # What the artifact says when the run left the owner's Demo inbox unread. The kernel writes owner alerts and
 # checkpoint notices to its Demo inbox already; plan 01b adds the route that reads it and the verification codes.
@@ -149,17 +141,6 @@ class RunError(BaseModel):
     @classmethod
     def _masked(cls, detail: str) -> str:
         return redact(mask_credentials(detail), ())[:DETAIL_CHARS]
-
-
-def mask_credentials(text: str) -> str:
-    """`text` with each URL's password and every value a password key sets replaced by `***`."""
-    text = _URL_PASSWORD.sub(lambda m: m.group("head") + MASKED + (m.group("at") or ""), text)
-    return _PASSWORD_VALUE.sub(_masked_value, text)
-
-
-def _masked_value(match: re.Match[str]) -> str:
-    quote = match.group("quote") or ""
-    return match.group("key") + quote + MASKED + quote
 
 
 class SimulatorStats(BaseModel):

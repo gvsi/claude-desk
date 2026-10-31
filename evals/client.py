@@ -37,6 +37,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from httpx_sse import aconnect_sse
 
 from desk.contracts import A2ARequest, DemoAgentIssued, Mandate
+from evals.credentials import mask_credentials
 from evals.routes import ROUTES
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -49,19 +50,22 @@ _PAYMENT_LINK = re.compile(r"(?:/api)?/pay/([^/?#\s]+)")
 # owner app re-sends `retry` every 3 s ("How proofs run"), and so does the client, for at most two minutes.
 PROVING_RETRY_S, PROVING_LIMIT_S = 3.0, 120.0
 SHOWN_UNREADABLE = 80   # the characters shown of a body or event that isn't JSON
+SHOWN_BODY = 500   # the characters a refusal's message shows of a JSON body
 
 
 class ApiCallFailed(AssertionError):
     """An operation that needs a 2xx answer got another. Carries the status and the body the API sent,
     never what the request carried: a JSON body as it came, for the caller to judge; one that isn't
-    JSON as its first 80 characters, named by its `content_type` (None for a JSON body)."""
+    JSON as its first 80 characters, named by its `content_type` (None for a JSON body). The message,
+    and a body that isn't JSON, have their credentials masked before they are cut (`mask_credentials`),
+    so one that crosses a cut is never shown in part."""
 
     def __init__(self, op: str, status: int, body: Any, *, content_type: str | None = None, what: str = "a body"):
         self.op, self.status, self.content_type = op, status, content_type
-        self.body = body if content_type is None else body[:SHOWN_UNREADABLE]
+        self.body = body if content_type is None else mask_credentials(body)[:SHOWN_UNREADABLE]
         if content_type is None:
             shown = json.dumps(body) if not isinstance(body, str) else body
-            message = f"{op} answered {status}: {shown[:500]}"
+            message = f"{op} answered {status}: {mask_credentials(shown)[:SHOWN_BODY]}"
         else:
             message = f"{op} answered {status} ({content_type}) with {what} that isn't JSON: {self.body!r}"
         super().__init__(message)

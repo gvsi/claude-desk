@@ -89,6 +89,7 @@ from pydantic import (
 )
 
 from evals import results
+from evals.credentials import mask_credentials
 from evals.gate import GateInput, RunRow
 from evals.results import API_ROUTES, KERNEL_ROUTES, SIMULATOR_ROUTES
 from evals.tier1.harness import load_landed
@@ -107,6 +108,7 @@ from evals.tier2.suite import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PER_RUN_USD = 0.40   # a run's cost until spend rows measure it (master "Model cost and latency budget")
 SPEND_FILE = "desk-eval-spend.csv"
+REASON_CHARS = 300   # an estimate's reason as written, cut after its credentials are masked
 SPEND_COLUMNS = ("pass_id", "date", "provider", "runs", "desk_usd", "simulator_usd", "claude_api_usd", "total_usd",
                  "estimated_usd")
 LEGACY_SPEND_COLUMNS = SPEND_COLUMNS[:-1]   # a spend file written before rows marked estimated spend
@@ -771,24 +773,25 @@ class _Pass:
             spend = self.deps.cost(outcome, self.providers)
         except Exception as failure:
             return self._estimate(outcome.scenario_id, outcome.rep, attempt,
-                                  f"its usage couldn't be priced ({type(failure).__name__}: {failure})"[:300])
+                                  f"its usage couldn't be priced ({type(failure).__name__}: {failure})")
         if spend is None:
             return self._estimate(outcome.scenario_id, outcome.rep, attempt, "it left no usage to price")
         if outcome.artifact is not None and (unread := outcome.artifact.usage_unread):
             spend = spend + self._estimate(outcome.scenario_id, outcome.rep, attempt,
-                                           f"part of its usage couldn't be read ({'; '.join(unread)})"[:300])
+                                           f"part of its usage couldn't be read ({'; '.join(unread)})")
         elif outcome.artifact is None and (held := outcome.held_usage) is not None:
             kind = outcome.error.kind if outcome.error is not None else "infra"
             why = "; ".join([f"it ended before its artifact was built ({kind}), so part of its usage may be unread",
                              *held.usage_unread])
-            spend = spend + self._estimate(outcome.scenario_id, outcome.rep, attempt, why[:300])
+            spend = spend + self._estimate(outcome.scenario_id, outcome.rep, attempt, why)
         return spend
 
     def _estimate(self, scenario_id: str, rep: int, attempt: int, reason: str) -> Spend:
         """A run's estimate, all of it on the Claude API so no budget undercounts, noted as estimated in
-        `estimated_spend` and marked in `estimated_usd`, so it never reads as measured."""
+        `estimated_spend` and marked in `estimated_usd`, so it never reads as measured. Its reason can quote an
+        error, so its credentials are masked before it is cut to `REASON_CHARS`."""
         self.estimated.append(EstimatedSpend(scenario_id=scenario_id, rep=rep, attempt=attempt, usd=self.per_run,
-                                             reason=reason))
+                                             reason=mask_credentials(reason)[:REASON_CHARS]))
         return Spend.of(desk_usd=self.per_run, simulator_usd=0.0, claude_api_usd=self.per_run,
                         estimated_usd=self.per_run)
 

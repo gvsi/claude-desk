@@ -544,6 +544,23 @@ async def test_spend_charged_as_an_estimate_is_marked(repo):
         (unpriced.pass_id, "0.8000", "0.8000"), (priced.pass_id, "0.2000", "0.0000")]
 
 
+async def test_an_estimates_reason_is_masked_before_it_is_cut(repo):
+    """A run whose usage can't be priced is charged its estimate with a reason that quotes the pricing
+    error: its credentials are masked before the reason is cut to 300 characters, so a DSN crossing
+    the cut is written with no part of its password."""
+    from evals.tier2.passes import pass_dir
+
+    def cost(outcome: RunOutcome, providers: Any) -> Spend:
+        # The reason's opening (40) + 240 + "postgresql://u:" (15) puts the cut 5 characters into the password.
+        raise ValueError("x" * 240 + "postgresql://u:Zq9xKw7vRt3Lm@db.example.invalid/prices")
+
+    result = await run_pass(config(runs=1, split="heldout"), deps(repo, cost=cost))
+    assert result.estimated_spend and all(len(row.reason) <= 300 for row in result.estimated_spend)
+    assert all("Zq9" not in row.reason for row in result.estimated_spend)
+    out = pass_dir(repo, result.pass_id)
+    assert "Zq9" not in "".join(path.read_text() for path in sorted(out.rglob("*")) if path.is_file())
+
+
 def test_a_spend_file_from_before_the_mark_gains_its_column(tmp_path):
     """A spend file whose header predates `estimated_usd` gets the column in place, under the lock,
     before the next row is appended, so the new row's mark lines up with its header; the rows written

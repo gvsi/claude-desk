@@ -44,6 +44,21 @@ def test_routes_name_each_operation_with_the_plan_that_lands_it():
         "/api/owner/desks/{desk_id}/ledger", {"verify": "true"})
 
 
+def test_a_refusals_message_masks_credentials_before_its_cuts():
+    """A refusal's message quotes the body the API sent, cut to 500 characters, or to 80 for a body
+    that isn't JSON: its credentials are masked first, so one that crosses a cut is never shown in part."""
+    # "x" * 480 + "postgresql://u:" (15) puts the 500 cut 5 characters into the password.
+    json_body = ApiCallFailed("send", 503, "x" * 480 + "postgresql://u:Zq9xKw7vRt3Lm@db.example.invalid/desk")
+    assert "Zq9" not in str(json_body)
+    keyed = ApiCallFailed("send", 503, {"error": "internal", "detail": "PGPASSWORD=fake-pg-secret psql failed"})
+    assert "fake-pg-secret" not in str(keyed) and "PGPASSWORD=***" in str(keyed)
+    assert keyed.body == {"error": "internal", "detail": "PGPASSWORD=fake-pg-secret psql failed"}   # as it came
+    # "x" * 60 + "postgresql://u:" (15) puts the 80 cut 5 characters into the password.
+    text_body = ApiCallFailed("send", 502, "x" * 60 + "postgresql://u:Zq9xKw7vRt3Lm@db.example.invalid/desk",
+                              content_type="text/html")
+    assert "Zq9" not in str(text_body) and "Zq9" not in text_body.body and len(text_body.body) <= 80
+
+
 def test_a_route_fills_and_encodes_its_parameters():
     assert ROUTES["owner_take_over"].url(session_id="s/1 ?x") == "/api/owner/conversations/s%2F1%20%3Fx/takeover"
     assert ROUTES["send"].url(desk_slug="rivera") == "/api/public/desks/rivera/messages"
