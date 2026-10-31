@@ -737,6 +737,41 @@ describe('Arrival', () => {
   });
 });
 
+describe('The preview behind the intro dialog', () => {
+  for (const viewport of ['desktop', 'phone'] as const) {
+    it(`preview_is_todays_layout_${viewport}`, async () => {
+      const { screen, router } = await renderRoute('/', { viewport, seed: { name: 'rivera', signedIn: false } });
+      const dialog = introDialog(screen);
+      await expect.element(dialog).toBeVisible();
+      const preview = document.querySelector<HTMLElement>('.cd-today-preview');
+      if (preview === null) throw new Error('no preview behind the dialog');
+      const before = layoutOf(preview);
+      const firstFrame = layoutAsTodayArrives();
+
+      // The dialog fades out over the preview, then Today replaces it: in its first frame and once
+      // it has read everything it reads, every part of Today is where the preview drew it.
+      await startTheDemo(screen);
+      await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+      await expect.element(heldCard(screen)).toBeVisible();
+      await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+      const after = layoutOf(document.body);
+
+      expect(Object.keys(before)).toEqual(Object.keys(after));
+      expect(misplaced(before, firstFrame()), 'Today as it first draws').toEqual([]);
+      expect(misplaced(before, after), 'Today once it has read everything').toEqual([]);
+    });
+  }
+
+  it('preview_makes_no_request', async () => {
+    const { screen } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+    // Long enough for every read Today polls to have gone out several times over, had the preview
+    // sent one: only the arrival's own question about the copy went out.
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect(mockStore.requests.map((r) => r.key)).toEqual(['me']);
+  });
+});
+
 describe('OwnerLayout', () => {
   it('nav_and_switcher', async () => {
     const { screen, router } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
@@ -1275,6 +1310,81 @@ function watchTheHandOff(dialog: HTMLDialogElement): {
     stopCounting();
   });
   return { steps: () => [...steps], answeredAsItLeft: () => answeredAsItLeft };
+}
+
+/** Where one part of the owner's frame or of Today sits in the window, in px. */
+interface Placed {
+  top: number;
+  left: number;
+  width: number;
+  height?: number;
+}
+
+/**
+ * Where Today's parts sit under `root`, by name: the frame (the reviewer bar, the sidebar or the
+ * phone's top bar, the page's area), each section of the page's column in order, and each part of
+ * the right column. Sections are named by their heading, so both sides must draw the same ones.
+ */
+function layoutOf(root: ParentNode): Record<string, Placed> {
+  const rect = (el: Element, withHeight: boolean): Placed => {
+    const r = el.getBoundingClientRect();
+    return withHeight ? { top: r.top, left: r.left, width: r.width, height: r.height } : { top: r.top, left: r.left, width: r.width };
+  };
+  const drawn = (selector: string) => [...root.querySelectorAll(selector)].find((el) => el.getClientRects().length > 0);
+  const nameOf = (el: Element) => el.querySelector('h1, h2')?.textContent?.trim() || (el.classList.item(0) ?? el.localName);
+  const out: Record<string, Placed> = {};
+  // The page's area grows with the page, which has the concept footer under it only on Today: its
+  // height isn't compared.
+  for (const [name, selector, withHeight] of [
+    ['reviewer bar', '.cd-app-shell__banner', true],
+    ['sidebar', '.cd-app-shell__column', true],
+    ['top bar', '.cd-app-shell__topbar', true],
+    ['page area', '.cd-app-shell__content', false],
+  ] as const) {
+    const el = drawn(selector);
+    if (el) out[name] = rect(el, withHeight);
+  }
+  for (const [column, selector] of [
+    ['page', '.cd-today__main'],
+    ['right column', '.cd-today-aside'],
+  ] as const) {
+    const el = root.querySelector(selector);
+    for (const child of el?.children ?? []) out[`${column}: ${nameOf(child)}`] = rect(child, false);
+  }
+  return out;
+}
+
+/** Every measure in `after` more than 2 px from where `before` put it, as a line each. */
+function misplaced(before: Record<string, Placed>, after: Record<string, Placed> | null): string[] {
+  if (after === null) return ['Today never drew'];
+  const lines: string[] = [];
+  for (const [name, was] of Object.entries(before)) {
+    const now = after[name];
+    if (now === undefined) {
+      lines.push(`${name}: missing`);
+      continue;
+    }
+    for (const key of ['top', 'left', 'width', 'height'] as const) {
+      const a = was[key];
+      const b = now[key];
+      if (a !== undefined && b !== undefined && Math.abs(a - b) > 2) lines.push(`${name} ${key}: ${a.toFixed(1)} then ${b.toFixed(1)}`);
+    }
+  }
+  for (const name of Object.keys(after)) if (!(name in before)) lines.push(`${name}: not in the preview`);
+  return lines;
+}
+
+/** Where Today's parts sit in the first frame Today draws in place of the preview, until the test ends. */
+function layoutAsTodayArrives(): () => Record<string, Placed> | null {
+  let first: Record<string, Placed> | null = null;
+  const look = () => {
+    if (first !== null || document.querySelector('.cd-today-preview') !== null || document.querySelector('.cd-today') === null) return;
+    first = layoutOf(document.body);
+  };
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => watch.disconnect());
+  return () => first;
 }
 
 /**

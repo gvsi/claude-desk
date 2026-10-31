@@ -75,7 +75,7 @@ const DeskContext = createContext<OwnerDeskContext | null>(null);
 
 /**
  * Gives the pages under it the business and Desk they are drawn for: the owner's frame around every
- * page of a Desk, or anything else that draws one of its pages.
+ * page of a Desk, and the still preview of Today behind the intro dialog.
  */
 export function OwnerDeskProvider({ value, children }: { value: OwnerDeskContext; children: ReactNode }) {
   return <DeskContext.Provider value={value}>{children}</DeskContext.Provider>;
@@ -402,7 +402,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   );
 }
 
-interface OwnerSidebarProps {
+export interface OwnerSidebarProps {
   businesses: BusinessOut[];
   business: BusinessOut;
   desk: DeskSummary;
@@ -417,8 +417,11 @@ interface OwnerSidebarProps {
   onAnsweringChange: (on: boolean) => void;
 }
 
-/** The sidebar, and the business switcher beside its business row while it is open. */
-function OwnerSidebar(props: OwnerSidebarProps) {
+/**
+ * The sidebar, and the business switcher beside its business row while it is open. The still
+ * preview of Today draws it too, so the frame it shows is the one Today opens in.
+ */
+export function OwnerSidebar(props: OwnerSidebarProps) {
   const { businesses, business, desk, liveCount } = props;
   const ref = useRef<HTMLDivElement>(null);
   return (
