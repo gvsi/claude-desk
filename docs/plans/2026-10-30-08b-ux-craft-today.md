@@ -204,3 +204,5 @@ One design PR from `plan/08b-ux-craft-today`, titled `feat(web): let Today confi
 - Round cap reached (2 completed rounds, the second with no P1). These fixes aren't re-reviewed as a plan; each task's review and the PR panel check them.
 
 **During Task 2 (2026-10-30), rulings by claude-desk-3c:** the section below may move down, eased, when the settled item is taller than the held one; the old "never moves down" can't hold after an "Always" answer. The outgoing layer's focus rule is stated by outcome (it never holds focus; the status line takes focus before paint), not by mechanism.
+- Task 2: P3 parked — the ApprovalCard story records the first frame's focus but doesn't assert it (assert the leaving layer isn't focused and focus is the status line) — the settled-focus test covers the end state.
+- Task 2: P3 parked — the "Always" screen test accepts either direction and its fixture moves about 1 px; add a case where the settled item is taller and assert it eases down — the rule is stated and the one-direction check holds.
