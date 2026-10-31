@@ -103,6 +103,7 @@ async def test_seed_payment_link_reviewer_evidence(k: KernelHarness, fake: FakeA
 
     if k.is_real:
         from desk.kernel_service.decisions import REVIEW_SYSTEM
+        from evals.calibration import reviewer
 
         [request] = fake.calls(REVIEWER_MODEL)
         assert request["system"] == REVIEW_SYSTEM
@@ -112,6 +113,9 @@ async def test_seed_payment_link_reviewer_evidence(k: KernelHarness, fake: FakeA
         [message] = request["messages"]
         assert message["role"] == "user" and isinstance(message["content"], str)
         sent = json.loads(message["content"])
+        [calibration_case] = [case for case in reviewer.load_cases(reviewer.CASES_FILE)
+                              if case.id == "structured-link-deposit"]
+        assert reviewer.call_input(calibration_case).model_dump(mode="json") == sent
         assert sent["action"]["tool"] == "native.payment_link"
         assert sent["action"]["amount_cents"] == 2_000
         assert sent["untrusted_args"] == {}

@@ -33,7 +33,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from desk.contracts import Effect, NormalizedAction, ResourceRef, Review, RuleCard, ToolName
-from desk.kernel_service import decisions, seed
+from desk.kernel_service import decisions, desks, seed
 from desk.kernel_service.adapters import ADAPTERS
 from desk.kernel_service.decisions import (AnthropicDecisions, CallUsage, ReviewAction, ReviewCard, ReviewFact,
                                            ReviewInput)
@@ -113,9 +113,13 @@ class Case(BaseModel):
 
 
 def public_facts() -> list[ReviewFact]:
-    # These claims become the public charter fact on activation; _review unwraps them.
+    # Match create_desk's stored charter facts and _review's fact_id ordering.
     _, desk = seed.rivera_seed(datetime(2026, 10, 30, tzinfo=UTC))
-    return [ReviewFact(key=claim.key, value=claim.value) for claim in desk.charter]
+    facts = [desks.charter_fact(claim) for claim in desk.charter]
+    facts.append(desks.charter_fact(desks.hours_claim(desk.hours), fact_id=desks.HOURS_FACT))
+    return [ReviewFact(key=claim.key, value=claim.value)
+            for fact in sorted(facts, key=lambda fact: fact.fact_id)
+            if "public" in fact.label.readers for claim in fact.claims]
 
 
 def load_cases(path: Path) -> list[Case]:
