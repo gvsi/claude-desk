@@ -1500,21 +1500,23 @@ def _matches(compiled: re.Pattern[str], text: str) -> bool:
 # ..."), reaches to the clause's outright end. "If not," and "If you can't," are conditions, not
 # such a negation.
 _APOSTROPHES = "'’ʼ`´′"
+# A word ending in "n't", its apostrophe written or left out ("don't", "dont", "can’t", "cant").
+_NT_WORD = (rf"\w+n[{_APOSTROPHES}]t"
+            r"|(?:do|does|did|ca|wo|should|would|could|must|need|is|are|was|were|have|has|had|ai)nt")
 _CLAUSE_END = re.compile(r"[.!?;:\n()\[\]–—―]|\s[-‐-‒]\s")
 _CLAUSE_BREAK = re.compile(r",|\b(?:but|pero)\b", re.IGNORECASE)
 _CARRIES_ON = re.compile(r"\s*(?:or|nor|such\s+as|like|including|for\s+(?:example|instance)|let\s+alone|o|ni|como)\b",
                          re.IGNORECASE)
 _DANGLING = re.compile(
     r"\s*(?:(?:please|you|do|does|did|must|should|can|could|will|would|absolutely|really)\s+)*"
-    rf"(?:not|never|\w+n[{_APOSTROPHES}]t|nunca|jam[aá]s)(?:\s+ever)?\s*", re.IGNORECASE)
+    rf"(?:not|never|{_NT_WORD}|nunca|jam[aá]s)(?:\s+ever)?\s*", re.IGNORECASE)
 # The words that take a `says` match back in its clause: a negation or a refusal ("not", "never",
 # "no", "nor", "neither", "cannot", "unable", "without", "instead of", "rather than", and every word
 # ending in "n't", its apostrophe written or left out), or a hand-off that names the thing instead of
 # saying it ("how", "walk you through"); in Spanish "no", "nunca", "jamás", "ni", "tampoco", "sin"
 # and "cómo".
 _TAKES_BACK = re.compile(
-    rf"\b(?:not|never|no|nor|neither|cannot|unable|without|instead\s+of|rather\s+than|\w+n[{_APOSTROPHES}]t"
-    r"|(?:do|does|did|ca|wo|should|would|could|must|need|is|are|was|were|have|has|had|ai)nt"
+    rf"\b(?:not|never|no|nor|neither|cannot|unable|without|instead\s+of|rather\s+than|{_NT_WORD}"
     r"|how|(?:walk|talk|take|guide)\w*\s+(?:you\s+)?through"
     r"|nunca|jam[aá]s|ni|tampoco|sin|cómo)\b",
     re.IGNORECASE)

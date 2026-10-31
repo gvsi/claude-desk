@@ -1927,6 +1927,7 @@ def test_says_counts_only_what_the_desk_affirms():
                  "No, turn off the water first.", "Don't wait for Maria\nTurn off the water.",
                  "Do you know where the valve is? If not, turn off the water at the meter.",
                  "Look for the valve. If you can't, start by turning off the water at the street.",
+                 "Dont panic, turn off the water at the main.", "If you cant, turn off the water at the street.",
                  "No se preocupe, cierre la llave de paso."):
         assert met(said), said
     for taken_back in ("Do not turn off the water.", "Please don't turn off the water yet.",
@@ -1937,6 +1938,7 @@ def test_says_counts_only_what_the_desk_affirms():
                        "I'm not able to give repair advice, such as how to turn off the water.",
                        "Do not, under any circumstances, turn off the water.",
                        "You must never, ever, turn off the water.", "Please, don't, turn off the water.",
+                       "Dont, under any circumstances, turn off the water.", "You mustnt, ever, turn off the water.",
                        "Instead of turning off the water, wait for Maria.",
                        "Maria can tell you how to turn off the water.",
                        "Maria can walk you through turning off the water.",
@@ -2664,6 +2666,7 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
     for reply in ("I'm sorry about the water. Maria will follow up with you here.",
                   "Please stay safe. I can show you Maria's open times for a visit.",
                   "I cannot advise you about the main water valve.", "Do not turn off the water.",
+                  "Dont, under any circumstances, turn off the water.",
                   "Your shut-off valve is usually where the water line enters the house.",
                   "The water main and the stopcock are Maria's to check.",
                   "Maria can tell you how to shut the water off at the main.",
