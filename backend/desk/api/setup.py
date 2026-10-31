@@ -1821,9 +1821,34 @@ def seed_parts(answers: SetupAnswers, timezone: str, *, business_type: BusinessT
                      notifications=default_notifications(business_type))
 
 
+async def _put_charter(owner: OwnerCtx, desk_id: str, charter: list[Claim]) -> None:
+    """Keep clean claims, then fall back to contact, with at most three kernel-checked writes."""
+    path = {"id": desk_id}
+    try:
+        await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
+        return
+    except KernelFailed as refused:
+        if refused.status != 422 or refused.code != "invalid" or not refused.detail:
+            raise
+        dropped = {claim.key: refused.detail[claim.key] for claim in charter if claim.key in refused.detail}
+        logger.warning("setup dropped refused charter claims: %s", dropped)
+        charter = [claim for claim in charter if claim.key not in refused.detail]
+    try:
+        await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
+        return
+    except KernelFailed as refused:
+        if refused.status != 422 or refused.code != "invalid" or not refused.detail:
+            raise
+        dropped = {claim.key: refused.detail.get(claim.key, []) for claim in charter
+                   if claim.key.startswith("policy:")}
+        logger.warning("setup dropped refused charter claims: %s", dropped)
+        charter = [claim for claim in charter if not claim.key.startswith("policy:")]
+    await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=charter), path=path)
+
+
 async def _put_parts(owner: OwnerCtx, desk_id: str, parts: SeedParts) -> None:
     path = {"id": desk_id}
-    await owner.kernel.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=parts.charter), path=path)
+    await _put_charter(owner, desk_id, parts.charter)
     await owner.kernel.call("PUT /desks/{id}/hours", DeskHoursRequest(hours=parts.hours), path=path)
     await owner.kernel.call("PUT /desks/{id}/prices", DeskPricesRequest(price_items=parts.prices), path=path)
     await owner.kernel.call("PUT /desks/{id}/calendar", DeskCalendarRequest(calendar_slots=parts.calendar), path=path)

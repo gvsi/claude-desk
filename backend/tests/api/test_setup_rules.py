@@ -57,7 +57,7 @@ from desk.api.prompts import (
 from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow, ToolsConfirmIn
 from desk.api.setup import (
-    SETUP_POLICY_CLAIMS, after_hours_start, calendar_slots, price_items, safety_probes, seed_parts, situation,
+    SETUP_POLICY_CLAIMS, _put_parts, after_hours_start, calendar_slots, price_items, safety_probes, seed_parts, situation,
 )
 from desk.api.setup_templates import SAFETY_PROBES, template_cards
 from desk.contracts import (
@@ -83,6 +83,7 @@ from desk.kernel_service.decide import tools_given
 from desk.presets import PRESETS
 from tests.api.fakes import ScriptedModel, gated, response
 from tests.api.fakes import text as text_block
+from tests.api.test_kernel_client import ScriptedKernel
 from tests.api.test_setup_questions import (
     Owner,
     answer,
@@ -232,6 +233,116 @@ async def drafted_rules(owner: Owner, model: ScriptedModel, state: dict, *cards:
     reply = await owner.browser.post(policy(state, "rules"))
     assert reply.status_code == 200, reply.text
     return RulesDraft.model_validate(reply.json())
+
+
+async def test_setup_finishes_with_clean_charter_claims_after_a_pricing_refusal(
+        app, browser, fake, kernel_http, model, monkeypatch, caplog):
+    intake = "Ask about the work the customer needs."
+    monkeypatch.setitem(PATCHES, "what_you_do", {**PATCHES["what_you_do"], "intake": intake})
+    monkeypatch.setitem(PATCHES, "quote_limit", {**PATCHES["quote_limit"], "pricing": "from $90"})
+    owner, state = await ready(app, browser, kernel_http, model)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+
+    await drafted_rules(owner, model, state)
+    assert (await owner.browser.post(policy(state, "confirm"))).status_code == 200
+    reply = await owner.browser.post(policy(state, "go_live"))
+    assert reply.status_code == 200, reply.text
+
+    desk = fake.desks[state["desk_id"]]
+    claims = {claim.key: claim.value for fact in desk.facts.values()
+              if fact.kind == "charter" and fact.fact_id != "charter:hours" for claim in fact.claims}
+    assert claims == {"contact": "(510) 555-0142", "policy:about": PATCHES["what_you_do"]["summary"],
+                      "policy:service_area": "Oakland and Berkeley", "policy:intake": intake,
+                      "policy:after_hours": "Take a message."}
+    first, retry = fake.called("PUT /desks/{id}/charter")
+    assert retry.body["charter"] == [claim for claim in first.body["charter"] if claim["key"] != "policy:pricing"]
+    warnings = [record.getMessage() for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "policy:pricing" in warnings[0] and "currency" in warnings[0] and "digit" in warnings[0]
+    assert "$90" not in caplog.text and intake not in caplog.text
+
+
+async def test_a_second_charter_refusal_drops_all_policies_before_the_third_put(caplog):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="No", pricing="from $90",
+                                    intake="charge for consultations.", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    refusals = [{"policy:pricing": ["currency", "digit"]},
+                {"policy:about": ["lex.en.promise"], "policy:intake": ["lex.en.promise"]}]
+    charters = []
+
+    def respond(request):
+        if request.url.path.endswith("/charter"):
+            charters.append(json.loads(request.content)["charter"])
+            if len(charters) <= 2:
+                return httpx.Response(422, json={"code": "invalid", "detail": refusals[len(charters) - 1]})
+        return httpx.Response(200, json={"desk_id": "d1", "updated_at": "2026-10-31T17:00:00Z"})
+
+    kernel.fail(respond)
+    caplog.set_level(logging.WARNING, logger="desk.api.setup")
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        await _put_parts(owner, "d1", parts)
+
+    assert len(charters) == 3
+    assert charters[0] == [claim.model_dump(mode="json") for claim in parts.charter]
+    assert charters[1] == [claim for claim in charters[0] if claim["key"] != "policy:pricing"]
+    assert charters[2] == [claim for claim in charters[0] if claim["key"] == "contact"]
+    assert [request.url.path for request in kernel.requests[3:]] == [
+        "/desks/d1/hours", "/desks/d1/prices", "/desks/d1/calendar", "/desks/d1/notifications"]
+    warnings = [record for record in caplog.records
+                if record.name == "desk.api.setup" and record.levelno == logging.WARNING]
+    assert [record.args for record in warnings] == [
+        refusals[0], {"policy:about": ["lex.en.promise"], "policy:service_area": [],
+                      "policy:intake": ["lex.en.promise"]}]
+    assert "$90" not in caplog.text and "charge for consultations." not in caplog.text
+
+
+@pytest.mark.parametrize("prior_refusals", [0, 1, 2])
+@pytest.mark.parametrize(("status", "code", "detail"), [
+    (422, "invalid", None), (422, "invalid", {}),
+    (409, "conflict", {"policy:about": ["digit"]}),
+    (422, "conflict", {"policy:about": ["digit"]}),
+])
+async def test_other_charter_errors_propagate_without_another_put(prior_refusals, status, code, detail):
+    kernel = ScriptedKernel()
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="About us", intake="Ask us"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+
+    def respond(request):
+        if len(kernel.requests) <= prior_refusals:
+            return httpx.Response(422, json={"code": "invalid", "detail": {"policy:intake": ["digit"]}})
+        return httpx.Response(status, json={"code": code, "detail": detail})
+
+    kernel.fail(respond)
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        with pytest.raises(KernelFailed) as caught:
+            await _put_parts(owner, "d1", parts)
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (status, code, detail)
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"] * (prior_refusals + 1)
+
+
+async def test_a_third_detailed_charter_refusal_propagates_without_a_fourth_put():
+    kernel = ScriptedKernel()
+    detail = {"policy:about": ["lex.en.promise"], "policy:intake": ["lex.en.promise"]}
+    kernel.fail(httpx.Response(422, json={"code": "invalid", "detail": detail}))
+    parts = seed_parts(SetupAnswers(public_contact="hello@example.test", summary="No",
+                                    intake="charge for consultations.", service_area="Oakland"),
+                       TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    async with kernel.client() as http:
+        owner = OwnerCtx(copy_id="c1", desk_ids=("d1",), owner_session_id="s1", owner_generation=0,
+                         kernel=http.owner("owner-token"), ro=None)
+        with pytest.raises(KernelFailed) as caught:
+            await _put_parts(owner, "d1", parts)
+    assert (caught.value.status, caught.value.code, caught.value.detail) == (422, "invalid", detail)
+    assert [request.url.path for request in kernel.requests] == ["/desks/d1/charter"] * 3
+    first, second, third = [json.loads(request.content)["charter"] for request in kernel.requests]
+    assert second == [claim for claim in first if claim["key"] not in detail]
+    assert third == [claim for claim in first if claim["key"] == "contact"]
 
 
 async def stored(engine, interview_id: str) -> dict:
