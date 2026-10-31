@@ -680,6 +680,20 @@ async def test_reply_rejects_owner_said_and_bad_input(api_conn, caller, fake):
     assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_bad", message.message_id, 1)]
 
 
+async def test_bad_input_on_the_turns_last_call_hands_off_at_once(api_conn, caller, fake):
+    # with no model call left Claude can't rewrite, so input that doesn't fit the tool gets the handoff at once,
+    # checked as the API's own (final) draft and recorded as what the call put on screen
+    bad = {"prose": "Maria says yes.", "clauses": [{"template": "owner_said", "fact_id": "owner:S-1"}]}
+    outcome = await send_reply(api_conn, caller, 0, bad, 1, call_left=False, call_id="toolu_bad")
+    assert (outcome.result, outcome.is_error, outcome.delivered) == ({"outcome": "delivered_handoff"}, True, "handoff")
+    assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
+                                   "clauses": [{"template": "handoff", "fact_id": None}]}]
+    assert [call.body.get("final", True) for call in fake.called("/check_reply")] == [True]
+    (message,) = await events(api_conn, caller.session_id)
+    assert [block.template for block in message.blocks] == ["handoff"]
+    assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_bad", message.message_id, 1)]
+
+
 async def test_recover_call_finds_the_decision_and_never_redecides(api_conn, caller, visitor, fake):
     async def decide(block: dict) -> Decision:
         return await visitor.kernel.call("POST /decide", DecideRequest(

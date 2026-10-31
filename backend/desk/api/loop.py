@@ -243,8 +243,8 @@ class _Turn:
         await self._bring_up_to_date(context, self.system)
         await conn.commit()
         while True:
-            if self.model_calls >= MAX_MODEL_CALLS:
-                return await self._hand_off()
+            if self.model_calls >= MAX_MODEL_CALLS:            # out of calls: the handoff, unless it is on screen
+                return self._ended() if self.delivered == "handoff" else await self._hand_off()
             response = await self._call()
             if isinstance(response, str):                  # the kernel refused a newer message's `/turn`
                 return response
@@ -552,11 +552,14 @@ class _Turn:
             return None
 
     async def _reply(self, tool_input: object, call_id: str | None) -> ToolOutcome:
-        """One reply of Claude's at the turn's attempt (`tools.send_reply`). A draft the check stopped that Claude may
-        rewrite is kept for the owner here, in the turn's transaction, which the caller commits with the result Claude
-        reads and before any other kernel call (`_tool_use`, `_end_turn`)."""
+        """One reply of Claude's at the turn's attempt (`tools.send_reply`), which Claude may still rewrite only on
+        attempt 1 while the turn has a model call left (`call_left`; any other check is `final` for the kernel, in
+        every kind of session). A draft the check stopped that Claude may rewrite is kept for the owner here, in the
+        turn's transaction, which the caller commits with the result Claude reads and before any other kernel call
+        (`_tool_use`, `_end_turn`)."""
         attempt = self.attempt
-        outcome = await send_reply(self.conn, self.caller, self.generation, tool_input, attempt, call_id=call_id)
+        outcome = await send_reply(self.conn, self.caller, self.generation, tool_input, attempt,
+                                   call_left=self.model_calls < MAX_MODEL_CALLS, call_id=call_id)
         if outcome.kept is not None:
             await append_stopped_draft(self.conn, self.caller.ids, outcome.kept)
         self._note(outcome)

@@ -151,7 +151,9 @@ async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> di
 
 async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     """The Desk's held requests, each read from the kernel with the owner's credential (which applies expiry, so a
-    request that expired meanwhile drops out), oldest first, then its open callback requests."""
+    request that expired meanwhile drops out), oldest first, then its open handoffs, call-back requests and the handoff
+    card's, each with its kind. A card's handoff has no action: its kernel row's `action_id`, which no view shows,
+    names the handoff itself."""
     who = await people(ctx, desk_id)
     held_rows = [row for row in await ctx.ro.rows("decisions", desk_id=desk_id, state="held",
                                                   order_by=("created_at", "decision_id"))
@@ -174,7 +176,7 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     for row in handoffs:
         if (session := who.brief(row["session_id"])) is not None:
             handoff = Handoff(handoff_id=row["handoff_id"], session_id=row["session_id"], reason=row["reason"],
-                              callback_window=row["callback_window"], status=row["status"])
+                              callback_window=row["callback_window"], status=row["status"], kind=row["kind"])
             items.append(NeedsYouItem(decision=None, held_by=None, held_at=None, handoff=handoff, session=session,
                                       from_the_visitor=texts.get(row["session_id"])))
     return items

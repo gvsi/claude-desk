@@ -385,8 +385,18 @@ export interface GenerationIn {
   generation: number;
 }
 /**
- * An open callback request (`kernel_ro.handoffs`). `reason` is "<name> · <contact> · <reason>" as the visitor
- * typed them (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one.
+ * A conversation handed to the owner (`kernel_ro.handoffs`), of one of two kinds:
+ *
+ * - `callback`: a visitor's call-back request. `reason` is "<name> · <contact> · <reason>" as the visitor typed them
+ *   (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one.
+ * - `card`: the handoff card the session saw (a passed reply citing it, or a blocked final draft or one no rewrite
+ *   fixes). `reason` is the kernel's own template ("The Desk handed this to you."), and `callback_window` is None:
+ *   no call back was promised.
+ *
+ * A null window alone can't tell them apart; `kind` does, and a row's kind never changes. A card handoff opens
+ * none in the owner's preview, while a held request awaits the owner, or while the session has an open handoff. A
+ * call-back request closes the session's open card handoff (it reads `done` from then on) and opens its own
+ * `callback` row with a new ID.
  */
 export interface Handoff {
   handoff_id: string;
@@ -394,6 +404,7 @@ export interface Handoff {
   reason: string;
   callback_window: string | null;
   status: "open" | "done";
+  kind: "callback" | "card";
 }
 /**
  * `GET /api/health`: 200 with the kernel's health, or 503 with `ok` false and no kernel field.
@@ -440,7 +451,8 @@ export interface MoneyCapIn {
 /**
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
  * applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
- * an open callback request (`handoff`), never both; who it came from, and the last thing they wrote (untrusted).
+ * an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last
+ * thing they wrote (untrusted).
  */
 export interface NeedsYouItem {
   decision: Decision | null;
