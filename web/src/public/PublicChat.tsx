@@ -647,5 +647,5 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
 function rowKey({ item }: ChatRow): string {
   if (item.kind === 'visitor') return `v:${item.id}`;
   if (item.kind === 'message') return `m:${item.ev.message_id}`;
-  return `s:${item.seq}`;
+  return `s:${item.id}`;
 }

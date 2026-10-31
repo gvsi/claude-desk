@@ -7,6 +7,12 @@
  * the chat already holds (a transcript read before their seqs were known) is matched by identity:
  * a message by its `message_id`, a status by its `(decision_id, ledger_seq)`.
  *
+ * Where the owner joined and left shows the same whether the page was open or loaded later: the
+ * stored conversation keeps each join and leave, and they become the same lines the stream's events
+ * do. Those events carry no identity, but they alternate (the API tells the visitor only of a change
+ * of mode, and only a chat in Claude's hands pauses), so a join while the chat shows the owner in
+ * it, or a leave while it doesn't, is its latest line again and adds nothing.
+ *
  * A held request's later lines ("Cancelled", "Maria Rivera approved this") stay under the message
  * that holds it, as every receipt stays under its own message, however far the chat has gone on.
  * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
@@ -44,7 +50,8 @@ export type SendFailure = 'rate_limited' | 'too_long' | 'not_sent' | 'session';
 export type ChatItem =
   | { kind: 'visitor'; id: string; text: string; status: VisitorStatus; failure?: SendFailure }
   | { kind: 'message'; seq: number | null; ev: EvMessage }
-  | { kind: 'system'; seq: number; ev: EvOwnerJoined | EvOwnerLeft };
+  /** The owner joined or left: `id` is `n{n}` for a line read from the stored conversation, `s{seq}` for one the stream brought. */
+  | { kind: 'system'; id: string; ev: EvOwnerJoined | EvOwnerLeft };
 
 export type ChatRow = GroupedRow<ChatItem, ReceiptView>;
 
@@ -148,6 +155,25 @@ function isStatus(ev: TranscriptItem['event']): ev is StatusEvent {
   return ev !== null && (ev.type === 'receipt' || ev.type === 'held' || ev.type === 'resolved');
 }
 
+function isPresence(ev: TranscriptItem['event']): ev is EvOwnerJoined | EvOwnerLeft {
+  return ev !== null && (ev.type === 'owner_joined' || ev.type === 'owner_left');
+}
+
+/** Whether the chat shows the owner in it: its latest line about the chat is her joining. */
+function ownerInChat(rows: readonly ChatRow[]): boolean {
+  const line = rows.findLast(({ item }) => item.kind === 'system')?.item;
+  return line?.kind === 'system' && line.ev.type === 'owner_joined';
+}
+
+/**
+ * The line for the owner joining or leaving, `id` as `ChatItem` names it, or null when it would
+ * leave who is in the chat as it is (`ownerIn`): then it repeats the chat's latest line.
+ */
+function presenceLine(ownerIn: boolean, id: string, ev: EvOwnerJoined | EvOwnerLeft): RowPart<ChatItem, ReceiptView> | null {
+  if ((ev.type === 'owner_joined') === ownerIn) return null;
+  return { kind: 'line', row: { kind: 'system', id, ev } };
+}
+
 /** A held request is open until its resolution arrives. */
 function withHolds(openHolds: string[], ev: StatusEvent): string[] {
   if (ev.type === 'held') return openHolds.includes(ev.decision_id) ? openHolds : [...openHolds, ev.decision_id];
@@ -173,7 +199,9 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
   const seen = new Set<string>();
   let openHolds: string[] = [];
   let holds: ReadonlyMap<string, ReceiptView> = new Map();
-  // How a stored item joins the chat: the visitor's words, a delivered message, or a status.
+  let ownerIn = false;
+  // How a stored item joins the chat: the visitor's words, a delivered message, a status, or where
+  // the owner joined or left, as the stream's events for them do.
   const partOf = (item: TranscriptItem): RowPart<ChatItem, ReceiptView> | null => {
     const { event } = item;
     if (item.kind === 'visitor_text') {
@@ -189,6 +217,11 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
       const status = statusPart(holds, event);
       holds = status.holds;
       return status.part;
+    }
+    if (isPresence(event) && event.type === item.kind) {
+      const line = presenceLine(ownerIn, `n${item.n}`, event);
+      if (line !== null) ownerIn = event.type === 'owner_joined';
+      return line;
     }
     // Whispers and agents' text never reach a visitor's transcript; anything else is left out.
     return null;
@@ -235,9 +268,13 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
       };
     }
     case 'owner_joined':
-      return { ...state, ...arrived(state, addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } })), writing: false };
-    case 'owner_left':
-      return { ...state, ...arrived(state, addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } })), writing: false, ownerTyping: null };
+    case 'owner_left': {
+      const line = presenceLine(ownerInChat(state.rows), `s${seq}`, ev);
+      // The chat already shows it (a replay over a transcript read before its seq was known).
+      if (line === null) return state;
+      const joinedOrLeft = { ...state, ...arrived(state, addPart(state, line)), writing: false };
+      return ev.type === 'owner_left' ? { ...joinedOrLeft, ownerTyping: null } : joinedOrLeft;
+    }
     case 'owner_typing': {
       // Kept whole, without its type: a later typing event replaces it.
       const { type: _type, ...ownerTyping } = ev;
