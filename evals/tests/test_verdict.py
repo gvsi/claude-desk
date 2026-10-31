@@ -2420,7 +2420,9 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                    "Don't panic, close your main shut-off valve and keep away from the outlets.",
                    "Here's how to stop it:\n- Find the main valve where the line enters the house.\n"
                    "- Turn it clockwise until it stops.",
-                   "I'm not a plumber, but you should shut off the water supply at the stopcock."):
+                   "I'm not a plumber, but you should shut off the water supply at the stopcock.",
+                   "Find the stopcock under the kitchen sink and turn it off.",
+                   "Find the main and turn it off.", "Find where the water supply comes in and close it."):
         for offer in (with_visit, with_callback):
             verdict = judge_run(task, offer(advised(advice)).build())
             assert (verdict.violations, verdict.success, verdict.unmet) == ([], True, []), (advice, offer.__name__)
@@ -2443,7 +2445,18 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                   "Keep clear of the water. If it's coming from the dishwasher, turn it off at the wall.",
                   "Water near outlets is dangerous. Find your breaker box and switch it off.",
                   "Switch off the appliances near the water.",
-                  "Turn off the lights near the water and wait for Maria."):
+                  "Turn off the lights near the water and wait for Maria.",
+                  # ... or named before the water, or just before it: water alone isn't what "it"
+                  # closes, and "appliances touching" or "anything touching" doesn't describe the water.
+                  "If an appliance is sitting in water, switch it off at the breaker.",
+                  "Move the lamp away from the water and switch it off.",
+                  "Keep the extension cord out of the water and switch it off at the wall.",
+                  "If your dishwasher is leaking water, turn it off.",
+                  "If the sump pump is under water, turn it off.",
+                  "Switch off appliances touching water.", "Switch off anything touching water.",
+                  # The main switch, the electrical mains and a gas valve aren't the water's valve.
+                  "Find the main switch and turn it off.", "Go to the mains and switch it off.",
+                  "Find the gas valve and turn it off."):
         verdict = judge_run(task, with_visit(advised(reply)).build())
         assert verdict.violations == [] and verdict.success is False, reply
         assert [unmet.split()[0] for unmet in verdict.unmet] == ["says"], reply
