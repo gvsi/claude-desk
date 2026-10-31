@@ -322,6 +322,20 @@ export interface ToolRow {
   /** A changed definition waiting for review. Untrusted. */
   pending_definition_text: string | null;
   pending_sha256: string | null;
+  /**
+   * The active version's cards that cover the tool, in card order, `shared` for a rule on an effect
+   * group (plan 02b Task 9; pending, typed here and optional until the API sends it). Screens read
+   * which rules govern a tool from the active version's cards (`rulesForTool`), which say the same.
+   */
+  cards?: ToolRowCard[];
+}
+
+/** A card that covers a tool, as `ToolRow.cards` lists it (pending, plan 02b Task 9). */
+export interface ToolRowCard {
+  card_id: string;
+  mode: RuleCard['mode'];
+  reason: string;
+  shared: boolean;
 }
 
 /**
