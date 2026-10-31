@@ -50,6 +50,7 @@ function know(item: Omit<KnowledgeItem, 'label'>, readers: string[], daysAgo: nu
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 /** The items the page posted, in order. */
@@ -228,19 +229,99 @@ describe('knowledge', () => {
     expect(switchOf(again.screen).query()).toBeNull();
     await expectScreenBasics(again.screen.container, { owner: true });
 
-    // A lost answer, or a server error, may have gone through: it never says it didn't, and adding
-    // again posts the same item, which replaces it rather than adding a second.
+    // A server error may have gone through, so the page reads the list before it says: here it
+    // didn't, and it says so, the note kept to add again.
     mockStore.inject({ route: 'addKnowledge', status: 503 });
     await main(again.screen).getByRole('button', { name: 'Add a note' }).click();
-    await expect.element(main(again.screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.unconfirmed);
+    await expect.element(main(again.screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.notAdded);
+    await expect.element(note).toHaveValue(NOTE);
+    expect(switchOf(again.screen).query()).toBeNull();
+  });
+
+  it('knowledge_lost_answers_are_read_back', async () => {
+    const { screen } = await renderRoute(KNOWLEDGE, { retryScale: 0 });
+    await main(screen).getByRole('textbox', { name: 'A note' }).fill(NOTE);
+    const addButton = main(screen).getByRole('button', { name: 'Add a note' });
+
+    // An add that went through, its answer lost: the list read back has it, so it shows as added.
     mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
-    await main(again.screen).getByRole('button', { name: 'Add a note' }).click();
-    await expect.element(main(again.screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.unconfirmed);
-    await main(again.screen).getByRole('button', { name: 'Add a note' }).click();
-    await expect.element(switchOf(again.screen)).toBeVisible();
-    const ids = new Set(posts().slice(-3).map((posted) => posted.item_id));
+    await addButton.click();
+    await expect.element(main(screen).getByText(ADDED, { exact: true })).toBeVisible();
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
+    expect(main(screen).getByRole('alert').query()).toBeNull();
+    expect(mockStore.requests.filter((r) => r.key === 'knowledge').length).toBeGreaterThanOrEqual(2);
+
+    // Made public, its answer lost: read back, the switch is on, as the list says.
+    mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
+    await switchOf(screen).click();
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'true');
+    await expect.element(main(screen).getByText('Added.', { exact: true })).toBeVisible();
+    expect(main(screen).getByText(KNOWLEDGE_COPY.switchUnconfirmed, { exact: true }).query()).toBeNull();
+
+    // Back to the owner only, its answer lost and the list unreadable too: the switch stays where it
+    // was, and the page says it couldn't confirm the change.
+    mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'knowledge', status: 503, times: 2 });
+    await switchOf(screen).click();
+    await expect.element(main(screen).getByText(KNOWLEDGE_COPY.switchUnconfirmed, { exact: true })).toBeVisible();
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'true');
+
+    // An add lost the same way: not known either way. Adding it again posts the same item, which
+    // replaces it rather than adding a second.
+    const fresh = (await renderRoute(KNOWLEDGE, { retryScale: 0 })).screen;
+    const other = 'Parking is on the street. Ring the side door.';
+    await main(fresh).getByRole('textbox', { name: 'A note' }).fill(other);
+    mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'knowledge', status: 503, times: 2 });
+    await main(fresh).getByRole('button', { name: 'Add a note' }).click();
+    // The add says it couldn't confirm; the list, which couldn't be read either, says so on its own.
+    await expect.element(main(fresh).getByRole('region', { name: 'Add something' }).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.unconfirmed);
+    expect(switchOf(fresh).query()).toBeNull();
+    await main(fresh).getByRole('button', { name: 'Add a note' }).click();
+    await expect.element(switchOf(fresh)).toBeVisible();
+    const ids = new Set(posts().filter((posted) => posted.text === other).map((posted) => posted.item_id));
     expect(ids.size).toBe(1);
-    expect([...mockStore.world.knowledge.values()].filter((stored) => stored.item.text === NOTE)).toHaveLength(1);
+    expect([...mockStore.world.knowledge.values()].filter((stored) => stored.item.text === other)).toHaveLength(1);
+  });
+
+  it('knowledge_writes_go_one_at_a_time', async () => {
+    // Item A added, its card showing.
+    const screen = await addNote();
+    const a = posts()[0]?.item_id;
+    // Item B on its way: A's switch does nothing meanwhile, and B's add stays busy.
+    const field = main(screen).getByRole('textbox', { name: 'A note' });
+    await field.fill('Parking is on the street. Ring the side door.');
+    const b = held();
+    mockStore.inject({ route: 'addKnowledge', status: 200, until: b.until, body: answered({ item_id: 'note-b', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: {} }, ['owner']) });
+    await main(screen).getByRole('button', { name: 'Add a note' }).click();
+    await expect.element(main(screen).getByRole('button', { name: 'Add a note' })).toHaveAttribute('aria-busy', 'true');
+    await switchOf(screen).click();
+    expect(posts()).toHaveLength(2);
+    await expect.element(main(screen).getByRole('button', { name: 'Add a note' })).toHaveAttribute('aria-busy', 'true');
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
+
+    // B lands: its card replaces A's, and its switch changes B, not A.
+    b.release();
+    await expect.element(main(screen).getByRole('button', { name: 'Add a note' })).not.toHaveAttribute('aria-busy', 'true');
+    await switchOf(screen).click();
+    await expect.poll(() => posts()).toHaveLength(3);
+    expect(posts()[2]?.item_id).toBe('note-b');
+    expect(posts().filter((posted) => posted.item_id === a)).toHaveLength(1);
+  });
+
+  it('knowledge_file_that_cannot_be_read_says_so', async () => {
+    const { screen } = await renderRoute(KNOWLEDGE);
+    await expect.element(main(screen).getByRole('button', { name: 'Add a file' })).toBeVisible();
+    // The browser can't read the file: it says so, never that the file is empty, and sends nothing.
+    const unreadable = vi.spyOn(Blob.prototype, 'text').mockRejectedValueOnce(new DOMException('The file could not be read.', 'NotReadableError'));
+    await pick(screen, new File(['# Prices'], 'price-list.md', { type: 'text/markdown' }));
+    await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.unreadable);
+    expect(unreadable).toHaveBeenCalled();
+    expect(posts()).toEqual([]);
+    // Picked again, it is read and added.
+    await pick(screen, new File(['# Prices'], 'price-list.md', { type: 'text/markdown' }));
+    await expect.element(switchOf(screen)).toBeVisible();
+    expect(posts()).toHaveLength(1);
   });
 
   it('knowledge_fits_a_phone_in_plain_words', async () => {

@@ -7,8 +7,8 @@
  * owner alone, and shows the readers the kernel returned, never the ones asked for, so an item the
  * kernel keeps to the owner stays off.
  */
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
 
 import type { KnowledgeItem } from '../../api/contracts.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
@@ -34,10 +34,20 @@ export const KNOWLEDGE_COPY = {
   notText: 'Add a text or Markdown file, one ending in .txt or .md.',
   tooBig: 'That file is too big. Add files up to 100 KB.',
   emptyFile: 'That file is empty. Add one with some text in it.',
-  /** An add whose answer was lost may have gone through: adding it again posts the same item, which replaces it. */
+  /** The browser couldn't read the file: never called empty. */
+  unreadable: "We couldn't read that file. Pick it again.",
+  /** An add whose answer was lost, and the list read back doesn't have it: it didn't go through. */
+  notAdded: "That wasn't added. Add it again.",
+  /**
+   * An add whose answer was lost, and the list couldn't be read either: it may have gone through.
+   * Adding it again posts the same item, which replaces it.
+   */
   unconfirmed: "We couldn't confirm that it was added. Add it again: it won't be added twice.",
   /** Asked to be public, answered owner-only: the kernel keeps it to the owner. */
   keptPrivate: 'This stays private. Only you can see it.',
+  /** Asked to be the owner's alone, still public when read back: the change didn't go through. */
+  stillPublic: "That change didn't go through. Customers can still see this.",
+  /** A change whose answer was lost, and the list couldn't be read either: the switch stays as it was. */
   switchUnconfirmed: "We couldn't confirm that change. Turn it again to make sure.",
 } as const;
 
@@ -45,6 +55,8 @@ type Busy = 'note' | 'file' | 'switch';
 
 /** A Desk's knowledge, as the owner may see it. Query keys start with the route key. */
 const knowledgeKey = (deskId: string) => ['knowledge', deskId] as const;
+const knowledgeQuery = (deskId: string) =>
+  queryOptions({ queryKey: knowledgeKey(deskId), queryFn: () => request('knowledge', { params: { desk_id: deskId } }) });
 
 /**
  * The list's rows, oldest first, each with when it was added on the business's clock. An item whose
@@ -64,7 +76,7 @@ function rowsOf(items: readonly KnowledgeListItem[], timeZone: string): Knowledg
 
 /** "What I know now": the list once read, the loading line while it is, and a failed read with Try again over it. */
 function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
-  const list = useQuery({ queryKey: knowledgeKey(deskId), queryFn: () => request('knowledge', { params: { desk_id: deskId } }) });
+  const list = useQuery(knowledgeQuery(deskId));
   const failure = useReadFailure(list);
   return (
     <>
@@ -123,15 +135,45 @@ export function KnowledgePage() {
   // The last item posted, so adding the same thing again posts it under the same id and replaces
   // it rather than adding a second copy, whether or not the first answer arrived.
   const [posted, setPosted] = useState<KnowledgeItem | null>(null);
+  // A write is out, or being read back: one at a time, so no answer lands on another's card.
+  const writing = useRef(false);
 
   const post = (item: KnowledgeItem) => request('addKnowledge', { params: { desk_id: deskId }, body: { item } });
+
+  /**
+   * After a write whose answer was lost: the item as a fresh read of the list has it, `missing` when
+   * the list doesn't, or null when it can't be read either, so the outcome stays unknown.
+   */
+  const readBack = async (itemId: string): Promise<KnowledgeListItem | 'missing' | null> => {
+    try {
+      const items = await queryClient.fetchQuery({ ...knowledgeQuery(deskId), staleTime: 0 });
+      return items.find((item) => item.item_id === itemId) ?? 'missing';
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Runs one write, `kind` busy until it and any read back are done; while it runs, every other add
+   * and change is ignored, the switch's included, which the design system doesn't hold during an add.
+   */
+  const exclusive = async (kind: Busy, write: () => Promise<void>) => {
+    if (writing.current) return;
+    writing.current = true;
+    setBusy(kind);
+    try {
+      await write();
+    } finally {
+      writing.current = false;
+      setBusy(undefined);
+    }
+  };
 
   /** Adds `fields` for the owner only, under the id it was posted with before if it is the same. */
   const add = async (kind: 'note' | 'file', fields: Omit<KnowledgeItem, 'item_id' | 'label'>) => {
     const ownerOnly = { ...fields, label: { readers: ['owner'] } };
     const item: KnowledgeItem = { item_id: posted !== null && sameItem(posted, ownerOnly) ? posted.item_id : newId(kind), ...ownerOnly };
     setPosted(item);
-    setBusy(kind);
     setError(undefined);
     try {
       const stored = await post(item);
@@ -140,9 +182,19 @@ export function KnowledgePage() {
       listChanged();
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      setError(isUncertain(err) ? KNOWLEDGE_COPY.unconfirmed : ownerErrorCopy(err));
-    } finally {
-      setBusy(undefined);
+      if (!isUncertain(err)) {
+        setError(ownerErrorCopy(err));
+        return;
+      }
+      // It may have gone through: the list, read again, says whether it did and how it's labelled.
+      const now = await readBack(item.item_id);
+      if (now === null) setError(KNOWLEDGE_COPY.unconfirmed);
+      else if (now === 'missing') setError(KNOWLEDGE_COPY.notAdded);
+      else {
+        // The list may withhold its words; the card keeps the ones posted, with the label read back.
+        setAdded({ ...item, label: now.label });
+        setSwitchLine(undefined);
+      }
     }
   };
 
@@ -152,10 +204,10 @@ export function KnowledgePage() {
       setError(KNOWLEDGE_COPY.emptyNote);
       return;
     }
-    void add('note', { source: 'setup', title: titleOf(text), text });
+    void exclusive('note', () => add('note', { source: 'setup', title: titleOf(text), text }));
   };
 
-  const addFile = async (file: File) => {
+  const addFile = (file: File) => {
     if (!TEXT_FILE.test(file.name)) {
       setError(KNOWLEDGE_COPY.notText);
       return;
@@ -164,32 +216,58 @@ export function KnowledgePage() {
       setError(KNOWLEDGE_COPY.tooBig);
       return;
     }
-    setBusy('file');
-    const text = await file.text().catch(() => '');
-    if (text.trim() === '') {
-      setBusy(undefined);
-      setError(KNOWLEDGE_COPY.emptyFile);
-      return;
-    }
-    await add('file', { source: 'upload', title: titleOf(file.name), text });
+    void exclusive('file', async () => {
+      let text: string;
+      try {
+        text = await file.text();
+      } catch {
+        setError(KNOWLEDGE_COPY.unreadable);
+        return;
+      }
+      if (text.trim() === '') {
+        setError(KNOWLEDGE_COPY.emptyFile);
+        return;
+      }
+      await add('file', { source: 'upload', title: titleOf(file.name), text });
+    });
   };
 
   /** The switch: the item posted again for customers or for the owner alone; it shows what comes back. */
-  const changeReaders = async (makePublic: boolean) => {
-    if (added === null) return;
-    setBusy('switch');
-    setSwitchLine(undefined);
-    try {
-      const stored = await post({ ...added, label: { ...added.label, readers: makePublic ? ['public'] : ['owner'] } });
-      setAdded(stored);
-      listChanged();
-      if (makePublic && !(stored.label.readers ?? []).includes('public')) setSwitchLine(KNOWLEDGE_COPY.keptPrivate);
-    } catch (err) {
-      if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      setSwitchLine(isUncertain(err) ? KNOWLEDGE_COPY.switchUnconfirmed : ownerErrorCopy(err));
-    } finally {
-      setBusy(undefined);
-    }
+  const changeReaders = (makePublic: boolean) => {
+    const card = added;
+    if (card === null) return;
+    void exclusive('switch', async () => {
+      setSwitchLine(undefined);
+      /** The card's label, as an answer or a read back gave it, if the card still shows this item. */
+      const show = (label: KnowledgeItem['label']) => setAdded((now) => (now?.item_id === card.item_id ? { ...now, label } : now));
+      /** What the label says against what was asked: nothing when they agree. */
+      const lineFor = (label: KnowledgeItem['label']) => {
+        const isPublic = (label.readers ?? []).includes('public');
+        if (isPublic === makePublic) return undefined;
+        return makePublic ? KNOWLEDGE_COPY.keptPrivate : KNOWLEDGE_COPY.stillPublic;
+      };
+      try {
+        const stored = await post({ ...card, label: { ...card.label, readers: makePublic ? ['public'] : ['owner'] } });
+        show(stored.label);
+        setSwitchLine(lineFor(stored.label));
+        listChanged();
+      } catch (err) {
+        if (err instanceof ApiError && err.kind === 'unauthorized') return;
+        if (!isUncertain(err)) {
+          setSwitchLine(ownerErrorCopy(err));
+          return;
+        }
+        // It may have gone through: the list, read again, says how the item is labelled now. If it
+        // can't be read, the switch stays where it was and says it couldn't confirm the change.
+        const now = await readBack(card.item_id);
+        if (now === null || now === 'missing') {
+          setSwitchLine(KNOWLEDGE_COPY.switchUnconfirmed);
+          return;
+        }
+        show(now.label);
+        setSwitchLine(lineFor(now.label));
+      }
+    });
   };
 
   return (
@@ -200,7 +278,7 @@ export function KnowledgePage() {
         note={note}
         onNoteChange={setNote}
         onAddNote={addNote}
-        onAddFile={(file) => void addFile(file)}
+        onAddFile={addFile}
         {...(busy === undefined ? {} : { busy })}
         {...(error === undefined ? {} : { error })}
         {...(added === null
@@ -208,7 +286,7 @@ export function KnowledgePage() {
           : {
               added: {
                 readers: added.label.readers ?? [],
-                onPublicChange: (makePublic: boolean) => void changeReaders(makePublic),
+                onPublicChange: changeReaders,
                 ...(switchLine === undefined ? {} : { note: switchLine }),
               },
             })}
