@@ -339,7 +339,7 @@ function watchAbout(shell: HTMLElement, observer: ResizeObserver | null, watched
  * the message the visitor was reading stays where it was under the chat's head, and the shell sends
  * `PUBLIC_SHELL_SCROLLER_EVENT` with the element that now scrolls the conversation.
  */
-function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
+export function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
   const [aboutBeside, setAboutBeside] = useState(false);
   const short = useRef(false);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -442,7 +442,7 @@ function useShellLayout(shell: RefObject<HTMLElement | null>): boolean {
  * on an iPhone), so it turns short and its chat's head stays at the top of what shows. Not while the
  * visitor has zoomed in, and not inside an owner screen.
  */
-function useVisualViewportFit(shell: RefObject<HTMLElement | null>, embedded: boolean): void {
+export function useVisualViewportFit(shell: RefObject<HTMLElement | null>, embedded: boolean): void {
   useLayoutEffect(() => {
     const el = shell.current;
     const viewport = typeof window === 'undefined' ? undefined : window.visualViewport;
