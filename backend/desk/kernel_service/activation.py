@@ -63,13 +63,13 @@ import signal
 import tempfile
 import threading
 from collections import OrderedDict
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from time import monotonic
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, TypeVar
 
 import desk_kernel
 from pydantic import BaseModel, ConfigDict, StrictInt, ValidationError
@@ -803,7 +803,9 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
     return StartupRebuild(results=results, left=left, unscanned=unscanned)
 
 
+T = TypeVar("T")
 RETRY_WAITS_S = (5.0, 30.0, 60.0)    # a failed lookup's wait before the next; the last one repeats
+BACKGROUND_LOOKUP_S = 10.0           # the background's limit on one listing or one copy's lookup
 
 
 async def wait_to_retry(seconds: float) -> None:
@@ -818,26 +820,32 @@ async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild)
     brings them up one at a time, proving live in `symcc` mode. A copy whose lookup fails, or a
     listing that fails, doesn't hold the others up: after the pass it waits (`RETRY_WAITS_S`,
     longer each time) and looks at only those again, until none are left or it is cancelled, so no
-    copy is lost until the next start. Every owner found in a pass is told before that pass's first
-    rebuild starts. As at startup, a version it can't rebuild is ledgered and alerts the owner, and
+    copy is lost until the next start; each listing or lookup is cut off at `BACKGROUND_LOOKUP_S`
+    and retried the same way, so a blocked query holds up no other copy. The owners of the Desks
+    startup found are told before anything else, and every owner found in a pass before that
+    pass's first rebuild starts. As at startup, a version it can't rebuild is ledgered and alerts the owner, and
     one it hasn't reached yet keeps refusing. The app cancels it at shutdown: the Desk in hand rolls
     back, its prover is killed, and the next start takes it up again."""
     results: Rebuilt = {}
     work: list[tuple[str, str]] = list(startup.left)
+    for copy_id, desk_id in work:             # the Desks startup found: their owners are told first
+        await _alert_waiting(runtime, copy_id, desk_id)
     pending: list[str] | None = startup.unscanned
     attempt = 0
     while True:
         if pending is None:                   # the copies weren't listed yet
             pending = await _copies(runtime)
         failed: list[str] | None = None if pending is None else []
+        found: list[tuple[str, str]] = []
         for copy_id in pending or []:
-            desk_ids = await _desks_of(runtime, copy_id)
+            desk_ids = await _bounded(_desks_of(runtime, copy_id), "rebuild_lookup_cut_off copy_id=" + copy_id)
             if desk_ids is None:
                 failed.append(copy_id)
             else:
-                work += [(copy_id, desk_id) for desk_id in desk_ids]
-        for copy_id, desk_id in work:
+                found += [(copy_id, desk_id) for desk_id in desk_ids]
+        for copy_id, desk_id in found:
             await _alert_waiting(runtime, copy_id, desk_id)
+        work += found
         for copy_id, desk_id in work:
             done = await _bring_up(runtime, copy_id, desk_id, prove=True)
             if done is not None:
@@ -853,11 +861,22 @@ async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild)
 
 
 async def _copies(runtime: KernelRuntime) -> list[str] | None:
-    """Every copy's ID (`repo.copy_ids`), or None when listing them failed, which is logged."""
+    """Every copy's ID (`repo.copy_ids`), or None when listing them failed or outlasted
+    `BACKGROUND_LOOKUP_S`, which is logged."""
     try:
-        return await copy_ids(runtime)
+        return await _bounded(copy_ids(runtime), "rebuild_copies_cut_off")
     except Exception as exc:
         log_error(log, exc, "rebuild_copies_failed")
+        return None
+
+
+async def _bounded(lookup: Awaitable[T], cut_off: str) -> T | None:
+    """The background's lookup, or None when it outlasts `BACKGROUND_LOOKUP_S` (logged as `cut_off`),
+    so one blocked query holds up no other copy and is looked at again after a wait."""
+    try:
+        return await asyncio.wait_for(lookup, BACKGROUND_LOOKUP_S)
+    except TimeoutError:
+        log.info(cut_off)
         return None
 
 

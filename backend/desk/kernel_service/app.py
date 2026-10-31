@@ -12,10 +12,11 @@ in its cache, then runs `desk-prove --selftest` once to pick the proof mode for 
 (`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), then
 gives every Desk the native tools it was created without and rebuilds the active rules versions an
 earlier kernel stored under another baseline, within a budget that finding them counts against
-too, and from cached reports only (`activation.rebuild_at_startup`), then reconciles the
-executions a stopped kernel left behind (`execute.reconcile_at_startup`), and last starts the
-rebuild of the copies and Desks startup left, which runs in the background while the kernel serves
-(`activation.rebuild_in_background`, `app.state.rebuilding`) and is cancelled at shutdown.
+too, and from cached reports only (`activation.rebuild_at_startup`), then starts the rebuild of
+the copies and Desks startup left, which runs in the background while the kernel serves
+(`activation.rebuild_in_background`, `app.state.rebuilding`) and is cancelled at shutdown, and last
+reconciles the executions a stopped kernel left behind (`execute.reconcile_at_startup`), within
+`STARTUP_RECONCILE_S`, since a read settles them too.
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -62,6 +63,7 @@ from desk.kernel_service.repo import (Ctx, KernelCtx, KernelFailure, KernelRunti
                                       route_template, storable)
 
 log = logging.getLogger("desk.kernel_service")
+STARTUP_RECONCILE_S = 10.0         # startup's limit on settling the executions a stopped kernel left
 
 # A link's path carries its single-use token (`/document_links/{token}`, and Plan 01c's
 # `/payment_links/{token}`); its segment is written `<redacted>` wherever it is logged.
@@ -157,17 +159,19 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                 startup = await activation.rebuild_at_startup(app.state.kernel)
             except Exception as exc:
                 log_error(log, exc, "startup_rebuild_failed")
-            try:
-                # executions a stopped kernel left behind; a read settles them too, so a failure
-                # here is logged and the kernel starts
-                await execute.reconcile_at_startup(app.state.kernel)
-            except Exception as exc:
-                log_error(log, exc, "startup_reconcile_failed")
             if startup is not None and startup.pending:
                 # the Desks and copies startup left, while the kernel serves; each Desk refuses
-                # until it is rebuilt
+                # until it is rebuilt. Started first, so nothing after it can keep it from starting
                 rebuilding = asyncio.create_task(activation.rebuild_in_background(app.state.kernel, startup))
             app.state.rebuilding = rebuilding
+            try:
+                # executions a stopped kernel left behind; a read settles them too, so a failure or
+                # a run past STARTUP_RECONCILE_S is logged and the kernel starts
+                await asyncio.wait_for(execute.reconcile_at_startup(app.state.kernel), STARTUP_RECONCILE_S)
+            except TimeoutError:
+                log.info("startup_reconcile_cut_off")
+            except Exception as exc:
+                log_error(log, exc, "startup_reconcile_failed")
             yield
         finally:
             if rebuilding is not None:

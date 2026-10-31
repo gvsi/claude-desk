@@ -25,6 +25,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
+import psycopg
 import pytest
 from fastapi import FastAPI
 from sqlalchemy import delete, select
@@ -32,7 +33,9 @@ from sqlalchemy import delete, select
 from desk.contracts import ProofReport, RuleCard, ToolProfile
 from desk.db.models import DemoInboxEntry as InboxRow
 from desk.db.models import PolicyVersion, Tool
+from desk.db.session import database_url, libpq_url
 from desk.kernel_service import activation, adapters, compiler, desks
+from desk.kernel_service import app as app_module
 from desk.kernel_service.app import create_app
 
 from .fakes import FakeDecisions, FrozenClock
@@ -502,6 +505,59 @@ async def test_two_kernels_starting_at_once_alert_a_waiting_owner_once(app, clie
     monkeypatch.setattr(activation.demo_inbox, "deliver", together)
     await asyncio.gather(*(activation._alert_waiting(app.state.kernel, copy.copy_id, copy.desk_id) for _ in range(2)))
     assert await rules_alerts(app, copy) == [WAITING_ALERT]
+
+
+async def test_a_blocked_lookup_holds_up_no_desk_the_background_already_knows(app, client, monkeypatch):
+    # a copy whose lookup hangs is cut off and looked at again after a wait; the Desk startup already found is
+    # rebuilt meanwhile, its owner told first
+    known, blocked = await rivera(app, client), await rivera(app, client)
+    for each in (known, blocked):
+        await seed_from_an_earlier_kernel(app, each)
+    discover, calls, waits, never = activation.desks_to_bring_up, [], [], asyncio.Event()
+
+    async def hanging_once(*args, **kwargs):
+        calls.append(args[1])
+        if calls.count(blocked.copy_id) == 1 and args[1] == blocked.copy_id:
+            await never.wait()                                   # never set: cut off by the lookup's bound
+        return await discover(*args, **kwargs)
+
+    async def waiting(seconds):
+        waits.append(seconds)
+        assert await rules_alerts(app, known) == [WAITING_ALERT]  # the known Desk's owner was told first
+
+    monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 0.05)
+    monkeypatch.setattr(activation, "desks_to_bring_up", hanging_once)
+    monkeypatch.setattr(activation, "wait_to_retry", waiting)
+    startup = activation.StartupRebuild(results={}, left=[(known.copy_id, known.desk_id)], unscanned=[blocked.copy_id])
+    rebuilt = await asyncio.wait_for(activation.rebuild_in_background(app.state.kernel, startup), timeout=10)
+    assert rebuilt == {(known.desk_id, 1): None, (blocked.desk_id, 1): None}
+    assert waits == [5.0] and calls == [blocked.copy_id, blocked.copy_id]
+
+
+async def test_a_kernel_starts_and_rebuilds_while_the_copies_table_is_locked(app, client, frozen_clock, reviewer,
+                                                                            monkeypatch):
+    # with every copy listing blocked behind a lock, startup's rebuild and its reconciliation are both cut off at
+    # their budgets, the kernel serves, and the background rebuilds the Desk once the lock goes
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.2)
+    monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 0.2)
+    monkeypatch.setattr(app_module, "STARTUP_RECONCILE_S", 0.2)
+    released = asyncio.Event()
+
+    async def waiting(seconds):
+        await released.wait()
+
+    monkeypatch.setattr(activation, "wait_to_retry", waiting)
+    async with await psycopg.AsyncConnection.connect(libpq_url(database_url("ADMIN"))) as admin:
+        await admin.execute("LOCK TABLE kernel.copies IN ACCESS EXCLUSIVE MODE")
+        async with asyncio.timeout(10):
+            async with started_kernel(frozen_clock, reviewer) as (kernel, _):
+                rebuilding = kernel.state.rebuilding
+                assert rebuilding is not None and not rebuilding.done()
+                await admin.rollback()                           # the lock goes
+                released.set()
+                assert await rebuilding == {(copy.desk_id, 1): None}
 
 
 async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
