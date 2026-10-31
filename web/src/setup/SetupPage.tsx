@@ -2,7 +2,8 @@ import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
-import { ownerErrorCopy, request } from '../api/http.ts';
+import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
+import { NotFound } from '../app/NotFound.tsx';
 import type { SetupState, SetupStep } from '../api/views.ts';
 import { Button, ConceptFooter, LoadingLine, Mark, Notice, Steps, Wordmark } from '../ds/index.ts';
 import { followInAppLinks } from '../owner/inAppLinks.ts';
@@ -109,6 +110,8 @@ function SetupInterview({ setupId }: { setupId: string }) {
   );
 
   const state = setup.data;
+  // An interview outside this copy: the app's not-found screen.
+  if (state === undefined && setup.error instanceof ApiError && setup.error.kind === 'not_found') return <NotFound />;
   if (state === undefined) {
     return (
       <SetupShell business={null} step={0} exitTo="/">
