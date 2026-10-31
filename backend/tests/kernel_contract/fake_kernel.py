@@ -3369,6 +3369,7 @@ class FakeKernelState:
     def put_business_tools(self, request: Request, body: dict) -> DeskUpdated:
         from desk.contracts import BusinessToolDef
         from desk.kernel_api import BusinessToolsRequest
+        from desk.kernel_service.adapters import profile_sha256
         from desk.kernel_service.adapters.blocks import profile as block_profile
         from desk.kernel_service.business_tools import config_texts, public_fields, public_promise_fields
         from desk.kernel_service.repo import storable
@@ -3401,7 +3402,8 @@ class FakeKernelState:
         for profile in profiles:
             previous = desk.tools.get(profile.tool)
             change = ("new" if previous is None else "kept"
-                      if previous.definition_sha256 == profile.definition_sha256 else "changed")
+                      if previous.definition_sha256 == profile.definition_sha256
+                      and profile_sha256(previous) == profile_sha256(profile) else "changed")
             if change != "kept":
                 self._put_tool(desk, profile.model_copy(update={"review_reason": change}))
             remaining.discard(profile.tool)
