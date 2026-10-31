@@ -418,7 +418,10 @@ export interface RuleChatOut {
 
 // Setup
 
-export type SetupStep = 'questions' | 'tools' | 'rules' | 'situations' | 'safety_check' | 'preview' | 'live';
+/** Setup's steps, in the order an interview goes through them: it only ever moves forward, and `live` is the last. */
+export const SETUP_STEPS = ['questions', 'tools', 'rules', 'situations', 'safety_check', 'preview', 'live'] as const;
+
+export type SetupStep = (typeof SETUP_STEPS)[number];
 
 /** The steps a setup that hasn't gone live can be at, as the API's `DeskSetup` names them: every step but `live`. */
 export type UnfinishedSetupStep = DeskSetup['step'];

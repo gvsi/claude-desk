@@ -1725,6 +1725,9 @@ describe("Today's unfinished setup", () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
     await expect.poll(() => requests('setupRules').length).toBeGreaterThan(0);
     await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    // Today never draws the step before, not even for a moment as it opens.
+    const sawTools = watchFor('Pick up at your tools');
+    onTestFinished(() => expect(sawTools(), 'Today drew the tools step').toBe(false));
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     expect(performance.now() - startedAt, "left within the Desks' fresh window").toBeLessThan(5_000);

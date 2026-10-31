@@ -1,6 +1,6 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useNavigate, useParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
 import { NotFound } from '../app/NotFound.tsx';
@@ -56,6 +56,11 @@ interface SetupShellProps {
   exitTo: string;
   /** The preview's wider column. */
   wide?: boolean;
+  /**
+   * What an in-app link out of setup waits for before it goes, such as the interview carried into
+   * the copy's Desks, so the page it opens is drawn from it.
+   */
+  beforeLeave?: () => Promise<void>;
   children: ReactNode;
 }
 
@@ -65,13 +70,18 @@ interface SetupShellProps {
  * business once known, the five steps and "Save and exit"; one column; the concept footer at the
  * window's foot.
  */
-function SetupShell({ business, step, live, exitTo, wide = false, children }: SetupShellProps) {
+function SetupShell({ business, step, live, exitTo, wide = false, beforeLeave, children }: SetupShellProps) {
   const navigate = useNavigate();
+  // An in-app link goes once `beforeLeave` is done, whether or not it worked.
+  const leave: NavigateFunction = (to: To | number, options?: NavigateOptions) => {
+    const go = () => (typeof to === 'number' ? navigate(to) : navigate(to, options));
+    return beforeLeave === undefined ? go() : beforeLeave().then(go, go);
+  };
   const compact = useSyncExternalStore(subscribeCompactBar, isCompactBar, () => false);
   // Setup's name, as its steps are labelled, at every step; the preview's public page leaves it be.
   useDocumentTitle(inApp(SETUP_COPY.stepsLabel));
   return (
-    <div className="cd-setup" onClick={followInAppLinks(navigate)}>
+    <div className="cd-setup" onClick={followInAppLinks(leave)}>
       <header className="cd-setup__bar">
         <div className="cd-setup__lead">
           <span className="cd-setup__brand">
@@ -139,16 +149,30 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const moveTo = useCallback((step: SetupStep) => update((now) => (now === undefined ? now : { ...now, step })), [update]);
   /** The API answered with the interview as it stands. */
   const onState = useCallback((next: SetupState) => update(() => next), [update]);
-  // Leaving setup, by "Save and exit", "Go to Today" or any other way, writes the interview as it
-  // stands into the copy's Desks once more, then reads them again: the steps' own reads (the draft,
-  // the situations, the safety check) can have answered a read of them still out with the step
-  // before, and the page that opens next names the step setup holds, even while they can't be read.
+  /**
+   * Leaving setup carries the interview as it stands into the copy's Desks once more (then they are
+   * read again): the steps' own reads (the draft, the situations, the safety check) can have moved it
+   * on in the API while a read of the Desks still out was answered with the step before, and the
+   * page that opens next names the step setup holds, even while the Desks can't be read. An in-app
+   * link out ("Save and exit", "Go to Today") goes once it is written (`SetupShell`'s `beforeLeave`);
+   * any other way out (Back, say) carries it as setup closes.
+   */
+  const carry = useCallback((): Promise<void> => {
+    const now = queryClient.getQueryData<SetupState>(setupQuery(setupId).queryKey);
+    if (now !== undefined) return carrySetup(queryClient, now);
+    void invalidateCopy(queryClient);
+    return Promise.resolve();
+  }, [queryClient, setupId]);
+  const leftByLink = useRef(false);
+  const beforeLeave = useCallback(() => {
+    leftByLink.current = true;
+    return carry();
+  }, [carry]);
   useEffect(
     () => () => {
-      const now = queryClient.getQueryData<SetupState>(setupQuery(setupId).queryKey);
-      void (now === undefined ? invalidateCopy(queryClient) : carrySetup(queryClient, now));
+      if (!leftByLink.current) void carry();
     },
-    [queryClient, setupId],
+    [carry],
   );
   /** The interview read again, after a write whose answer was lost; null when it can't be read. */
   const reread = useCallback(
@@ -232,6 +256,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       live={state.step !== 'live' ? undefined : wentLiveHere ? 'draw' : 'drawn'}
       exitTo={todayPath(state.desk_id)}
       wide={state.step === 'preview'}
+      beforeLeave={beforeLeave}
     >
       {body}
     </SetupShell>

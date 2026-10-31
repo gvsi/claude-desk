@@ -8,7 +8,7 @@ import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanst
 import { useEffect, useState } from 'react';
 
 import { request } from '../api/http.ts';
-import type { BusinessOut, CopyOut, DeskSummary, NeedsYouItem, SetupStep } from '../api/views.ts';
+import { SETUP_STEPS, type BusinessOut, type CopyOut, type DeskSetup, type DeskSummary, type NeedsYouItem, type SetupStep } from '../api/views.ts';
 import { pollMs } from '../app/poll.ts';
 import { readLocal } from '../lib/storage.ts';
 
@@ -235,21 +235,32 @@ export async function invalidateCopy(queryClient: QueryClient): Promise<void> {
 }
 
 /**
- * A Desk's setup interview as setup holds it now (its Desk, its id and its step), written into the
- * copy's Desks read here, the businesses and the copy (`me`), whose `setup` names it: the interview
- * and its step, or null once it is live. So the next page that reads them, Today, names the step at
- * once, while a read of them is slow and after one fails. A read still out, answered before the
- * step moved on, is let go (it reverts to what is written here), and they are read again in the
- * background, so the API stays the source.
+ * The setup a Desk's cached `setup` should name once setup has carried `carried` into it: only ever
+ * further on, as an interview moves only forward. A cached null stays: the API said the Desk is live
+ * (or was made outside setup). A cached later step, or another interview, stays. Otherwise the
+ * carried step, or null at `live`.
+ */
+function furtherSetup(cached: DeskSetup | null, carried: { interview_id: string; step: SetupStep }): DeskSetup | null {
+  if (cached === null || cached.interview_id !== carried.interview_id) return cached;
+  if (SETUP_STEPS.indexOf(carried.step) <= SETUP_STEPS.indexOf(cached.step)) return cached;
+  return carried.step === 'live' ? null : { interview_id: carried.interview_id, step: carried.step };
+}
+
+/**
+ * A Desk's setup interview as setup holds it now (its Desk, its id and its step), carried into the
+ * copy's Desks read here, the businesses and the copy (`me`), whose `setup` names it, so the next
+ * page that reads them, Today, names the step at once, while a read of them is slow and after one
+ * fails. A read of them still out, which may have been answered before the step moved on, is let go
+ * first; the carried step only ever moves the Desk's setup forward (`furtherSetup`); then they are
+ * read again in the background, so the API stays the source. Resolves once the carried step is
+ * written, without waiting for that read.
  */
 export async function carrySetup(queryClient: QueryClient, state: { desk_id: string; interview_id: string; step: SetupStep }): Promise<void> {
-  const setup = state.step === 'live' ? null : { interview_id: state.interview_id, step: state.step };
-  const withSetup = (desk: DeskSummary): DeskSummary => (desk.desk_id === state.desk_id ? { ...desk, setup } : desk);
-  queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => now?.map((business) => ({ ...business, desks: business.desks.map(withSetup) })));
-  queryClient.setQueryData<CopyOut>(ME_KEY, (now) => (now === undefined ? now : { ...now, desks: now.desks.map(withSetup) }));
-  void queryClient.cancelQueries({ queryKey: DESKS_KEY });
-  void queryClient.cancelQueries({ queryKey: ME_KEY });
-  await invalidateCopy(queryClient);
+  await Promise.all([queryClient.cancelQueries({ queryKey: DESKS_KEY }), queryClient.cancelQueries({ queryKey: ME_KEY })]);
+  const carried = (desk: DeskSummary): DeskSummary => (desk.desk_id === state.desk_id ? { ...desk, setup: furtherSetup(desk.setup, state) } : desk);
+  queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => now?.map((business) => ({ ...business, desks: business.desks.map(carried) })));
+  queryClient.setQueryData<CopyOut>(ME_KEY, (now) => (now === undefined ? now : { ...now, desks: now.desks.map(carried) }));
+  void invalidateCopy(queryClient);
 }
 
 /** A Desk's own address in the owner app, which its pages sit under. */

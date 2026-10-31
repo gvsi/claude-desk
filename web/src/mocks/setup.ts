@@ -28,6 +28,7 @@ import type {
   ToolRow,
   WentLive,
 } from '../api/views.ts';
+import { SETUP_STEPS } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
@@ -475,9 +476,8 @@ function safetyCheckFor(ownerName: string | null): SafetyCheck {
   return { rows, blocked: rows.filter((r) => r.blocked).length, total: rows.length, seconds: 1.4 };
 }
 
-/** The steps in order: an interview only moves forward. */
-const STEP_ORDER: readonly SetupState['step'][] = ['questions', 'tools', 'rules', 'situations', 'safety_check', 'preview', 'live'];
-const atLeast = (step: SetupState['step'], than: SetupState['step']) => STEP_ORDER.indexOf(step) >= STEP_ORDER.indexOf(than);
+/** Whether `step` is `than` or past it, in setup's order (`SETUP_STEPS`): an interview only moves forward. */
+const atLeast = (step: SetupState['step'], than: SetupState['step']) => SETUP_STEPS.indexOf(step) >= SETUP_STEPS.indexOf(than);
 
 function moveTo(interview: Interview, step: SetupState['step']): void {
   if (!atLeast(interview.state.step, step)) interview.state.step = step;
