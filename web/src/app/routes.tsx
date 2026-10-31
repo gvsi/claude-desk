@@ -12,6 +12,7 @@ import { TodayPage } from '../owner/today/TodayPage.tsx';
 import { AgentCardPage } from '../public/agents/AgentCardPage.tsx';
 import { CheckoutPage } from '../public/checkout/CheckoutPage.tsx';
 import { PublicPage } from '../public/PublicPage.tsx';
+import { SetupPage } from '../setup/SetupPage.tsx';
 import { NotFound } from './NotFound.tsx';
 import { RouteError } from './RouteError.tsx';
 
@@ -46,6 +47,8 @@ function aboutRoute(id: AboutId): RouteObject {
  */
 export const routes: RouteObject[] = [
   { path: '/', element: <Arrival />, errorElement: <RouteError /> },
+  // Setup, before the owner's Desk routes so "setup" is never read as a Desk.
+  { path: '/app/setup/:setupId?', element: <SetupPage />, errorElement: <RouteError /> },
   {
     path: '/app/:deskId',
     element: <OwnerLayout />,
