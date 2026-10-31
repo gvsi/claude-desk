@@ -195,8 +195,13 @@ describe('gen-api', () => {
       /schema Decision differs from the contract of the same name/,
     );
 
-    // Titles, descriptions, defaults and how a reference is spelled may differ: the shape is the same.
+    // Titles, descriptions, defaults and how a reference is spelled may differ, a discriminator's
+    // mapping included: the shape is the same.
     const review = (score) => ({ type: 'object', properties: { score }, required: [] });
+    const choice = (prefix, reviewIs = 'Review') => ({
+      oneOf: [{ $ref: `${prefix}Decision` }, { $ref: `${prefix}Review` }],
+      discriminator: { propertyName: 'kind', mapping: { decision: `${prefix}Decision`, review: `${prefix}${reviewIs}` } },
+    });
     const contracts = {
       $defs: {
         Decision: {
@@ -204,6 +209,7 @@ describe('gen-api', () => {
           properties: { ...CONTRACTS.$defs.Decision.properties, review: { $ref: '#/$defs/Review' } },
         },
         Review: { ...review({ type: 'number', title: 'Score', default: 0 }), title: 'Review' },
+        Choice: choice('#/$defs/'),
       },
     };
     const served = {
@@ -215,10 +221,15 @@ describe('gen-api', () => {
         properties: { ...contracts.$defs.Decision.properties, review: ref('Review') },
       },
       Review: review({ type: 'number', title: 'How sure', description: 'From 0 to 1.', default: 1 }),
+      Choice: choice('#/components/schemas/'),
     };
     const text = await generateApi(doc(served), contracts);
     expect(text).toContain("import type { Decision } from './contracts.ts';");
-    expect(text).not.toMatch(/^export (?:interface|type) (?:Decision|Review)\b/m);
+    expect(text).not.toMatch(/^export (?:interface|type) (?:Decision|Review|Choice)\b/m);
+    // A mapping that points at another schema is another shape.
+    await expect(generateApi(doc({ ...served, Choice: choice('#/components/schemas/', 'Decision') }), contracts)).rejects.toThrow(
+      /schema Choice differs from the contract of the same name/,
+    );
   });
 
   it('command_check_fails_when_stale_or_missing', async () => {

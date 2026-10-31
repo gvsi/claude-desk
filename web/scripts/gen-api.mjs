@@ -40,9 +40,17 @@ function refName(ref) {
 const ANNOTATIONS = new Set(['title', 'description', 'default']);
 
 /**
- * A prepared schema as it is compared with another: annotations dropped, and each `$ref` reduced to
- * the schema name it points at, whether it is spelled `#/components/schemas/Name` (the OpenAPI
- * document) or `#/$defs/Name` (the contracts schema). Property names are data and all kept.
+ * The schema name a reference points at, whether it is spelled `#/components/schemas/Name` (the
+ * OpenAPI document) or `#/$defs/Name` (the contracts schema).
+ */
+function referencedName(ref) {
+  return ref.replace(/^#\/(?:components\/schemas|\$defs)\//, '');
+}
+
+/**
+ * A prepared schema as it is compared with another: annotations dropped, and each reference, a
+ * `$ref` or a value of a discriminator's `mapping`, reduced to the schema name it points at.
+ * Property names and mapping keys are data and all kept.
  */
 function shapeOf(node) {
   if (Array.isArray(node)) return node.map(shapeOf);
@@ -51,9 +59,16 @@ function shapeOf(node) {
   for (const [key, value] of Object.entries(node)) {
     if (ANNOTATIONS.has(key)) continue;
     if (key === '$ref' && typeof value === 'string') {
-      out.$ref = value.replace(/^#\/(?:components\/schemas|\$defs)\//, '');
+      out.$ref = referencedName(value);
     } else if (key === 'properties' && value && typeof value === 'object') {
       out.properties = Object.fromEntries(Object.entries(value).map(([field, schema]) => [field, shapeOf(schema)]));
+    } else if (key === 'discriminator' && value && typeof value === 'object') {
+      out.discriminator = shapeOf(value);
+      if (value.mapping && typeof value.mapping === 'object') {
+        out.discriminator.mapping = Object.fromEntries(
+          Object.entries(value.mapping).map(([tag, ref]) => [tag, typeof ref === 'string' ? referencedName(ref) : ref]),
+        );
+      }
     } else {
       out[key] = shapeOf(value);
     }
