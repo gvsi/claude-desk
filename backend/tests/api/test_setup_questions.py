@@ -1651,12 +1651,16 @@ def test_fact_turns_capture_business_policies_with_bounded_fields():
         "pricing": 'how the business prices (a fixed menu, "from" prices, or per case after a consult)',
         "intake": "what to ask a new customer before the owner takes them on",
         "urgent": "what this business treats as urgent and what to do then",
+        "after_hours": "What a customer is told about contacting the business outside its hours; public text, "
+                       "never private owner instructions or personal phone numbers",
     }
     for key in set(QUESTION_KEYS) - set(LIMIT_QUESTIONS):
         schema = SETUP_TURNS[key].model_json_schema()
         assert set(descriptions).issubset(schema["properties"]), key
         for name, description in descriptions.items():
-            assert schema["properties"][name]["description"] == description
+            assert schema["properties"][name]["description"] == (
+                description + ". Describe the policy in words; keep amounts, percentages, times, days and numbers "
+                "out. Leave hours to the hours question.")
             assert schema["properties"][name]["maxLength"] == 500
             assert name in schema["required"]
         fields = {name: "x" * 500 for name in descriptions}
@@ -1680,6 +1684,14 @@ def test_fact_turns_capture_business_policies_with_bounded_fields():
     assert all("how_we_help" not in output.model_fields for output in SETUP_TURNS.values())
     assert ('pricing, intake and urgent record what the owner\'s answers and the business\'s own text say about '
             'how it works, never limits.') in SETUP_TURN_SYSTEM
+
+
+def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
+    assert ("For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, "
+            "times, days and numbers out. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+    assert ("after_hours is what a customer is told about contacting the business outside its hours, rendered "
+            "word for word to visitors. Never include private owner instructions or personal phone numbers.") in (
+                SETUP_TURN_SYSTEM)
 
 
 UNSET = {"quote_auto_max_cents": None, "discount_auto_max_bp": None, "payment_link_auto_max_cents": None,

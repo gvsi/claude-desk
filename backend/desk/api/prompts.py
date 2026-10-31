@@ -533,6 +533,10 @@ prices, give the whole list, the ones so far and the new ones. Set clear_hours o
 the owner says to remove all their opening hours or all their prices, such as "we no longer list hours".
 - pricing, intake and urgent record what the owner's answers and the business's own text say about how it works, \
 never limits.
+- For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, \
+times, days and numbers out. Leave hours to the hours question.
+- after_hours is what a customer is told about contacting the business outside its hours, rendered \
+word for word to visitors. Never include private owner instructions or personal phone numbers.
 - On the quote question, price_items holds only the prices the owner's answer names. Code adds each one to the \
 price list, or updates the item with the same title, and removes none.
 - Amounts are whole US cents (a $500 limit is 50000), discounts are basis points (10% is 1000), and hours are \
@@ -1218,13 +1222,21 @@ def _turn_fields() -> dict[str, tuple[object, Any]]:
         "owner_display_name": (str, Field(max_length=80, description="The owner's name, as customers see it.")),
         "service_area": (str, Field(max_length=500, description="Where the business works.")),
         "pricing": (str, Field(max_length=500, description='how the business prices (a fixed menu, "from" prices, '
-                                                        'or per case after a consult)')),
-        "intake": (str, Field(max_length=500, description="what to ask a new customer before the owner takes them on")),
-        "urgent": (str, Field(max_length=500, description="what this business treats as urgent and what to do then")),
+                              'or per case after a consult). Describe the policy in words; keep amounts, percentages, '
+                              'times, days and numbers out. Leave hours to the hours question.')),
+        "intake": (str, Field(max_length=500, description="what to ask a new customer before the owner takes them on. "
+                             "Describe the policy in words; keep amounts, percentages, times, days and numbers out. "
+                             "Leave hours to the hours question.")),
+        "urgent": (str, Field(max_length=500, description="what this business treats as urgent and what to do then. "
+                             "Describe the policy in words; keep amounts, percentages, times, days and numbers out. "
+                             "Leave hours to the hours question.")),
         "hours": (list[HoursAnswer], Field(max_length=14, description="Opening hours, every window.")),
         "clear_hours": (bool, Field(description="True only when the owner says to remove all the opening hours; an "
                                                 "empty hours list leaves them as they are.")),
-        "after_hours": (str, Field(max_length=500, description="What to do with messages after hours.")),
+        "after_hours": (str, Field(max_length=500, description="What a customer is told about contacting the business "
+                                  "outside its hours; public text, never private owner instructions or personal phone "
+                                  "numbers. Describe the policy in words; keep amounts, percentages, times, days and "
+                                  "numbers out. Leave hours to the hours question.")),
         "quote_auto_max_cents": (Cents | None, Field(description="The largest quote given without asking, in cents.")),
         "discount_auto_max_bp": (BasisPoints | None, Field(description="The largest discount given without asking, "
                                                                        "in basis points.")),
