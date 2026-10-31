@@ -69,10 +69,16 @@ const FILL_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['conversations', 'setti
 /** Of those, the pages that center the content column: a notice above one keeps to that column. */
 const CENTERED_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['settings']);
 
+/**
+ * Every row a page can be: the rows above and Connectors, which the sidebar draws only once its
+ * pages are built (`connectorPageHref`); until then, as Connectors it marks no row.
+ */
+const CURRENT_KEYS: readonly NavKey[] = [...NAV_KEYS, 'connectors'];
+
 /** The sidebar row for the page at `pathname`: the segment after the Desk, Today when it names no row. */
 function currentNav(pathname: string): NavKey {
   const segment = pathname.split('/')[3] ?? '';
-  return NAV_KEYS.find((key) => key === segment) ?? 'today';
+  return CURRENT_KEYS.find((key) => key === segment) ?? 'today';
 }
 
 /** Whether the page at `pathname` is the Desk's Today, which the Desk's own address opens too. */

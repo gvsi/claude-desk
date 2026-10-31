@@ -3,11 +3,13 @@
  * the page, the presets and the payment limit, each change through its proved review, and the
  * house rules.
  */
+import type { RouteObject } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 
 import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
 import type { Suggestion } from '../../api/views.ts';
+import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -100,6 +102,17 @@ const SECTION_KEYS = ['quotes', 'bookings', 'leads', 'verification', 'documents'
 function toolRowWords(row: Element): string {
   const part = (selector: string) => row.querySelector(selector)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
   return `${part('.cd-connector-section__tool-name')}: ${part('.cd-connector-section__tool-summary')}, ${part('.cd-connector-section__tool-outcome')}`;
+}
+
+/**
+ * The app's routes with a stand-in page where the Connectors page will be, under the Desk, so a
+ * test can open it with the Connectors pages switched on.
+ */
+function withConnectorsPage(): RouteObject[] {
+  return routes.map((route) => {
+    if (route.path !== '/app/:deskId' || route.index === true) return route;
+    return { ...route, children: [...(route.children ?? []), { path: 'connectors', element: <h1>Connectors</h1> }] };
+  });
 }
 
 /**
@@ -215,6 +228,12 @@ describe('rules page', () => {
     const link = house.screen.getByRole('region', { name: 'Payment link' }).element().querySelector('a.cd-tool-rules__tool');
     expect(link?.getAttribute('href')).toBe(`${DESK}/connectors/payments/native.payment_link`);
     expect(house.screen.getByRole('main').element().querySelectorAll('a.cd-tool-rules__tool')).toHaveLength(11);
+
+    // On a Connectors page, the sidebar marks its row as the current one, and only that row.
+    const connectors = await renderRoute(`${DESK}/connectors`, { connectorPages: true, routes: withConnectorsPage() });
+    const nav = connectors.screen.getByRole('navigation', { name: 'Main' });
+    await expect.element(nav.getByRole('link', { name: 'Connectors' })).toHaveAttribute('aria-current', 'page');
+    expect([...nav.element().querySelectorAll('[aria-current="page"]')].map((row) => row.textContent)).toEqual(['Connectors']);
   });
 
   it('preset_menu_drafts_a_preset', async () => {
