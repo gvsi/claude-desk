@@ -1247,11 +1247,13 @@ async def test_a_start_that_failed_before_the_desk_was_asked_for_frees_its_key(a
     ("timeout", (503, {"error": "kernel", "code": "kernel_unavailable"})),
 ], ids=["kernel refused", "kernel 500", "kernel timeout"])
 async def test_a_start_that_failed_once_the_desk_was_asked_for_spends_its_key(app, browser, fake, kernel_http, model,
-                                                                             engine, fail, answered):
+                                                                             engine, monkeypatch, fail, answered):
     # The kernel was asked for the Desk, which may exist even when the answer was an error: the key keeps the outcome,
     # so it can't start again. The first answers its failure; a repeat answers 409 `key_spent` (with no wait, since
-    # waiting changes nothing) and makes nothing, not even a model call; a new click sends a new key.
+    # waiting changes nothing) and makes nothing, not even a model call, and isn't counted on the setup turn limit; a
+    # new click sends a new key.
     owner = await new_owner(app, browser, kernel_http)
+    asked, _ = held_limits(app, monkeypatch)
     model.add(started())
     fake.fail("POST /desks", fail, times=1)
     first = await start_keyed(owner)
@@ -1259,6 +1261,10 @@ async def test_a_start_that_failed_once_the_desk_was_asked_for_spends_its_key(ap
     for _ in range(2):
         repeat = await start_keyed(owner)
         assert (repeat.status_code, repeat.json()) == (409, {"error": "key_spent"})
+    # The spent key sent again with an edited body is 409 `conflict`, as for any key, before its failure is read.
+    edited = await start_keyed(owner, description="Rivera Plumbing, now in Berkeley too.")
+    assert (edited.status_code, edited.json()) == (409, {"error": "conflict"})
+    assert asked.count("setup_turn") == 1                       # the first start alone
     assert (len(model.requests), len(fake.called("POST /desks"))) == (1, 1)
     ((interview_id, desk_id),) = await interviews(engine)
     assert desk_id is None
