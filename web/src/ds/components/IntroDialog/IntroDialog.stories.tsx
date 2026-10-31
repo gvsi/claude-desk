@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { expect, fn, waitFor, within, type Mock } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { settled } from '../../test/settled.ts';
 import { INTRO_ERROR_COPY, type IntroErrorCode } from './introCopy.ts';
 import { IntroDialog, type IntroDialogProps } from './IntroDialog.tsx';
 
@@ -66,6 +67,55 @@ function SameErrorPage(args: IntroDialogProps) {
       }}
     />
   );
+}
+
+/** A CSS time as the browser computes it ("0.29s", "60ms"), in whole milliseconds. */
+function ms(time: string): number {
+  const value = Number.parseFloat(time);
+  return Math.round(time.trim().endsWith('ms') ? value : value * 1000);
+}
+
+/** A motion token's value in milliseconds, as the page's stylesheet sets it. */
+function motion(name: 'instant' | 'fast' | 'base' | 'stagger'): number {
+  return ms(getComputedStyle(document.documentElement).getPropertyValue(`--motion-${name}`));
+}
+
+/** `motion-ease-emphasis`, as the browser computes it. */
+const EMPHASIS = 'cubic-bezier(0.165, 0.84, 0.44, 1)';
+
+/** The element `selector` finds in `root`; throws when there is none. */
+function the<T extends Element = HTMLElement>(root: ParentNode, selector: string): T {
+  const el = root.querySelector<T>(selector);
+  if (el === null) throw new Error(`nothing matches ${selector}`);
+  return el;
+}
+
+/** What had focus before the dialog was first drawn and as it was, and whether its panel was still arriving then. */
+interface FirstFrame {
+  beforeDrawing: Element | null;
+  drawing: Element | null;
+  arriving: boolean;
+}
+
+let firstFrame: FirstFrame | null = null;
+
+/**
+ * The dialog, watched as it first shows. A parent's layout effect runs after the dialog's own (which
+ * opens it and focuses the field) and before the browser draws anything; the frame callback runs as
+ * the first frame is drawn.
+ */
+function WatchingTheFirstFrame(args: IntroDialogProps) {
+  useLayoutEffect(() => {
+    firstFrame = null;
+    const beforeDrawing = document.activeElement;
+    const frame = requestAnimationFrame(() => {
+      const panel = document.querySelector('.cd-intro__panel');
+      const arriving = panel?.getAnimations().some((animation) => animation.playState !== 'finished') ?? false;
+      firstFrame = { beforeDrawing, drawing: document.activeElement, arriving };
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  return <IntroDialog {...args} />;
 }
 
 /** The error line, the field's state and its focus, for a dialog showing `code`. */
@@ -216,7 +266,8 @@ export const Default: Story = {
     // reply_avatar_is_the_mark_alone: the reply card's avatar is the Claude Desk mark at 32 px with no
     // tile and no frame, in the drawing's dark ink straight on the light card (owner, 2026-10-30), in
     // the place and at the size of Dana's initials on the card above. The name line keeps its place:
-    // level with the mark's top, 12 px to its right.
+    // level with the mark's top, 12 px to its right. Measured once the cards have arrived.
+    await settled(dialog);
     const cards = [...(art?.querySelectorAll<HTMLElement>(':scope > .cd-intro__card') ?? [])];
     await expect(cards).toHaveLength(2);
     const [request, replyCard] = cards as [HTMLElement, HTMLElement];
@@ -242,6 +293,76 @@ export const Default: Story = {
     await expect(inCard(mark, replyCard)).toEqual([16, 14, 32, 32]);
     await expect(inCard(mark, replyCard)).toEqual(inCard(request.querySelector('.cd-intro__avatar'), request));
     await expect(inCard(replyCard.querySelector('.cd-intro__who'), replyCard).slice(0, 2)).toEqual([60, 14]);
+  },
+};
+
+export const PlaysOnce: Story = {
+  render: (args) => <WatchingTheFirstFrame {...args} />,
+  parameters: {
+    canvasNote: [
+      'N-Intro-D draws one moment: the booking’s check draws once, in motion-base. The owner signed the whole sequence on the UX craft board UXC-P101-After (2026-10-30): the panel arrives, Dana’s card at 290 ms, Claude’s at 600 ms, the check at 860 ms and the receipts at 1000 and 1150 ms.',
+      'As in the other stories, the reply card’s mark stands alone at 32 px, where the board draws it in a dark tile.',
+    ].join(' '),
+  },
+  play: async ({ args, canvas }) => {
+    const dialog = canvas.getByRole('dialog', { name: args.title });
+
+    // focus_from_the_first_frame: the passcode field has focus before anything is drawn, and still
+    // has it in the first frame, while the panel is arriving.
+    const field = canvas.getByLabelText('Passcode');
+    await waitFor(() => expect(firstFrame).not.toBeNull());
+    await expect(firstFrame).toEqual({ beforeDrawing: field, drawing: field, arriving: true });
+    await expect(field).toHaveFocus();
+
+    const panel = the(dialog, '.cd-intro__panel');
+    const art = the(dialog, '.cd-intro__illustration');
+    const [dana, claude] = [...art.querySelectorAll<HTMLElement>(':scope > .cd-intro__card')] as [HTMLElement, HTMLElement];
+    const check = the<SVGPathElement>(art, '.cd-intro__check path');
+    const [checked, booked] = [...art.querySelectorAll<HTMLElement>('.cd-intro__receipt')] as [HTMLElement, HTMLElement];
+
+    // panel_arrives: the panel fades in from 98% in motion-base, on the emphasis curve, at once.
+    expectComputed(panel, {
+      animationName: 'cd-intro-arrive',
+      animationDuration: '0.2s',
+      animationTimingFunction: EMPHASIS,
+      animationDelay: '0s',
+      animationIterationCount: '1',
+    });
+
+    // beats_come_from_the_tokens: Dana asks once the panel has settled, Claude answers a beat later,
+    // the booking's check draws (the board's motion-base draw) and the two receipts tick in
+    // motion-stagger apart. Each start is a sum of motion tokens, and lands on the signed offsets.
+    const [instant, base, stagger] = [motion('instant'), motion('base'), motion('stagger')];
+    const fromTheTokens = [base + stagger - instant, base * 3, base * 4 + instant, base * 5, base * 5 + stagger];
+    await expect(fromTheTokens).toEqual([290, 600, 860, 1000, 1150]);
+    const beats = [dana, claude, check, checked, booked];
+    await expect(beats.map((el) => ms(getComputedStyle(el).animationDelay))).toEqual(fromTheTokens);
+    await expect(beats.map((el) => getComputedStyle(el).animationName)).toEqual([
+      'cd-intro-rise',
+      'cd-intro-rise',
+      'cd-intro-draw',
+      'cd-intro-tick',
+      'cd-intro-tick',
+    ]);
+    for (const el of beats) {
+      expectComputed(el, { animationDuration: '0.2s', animationTimingFunction: EMPHASIS, animationIterationCount: '1' });
+    }
+
+    // left_column_stays_still: nothing in the copy, the things to try or the passcode moves.
+    const content = the(dialog, '.cd-intro__content');
+    const moving = [content, ...content.querySelectorAll('*')].filter((el) => getComputedStyle(el).animationName !== 'none');
+    await expect(moving).toEqual([]);
+
+    // Played once, the illustration rests as the board draws it.
+    const played = dialog.getAnimations({ subtree: true });
+    await expect(played).toHaveLength(6);
+    await Promise.all(played.map((animation) => animation.finished));
+    await expect(dialog.getAnimations({ subtree: true }).map((animation) => animation.playState)).toEqual(Array(6).fill('finished'));
+    // A filled animation ends on the identity matrix, which draws as no transform at all.
+    for (const el of [panel, dana, claude, checked, booked]) {
+      expectComputed(el, { opacity: '1', transform: /^(?:none|matrix\(1, 0, 0, 1, 0, 0\))$/ });
+    }
+    expectComputed(check, { strokeDashoffset: '0px' });
   },
 };
 
@@ -381,7 +502,8 @@ export const Phone: Story = {
     await expect(tooWide).toEqual([]);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
 
-    // The panel fills the width with 16 px margins, and the illustration isn't drawn.
+    // The panel fills the width with 16 px margins once it has arrived, and the illustration isn't drawn.
+    await settled(dialog);
     const panel = dialog.querySelector('.cd-intro__panel') as HTMLElement;
     const panelBox = panel.getBoundingClientRect();
     await expect([panelBox.left, width - panelBox.right]).toEqual([16, 16]);
@@ -404,6 +526,7 @@ export const Tablet: Story = {
     // Below 960 px the panel can't hold both columns at full width, so the illustration goes and the
     // content keeps a comfortable measure: one column, at most 560 px wide, centered.
     await expect(window.innerWidth).toBe(768);
+    await settled(canvasElement);
     const field = canvas.getByLabelText('Passcode');
     await expect(field.getBoundingClientRect().width).toBeGreaterThanOrEqual(200);
     await expect(canvasElement.querySelector('.cd-intro__illustration')).not.toBeVisible();

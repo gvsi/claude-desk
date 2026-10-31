@@ -6,7 +6,11 @@
    Media queries, because the dialog always fills the window, so the window's width is the
    dialog's. Under 960 px the illustration isn't drawn and the panel is one column, at most 560 px;
    under 720 px the scrim margin is 16 px and the field and button stack. A short window scrolls
-   the panel inside itself. Nothing moves beyond the button's own transitions. */
+   the panel inside itself.
+
+   The first visit's one moment: the panel arrives, and the illustration plays its conversation
+   once, in about 1.1 s, while the content column stays still with focus already in the field.
+   On a correct passcode the dialog leaves in motion-fast. Under reduced motion none of it runs. */
 
 .cd-intro {
   position: fixed;
@@ -304,6 +308,86 @@
   margin-top: var(--space-6);
   border-radius: var(--radius-full);
   background: var(--illustration-handled);
+}
+
+/* The screen's one moment, and only with motion allowed, so under reduced motion every card, the
+   check and the receipts are drawn from the start. Every time is a sum of motion tokens. */
+@media (prefers-reduced-motion: no-preference) {
+  .cd-intro__panel {
+    animation: cd-intro-arrive var(--motion-base) var(--motion-ease-emphasis) both;
+  }
+
+  .cd-intro__illustration > .cd-intro__card {
+    animation: cd-intro-rise var(--motion-base) var(--motion-ease-emphasis) both;
+  }
+
+  /* Dana asks once the panel has settled (290 ms in); Claude answers a beat later (600 ms), as if
+     it read her first. */
+  .cd-intro__illustration > .cd-intro__card:nth-of-type(1) {
+    animation-delay: calc(var(--motion-base) + var(--motion-stagger) - var(--motion-instant));
+  }
+
+  .cd-intro__illustration > .cd-intro__card:nth-of-type(2) {
+    animation-delay: calc(var(--motion-base) * 3);
+  }
+
+  /* The booking's check draws once, as the board draws it (860 ms). */
+  .cd-intro__check path {
+    stroke-dasharray: 24;
+    stroke-dashoffset: 24;
+    animation: cd-intro-draw var(--motion-base) var(--motion-ease-emphasis) forwards;
+    animation-delay: calc(var(--motion-base) * 4 + var(--motion-instant));
+  }
+
+  /* Then what the Desk checked, one receipt at a time, motion-stagger apart (1000 and 1150 ms). */
+  .cd-intro__receipt {
+    animation: cd-intro-tick var(--motion-base) var(--motion-ease-emphasis) both;
+  }
+
+  .cd-intro__receipt:nth-child(1) {
+    animation-delay: calc(var(--motion-base) * 5);
+  }
+
+  .cd-intro__receipt:nth-child(2) {
+    animation-delay: calc(var(--motion-base) * 5 + var(--motion-stagger));
+  }
+}
+
+@keyframes cd-intro-arrive {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@keyframes cd-intro-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-6));
+  }
+}
+
+@keyframes cd-intro-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes cd-intro-tick {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--space-4) * -1));
+  }
+}
+
+/* Reduced motion: the dialog appears and closes at once, with the illustration already whole. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-intro__panel,
+  .cd-intro__card,
+  .cd-intro__check path,
+  .cd-intro__receipt {
+    animation: none;
+  }
 }
 
 /* Below 960 px the two columns can't both have their width, so the illustration goes and the

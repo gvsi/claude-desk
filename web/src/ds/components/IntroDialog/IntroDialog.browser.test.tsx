@@ -100,6 +100,27 @@ it('a_real_press_on_the_scrim_changes_nothing', async () => {
   expect(document.activeElement).toBe(field);
 });
 
+it('the_illustration_is_whole_from_the_start_under_reduced_motion', async () => {
+  // This project emulates reduced motion: the panel, the two cards, the booking's check and the
+  // receipts show at rest from the first frame, and the check is drawn rather than waiting to be.
+  expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+  const { dialog } = await openDialog();
+  const art = dialog.querySelector('.cd-intro__illustration') as HTMLElement;
+  const still = [
+    dialog.querySelector('.cd-intro__panel'),
+    ...art.querySelectorAll(':scope > .cd-intro__card'),
+    ...art.querySelectorAll('.cd-intro__receipt'),
+  ] as HTMLElement[];
+  expect(still).toHaveLength(5);
+  for (const el of still) {
+    const style = getComputedStyle(el);
+    expect([style.animationName, style.opacity, style.transform]).toEqual(['none', '1', 'none']);
+  }
+  const check = getComputedStyle(art.querySelector('.cd-intro__check path') as Element);
+  expect([check.animationName, check.strokeDasharray, check.strokeDashoffset]).toEqual(['none', 'none', '0px']);
+  expect(dialog.getAnimations({ subtree: true })).toEqual([]);
+});
+
 it('an_item_without_icon_or_detail_shows_neither', async () => {
   const dialog = await runWith({
     thingsToTry: [{ title: 'Look around' }, { title: 'Chat as a customer', detail: 'Rivera’s public page opens in a new tab.', icon: 'person' }],
