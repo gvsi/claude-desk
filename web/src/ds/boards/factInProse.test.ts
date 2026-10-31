@@ -60,6 +60,7 @@ describe('fact_in_prose', () => {
       ['Te damos un descuento.', 'lex.es.promise'],
       ['It comes at no extra charge.', 'lex.en.promise'],
       ['Sin recargos.', 'lex.es.promise'],
+      ['No hay cargo extra.', 'lex.es.promise'],
       ['Your appointment is confirmed.', 'lex.en.booking'],
       ['You’re all set.', 'lex.en.booking'],
       ['Booking confirmed.', 'lex.en.booking'],
@@ -71,8 +72,9 @@ describe('fact_in_prose', () => {
   });
 
   it('passes_what_the_kernel_passes', () => {
-    // The modal "may", a booking claim with a condition straight before it, and one beside its card.
-    for (const text of ['You may call Maria.', 'Once your visit is confirmed, Maria texts you.', 'Cuando tu cita está confirmada, te escribimos.']) {
+    // The modal "may", a booking claim with a condition straight before it, a cost that isn't set yet, and a
+    // booking claim beside its card.
+    for (const text of ['You may call Maria.', 'Once your visit is confirmed, Maria texts you.', 'Cuando tu cita está confirmada, te escribimos.', 'There’s no set cost until Maria sees the leak.']) {
       expect(rules(text), text).toEqual([]);
     }
     expect(rules('Your appointment is confirmed.', true)).toEqual([]);

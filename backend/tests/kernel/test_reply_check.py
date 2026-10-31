@@ -221,6 +221,20 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("La visita va sin ningún coste.", "lex.es.promise", "sin ningún coste"),
     ("La visita va sin comisión.", "lex.es.promise", "sin comisión"),
     ("Sin ninguna comisión por la visita.", "lex.es.promise", "Sin ninguna comisión"),
+    # "no hay", "no tiene" or "no lleva" and any one or two words before a charge, cost or
+    # surcharge, in the plural too
+    ("No hay cargo extra.", "lex.es.promise", "No hay cargo"),
+    ("No tiene costo.", "lex.es.promise", "No tiene costo"),
+    ("La visita no lleva recargo.", "lex.es.promise", "no lleva recargo"),
+    ("No tiene coste para usted.", "lex.es.promise", "No tiene coste"),
+    ("No hay ningún cargo adicional.", "lex.es.promise", "No hay ningún cargo"),
+    ("La revisión no tiene ningún costo extra.", "lex.es.promise", "no tiene ningún costo"),
+    ("No lleva un recargo por la visita.", "lex.es.promise", "No lleva un recargo"),
+    ("No hay cargos ocultos.", "lex.es.promise", "No hay cargos"),
+    ("No hay costos adicionales.", "lex.es.promise", "No hay costos"),
+    ("Las revisiones no tienen costo.", "lex.es.promise", "no tienen costo"),
+    ("Las visitas no llevan recargos.", "lex.es.promise", "no llevan recargos"),
+    ("No-hay-cargo-extra.", "lex.es.promise", "No-hay-cargo"),
     ("Maria can be there in an hour.", "lex.en.date", "in an hour"),
     ("She can be there in a few minutes.", "lex.en.date", "in a few minutes"),
     ("Maria can come in a couple of hours.", "lex.en.date", "in a couple of hours"),
@@ -293,6 +307,13 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "There's no fixed fee for repairs.",
     "There's no standard charge for that; the quote below has it.",
     "There's no standard fee for a leak.",
+    # "no hay", "no tiene" or "no lleva" states no price with more than two words, a stop or the
+    # noun before it
+    "No tiene que preocuparse por el costo; está en la cotización.",
+    "¿No hay más preguntas sobre el costo?",
+    "No hay problema; el costo está en la cotización de abajo.",
+    "El costo no tiene sorpresas: está en la cotización de abajo.",
+    "El cargo no lleva nada oculto, todo está en la cotización.",
 ])
 def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
     assert reply_check.scan_prose(prose) == []
