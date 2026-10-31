@@ -331,14 +331,30 @@
   overflow-wrap: anywhere;
 }
 
-/* A short shell (a phone on its side, a short phone, a phone with its keyboard open): the brand
-   header and the footer can't stay pinned and leave the conversation room, so they scroll with it.
+/* A short shell (below 520 px tall, or too full for its height: the component decides and sets the
+   class): the brand header and the footer can't stay pinned and leave the conversation room, so
+   they scroll with it.
    The shell itself scrolls, and its scroll region grows with the conversation; the chat's head with
    the disclosure sticks to the top of the shell and the composer to its bottom, a little tighter,
    over the app ground. Their ground runs out into the gutters (a shadow as wide as the gutter, cut
    to their height), so the about column passing under them doesn't show beside them. */
 .cd-public-shell--short {
   overflow-y: auto;
+  /* What scrolls into view, by focus or by Page Up and Page Down, does so between the chat's head and
+     the composer, not under them. */
+  scroll-padding-top: var(--cd-public-head-height, 0);
+  scroll-padding-bottom: var(--cd-public-composer-height, 0);
+}
+
+/* The chat's head and the composer are always in view, so focus in them (Ask for the owner, the
+   text box) scrolls nothing: their parts reach back over the padding that keeps the rest from
+   under them. */
+.cd-public-shell--short .cd-public-shell__chat-head * {
+  scroll-margin-top: calc(-1 * var(--cd-public-head-height, 0px));
+}
+
+.cd-public-shell--short .cd-public-shell__composer * {
+  scroll-margin-bottom: calc(-1 * var(--cd-public-composer-height, 0px));
 }
 
 .cd-public-shell--short .cd-public-shell__body {

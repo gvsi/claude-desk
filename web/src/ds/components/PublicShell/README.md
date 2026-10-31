@@ -53,26 +53,56 @@ The shell is the window's height (`100dvh`, or `100vh` in a browser without dyna
 - **The scroll region** (`.cd-public-shell__scroll`) between them is the only part that scrolls. It holds the conversation, runs the chat's full width (so the scrollbar is at the chat's edge and the wheel scrolls it anywhere over the chat), and is positioned, so a receipt's screen-reader label scrolls with it instead of stretching the document. It is a stop in the tab order after "Ask for {ownerName}", a group named by the chat's title, so a conversation with nothing to focus in it still scrolls from the keyboard.
 - **The disclosure must stay in view.** It is part of the always-on baseline: however long the chat, and wherever the visitor has scrolled to, the chat's head with the disclosure is on screen and nothing covers it. Nothing may be added to the page that scrolls it away or covers it, such as content under the composer or a page that scrolls as a whole.
 - **A long draft scrolls in the composer.** The composer's text box grows with what is typed up to a sixth of the shell's height (two lines at least, and never more than its own six), then scrolls inside, so a draft can't push the chat's head off the screen. The shell writes its measured height as `--cd-public-shell-height` for this.
-- **What the page does:** the shell scrolls nothing itself. Keeping the newest message just above the composer as the chat goes on, and leaving a visitor who has scrolled back to read where they are, is the page's job (`PublicChat`), in this scroll region.
-- **On a phone,** `100dvh` follows the browser's toolbars as they show and hide, so the composer stays above them. Where the browser shrinks the page for the on-screen keyboard, the composer stays just above the keyboard too; where it doesn't, the browser moves the page to keep the composer in view while the visitor types.
+- **What the page does:** keeping the newest message just above the composer as the chat goes on, and leaving a visitor who has scrolled back to read where they are, is the page's job (`PublicChat`), in whichever element scrolls the conversation (see "When the scroller changes"). The shell scrolls the conversation itself only to keep the visitor's place when it switches between tall and short, and to bring the composer out from under the chat's head on a short shell.
+- **On a phone,** `100dvh` follows the browser's toolbars as they show and hide, so the composer stays above them. Where the browser shrinks the page for the on-screen keyboard (Chrome on Android with the page's `interactive-widget=resizes-content`), the shell shrinks with it and the composer stays just above the keyboard.
+- **Safari on an iPhone** keeps the page's height for the keyboard and shrinks only the visual viewport. While the visual viewport is shorter than the window at a scale of 1 (a keyboard, not a zoom), the shell on a page of its own takes the visual viewport's height and moves down to where it shows (`visualViewport.offsetTop`), so it turns short and the chat's head stays at the top of what shows; it goes back when the keyboard closes. This is checked in Chromium with a faked visual viewport, and still needs a check on a real iPhone.
 
 ### A short shell
 
-Below 520 px of shell height (a phone on its side, a short phone, or a 640 px phone with its on-screen keyboard open), pinning the brand header and the footer as well would leave the conversation a sliver. So on a short shell they scroll with the conversation, and only the chat's head and the composer stay put:
+On a short shell, pinning the brand header and the footer as well would leave the conversation a sliver, so they scroll with the conversation and only the chat's head and the composer stay put. The shell is short:
+
+- below 520 px of shell height (a phone on its side, a short phone, a 640 px phone with its on-screen keyboard open), or
+- when the brand header, the chat's head, the composer area and the footer, pinned, would leave the conversation under 120 px, whatever the height: a tagline that wraps, the longest closed status or a long draft can fill a shell well over 520 px. It is measured with the about column where it is, and the composer area is watched, so a growing draft can turn the shell short.
+- It turns tall again only with 16 px more than that to spare, so it can't flap as a draft grows and shrinks at the edge.
+
+The shell decides in a layout effect and sets `cd-public-shell--short` on its root itself (React's class for the shell leaves it out, and the shell puts it back after each render), so it is in place before the page's own layout effects run and the page scrolls the right element from the first render on, as when a chat is reopened.
+
+On a short shell:
 
 - The shell itself scrolls (the document still never does), and its scroll region grows with the conversation. The brand header is at the top of what scrolls, the footer at its end.
 - The chat's head with the disclosure sticks to the top of the shell and the composer area to its bottom, each 8 px tighter at top and bottom, over the app ground. Their ground runs out into the gutters, so the about column passing under them doesn't show beside them.
-- At the top of a chat, the brand header, the chat's head and a composer holding a long draft can be taller than the shell together. The chat's head then stays over the composer, so the composer can never cover the disclosure.
-- Where the page keeps a chat it follows (the newest message just above the composer), the footer is just below the window and the conversation has the shell's height less the chat's head and the composer: at least 96 px at 568 × 320, 320 × 480 and 360 × 380, in English and Spanish, with a long draft in the composer. Scrolled right to the end, the footer shows under the composer.
-- The page's rule for following a chat works the same: its scroller is the shell, found as the nearest scrolling ancestor of the conversation.
+- **Keyboard scrolling skips nothing.** The shell's scroll padding is the chat's head's and the composer area's heights (`--cd-public-head-height`, `--cd-public-composer-height`, which the shell writes), so focus and Page Up and Page Down bring things into view between them, not under them. Focus in the chat's head or the composer scrolls nothing: they are always in view.
+- At the top of a chat, the brand header, the chat's head and a composer holding a long draft can be taller than the shell together. The chat's head then stays over the composer, so the composer can never cover the disclosure; when the composer takes focus or grows there, the shell scrolls by the overlap, so the composer comes out from under the chat's head.
+- Where the page keeps a chat it follows (the newest message just above the composer), the footer is just below the window and the conversation has the shell's height less the chat's head and the composer: at least 96 px at 568 × 320, 320 × 480, 360 × 380, 320 × 520, 320 × 545, 320 × 560 and 360 × 520, in English and in Spanish with the longest closed status, with a long draft or a wrapped tagline. Scrolled right to the end, the footer shows under the composer.
+
+### When the scroller changes
+
+When the shell turns short or tall, the element that scrolls the conversation changes: the scroll region while tall, the shell itself while short. The shell then:
+
+1. keeps the visitor's place: the first message under the chat's head stays where it was under it, on the new scroller;
+2. sends one event from its root, once per switch, after the place is kept:
+
+```ts
+import { PUBLIC_SHELL_SCROLLER_EVENT, type PublicShellScrollerDetail } from '../ds/index.ts';
+
+// 'cd-public-shell-scroller': a CustomEvent<PublicShellScrollerDetail>, bubbling, dispatched on the
+// shell's root element (.cd-public-shell), synchronously in the ResizeObserver callback in which the
+// shell switched. detail.scroller is the element that now scrolls the conversation.
+shell.addEventListener(PUBLIC_SHELL_SCROLLER_EVENT, (event) => {
+  const { scroller } = (event as CustomEvent<PublicShellScrollerDetail>).detail;
+  // A visitor who was at the end: bring the end back above the composer, on `scroller`.
+});
+```
+
+It isn't sent when the shell first lays out (it is short or tall from its first render), when only the about column moves, or when nothing switched. The old scroller's scroll position resets as it stops scrolling; a page that follows the chat should treat the event, not that reset, as the change.
 
 ## Layout
 
 The shell is an inline-size container, so it lays out by its own width, not the window's. Below 720 px (each state of the handoff board at 640 px, a phone, or the owner's 420 px panel) the gutters are 16 px instead of 40, and below 640 px the open status also has its own line under the name.
 
-From 900 px of shell width the about column stands at the right of the chat. Below 900 px there is no room for it beside the chat, and the page doesn't scroll, so it opens the scroll region instead: the first thing above the conversation, the region's full width on the panel, with a hairline between it and the first message. It scrolls away as the chat goes on and comes back at the chat's start. The shell watches its own width and moves the column before the browser paints, so the column never shows beside a narrow chat, and the rest of the page stays mounted as it moves (an unsent draft is kept, and stays focused). If focus is on a link in the column when it moves, focus goes to the same link in the moved column.
+From 900 px of shell width the about column stands at the right of the chat. Below 900 px there is no room for it beside the chat, and the page doesn't scroll, so it opens the scroll region instead: the first thing above the conversation, the region's full width on the panel, with a hairline between it and the first message. It scrolls away as the chat goes on and comes back at the chat's start. Until the shell has measured itself it opens the scroll region too, where it takes nothing from the chat's width, so the chat never lays out squeezed beside it. The shell watches its own width and moves the column before the browser paints, then judges short or tall with the column in place, and the rest of the page stays mounted as it moves (an unsent draft is kept, and stays focused). If focus is on a link in the column when it moves, focus goes to the same link in the moved column.
 
-Beside the chat, a charter taller than the column scrolls in the column, on its own. While it does, the column is a stop in the tab order (it is already named by its heading), so it scrolls from the keyboard too. When it fits, or when it opens the scroll region, it isn't a stop of its own.
+Beside the chat, a charter taller than the column scrolls in the column, on its own. While it does, the column is a stop in the tab order (it is already named by its heading), so it scrolls from the keyboard too, and it stays one while it has focus, so focus doesn't drop to the page when the window grows and the column stops scrolling under it. When it fits, or when it opens the scroll region, it isn't a stop of its own.
 
 ## Standalone or embedded
 
@@ -116,4 +146,4 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `composer` | `ReactNode` | Required. Pinned at the bottom, with the footer under it (the footer scrolls on a short shell). |
 | `children` | `ReactNode` | Required. The conversation, in the scroll region. |
 
-`PublicBrand` and `PublicOpenStatus` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.
+`PublicBrand`, `PublicOpenStatus`, `PUBLIC_SHELL_SCROLLER_EVENT` and `PublicShellScrollerDetail` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.

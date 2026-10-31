@@ -4,7 +4,7 @@
  * document itself never scrolls, so however long the chat gets, and wherever the visitor is in it,
  * the disclosure (part of the always-on baseline) stays on screen. The same rule as AppShell's.
  */
-import { act } from 'react';
+import { act, useLayoutEffect, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
@@ -49,6 +49,35 @@ const LONG_DRAFT = 'word '.repeat(380);
 
 const desk = rivera.publicDesk.en;
 
+/**
+ * The longest open status line the kernel writes, in Spanish: Wednesday 14:00 after Wednesday's
+ * hours, closed until 13:00 a week ahead, with the closed line under it. The Spanish page shows it.
+ */
+const CLOSED_ES_LONGEST = {
+  open: false,
+  until: null,
+  opens_at: '2026-11-04T13:00:00-08:00',
+  text: 'Cerrado ahora. Abre el próximo miércoles a las 13:00',
+  as_of: '2026-10-28T14:00:00-07:00',
+  refresh_at: '2026-10-29T00:00:00-07:00',
+};
+
+const OPEN_EN = {
+  open: true,
+  until: '2026-10-29T18:00:00-07:00',
+  opens_at: null,
+  text: 'Open now, until 6:00 pm',
+  as_of: '2026-10-29T10:00:00-07:00',
+  refresh_at: '2026-10-29T18:00:00-07:00',
+};
+
+/** A tagline that takes two lines on a phone. */
+const TWO_LINE_TAGLINE = 'Fontanería de urgencia y calentadores de agua en Oakland';
+
+/** A tagline that takes three lines on a phone on its side. */
+const THREE_LINE_TAGLINE =
+  'Fontanería de urgencia, calentadores de agua, desagües, tuberías y reformas de baños y cocinas para casas y negocios en Oakland, Berkeley, Alameda, Emeryville y Piedmont, de lunes a sábado';
+
 /** The page's brand, as the screen maps `PublicDesk` to it. */
 function brandOf(publicDesk: PublicDesk): PublicBrand {
   return {
@@ -63,11 +92,28 @@ function brandOf(publicDesk: PublicDesk): PublicBrand {
 }
 
 interface LongChatOptions {
+  /** English with the open status, or Spanish with the longest closed status. */
   language?: 'en' | 'es';
   /** The links for people's agents in the about column. */
   links?: boolean;
   /** A tagline in place of the Desk's name, long enough to wrap the header onto more lines. */
   tagline?: string;
+  /** How many messages: 80 unless given. */
+  rows?: number;
+  /**
+   * Keep the newest message just above the composer after every render, as the public chat page
+   * does in a layout effect of its own, which runs after the shell's.
+   */
+  follow?: boolean;
+}
+
+/** The element whose scrolling moves `el`: its nearest scrolling ancestor, as the public chat page finds it. */
+function scrollerOfEl(el: Element): Element {
+  for (let node = el.parentElement; node !== null && node !== document.body; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+  }
+  return document.scrollingElement ?? document.documentElement;
 }
 
 /**
@@ -76,34 +122,36 @@ interface LongChatOptions {
  * didn't hold it. In English or Spanish, whose disclosure is longer, and with the links for
  * people's agents in the about column if asked.
  */
-function LongChat({ language = 'en', links = false, tagline }: LongChatOptions) {
+function LongChat({ language = 'en', links = false, tagline, rows = 80, follow = false }: LongChatOptions) {
   const page = rivera.publicDesk[language];
+  const end = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const marker = end.current;
+    const area = marker?.closest('.cd-public-shell')?.querySelector('.cd-public-shell__composer');
+    if (!follow || !marker || !area) return;
+    const hidden = marker.getBoundingClientRect().bottom - area.getBoundingClientRect().top;
+    if (hidden > 0) scrollerOfEl(marker).scrollBy({ top: hidden, behavior: 'instant' });
+  });
   return (
     <PublicShell
       brand={{ ...brandOf(page), ...(tagline ? { tagline } : {}) }}
       ownerName={rivera.business.ownerName}
       language={language}
-      openStatus={{
-        open: true,
-        until: '2026-10-29T18:00:00-07:00',
-        opens_at: null,
-        text: 'Open now, until 6:00 pm',
-        as_of: '2026-10-29T10:00:00-07:00',
-        refresh_at: '2026-10-29T18:00:00-07:00',
-      }}
+      openStatus={language === 'es' ? CLOSED_ES_LONGEST : OPEN_EN}
       onAskForOwner={() => {}}
       about={page.charter}
       aboutLinks={links ? [{ label: 'What agents can do here', href: `/d/${rivera.business.slug}/agents` }] : undefined}
       composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={() => {}} />}
     >
       <Transcript label="Conversation with Rivera Plumbing">
-        {Array.from({ length: 80 }, (_, index) => (
+        {Array.from({ length: rows }, (_, index) => (
           <TranscriptRow key={index}>
             <VisitorMessage text={`Message ${index + 1}: is drain clearing the same price on a Saturday?`} />
             <span className="cd-sr-only">Reply checked before the visitor saw it.</span>
           </TranscriptRow>
         ))}
       </Transcript>
+      <div ref={end} />
     </PublicShell>
   );
 }
@@ -150,7 +198,7 @@ async function renderLongChat([width, height]: Size, options: LongChatOptions = 
   act(() => root.render(null));
   await page.viewport(width, height);
   act(() => root.render(<LongChat {...options} />));
-  await vi.waitFor(() => expect(container.querySelectorAll('.cd-transcript-row')).toHaveLength(80));
+  await vi.waitFor(() => expect(container.querySelectorAll('.cd-transcript-row')).toHaveLength(options.rows ?? 80));
 }
 
 function one<T extends Element = HTMLElement>(selector: string): T {
@@ -442,6 +490,13 @@ it('short_windows_keep_the_disclosure_and_composer_in_view', async () => {
         if (draft === 'long') await pasteLongDraft();
         const scrolls = scroller();
         scrolls.scrollTop = 0;
+        // At the very top, a long draft with the longest closed status can meet the chat's head;
+        // the composer comes out from under it as soon as it has focus.
+        if (draft === 'long') {
+          one<HTMLTextAreaElement>('.cd-composer__input').blur();
+          one<HTMLTextAreaElement>('.cd-composer__input').focus();
+          await nextFrames();
+        }
         const atTheStart = uncovered(disclosureLine()) && uncovered(one('.cd-composer'));
         scrolls.scrollTop = scrolls.scrollHeight;
         const atTheEnd = uncovered(disclosureLine()) && uncovered(one('.cd-composer'));
@@ -515,8 +570,8 @@ it('short_windows_scroll_the_brand_header_and_footer_with_the_chat', async () =>
 });
 
 it('a_long_draft_never_pushes_the_disclosure_out', async () => {
-  // At every height the composer's text box stops growing at under a third of the shell's height
-  // and scrolls inside, so a long draft never pushes the disclosure off the screen.
+  // At every height the composer's text box stops growing at a sixth of the shell's height and
+  // scrolls inside, so a long draft never pushes the disclosure off the screen.
   const seen = [];
   for (const size of [...WINDOWS, ...SHORT]) {
     await renderLongChat(size, { language: 'es' });
@@ -529,7 +584,7 @@ it('a_long_draft_never_pushes_the_disclosure_out', async () => {
       disclosure: uncovered(disclosureLine()),
       composer: uncovered(one('.cd-composer')),
       documentFits: document.documentElement.scrollHeight <= innerHeight,
-      capped: input.getBoundingClientRect().height <= 0.3 * one('.cd-public-shell').clientHeight,
+      capped: input.getBoundingClientRect().height <= one('.cd-public-shell').clientHeight / 6 + 1,
       scrollsInside: input.scrollHeight > input.clientHeight,
     });
   }
@@ -592,11 +647,7 @@ it('the_composer_never_covers_the_disclosure', async () => {
   // has scrolled to.
   const seen = [];
   for (const size of [[568, 320], [360, 380]] satisfies Size[]) {
-    await renderLongChat(size, {
-      language: 'es',
-      tagline:
-        'Fontanería de urgencia, calentadores de agua, desagües, tuberías y reformas de baños y cocinas para casas y negocios en Oakland, Berkeley, Alameda, Emeryville y Piedmont, de lunes a sábado',
-    });
+    await renderLongChat(size, { language: 'es', tagline: THREE_LINE_TAGLINE });
     await pasteLongDraft();
     const scrolls = scroller();
     const covered = [];
@@ -610,4 +661,249 @@ it('the_composer_never_covers_the_disclosure', async () => {
     { window: '568x320', covered: [] },
     { window: '360x380', covered: [] },
   ]);
+});
+
+/** Whether the shell is laid out short: the brand header and the footer scroll with the chat. */
+function isShort(): boolean {
+  return one('.cd-public-shell').classList.contains('cd-public-shell--short');
+}
+
+/** Scrolls as the public chat page does to follow a chat: the newest message's foot at the composer area's top. */
+function followTheChat(): void {
+  const scrolls = scroller();
+  scrolls.scrollTop = 0;
+  scrolls.scrollTop += lastRow().getBoundingClientRect().bottom - one('.cd-public-shell__composer').getBoundingClientRect().top;
+}
+
+/** Whether the newest message sits just above the composer area. */
+function newestAboveTheComposer(): boolean {
+  return Math.abs(lastRow().getBoundingClientRect().bottom - one('.cd-public-shell__composer').getBoundingClientRect().top) <= 1;
+}
+
+it('a_shell_too_full_for_its_height_turns_short', async () => {
+  // Just above 520 px, a wrapped tagline, the longest closed status in Spanish or a long draft can
+  // leave the conversation almost nothing with the header and the footer pinned. The shell turns
+  // short when the conversation would get less than 120 px, not only below 520 px, so it always
+  // keeps at least 96 px of conversation and the document never scrolls.
+  const seen = [];
+  for (const size of [[320, 520], [320, 545], [320, 560], [360, 520]] satisfies Size[]) {
+    for (const variant of ['long draft', 'two-line tagline', 'both'] as const) {
+      await renderLongChat(size, { language: 'es', tagline: variant === 'long draft' ? undefined : TWO_LINE_TAGLINE });
+      if (variant !== 'two-line tagline') await pasteLongDraft();
+      await nextFrames();
+      followTheChat();
+      seen.push({
+        window: named(size),
+        variant,
+        documentFits: document.documentElement.scrollHeight <= innerHeight,
+        conversationShown: conversationShown() >= 96 ? '96 px or more' : `${conversationShown()} px`,
+        disclosure: uncovered(disclosureLine()),
+        composer: uncovered(one('.cd-composer')),
+      });
+    }
+  }
+  expect(seen).toEqual(
+    [[320, 520], [320, 545], [320, 560], [360, 520]].flatMap(([width, height]) =>
+      (['long draft', 'two-line tagline', 'both'] as const).map((variant) => ({
+        window: `${width}x${height}`,
+        variant,
+        documentFits: true,
+        conversationShown: '96 px or more',
+        disclosure: true,
+        composer: true,
+      })),
+    ),
+  );
+});
+
+it('short_mode_leaves_only_with_room_to_spare', async () => {
+  // A draft growing past the point where the conversation would get less than 120 px turns the
+  // shell short; taking one line back off doesn't turn it back, so the page can't flap between the
+  // two as the visitor types at the edge. Clearing the draft does.
+  await renderLongChat([320, 568], { language: 'es' });
+  expect(isShort()).toBe(false);
+  const input = one<HTMLTextAreaElement>('.cd-composer__input');
+  const lines: string[] = [];
+  for (let line = 1; line <= 6 && !isShort(); line += 1) {
+    lines.push(`line ${line}`);
+    await userEvent.fill(input, lines.join('\n'));
+    await nextFrames();
+  }
+  expect(isShort()).toBe(true);
+  await userEvent.fill(input, lines.slice(0, -1).join('\n'));
+  await nextFrames();
+  await nextFrames();
+  expect(isShort()).toBe(true);
+  await userEvent.clear(input);
+  await vi.waitFor(() => expect(isShort()).toBe(false));
+});
+
+it('keyboard_scrolling_on_a_short_shell_skips_nothing', async () => {
+  // On a short shell the chat's head and the composer sit over the conversation. Tabbing from
+  // "Ask for Maria Rivera" into the conversation leaves the newest message just above the composer,
+  // and Page Down moves by no more than the conversation that shows, so nothing passes unseen
+  // under the chat's head.
+  const seen = [];
+  for (const size of [[568, 320], [360, 380]] satisfies Size[]) {
+    await renderLongChat(size);
+    followTheChat();
+    (page.getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement).focus();
+    await userEvent.tab();
+    const tabbed = document.activeElement === one('.cd-public-shell__scroll') && newestAboveTheComposer();
+
+    const scrolls = scroller();
+    scrolls.scrollTop = scrolls.scrollHeight / 2;
+    const shown = conversationShown();
+    const before = scrolls.scrollTop;
+    await userEvent.keyboard('{PageDown}');
+    await vi.waitFor(() => expect(scrolls.scrollTop).toBeGreaterThan(before));
+    await nextFrames();
+    seen.push({ window: named(size), tabbed, pageDownWithinWhatShows: scrolls.scrollTop - before <= shown });
+  }
+  expect(seen).toEqual([
+    { window: '568x320', tabbed: true, pageDownWithinWhatShows: true },
+    { window: '360x380', tabbed: true, pageDownWithinWhatShows: true },
+  ]);
+});
+
+it('a_reopened_chat_opens_at_its_newest_message', async () => {
+  // Reopening a chat on a short phone: the page brings the newest message above the composer in a
+  // layout effect of its own, after the shell's. The shell has already decided it is short, so the
+  // page scrolls the right element and the newest message is just above the composer, not left far
+  // below it by a switch after the page has scrolled.
+  await renderLongChat([360, 380], { rows: 8, follow: true });
+  await nextFrames();
+  expect(isShort()).toBe(true);
+  expect(newestAboveTheComposer()).toBe(true);
+});
+
+it('the_reading_place_survives_a_switch_to_short_and_back', async () => {
+  // A visitor reading at message 6 on a tall phone, whose window then gets short (the keyboard
+  // opens) and tall again: message 6 stays where it was under the chat's head, both ways. After each
+  // switch the shell tells the page, once, which element now scrolls the conversation.
+  await renderLongChat([360, 640]);
+  const events: Element[] = [];
+  const listen = (event: Event) => events.push((event as CustomEvent<{ scroller: Element }>).detail.scroller);
+  document.addEventListener('cd-public-shell-scroller', listen);
+  try {
+    const row = container.querySelectorAll<HTMLElement>('.cd-transcript-row')[5] as HTMLElement;
+    const head = one('.cd-public-shell__chat-head');
+    const scrolls = scroller();
+    scrolls.scrollTop += row.getBoundingClientRect().top - head.getBoundingClientRect().bottom - 10;
+    const offset = () => Math.round(row.getBoundingClientRect().top - head.getBoundingClientRect().bottom);
+    expect(offset()).toBe(10);
+
+    await page.viewport(360, 380);
+    await vi.waitFor(() => expect(isShort()).toBe(true));
+    await nextFrames();
+    expect(offset()).toBe(10);
+    expect(events).toEqual([one('.cd-public-shell')]);
+
+    await page.viewport(360, 640);
+    await vi.waitFor(() => expect(isShort()).toBe(false));
+    await nextFrames();
+    expect(offset()).toBe(10);
+    expect(events).toEqual([one('.cd-public-shell'), one('.cd-public-shell__scroll')]);
+  } finally {
+    document.removeEventListener('cd-public-shell-scroller', listen);
+  }
+});
+
+it('follows_the_visual_viewport_when_the_keyboard_opens', async () => {
+  // Safari on an iPhone doesn't shrink the page for the on-screen keyboard; it shrinks the visual
+  // viewport and pans it. The shell takes the visual viewport's height and place instead, so it is
+  // short and its chat head stays at the top of what shows. Checked here with a faked visual
+  // viewport: a 390 x 844 window with 380 px left above the keyboard, then the keyboard closing.
+  class FakeViewport extends EventTarget {
+    height = 380;
+    width = 390;
+    offsetTop = 0;
+    offsetLeft = 0;
+    scale = 1;
+  }
+  const fake = new FakeViewport();
+  const real = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+  Object.defineProperty(window, 'visualViewport', { value: fake, configurable: true });
+  try {
+    await renderLongChat([390, 844]);
+    const shell = one('.cd-public-shell');
+    await vi.waitFor(() => expect(isShort()).toBe(true));
+    expect(shell.getBoundingClientRect().height).toBe(380);
+    expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(innerHeight);
+
+    // Panned 200 px down as the browser brings the composer into view: the shell moves with it.
+    fake.offsetTop = 200;
+    fake.dispatchEvent(new Event('scroll'));
+    expect(shell.getBoundingClientRect().top).toBe(200);
+
+    // The keyboard closes: the shell is the window's height again, and tall.
+    fake.height = 844;
+    fake.offsetTop = 0;
+    fake.dispatchEvent(new Event('resize'));
+    await vi.waitFor(() => expect(isShort()).toBe(false));
+    expect(shell.getBoundingClientRect().height).toBe(844);
+    expect(shell.getBoundingClientRect().top).toBe(0);
+  } finally {
+    if (real) Object.defineProperty(window, 'visualViewport', real);
+    else Reflect.deleteProperty(window, 'visualViewport');
+  }
+});
+
+it('the_about_column_keeps_focus_when_it_stops_scrolling', async () => {
+  // Focus on the about column while it scrolls on its own, then a taller window where it fits:
+  // focus stays on the column, and once it moves on, the column is no longer a stop.
+  await renderLongChat([1024, 640]);
+  const about = one('[aria-labelledby]:is(aside, section)');
+  expect(about.tabIndex).toBe(0);
+  about.focus();
+  await page.viewport(1024, 1100);
+  await vi.waitFor(() => expect(about.scrollHeight).toBeLessThanOrEqual(about.clientHeight));
+  await nextFrames();
+  expect(document.activeElement).toBe(about);
+  (page.getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement).focus();
+  await vi.waitFor(() => expect(about.hasAttribute('tabindex')).toBe(false));
+});
+
+it('the_composer_comes_out_from_under_the_chat_head', async () => {
+  // At the top of a chat on a short shell, a wrapped tagline can leave the chat's head over the
+  // composer. When the composer takes focus or grows there, the shell scrolls by the overlap, so the
+  // visitor sees what they type.
+  const seen = [];
+  for (const size of [[568, 320], [360, 380]] satisfies Size[]) {
+    await renderLongChat(size, { language: 'es', tagline: THREE_LINE_TAGLINE });
+    scroller().scrollTop = 0;
+    await pasteLongDraft();
+    await nextFrames();
+    const head = one('.cd-public-shell__chat-head').getBoundingClientRect();
+    const composer = one('.cd-public-shell__composer').getBoundingClientRect();
+    seen.push({ window: named(size), clear: head.bottom <= composer.top + 1, composer: uncovered(one('.cd-composer')), disclosure: uncovered(disclosureLine()) });
+  }
+  expect(seen).toEqual([
+    { window: '568x320', clear: true, composer: true, disclosure: true },
+    { window: '360x380', clear: true, composer: true, disclosure: true },
+  ]);
+});
+
+it('a_window_crossing_900_in_one_step_settles_without_a_switch', async () => {
+  // A laptop window snapped to a phone's size in one step, and back: the about column moves first,
+  // then the shell judges whether it is short with the column where it now is. A column still beside
+  // a chat too narrow for it would squeeze the chat's head and the composer and turn a roomy phone
+  // short for a frame; nothing switches, and the shell tells the page of no new scroller.
+  await renderLongChat([1440, 900]);
+  const events: Event[] = [];
+  const listen = (event: Event) => events.push(event);
+  document.addEventListener('cd-public-shell-scroller', listen);
+  try {
+    await page.viewport(390, 844);
+    await vi.waitFor(() => expect(one('.cd-public-shell__scroll').contains(one('[aria-labelledby]:is(aside, section)'))).toBe(true));
+    await nextFrames();
+    expect(isShort()).toBe(false);
+    await page.viewport(1440, 900);
+    await vi.waitFor(() => expect(one('.cd-public-shell__scroll').contains(one('[aria-labelledby]:is(aside, section)'))).toBe(false));
+    await nextFrames();
+    expect(isShort()).toBe(false);
+    expect(events).toHaveLength(0);
+  } finally {
+    document.removeEventListener('cd-public-shell-scroller', listen);
+  }
 });
