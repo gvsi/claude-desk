@@ -96,7 +96,8 @@ own, startup or the background gives a Desk the native tools it has no row for
 are inserts under fresh keys, and its `desk_data` entry takes the ledger head. Before both, the
 owner alert the background sends while a version waits (`activation._alert_waiting`) runs in a
 transaction of its own that takes the Desk's `waiting-alert` advisory lock first, before any row,
-and nothing else takes that lock. An owner write
+and nothing else takes that lock; then the Desk row `FOR SHARE`, held to its commit, so a Desk's
+deletion comes before its check or waits for it. An owner write
 refused for a document canary (`desks.refuse_public_canaries`) appends in its
 `persist` alone, holding nothing else, to each Desk it names in ID order, and one refused past a
 Desk's cap of documents or knowledge items (`labels.refuse_past_cap`, counted without a lock under

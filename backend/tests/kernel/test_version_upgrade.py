@@ -691,6 +691,32 @@ async def test_a_failed_waiting_alert_neither_blocks_nor_skips_the_rebuild(app, 
     assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
 
 
+async def test_a_desk_deleted_while_its_waiting_alert_is_written_waits_for_it(app, client, monkeypatch):
+    # the alert holds the Desk's row from its deletion check to its commit, so a deletion either comes first (and
+    # the alert writes nothing) or waits for the alert, never lands in between
+    from .helpers import connections_of, until_waiting
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    deliver, paused, go_on = activation.demo_inbox.deliver, asyncio.Event(), asyncio.Event()
+
+    async def held(*args, **kwargs):
+        paused.set()
+        await go_on.wait()
+        return await deliver(*args, **kwargs)
+
+    monkeypatch.setattr(activation.demo_inbox, "deliver", held)
+    alerting = asyncio.create_task(activation._alert_waiting(app.state.kernel, copy.copy_id, copy.desk_id))
+    await asyncio.wait_for(paused.wait(), timeout=5)
+    with connections_of(app) as pids:
+        deleting = asyncio.create_task(client.delete(f"/desks/{copy.desk_id}", headers=copy.owner))
+        await until_waiting(app, deleting, pids, "kernel.desks")
+    assert not deleting.done()                                   # the deletion waits for the alert's commit
+    go_on.set()
+    await asyncio.wait_for(alerting, timeout=5)
+    assert (await asyncio.wait_for(deleting, timeout=5)).status_code == 204
+    assert await rules_alerts(app, copy) == [WAITING_ALERT]       # written while the Desk still stood
+
+
 async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
     # in symcc mode no shipped report covers the kernel core's tools, so only a live proof answers its version
     copy = await rivera(app, client)

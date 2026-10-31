@@ -908,7 +908,9 @@ async def _alert_waiting(runtime: KernelRuntime, copy_id: str, desk_id: str) -> 
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
             await _lock(ctx, "waiting-alert", desk_id)
-            deleted = await ctx.db.scalar(ctx.repo.scoped(select(Desk.deleted_at).where(Desk.desk_id == desk_id)))
+            # the Desk row held to the commit, so a deletion comes before the check or waits for the alert
+            deleted = await ctx.db.scalar(ctx.repo.scoped(select(Desk.deleted_at).where(Desk.desk_id == desk_id)
+                                                          .with_for_update(read=True)))
             row = await active_version(ctx, desk_id)
             if deleted is not None or row is None or not outdated(row):
                 return
