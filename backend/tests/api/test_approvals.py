@@ -322,6 +322,29 @@ async def test_lost_answer_response_still_resumes(app, browser, fake, kernel_htt
     assert len([call for call in fake.called("POST /approvals/{decision_id}/answer")]) == 2
 
 
+async def test_retried_answer_during_execution_doesnt_resume(app, browser, fake, kernel_http, model, engine,
+                                                            jobs_connector):
+    held = await held_request(app, browser, fake, kernel_http, model)
+    # The first answer committed its approval; its adapter has not returned yet.
+    approved = fake._transition(fake.decisions[held.decision_id], "approved", kind="approval", answer="allow_once")
+    before = await sse_events(engine, held.session_id)
+
+    retried = await answer(held, "allow_once")
+
+    assert retried.status_code == 409
+    assert retried.json() == {"error": "already_resolved", "decision": approved.model_dump(mode="json")}
+    assert await resume_jobs(jobs_connector) == []
+    assert await sse_events(engine, held.session_id) == before
+    async with engine.connect() as conn:
+        assert (await conn.execute(text(
+            "SELECT count(*) FROM app.messages WHERE session_id = :s AND kind = 'action_update'"),
+            {"s": held.session_id})).scalar_one() == 0
+        assert (await conn.execute(text(
+            "SELECT count(*) FROM app.run_events WHERE session_id = :s AND kind = 'control'"
+            " AND type = 'run_resumable'"), {"s": held.session_id})).scalar_one() == 0
+    assert len(model.requests) == 1
+
+
 async def test_unreadable_or_unanswered_is_503(app, browser, fake, kernel_http, model, engine, jobs_connector):
     """When the answer's response is lost and the decision can't be read, or is still held (the answer never
     reached the kernel), the owner gets 503 and may answer again; an answer the request doesn't offer is 422."""

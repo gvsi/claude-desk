@@ -541,9 +541,10 @@ async def answer_approval(decision_id: Annotated[str, Path(max_length=128)], bod
     waits on a proof.
 
     When the kernel refuses the answer (409: answered before, expired or cancelled) or its response is lost, the
-    decision is read as it stands: once it left `held`, an outcome the visitor wasn't shown yet gets the (idempotent)
-    resume job, so a lost response still resumes the chat, and the answer is 409 `already_resolved` with the
-    decision. A decision still `held` keeps the kernel's own error, its code included ("Errors"): a 409 is
+    decision is read as it stands: once it left `held` and `approved`, an outcome the visitor wasn't shown yet gets
+    the (idempotent) resume job, so a lost response still resumes the chat. While `approved`, the first answer is
+    still executing and its own job will publish both statuses. Either case answers 409 `already_resolved` with
+    the decision. A decision still `held` keeps the kernel's own error, its code included ("Errors"): a 409 is
     `{error: "kernel", code}`, and an answer that never reached the kernel is 503, `seed_unproved` and `internal`
     kept. A decision that can't be read is 503 `kernel_unavailable`. In each case answering again is safe. An answer
     the request doesn't offer is the kernel's 422 `invalid`."""
@@ -571,7 +572,7 @@ async def _no_longer_held(state: Runtime, ctx: OwnerCtx, decision_id: str,
         raise ApiProblem(503, "kernel", code="kernel_unavailable") from None
     if decision.state == "held":                        # the answer didn't take: the kernel's own error stands
         raise failure
-    if not await status_shown(ctx.ro.conn, decision, or_later=True):
+    if decision.state != "approved" and not await status_shown(ctx.ro.conn, decision, or_later=True):
         await _resume(state, ctx, decision)
     return JSONResponse(AlreadyResolved(decision=decision).model_dump(mode="json"), status_code=409)
 
