@@ -521,6 +521,30 @@ describe('rule drafts', () => {
       ['card-auto-messages', 'Every tool that sends a message out', undefined],
       ['rv-agent-charges', 'Every tool that charges money', undefined],
     ]);
+
+    // A shared rule retargeted to one of its tools keeps the title, connector and place of the
+    // tools it covered, and each side names its target: the group's words, then the tool.
+    const toLink = changed(rivera.sharedChargeCard, { applies_to: 'native.payment_link' });
+    const pairs: [RuleCard, RuleCard][] = [
+      [rivera.sharedChargeCard, toLink],
+      [ruleCards['rv-link'], changed(ruleCards['rv-link'], { reason: 'Links up to $300.' })],
+      [ruleCards['rv-mandate'], changed(ruleCards['rv-mandate'], { reason: 'Deposits from a signed limit.' })],
+    ];
+    const narrowed = changeRows(
+      draftFromDiff(
+        rulesDraft({
+          cards: [...RIVERA_CARDS.filter((card) => !['rv-link', 'rv-mandate'].includes(card.card_id)), ...pairs.map(([, now]) => now)],
+          diff: { added: [], removed: [], changed: pairs },
+        }),
+        version(7, [...RIVERA_CARDS, rivera.sharedChargeCard]),
+      ),
+      PEOPLE,
+      TOOLS,
+    );
+    expect(narrowed.map((row) => row.key)).toEqual(['rv-link', 'rv-agent-charges', 'rv-mandate']);
+    expect(narrowed[1]).toMatchObject({ change: 'changed', title: 'Payment link and Charge within a signed limit', connector: view('payments'), changed: ['applies_to'] });
+    expect(narrowed[1]?.before?.appliesTo).toBe('Every tool that charges money');
+    expect(narrowed[1]?.after?.appliesTo).toBe('Payment link');
   });
 
   /** Rivera's rules with a shared rule on private data changed in place from `was` to `now`, beside a quote and a refund change. */
