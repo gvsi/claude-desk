@@ -167,9 +167,8 @@ function Thing({ icon, title, held = false, detail, below, children }: ThingProp
 /**
  * "Try to break it": the fixed ideas. A pick opens the public page in a new tab with the idea's key
  * in its link (`?try=`), and the page types that idea into its chat box for the owner to send;
- * nothing is sent without their Send. The idea is copied too, as a fallback only: the copy starts
- * and the tab opens in the click itself, without waiting for the copy, so the browser counts the
- * tab as the owner's own, and a clipboard that refuses changes nothing. The tab is opened without
+ * nothing is sent without their Send, and nothing is written to the owner's clipboard. The tab
+ * opens in the click itself, so the browser counts it as the owner's own. It is opened without
  * `noopener` (with it the browser hides whether the tab opened), and this page cuts the new tab's
  * link back to it. A browser that blocks the tab gets a link to open it by hand, the key in it too.
  */
@@ -181,11 +180,6 @@ function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ow
     const idea = BREAK_IT_IDEAS.find((each) => each.text === text);
     if (idea === undefined) return;
     setPick(null);
-    try {
-      void navigator.clipboard.writeText(idea.text).catch(() => undefined);
-    } catch {
-      // No clipboard here at all; the link carries the idea either way.
-    }
     const tab = window.open(customerLink(slug, deskId, idea.key), '_blank');
     if (tab === null) {
       setPick({ key: idea.key, outcome: 'blocked' });
