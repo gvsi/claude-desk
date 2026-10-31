@@ -314,15 +314,17 @@ class VisitorChat {
    * A session from a later read of the stored conversation, sent when the chat had last lost track
    * `since`, and while it was `following` the reopened stream or not. Older than what the chat knows
    * of the mode (`modeAt`), it says nothing of it. Otherwise it says the mode as of its `last_seq`,
-   * which may only lower it, and from then on no older mode event can change it. It confirms the
-   * mode if it was sent after the stream reopened, with nothing lost since.
+   * which may only lower it. Only an applied mode moves the cursor: a refused owner's mode must
+   * leave its join available to the stream. It confirms the mode if it was sent after the stream
+   * reopened, with nothing lost since.
    */
   private laterRead(transcript: VisitorTranscript, since: number, following: boolean): SessionState {
     const read = transcript.state;
     if (transcript.last_seq < this.modeAt) return this.laterSession(read, null);
-    this.modeAt = transcript.last_seq;
+    const session = this.laterSession(read, read.mode);
+    if (session.mode === read.mode) this.modeAt = transcript.last_seq;
     if (following && since === this.tracked) this.modeKnown = true;
-    return this.laterSession(read, read.mode);
+    return session;
   }
 
   private dispatch(action: ChatAction): void {

@@ -1613,6 +1613,30 @@ describe('public chat page', () => {
     await staleOwnerReopen(true);
   });
 
+  it('a_refused_owner_read_does_not_consume_the_join_it_saw', async () => {
+    const replay = holdStreamEvents();
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    replay.release();
+    await say(screen, 'Can you send my invoice?');
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    replay.hold();
+    mockStore.world.takeOver(chat);
+    const read = await request('visitorSession', { params: { slug: RIVERA.slug } });
+    mockStore.inject({ route: 'verifyCheck', status: 'network' });
+    mockStore.inject({ route: 'visitorSession', status: 200, body: { ...read, state: { ...read.state, verified: true, assurance: 'demo_code' } } });
+    await screen.getByRole('textbox', { name: '6-digit code' }).fill(DEMO_CODE);
+    await screen.getByRole('button', { name: 'Confirm' }).click();
+    await expect.element(screen.getByText('Verified with a code. Simulated verification')).toBeVisible();
+    // A later read can only lower the mode, so this owner's mode was refused. Its cursor must
+    // not suppress the join that would establish her presence through the live stream.
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    replay.release();
+    await vi.waitFor(() => expect(systemLines().at(-1)).toBe('Maria Rivera joined the chat'));
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+  });
+
   it('a_newer_read_keeps_an_older_replayed_join_from_bringing_the_owner_back', async () => {
     const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);
@@ -3002,7 +3026,7 @@ async function newerVerificationBeforeReopen(fallback: boolean): Promise<void> {
  * hold a stream's replay while the page's other requests go through. Only the events wait: a stream
  * still opens, and says so, at once.
  */
-function holdStreamEvents(): { release: () => void } {
+function holdStreamEvents(): { release: () => void; hold: () => void } {
   const native = window.EventSource;
   const queued: (() => void)[] = [];
   let holding = true;
@@ -3021,6 +3045,7 @@ function holdStreamEvents(): { release: () => void } {
     window.EventSource = native;
   });
   return {
+    hold: () => { holding = true; },
     release: () => {
       holding = false;
       for (const deliver of queued.splice(0)) deliver();
