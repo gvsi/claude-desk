@@ -27,11 +27,11 @@ from desk.contracts import ProofCheck, ProofReport
 from desk.db.models import LedgerEntry, PolicyVersion
 from desk.db.session import database_url, dispose_engines, libpq_url
 from desk.kernel_service import activation, compiler, seed
-from desk.kernel_service.app import create_app
+from desk.kernel_service.app import KernelSettings, create_app
 from desk.kernel_service.seed import RIVERA_CARDS
 from scripts import prove_latency
 
-from .conftest import BACKEND
+from .conftest import BACKEND, Mockpay
 from .fakes import FrozenClock
 from .helpers import TEST_CAP, compile_at, context, kernel_ctx, make_copy_rows, rows_of
 from .test_compiler import A_MIX_OF_CARDS, NATIVE, card, native_profile
@@ -40,9 +40,14 @@ STUBS = Path(__file__).parent / "stubs"
 
 
 @asynccontextmanager
-async def running_kernel(clock: FrozenClock) -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
-    """A kernel app started with the environment as the test has set it, and a client for it."""
-    kernel = create_app(clock=clock)
+async def running_kernel(clock: FrozenClock, mockpay: Mockpay | None = None
+                         ) -> AsyncIterator[tuple[FastAPI, httpx.AsyncClient]]:
+    """A kernel app started with the environment as the test has set it, and a client for it; with
+    `mockpay`, calling the run's mock payments server, as a copy's seed does."""
+    settings = None
+    if mockpay is not None:
+        settings = dataclasses.replace(KernelSettings.from_env(), mockpay_url=mockpay.url, mockpay_key=mockpay.key)
+    kernel = create_app(settings, clock=clock)
     try:
         async with kernel.router.lifespan_context(kernel):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(kernel), base_url="http://kernel") as http:
@@ -134,11 +139,17 @@ async def test_prover_timeout_rejects_and_kills(monkeypatch):
 def test_shipped_reports_match_the_current_build():
     """A change to the seed or preset cards, the adapter profiles, the schema, baseline,
     invariants, compiler output or thresholds must regenerate the reports (`make proofs`) in the
-    same commit: here every shipped report has to match what the kernel compiles today."""
-    profiles = activation.shipped_profiles()
+    same commit: here every shipped report has to match what the kernel compiles today. The seed is
+    compiled over the native profiles and its pinned mock payments tools, the presets over the
+    native profiles alone (plan 01c)."""
     assert set(activation.SHIPPED_PRESETS) == {"rivera", "ask_first", "auto"}
     assert activation.SHIPPED_CAPS == {"rivera": 50_000, "ask_first": 0, "auto": 0}
+    native = activation.shipped_profiles()
+    assert {p.source for p in native} == {"native"} and activation.shipped_profiles("ask_first") == native
+    assert [p.tool for p in activation.shipped_profiles("rivera") if p.source == "mcp"] == [
+        "payments.create_refund", "payments.list_charges"]
     for preset, cards in activation.SHIPPED_PRESETS.items():
+        profiles = activation.shipped_profiles(preset)
         schema, cap = compiler.desk_schema(profiles), activation.SHIPPED_CAPS[preset]
         hashes = activation.version_hashes(compile_at(cards, profiles, cap=cap), schema, profiles, cards=cards,
                                            auto_money_cap_cents=cap)
@@ -194,7 +205,7 @@ async def test_copy_activates_from_the_cache_without_proving(outside_repo, app, 
     report = shipped("rivera")
     assert row.proof == report.proof and row.proof.ok and row.proof.method == "symcc"
     assert activation.VersionHashes(*(getattr(row, f) for f in activation.VersionHashes._fields)) == report.hashes
-    profiles = activation.shipped_profiles()
+    profiles = activation.shipped_profiles("rivera")
     compiled = compile_at(RIVERA_CARDS, profiles, cap=seed.RIVERA_MONEY_CAP_CENTS)
     assert row.cards == compiled.cards and row.auto_money_cap_cents == seed.RIVERA_MONEY_CAP_CENTS
     assert row.cedar == {**compiled.sets(), "A0": compile_at(RIVERA_CARDS, profiles, review=False).A}
@@ -311,7 +322,7 @@ def kernel_row_counts(*tables: str) -> dict[str, int]:
 
 
 @pytest.mark.parametrize("patched", ["cedar_sha256", "cards_sha256"])   # other Cedar, or the same Cedar from other cards
-async def test_an_uncached_seed_is_503_in_either_mode(patched, monkeypatch, frozen_clock, tmp_path, caplog):
+async def test_an_uncached_seed_is_503_in_either_mode(patched, monkeypatch, frozen_clock, tmp_path, caplog, mockpay):
     compiled = shipped("rivera").cedar_sha256                     # what the kernel compiles Rivera's cards to
     # the shipped reports, each with one hash patched, so nothing the kernel compiles has a report
     for preset in activation.SHIPPED_PRESETS:
@@ -322,7 +333,7 @@ async def test_an_uncached_seed_is_503_in_either_mode(patched, monkeypatch, froz
     for mode in ("symcc", "bounded"):
         force_mode(monkeypatch, mode)
         caplog.clear()
-        async with running_kernel(frozen_clock) as (kernel, http):
+        async with running_kernel(frozen_clock, mockpay) as (kernel, http):
             health = (await http.get("/health")).json()
             assert (health["proof_mode"], health["unproved_seeds"]) == (mode, [])
             response = await http.post("/copies", json={})

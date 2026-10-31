@@ -9,15 +9,27 @@ export interface StepsProps {
   steps: readonly string[];
   /** The step the person is on, counted from 0. Steps before it are done; one past the last reads as the last. */
   current: number;
+  /**
+   * The flow is finished, as setup is once the Desk is live: the current step is done too. Its number
+   * gives way to a check on the current step's fill, it reads "{name}, done", and it keeps
+   * `aria-current="step"`.
+   */
+  finished?: boolean;
+  /**
+   * With `finished`, the current step's check draws once, as the person reaches it. Without it the
+   * check is drawn from the start, as when the page opens on a finished flow. Static under reduced motion.
+   */
+  drawCheck?: boolean;
 }
 
 /**
  * Where a person is in a flow of a few steps: an ordered list in a row, joined by hairlines. Done
  * steps show a check and read "{name}, done"; the current one is a filled circle with its number
- * and `aria-current="step"`; later ones are quiet numbered circles. Under 480 px of its own width
- * the list is read but not drawn, and one line says where the person is: "Step 1 of 5: Questions".
+ * and `aria-current="step"`, or with a check once the flow is `finished`; later ones are quiet
+ * numbered circles. Under 480 px of its own width the list is read but not drawn, and one line says
+ * where the person is: "Step 1 of 5: Questions".
  */
-export function Steps({ label, steps, current }: StepsProps) {
+export function Steps({ label, steps, current, finished = false, drawCheck = false }: StepsProps) {
   // The step the list marks and the line names: `current`, kept within the steps, so both say the same.
   const at = Math.min(Math.max(current, 0), steps.length - 1);
   return (
@@ -25,6 +37,7 @@ export function Steps({ label, steps, current }: StepsProps) {
       <ol role="list" className="cd-steps cd-type-meta" aria-label={label}>
         {steps.map((step, index) => {
           const state = index < at ? 'done' : index === at ? 'current' : 'later';
+          const done = state === 'done' || (state === 'current' && finished);
           return (
             <li
               key={`${index}-${step}`}
@@ -33,11 +46,15 @@ export function Steps({ label, steps, current }: StepsProps) {
             >
               {index > 0 ? <span className="cd-steps__join" aria-hidden="true" /> : null}
               <span className="cd-steps__circle cd-type-caption" aria-hidden="true">
-                {state === 'done' ? <Icon name="check" size={14} /> : index + 1}
+                {done ? (
+                  <Icon name="check" size={14} className={state === 'current' && drawCheck ? 'cd-steps__check--draw' : undefined} />
+                ) : (
+                  index + 1
+                )}
               </span>
               <span className="cd-steps__name">
                 {step}
-                {state === 'done' ? <span className="cd-sr-only">, done</span> : null}
+                {done ? <span className="cd-sr-only">, done</span> : null}
               </span>
             </li>
           );

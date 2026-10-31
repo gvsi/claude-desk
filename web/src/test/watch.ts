@@ -11,8 +11,9 @@ const NOT_FOUND = "This page doesn't exist";
 
 /**
  * The page drawn now, by name: the preview behind the intro dialog; the owner's loading page or its
- * error; the not-found page, or another page outside the app's frame (an error); Today, named for
- * what it lacks until it holds Rivera's held request and its briefing; any other page; or nothing.
+ * error; the not-found page, or another page outside the app's frame (an error); Today while its
+ * column holds the loading line, then named for what it lacks until it holds Rivera's held request
+ * and its briefing; any other page; or nothing.
  */
 export function pageNow(): string {
   const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
@@ -22,6 +23,7 @@ export function pageNow(): string {
   if (standalone !== null) return standalone.textContent?.includes(NOT_FOUND) ? 'not found' : 'an error page';
   if (document.querySelector('.cd-today-preview') !== null) return 'preview';
   if (document.querySelector('.cd-today') !== null) {
+    if (document.querySelector('.cd-today__main > .cd-loading-line') !== null) return 'today opening';
     if (document.querySelector(held) === null) return 'today without its held request';
     if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
     return 'today';
@@ -45,6 +47,26 @@ export function watchPages(): () => string[] {
   watch.observe(document.body, { childList: true, subtree: true });
   onTestFinished(() => watch.disconnect());
   return () => [...seen];
+}
+
+/**
+ * Every place the element `find` returns is drawn at, as its top in whole CSS px from the top of the
+ * window, read each time the page changes from now until the test ends, a place held many times in
+ * a row named once. While `find` returns nothing, there is no place to read.
+ */
+export function watchTop(find: () => Element | null): () => number[] {
+  const tops: number[] = [];
+  const look = () => {
+    const element = find();
+    if (element === null) return;
+    const top = Math.round(element.getBoundingClientRect().top);
+    if (tops.at(-1) !== top) tops.push(top);
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => watch.disconnect());
+  return () => [...tops];
 }
 
 /** Whether `text` showed anywhere on the page, even for a moment, from now until the test ends. */

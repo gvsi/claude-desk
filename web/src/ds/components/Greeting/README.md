@@ -21,13 +21,13 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `text` | `string` | Required. `.cd-type-greeting` (serif, 36/44, weight 300). |
+| `text` | `string` | Required. `.cd-type-greeting` (serif, 36/44, weight 300). Balanced when it wraps, as `PageHeader`'s title is: on a phone, "Good morning, Maximiliana" takes two lines with the name whole on the second. |
 | `presence` | `{ line: string; people: PresenceGlyph[] }` | The line in `body` type, `text-secondary`. At most three glyphs. |
 | `link` | `{ label: string; onCopy: () => void; copied?: boolean }` | An outlined pill at the right; it drops under the text on a narrow line. `copied` says "Copied" with a check, at the same width. |
 
 ## Motion
 
-- The presence glyphs are the screen's one small moment: their opacity breathes between 50% and 100% over `motion-breathe`, each half a breath out of step with the one before.
+- The presence glyphs are the screen's one small moment: their opacity breathes between 60% and 100% over `motion-breathe`, each half a breath out of step with the one before. At the faintest point a glyph's initials still read against its circle by 4.5:1, as text must, and its icon by more than 3:1, as a mark must (at 50% the initials fell to about 4.1:1).
 - The copy button presses in on `:active` (`scale(0.97)`, `motion-fast`), with the check over it.
 - When `copied` turns on or off, the link's words and "Copied" crossfade over `motion-fast`. The copy icon fades and shrinks out as the check fades and settles in (from `scale(0.8)`, on the emphasis ease), both over `motion-fast`.
 - Under `prefers-reduced-motion: reduce` the glyphs are still at full opacity, the button doesn't press in, and "Copied" and the check draw at once.

@@ -13,17 +13,22 @@ import type { RenderResult } from 'vitest-browser-react';
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RuleCard } from '../api/contracts.ts';
-import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
+import type { BusinessOut, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { reduceMotion } from '../ds/test/reducedMotion.ts';
+import { pairContrast } from '../ds/contrast.ts';
+import { faintestOpacity, paintedGroundOf } from '../ds/test/breath.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { hubSections } from '../owner/rules/hub.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
+import { withAnswering } from '../owner/useDesks.ts';
 import { worker } from '../mocks/browser.ts';
 import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextStart } from '../mocks/setup.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
+import { lineWords } from '../ds/test/lineWords.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { retryAfterMs } from '../app/poll.ts';
 import { SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
@@ -179,11 +184,125 @@ const UNPROVED = {
 
 const FAILED_LINE = "I couldn't answer just now. Your answer is still here; try again.";
 
+/** A business name longer than setup's bar, at any width. */
+const LONG_BUSINESS_NAME = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland';
+
 /** The composer's failed box, which keeps an answer that didn't go through beside "Try again". */
 const keptAnswer = (screen: RenderResult) => screen.getByRole('group', { name: 'Your answer' });
 
+/** Setup's loading line, while what a step needs is read. */
+const OPENING = 'Opening your setup';
+
+/** Setup's five steps in the bar, as screen readers read them. */
+const setupSteps = (screen: RenderResult) => screen.getByRole('list', { name: 'Set up your Desk' }).getByRole('listitem');
+
+/** A step's circle, drawn only. */
+function stepCircle(step: Element): HTMLElement {
+  const circle = step.querySelector<HTMLElement>('.cd-steps__circle');
+  if (!circle) throw new Error('No circle on the step');
+  return circle;
+}
+
+/** The stroke of the check a step's circle shows. */
+function checkPath(circle: Element): SVGPathElement {
+  const path = circle.querySelector<SVGPathElement>('svg path');
+  if (!path) throw new Error('No check in the circle');
+  return path;
+}
+
 /** Whether `el` is set in Claude's serif. */
 const inSerif = (el: Element) => /Source Serif 4/.test(getComputedStyle(el).fontFamily);
+
+/** A row of a list as it was drawn: its words, and how it moved then, if it did. */
+interface DrawnRow {
+  text: string;
+  /** The row's own animation: its name, its delay in ms, its duration in ms and its easing. */
+  animation: { name: string; delayMs: number; durationMs: number; easing: string };
+  /** The first and last frames of the row's own landing, as the browser runs it; none when it was drawn still. */
+  frames: Keyframe[];
+  /** Its status dot's animation name, and the dot's first frame. */
+  dot: { name: string; frames: Keyframe[] };
+}
+
+/** A computed duration ("0.15s", "200ms") in ms. */
+const ms = (duration: string) => Math.round(parseFloat(duration) * (duration.endsWith('ms') ? 1 : 1000));
+
+/** A design system token as the page computes it. */
+const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/** An easing (a token, as `var(--motion-ease-emphasis)`) as computed styles write it. */
+function easing(value: string): string {
+  const probe = document.createElement('div');
+  probe.style.animationTimingFunction = value;
+  document.body.append(probe);
+  const computed = getComputedStyle(probe).animationTimingFunction;
+  probe.remove();
+  return computed;
+}
+
+/**
+ * Each row of the list named `label`, as it is drawn from now until the test ends, in the order
+ * drawn: how it was set to move at that moment. A landing is spent once it has played, so a test
+ * can't tell afterwards whether a row landed.
+ */
+function watchRows(label: string): () => DrawnRow[] {
+  const drawn = new Map<Element, DrawnRow>();
+  const record = () => {
+    for (const row of document.querySelectorAll(`ul[aria-label="${label}"] > li > *`)) {
+      if (drawn.has(row)) continue;
+      const style = getComputedStyle(row);
+      const own = row.getAnimations().find((a): a is CSSAnimation => a instanceof CSSAnimation);
+      const dot = row.querySelector('.cd-status-dot');
+      const dotOwn = dot?.getAnimations().find((a): a is CSSAnimation => a instanceof CSSAnimation);
+      drawn.set(row, {
+        text: row.textContent ?? '',
+        animation: { name: style.animationName, delayMs: ms(style.animationDelay), durationMs: ms(style.animationDuration), easing: style.animationTimingFunction },
+        frames: own?.effect instanceof KeyframeEffect ? own.effect.getKeyframes() : [],
+        dot: { name: dot === null ? 'none' : getComputedStyle(dot).animationName, frames: dotOwn?.effect instanceof KeyframeEffect ? dotOwn.effect.getKeyframes() : [] },
+      });
+    }
+  };
+  const observer = new MutationObserver(record);
+  observer.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => observer.disconnect());
+  return () => [...drawn.values()];
+}
+
+/**
+ * What `el` shows on screen (without its visually hidden words) and what a screen reader reads of
+ * it (without what is hidden from assistive tech).
+ */
+function textOf(el: Element): { shown: string; spoken: string } {
+  const without = (selector: string) => {
+    const copy = el.cloneNode(true) as Element;
+    for (const hidden of copy.querySelectorAll(selector)) hidden.remove();
+    return copy.textContent ?? '';
+  };
+  return { shown: without('.cd-sr-only'), spoken: without('[aria-hidden="true"]') };
+}
+
+/** The safety check's count, "6 of 6 blocked", by what it shows; null when it isn't drawn. */
+const countElement = () => [...document.querySelectorAll('main p')].find((p) => /^\d+ of \d+ blocked$/.test(textOf(p).shown)) ?? null;
+
+/**
+ * Every text the safety check's count shows from now until the test ends (or, with `spoken`, what a
+ * screen reader reads of it), in order, each change once.
+ */
+function watchCount(read: 'shown' | 'spoken' = 'shown'): () => string[] {
+  const seen: string[] = [];
+  const record = () => {
+    const count = countElement();
+    const text = count === null ? null : textOf(count)[read];
+    if (text !== null && seen.at(-1) !== text) seen.push(text);
+  };
+  const observer = new MutationObserver(record);
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => observer.disconnect());
+  return () => [...seen];
+}
+
+/** What still moves in `el`: its animations, and its children's, not yet done. */
+const moving = (el: Element) => el.getAnimations({ subtree: true }).filter((a) => a.playState !== 'finished');
 
 afterEach(() => {
   vi.useRealTimers();
@@ -1304,6 +1423,186 @@ describe('setup', () => {
     expect(deskOf(state).summary.answering).toBe(false);
   });
 
+  it('safety_check_lands_one_by_one', async () => {
+    // Come to from Real situations on this page: the check runs as the owner watches.
+    const { state } = await interviewAtRules();
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
+    const drawn = watchRows('Tricks tried');
+    const counts = watchCount();
+    const spoken = watchCount('spoken');
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+
+    // The rows are the check's real results, in the order tried, drawn as they arrive.
+    const answered = (await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } })) as { body: SafetyCheck };
+    const rows = drawn();
+    expect(rows.map((row) => row.text)).toEqual(answered.body.rows.map((row) => expect.stringContaining(`${row.label}“${row.tries}”`)));
+    // Each lands motion-stagger after the one before it, the first at once: it rises space-4 and
+    // fades in over motion-base on the emphasis ease, and its dot scales in with it.
+    const stagger = ms(token('--motion-stagger'));
+    expect(rows.map((row) => row.animation.delayMs)).toEqual(rows.map((_, index) => index * stagger));
+    for (const row of rows) {
+      expect(row.animation).toMatchObject({ durationMs: ms(token('--motion-base')), easing: easing('var(--motion-ease-emphasis)') });
+      expect(row.frames[0]).toMatchObject({ opacity: '0', transform: `translateY(${token('--space-4')})` });
+      expect(row.dot.frames[0]).toMatchObject({ transform: 'scale(0.5)' });
+    }
+
+    // The count ticks with the rows, from the first row's to the check's own count, and never back.
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
+    const ticks = counts().map((text) => Number(text.split(' ')[0]));
+    expect(ticks[0]).toBe(1);
+    expect(ticks.length).toBeGreaterThan(1);
+    expect(ticks.every((n, i) => i === 0 || n > (ticks[i - 1] ?? 0))).toBe(true);
+
+    // Once landed, nothing lingers: the rows are drawn still, and the count is the check's own.
+    await expect.poll(() => moving(list.element())).toEqual([]);
+    for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
+    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+
+    // A screen reader reads the check's own count from the first, never the ticks, all six rows
+    // being there from the start; and the count sits in no live region, so nothing announces it.
+    expect(spoken()).toEqual(['6 of 6 blocked']);
+    expect(countElement()?.closest('[aria-live],[role="status"],[role="log"],[role="alert"]')).toBeNull();
+  });
+
+  it('safety_check_shows_at_once_under_reduced_motion', async () => {
+    await reduceMotion(true);
+    onTestFinished(() => reduceMotion(false));
+    const { state } = await interviewAtRules();
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
+    const drawn = watchRows('Tricks tried');
+    const counts = watchCount();
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+
+    // Every row at once, nothing moving, and the check's own count from the first.
+    expect(drawn()).toHaveLength(6);
+    for (const row of drawn()) expect([row.animation.name, row.dot.name]).toEqual(['none', 'none']);
+    expect(moving(list.element())).toEqual([]);
+    expect(counts()).toEqual(['6 of 6 blocked']);
+  });
+
+  /** An interview at Real situations, opened on this page, with "Looks right" ready to press. */
+  async function openedAtSituations(): Promise<RenderResult> {
+    const { state } = await interviewAtRules();
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
+    return screen;
+  }
+
+  it('safety_check_landing_follows_only_its_own_motion', async () => {
+    // Something else moving in the rows (here, each trick's name, on a loop that starts at once)
+    // neither keeps the rows landing nor runs the count ahead of them.
+    const style = document.createElement('style');
+    style.textContent =
+      'ul[aria-label="Tricks tried"] .cd-safety-check-row__label { animation: test-other-motion 1s linear infinite; } @keyframes test-other-motion { to { opacity: 0.9; } }';
+    document.head.append(style);
+    onTestFinished(() => style.remove());
+    const screen = await openedAtSituations();
+    const counts = watchCount();
+    const at = new Map<string, number>();
+    const timer = new MutationObserver(() => {
+      const count = countElement();
+      if (count !== null && !at.has(textOf(count).shown)) at.set(textOf(count).shown, performance.now());
+    });
+    timer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    onTestFinished(() => timer.disconnect());
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+
+    // The count reaches the last row only when it lands, five beats after the first.
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
+    expect(counts()[0]).toBe('1 of 6 blocked');
+    const beats = ((at.get('6 of 6 blocked') ?? 0) - (at.get('1 of 6 blocked') ?? 0)) / ms(token('--motion-stagger'));
+    expect(beats).toBeGreaterThanOrEqual(4);
+    // And once the rows have landed they are drawn still, whatever else moves in them.
+    await expect.poll(() => [...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName)).toEqual(Array(6).fill('none'));
+  });
+
+  it('safety_check_shows_at_once_where_motion_cant_be_read', async () => {
+    // A browser that can't report what is moving (no `getAnimations`) shows the rows at once,
+    // with the check's own count, rather than failing.
+    const screen = await openedAtSituations();
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'getAnimations');
+    Object.defineProperty(Element.prototype, 'getAnimations', { configurable: true, writable: true, value: undefined });
+    onTestFinished(() => {
+      if (original) Object.defineProperty(Element.prototype, 'getAnimations', original);
+    });
+    const counts = watchCount();
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+    expect([...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName)).toEqual(Array(6).fill('none'));
+    expect(counts()).toEqual(['6 of 6 blocked']);
+  });
+
+  it('safety_check_opened_with_results_draws_them_still', async () => {
+    // Setup opened at the safety check (a reload, or resumed from Today): the owner didn't just run
+    // it, so its results are drawn at once, with no landing, and the check's own count.
+    const { state } = await interviewAtSafety();
+    const drawn = watchRows('Tricks tried');
+    const counts = watchCount();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+    expect(drawn()).toHaveLength(6);
+    for (const row of drawn()) expect([row.animation.name, row.dot.name]).toEqual(['none', 'none']);
+    expect(moving(list.element())).toEqual([]);
+    expect(counts()).toEqual(['6 of 6 blocked']);
+
+    // "Run again" runs the check again as the owner watches: its results land, the count with them.
+    await screen.getByRole('button', { name: 'Run again' }).click();
+    await expect.poll(() => drawn().length).toBe(12);
+    const again = drawn().slice(6);
+    expect(again.map((row) => row.animation.delayMs)).toEqual(again.map((_, index) => index * ms(token('--motion-stagger'))));
+    for (const row of again) expect([row.animation.name, row.dot.name]).not.toContain('none');
+    await expect.poll(() => counts().length).toBeGreaterThan(2);
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
+    expect(counts().slice(0, 2)).toEqual(['6 of 6 blocked', '1 of 6 blocked']);
+  });
+
+  it('real_situations_land_one_by_one', async () => {
+    // Come to from the rules on this page: the situations are tried as the owner watches, and land
+    // as the safety check's tricks do, in the order tried.
+    const { state } = await interviewAtRules();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    const drawn = watchRows('Real situations');
+    await screen.getByRole('button', { name: 'Check real situations' }).click();
+    const list = screen.getByRole('list', { name: 'Real situations' });
+    await expect.element(list).toBeInTheDocument();
+
+    const answered = (await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } })) as { body: SituationResult[] };
+    const rows = drawn();
+    expect(rows.map((row) => row.text)).toEqual(answered.body.map(({ situation }) => expect.stringContaining(situation.title)));
+    const stagger = ms(token('--motion-stagger'));
+    expect(rows.map((row) => row.animation.delayMs)).toEqual(rows.map((_, index) => index * stagger));
+    for (const row of rows) {
+      expect(row.animation).toMatchObject({ durationMs: ms(token('--motion-base')), easing: easing('var(--motion-ease-emphasis)') });
+      expect(row.frames[0]).toMatchObject({ opacity: '0', transform: `translateY(${token('--space-4')})` });
+      expect(row.dot.frames[0]).toMatchObject({ transform: 'scale(0.5)' });
+    }
+    await expect.poll(() => moving(list.element())).toEqual([]);
+    for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
+
+    // Setup opened at Real situations (a reload): the same results, drawn at once.
+    const reopened = watchRows('Real situations');
+    const again = (await renderRoute(`/app/setup/${state.interview_id}`)).screen;
+    const shown = again.getByRole('list', { name: 'Real situations' });
+    await expect.element(shown).toBeInTheDocument();
+    expect(reopened().map((row) => row.text)).toEqual(rows.map((row) => row.text));
+    for (const row of reopened()) expect([row.animation.name, row.dot.name]).toEqual(['none', 'none']);
+    expect(moving(shown.element())).toEqual([]);
+  });
+
   it('confirm_then_preview_then_go_live', async () => {
     const { state } = await interviewAtSafety();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -1399,6 +1698,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
     expect(deskOf(state).summary.answering).toBe(true);
     await expect.element(screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true })).toBeVisible();
+    // The Desks, read again after the lost answer, say it answers: "Answering now" shows.
+    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
 
     // The link is the API's `public_url`, and "Open" opens it in a new tab.
     const url = `${window.location.origin}/d/${state.slug}`;
@@ -1484,6 +1785,217 @@ describe('setup', () => {
       expect(el.scrollWidth, text).toBeLessThanOrEqual(el.clientWidth);
     }
     expectNoHorizontalScroll();
+  });
+
+  it('live_title_balances_a_long_name', async () => {
+    // A 78-character name, near the API's 80, given as an owner gives it: the description's first
+    // sentence. Screen tests load no web fonts, so the title is drawn in the platform's fallback
+    // serif (Georgia on a Mac, Liberation Serif on Linux), and the lines it takes differ by platform.
+    // The name is long enough to wrap in setup's column in either, and the test compares the title's
+    // lines with the ones it would take unbalanced rather than counting them. The exact lines in
+    // Source Serif 4 are the PageHeader stories' (LongTitle, LongTitleOnAPhone).
+    const name = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland and the East Bay';
+    const state = await interviewAtPreview(`${name}. I'm Sam, a plumber in Oakland.`);
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      const title = screen.getByRole('heading', { level: 1, name: `${name} is live` });
+      await expect.element(title).toBeVisible();
+      const element = title.element() as HTMLElement;
+      expect(getComputedStyle(element).textWrapStyle, viewport).toBe('balance');
+      const balanced = lineWords(element);
+      // The lines the browser's greedy rule gives the same title, filling each line in turn.
+      const before = element.style.textWrap;
+      element.style.textWrap = 'wrap';
+      const greedy = lineWords(element);
+      element.style.textWrap = before;
+      const read = `${viewport}: balanced ${JSON.stringify(balanced)}, greedy ${JSON.stringify(greedy)}`;
+      // The title wraps, and balancing keeps the lines it takes anyway, so nothing under it moves.
+      expect(greedy.length, read).toBeGreaterThan(1);
+      expect(balanced.length, read).toBe(greedy.length);
+      // "live", the word the whole setup builds to, doesn't sit alone on the last line.
+      expect(balanced.at(-1)?.length ?? 0, read).toBeGreaterThan(1);
+      expectNoHorizontalScroll();
+    }
+  });
+
+  it('going_live_is_a_moment', async () => {
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const live = setupSteps(screen).last();
+
+    // Before going live, "Live" is the current step with its number, and nothing says it's answering.
+    await expect.element(live).toHaveAttribute('aria-current', 'step');
+    await expect.element(live).not.toHaveTextContent('done');
+    expect(stepCircle(live.element()).textContent).toBe('5');
+    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+
+    // Step 5's number gives way to a check that draws once, on motion-base and the emphasis ease:
+    // all five steps read done, and "Live" stays the current one.
+    await expect.element(live).toHaveTextContent('Live, done');
+    await expect.element(live).toHaveAttribute('aria-current', 'step');
+    const circle = stepCircle(live.element());
+    expect(circle.textContent).toBe('');
+    const check = checkPath(circle);
+    expect(getComputedStyle(check)).toMatchObject({
+      animationName: 'cd-steps-draw',
+      animationDuration: '0.2s',
+      animationIterationCount: '1',
+      animationTimingFunction: 'cubic-bezier(0.165, 0.84, 0.44, 1)',
+      animationFillMode: 'forwards',
+    });
+    await expect.poll(() => getComputedStyle(check).strokeDashoffset).toBe('0px');
+
+    // Under the title and its line, "Answering now" with its handled dot breathing on the presence loop.
+    const answering = screen.getByText('Answering now', { exact: true });
+    await expect.element(answering).toBeVisible();
+    const dot = answering.element().querySelector('.cd-status-dot--handled');
+    if (!dot) throw new Error('No handled dot beside "Answering now"');
+    expect(getComputedStyle(dot)).toMatchObject({ animationDuration: '5s', animationIterationCount: 'infinite', animationDirection: 'alternate' });
+    expect(getComputedStyle(dot).animationName).not.toBe('none');
+    // breathing_dot_keeps_3_to_1: at its faintest the dot still stands out from its ground by 3:1,
+    // the least a status dot may have, measured from the breath it runs and the colors it is drawn in.
+    const faintest = faintestOpacity(dot);
+    expect(faintest).toBeLessThan(1);
+    expect(pairContrast({ fg: getComputedStyle(dot).backgroundColor, ground: 'transparent', over: paintedGroundOf(dot), opacity: faintest })).toBeGreaterThanOrEqual(3);
+    const subtitle = screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true }).element();
+    const link = screen.getByRole('button', { name: 'Copy link' }).element();
+    const line = answering.element().getBoundingClientRect();
+    expect(line.top).toBeGreaterThanOrEqual(subtitle.getBoundingClientRect().bottom);
+    expect(line.bottom).toBeLessThanOrEqual(link.getBoundingClientRect().top);
+  });
+
+  it('stale_preview_never_claims_answering_that_is_off', async () => {
+    // The preview is open here; elsewhere the owner finishes setup, then turns Answering off.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Go live' })).toBeVisible();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: false } });
+    expect(deskOf(state).summary.answering).toBe(false);
+    const mark = mockStore.requests.length;
+
+    // "Go live" in the stale preview: the API says it is live already (409), the interview read again
+    // says so, and the step shows live, its check drawn, but with Answering off it never says
+    // "Answering now", before or after the Desks are read again.
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(requests('goLive', mark)).toHaveLength(1);
+    await expect.element(setupSteps(screen).last()).toHaveTextContent('Live, done');
+    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
+    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(deskOf(state).summary.answering).toBe(false);
+  });
+
+  it('slow_desks_read_never_pushes_the_link_down', async () => {
+    // A reload on the live step: the Desks are read once the interview names the Desk, and slowly.
+    const state = await interviewAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    const read = await mockStore.dispatch('desks');
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the Desks');
+    let release = () => {};
+    const until = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockStore.inject({ route: 'desks', status: 200, until, body: read.body });
+    const mark = mockStore.requests.length;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
+
+    // While they are read, the step waits whole, on setup's loading line: no title without its
+    // business, and no link that "Answering now" would push down when it lands.
+    await expect.element(screen.getByText(OPENING, { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Copy link' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('heading', { level: 1 }).elements()).toHaveLength(0);
+
+    // Once they land, the title, its line and the link draw together, and the link stays put.
+    release();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    const link = screen.getByRole('button', { name: 'Copy link' });
+    await expect.element(link).toBeVisible();
+    const top = link.element().getBoundingClientRect().top;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(link.element().getBoundingClientRect().top).toBe(top);
+    expect(screen.getByText(OPENING, { exact: true }).elements()).toHaveLength(0);
+
+    // In the page: a go-live whose answer was lost, with the Desks read again slowly. The step stays
+    // on the preview until they land, then turns live with "Answering now" already under the title.
+    const second = await interviewAtPreview();
+    const page2 = (await renderRoute(`/app/setup/${second.interview_id}`)).screen;
+    await expect.element(page2.getByRole('button', { name: 'Go live' })).toBeVisible();
+    const before = await mockStore.dispatch('desks');
+    if ('network' in before || before.status !== 200) throw new Error('the mock reads the Desks');
+    let land = () => {};
+    const slow = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    mockStore.inject({ route: 'desks', status: 200, until: slow, body: withAnswering(before.body as BusinessOut[], second.desk_id, true) });
+    mockStore.inject({ route: 'goLive', status: 'network', afterCommit: true });
+    const from = mockStore.requests.length;
+    await page2.getByRole('button', { name: 'Go live' }).click();
+    await expect.poll(() => requests('desks', from).length).toBeGreaterThan(0);
+    expect(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' }).elements()).toHaveLength(0);
+    land();
+    await expect.element(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(page2.getByText('Answering now', { exact: true }).elements()).toHaveLength(1);
+  });
+
+  it('going_live_under_reduced_motion_is_drawn_still', async () => {
+    await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    try {
+      expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+      const state = await interviewAtPreview();
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+      await screen.getByRole('button', { name: 'Go live' }).click();
+      await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+
+      // Nothing moves: the check is drawn from the start, and the dot is still at full strength.
+      const live = setupSteps(screen).last();
+      await expect.element(live).toHaveTextContent('Live, done');
+      const check = checkPath(stepCircle(live.element()));
+      expect(getComputedStyle(check).animationName).toBe('none');
+      expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
+      expect(check.getAnimations()).toHaveLength(0);
+      const answering = screen.getByText('Answering now', { exact: true });
+      await expect.element(answering).toBeVisible();
+      const dot = answering.element().querySelector('.cd-status-dot--handled');
+      if (!dot) throw new Error('No handled dot beside "Answering now"');
+      expect(getComputedStyle(dot)).toMatchObject({ animationName: 'none', opacity: '1' });
+      expect(dot.getAnimations()).toHaveLength(0);
+    } finally {
+      await cdp().send('Emulation.setEmulatedMedia', { features: [] });
+    }
+  });
+
+  it('live_at_load_shows_the_check_drawn', async () => {
+    // A reload on the live step: the Desk went live before this page opened, so nothing draws.
+    const state = await interviewAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    const live = setupSteps(screen).last();
+    await expect.element(live).toHaveTextContent('Live, done');
+    await expect.element(live).toHaveAttribute('aria-current', 'step');
+    const check = checkPath(stepCircle(live.element()));
+    expect(getComputedStyle(check).animationName).toBe('none');
+    expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
+    // The Desks say it is answering, so the line shows, its dot breathing as it does on Today.
+    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+
+    // A live Desk whose owner has turned Answering off since doesn't claim to be answering.
+    const off = await interviewAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: off.interview_id } });
+    deskOf(off).summary.answering = false;
+    const reopened = (await renderRoute(`/app/setup/${off.interview_id}`)).screen;
+    // The title names the business from the Desks, so once it does, the line has had its answer.
+    await expect.element(reopened.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(reopened.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
   });
 
   it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {
@@ -1695,6 +2207,29 @@ describe('setup', () => {
       const business = screen.getByText(/^Rivera Plumbing, Heating/).first().element() as HTMLElement;
       expect(business.scrollWidth, `${width}`).toBeGreaterThan(business.clientWidth);
       expect(getComputedStyle(business).textOverflow).toBe('ellipsis');
+      expectNoHorizontalScroll();
+    }
+  });
+
+  it('setup_bar_carries_a_long_business_name_in_full', async () => {
+    // A name too long for the bar is cut with an ellipsis, at a laptop's width and a phone's, and
+    // carries its whole self as its title, so it can still be read in full; nothing scrolls sideways.
+    const state = await startInterview();
+    // The name as the API keeps it, set on the Desk directly rather than read from a description.
+    deskOf(state).summary.business_name = LONG_BUSINESS_NAME;
+    for (const viewport of [
+      { width: 1512, height: 900 },
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      const where = `at ${viewport.width}`;
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      const name = screen.getByRole('banner').getByText(LONG_BUSINESS_NAME, { exact: true });
+      await expect.element(name).toBeVisible();
+      const business = name.element() as HTMLElement;
+      expect(business.scrollWidth, where).toBeGreaterThan(business.clientWidth);
+      expect(getComputedStyle(business).textOverflow, where).toBe('ellipsis');
+      expect(business.title, where).toBe(LONG_BUSINESS_NAME);
       expectNoHorizontalScroll();
     }
   });

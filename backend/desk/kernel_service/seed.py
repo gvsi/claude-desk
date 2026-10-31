@@ -1,14 +1,21 @@
 """The Rivera Plumbing seed: the demo business every visitor gets a fresh copy of.
 
 `POST /copies` writes it through `desks.create_desk`, the same path as an owner's new Desk, so a
-copy differs from another only in its IDs, canaries and dates. `RIVERA_CARDS` have fixed IDs and
-are scoped `anyone`, `verified` or `record_owner`, never to a person, so they compile to the same
-Cedar in every copy and share one CI-proved report. Once the cards are active, `seed_held_request`
-puts one held request on the owner's Today, decided like any other.
+copy differs from another only in its IDs, canaries and dates. The seed connects the mock payments
+server (`connections`), with both its tools pinned at the hashes the seed is proved with, and
+`seed_charges` gives Dana and Bob their past payments there (`RIVERA_MOCKPAY_CHARGES`), each with a
+`charge:<id>` fact naming it for its owner. `RIVERA_CARDS` have fixed IDs and are scoped `anyone`,
+`verified` or `record_owner`, never to a person, so they compile to the same Cedar in every copy and
+share one CI-proved report. Once the cards are active, `seed_held_request` puts one held request on
+the owner's Today, decided like any other.
 """
 
+import logging
 from datetime import date, datetime, time, timedelta
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
+
+from sqlalchemy import select
 
 from desk.contracts import (
     BusinessSeed,
@@ -16,7 +23,9 @@ from desk.contracts import (
     Claim,
     Decision,
     DeskSeed,
+    Fact,
     HoursWindow,
+    Label,
     NotificationDefaults,
     PriceItem,
     RuleCard,
@@ -24,12 +33,16 @@ from desk.contracts import (
     SeedPerson,
     ToolCall,
 )
+from desk.db.models import Person
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import sessions
-from desk.kernel_service.repo import KernelCtx
+from desk.kernel_service import labels, sessions
+from desk.kernel_service.repo import KernelCtx, KernelFailure
 from desk.presets import PRESETS
 
-__all__ = ["PRESETS", "RIVERA_CARDS", "RIVERA_MONEY_CAP_CENTS", "rivera_seed", "seed_held_request"]
+__all__ = ["PRESETS", "RIVERA_CARDS", "RIVERA_MOCKPAY_CHARGES", "RIVERA_MONEY_CAP_CENTS", "rivera_seed",
+           "seed_charges", "seed_held_request"]
+
+log = logging.getLogger(__name__)
 
 TIMEZONE = "America/Los_Angeles"
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
@@ -57,6 +70,31 @@ RIVERA_CARDS: list[RuleCard] = [
              review=True, reason="Saturday morning bookings, checked by the reviewer."),
     RuleCard(card_id="rv-docs", applies_to="native.release_document", mode="auto", who="record_owner",
              reason="Customers get their own documents after confirming it's them."),
+    RuleCard(card_id="rv-link", applies_to="native.payment_link", mode="auto", who="anyone", max_amount_cents=30_000,
+             review=True, reason="Payment links up to $300, checked by the reviewer."),
+    RuleCard(card_id="rv-charges", applies_to="payments.list_charges", mode="auto", who="record_owner",
+             reason="Customers see their own past payments after confirming it's them."),
+    RuleCard(card_id="rv-refund", applies_to="payments.create_refund", mode="ask", who="record_owner",
+             reason="Refunds of a customer's own payment ask you first."),
+    RuleCard(card_id="rv-mandate", applies_to="native.charge_mandate", mode="auto", who="anyone",
+             max_amount_cents=2_000, reason="Visiting agents pay up to $20, within the limits of their signed mandate."),
+]
+
+
+class SeedCharge(NamedTuple):
+    """A past payment at the mock payments server: whose (a `SeedPerson.ref`), how much, for what,
+    and how many days before the copy was made."""
+
+    person_ref: str
+    amount_cents: int
+    title: str
+    days_ago: int
+
+
+RIVERA_MOCKPAY_CHARGES: list[SeedCharge] = [
+    SeedCharge("dana", 18_000, "Drain clearing", 21),
+    SeedCharge("dana", 25_000, "Leak repair", 9),
+    SeedCharge("bob", 15_000, "Water heater flush", 30),
 ]
 
 # The held request: drain clearing at 15% off, which `rv-quote` (list price only) holds for Maria.
@@ -105,6 +143,7 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
         ],
         notifications=NotificationDefaults(now=["approval", "emergency", "breaker", "lockout"],
                                            briefing=["lead", "callback", "booking"]),
+        connections=["mock_payments"],
     )
     return business, desk
 
@@ -122,6 +161,41 @@ def calendar_slots(now: datetime) -> list[CalendarSlot]:
             slots.append(CalendarSlot(slot_id=starts_at.strftime("S-%Y%m%d-%H%M"), starts_at=starts_at,
                                       minutes=SLOT_MINUTES))
     return slots
+
+
+async def seed_charges(ctx: KernelCtx, desk_id: str, charges: list[SeedCharge]) -> list[str]:
+    """The Desk's people's past payments, made at the mock payments server for the bound copy
+    (`/provider/seed`), each with a `charge:<id>` fact in the caller's transaction holding its
+    title, total, date and ID, readable by the owner and the person it belongs to. A server that
+    can't be reached, or answers otherwise, is 503 `internal` (logged `mockpay_unavailable`), so the
+    copy rolls back; the charges it may have made belong to a copy that never exists. Returns their IDs."""
+    from desk.kernel_service import payments     # payments imports activation, which imports this module
+
+    now = ctx.clock.now()
+    people = dict((await ctx.db.execute(ctx.repo.scoped(
+        select(Person.ref, Person.person_id).where(Person.desk_id == desk_id)))).all())
+    made = [payments.SeedCharge(owner_person_id=people[charge.person_ref], amount_cents=charge.amount_cents,
+                                description=charge.title, created_at=now - timedelta(days=charge.days_ago))
+            for charge in charges]
+    try:
+        charge_ids = await payments.provider(ctx).seed(made)
+    except (payments.ProviderError, payments.ProviderTimeout):
+        log.warning("mockpay_unavailable copy_id=%s op=seed", ctx.copy_id)
+        raise KernelFailure(503, "internal", "mockpay_unavailable") from None
+    if len(charge_ids) != len(made):
+        log.warning("mockpay_unavailable copy_id=%s op=seed reason=count", ctx.copy_id)
+        raise KernelFailure(503, "internal", "mockpay_unavailable")
+    for charge_id, charge in zip(charge_ids, made, strict=True):
+        person = charge.owner_person_id
+        ctx.db.add(labels.fact_row(ctx.copy_id, desk_id, Fact(
+            fact_id=f"charge:{charge_id}", kind="charge", status="committed", source="kernel",
+            claims=[Claim(key="title", kind="text", value=charge.description),
+                    Claim(key="total", kind="money", value=charge.amount_cents),
+                    Claim(key="starts_at", kind="datetime", value=charge.created_at.isoformat()),
+                    Claim(key="ref", kind="ref", value=charge_id)],
+            label=Label(readers=["owner", f"person:{person}"], record_owner=person)), now))
+    await ctx.db.flush()
+    return charge_ids
 
 
 async def seed_held_request(ctx: KernelCtx, copy_id: str, desk_id: str) -> Decision:

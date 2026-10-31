@@ -20,6 +20,7 @@ import {
   type Effect,
   type NormalizedAction,
   type Outcome,
+  type PaymentLinkView,
   type RenderedBlock,
   type RuleCard,
   type SseEvent,
@@ -214,18 +215,20 @@ export const HELD_PROSE: Record<Language, string> = {
  */
 export const LINK_CANCELLED: Record<Language, string> = {
   en: `This payment link was cancelled because ${OWNER}'s rules changed. Ask again if you still want to pay.`,
-  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pide uno nuevo si todavía quieres pagar.`,
+  es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pídelo de nuevo si todavía quieres pagar.`,
 };
 
 /**
- * The `link_cancelled` card as the kernel renders it. The template joins the generated contracts
- * with kernel plan 01c; until then it is named here by hand, and the public chat shows it as the
- * design system's `LinkCancelledCard`, from its `title`.
+ * The `link_cancelled` card as the kernel renders it from the cancelled link's own `payment_link`
+ * fact, in the chat's language: the link's amount as its title, then what the link was for and the
+ * kernel's line. It cites the deposit card's fact, as the script's payment link card does.
  */
-export function linkCancelledBlock(language: Language): RenderedBlock {
-  const text = LINK_CANCELLED[language];
-  const template = 'link_cancelled' as unknown as ClauseTemplate;
-  return { kind: 'card', template, text, fact_id: null, title: text, lines: [], href: null, options: [] };
+export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language): CardBlock {
+  return cardBlock('link_cancelled', {
+    fact_id: blocks.payment_link[language].fact_id ?? null,
+    title: moneyText(link.amount_cents),
+    lines: [link.title, LINK_CANCELLED[language]],
+  });
 }
 
 const inboxPreview: Record<Language, string> = {
@@ -501,10 +504,13 @@ export interface ScriptRule {
   steps: readonly Step[];
 }
 
-/** The deposit link's title, as its card shows it: "Service call deposit, $20.00". */
+/**
+ * The deposit link's own title, as the kernel's link holds it: what the link is for, without the
+ * amount its card adds ("Service call deposit, $20.00").
+ */
 const DEPOSIT_TITLE: Record<Language, string> = {
-  en: blocks.payment_link.en.title ?? '',
-  es: blocks.payment_link.es.title ?? '',
+  en: 'Service call deposit',
+  es: 'Service call deposit',
 };
 
 /** The verification code the invoice rule sends to the Demo inbox. */

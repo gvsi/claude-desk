@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 
 import type { RuleCard } from '../api/contracts.ts';
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
@@ -25,6 +25,7 @@ import { capOf } from '../owner/rules/drafts.ts';
 import { peopleQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { moneyLimitLine, ruleWords } from '../owner/rules/ruleWords.ts';
 import { SETUP_COPY } from './copy.ts';
+import { useLanding } from './landing.ts';
 import { aroundBusiness, setupRulesQuery } from './shared.ts';
 
 const copy = SETUP_COPY.rules;
@@ -35,6 +36,12 @@ export interface RulesStepProps {
   business: string;
   /** The interview moved on. */
   onNext: (step: SetupStep) => void;
+  /**
+   * The owner came to Real situations on this page (from the rules): the situations are tried as
+   * they watch, and their rows land as they arrive. Setup opened at Real situations (a reload, or
+   * resumed from Today) draws its first results still.
+   */
+  live: boolean;
 }
 
 /** A card's reason as a row's words: the board's rows end without a full stop. */
@@ -83,9 +90,10 @@ function DraftRules({ draft, people, check }: { draft: RulesDraft; people: Peopl
  * "Your rules": setup's draft from the answers (`setupRules`), its payment limit in the signed words,
  * what Claude does on its own, asks about and never does, the always-on rules and the check. A
  * draft that can't be checked can't go on: only "Save and exit". "Check real situations" runs the
- * draft on situations from the owner's answers; "Looks right" goes on to the safety check.
+ * draft on situations from the owner's answers, which land one by one as they arrive; "Looks right"
+ * goes on to the safety check.
  */
-export function RulesStep({ state, business, onNext }: RulesStepProps) {
+export function RulesStep({ state, business, onNext, live }: RulesStepProps) {
   const id = state.interview_id;
   const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
   const [view, setView] = useState<'rules' | 'situations'>(state.step === 'situations' ? 'situations' : 'rules');
@@ -99,6 +107,8 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
     retry: false,
     refetchOnWindowFocus: false,
   });
+  const situationRows = useRef<HTMLUListElement>(null);
+  const landing = useLanding(situationRows, situations, live, situations.data?.length ?? 0);
 
   const saveAndExit = (
     <div className="cd-setup-step__actions">
@@ -143,7 +153,8 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
             <EmptyState title={s.empty} body={s.emptyBody} />
           ) : (
             <Card padding={16}>
-              <ul role="list" className="cd-setup-step__rows" aria-label={s.label}>
+              {/* Each read's rows are drawn anew, so situations just tried land. */}
+              <ul key={situations.dataUpdatedAt} ref={situationRows} role="list" className="cd-setup-step__rows" aria-label={s.label}>
                 {situations.data.map(({ situation, result, matches }, index) => (
                   <li key={`${index}-${situation.title}`}>
                     <SituationRow
@@ -153,6 +164,8 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
                       dependsOnReview={result.depends_on_review}
                       reason={result.reason_plain}
                       matches={matches}
+                      index={index}
+                      live={landing.live}
                     />
                   </li>
                 ))}

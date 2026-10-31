@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 
 import type { PolicyVersion } from '../api/contracts.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
@@ -9,6 +9,7 @@ import { capOf, draftFromDiff, draftFromVersion, type RuleDraft } from '../owner
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
+import { useLanding } from './landing.ts';
 import { gaveUp, setupRulesQuery } from './shared.ts';
 
 const copy = SETUP_COPY.safety;
@@ -19,6 +20,12 @@ export interface SafetyStepProps {
   onConfirmed: () => void;
   /** Reads the interview again after a write whose answer was lost; null when it can't be read. */
   reread: () => Promise<SetupState | null>;
+  /**
+   * The owner came to the safety check on this page (from Real situations): the check runs as they
+   * watch, and its rows land as they arrive. Setup opened at the safety check (a reload, or resumed
+   * from Today) draws its first results still.
+   */
+  live: boolean;
 }
 
 /** A setup confirm's answer that is a rules draft, which a proving retry can give, rather than the confirmed version. */
@@ -36,12 +43,12 @@ function conflictReview(active: PolicyVersionOut, draft: RulesDraft): RuleDraft 
 
 /**
  * The safety check (`setupSafetyCheck`): the tricks people use, tried on the draft rules with nothing
- * real and no one contacted, each with whether it was stopped and the kernel's reason, arriving one
- * by one. "Confirm rules" sends `setupConfirm`, which activates them with Answering still off; when
- * the rules changed since the draft, the new draft shows in the change review, and its "Confirm
- * change" confirms setup again.
+ * real and no one contacted, each with whether it was stopped and the kernel's reason. A check that
+ * just ran lands one by one, in the order tried, the count above ticking with it. "Confirm rules"
+ * sends `setupConfirm`, which activates them with Answering still off; when the rules changed since
+ * the draft, the new draft shows in the change review, and its "Confirm change" confirms setup again.
  */
-export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
+export function SafetyStep({ state, onConfirmed, reread, live }: SafetyStepProps) {
   const queryClient = useQueryClient();
   const id = state.interview_id;
   const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
@@ -62,6 +69,8 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
   const [conflict, setConflict] = useState<RuleDraft | null>(null);
   /** The server said the rules can't be checked: only "Save and exit". */
   const [unchecked, setUnchecked] = useState(false);
+  const tricks = useRef<HTMLUListElement>(null);
+  const landing = useLanding(tricks, check, live, check.data?.rows.length ?? 0);
 
   /** Confirms setup's rules; an answer that is the redrafted rules (after a proving retry) is confirmed once more. */
   const confirmSetup = async (): Promise<PolicyVersion> => {
@@ -207,18 +216,33 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
     body = <LoadingLine>{copy.loading}</LoadingLine>;
   } else {
     const { rows, blocked, total } = check.data;
+    // The check's own counts, never worked out here. While the rows land, the count on screen
+    // follows them (those blocked among the rows landed so far, of all the check tried), hidden from
+    // assistive tech, which reads the check's own counts at once, as it reads all the rows at once.
+    // Neither is in a live region, so nothing is announced as it ticks.
+    const final = copy.blocked(blocked, total);
+    const ticking = landing.live ? copy.blocked(rows.slice(0, landing.landed).filter((row) => row.blocked).length, total) : null;
     body = (
       <>
         <div className="cd-setup-safety__summary">
-          {/* The check's own counts, never worked out here. */}
-          <p className="cd-setup-safety__count cd-type-summary">{copy.blocked(blocked, total)}</p>
+          <p className="cd-setup-safety__count cd-type-summary">
+            {ticking === null ? (
+              final
+            ) : (
+              <>
+                <span aria-hidden="true">{ticking}</span>
+                <span className="cd-sr-only">{final}</span>
+              </>
+            )}
+          </p>
           <p className="cd-setup-step__line cd-type-body">{copy.lead(total)}</p>
         </div>
         {rows.length === 0 ? (
           <EmptyState title={copy.empty} body={copy.emptyBody} />
         ) : (
           <Card padding={16}>
-            <ul role="list" className="cd-setup-step__rows" aria-label={copy.label}>
+            {/* Each read's rows are drawn anew, so a check that just ran lands. */}
+            <ul key={check.dataUpdatedAt} ref={tricks} role="list" className="cd-setup-step__rows" aria-label={copy.label}>
               {rows.map((row, index) => (
                 <li key={`${index}-${row.label}`}>
                   <SafetyCheckRow
@@ -228,6 +252,7 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
                     {...(row.blocked ? { stoppedBy: 'action' as const } : {})}
                     reason={row.result.reason_plain}
                     index={index}
+                    live={landing.live}
                   />
                 </li>
               ))}

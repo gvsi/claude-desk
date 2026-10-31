@@ -4,7 +4,7 @@
  * the straight-line fit through all seven from the latest release on, and the band between the fits the text
  * cites. Everything it draws comes from `tau3.ts`, whose tests hold it to the prediction's text.
  */
-import { useId } from 'react';
+import { useId, type CSSProperties } from 'react';
 
 import { TextLink } from '../../ds/index.ts';
 import {
@@ -19,8 +19,16 @@ import {
   shortMonthYear,
   type Tau3Row,
 } from '../tau3.ts';
+import { usePlayOnce } from './usePlayOnce.ts';
 
 import '../reader.css';
+
+/** A Claude release's point, with its place in date order, from which its turn to appear is worked out. */
+type PointStyle = CSSProperties & { '--cd-tau3-i': number };
+
+function pointStyle(index: number): PointStyle {
+  return { '--cd-tau3-i': index };
+}
 
 export interface Tau3ChartProps {
   /** The phone layout: a narrower plot that keeps only the short labels. */
@@ -110,6 +118,7 @@ const FIT_SENTENCE =
 
 export function Tau3Chart({ compact = false }: Tau3ChartProps) {
   const id = useId();
+  const [ref, play] = usePlayOnce<HTMLElement>('tau3');
   const captionId = `${id}-caption`;
   const tableId = `${id}-table`;
   const layout = compact ? PHONE : DESKTOP;
@@ -133,7 +142,11 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
   const latest = at(LATEST);
 
   return (
-    <figure className={`cd-about-figure cd-about-chart${compact ? ' cd-about-figure--compact cd-about-chart--compact' : ''}`}>
+    <figure
+      ref={ref}
+      className={`cd-about-figure cd-about-chart${compact ? ' cd-about-figure--compact cd-about-chart--compact' : ''}`}
+      data-play={play ?? undefined}
+    >
       <div className="cd-about-frame cd-about-chart__frame">
         <div className="cd-about-chart__head">
           <p className="cd-about-figure-title cd-type-section">Claude on τ³-Banking, pass^1</p>
@@ -163,6 +176,7 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
         >
           <rect
             data-band=""
+            data-tau3-part="band"
             className="cd-about-chart__band"
             x={band.left}
             y={plot.top}
@@ -170,11 +184,20 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
             height={plot.bottom - plot.top}
           />
           {GRID.filter((score) => score !== TAU3_BAR * 100).map((score) => (
-            <line key={score} className="cd-about-chart__grid" x1={plot.left} x2={plot.right} y1={y(score)} y2={y(score)} />
+            <line
+              key={score}
+              data-tau3-part="grid"
+              className="cd-about-chart__grid"
+              x1={plot.left}
+              x2={plot.right}
+              y1={y(score)}
+              y2={y(score)}
+            />
           ))}
           {layout.ticks.map(({ iso }) => (
             <line
               key={iso}
+              data-tau3-part="tick"
               className="cd-about-chart__axis-line"
               x1={x(dayOf(iso))}
               x2={x(dayOf(iso))}
@@ -182,14 +205,27 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
               y2={plot.bottom + (compact ? 5 : 6)}
             />
           ))}
-          <line className="cd-about-chart__axis-line" x1={plot.left} x2={plot.right} y1={plot.bottom} y2={plot.bottom} />
+          <line
+            data-tau3-part="axis"
+            className="cd-about-chart__axis-line"
+            x1={plot.left}
+            x2={plot.right}
+            y1={plot.bottom}
+            y2={plot.bottom}
+          />
 
-          <line data-bar="" className="cd-about-chart__bar" x1={plot.left} x2={plot.right} y1={bar} y2={bar} />
-          <text className="cd-about-chart__label cd-type-caption" x={plot.left + (compact ? 4 : 8)} y={bar - (compact ? 8 : 10)}>
+          <line data-bar="" data-tau3-part="bar" className="cd-about-chart__bar" x1={plot.left} x2={plot.right} y1={bar} y2={bar} />
+          <text
+            data-tau3-part="bar-label"
+            className="cd-about-chart__label cd-type-caption"
+            x={plot.left + (compact ? 4 : 8)}
+            y={bar - (compact ? 8 : 10)}
+          >
             {compact ? '80% bar' : 'The bar: 80% pass^1'}
           </text>
-          <line className="cd-about-chart__rule" x1={prediction} x2={prediction} y1={plot.top} y2={plot.bottom} />
+          <line data-tau3-part="rule" className="cd-about-chart__rule" x1={prediction} x2={prediction} y1={plot.top} y2={plot.bottom} />
           <text
+            data-tau3-part="prediction-date"
             className="cd-about-chart__label cd-type-caption"
             x={prediction - (compact ? 6 : 8)}
             y={plot.top + (compact ? 12 : 14)}
@@ -198,28 +234,53 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
             {compact ? shortMonthYear(PREDICTION_DATE) : `Prediction date, ${shortMonthYear(PREDICTION_DATE)}`}
           </text>
           {compact ? (
-            <text className="cd-about-chart__axis cd-type-caption" x={(band.left + band.right) / 2} y={plot.bottom - 10} textAnchor="middle">
+            <text
+              data-tau3-part="band-label"
+              className="cd-about-chart__axis cd-type-caption"
+              x={(band.left + band.right) / 2}
+              y={plot.bottom - 10}
+              textAnchor="middle"
+            >
               Fits
             </text>
           ) : (
             <>
-              <text className="cd-about-chart__axis cd-type-caption" x={(band.left + band.right) / 2} y={plot.bottom - 30} textAnchor="middle">
+              <text
+                data-tau3-part="band-label"
+                className="cd-about-chart__axis cd-type-caption"
+                x={(band.left + band.right) / 2}
+                y={plot.bottom - 30}
+                textAnchor="middle"
+              >
                 Fits cross the bar
               </text>
-              <text className="cd-about-chart__axis cd-type-caption" x={(band.left + band.right) / 2} y={plot.bottom - 14} textAnchor="middle">
+              <text
+                data-tau3-part="band-label"
+                className="cd-about-chart__axis cd-type-caption"
+                x={(band.left + band.right) / 2}
+                y={plot.bottom - 14}
+                textAnchor="middle"
+              >
                 {monthRange(BAND.from, BAND.to)}
               </text>
             </>
           )}
 
-          <polyline data-fit="" className="cd-about-chart__fit" points={fit.join(' ')} strokeDasharray={layout.dash} />
+          <polyline
+            data-fit=""
+            data-tau3-part="fit"
+            className="cd-about-chart__fit"
+            points={fit.join(' ')}
+            strokeDasharray={layout.dash}
+          />
 
-          <circle data-point="top" className="cd-about-chart__top" {...top} r={layout.point}>
+          <circle data-point="top" data-tau3-part="top" className="cd-about-chart__top" {...top} r={layout.point}>
             <title>{`${TOP_SCORE.model}, ${shortDate(TOP_SCORE.released)}: ${percent(TOP_SCORE.score)}, the top score`}</title>
           </circle>
           {compact ? null : (
             <text
               data-point-label=""
+              data-tau3-part="point-label"
               className="cd-about-chart__label cd-type-caption"
               x={top.cx - 12}
               y={top.cy - 12}
@@ -228,13 +289,23 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
               {`Top score, ${TOP_SCORE.model} ${percent(TOP_SCORE.score)}`}
             </text>
           )}
-          {CLAUDE_SCORES.map((row) => (
-            <circle key={row.model} data-point="claude" className="cd-about-chart__point" {...at(row)} r={layout.point}>
+          {/* In release order (`tau3.ts` sorts them), which is the order they appear in when the chart plays. */}
+          {CLAUDE_SCORES.map((row, i) => (
+            <circle
+              key={row.model}
+              data-point="claude"
+              data-tau3-part="point"
+              className="cd-about-chart__point"
+              style={pointStyle(i)}
+              {...at(row)}
+              r={layout.point}
+            >
               <title>{`${row.model}, ${shortDate(row.released)}: ${percent(row.score)}`}</title>
             </circle>
           ))}
           <text
             data-point-label=""
+            data-tau3-part="point-label"
             className="cd-about-chart__label cd-type-caption"
             x={lowest.cx}
             y={lowest.cy + (compact ? 20 : 26)}
@@ -242,9 +313,17 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
           >
             {compact ? percent(LOWEST.score) : `${shortName(LOWEST)} ${percent(LOWEST.score)}`}
           </text>
-          <circle data-ring="" className="cd-about-chart__ring" cx={latest.cx} cy={latest.cy} r={layout.ring} />
+          <circle
+            data-ring=""
+            data-tau3-part="ring"
+            className="cd-about-chart__ring"
+            cx={latest.cx}
+            cy={latest.cy}
+            r={layout.ring}
+          />
           <text
             data-point-label=""
+            data-tau3-part="point-label"
             className="cd-about-chart__label cd-type-caption"
             x={latest.cx + (compact ? 12 : 16)}
             y={latest.cy + (compact ? 20 : 24)}
@@ -255,6 +334,7 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
           {GRID.map((score) => (
             <text
               key={score}
+              data-tau3-part="score-label"
               className="cd-about-chart__axis cd-type-caption"
               x={plot.left - (compact ? 8 : 12)}
               y={y(score) + 4}
@@ -266,6 +346,7 @@ export function Tau3Chart({ compact = false }: Tau3ChartProps) {
           {layout.ticks.map(({ iso, label }) => (
             <text
               key={iso}
+              data-tau3-part="tick-label"
               className="cd-about-chart__axis cd-type-caption"
               x={x(dayOf(iso))}
               y={plot.bottom + (compact ? 20 : 24)}

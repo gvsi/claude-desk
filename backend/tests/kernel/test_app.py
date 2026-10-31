@@ -297,11 +297,7 @@ def test_kernel_logs_never_print_an_errors_text():
 
 # The KERNEL_ROUTES rows the later kernel plans serve, as each plan's "Produced" list names them. A
 # plan takes its rows out of here in the commit that serves them, since the test below fails until then.
-LATER_ROUTES = {
-    "01c": {"POST /tools/connect", "POST /tools/confirm", "POST /tools/simulate_change", "GET /payment_links/{token}",
-            "POST /payment_links/{token}/complete", "POST /payment_links/{token}/cancel", "POST /agents/demo",
-            "POST /policy/{version}/probe"},
-}
+LATER_ROUTES: dict[str, set[str]] = {}
 
 
 def dispatched(routes: list[RouteContext], key: str) -> RouteContext | None:

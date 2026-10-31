@@ -8,17 +8,19 @@ owner write of any of them that carries a document's canary, even split or disgu
 new Desk's slug would carry, is refused (422 `invalid`) and ledgered `desk_data` `{part, refused:
 "canary", fields, fact_ids}`, naming the fields and the documents, never the text. A header value
 stored before that check is withheld from the page, which shows the field's safe fallback
-instead, and the owner is alerted in the Demo inbox. Tests run on Rivera Plumbing copies as `POST /copies` seeds
+instead, in the header and in the Agent Card that names the business and the owner, and the owner
+is alerted in the Demo inbox. Tests run on Rivera Plumbing copies as `POST /copies` seeds
 them (Friday 10:04 in Oakland).
 """
 
 import secrets
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Claim, PriceItem
+from desk.contracts import Claim, PriceItem, RenderedBlock
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as InboxRow
 from desk.db.models import Fact as FactRow
@@ -41,10 +43,21 @@ def business(**fields) -> dict:
     return RIVERA_BUSINESS | fields
 
 
-async def public_page(client: httpx.AsyncClient, copy: Rivera) -> PublicDesk:
-    response = await client.get(f"/public/{copy.slug}")
+async def public_page(client: httpx.AsyncClient, copy: Rivera, lang: str = "en") -> PublicDesk:
+    response = await client.get(f"/public/{copy.slug}", params={"lang": lang})
     assert response.status_code == 200, response.text
     return PublicDesk.model_validate(response.json())
+
+
+def card_naming(card: list[RenderedBlock], name: str, shown: str) -> list[RenderedBlock]:
+    """The Agent Card `card`, which names `name`, naming `shown` in its place."""
+    assert any(name in block.text for block in card)
+    return [block.model_copy(update={"text": block.text.replace(name, shown)}) for block in card]
+
+
+# What the Agent Card says in place of a name the page withholds: fixed words, never the name
+WITHHELD_BUSINESS = {"en": "this business", "es": "este negocio"}
+WITHHELD_OWNER = {"en": "the owner", "es": "la persona a cargo"}
 
 
 async def test_a_document_body_in_the_business_name_is_refused(app, client):
@@ -306,8 +319,10 @@ async def test_a_stored_canary_is_withheld_from_the_public_page(app, client, fro
     assert response.status_code == 200, response.text
     assert dana.canary not in response.text and "Dana Whitfield" not in response.text
     page = PublicDesk.model_validate(response.json())
-    # the name gives way to its fallback, and the rest of the page is served as it was
-    assert page == clean.model_copy(update={"business_name": ""})
+    # the name gives way to its fallback, in the Agent Card too, and the rest of the page is served as it was
+    assert page == clean.model_copy(update={"business_name": "",
+                                            "agent_card": card_naming(clean.agent_card, "Rivera Plumbing",
+                                                                      WITHHELD_BUSINESS["en"])})
     # the owner hears of it at most once an hour
     alert = ("Text from one of your private documents is in your business name, so your public page doesn't show "
              "it. Change it to show it again.")
@@ -329,7 +344,9 @@ async def test_each_field_is_withheld_alone_and_a_split_withholds_them_all(app, 
     # the owner's name and a brand color, each holding a canary however written, give way alone
     await store_business(app, copy, owner_display_name=f"Maria {bob.canary.upper()}",
                          brand={"primary": "#1F4E4A", "accent": full_width(dana.canary)})
-    assert await public_page(client, copy) == clean.model_copy(update={"owner_display_name": "", "brand": {}})
+    assert await public_page(client, copy) == clean.model_copy(update={
+        "owner_display_name": "", "brand": {},
+        "agent_card": card_naming(clean.agent_card, "Maria Rivera", WITHHELD_OWNER["en"])})
     assert await withheld_alerts(app, copy) == [
         "Text from one of your private documents is in your display name and brand colors, so your public page "
         "doesn't show them. Change them to show them again."]
@@ -347,6 +364,30 @@ async def test_each_field_is_withheld_alone_and_a_split_withholds_them_all(app, 
     assert (await withheld_alerts(app, copy))[-1] == (
         "Text from one of your private documents is in your business name, Desk name, display name and brand "
         "colors, so your public page doesn't show them. Change them to show them again.")
+
+
+@pytest.mark.parametrize("lang", ["en", "es"])
+async def test_the_agent_card_names_a_withheld_name_in_fixed_words(app, client, frozen_clock, lang):
+    copy = await rivera(app, client)
+    seeded = await documents(app, copy)
+    dana, bob = seeded["dana-invoice"], seeded["bob-warranty"]
+    clean = await public_page(client, copy, lang)
+    # the business's name holds Dana's invoice: the card says "this business" in the page's language
+    await store_business(app, copy, name=dana.body)
+    response = await client.get(f"/public/{copy.slug}", params={"lang": lang})
+    assert response.status_code == 200, response.text
+    assert dana.canary not in response.text and "Dana Whitfield" not in response.text
+    card = PublicDesk.model_validate(response.json()).agent_card
+    assert card == card_naming(clean.agent_card, "Rivera Plumbing", WITHHELD_BUSINESS[lang])
+    assert all("  " not in block.text for block in card)
+    # the owner's name holds Bob's canary instead: the card says "the owner"
+    await store_business(app, copy, name="Rivera Plumbing", owner_display_name=f"Maria {bob.canary}")
+    response = await client.get(f"/public/{copy.slug}", params={"lang": lang})
+    assert response.status_code == 200, response.text
+    assert bob.canary not in response.text
+    card = PublicDesk.model_validate(response.json()).agent_card
+    assert card == card_naming(clean.agent_card, "Maria Rivera", WITHHELD_OWNER[lang])
+    assert all("  " not in block.text and " 's" not in block.text for block in card)
 
 
 async def test_ordinary_names_pass(app, client):

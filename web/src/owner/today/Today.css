@@ -213,11 +213,6 @@
   gap: var(--space-12);
 }
 
-.cd-things__idea {
-  margin: 0;
-  color: var(--text-primary);
-}
-
 /* The right column */
 
 .cd-today-aside {

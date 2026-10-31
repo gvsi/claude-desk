@@ -185,14 +185,38 @@ function namedIn(sentence: string): string | null {
 
 /**
  * The business's name, as the API's structured read of the description takes it: here, the way a
- * reader would, cut to 60 characters. The sentences are read in order, and the first that names the
- * business gives its name: with a phrase naming it ("I'm Ana. I run Ana's Bakery in Oakland." or
- * "Ana's Bakery is my shop" → "Ana's Bakery"), or as a sentence that is only the name ("Rivera
- * Plumbing. I'm Maria, …" → "Rivera Plumbing"). The owner's introduction and a sentence about the
- * owner or the work ("I run a small bakery") name nothing, so "I'm Ana." alone gives "Your business".
+ * reader would, kept as the API keeps it (`nameAsKept`). The sentences are read in order, and the
+ * first that names the business gives its name: with a phrase naming it ("I'm Ana. I run Ana's
+ * Bakery in Oakland." or "Ana's Bakery is my shop" → "Ana's Bakery"), or as a sentence that is only
+ * the name ("Rivera Plumbing. I'm Maria, …" → "Rivera Plumbing"). The owner's introduction and a
+ * sentence about the owner or the work ("I run a small bakery") name nothing, so "I'm Ana." alone
+ * gives "Your business".
  */
 function businessNameOf(description: string): string {
   return naming(sentencesOf(description))?.name ?? 'Your business';
+}
+
+/** The most characters a business's name has: the API's reading of a description keeps no more (`SetupStart.business_name`). */
+const NAME_MAX = 80;
+/** What a cut name mustn't end on: punctuation or a dash, or a word that joins it to the words cut off. */
+const HANGING_END = /(?:\s+(?:and|or|y|o)|[\s,;:&/–—-])+$/iu;
+
+/**
+ * A name as the API keeps it: one space between its words, and at most `NAME_MAX` characters, counted
+ * as the API counts them. The API's reading never gives a longer one, so here a longer one ends on
+ * the last whole word that fits, never mid-word, with nothing left hanging at its end: no comma or
+ * "&", and no "and" or "or" (or the Spanish "y" or "o"). A first word longer than that leaves no
+ * name (null).
+ */
+function nameAsKept(name: string): string | null {
+  const spaced = name.split(/\s+/).filter((word) => word !== '').join(' ');
+  const chars = [...spaced];
+  if (chars.length <= NAME_MAX) return spaced;
+  // The characters that fit and the one after them: a space there means the last word that fits is whole.
+  const head = chars.slice(0, NAME_MAX + 1).join('');
+  const end = head.lastIndexOf(' ');
+  const kept = end <= 0 ? '' : head.slice(0, end).replace(HANGING_END, '');
+  return kept === '' ? null : kept;
 }
 
 /** The description's sentences, each with its closing punctuation. */
@@ -212,7 +236,8 @@ function naming(sentences: readonly string[]): { at: number; name: string } | nu
     const introduction = INTRODUCTION.test(text);
     const rest = introduction ? AFTER_INTRODUCTION.exec(text)?.[1] : text;
     const named = (rest === undefined ? null : namedIn(rest)) ?? (introduction || FIRST_PERSON.test(text) ? null : text);
-    if (named !== null) return { at, name: named.trim().slice(0, 60).trim() };
+    const name = named === null ? null : nameAsKept(named);
+    if (name !== null) return { at, name };
   }
   return null;
 }

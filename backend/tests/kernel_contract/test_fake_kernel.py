@@ -210,7 +210,8 @@ async def test_a_lowered_link_limit_cancels_the_open_links_above_it(fake):
     get, complete, _ = LINK_ROUTES
 
     assert state.lower_link_limit(desk_id, 1000) == [link_id]
-    assert (await checkout(http, get, token)).state == "cancelled"
+    shown = await checkout(http, get, token)
+    assert (shown.state, shown.cancel_reason) == ("cancelled", "rules_changed")
     assert state.payment_links[link_id].cancel_reason == "rules_changed"
     assert await refused(checkout(http, complete, token)) == (409, "conflict")
     *_, policy, cancelled, refusal = [entry.event for entry in state.desks[desk_id].ledger]

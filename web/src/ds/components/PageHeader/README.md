@@ -20,11 +20,15 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `title` | `ReactNode` | Required. `.cd-type-page-title` (serif, 24/32) in `text-primary`. |
+| `title` | `ReactNode` | Required. `.cd-type-page-title` (serif, 24/32) in `text-primary`. Balanced when it wraps. |
 | `subtitle` | `ReactNode` | `.cd-type-body` in `text-secondary`, under the title. |
 | `actions` | `ReactNode` | At the right of the title's line. |
 | `actionsBelowOnPhone` | `boolean` | Under 640 px, the actions on a line of their own at full width. |
 | `hideSubtitleOnPhone` | `boolean` | Under 640 px, no subtitle. |
 | `titleRef` | `Ref<HTMLHeadingElement>` | The title's element, for moving focus to it; it then takes `tabIndex={-1}`. |
+
+## Long titles
+
+A title that wraps balances its lines (`text-wrap: balance`): the browser evens them out rather than filling each in turn, so a long business name doesn't leave its last word on a line of its own. "Bayview Heating, Plumbing & Drain Services of Greater Oakland is live" takes two even lines in setup's 720 px column, not a full line and "live". The title keeps the number of lines it would take anyway, so nothing under it moves. A word with no break in it still breaks rather than leaving the line (`overflow-wrap: anywhere`).
 
 The header has no outer margin; the `AppShell` pads the page above it, and the page spaces what follows.

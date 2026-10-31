@@ -16,6 +16,8 @@ dependencies = [
     "sse-starlette>=3.6.0",
     "anthropic==2.3.0",
     "cryptography>=50.0.2",
+    "mcp==2.3.0",
+    "httpx2>=2.13.1",
 ]
 
 # The kernel's Rust module, built from source by maturin; `make kernel` rebuilds it.
@@ -27,7 +29,6 @@ dev = [
     "pytest>=8",
     "pytest-asyncio==1.4.0",
     "httpx==0.28.1",
-    "cryptography==50.0.2",
 ]
 # The evals (evals/): `uv run --project backend --group evals ...` from the repository root.
 evals = [

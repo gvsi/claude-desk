@@ -17,7 +17,7 @@ from desk.db.models import (ActorSession, Business, CalendarSlot, Copy, Desk, Do
                              NotificationPref, Person, PriceItem, Tool)
 from desk.db.session import COPY_SETTING, database_url, libpq_url
 from desk import presets
-from desk.kernel_service import adapters, auth, desks, seed
+from desk.kernel_service import adapters, auth, desks, mcp_client, seed
 from desk.kernel_service.repo import Ctx, KernelFailure, new_id
 
 from .fakes import FakeAdapter
@@ -103,20 +103,33 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     assert windows.value == desk_kernel.canonical_json(json.dumps([w.model_dump(mode="json") for w in desk.hours]))
     assert [(w.days, w.start, w.end) for w in desk.hours] == [
         (["mon", "tue", "wed", "thu", "fri"], time(8), time(18)), (["sat"], time(9), time(13))]
-    # the Desk's creation is the first entry on its ledger, its rules' activation the second, then
-    # the held request on Today (test_adapters.test_copy_seeds_one_held_quote)
+    # the Desk's creation is the first entry on its ledger, then its two mock payments tools pinned
+    # (plan 01c), its rules' activation, then the held request on Today
+    # (test_adapters.test_copy_seeds_one_held_quote)
     entries = await rows_of(app, copy_id, select(LedgerEntry).order_by(LedgerEntry.seq))
     assert [(e.desk_id, e.seq, e.event.kind) for e in entries] == [
-        (desk_id, 1, "desk_data"), (desk_id, 2, "policy"), (desk_id, 3, "session"), (desk_id, 4, "decide")]
-    assert [e.event.summary for e in entries[:2]] == [{"part": "desk", "created": True},
-                                                      {"version": 1, "status": "active", "preset": "rivera",
-                                                       "activated": True, "from": None,
-                                                       "auto_money_cap_cents": 50_000}]
+        (desk_id, 1, "desk_data"), (desk_id, 2, "tool_pin"), (desk_id, 3, "tool_pin"), (desk_id, 4, "policy"),
+        (desk_id, 5, "session"), (desk_id, 6, "decide")]
+    pins = mcp_client.seed_pins()
+    assert [e.event.summary for e in entries[:4]] == [
+        {"part": "desk", "created": True},
+        {"tool": "payments.create_refund", "event": "connected", "status": "enabled",
+         "definition_sha256": pins["create_refund"]},
+        {"tool": "payments.list_charges", "event": "connected", "status": "enabled",
+         "definition_sha256": pins["list_charges"]},
+        {"version": 1, "status": "active", "preset": "rivera", "activated": True, "from": None,
+         "auto_money_cap_cents": 50_000}]
     # the seed's cards: the starter preset's utility cards plus Rivera's own
     ask_first = seed.PRESETS["ask_first"]
     assert all(card.card_id.startswith("preset-") and card.mode == "auto" for card in ask_first)
     assert [card.card_id for card in seed.RIVERA_CARDS] == [card.card_id for card in ask_first] + [
-        "rv-quote", "rv-book-wk", "rv-book-sat", "rv-docs"]
+        "rv-quote", "rv-book-wk", "rv-book-sat", "rv-docs", "rv-link", "rv-charges", "rv-refund", "rv-mandate"]
+    [link] = [card for card in seed.RIVERA_CARDS if card.card_id == "rv-link"]       # the 01c rows of the seed
+    assert (link.applies_to, link.mode, link.who, link.max_amount_cents, link.review) == (
+        "native.payment_link", "auto", "anyone", 30_000, True)
+    assert [(c.applies_to, c.mode, c.who, c.max_amount_cents) for c in seed.RIVERA_CARDS[-3:]] == [
+        ("payments.list_charges", "auto", "record_owner", None), ("payments.create_refund", "ask", "record_owner", None),
+        ("native.charge_mandate", "auto", "anyone", 2_000)]
     assert {card.applies_to for card in ask_first} == {
         "native.find_slots", "native.capture_lead", "native.request_callback", "native.start_verification",
         "native.fetch_website", "native.read_memory"}
@@ -241,8 +254,9 @@ async def test_create_desk_enables_only_native_tools(app, frozen_clock, registry
     enabled = native.profile.model_copy(update={"status": "enabled"})
     assert (row.desk_id, row.tool, row.source, row.status, row.effects) == (
         desk_id, "native.find_slots", "native", "enabled", ["read"])
-    assert (row.profile, row.definition_sha256) == (enabled, None)
+    assert row.profile == enabled
     assert row.profile_sha256 == adapters.profile_sha256(native.profile)     # status isn't part of the pin
+    assert row.definition_sha256 == row.profile_sha256          # the hash the owner names it by (plan 01c)
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy_id)
         assert await desks.enabled_profiles(ctx, desk_id) == [enabled]

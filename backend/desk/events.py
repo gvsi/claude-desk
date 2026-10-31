@@ -19,7 +19,7 @@ class EvMessage(BaseModel):               # a checked reply, delivered through d
     type: Literal["message"]
     message_id: str
     generation: int
-    author: Literal["claude", "owner", "desk"]   # "desk" for payment_confirmed
+    author: Literal["claude", "owner", "desk"]   # "desk" for payment_confirmed and link_cancelled
     language: Literal["en", "es"]
     handoff: bool                         # not verdict.ok
     blocks: list[RenderedBlock]

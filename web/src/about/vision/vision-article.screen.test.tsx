@@ -1,0 +1,313 @@
+/**
+ * The Vision article at its own address, in the whole app against the mock API: a long-form page under About
+ * this prototype with four phone screens drawn inline. Expected words are written out here, never read from the
+ * page's code.
+ */
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { writeLocal } from '../../lib/storage.ts';
+import { RIVERA } from '../../mocks/seed.ts';
+import { mockStore } from '../../mocks/store.ts';
+import { renderRoute } from '../../test/renderRoute.tsx';
+import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+
+const PATH = '/about/vision';
+const HEADLINE = 'A front desk that never closes';
+const DEK =
+  'Today a Desk answers for one plumber in Oakland. The same idea fits a city permit office, a team in the field, a customer who’s already signed in and an owner who’s never at a desk. Here’s what that could look like, and the rules that wouldn’t change.';
+const NOTE = 'Vision, not the prototype. Nothing on this page is live.';
+const END_NOTE = 'Vision, not in the prototype. Nothing on this page is live; the businesses and people are fictional.';
+const FIRST_WORDS = /^Most of the questions a business gets are the same questions/;
+
+// The About pages' reading speed: 230 words a minute, rounded, and at least one.
+const WORDS_PER_MINUTE = 230;
+
+/**
+ * The four screens in the order the article shows them: each one's label, its caption's lead, and the line in its
+ * header that says Claude, an AI, is answering. The owner's phone is her own app, which no visitor sees.
+ */
+const FIGURES = [
+  {
+    label: 'A resident’s phone: the Meridian Bay Permit Center’s Desk shows his permit status in a card and hands a fee waiver to staff.',
+    lead: 'Marcus checks his remodel at 11 pm.',
+    ai: 'You’re chatting with Claude, an AI answering for the Permit Center.',
+  },
+  {
+    label: 'A plumber’s phone: the team Desk shows his job card with the gate code and declines to share a colleague’s pay.',
+    lead: 'Luis, between jobs.',
+    ai: 'Claude, an AI, answers the team under Maria’s rules.',
+  },
+  {
+    label: 'A returning customer’s phone: she confirms it’s her with her Claude account, for this visit only, and her invoice opens.',
+    lead: 'Dana comes back for her invoice.',
+    ai: 'You’re chatting with Claude, an AI answering for Rivera Plumbing.',
+  },
+  {
+    label: 'The owner’s phone: a held discount request waits for her answer, with Allow this time and Deny this time.',
+    lead: 'A request waits for Maria.',
+    ai: null,
+  },
+] as const;
+
+/**
+ * The words a reader reads in `root`: its text, but what is hidden from everyone (`aria-hidden`) and the
+ * elements `skip` names, each text node a run of its own so that two blocks never join into one word.
+ */
+function readWords(root: Element, skip: Element[] = []): number {
+  const runs: string[] = [];
+  const walk = (node: Node) => {
+    if (node instanceof Element && (node.getAttribute('aria-hidden') === 'true' || skip.includes(node))) return;
+    if (node.nodeType === Node.TEXT_NODE) runs.push(node.textContent ?? '');
+    for (const child of node.childNodes) walk(child);
+  };
+  walk(root);
+  return runs.join(' ').split(/\s+/).filter(Boolean).length;
+}
+
+/** The text of `el` with its whitespace collapsed. */
+function flat(el: Element | null | undefined): string {
+  return (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+}
+
+afterEach(() => {
+  writeLocal('lastDesk', null);
+});
+
+describe('The Vision article', () => {
+  it('the_article_renders_at_its_route', async () => {
+    const { screen } = await renderRoute(PATH);
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+    await expect.element(screen.getByText(DEK, { exact: true })).toBeVisible();
+    // The note under the dek and the end note say it's vision, not the prototype.
+    await expect.element(screen.getByText(NOTE, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(END_NOTE, { exact: true })).toBeVisible();
+
+    // The meta line's read time is the article's words at the About pages' speed: its own text and the words
+    // on its screens, but not the meta line itself or the decorative cover.
+    const article = screen.getByRole('article').element();
+    const meta = article.querySelector('[data-meta]');
+    expect(meta, 'the meta line is in the article').not.toBeNull();
+    const words = readWords(article, meta ? [meta] : []);
+    const minutes = Math.max(1, Math.round(words / WORDS_PER_MINUTE));
+    expect(flat(meta)).toBe(`Vision October 30, 2026 ${minutes} min read`);
+    expect(meta?.querySelector('time')?.getAttribute('datetime')).toBe('2026-10-30');
+  });
+
+  it('each_screen_is_a_labelled_picture_with_a_caption', async () => {
+    const { screen } = await renderRoute(PATH);
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+
+    // A screen reader meets four pictures, one per screen, each read by its label; the cover's copies are hidden.
+    expect(screen.getByRole('img').elements().map((img) => img.getAttribute('aria-label'))).toEqual(FIGURES.map(({ label }) => label));
+    const figures = [...screen.getByRole('article').element().querySelectorAll('figure')];
+    expect(figures).toHaveLength(FIGURES.length);
+    for (const [i, figure] of figures.entries()) {
+      const { label, lead } = FIGURES[i] ?? FIGURES[0];
+      // A figure holds the picture, then its caption, which names the figure.
+      const [picture, caption] = [...figure.children];
+      expect(picture?.getAttribute('role'), label).toBe('img');
+      expect(picture?.getAttribute('aria-label'), label).toBe(label);
+      expect(caption?.localName, label).toBe('figcaption');
+      expect(flat(caption).startsWith(`${lead} `), label).toBe(true);
+      await expect.element(screen.getByRole('figure', { name: flat(caption), exact: true })).toBeVisible();
+      // What the screen shows is real text, not an image of it.
+      expect(readWords(picture ?? figure), label).toBeGreaterThan(40);
+    }
+  });
+
+  it('the_screens_keep_the_honesty_rules', async () => {
+    const { screen } = await renderRoute(PATH);
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+    const pictures = FIGURES.map(({ label }) => screen.getByRole('img', { name: label, exact: true }).element());
+
+    // Every screen a visitor or the team reads says, in its header and above the chat, that Claude, an AI, is
+    // answering.
+    for (const [i, { label, ai }] of FIGURES.entries()) {
+      if (ai === null) continue;
+      const picture = pictures[i];
+      const line = [...(picture?.querySelectorAll('p, div') ?? [])].find((el) => flat(el) === ai);
+      expect(line, label).toBeDefined();
+      expect(line?.closest('[data-screen-head]'), label).not.toBeNull();
+      const chat = picture?.querySelector('[data-part]');
+      expect(line?.getBoundingClientRect().bottom ?? Infinity, label).toBeLessThanOrEqual(chat?.getBoundingClientRect().top ?? -Infinity);
+    }
+
+    // Prices, percentages, times, dates and codes sit in cards; Claude's own words state none of them.
+    const FACT = new RegExp(
+      [
+        String.raw`\$\d`,
+        String.raw`\d%`,
+        String.raw`\b\d{1,2}:\d{2}\b`,
+        String.raw`\d{4,}`,
+        String.raw`\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b`,
+        String.raw`\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b`,
+      ].join('|'),
+    );
+    expect(['$153.00', '15%', '10:30 am', 'B-2026-0412', 'Tuesday, October 20'].every((fact) => FACT.test(fact))).toBe(true);
+    let facts = 0;
+    for (const picture of pictures) {
+      const walker = document.createTreeWalker(picture ?? document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!FACT.test(node.textContent ?? '')) continue;
+        facts += 1;
+        expect(node.parentElement?.closest('[data-part="card"]'), node.textContent ?? '').not.toBeNull();
+      }
+      for (const words of picture?.querySelectorAll('[data-part="claude"]') ?? []) expect(flat(words)).not.toMatch(FACT);
+    }
+    expect(facts, 'the cards hold the facts the test looks for').toBeGreaterThanOrEqual(6);
+
+    // Statuses too: the permit's status is the card's to state, and Claude's words in the city screen only point to it.
+    const city = pictures[0];
+    const inCards = [...(city?.querySelectorAll('[data-part="card"] *') ?? [])].map(flat);
+    expect(inCards).toContain('Plan check passed');
+    const claude = [...(city?.querySelectorAll('[data-part="claude"]') ?? [])].map(flat);
+    expect(claude.length).toBeGreaterThan(0);
+    for (const words of claude) expect(words).not.toMatch(/passed|plan check/i);
+
+    // A held or declined outcome is a receipt right under Claude's message, as the app draws it.
+    const outcomes = pictures.flatMap((picture) => [...(picture?.querySelectorAll('[data-part="receipt"]') ?? [])]);
+    const heldOrDeclined = outcomes.filter((receipt) => ['held', 'declined'].includes(receipt.getAttribute('data-tone') ?? ''));
+    expect(heldOrDeclined.map(flat)).toEqual([
+      'Held for a person: waivers are decided by staff.',
+      'Declined by team access. No pay was shared.',
+    ]);
+    for (const receipt of heldOrDeclined) {
+      const message = receipt.previousElementSibling;
+      expect(message?.getAttribute('data-part'), flat(receipt)).toBe('claude');
+      expect(receipt.getBoundingClientRect().top).toBeGreaterThanOrEqual(message?.getBoundingClientRect().bottom ?? Infinity);
+    }
+  });
+
+  it('the_cover_band_is_decoration_hidden_on_phones', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      const headline = screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true });
+      await expect.element(headline).toBeVisible();
+      // The band under the headline peeks at the four screens. It is hidden from screen readers and labels none.
+      const band = document.querySelector('[data-cover]');
+      expect(band?.getAttribute('aria-hidden'), viewport).toBe('true');
+      expect(band?.querySelectorAll('[role], [aria-label]'), viewport).toHaveLength(0);
+      if (viewport === 'desktop') {
+        expect(band?.firstElementChild?.children, viewport).toHaveLength(4);
+        // At a laptop's width it is drawn across the page, under the headline and above the article's first words.
+        await expect.element(screen.getByText(FIRST_WORDS)).toBeVisible();
+        const box = band?.getBoundingClientRect();
+        expect(box?.height ?? 0).toBeGreaterThan(0);
+        expect(box?.top ?? 0).toBeGreaterThanOrEqual(headline.element().getBoundingClientRect().bottom);
+        expect(box?.bottom ?? Infinity).toBeLessThanOrEqual(screen.getByText(FIRST_WORDS).element().getBoundingClientRect().top);
+        expect(box?.width).toBe(document.documentElement.clientWidth);
+      } else {
+        // On a phone, it isn't drawn at all.
+        expect(band ? getComputedStyle(band).display : '', viewport).toBe('none');
+      }
+    }
+  });
+
+  it('the_figures_alternate_sides_and_stack_on_phones', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+      const column = screen.getByText(FIRST_WORDS).element().getBoundingClientRect();
+      const middle = (box: DOMRect) => (box.left + box.right) / 2;
+      for (const [i, { label }] of FIGURES.entries()) {
+        const picture = screen.getByRole('img', { name: label, exact: true }).element();
+        const phone = picture.getBoundingClientRect();
+        const caption = picture.parentElement?.querySelector('figcaption')?.getBoundingClientRect();
+        if (!caption) throw new Error(`${label} has no caption`);
+        const where = `${label} at ${viewport}`;
+        if (viewport === 'desktop') {
+          // Side by side, the first on the left and then alternating, the caption level with the phone's lower
+          // part, the pair centered on the article's column.
+          if (i % 2 === 0) expect(phone.right, where).toBeLessThan(caption.left);
+          else expect(caption.right, where).toBeLessThan(phone.left);
+          expect(caption.bottom, where).toBeLessThanOrEqual(phone.bottom);
+          expect(caption.top, where).toBeGreaterThan((phone.top + phone.bottom) / 2);
+          expect(Math.abs((Math.min(phone.left, caption.left) + Math.max(phone.right, caption.right)) / 2 - middle(column)), where).toBeLessThanOrEqual(1);
+        } else {
+          // Stacked: the phone centered on the screen, its caption under it and no wider.
+          expect(phone.bottom, where).toBeLessThanOrEqual(caption.top);
+          expect(Math.abs(middle(phone) - window.innerWidth / 2), where).toBeLessThanOrEqual(1);
+          expect(caption.width, where).toBeLessThanOrEqual(phone.width);
+          expect(caption.left, where).toBeGreaterThanOrEqual(phone.left);
+        }
+      }
+    }
+  });
+
+  it('the_article_passes_screen_basics', async () => {
+    for (const lastDesk of [RIVERA.deskId, null]) {
+      for (const viewport of ['desktop', 'phone'] as const) {
+        const where = `at ${viewport}, last Desk ${lastDesk}`;
+        writeLocal('lastDesk', lastDesk);
+        const { screen } = await renderRoute(PATH, { viewport });
+        await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true }), { message: where }).toBeVisible();
+        // One concept footer, the copy check over the whole page, the screens' words included, and axe. Not the
+        // owner's jargon check: the article speaks of an owner's policies, as the reading pages name the kernel.
+        await expectScreenBasics(screen.container, { owner: false });
+        expectNoHorizontalScroll();
+      }
+    }
+  });
+
+  it('the_article_makes_no_requests', async () => {
+    for (const lastDesk of [RIVERA.deskId, null]) {
+      for (const viewport of ['desktop', 'phone'] as const) {
+        const where = `at ${viewport}, last Desk ${lastDesk}`;
+        writeLocal('lastDesk', lastDesk);
+        const before = [...mockStore.requests];
+        const { screen } = await renderRoute(PATH, { viewport });
+        await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true }), { message: where }).toBeVisible();
+        // Long enough for anything the page asked for as it opened to reach the mock API.
+        await settle();
+        expect(mockStore.requests, where).toEqual(before);
+      }
+    }
+  });
+
+  it('the_back_links_go_where_the_reading_pages_way_back_goes', async () => {
+    for (const [lastDesk, to] of [
+      [RIVERA.deskId, `/app/${RIVERA.deskId}/today`],
+      [null, '/'],
+    ] as const) {
+      writeLocal('lastDesk', lastDesk);
+      // A reading page's way back into the prototype.
+      const reader = await renderRoute('/about/prediction');
+      await expect.element(reader.screen.getByRole('link', { name: 'Try Desk prototype', exact: true })).toHaveAttribute('href', to);
+
+      // The article's two: in the top bar and at the end.
+      const { screen } = await renderRoute(PATH);
+      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+      const top = screen.getByRole('banner').getByRole('link', { name: 'Back to your Desk', exact: true });
+      const end = screen.getByRole('contentinfo').getByRole('link', { name: 'Back to your Desk', exact: true });
+      await expect.element(top, { message: `top, last Desk ${lastDesk}` }).toHaveAttribute('href', to);
+      await expect.element(end, { message: `end, last Desk ${lastDesk}` }).toHaveAttribute('href', to);
+      expect(screen.getByRole('link', { name: 'Back to your Desk', exact: true }).elements()).toHaveLength(2);
+    }
+
+    // Followed, the way back opens the Desk.
+    writeLocal('lastDesk', RIVERA.deskId);
+    const { screen, router } = await renderRoute(PATH);
+    await screen.getByRole('contentinfo').getByRole('link', { name: 'Back to your Desk', exact: true }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.deskId}/today`);
+  });
+
+  it('the_article_names_the_tab_and_is_noindex', async () => {
+    const robots = () => [...document.head.querySelectorAll('meta[name="robots"]')].map((meta) => meta.getAttribute('content'));
+    const { screen, router } = await renderRoute(PATH);
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+    // As the reading pages: the tab names the page, and search engines are asked not to list it while it is open.
+    expect(document.title).toBe('Vision · Claude Desk');
+    expect(robots()).toEqual(['noindex']);
+
+    // Leaving for the rest of the app takes both back.
+    await router.navigate('/no/such/page');
+    await expect.element(screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(robots()).toEqual([]);
+    expect(document.title).not.toContain('Vision');
+  });
+});
+
+/** Waits a quarter of a second: a request sent while the page drew has reached the mock API by then. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 250));
+}

@@ -1,8 +1,8 @@
 /* Greeting: the serif greeting with the presence line under it, and the public link in an
    outlined pill at the right, level with the greeting's first line. On a narrow line the pill
    drops under the text. The presence glyphs sit in a short row and breathe slowly over
-   motion-breathe, each half a breath out of step with the one before; under reduced motion they
-   are still. */
+   motion-breathe, between 60% and full strength, each half a breath out of step with the one
+   before; under reduced motion they are still. */
 
 .cd-greeting {
   display: flex;
@@ -21,10 +21,12 @@
   min-width: 0;
 }
 
+/* A greeting that wraps balances its lines, as page titles do (`PageHeader`). */
 .cd-greeting__title {
   margin: 0;
   color: var(--text-primary);
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .cd-greeting__presence {
@@ -65,9 +67,11 @@
   animation-delay: calc(var(--motion-breathe) / -2);
 }
 
+/* The breath's faintest point is 60%: there a glyph's initials still read against its circle by
+   4.5:1 (about 4.1:1 at 50%) and its icon by well over 3:1. No token holds an opacity. */
 @keyframes cd-breathe {
   from {
-    opacity: 0.5;
+    opacity: 0.6;
   }
 
   to {

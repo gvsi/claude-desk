@@ -29,7 +29,7 @@ from desk.contracts import CardOption, Claim, Fact, Label, RenderedBlock, ReplyV
 from desk.db.models import ActorSession, Business, Desk, Document
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import PublicDesk
-from desk.kernel_service import labels, lang, ledger, reply_check
+from desk.kernel_service import labels, lang, ledger, render, reply_check
 from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseVerdict
 from scripts import lookalikes
 
@@ -604,7 +604,7 @@ async def own_booking(client: httpx.AsyncClient, reviewer, visitor: Visitor, slo
     ("payment_link", "unknown_fact", "template_unavailable"),
     ("a hostile fact_id", "unknown_fact", "no_such_fact"),
 ])
-async def test_clause_checks(app, client, reviewer, frozen_clock, case, kind, rule_id):
+async def test_clause_checks(app, client, reviewer, frozen_clock, monkeypatch, case, kind, rule_id):
     copy, visitor = await visitor_of(app, client)
     template = "quote"
     if case == "an unknown fact":
@@ -616,7 +616,8 @@ async def test_clause_checks(app, client, reviewer, frozen_clock, case, kind, ru
         fact_id = (await own_quote(client, await open_visitor(client, copy))).fact_id
     elif case == "a booking under quote":
         fact_id = (await own_booking(client, reviewer, visitor)).fact_id
-    elif case == "payment_link":                                           # registered by Plan 01c
+    elif case == "payment_link":                     # a template with nothing registered to render it
+        monkeypatch.delitem(render.TEMPLATES, "payment_link")
         template, fact_id = "payment_link", "payment_link:link-aaaaaaaaaaaaaaaa"
     else:
         fact_id = "dana@example.com"
@@ -1706,8 +1707,11 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
     response = await client.get(f"/public/{copy.slug}", params={"lang": "es"})
     assert response.status_code == 200, response.text
     public = PublicDesk.model_validate(response.json())
-    assert (public.business_name, public.desk_name, public.owner_display_name, public.brand, public.agent_card) == (
-        "Rivera Plumbing", "Main line", "Maria Rivera", {"primary": "#1F4E4A", "accent": "#B87333"}, [])
+    assert (public.business_name, public.desk_name, public.owner_display_name, public.brand) == (
+        "Rivera Plumbing", "Main line", "Maria Rivera", {"primary": "#1F4E4A", "accent": "#B87333"})
+    # the Agent Card is kernel prose (tests/kernel/test_agent_auth.py), read by the same checks below
+    assert public.agent_card and {(block.kind, block.template, block.fact_id) for block in public.agent_card} == {
+        ("prose", None, None)}
     assert [(block.template, block.fact_id, block.title, block.lines) for block in public.charter] == [
         ("hours", "charter:hours", "De lunes a viernes, de 8:00 a 18:00", ["Sábado, de 9:00 a 13:00"]),
         ("contact", "charter:contact", "(510) 555-0142", []),

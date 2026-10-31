@@ -7,11 +7,13 @@ and safe for SSE and `app.*`, never the body. Writers run in the caller's transa
 commit, so an entry exists only if the record that caused it does.
 
 Two reads serve those routes. A session reads only the verification codes of the challenges it
-started, each code entry naming its challenge: in the demo, whoever types a person's contact is
-shown the code sent to it, and never a code another session asked for, which may have gone to a
-contact the owner has since changed. A session never reads an owner alert or a head checkpoint,
-and no entry it reads names a decision (`session_entry`). The owner reads every entry of the copy,
-a held request's alert with the decision it is about (`owner_entry`).
+started, or a demo agent it minted started (`agents.minted_sessions`), each code entry naming its
+challenge: in the demo, whoever types a person's contact, or has their own agent type it, is shown
+the code sent to it, and never a code another session asked for, which may have gone to a contact
+the owner has since changed. A session never reads an owner alert or a head checkpoint, nor the
+codes of agents another session or the owner minted, and no entry it reads names a decision
+(`session_entry`). The owner reads every entry of the copy, a held request's alert with the
+decision it is about (`owner_entry`).
 """
 
 from typing import get_args
@@ -89,10 +91,14 @@ def _ordered(stmt):
 
 async def session_entries(ctx: KernelCtx, session_row: ActorSession) -> list[DemoInboxEntry]:
     """The `verification_code` entries, on the session's Desk, of the challenges the session
-    started; nothing else, not even another session's code for the same person."""
+    started, or an agent session opened with a key it minted started; nothing else, not even
+    another session's code for the same person."""
+    from desk.kernel_service import agents     # agents writes the ledger, which delivers here
+
+    started_by = [session_row.session_id, *await agents.minted_sessions(ctx, session_row.session_id)]
     rows = await ctx.db.scalars(ctx.repo.scoped(_ordered(select(DemoInboxRow).join(
         VerificationChallenge, VerificationChallenge.challenge_id == DemoInboxRow.challenge_id).where(
-        VerificationChallenge.session_id == session_row.session_id, DemoInboxRow.desk_id == session_row.desk_id,
+        VerificationChallenge.session_id.in_(started_by), DemoInboxRow.desk_id == session_row.desk_id,
         DemoInboxRow.kind == "verification_code"))))
     return [session_entry(row) for row in rows]
 

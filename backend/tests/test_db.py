@@ -9,6 +9,7 @@ next to the suite's and dropped afterwards (`new_scratch`, under the `scratch` a
 `scratch_database` fixtures); the suite's database is never downgraded.
 """
 
+import ast
 import hashlib
 import re
 import warnings
@@ -40,6 +41,7 @@ from sqlalchemy.sql.functions import Function
 import desk.db
 from desk.contracts import ActorKind, Assurance, Claim, DecisionState, Outcome, RenderedBlock, Review, SessionMode
 from desk.contracts import PolicyVersion as PolicyVersionContract
+from desk.contracts import ToolProfile as ToolProfileContract
 from desk.db.models import (
     ActorSession,
     Approval,
@@ -640,6 +642,7 @@ STATE_COLUMNS = {   # each kernel state column admits exactly its contract's val
     ("policy_versions", "status"): PolicyVersionContract.model_fields["status"].annotation,
     ("decisions", "outcome"): Outcome,
     ("decisions", "state"): DecisionState,
+    ("tools", "review_reason"): get_args(ToolProfileContract.model_fields["review_reason"].annotation)[0],
 }
 
 
@@ -840,6 +843,89 @@ def test_a_downgrade_below_document_links_leaves_no_link_behind(scratch):
             insert("link-upgraded", "token-upgraded", digest)
 
 
+def test_no_downgrade_deletes_from_a_kernel_table():
+    """Every kernel table forces row security, on its owner too: on a managed Postgres, whose
+    migration role neither is a superuser nor bypasses row security, a DELETE in a downgrade sees no
+    row, so the rows it meant to remove lose their columns and the next upgrade fails on them. A
+    downgrade that empties a kernel table does it with TRUNCATE, which row security doesn't hold
+    back."""
+    versions = Path(__file__).resolve().parents[1] / "alembic" / "versions"
+    found = []
+    for path in sorted(versions.glob("*.py")):
+        source = path.read_text()
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.FunctionDef) and node.name == "downgrade":
+                body = ast.get_source_segment(source, node) or ""
+                if re.search(r"DELETE\s+FROM\s+kernel\.", body, re.I):
+                    found.append(path.name)
+    assert found == []
+
+
+AGENTS_REVISION, RESERVATIONS_REVISION = "01c_1_agents", "01c_5_mandate_reservations"
+AGENT_TABLES = ("agent_keys", "agent_nonces", "demo_wallet_keys", "mandates", "mandate_reservations")
+
+
+class StatementsOn:
+    """The `op` a revision's own `upgrade` and `downgrade` see here: each statement sent on `conn`,
+    in its transaction and as its role. The two revisions this runs only ever call `op.execute`."""
+
+    def __init__(self, conn: psycopg.Connection):
+        self.conn = conn
+
+    def execute(self, statement: str) -> None:
+        self.conn.execute(statement)
+
+
+def test_agent_tables_go_down_and_up_under_an_owner_bound_by_row_security(scratch, monkeypatch):
+    """The agents and mandate reservations revisions go down and up again over populated tables
+    when their owner is bound by row security, as on a managed Postgres: the owner sees none of the
+    rows, yet each downgrade empties its tables (TRUNCATE), so no row is left without the NOT NULL
+    columns the upgrade adds back. It all runs in a transaction that is rolled back, the stand-in
+    owner included, so the scratch database stays at head."""
+    admin = scratch.conn
+    script = ScriptDirectory.from_config(alembic_config())
+    revisions = [script.get_revision(name).module for name in (RESERVATIONS_REVISION, AGENTS_REVISION)]
+    for module in revisions:
+        monkeypatch.setattr(module, "op", StatementsOn(admin))
+    digest = "a" * 64
+    with admin.transaction(force_rollback=True):
+        admin.execute("INSERT INTO kernel.agent_keys (copy_id, agent_key_id, desk_id, public_key_hex, source, minted_by,"
+                      " created_at) VALUES ('copy-agents', 'key-1', 'desk-agents', %s, 'demo', 'owner', now())",
+                      (digest,))
+        admin.execute("INSERT INTO kernel.agent_nonces (copy_id, agent_key_id, nonce, session_id, body_sha256,"
+                      " first_used_at) VALUES ('copy-agents', 'key-1', 'nonce-1', 'session-agents', %s, now())",
+                      (digest,))
+        admin.execute("INSERT INTO kernel.demo_wallet_keys (copy_id, key_id, public_key_hex, private_key_hex)"
+                      " VALUES ('copy-agents', 'wallet-1', %s, %s)", (digest, digest))
+        admin.execute("INSERT INTO kernel.mandates (mandate_id, copy_id, desk_id, agent_key_id, per_charge_cents,"
+                      " total_cents, reserved_cents, expires_at, session_id, issuer, nonce, envelope)"
+                      " VALUES ('mandate-1', 'copy-agents', 'desk-agents', 'key-1', 2000, 10000, 2000,"
+                      " '2026-11-01T00:00:00.000000Z', 'session-agents', 'wallet-1', 'mandate-nonce-1', '{}')")
+        admin.execute("INSERT INTO kernel.mandate_reservations (reservation_id, copy_id, mandate_id, action_id,"
+                      " amount_cents, state, created_at, updated_at)"
+                      " VALUES ('resv-1', 'copy-agents', 'mandate-1', 'act-1', 2000, 'reserved', now(), now())")
+        admin.execute("CREATE ROLE desk_test_migrator NOLOGIN NOSUPERUSER NOBYPASSRLS")
+        admin.execute("GRANT USAGE, CREATE ON SCHEMA kernel TO desk_test_migrator")
+        for table in AGENT_TABLES:
+            admin.execute(SQL("ALTER TABLE kernel.{} OWNER TO desk_test_migrator").format(Identifier(table)))
+        admin.execute("SET LOCAL ROLE desk_test_migrator")
+        assert admin.execute("SELECT count(*) FROM kernel.mandates").fetchone() == (0,)   # bound by row security
+        for module in revisions:
+            module.downgrade()
+        admin.execute("RESET ROLE")
+        counts = {table: admin.execute(SQL("SELECT count(*) FROM kernel.{}").format(Identifier(table))).fetchone()[0]
+                  for table in AGENT_TABLES}
+        assert counts == dict.fromkeys(AGENT_TABLES, 0)
+        assert columns(admin, "kernel", "mandate_reservations") == ["reservation_id", "copy_id"]
+        assert "envelope" not in columns(admin, "kernel", "mandates")
+        admin.execute("SET LOCAL ROLE desk_test_migrator")
+        for module in reversed(revisions):
+            module.upgrade()
+        admin.execute("RESET ROLE")
+        assert "envelope" in columns(admin, "kernel", "mandates")
+        assert "state" in columns(admin, "kernel", "mandate_reservations")
+
+
 def test_state_columns_admit_only_contract_values(admin):
     for (table, column), literal in STATE_COLUMNS.items():
         checks = admin.execute(
@@ -849,6 +935,40 @@ def test_state_columns_admit_only_contract_values(admin):
         ).fetchall()
         assert len(checks) == 1, (table, column, checks)
         assert set(re.findall(r"'([^']*)'::text", checks[0][0])) == set(get_args(literal)), (table, column)
+
+
+def test_a_tool_has_a_review_reason_only_while_it_needs_review(kernel_tx):
+    def tool(name: str, status: str, reason: str | None) -> Tool:
+        return Tool(desk_id="desk-a", tool=name, copy_id="copy-a", source="mcp", effects=["private_data"],
+                    reversible=True, status=status, description_confirmed="d", review_reason=reason)
+
+    kernel_tx.add_all([tool("payments.list_charges", "needs_review", "changed"),
+                       tool("payments.create_refund", "disabled", None)])
+    kernel_tx.flush()
+    for status in ("enabled", "disabled"):
+        savepoint = kernel_tx.begin_nested()
+        kernel_tx.add(tool(f"x.{status}", status, "new"))
+        with pytest.raises(IntegrityError):
+            kernel_tx.flush()
+        savepoint.rollback()
+
+
+def test_a_version_lists_the_tools_it_turns_on(kernel_tx):
+    # a tools-confirm draft names each tool it enables at the hash it was proved with; any other
+    # version enables none
+    def version(number: int, **values) -> PolicyVersion:
+        return PolicyVersion(desk_id="desk-e", version=number, copy_id="copy-a", cards=[], status="draft",
+                             cedar_sha256="c", schema_sha256="s", baseline_sha256="b", profiles_sha256="p",
+                             invariants_sha256="i", review_thresholds_version=1, **values)
+
+    pin = {"tool": "payments.list_charges", "definition_sha256": "a" * 64}
+    kernel_tx.add_all([version(1), version(2, enables=[pin])])
+    kernel_tx.flush()
+    kernel_tx.expire_all()
+    rows = kernel_tx.scalars(select(PolicyVersion).where(PolicyVersion.desk_id == "desk-e")
+                             .order_by(PolicyVersion.version)).all()
+    assert [[p.model_dump() for p in row.enables] for row in rows] == [[], [pin]]
+    assert_refused_before_the_database(kernel_tx, version(3, enables=[{**pin, "definition_sha256": "nope"}]))
 
 
 def test_one_active_policy_version_per_desk(kernel_tx):
@@ -934,6 +1054,7 @@ def test_a_code_entry_from_before_the_inbox_challenge_revision_names_none(scratc
         insert("inbox-after", "challenge-1")
         with pytest.raises(psycopg.errors.CheckViolation):
             insert("inbox-unnamed", None)
+        scratch.migrate(command.downgrade, INBOX_CHALLENGE_REVISION)   # the revisions after it go down first
         scratch.migrate(command.stamp, before)              # the revision runs again over what it added
         scratch.migrate(command.upgrade, INBOX_CHALLENGE_REVISION)
         assert admin.execute("SELECT count(*) FROM pg_constraint WHERE conname = 'demo_inbox_challenge_id_check'"
@@ -1059,7 +1180,7 @@ COPY_READ_POLICY = {"people": f"({COPY_POLICY} AND (removed_at IS NULL))"}
 # each key a hash or an ID that is no secret, never a token.
 RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash", "session_id"},
                   "desks": {"copy_id", "slug"}, "decisions": {"copy_id", "decision_id"},
-                  "document_links": {"copy_id", "token_sha256"}}
+                  "document_links": {"copy_id", "token_sha256"}, "payment_links": {"copy_id", "token_sha256"}}
 
 
 def test_every_kernel_table_forces_copy_row_security(admin):
@@ -1338,7 +1459,7 @@ def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
 
 COPY_RESOLVERS = ("kernel.copy_of_session(text)", "kernel.copy_of_session_id(text)",
                   "kernel.copy_of_desk_slug(text)", "kernel.copy_of_decision_id(text)",
-                  "kernel.copy_of_document_link(text)", "kernel.copy_ids()")
+                  "kernel.copy_of_document_link(text)", "kernel.copy_of_payment_link(text)", "kernel.copy_ids()")
 
 
 def test_copy_resolvers_are_narrow(admin):
@@ -1375,6 +1496,13 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(admin, committed_co
             " VALUES (%s, %s, %s, %s, %s, 'person-1', %s, %s, now(), now() + interval '1 day')",
             (f"link-{copy_id}", copy_id, f"desk-{copy_id}", f"doc-{copy_id}", f"session-{copy_id}",
              link_token(copy_id), hashlib.sha256(link_token(copy_id).encode()).hexdigest()))
+        admin.execute(   # and a payment link, found by its token's hash alone
+            "INSERT INTO kernel.payment_links (link_id, copy_id, desk_id, session_id, quote_id, action_id, title,"
+            " amount_cents, state, token, token_sha256, provider_checkout_id, customer_id, expires_at, created_at,"
+            " updated_at) VALUES (%s, %s, %s, %s, 'quote-1', %s, 'Drain clearing', 18000, 'issued', %s, %s, 'co-1',"
+            " %s, now() + interval '1 day', now(), now())",
+            (f"paylink-{copy_id}", copy_id, f"desk-{copy_id}", f"session-{copy_id}", f"act-{copy_id}",
+             f"pay-token-{copy_id}", token_hash(f"pay-{copy_id}"), f"session:session-{copy_id}"))
     try:
         for copy_id in committed_copies:
             assert await resolve_copy("copy_of_session", token_hash(copy_id)) == copy_id
@@ -1385,11 +1513,14 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(admin, committed_co
             assert await resolve_copy("copy_of_document_link",
                                       hashlib.sha256(link_token(copy_id).encode()).hexdigest()) == copy_id
             assert await resolve_copy("copy_of_document_link", link_token(copy_id)) is None
+            assert await resolve_copy("copy_of_payment_link", token_hash(f"pay-{copy_id}")) == copy_id
+            assert await resolve_copy("copy_of_payment_link", f"pay-token-{copy_id}") is None   # never by the token
         assert await resolve_copy("copy_of_session", "0" * 64) is None
         assert await resolve_copy("copy_of_session_id", "no-such-session") is None
         assert await resolve_copy("copy_of_desk_slug", "no-such-desk") is None
         assert await resolve_copy("copy_of_decision_id", "no-such-decision") is None
         assert await resolve_copy("copy_of_document_link", "0" * 64) is None
+        assert await resolve_copy("copy_of_payment_link", "0" * 64) is None
         assert set(committed_copies) <= set(await copy_ids())
         with pytest.raises(ValueError):
             await resolve_copy("copy_of_anything", "x")
@@ -1408,7 +1539,7 @@ def test_only_the_kernel_runs_the_copy_resolvers(committed_copies):
         with connect(prefix) as conn:
             for call in ("kernel.copy_of_session(%s)", "kernel.copy_of_session_id(%s)",
                          "kernel.copy_of_desk_slug(%s)", "kernel.copy_of_decision_id(%s)",
-                         "kernel.copy_of_document_link(%s)"):
+                         "kernel.copy_of_document_link(%s)", "kernel.copy_of_payment_link(%s)"):
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     conn.execute(f"SELECT {call}", (token_hash(committed_copies[0]),))
             with pytest.raises(psycopg.errors.InsufficientPrivilege):

@@ -176,11 +176,15 @@ class ToolProfile(BaseModel):
     resource_kind: Literal["quote", "slot", "booking", "document", "charge", "desk"]
     description_confirmed: str            # the owner-confirmed text Claude sees, never the server's description
     input_schema: dict                    # the adapter's JSON Schema of the args it accepts (additionalProperties: false), never the server's
-    definition_sha256: str | None = None  # MCP only: sha256 of canonical_json_any(every field of the parsed tools/list entry, client
-                                          # list cache off; fields the SDK drops reach no one); re-listed before every execution
+    definition_sha256: str | None = None  # MCP: sha256 of canonical_json_any(every field of the parsed tools/list entry, client
+                                          # list cache off; fields the SDK drops reach no one); re-listed before every execution.
+                                          # A native tool's owner view carries its adapter profile's profile_sha256, the hash
+                                          # /tools/confirm names for it; Claude's view of a native tool has none
     pending_definition_text: str | None = None   # a drifted tools/list entry, shown to the owner as quoted untrusted text
     pending_sha256: str | None = None     # its hash; the owner's confirm must name it
     status: Literal["enabled", "needs_review", "disabled"]
+    review_reason: Literal["new", "changed", "delisted"] | None = None   # set only while needs_review: a connect not yet
+                                          # confirmed, a changed definition (pending_sha256 set), a tool its server stopped listing
 
 class ToolCall(BaseModel):                # what Claude proposed (untrusted)
     call_id: str
@@ -400,14 +404,15 @@ class ApprovalResult(BaseModel):
 # Replies: typed clauses plus guarded prose
 ClauseTemplate = Literal["quote", "booking_options", "booking_confirmed", "payment_link", "document_link",
                          "hours", "policy", "contact", "handoff", "verify_prompt", "owner_said",
-                         "charges", "refund_issued", "charge_confirmed", "callback_confirmed", "payment_confirmed"]
+                         "charges", "refund_issued", "charge_confirmed", "callback_confirmed", "payment_confirmed",
+                         "link_cancelled"]   # link_cancelled: Plan 01c ("Payment links")
 
 class Clause(BaseModel):                  # rendered by code from a fact, in the reply's language
     template: ClauseTemplate
     fact_id: str | None = None
 
-class ReplyDraft(BaseModel):              # send_reply input: Claude's schema has prose and clauses only (never owner_said or
-                                          # payment_confirmed, which only the kernel issues), the API fills the rest;
+class ReplyDraft(BaseModel):              # send_reply input: Claude's schema has prose and clauses only (never owner_said,
+                                          # payment_confirmed or link_cancelled, which only the kernel issues), the API fills the rest;
                                           # end_turn text becomes prose with no clauses
     session_id: str
     generation: int

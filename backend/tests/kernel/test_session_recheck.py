@@ -183,6 +183,8 @@ SESSION_ROUTES: dict[str, Setup] = {
     "POST /verify/start": plain(lambda client, copy, v: start(client, v, DANA)),
     "POST /verify/check": plain(lambda client, copy, v: check(client, v, "000000")),
     "POST /check_reply": plain(lambda client, copy, v: post_check(client, v, "I can help with that.")),
+    "POST /agents/demo": plain(lambda client, copy, v: client.post("/agents/demo", json={"desk_id": copy.desk_id},
+                                                                    headers=v.headers)),
 }
 
 # Rows a session's token is proved on that record something which already happened and answer only
@@ -197,14 +199,17 @@ NO_SESSION_ROUTES: dict[str, str] = {
                      "POST /documents", "POST /sessions/{id}/mode", "GET /demo_inbox",
                      "POST /approvals/{decision_id}/answer", "POST /owner/messages", "POST /policy/draft",
                      "POST /policy/confirm", "POST /knowledge", "POST /handoffs/{id}/done",
-                     "GET /ledger/{desk_id}?verify=true"], "the owner's credential alone"),
+                     "GET /ledger/{desk_id}?verify=true", "POST /policy/{version}/probe",
+                     "GET /policy/{version}/cancelled_links?desk_id=", "POST /tools/connect", "POST /tools/confirm",
+                     "POST /tools/simulate_change"], "the owner's credential alone"),
     **dict.fromkeys(["POST /copies", "POST /sessions", "GET /public/{desk_slug}", "GET /health"],
                     "no credential: a new copy or session, the public page, the kernel's health"),
     "GET /document_links/{token}": "the link's own single-use token, which a removal or contact change voids",
-    **dict.fromkeys(["POST /policy/{version}/probe", "POST /tools/connect", "POST /tools/confirm",
-                     "POST /tools/simulate_change", "GET /payment_links/{token}",
-                     "POST /payment_links/{token}/complete", "POST /payment_links/{token}/cancel", "POST /agents/demo"],
-                    "not served yet (the payments, agents and setup kernel plan, 01c): classify it when it is"),
+    **dict.fromkeys(["GET /payment_links/{token}", "POST /payment_links/{token}/complete",
+                     "POST /payment_links/{token}/cancel"],
+                    "the payment link's own token, which pays once: a completion checks the link's baseline "
+                    "(`payments.recheck_link_baseline`), then its session under the row it holds, before the "
+                    "provider is asked"),
 }
 
 
@@ -261,6 +266,16 @@ PLAIN_COMMITS = {
     ("execute.py", "_settle_unknown"): "T3: an unknown result, which holds nothing read",
     ("execute.py", "reconcile_orphans"): "a reconciliation, a record of what already happened: at startup, "
                                           "outside any request, or on a read, which then answers under them",
+    ("payments.py", "_refused"): "a completion or cancel refused: its record, then 409",
+    ("payments.py", "complete_link"): "C1: a baseline refusal's record, then 409, or the completion's marker, "
+                                      "before the provider is asked; C2 answers",
+    ("payments.py", "_pay"): "C2: a refusal's record, or what the provider did, recorded as C2 decided; the "
+                             "link's session was checked before the provider was asked, under the row C2 holds "
+                             "through this commit, and no recheck may take back a payment that happened",
+    ("payments.py", "_settle"): "C3: an exception in C2 settled, which holds nothing read",
+    ("payments.py", "reconcile_links_at_startup"): "startup reconciliation, outside any request",
+    ("payments.py", "settle_link"): "a link's reconciliation on a read, a record of what already happened, "
+                                    "committed before the read goes on",
     ("repo.py", "kernel_transaction"): "runs them first whenever the transaction read anything",
     ("repo.py", "commit"): "KernelCtx.commit, which runs them first",
 }

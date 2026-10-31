@@ -2,12 +2,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
-import type { SetupState, WentLive } from '../api/views.ts';
-import { Button, Card, Notice, PageHeader, Pill } from '../ds/index.ts';
+import type { BusinessOut, SetupState, WentLive } from '../api/views.ts';
+import { Button, Card, Notice, PageHeader, Pill, StatusDot } from '../ds/index.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { QrCode } from '../owner/share/QrCode.tsx';
-import { DESKS_KEY } from '../owner/useDesks.ts';
+import { DESKS_KEY, withAnswering } from '../owner/useDesks.ts';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { gaveUp } from './shared.ts';
 
@@ -17,6 +17,8 @@ export interface LiveStepProps {
   state: SetupState;
   /** The business's name, once known. */
   business: string;
+  /** Answering is on, as the latest Desks read says. */
+  answering: boolean;
   /** The Desk went live. */
   onLive: () => void;
   /** Reads the interview again after a write whose answer was lost; null when it can't be read. */
@@ -41,11 +43,12 @@ function publicLink(wentLive: WentLive | null, slug: string): string {
 /**
  * The last step, opened by a confirmed setup. Before going live (step `preview`): the public page
  * in a frame, on the owner's own preview chat, while Answering is off; "Go live" turns it on. Live:
- * the link to share with "Copy link" and "Open"; "Go to Today"; and under them "Share it" as
- * N-R2-Setup-14-Live draws it: the link's QR code, and the website embed, coming later. It is built
- * from the link alone; the printable card and the ready-made words are on Share.
+ * "Answering now" under the title, its handled dot breathing, while the Desk answers; the link to
+ * share with "Copy link" and "Open"; "Go to Today"; and under them "Share it" as N-R2-Setup-14-Live
+ * draws it: the link's QR code, and the website embed, coming later. It is built from the link
+ * alone; the printable card and the ready-made words are on Share.
  */
-export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
+export function LiveStep({ state, business, answering, onLive, reread }: LiveStepProps) {
   const queryClient = useQueryClient();
   const id = state.interview_id;
   const [wentLive, setWentLive] = useState<WentLive | null>(null);
@@ -55,18 +58,21 @@ export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
   const goLive = async () => {
     setPending(true);
     setError(null);
-    // Answering is on now: the Desks the app read before say it's off, so they are read again.
-    const answering = () => void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
     try {
       setWentLive(await request('goLive', { params: { id } }));
-      answering();
+      // It went live here, so this Desk answers now: the Desks say so at once, and are read again.
+      queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => withAnswering(now, state.desk_id, true));
+      void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
       onLive();
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      // A lost answer, the give-up, or a 409 (it is live already): the interview says whether the Desk is live.
-      const now = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict') ? await reread() : null;
-      if (now?.step === 'live') answering();
-      else setError(gaveUp(err) ? stillCheckingLine() : ownerErrorCopy(err));
+      // A lost answer, the give-up, or a 409 (it is live already): the interview says whether the Desk
+      // is live. The Desks are read again first, so a step that turns live draws with "Answering now"
+      // as they say, rather than gaining it a moment later and moving down.
+      const recover = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
+      if (recover) await queryClient.refetchQueries({ queryKey: DESKS_KEY });
+      const now = recover ? await reread() : null;
+      if (now?.step !== 'live') setError(gaveUp(err) ? stillCheckingLine() : ownerErrorCopy(err));
     } finally {
       setPending(false);
     }
@@ -76,19 +82,27 @@ export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
     const url = publicLink(wentLive, state.slug);
     return (
       <div className="cd-setup-step">
-        <PageHeader
-          title={
-            business === '' ? (
-              copy.yourDeskIsLive
-            ) : (
-              <>
-                <span data-copy="user">{business}</span>
-                {copy.isLive}
-              </>
-            )
-          }
-          subtitle={copy.liveSubtitle}
-        />
+        <div className="cd-setup-live__head">
+          <PageHeader
+            title={
+              business === '' ? (
+                copy.yourDeskIsLive
+              ) : (
+                <>
+                  <span data-copy="user">{business}</span>
+                  {copy.isLive}
+                </>
+              )
+            }
+            subtitle={copy.liveSubtitle}
+          />
+          {answering ? (
+            <p className="cd-setup-live__answering cd-type-meta">
+              <StatusDot tone="handled" />
+              {copy.answeringNow}
+            </p>
+          ) : null}
+        </div>
         <CopyLink
           url={url}
           actions={

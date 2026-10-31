@@ -3,7 +3,10 @@ import { useState } from 'react';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
+import { pairContrast } from '../../contrast.ts';
+import { faintestOpacity, paintedGroundOf } from '../../test/breath.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { lineWords } from '../../test/lineWords.ts';
 import { Greeting, type GreetingProps } from './Greeting.tsx';
 
 /** The public link as the owner's screen would show it: a display string, never fetched. */
@@ -62,6 +65,16 @@ export const WithPresence: Story = {
       expectComputed(glyph, { animationName: /^(?!none$).+/, animationDuration: '5s', animationIterationCount: 'infinite' });
     }
     await expect(getComputedStyle(glyphs[1] as HTMLElement).animationDelay).not.toBe(getComputedStyle(glyphs[0] as HTMLElement).animationDelay);
+    // presence_glyphs_keep_their_contrast: at the breath's faintest point each glyph, faded as one
+    // over the page, still reads against its own circle: its initials as text (4.5:1), its icon as
+    // a mark (3:1).
+    for (const glyph of glyphs) {
+      const faintest = faintestOpacity(glyph);
+      await expect(faintest).toBeLessThan(1);
+      const style = getComputedStyle(glyph);
+      const ratio = pairContrast({ fg: style.color, ground: style.backgroundColor, over: paintedGroundOf(glyph), opacity: faintest });
+      await expect(ratio).toBeGreaterThanOrEqual(glyph.querySelector('svg') === null ? 4.5 : 3);
+    }
 
     // The public link, and a button that copies it.
     await expect(canvas.getByText(PUBLIC_LINK)).toBeVisible();
@@ -166,5 +179,26 @@ export const CopiedAfterPress: Story = {
     });
     await expect(copied.getBoundingClientRect().left).toBe(before.words.left);
     await expect(words.getBoundingClientRect().width).toBe(before.words.width);
+  },
+};
+
+export const LongGreetingOnAPhone: Story = {
+  name: 'Long greeting on a phone',
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: { text: 'Good morning, Maximiliana', link: { label: PUBLIC_LINK, onCopy: fn() } },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No reference board draws Today's greeting on a phone with a long name. The nearest is N-Today-Run1, at the canvas's width; on a phone a long name takes the greeting's second line, and the link drops under it.",
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(390);
+    // The greeting balances its lines, as page titles do: the name whole on the second, nothing cut.
+    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maximiliana' });
+    expectComputed(heading, { textWrapStyle: 'balance' });
+    await expect(lineWords(heading)).toEqual([['Good', 'morning,'], ['Maximiliana']]);
+    await expect(heading.getBoundingClientRect().height).toBe(2 * 44);
+    await expect(canvas.getByRole('button', { name: 'Copy your Desk link' }).getBoundingClientRect().top).toBeGreaterThan(heading.getBoundingClientRect().bottom);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };

@@ -12,6 +12,7 @@
 - `title` and `who` as the check describes the situation: "A visitor asks for 10% off if they pay cash", "A visitor, not verified".
 - `outcome`, `dependsOnReview` and `reason` from the probe's result: `outcome`, `depends_on_review` and the kernel's `reason_plain`, as written.
 - `matches`: false when the outcome isn't the one the setup interview planned.
+- `index`, the row's place in the list from 0, and `live`, for situations the owner just had tried: they land one by one, as the safety check's tricks do. Leave `live` off for results the owner didn't just ask for, such as a step opened by a reload (its situations are tried again, but drawn still), and clear it once the rows have landed, so nothing replays them.
 - Put each row in a list item, in a list named by the step ("Real situations"), inside a card padded 16 px.
 
 ## What it shows
@@ -33,8 +34,15 @@
 - Below 560 px of row width, as on a phone, the outcome and reason drop under who is asking, 8 px under it, from the same edge.
 - One line on each side: 69 px with the hairline.
 
+## Motion
+
+- Live rows land one by one, in the order tried, as a `SafetyCheckRow` does: each rises `space-4` and fades in over `motion-base` on `motion-ease-emphasis`, `motion-stagger` after the one before it (`index` × `motion-stagger`), the first at once, its dot growing from half size with it.
+- A row that isn't live is drawn still.
+- Under reduced motion every row is there at once, its dot whole.
+
 ## Accessibility
 
+- The rows are in the page from the start, only faded while they land, so a screen reader reads them all in order.
 - The dot and the bar are decoration beside words that say the same thing. The dot is `aria-hidden`.
 - The words read in order: the situation, who is asking, any "Not what we planned", the outcome, the reason.
 
@@ -48,3 +56,5 @@
 | `dependsOnReview` | `boolean` | Required. The probe's `depends_on_review`; it sets the second-look words and dot, whatever `outcome` is. |
 | `reason` | `string` | Required. The kernel's `reason_plain`. |
 | `matches` | `boolean` | Required. False adds "Not what we planned". |
+| `index` | `number` | The row's place, from 0, which sets when a live row lands. Default `0`. |
+| `live` | `boolean` | The situation was just tried: the row lands. Default `false`, drawn still. |

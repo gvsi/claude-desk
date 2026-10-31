@@ -68,7 +68,7 @@ function shortForm(briefing: Today['briefing']): BriefingItem[] {
 export function SinceLastNight() {
   const { desk } = useOwnerDesk();
   const deskId = desk.desk_id;
-  const today = useToday(deskId);
+  const today = useToday(deskId, { retryOnMount: false });
   const titleId = useId();
   const briefing = today.data?.briefing;
   const replayed = today.data?.recorded_history?.briefing === true;
