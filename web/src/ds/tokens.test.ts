@@ -116,12 +116,14 @@ describe('design tokens', () => {
 
   test('mark_tokens_match_the_signed_mark', () => {
     // The mark's fixed colors, the same in every theme: its white tile and the tile's hairline edge,
-    // the clay of the bell's dome and the black ink. They are the favicon's own colors
+    // the clay of the bell's dome, the drawing's dark ink, and the light ink the bell is drawn in on
+    // the dark grounds, where it has no tile. They are the drawing's and the tab icon's own colors
     // (scripts/gen-mark.test.mjs), and nothing but the mark uses them (guards.test.ts).
     const expected = {
       'mark-tile': '#ffffff',
       'mark-clay': '#d97757',
       'mark-ink': '#141413',
+      'mark-ink-light': '#faf9f5',
       'mark-hairline': 'rgba(20,20,19,0.1)',
     };
     const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
@@ -303,9 +305,13 @@ describe('design tokens', () => {
     const marks = ['accent-blue', 'ring-composer', 'status-handled', 'status-held', 'status-refused', 'status-info'];
     add(marks, ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'], 3);
     add(marks, ['fill-card'], 3, 'bg-app');
-    // The mark: its tile on the app and the sidebar, and its drawing on the tile, the ink where it
-    // crosses the clay dome included.
-    add(['mark-tile'], ['bg-app', 'bg-panel'], 3);
+    // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone
+    // top bar, and the intro dialog's surface; its dark ink on the intro illustration's light card.
+    add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3);
+    add(['mark-ink'], ['illustration-card'], 3);
+    // The mark with its tile, on the About pages' top bar: the tile on the app, and its drawing on
+    // the tile, the ink where it crosses the clay dome included.
+    add(['mark-tile'], ['bg-app'], 3);
     add(['mark-ink', 'mark-clay'], ['mark-tile'], 3);
     add(['mark-ink'], ['mark-clay'], 3);
     // The switch: its track when on, its knob on the track, on or off.
@@ -314,8 +320,7 @@ describe('design tokens', () => {
     add(['text-secondary'], ['fill-secondary'], 3, 'bg-panel');
     // The switch row's label and description while it is hovered in the sidebar.
     add(['text-primary', 'text-secondary'], ['fill-hover'], 4.5, 'bg-panel');
-    // The first-visit intro dialog: the mark on its surface and the passcode in its field.
-    add(['mark-tile'], ['bg-surface'], 3);
+    // The first-visit intro dialog: the passcode in its field.
     add(['text-primary'], ['fill-card'], 4.5, 'bg-surface');
     // The intro illustration's light cards: their text, the initials, the check and receipt dots.
     add(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5);

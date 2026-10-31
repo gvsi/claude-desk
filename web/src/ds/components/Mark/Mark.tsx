@@ -2,21 +2,48 @@ import { MARK_GEOMETRY } from './markGeometry.ts';
 
 import './Mark.css';
 
-export interface MarkProps {
-  /** Drawn size in px; 20 (the default) in the sidebar, 16 at the smallest, 32 alone in an avatar's place on the intro illustration's reply card. */
-  size?: 16 | 20 | 24 | 32;
-}
+export type MarkProps = {
+  /**
+   * Drawn size in px: 20 (the default) in the top bars and beside a name, 16 in "Powered by Claude
+   * Desk", 32 alone in an avatar's place on the intro illustration's reply card, 36 in the sidebar's
+   * lockup.
+   */
+  size?: 16 | 20 | 24 | 32 | 36;
+} & (
+  | {
+      /**
+       * The ground under the bell, which has no tile: `dark` (the default, every ground in the app)
+       * draws its ink light; `light` keeps the drawing's dark ink, as on the intro illustration's
+       * light card.
+       */
+      ground?: 'dark' | 'light';
+      tile?: false;
+    }
+  | {
+      /** The white tile behind the bell, with the drawing's dark ink: only on the About pages' top bar. */
+      tile: true;
+      ground?: never;
+    }
+);
 
 /**
- * The Claude Desk mark: a hand-drawn service bell on a white tile, drawn from `MARK_GEOMETRY` in the
- * mark's fixed colors. Decorative (`aria-hidden`): it always sits beside the name written out, in
- * the `Wordmark` or "Powered by Claude Desk".
+ * The Claude Desk mark: a hand-drawn service bell, drawn from `MARK_GEOMETRY` in the mark's fixed
+ * colors. With no tile, its clay dome under ink lines that are light on a dark ground and dark on a
+ * light one; with `tile`, on its white tile in the drawing's own colors. Decorative (`aria-hidden`):
+ * it always sits beside the name written out, in the `Wordmark` or "Powered by Claude Desk".
  */
-export function Mark({ size = 20 }: MarkProps) {
-  const { viewBox, tile, art, clay, ink } = MARK_GEOMETRY;
+export function Mark({ size = 20, ground = 'dark', tile = false }: MarkProps) {
+  const { viewBox, tile: tileShape, art, clay, ink } = MARK_GEOMETRY;
   return (
-    <svg className="cd-mark" aria-hidden="true" focusable="false" width={size} height={size} viewBox={viewBox}>
-      <rect className="cd-mark__tile" {...tile} />
+    <svg
+      className={`cd-mark cd-mark--${tile ? 'tile' : ground}`}
+      aria-hidden="true"
+      focusable="false"
+      width={size}
+      height={size}
+      viewBox={viewBox}
+    >
+      {tile ? <rect className="cd-mark__tile" {...tileShape} /> : null}
       <g transform={art}>
         <g className="cd-mark__clay">
           {clay.map((d, index) => (

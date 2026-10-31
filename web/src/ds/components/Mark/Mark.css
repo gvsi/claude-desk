@@ -1,7 +1,9 @@
-/* The Claude Desk mark: a white tile with a hairline edge, a clay dome and black ink. These are the
-   mark's fixed colors (the mark-* tokens), the same in every theme, and nothing else uses them. The
-   fills are set here, not as SVG attributes, because presentation attributes can't read custom
-   properties. */
+/* The Claude Desk mark: a clay dome under ink lines, with no tile. On the dark grounds the ink is
+   light (mark-ink-light); on a light ground it keeps the drawing's dark ink (mark-ink). Only the
+   About pages' top bar draws the white tile (mark-tile, with its mark-hairline edge), and on it the
+   ink is the drawing's dark ink. These are the mark's fixed colors, the same in every theme, and
+   nothing else uses them. The fills are set here, not as SVG attributes, because presentation
+   attributes can't read custom properties. */
 
 .cd-mark {
   display: block;
@@ -17,7 +19,12 @@
   fill: var(--mark-clay);
 }
 
-.cd-mark__ink {
+.cd-mark--dark .cd-mark__ink {
+  fill: var(--mark-ink-light);
+}
+
+.cd-mark--light .cd-mark__ink,
+.cd-mark--tile .cd-mark__ink {
   fill: var(--mark-ink);
 }
 

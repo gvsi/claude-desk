@@ -259,8 +259,8 @@ function Illustration() {
       </div>
 
       <div className="cd-intro__card">
-        {/* The mark alone in an avatar's place: its own white tile, with no frame around it. */}
-        <Mark size={32} />
+        {/* The mark alone in an avatar's place: no tile and no frame, in its dark ink on the light card. */}
+        <Mark size={32} ground="light" />
         <div className="cd-intro__card-body cd-intro__card-body--reply">
           <p className="cd-intro__who cd-type-body">
             Rivera Plumbing <span className="cd-intro__where cd-type-caption">Claude, an AI</span>

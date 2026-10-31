@@ -339,7 +339,8 @@ function DocumentSwitch({ current, compact }: { current: AboutId; compact: boole
 function Brand() {
   return (
     <span className="cd-about-brand">
-      <Mark />
+      {/* The one place the mark keeps its white tile. */}
+      <Mark tile />
       <Wordmark beta />
     </span>
   );

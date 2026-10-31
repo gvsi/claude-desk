@@ -131,6 +131,33 @@ const MARK_FOLDER = 'ds/components/Mark/';
 const CLAY_FOLDER = 'ds/components/IntroDialog/';
 const COLOR_TABLES = ['ds/tokens.json', 'ds/tokens.css', 'ds/contrast.ts', 'ds/tokens.test.ts', 'ds/guards.test.ts'];
 
+// The mark's white tile: only the About pages' top bar draws it (owner, 2026-10-30), and the design
+// system's stories show it. A JSX `<Mark>` (or the name a file imports it under) that passes `tile`, or
+// a spread that could carry it, counts as a use.
+const MARK_IMPORT_ALIAS = /\bMark\s+as\s+([A-Za-z_$][\w$]*)/g;
+const TILE_ATTRIBUTE = /\stile\b|\{\s*\.\.\./;
+
+/** The tag names `text` draws the mark under: `Mark`, and any name it imports `Mark` as. */
+function markNames(text: string): string[] {
+  return ['Mark', ...[...text.matchAll(MARK_IMPORT_ALIAS)].map((m) => m[1] ?? '')];
+}
+
+/** Each `<Mark …>` opening tag in a source that passes `tile` or spreads its props, as "file: tag". */
+function markTiles(scanned: Source[]): string[] {
+  return scanned.flatMap(({ file, text }) =>
+    markNames(text).flatMap((name) =>
+      [...text.matchAll(new RegExp(String.raw`<${name}(?![\w$.])${TAG_PART}*>`, 'g'))]
+        .filter((m) => TILE_ATTRIBUTE.test(m[0].slice(name.length + 1)))
+        .map((m) => `${file}: ${m[0].replace(/\s+/g, ' ')}`),
+    ),
+  );
+}
+
+/** The files that may draw the mark's tile: the About pages, and the design system's stories. */
+function mayDrawTheMarkTile(file: string): boolean {
+  return file.startsWith('about/') || (file.startsWith('ds/') && /\.stories\.tsx$/.test(file));
+}
+
 /** Every text file under `src/` but this one and the color tables, read. */
 function everyTextFile(): Source[] {
   return everyFileButThisOne()
@@ -415,6 +442,32 @@ describe('app source guards', () => {
     expect(functionBody(hook?.text ?? '', 'openStatusDelayMs'), 'openStatusDelayMs is in useOpenStatus.ts').not.toBeNull();
     const reducer = visitor.find((s) => s.file === 'public/chatReducer.ts');
     expect(functionBody(reducer?.text ?? '', 'ownerTypingDelayMs'), 'ownerTypingDelayMs is in chatReducer.ts').not.toBeNull();
+  });
+
+  it('mark_tile_only_on_the_about_top_bar', () => {
+    // The matcher, on known samples first: the prop however it is written, under an imported name,
+    // and a spread that could carry it; not another prop, a longer tag name or another component's.
+    expect(markTiles(sample('<Mark tile />'))).toEqual(['sample.tsx: <Mark tile />']);
+    expect(markTiles(sample('<Mark size={20}\n  tile={true} />'))).toHaveLength(1);
+    expect(markTiles(sample("import { Mark as Bell } from '../ds/index.ts'; <Bell tile />"))).toEqual(['sample.tsx: <Bell tile />']);
+    expect(markTiles(sample('<Mark {...props} />'))).toHaveLength(1);
+    expect(markTiles(sample('<Mark size={32} ground="light" /> <Mark /> <MarkBanner tile /> <Tile tile />'))).toEqual([]);
+    // A word that only starts with the prop's name, and an arrow's `>` inside a braced value, are not it.
+    expect(markTiles(sample('<Mark key={tiles.length} onClick={() => open(tiles)} />'))).toEqual([]);
+    expect(markTiles(sample('<Mark onClick={() => setOpen(true)} tile />'))).toHaveLength(1);
+    // The allowlist: the About pages and the design system's stories, nothing else.
+    expect(mayDrawTheMarkTile('about/ReaderPage.tsx')).toBe(true);
+    expect(mayDrawTheMarkTile('ds/components/Mark/Mark.stories.tsx')).toBe(true);
+    expect(mayDrawTheMarkTile('ds/components/Sidebar/Sidebar.tsx')).toBe(false);
+    expect(mayDrawTheMarkTile('ds/boards/parts.tsx')).toBe(false);
+    expect(mayDrawTheMarkTile('owner/OwnerLayout.tsx')).toBe(false);
+    expect(mayDrawTheMarkTile('aboutness/Page.tsx')).toBe(false);
+
+    // Every TypeScript file under src/, the design system included. The About top bar does draw it,
+    // so the matcher reads the code as it is written, and nothing else does.
+    const code = everyTextFile().filter(({ file }) => /\.tsx?$/.test(file));
+    expect(markTiles(code.filter(({ file }) => file === 'about/ReaderPage.tsx'))).toEqual(['about/ReaderPage.tsx: <Mark tile />']);
+    expect(markTiles(code.filter(({ file }) => !mayDrawTheMarkTile(file)))).toEqual([]);
   });
 
   it('mark_and_clay_colors_stay_in_their_components', () => {

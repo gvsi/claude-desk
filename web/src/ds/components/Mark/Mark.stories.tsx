@@ -16,10 +16,53 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-const SIZES = [16, 20, 24, 32] as const;
+const SIZES = [16, 20, 24, 32, 36] as const;
+
+const DARK_INK = 'rgb(20, 20, 19)';
+const LIGHT_INK = 'rgb(250, 249, 245)';
+
+/**
+ * Checks one drawn mark: decorative, on the drawing's grid, with or without its tile, and the bell
+ * inside it exactly as the drawing has it (the clay dome, then the ink over it) in `ink`.
+ */
+async function expectMark(mark: SVGSVGElement, { tile, ink }: { tile: boolean; ink: string }) {
+  await expect(mark).toHaveAttribute('aria-hidden', 'true');
+  await expect(mark).toHaveAttribute('focusable', 'false');
+  await expect(mark).toHaveAttribute('viewBox', '0 0 100 100');
+  const art = mark.querySelector(':scope > g');
+  await expect([...mark.children].map((child) => child.tagName)).toEqual(tile ? ['rect', 'g'] : ['g']);
+  const groups = [...(art?.children ?? [])].map((group) => group.getAttribute('class'));
+  await expect(groups).toEqual(['cd-mark__clay', 'cd-mark__ink']);
+  const clay = art?.querySelector(':scope > .cd-mark__clay');
+  const inkGroup = art?.querySelector(':scope > .cd-mark__ink');
+  await expect(art).toHaveAttribute('transform', MARK_GEOMETRY.art);
+  expectComputed(clay as Element, { fill: 'rgb(217, 119, 87)' });
+  expectComputed(inkGroup as Element, { fill: ink });
+  // The one clay blob, and the six ink strokes with a round dot at both ends of each, exactly as
+  // the drawing has them and in its order.
+  const number = (shape: Element, name: string) => Number(shape.getAttribute(name));
+  await expect([...(clay?.children ?? [])].map((shape) => shape.getAttribute('d'))).toEqual([...MARK_GEOMETRY.clay]);
+  const drawn = [...(inkGroup?.children ?? [])].map((shape) =>
+    shape.tagName === 'path' ? { d: shape.getAttribute('d') } : { cx: number(shape, 'cx'), cy: number(shape, 'cy'), r: number(shape, 'r') },
+  );
+  await expect(drawn).toEqual(MARK_GEOMETRY.ink);
+  await expect(inkGroup?.querySelectorAll(':scope > path')).toHaveLength(6);
+  await expect(inkGroup?.querySelectorAll(':scope > circle')).toHaveLength(12);
+  if (tile) {
+    // The white tile with its hairline edge, behind the bell.
+    const rect = mark.querySelector(':scope > rect.cd-mark__tile') as Element;
+    expectComputed(rect, { fill: 'rgb(255, 255, 255)', stroke: 'rgba(20, 20, 19, 0.1)' });
+    await expect(Object.fromEntries(Object.keys(MARK_GEOMETRY.tile).map((name) => [name, number(rect, name)]))).toEqual(
+      MARK_GEOMETRY.tile,
+    );
+  }
+}
 
 export const Mark: Story = {
-  parameters: { canvasNote: 'N-Today-Run1 draws the earlier counter mark; the bell (N-Explore-Mark-Bell, signed 2026-10-30) replaced it.' },
+  parameters: {
+    canvasNote:
+      'N-Today-Run1 draws the earlier counter mark. The bell (N-Explore-Mark-Bell) replaced it, drawn without its tile in its light ink on the dark grounds (N-Explore-Mark-Decided, signed 2026-10-30).',
+  },
   render: () => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-16)' }}>
       {SIZES.map((size) => (
@@ -29,40 +72,39 @@ export const Mark: Story = {
   ),
   play: async ({ canvasElement }) => {
     const marks = [...canvasElement.querySelectorAll<SVGSVGElement>('svg.cd-mark')];
-    await expect(marks.map((mark) => mark.getAttribute('width'))).toEqual(['16', '20', '24', '32']);
-    for (const mark of marks) {
-      await expect(mark).toHaveAttribute('aria-hidden', 'true');
-      await expect(mark).toHaveAttribute('focusable', 'false');
-      await expect(mark).toHaveAttribute('viewBox', '0 0 100 100');
-      // The white tile with its hairline edge, then the bell inside it: the clay dome, then the ink
-      // drawn over it, in the mark's fixed colors.
-      const tile = mark.querySelector(':scope > rect.cd-mark__tile');
-      const art = mark.querySelector(':scope > g');
-      const groups = [...(art?.children ?? [])].map((group) => group.getAttribute('class'));
-      await expect(groups).toEqual(['cd-mark__clay', 'cd-mark__ink']);
-      const clay = art?.querySelector(':scope > .cd-mark__clay');
-      const ink = art?.querySelector(':scope > .cd-mark__ink');
-      await expect(tile).not.toBeNull();
-      await expect(art).toHaveAttribute('transform', MARK_GEOMETRY.art);
-      expectComputed(tile as Element, { fill: 'rgb(255, 255, 255)', stroke: 'rgba(20, 20, 19, 0.1)' });
-      expectComputed(clay as Element, { fill: 'rgb(217, 119, 87)' });
-      expectComputed(ink as Element, { fill: 'rgb(20, 20, 19)' });
-      // The tile, the one clay blob, and the six ink strokes with a round dot at both ends of each,
-      // exactly as the drawing has them and in its order.
-      const number = (shape: Element, name: string) => Number(shape.getAttribute(name));
-      await expect(Object.fromEntries(Object.keys(MARK_GEOMETRY.tile).map((name) => [name, number(tile as Element, name)]))).toEqual(
-        MARK_GEOMETRY.tile,
-      );
-      await expect([...(clay?.children ?? [])].map((shape) => shape.getAttribute('d'))).toEqual([...MARK_GEOMETRY.clay]);
-      const drawn = [...(ink?.children ?? [])].map((shape) =>
-        shape.tagName === 'path'
-          ? { d: shape.getAttribute('d') }
-          : { cx: number(shape, 'cx'), cy: number(shape, 'cy'), r: number(shape, 'r') },
-      );
-      await expect(drawn).toEqual(MARK_GEOMETRY.ink);
-      await expect(ink?.querySelectorAll(':scope > path')).toHaveLength(6);
-      await expect(ink?.querySelectorAll(':scope > circle')).toHaveLength(12);
-    }
+    await expect(marks.map((mark) => mark.getAttribute('width'))).toEqual(['16', '20', '24', '32', '36']);
+    // mark_has_no_tile_on_a_dark_ground: no tile, and the drawing's ink drawn light.
+    for (const mark of marks) await expectMark(mark, { tile: false, ink: LIGHT_INK });
+  },
+};
+
+export const OnALightGround: Story = {
+  parameters: {
+    canvasNote:
+      "N-Explore-Mark-Decided (signed 2026-10-30) draws the bell on a light ground in the drawing's dark ink, with no tile: the intro illustration's reply card.",
+  },
+  render: () => (
+    <div style={{ display: 'inline-flex', padding: 'var(--space-16)', borderRadius: 'var(--radius-card)', background: 'var(--illustration-card)' }}>
+      <DeskMark size={32} ground="light" />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const mark = canvasElement.querySelector<SVGSVGElement>('svg.cd-mark') as SVGSVGElement;
+    // mark_on_a_light_ground_keeps_the_dark_ink
+    await expectMark(mark, { tile: false, ink: DARK_INK });
+  },
+};
+
+export const WithTile: Story = {
+  parameters: {
+    canvasNote: "N-Explore-Mark-Decided (signed 2026-10-30) keeps the white tile only on the About pages' top bar.",
+  },
+  render: () => <DeskMark tile />,
+  play: async ({ canvasElement }) => {
+    const mark = canvasElement.querySelector<SVGSVGElement>('svg.cd-mark') as SVGSVGElement;
+    // mark_tile_keeps_the_dark_ink: the tile, then the bell in the drawing's own colors.
+    await expect(mark.getAttribute('width')).toBe('20');
+    await expectMark(mark, { tile: true, ink: DARK_INK });
   },
 };
 

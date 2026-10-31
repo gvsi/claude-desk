@@ -228,6 +228,22 @@ describe('ReaderPage', () => {
     }
   });
 
+  it('top_bar_mark_keeps_its_white_tile', async () => {
+    // The About pages' top bar is the one place the Claude Desk mark keeps its white tile, with the
+    // drawing's dark ink on it (owner, 2026-10-30); everywhere else the bell has no tile.
+    for (const size of [DESKTOP, PHONE]) {
+      const where = `at ${size.width}`;
+      const screen = await renderReader('proposal', { size });
+      const mark = screen.container.querySelector('header svg.cd-mark');
+      expect(mark, where).not.toBeNull();
+      const tile = mark?.querySelector(':scope > rect');
+      expect(tile, where).not.toBeNull();
+      expect(getComputedStyle(tile as Element).fill, where).toBe('rgb(255, 255, 255)');
+      expect(getComputedStyle(mark?.querySelector(':scope > g > g:last-child') as Element).fill, where).toBe('rgb(20, 20, 19)');
+      await screen.unmount();
+    }
+  });
+
   it('reader_chrome_has_no_jargon', async () => {
     /** A copy of `el` without the parts the documents' words fill: the jargon check reads only the page's own. */
     const without = (el: Element | null | undefined, selector: string): HTMLElement => {

@@ -25,8 +25,8 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Use `accent-blue` only for links, the focus ring and selection. Never put text on it and never use it as decoration.
 - Show status only as a `size-dot` dot or a thin bar in `status-handled` (handled or allowed), `status-held` (held, needs you), `status-refused` (refused or blocked) or `status-info` (a hollow dot), always beside words that say the same thing. Never a colored tile, a filled badge or colored text.
 - Use `clay` only as the field behind the first-visit intro's illustration.
-- The Claude Desk mark has its own fixed colors, the same in every theme: `mark-tile`, `mark-clay`, `mark-ink` and `mark-hairline`. Nothing else uses them, and its white tile is part of the mark, not a light surface.
-- The intro illustration's cards (`illustration-card`, with `illustration-ink`, `illustration-ink-secondary`, `illustration-avatar`, `illustration-line` and `illustration-handled`) are one of the product's two light surfaces. They are decorative and hidden from assistive tech, and nothing else uses these colors.
+- The Claude Desk mark has its own fixed colors, the same in every theme: `mark-clay`, `mark-ink`, `mark-ink-light`, `mark-tile` and `mark-hairline`. Nothing else uses them. The bell has no tile: on the dark grounds its ink is `mark-ink-light`, and on a light ground it keeps the drawing's dark ink, `mark-ink`. Only the About pages' top bar draws it on its white tile, `mark-tile`, with a `mark-hairline` edge.
+- The product's light surfaces are the intro illustration's cards, a QR code's quiet zone, the mark's tile on the About pages and a connector's brand tile (below), and no others. The cards (`illustration-card`, with `illustration-ink`, `illustration-ink-secondary`, `illustration-avatar`, `illustration-line` and `illustration-handled`) are decorative and hidden from assistive tech, and nothing else uses these colors; the mark sits on them in its dark ink, with no tile. A QR code draws its own light quiet zone, which it needs to scan.
 - A connector's brand tile is the one light surface besides the intro illustration's cards: a third-party connector (Stripe, Google Calendar) shows its own mark on `connector-tile-brand`, in its brand's colors (`connector-stripe`, `connector-google-blue`), always beside its name and its Mock badge. The tile is decorative and hidden from assistive tech, nothing is read on it, and nothing else uses these colors. Built-in connectors keep the line icons on `fill-secondary`.
 
 ### Brand colors on the public page
@@ -76,7 +76,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 ## Iconography
 
 - Use 20 px (`size-icon`) line icons with a 1.5 px effective stroke in the current text color. No filled icons, no emoji, no sparkles or other "AI" glyphs.
-- The Claude Desk mark, a hand-drawn service bell on a white tile (a clay dome under black ink), is the only mark, and its colors are used nowhere else. Never use a Claude or Anthropic logo.
+- The Claude Desk mark, a hand-drawn service bell (a clay dome under ink lines, with no tile), is the only mark, and its colors are used nowhere else. Never use a Claude or Anthropic logo.
 - Render initials avatars and monograms `aria-hidden`, beside the name written out as text.
 
 ## Accessibility
@@ -130,7 +130,7 @@ Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 | `fill-hover` over `bg-app` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 | `fill-card` over `bg-panel` | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
 
-The mark's tile, `mark-tile`, reads 17.2 on `bg-app`, 15.9 on `bg-panel` and 14.5 on `bg-surface` (the intro dialog). On the tile, `mark-ink` reads 18.4 and `mark-clay` 3.1, and the ink reads 5.9 where it crosses the clay.
+The mark is a logo beside its written name, and its ink outline carries it. With no tile, `mark-ink-light` reads 16.3 on `bg-app`, 15.1 on `bg-panel` and 13.8 on `bg-surface` (the intro dialog), and the `mark-clay` dome 5.5, 5.1 and 4.7. On the intro illustration's light card, `mark-ink` reads 17.5. Two parts of the drawing fall just under 3:1, and are recorded here rather than listed as pairs: the light ink where it crosses the dome reads 2.96, and the dome on the light card 2.96; in both places the ink's outline (13.8 and up, and 17.5) sets the bell off its ground. On its tile, on the About pages' top bar, `mark-tile` reads 17.2 on `bg-app`, `mark-ink` 18.4 and `mark-clay` 3.1 on the tile, and the dark ink reads 5.9 where it crosses the clay.
 
 `line-field`, a text field's outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1), and 3.2 on `fill-card` over `bg-app`, where it outlines an inline `CopyField`'s value in a card.
 
