@@ -14,7 +14,7 @@ import { DEMO_CODE } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { aPollPasses, closedInboxReads, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -363,13 +363,14 @@ describe('Demo inbox', () => {
     const open = screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
     await expect.element(open).toBeVisible();
     expect(open.element().closest('.cd-today-aside')).not.toBeNull();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    const closedReads = closedInboxReads(sheet);
     expect(requests('ownerInbox')).toHaveLength(1);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(requests('ownerInbox')).toHaveLength(1);
+    await aPollPasses();
+    expect(closedReads()).toBe(0);
 
     // It opens as a sheet at the right, over Today, focus on Close.
     await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
     await expect.element(sheet.getByText(alert.body)).toBeVisible();
     await expect.element(sheet.getByText('Alert', { exact: true }).first()).toBeVisible();
     await expect.element(sheet.getByText('To owner').first()).toBeVisible();
@@ -386,9 +387,8 @@ describe('Demo inbox', () => {
     await userEvent.keyboard('{Escape}');
     await expect.element(sheet).not.toBeInTheDocument();
     await expect.element(open).toHaveFocus();
-    const reads = requests('ownerInbox').length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(requests('ownerInbox')).toHaveLength(reads);
+    await aPollPasses();
+    expect(closedReads()).toBe(0);
     // Its own codes stay the visitor's: the owner's inbox never calls the visitor's read.
     expect(requests('visitorInbox')).toEqual([]);
   });

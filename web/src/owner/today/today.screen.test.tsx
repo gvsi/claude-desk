@@ -21,7 +21,7 @@ import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
+import { aPollPasses, closedInboxReads, expectNoWindowScroll, expectScreenBasics, focusIsOn, nextFrames } from '../../test/screen.ts';
 import { watchFor, watchPages } from '../../test/watch.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
@@ -1035,9 +1035,6 @@ describe("Today's Demo inbox", () => {
   /** The owner's read of one decision, as the app sends it. */
   const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
 
-  /** Two animation frames: long enough for a navigation's transition to be drawn. */
-  const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-
   /** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
   function failReads(path: string): { count: () => number; stop: () => void } {
     let failing = true;
@@ -1062,28 +1059,6 @@ describe("Today's Demo inbox", () => {
     const box = el.getBoundingClientRect();
     expect(box.top).toBeGreaterThanOrEqual(0);
     expect(box.top).toBeLessThan(window.innerHeight);
-  }
-
-  /**
-   * Counts the Demo inbox reads the app sends from now on while the sheet isn't on the page, each
-   * as it is sent: a read sent while the sheet was open isn't one, however late the mock gets it.
-   */
-  function closedInboxReads(sheet: Locator): () => number {
-    const send = window.fetch;
-    let count = 0;
-    const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
-      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
-      if (url.pathname === ROUTES.ownerInbox.path && sheet.elements().length === 0) count += 1;
-      return send(input, init);
-    });
-    onTestFinished(() => sending.mockRestore());
-    return () => count;
-  }
-
-  /** A whole poll of the Demo inbox's, then two frames: a sheet still polling would have read by then. */
-  async function aPollPasses(): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, pollMs('inbox')));
-    await nextFrames();
   }
 
   /** Settles once the app has an answer to its next Demo inbox read and has taken it in. */
