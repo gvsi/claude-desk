@@ -17,12 +17,13 @@
 - A rejected `onSubmit` promise is ignored: the page reports failures through `error`.
 - With `error`, an error `Notice` (`role="alert"`) under the field gives the line from `INTRO_ERROR_COPY`. The field gets `aria-invalid="true"` and its `aria-describedby` names the line. The line isn't shown while `busy`, so every failure is a new alert and is announced, even when the page leaves `error` set to the same code through a retry. When a line appears, the field takes focus with its text selected, ready to type over. The code itself never appears in the page, and a code this build doesn't know reads as `unreachable`.
 - It is the first visit's one moment. The panel arrives (`opacity` 0 to 1 and `scale(0.98)` to 1, `motion-base`, `motion-ease-emphasis`), then the illustration plays its conversation once, in about 1.1 s: Dana's card rises 6 px and fades in at 290 ms, Claude's card follows at 600 ms, the booking's check draws (`motion-base`, as on the board) at 860 ms, and the two receipts tick in from 4 px to the left at 1000 and 1150 ms, `motion-stagger` apart. Every start is a sum of motion tokens. The content column doesn't move, and the passcode field has focus from the first frame. This is the illustration's own conversation, not a page-entrance cascade: the page around it stays still.
-- Under reduced motion none of it runs: the dialog appears with the illustration already whole, the check drawn. The button's own transitions stop too.
+- With `leaving`, the passcode worked and the next page is ready, so the dialog lets go of it in `motion-fast` (`motion-ease`): the scrim fades to clear and the panel goes to `opacity` 0 and `scale(0.98)`. While it leaves it is still starting the demo: the spinner and the status line stay, and nothing more is sent. It closes the native dialog when the scrim's fade ends (`animationend`), then calls `onClosed` once. It can never stay open: with no exit to run it closes at once, and if the animation's end never reaches it, a timer closes it after the exit's length plus `motion-instant`. Once set, `leaving` stays set. A wrong passcode never starts it: only the page knows the passcode worked.
+- Under reduced motion none of it runs: the dialog appears with the illustration already whole, the check drawn, and on `leaving` it closes at once, before a frame of the exit is drawn. The button's own transitions stop too.
 
 ## What the consumer provides
 
 - `title`, `intro`, `thingsToTry` and `submitLabel`, as in the stories. An item without an `icon` shows none.
-- `onSubmit`: send the passcode to the API's passcode route, with `busy` on while it runs. On failure set `error`: a wrong passcode is `wrong_passcode`, too many tries is `rate_limited`, and a network failure or server error is `unreachable`. On success, take the dialog away.
+- `onSubmit`: send the passcode to the API's passcode route, with `busy` on while it runs. On failure set `error`: a wrong passcode is `wrong_passcode`, too many tries is `rate_limited`, and a network failure or server error is `unreachable`. On success, once the next page is ready to draw at once, set `leaving`, and go on to that page from `onClosed`, so the dialog lets go of it rather than vanishing in one frame.
 - Render it outside the inert preview of Today, not inside it. A modal dialog escapes an inert page and its Tab order still works there, but an `aria-hidden` wrapper would hide it from assistive tech.
 - Nothing fetches here.
 
@@ -55,3 +56,5 @@
 | `onSubmit` | `(passcode: string) => Promise<void>` | Required. Called once per submit with the trimmed passcode. |
 | `busy` | `boolean` | The demo is starting: the busy spinner, and "Starting the demo" in the status line. |
 | `error` | `IntroErrorCode` | `'wrong_passcode' \| 'rate_limited' \| 'unreachable'`. |
+| `leaving` | `boolean` | The passcode worked and the next page is ready: the dialog leaves and closes. Stays busy while it does. Once set, stays set. |
+| `onClosed` | `() => void` | Called once, when the dialog has closed after `leaving`. |

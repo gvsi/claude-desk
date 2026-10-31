@@ -6,7 +6,7 @@
 import { composeStory } from '@storybook/react-vite';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
 import { CAPS_BADGE } from '../../test/copy.ts';
@@ -17,7 +17,7 @@ import meta, { Default } from './IntroDialog.stories.tsx';
 const story = composeStory({ ...Default, play: undefined }, meta, undefined, 'Default');
 
 /** The Default story with other args, rendered without its play. */
-async function runWith(args: Partial<Omit<IntroDialogProps, 'onSubmit'>>): Promise<HTMLDialogElement> {
+async function runWith(args: Partial<Omit<IntroDialogProps, 'onSubmit' | 'onClosed'>>): Promise<HTMLDialogElement> {
   await composeStory({ ...Default, args, play: undefined }, meta, undefined, 'Default').run();
   expect(document.querySelectorAll('dialog.cd-intro')).toHaveLength(1);
   const dialog = document.querySelector<HTMLDialogElement>('dialog.cd-intro');
@@ -119,6 +119,33 @@ it('the_illustration_is_whole_from_the_start_under_reduced_motion', async () => 
   const check = getComputedStyle(art.querySelector('.cd-intro__check path') as Element);
   expect([check.animationName, check.strokeDasharray, check.strokeDashoffset]).toEqual(['none', 'none', '0px']);
   expect(dialog.getAnimations({ subtree: true })).toEqual([]);
+});
+
+it('the_exit_closes_at_once_under_reduced_motion', async () => {
+  // Under reduced motion there is no exit to wait for: as the page says the passcode worked, the
+  // dialog closes before the browser draws a frame of it leaving, and says so once.
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const onClosed = vi.fn();
+  const props = { ...(meta.args as IntroDialogProps), onClosed };
+  try {
+    flushSync(() => root.render(<IntroDialog {...props} busy />));
+    const dialog = host.querySelector('dialog') as HTMLDialogElement;
+    expect(dialog.open).toBe(true);
+    flushSync(() => root.render(<IntroDialog {...props} leaving />));
+    expect(dialog.classList.contains('cd-intro--leaving')).toBe(true);
+    expect(dialog.open).toBe(false);
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    const panel = dialog.querySelector('.cd-intro__panel') as HTMLElement;
+    expect([getComputedStyle(dialog).animationName, getComputedStyle(panel).animationName]).toEqual(['none', 'none']);
+    // Nothing was left waiting to close it again.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(onClosed).toHaveBeenCalledTimes(1);
+  } finally {
+    root.unmount();
+    host.remove();
+  }
 });
 
 it('an_item_without_icon_or_detail_shows_neither', async () => {

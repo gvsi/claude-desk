@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useLayoutEffect, useState } from 'react';
-import { expect, fn, waitFor, within, type Mock } from 'storybook/test';
+import { expect, fn, spyOn, waitFor, within, type Mock } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
 import { settled } from '../../test/settled.ts';
@@ -47,6 +47,62 @@ function StartingPage(args: IntroDialogProps) {
       }}
     />
   );
+}
+
+/**
+ * The page's side of a passcode that works, as the web app's: busy while it is checked, then, with
+ * the next page ready, the dialog leaves. Like the app, the page stops saying busy once it has.
+ */
+function LeavingPage(args: IntroDialogProps) {
+  const [busy, setBusy] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  return (
+    <IntroDialog
+      {...args}
+      busy={busy}
+      leaving={leaving}
+      onSubmit={async (passcode) => {
+        setBusy(true);
+        await args.onSubmit(passcode);
+        setLeaving(true);
+        setBusy(false);
+      }}
+    />
+  );
+}
+
+/** What the dialog showed the moment it started to leave, before any frame of its exit was drawn. */
+interface AtLeaving {
+  open: boolean;
+  busy: string | null | undefined;
+  status: string | null | undefined;
+  scrim: string[];
+  panel: string[];
+}
+
+/** The animation `el` runs: its name, duration, easing and fill. */
+function runs(el: Element): string[] {
+  const style = getComputedStyle(el);
+  return [style.animationName, style.animationDuration, style.animationTimingFunction, style.animationFillMode];
+}
+
+/** Watches `dialog` until the test ends: what it showed as it started to leave, and when it did. */
+function watchTheExit(dialog: HTMLDialogElement): { at: () => AtLeaving | null; startedAt: () => number; stop: () => void } {
+  let at: AtLeaving | null = null;
+  let startedAt = Number.NaN;
+  const observer = new MutationObserver(() => {
+    if (at !== null || !dialog.classList.contains('cd-intro--leaving')) return;
+    startedAt = performance.now();
+    at = {
+      open: dialog.open,
+      busy: dialog.querySelector('button[type="submit"]')?.getAttribute('aria-busy'),
+      status: dialog.querySelector('[role="status"]')?.textContent,
+      scrim: runs(dialog),
+      panel: runs(the(dialog, '.cd-intro__panel')),
+    };
+  });
+  observer.observe(dialog, { attributes: true, attributeFilter: ['class'] });
+  return { at: () => at, startedAt: () => startedAt, stop: () => observer.disconnect() };
 }
 
 /**
@@ -146,6 +202,7 @@ const meta = {
     ],
     submitLabel: 'Start the demo',
     onSubmit: fn(async () => {}),
+    onClosed: fn(),
   },
   parameters: {
     layout: 'fullscreen',
@@ -433,6 +490,97 @@ export const StartingFlow: Story = {
   },
 };
 
+export const Leaving: Story = {
+  render: (args) => <LeavingPage {...args} />,
+  parameters: {
+    canvasNote: [
+      'N-Intro-D draws the dialog open; the owner signed its exit on the UX craft board UXC-P101-After (2026-10-30): on a passcode that works, the scrim fades to clear and the panel to nothing at 98% in motion-fast, onto Today.',
+      'As in the other stories, the reply card’s mark stands alone at 32 px, where the board draws it in a dark tile.',
+    ].join(' '),
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const dialog = canvas.getByRole('dialog', { name: args.title }) as HTMLDialogElement;
+    await settled(dialog);
+    const exit = watchTheExit(dialog);
+    // Whether the dialog was still open as its own animation ended, seen from the document, so
+    // after the dialog's own handling of the event.
+    const openAsItEnded: boolean[] = [];
+    const watchTheEnd = (event: AnimationEvent) => {
+      if (event.target === dialog) openAsItEnded.push(dialog.open);
+    };
+    document.addEventListener('animationend', watchTheEnd);
+    try {
+      await userEvent.type(canvas.getByLabelText('Passcode'), 'rivera-demo');
+      await userEvent.keyboard('{Enter}');
+      await expect(args.onSubmit).toHaveBeenCalledWith('rivera-demo');
+
+      // leaves_on_a_correct_passcode: once the page says the passcode worked, the dialog leaves,
+      // still open and still starting the demo: the scrim fades to clear and the panel goes, both
+      // in motion-fast.
+      await waitFor(() => expect(exit.at()).not.toBeNull());
+      await expect(exit.at()).toEqual({
+        open: true,
+        busy: 'true',
+        status: 'Starting the demo',
+        scrim: ['cd-intro-clear', '0.12s', 'ease-out', 'forwards'],
+        panel: ['cd-intro-leave', '0.12s', 'ease-out', 'forwards'],
+      });
+
+      // closes_on_animationend: it had closed by the time its exit's animationend passed it, and
+      // said so once.
+      await waitFor(() => expect(dialog.open).toBe(false));
+      await expect(openAsItEnded).toEqual([false]);
+      await expect(args.onClosed).toHaveBeenCalledTimes(1);
+      await expect(args.onSubmit).toHaveBeenCalledTimes(1);
+    } finally {
+      exit.stop();
+      document.removeEventListener('animationend', watchTheEnd);
+    }
+  },
+};
+
+export const LeavingWithoutAnimationEnd: Story = {
+  render: (args) => <LeavingPage {...args} />,
+  parameters: { canvasNote: Leaving.parameters?.canvasNote },
+  play: async ({ args, canvas, userEvent }) => {
+    const dialog = canvas.getByRole('dialog', { name: args.title }) as HTMLDialogElement;
+    await settled(dialog);
+    const exit = watchTheExit(dialog);
+    // The exit's animationend never reaches the dialog, as when a page script swallows it or the
+    // browser drops it.
+    const swallow = (event: AnimationEvent) => {
+      if (event.target === dialog) event.stopImmediatePropagation();
+    };
+    window.addEventListener('animationend', swallow, { capture: true });
+    const timers = spyOn(window, 'setTimeout');
+    let closedAt = Number.NaN;
+    const watchTheClose = new MutationObserver(() => {
+      if (!dialog.open && Number.isNaN(closedAt)) closedAt = performance.now();
+    });
+    watchTheClose.observe(dialog, { attributes: true, attributeFilter: ['open'] });
+    try {
+      await userEvent.type(canvas.getByLabelText('Passcode'), 'rivera-demo');
+      await userEvent.keyboard('{Enter}');
+      await waitFor(() => expect(exit.at()).not.toBeNull());
+      await expect(exit.at()?.open).toBe(true);
+
+      // closes_by_the_fallback: it still closes, and says so once, by a timer set to the exit's
+      // length plus motion-instant, so it can never stay open over the page. It waited for the exit
+      // first rather than cutting it short.
+      await waitFor(() => expect(dialog.open).toBe(false));
+      await expect(args.onClosed).toHaveBeenCalledTimes(1);
+      const [fast, instant] = [motion('fast'), motion('instant')];
+      await expect(timers.mock.calls.map(([, delay]) => delay)).toContain(fast + instant);
+      await expect(closedAt - exit.startedAt()).toBeGreaterThanOrEqual(fast);
+    } finally {
+      exit.stop();
+      watchTheClose.disconnect();
+      timers.mockRestore();
+      window.removeEventListener('animationend', swallow, { capture: true });
+    }
+  },
+};
+
 export const WrongPasscode: Story = {
   args: { error: 'wrong_passcode' },
   render: (args) => <FailingPage {...args} />,
@@ -451,6 +599,16 @@ export const WrongPasscode: Story = {
     await expectErrorOnTheField(canvas, 'wrong_passcode');
     await expect([field.selectionStart, field.selectionEnd]).toEqual([0, 'rivera'.length]);
     await expect(canvas.getByRole('button', { name: 'Start the demo' })).toBeEnabled();
+
+    // a_wrong_passcode_never_leaves: the dialog stays open and still, longer than an exit would
+    // take, and never says it has closed.
+    const dialog = canvas.getByRole('dialog', { name: args.title }) as HTMLDialogElement;
+    await new Promise((resolve) => setTimeout(resolve, (motion('fast') + motion('instant')) * 2));
+    await expect(dialog).not.toHaveClass('cd-intro--leaving');
+    await expect(dialog.open).toBe(true);
+    expectComputed(dialog, { animationName: 'none' });
+    expectComputed(the(dialog, '.cd-intro__panel'), { opacity: '1' });
+    await expect(args.onClosed).not.toHaveBeenCalled();
   },
 };
 

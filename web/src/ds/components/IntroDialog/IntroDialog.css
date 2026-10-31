@@ -351,6 +351,16 @@
   .cd-intro__receipt:nth-child(2) {
     animation-delay: calc(var(--motion-base) * 5 + var(--motion-stagger));
   }
+
+  /* Leaving, on a passcode that works: faster than it arrived, the scrim fades to clear and the
+     panel goes, onto the page under it. The dialog closes when the scrim's fade ends. */
+  .cd-intro.cd-intro--leaving {
+    animation: cd-intro-clear var(--motion-fast) var(--motion-ease) forwards;
+  }
+
+  .cd-intro--leaving .cd-intro__panel {
+    animation: cd-intro-leave var(--motion-fast) var(--motion-ease) forwards;
+  }
 }
 
 @keyframes cd-intro-arrive {
@@ -380,8 +390,22 @@
   }
 }
 
+@keyframes cd-intro-clear {
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes cd-intro-leave {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
 /* Reduced motion: the dialog appears and closes at once, with the illustration already whole. */
 @media (prefers-reduced-motion: reduce) {
+  .cd-intro,
   .cd-intro__panel,
   .cd-intro__card,
   .cd-intro__check path,
