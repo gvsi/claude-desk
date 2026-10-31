@@ -78,6 +78,7 @@ function Line({ message }: { message: SetupMessage }) {
  */
 export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   const composer = useRef<HTMLDivElement>(null);
+  const returnFocus = useRef(false);
   const [consenting, setConsenting] = useState<boolean | null>(null);
   const [consentError, setConsentError] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
@@ -133,6 +134,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
    * been taken. Words a read shows stored are never sent again or put back.
    */
   const submit = async (answer: Answer, again = false) => {
+    returnFocus.current = returnFocus.current || (composer.current?.contains(document.activeElement) ?? false);
     setSending(answer.text);
     setFailed(null);
     try {
@@ -168,6 +170,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
    */
   const retry = async () => {
     if (failed === null || retrying) return;
+    returnFocus.current = composer.current?.contains(document.activeElement) ?? false;
     setRetrying(true);
     const now = await reread();
     setRetrying(false);
@@ -204,9 +207,30 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   useEffect(() => {
     const box = composer.current?.querySelector('textarea');
     if (refill === null || !box || box.disabled) return;
-    fillComposer(box, refill.text);
+    fillComposer(box, refill.text, { focus: false });
     setRefill(null);
   }, [refill, sending, retrying, failed]);
+
+  useEffect(() => {
+    // Disabling the textarea drops focus to the page. An owner's move elsewhere cancels its return,
+    // including a click on text that doesn't itself take focus.
+    const leave = (event: Event) => {
+      if (event.target instanceof Node && !composer.current?.contains(event.target)) returnFocus.current = false;
+    };
+    document.addEventListener('focusin', leave);
+    document.addEventListener('pointerdown', leave);
+    return () => {
+      document.removeEventListener('focusin', leave);
+      document.removeEventListener('pointerdown', leave);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (sending !== null || retrying || !returnFocus.current) return;
+    returnFocus.current = false;
+    // A failed answer replaces the field with "Try again" until it can be settled.
+    composer.current?.querySelector<HTMLElement>('textarea:not(:disabled), button:not(:disabled)')?.focus({ preventScroll: true });
+  }, [sending, retrying, failed]);
 
   return (
     <div className="cd-setup-step">

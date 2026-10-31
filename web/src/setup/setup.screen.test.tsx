@@ -806,6 +806,72 @@ describe('setup', () => {
     expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
   });
 
+  it('keyboard_answer_returns_focus_for_the_next_question', async () => {
+    const { interview_id: id } = await startInterview();
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('Leaks and drains.{Enter}');
+    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(box).toHaveValue('');
+    await expect.element(box).toHaveFocus();
+  });
+
+  it('keyboard_answer_keeps_focus_through_failure_and_retry', async () => {
+    const { interview_id: id } = await startInterview();
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    mockStore.inject({ route: 'setupAnswer', status: 503 });
+    await box.click();
+    await userEvent.keyboard('Leaks and drains.{Enter}');
+    const retry = screen.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(box).toHaveFocus();
+  });
+
+  it('keyboard_refusal_returns_the_words_with_focus', async () => {
+    const { interview_id: id } = await startInterview();
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeVisible();
+    await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: 'what_you_do', text: 'Leaks.' } });
+    await box.click();
+    await userEvent.keyboard('Drains too.{Enter}');
+    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(box).toHaveValue('Drains too.');
+    await expect.element(box).toHaveFocus();
+  });
+
+  it.each(['accepted', 'refused'] as const)('an_%s_answer_does_not_reclaim_focus_the_owner_moved', async (outcome) => {
+    const { interview_id: id } = await startInterview();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    worker.use(http.post(`/api/owner/setup/${id}/answer`, async () => {
+      await gate;
+      return undefined;
+    }, { once: true }));
+    if (outcome === 'refused') mockStore.inject({ route: 'setupAnswer', status: 409 });
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('Leaks and drains.{Enter}');
+    await expect.element(box).toBeDisabled();
+    // Leave for another control while the reply is held, then click the page's text. Even though
+    // focus ends up on the body again, it now belongs to the owner, not the disabled textarea.
+    const exit = screen.getByRole('link', { name: 'Save and exit' });
+    (exit.element() as HTMLElement).focus();
+    await expect.element(exit).toHaveFocus();
+    await screen.getByText('Question 1 of 7', { exact: true }).click();
+    expect(document.activeElement).toBe(document.body);
+    release();
+    await expect.element(box).toBeEnabled();
+    await expect.element(box).toHaveValue(outcome === 'refused' ? 'Leaks and drains.' : '');
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it('answer_failure_keeps_the_answer', async () => {
     const { interview_id: id } = await startInterview();
     const { screen } = await renderRoute(`/app/setup/${id}`);
