@@ -22,10 +22,10 @@ import pytest
 import yaml
 
 from desk.kernel_service import decisions, reply_check
+from desk.kernel_service.decisions import AnthropicDecisions, CallUsage, SoftPromiseInput
 from desk.kernel_service.render import en as render_en
 from desk.kernel_service.render import es as render_es
 from desk.kernel_service.render.cards import DeskInfo
-from desk.kernel_service.decisions import AnthropicDecisions, CallUsage, SoftPromiseInput
 from evals.calibration.soft_promise import (
     CASES_FILE,
     DECISIONS_PATH,
