@@ -145,7 +145,8 @@ function oneOfEach(lists: readonly (readonly RuleCard[])[]): RuleCard[][] {
 function permitsFor(tool: RulesTool, rules: readonly RuleCard[]): Permit[] {
   const autos = rules.filter((card) => card.mode === 'auto');
   const own = autos.filter((card) => card.applies_to === tool.tool).map((card): Permit => ({ rules: [card], rank: 1 }));
-  const effects = [...new Set(tool.effects)];
+  // In the compiler's order (`sorted(effects)`), so a tie reads by the same rule.
+  const effects = [...new Set(tool.effects)].sort();
   const perEffect = effects.map((effect) => autos.filter((card) => card.applies_to === `effect:${effect}`));
   const shared = effects.length === 0 ? [] : oneOfEach(perEffect).map((combo): Permit => ({ rules: combo, rank: 0 }));
   return [...own, ...shared];
@@ -179,7 +180,7 @@ export function toolOutcome(tool: RulesTool, cards: readonly RuleCard[]): ToolOu
     const never = byRank.find((card) => card.mode === 'never');
     const asks = byRank.filter((card) => card.mode === 'ask');
     const permits = permitsFor(tool, rules);
-    // A permit an ask rule at its rank or above, or a permit above it, excludes never runs.
+    // A permit runs unless an ask rule at its rank or above, or another permit above it, excludes it (`_exclusions`).
     const running = permits.filter((permit) => !asks.some((ask) => rank(ask) >= permit.rank) && !permits.some((other) => other.rank > permit.rank));
     const asked: ToolOutcome = { mode: 'ask', limitCents: null, ...(asks[0] === undefined ? {} : { rule: asks[0] }) };
     for (const minute of moments) {
