@@ -306,7 +306,7 @@ def _conditioned(text: str, reading: str, origin: Sequence[int], start: int) -> 
     return condition.group("si") is None or not _marked(text[origin[condition.start("si")]:origin[start]])
 
 
-def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int, str, Violation]]:
+def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int, int, str, Violation]]:
     """A `promise_word` (`lex.<lang>.booking`) for each booking claim in `text`, in any reading, but
     for one with a condition straight before it (`_conditioned`: "once you're booked") or inside
     such a claim in the same reading ("cuando tu cita está confirmada" holds "está confirmada"). A
@@ -320,14 +320,14 @@ def _booking_claims(text: str, readings: dict[str, list[int]]) -> list[tuple[int
                 reach = max(reach, end)
             if reach < end:
                 found.add((origin[start], origin[end - 1] + 1, rule_id))
-    hits: list[tuple[int, str, Violation]] = []
+    hits: list[tuple[int, int, str, Violation]] = []
     reach, previous = -1, None       # the furthest end of the claims found before this one, and the last one
     for start, end, rule_id in sorted(found, key=lambda claim: (claim[0], -claim[1], claim[2])):
         if previous is not None and previous != (start, end):
             reach = max(reach, previous[1])
         previous = (start, end)
         if reach < end:
-            hits.append((start, rule_id, Violation(kind="promise_word", span=_span(text[start:end]), rule_id=rule_id)))
+            hits.append((start, end, rule_id, Violation(kind="promise_word", span=_span(text[start:end]), rule_id=rule_id)))
     return hits
 
 
@@ -359,26 +359,35 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     stroke both as l and as I, an ASCII capital I as l too, every dash and hyphen as "-" and every
     apostrophe as "’", an acute accent (a space and a combining acute after NFKC) both as that
     space and as "’". The canary comes first, then the rest in the order they appear."""
+    return [violation for _, _, _, violation in _prose_hits(text, canaries, names, booking_card=booking_card)]
+
+
+def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iterable[str] = (), *,
+                booking_card: bool = False) -> list[tuple[int, int, str, Violation]]:
+    """The prose scan with full match offsets in `shown(text)`, before display spans are truncated."""
     text, found = _blank_canaries(shown(text), canaries)
-    hits: list[tuple[int, str, Violation]] = [(-1, "canary", canary_violation(found))] if found else []
+    hits: list[tuple[int, int, str, Violation]] = [(-1, -1, "canary", canary_violation(found))] if found else []
     i = 0
     while i < len(text):
         category = unicodedata.category(text[i])
         if text[i] in PERCENT_SIGNS:
-            hits.append((i, "percent_sign", Violation(kind="number_in_prose", span=text[i], rule_id="percent_sign")))
+            hits.append((i, i + 1, "percent_sign", Violation(kind="number_in_prose", span=text[i],
+                                                            rule_id="percent_sign")))
         elif text[i] == KEYCAP_TEN:
-            hits.append((i, "digit", Violation(kind="number_in_prose", span=text[i], rule_id="digit")))
+            hits.append((i, i + 1, "digit", Violation(kind="number_in_prose", span=text[i], rule_id="digit")))
         if _numeral(text[i]) or text[i] in ZERO_OR_ONE:
             end = _number_end(text, i)          # no currency or percent sign inside, so passed over once
             if any(_numeral(ch) for ch in text[i:end]) or (_alone(text, i, end) and not text[i:end].isascii()):
-                hits.append((i, "digit", Violation(kind="number_in_prose", span=_span(text[i:end]), rule_id="digit")))
+                hits.append((i, end, "digit", Violation(kind="number_in_prose", span=_span(text[i:end]),
+                                                        rule_id="digit")))
             i = end
             continue
         if category == "Sc":
-            hits.append((i, "currency", Violation(kind="number_in_prose", span=text[i], rule_id="currency")))
+            hits.append((i, i + 1, "currency", Violation(kind="number_in_prose", span=text[i], rule_id="currency")))
         i += 1
     reach = _named_reach(text, names)
-    hits += [(start, "mixed_script", Violation(kind="unsupported_language", span=_span(word), rule_id="mixed_script"))
+    hits += [(start, start + len(word), "mixed_script", Violation(kind="unsupported_language", span=_span(word),
+                                                                rule_id="mixed_script"))
              for start, word in _words(text) if _mixes_scripts(word) and reach[start] < start + len(word)]
     readings = _readings(text)
     if not booking_card:
@@ -397,18 +406,60 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
                 if (rule_id, start, end) in seen:
                     continue
                 seen.add((rule_id, start, end))
-                hits.append((start, rule_id, Violation(kind=CATEGORIES[category], span=_span(text[start:end]),
-                                                       rule_id=rule_id)))
-    return [violation for _, _, violation in sorted(hits, key=lambda hit: (hit[0], hit[1]))]
+                hits.append((start, end, rule_id, Violation(kind=CATEGORIES[category], span=_span(text[start:end]),
+                                                           rule_id=rule_id)))
+    return sorted(hits, key=lambda hit: (hit[0], hit[2]))
 
 
 def scan_public_text(text: str) -> list[str]:
     """Rule IDs for public text: the prose scan with no canaries, names or booking card.
 
-    Both lexicons run, whatever the text's language. Pure: no reads or writes, and no matched
-    text returned to callers that record a refusal.
+    Both lexicons run, whatever the text's language. Format controls are refused because
+    policy cards render the original text, whereas the prose scan reads normalized text.
+    Pure: no reads or writes, and no matched text returned to callers that record a refusal.
     """
-    return sorted({violation.rule_id for violation in scan_prose(text)})
+    rules = {violation.rule_id for violation in scan_prose(text)}
+    if any(unicodedata.category(char) == "Cf" for char in text):
+        rules.add("format_control")
+    return sorted(rules)
+
+
+def scan_public_policies(values: Mapping[str, str]) -> dict[str, list[str]]:
+    """Scan policies individually and as adjacent paragraphs/cards, separated by a newline.
+
+    Keys sort like their `charter:<key>` fact IDs on the public page (C collation). Offsets
+    refer to normalized pieces, so Unicode expansion cannot shift a hit onto another key.
+    Keep full match ranges for attribution, even when a violation's display span is truncated.
+    Only contributing keys and rule IDs leave the scan.
+    """
+    fields = {key: set(scan_public_text(value)) for key, value in values.items()}
+    ranges: list[tuple[str, int, int]] = []
+    pieces: list[str] = []
+    offset = 0
+    for key in sorted(values):
+        text = shown(values[key])
+        pieces.append(text)
+        ranges.append((key, offset, offset + len(text)))
+        offset += len(text) + 1
+    combined = "\n".join(pieces)
+    hits = _prose_hits(combined)
+    prefixes = {len(combined): {(start, end, rule) for start, end, rule, _ in hits}}
+    for start, end, rule, _ in hits:
+        # A positive lookahead can require another policy without consuming its text
+        # ("libres" / "para todos"). Include the shortest right context preserving that hit.
+        for _, _, boundary in ranges:
+            if boundary < end:
+                continue
+            if boundary not in prefixes:
+                prefixes[boundary] = {(low, high, found)
+                                      for low, high, found, _ in _prose_hits(combined[:boundary])}
+            if (start, end, rule) in prefixes[boundary]:
+                end = boundary
+                break
+        for key, low, high in ranges:
+            if low < high and low < end and start < high:
+                fields[key].add(rule)
+    return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
 
 
 # ---- Clauses --------------------------------------------------------------------------------------

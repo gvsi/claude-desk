@@ -1769,3 +1769,30 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
 ])
 def test_scan_public_text(text, rules):
     assert reply_check.scan_public_text(text) == rules
+
+
+@pytest.mark.parametrize("control", ["\u202a", "\u202b", "\u202c", "\u202d", "\u202e", "\u2066", "\u2067",
+                                     "\u2068", "\u2069", "\u200c", "\u200d", "\u200b", "\u200e", "\u200f",
+                                     "\u00ad", "\ufeff", "\U000e0001"])
+@pytest.mark.parametrize("honest", ["Ask about our services.", "Pregunte por nuestros servicios."])
+def test_public_text_refuses_format_controls(control, honest):
+    assert reply_check.scan_public_text(honest) == []
+    assert reply_check.scan_public_text(honest + control) == ["format_control"]
+
+
+@pytest.mark.parametrize(("values", "fields"), [
+    ({"policy:c": "charge.", "policy:a": "No", "policy:b": "extra"},
+     {key: ["lex.en.promise"] for key in ("policy:a", "policy:b", "policy:c")}),
+    ({"policy:a": "Your appointment is" + " " * 100, "policy:b": "confirmed."},
+     {key: ["lex.en.booking"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "Oﬃce.", "policy:b": "No", "policy:c": "charge.", "policy:d": "Ask about our services."},
+     {key: ["lex.en.promise"] for key in ("policy:b", "policy:c")}),
+    ({"policy:a": "Once your appointment is", "policy:b": "confirmed."}, {}),
+    ({"policy:a": "Tu cita está", "policy:b": "pendiente."}, {}),
+    ({"policy:a": "libres", "policy:b": "para todos"},
+     {key: ["lex.es.promise"] for key in ("policy:a", "policy:b")}),
+    ({"policy:a": "You are free to", "policy:b": "all clients"},
+     {key: ["lex.en.promise"] for key in ("policy:a", "policy:b")}),
+])
+def test_public_policy_scan_attributes_full_matches_and_preserves_honest_context(values, fields):
+    assert reply_check.scan_public_policies(values) == fields

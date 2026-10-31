@@ -838,6 +838,14 @@ def money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
 
 
+PUBLIC_POLICY_PATTERNS = (
+    ("lex.en.promise", r"\b(?:free|discounts?|refunds?|guarantees?|no\s+charge)\b"),
+    ("lex.es.promise", r"\b(?:descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
+    ("lex.en.booking", r"\byour\s+appointment\s+is\s+confirmed\b"),
+    ("lex.es.booking", r"\btu\s+cita\s+está\s+confirmada\b"),
+)
+
+
 def public_policy_rules(text: str) -> list[str]:
     """Mirror the contract's numeric and English/Spanish promise examples, not the full scan.
 
@@ -845,10 +853,11 @@ def public_policy_rules(text: str) -> list[str]:
     Exhaustive lexicon behavior is covered by the real kernel's own tests.
     """
     rules = {"percent_sign" if hit.rule_id == "percent" else hit.rule_id for hit in scan_prose(text, {})}
-    for language, pattern in (("en", r"\b(?:free|discounts?|refunds?|guarantees?)\b"),
-                              ("es", r"\b(?:descuentos?|garantiz\w*|reembols\w*)\b")):
+    if any(unicodedata.category(char) == "Cf" for char in text):
+        rules.add("format_control")
+    for rule, pattern in PUBLIC_POLICY_PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
-            rules.add(f"lex.{language}.promise")
+            rules.add(rule)
     return sorted(rules)
 
 
@@ -2944,6 +2953,7 @@ class FakeKernelState:
         if body.desk.connections or body.desk.auto_money_cap_cents != 0:
             raise Refusal(422, "invalid")
         self._check_business(body.business.owner_display_name, body.business.timezone)
+        self._refuse_policy_promises(copy.copy_id, body.desk.charter, "desk")
         native = tuple(tool for tool in TOOL_FACTS if tool_profile(tool).source == "native")
         desk = self._create_desk(copy.copy_id, body.business, body.desk, tools=native, cards=ASK_FIRST_CARDS)
         copy.desk_ids.append(desk.desk_id)
@@ -3015,19 +3025,38 @@ class FakeKernelState:
         self.append(desk, "desk_data", {"part": part, "refs": []})
         return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
 
+    def _refuse_policy_promises(self, copy_id: str, charter: list[Claim], part: str,
+                                desk: Desk | None = None) -> None:
+        keys = [claim.key for claim in charter]
+        if len(set(keys)) != len(keys):
+            raise Refusal(422, "invalid")
+        values = {claim.key: claim.value for claim in charter
+                  if claim.key.startswith("policy:") and claim.kind == "text"}
+        fields = {key: set(public_policy_rules(value)) for key, value in values.items()}
+        ranges, pieces, offset = [], [], 0
+        for key in sorted(values):
+            value = values[key]
+            ranges.append((key, offset, offset + len(value)))
+            pieces.append(value)
+            offset += len(value) + 1
+        for rule, pattern in PUBLIC_POLICY_PATTERNS:
+            for match in re.finditer(pattern, "\n".join(pieces), re.IGNORECASE):
+                for key, low, high in ranges:
+                    if low < match.end() and match.start() < high:
+                        fields[key].add(rule)
+        fields = {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
+        if fields:
+            targets = [desk] if desk is not None else sorted(
+                (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)
+            for target in targets:
+                self.append(target, "desk_data", {"part": part, "refused": "promise", "fields": fields})
+            raise Refusal(422, "invalid", fields)
+
     def desk_charter(self, request: Request, body: DeskCharterRequest) -> DeskUpdated:
         """The charter: each claim a public `charter:<key>` fact, in place of the ones before (`charter:hours`
         stays, since the hours write it); a key given twice is 422."""
         desk = self._owners_desk(request, request.path_params["id"])
-        keys = [claim.key for claim in body.charter]
-        if len(set(keys)) != len(keys):
-            raise Refusal(422, "invalid")
-        fields = {claim.key: rules for claim in body.charter
-                  if claim.key.startswith("policy:") and claim.kind == "text"
-                  and (rules := public_policy_rules(claim.value))}
-        if fields:
-            self.append(desk, "desk_data", {"part": "charter", "refused": "promise", "fields": fields})
-            raise Refusal(422, "invalid", fields)
+        self._refuse_policy_promises(desk.copy_id, body.charter, "charter", desk)
         for fact_id in [fact_id for fact_id, fact in desk.facts.items()
                         if fact.kind == "charter" and fact_id != "charter:hours"]:
             del desk.facts[fact_id]

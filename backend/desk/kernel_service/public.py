@@ -140,8 +140,9 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
         Business, Business.business_id == Desk.business_id).where(Desk.slug == slug)))).one()
     if desk.deleted_at is not None:
         raise KernelFailure(404, "not_found", "deleted_desk")
+    # Match the policy write scan's order regardless of the database's default collation.
     rows = await ctx.db.scalars(copy.scoped(select(FactRow).where(
-        FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
+        FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id.collate("C"))))
     facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)]
     canaries = await labels.copy_canaries(ctx)
     header, withheld = header_of(desk, business, canaries)
