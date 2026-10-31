@@ -75,7 +75,7 @@ Two eval suites run against the real kernel and Claude: an attack suite of hosti
 
 The attack suite tests the attacks we thought of: a clean run means none of those got through, not that no attack can.
 
-[measured: link the evals guide, docs/evals.md (what each suite tests, the gate and how to reproduce a run), once it lands with the evals report]
+The [evals guide](docs/evals.md) says what each suite tests, how a run is judged and gated, what it costs and how to reproduce one, and holds the latest results.
 
 ## Run it locally
 
