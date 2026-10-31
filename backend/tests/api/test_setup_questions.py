@@ -1230,18 +1230,19 @@ async def test_a_start_that_failed_before_the_desk_was_asked_for_frees_its_key(a
     ("500", (503, {"error": "kernel", "code": "internal"})),
     ("timeout", (503, {"error": "kernel", "code": "kernel_unavailable"})),
 ], ids=["kernel refused", "kernel 500", "kernel timeout"])
-async def test_a_start_that_failed_once_the_desk_was_asked_for_answers_its_failure_again(app, browser, fake,
-                                                                                       kernel_http, model, engine,
-                                                                                       fail, answered):
-    # The kernel was asked for the Desk, which may exist even when the answer was an error: the key keeps the outcome.
-    # A repeat answers the same failure and makes nothing, not even a model call; a new click sends a new key.
+async def test_a_start_that_failed_once_the_desk_was_asked_for_spends_its_key(app, browser, fake, kernel_http, model,
+                                                                             engine, fail, answered):
+    # The kernel was asked for the Desk, which may exist even when the answer was an error: the key keeps the outcome,
+    # so it can't start again. The first answers its failure; a repeat answers 409 `key_spent` (with no wait, since
+    # waiting changes nothing) and makes nothing, not even a model call; a new click sends a new key.
     owner = await new_owner(app, browser, kernel_http)
     model.add(started())
     fake.fail("POST /desks", fail, times=1)
     first = await start_keyed(owner)
     assert (first.status_code, first.json()) == answered
-    repeat = await start_keyed(owner)
-    assert (repeat.status_code, repeat.json()) == answered
+    for _ in range(2):
+        repeat = await start_keyed(owner)
+        assert (repeat.status_code, repeat.json()) == (409, {"error": "key_spent"})
     assert (len(model.requests), len(fake.called("POST /desks"))) == (1, 1)
     ((interview_id, desk_id),) = await interviews(engine)
     assert desk_id is None
@@ -1251,6 +1252,21 @@ async def test_a_start_that_failed_once_the_desk_was_asked_for_answers_its_failu
     fresh = await start_keyed(owner, "start-again")
     assert fresh.status_code == 201, fresh.text
     assert len(fake.called("POST /desks")) == 2
+
+
+async def test_a_start_without_a_key_has_none_to_spend(app, browser, fake, kernel_http, model, engine):
+    # Without a key, a start whose kernel call failed answers its failure and keeps no row, and the same request sent
+    # again starts afresh: never 409 `key_spent`.
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started(), started())
+    fake.fail("POST /desks", "500", times=1)
+    first = await start_keyed(owner, None)
+    assert (first.status_code, first.json()) == (503, {"error": "kernel", "code": "internal"})
+    assert await interviews(engine) == []
+    again = await start_keyed(owner, None)
+    assert again.status_code == 201, again.text
+    assert await interviews(engine) == [(again.json()["interview_id"], again.json()["desk_id"])]
+    assert len(fake.called("POST /desks")) == 2 and len(model.requests) == 2
 
 
 async def test_a_repeat_while_the_first_is_starting_answers_in_progress_at_once(app, browser, fake, kernel_http, model,
@@ -1353,8 +1369,9 @@ async def test_a_start_that_asked_for_its_desk_is_never_taken_over(app, browser,
                                                                    monkeypatch):
     # The kernel made the Desk, but its answer was lost and the start never settled its row (its process stopped, or
     # the last write failed): the row has no Desk and no failure. It did record that the Desk was asked for, so no
-    # age makes it abandoned: the Desk may exist, a repeat answers 409 `in_progress` however old the row is, and only
-    # a new key starts again.
+    # age makes it abandoned: the Desk may exist. Until the row is older than the longest a start can take, a repeat
+    # answers 409 `in_progress`; after that the start has surely stopped, and a repeat answers 409 `key_spent`, the
+    # row kept as it is. Only a new key starts again.
     owner = await new_owner(app, browser, kernel_http)
 
     async def unsettled(engine, statement) -> None:
@@ -1365,12 +1382,18 @@ async def test_a_start_that_asked_for_its_desk_is_never_taken_over(app, browser,
         fake.drop_response("POST /desks")
         model.add(started())
         first = await start_keyed(owner)
-    assert first.status_code == 503, first.text
+    assert (first.status_code, first.json()) == (503, {"error": "kernel", "code": "kernel_unavailable"})
     assert len(fake.called("POST /desks")) == 1
+    for age in (None, desk_setup.START_ABANDONED_S - 5):
+        if age is not None:
+            db.execute("UPDATE app.setup_interviews SET created_at = now() - make_interval(secs => %s)", (age,))
+        repeat = await start_keyed(owner)
+        assert (repeat.status_code, repeat.json()) == (409, {"error": "in_progress", "retry_after": 2}), age
     db.execute("UPDATE app.setup_interviews SET created_at = now() - make_interval(secs => %s)",
                (desk_setup.START_ABANDONED_S + 5,))
-    repeat = await start_keyed(owner)
-    assert (repeat.status_code, repeat.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    for _ in range(2):
+        repeat = await start_keyed(owner)
+        assert (repeat.status_code, repeat.json()) == (409, {"error": "key_spent"})
     assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
     ((desk_id, start_error, asked),) = db.execute("SELECT desk_id, start_error, desk_requested_at IS NOT NULL"
                                                   " FROM app.setup_interviews").fetchall()
