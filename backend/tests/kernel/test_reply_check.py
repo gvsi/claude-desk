@@ -200,6 +200,19 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("No doubt about it: no hidden charges.", "lex.en.promise", "no hidden charges"),
     ("There's no one-off charge.", "lex.en.promise", "no one-off charge"),
     ("There's no one-time cost.", "lex.en.promise", "no one-time cost"),
+    # nor after "worries", "problem", "questions", "set", "exact", "single", "fixed" or "standard",
+    # which pass (below), nor "set" with a hyphen going on, on the charge and cost line and the fee line
+    ("No worries, there's no extra charge.", "lex.en.promise", "no extra charge"),
+    ("No problem: no hidden fees.", "lex.en.promise", "no hidden fees"),
+    ("No questions asked, no fee.", "lex.en.promise", "no fee"),
+    ("There's no set-up charge.", "lex.en.promise", "no set-up charge"),
+    ("There's no set-up fee.", "lex.en.promise", "no set-up fee"),
+    ("There's no setup cost.", "lex.en.promise", "no setup cost"),
+    ("There's no extra fee for that.", "lex.en.promise", "no extra fee"),
+    ("There's no service fee.", "lex.en.promise", "no service fee"),
+    ("There are no added fees.", "lex.en.promise", "no added fees"),
+    # the fee line doesn't take "matter", "one", "way" or "doubt"
+    ("No matter the fee, call us.", "lex.en.promise", "No matter the fee"),
     ("Sin recargo.", "lex.es.promise", "Sin recargo"),                              # a surcharge of nothing
     ("La visita va sin cargo extra.", "lex.es.promise", "sin cargo"),             # the word after needs no rule
     ("Se lo hacemos sin costo adicional.", "lex.es.promise", "sin costo"),
@@ -263,6 +276,23 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "No way it costs that much.",
     "No doubt the cost is worth it.",
     "No matter the charges, Maria can help.",
+    # nor do "worries", "problem", "questions", "set", "exact", "single", "fixed" or "standard",
+    # before a charge, a cost or a fee
+    "There's no set cost until Maria sees the leak.",
+    "No worries about cost, the quote below has it.",
+    "No questions about cost?",
+    "No worries about fees, the quote below has them.",
+    "No problem the cost is in the quote below.",
+    "No questions about fees?",
+    "There's no set fee for a job like this.",
+    "There's no exact cost until Maria sees it.",
+    "We have no exact fee for that yet.",
+    "There's no single cost for every leak.",
+    "There's no single fee that fits every job.",
+    "There's no fixed cost for a repair like this.",
+    "There's no fixed fee for repairs.",
+    "There's no standard charge for that; the quote below has it.",
+    "There's no standard fee for a leak.",
 ])
 def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
     assert reply_check.scan_prose(prose) == []
