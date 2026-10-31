@@ -628,6 +628,69 @@ async def test_no_rebuild_runs_over_the_old_tools_when_adding_the_new_ones_fails
     assert steps == ["tools", "wait", "tools", "rebuild"]
 
 
+async def test_an_unexpected_startup_error_still_starts_the_background(app, client, frozen_clock, reviewer,
+                                                                       monkeypatch):
+    # whatever startup's rebuild raises, the kernel serves and the background lists the copies and rebuilds them
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+
+    async def raising(runtime):
+        raise RuntimeError("something startup didn't expect")
+
+    monkeypatch.setattr(activation, "rebuild_at_startup", raising)
+    async with started_kernel(frozen_clock, reviewer) as (kernel, _):
+        assert kernel.state.rebuilding is not None
+        assert await kernel.state.rebuilding == {(copy.desk_id, 1): None}
+
+
+async def test_the_background_lists_the_copies_again_after_its_listing_fails(app, client, monkeypatch):
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    listing, calls, waits = activation.copy_ids, [], []
+
+    async def failing_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("the listing's connection dropped")
+        return await listing(*args, **kwargs)
+
+    async def waiting(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(activation, "copy_ids", failing_once)
+    monkeypatch.setattr(activation, "wait_to_retry", waiting)
+    startup = activation.StartupRebuild(results={}, left=[], unscanned=None)
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
+    assert (len(calls), waits) == (2, [5.0])
+
+
+async def test_a_deleted_desk_gets_neither_the_native_tools_nor_the_waiting_alert(app, client, monkeypatch):
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    await without_new_native_tools(app, copy)
+    response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
+    assert response.status_code == 204, response.text
+    before = await entries_of(client, copy, "desk_data")
+    startup = await activation.rebuild_at_startup(app.state.kernel)
+    await activation.rebuild_in_background(app.state.kernel, startup)
+    tools = {row.tool for row in await rows_of(app, copy.copy_id, select(Tool).where(Tool.desk_id == copy.desk_id))}
+    assert not set(NEW_NATIVE_TOOLS) & tools
+    assert await entries_of(client, copy, "desk_data") == before
+    assert await rules_alerts(app, copy) == []
+
+
+async def test_a_failed_waiting_alert_neither_blocks_nor_skips_the_rebuild(app, client, monkeypatch):
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+
+    async def failing(*args, **kwargs):
+        raise RuntimeError("the inbox write's connection dropped")
+
+    monkeypatch.setattr(activation.demo_inbox, "deliver", failing)
+    startup = activation.StartupRebuild(results={}, left=[(copy.copy_id, copy.desk_id)], unscanned=[])
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
+
+
 async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
     # in symcc mode no shipped report covers the kernel core's tools, so only a live proof answers its version
     copy = await rivera(app, client)

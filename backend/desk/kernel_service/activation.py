@@ -85,7 +85,7 @@ from desk.contracts import (
     ToolProfile,
     money_tool,
 )
-from desk.db.models import AgentKey, Person
+from desk.db.models import AgentKey, Desk, Person
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain, ledger, reference, render,
@@ -908,8 +908,9 @@ async def _alert_waiting(runtime: KernelRuntime, copy_id: str, desk_id: str) -> 
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
             await _lock(ctx, "waiting-alert", desk_id)
+            deleted = await ctx.db.scalar(ctx.repo.scoped(select(Desk.deleted_at).where(Desk.desk_id == desk_id)))
             row = await active_version(ctx, desk_id)
-            if row is None or not outdated(row):
+            if deleted is not None or row is None or not outdated(row):
                 return
             preview, now = render.owner_preview("rules"), ctx.clock.now()
             recent = await ctx.db.scalars(ctx.repo.scoped(select(DemoInboxRow.entry_id).where(

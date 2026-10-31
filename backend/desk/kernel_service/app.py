@@ -158,7 +158,9 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                 # proved before anything is decided under them; one that isn't decides nothing
                 startup = await activation.rebuild_at_startup(app.state.kernel)
             except Exception as exc:
+                # whatever went wrong, the background lists the copies and brings them up itself
                 log_error(log, exc, "startup_rebuild_failed")
+                startup = activation.StartupRebuild(results={}, left=[], unscanned=None)
             if startup is not None and startup.pending:
                 # the Desks and copies startup left, while the kernel serves; each Desk refuses
                 # until it is rebuilt. Started first, so nothing after it can keep it from starting

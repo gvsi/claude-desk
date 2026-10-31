@@ -218,9 +218,11 @@ async def add_native_tools(ctx: KernelCtx, desk_id: str) -> list[str]:
     they were registered), enabled as `create_desk` writes them, in the caller's transaction under
     the Desk row's lock, as an owner's write takes it, and ledgered `desk_data` `{part: "tools",
     refs}`. A row the Desk has stays as it is, whatever its status. Returns the tools added, by
-    name; [] when it has them all, and then nothing is written."""
+    name; [] when it has them all, or when the Desk is deleted, and then nothing is written."""
     desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id).with_for_update()
                                                      .execution_options(populate_existing=True)))).one()
+    if desk_row.deleted_at is not None:              # deleted since it was found: it gets nothing
+        return []
     have = set((await ctx.db.scalars(ctx.repo.scoped(select(Tool.tool).where(Tool.desk_id == desk_id)))).all())
     missing = [profile for profile in adapters.registered_profiles(source="native") if profile.tool not in have]
     if not missing:

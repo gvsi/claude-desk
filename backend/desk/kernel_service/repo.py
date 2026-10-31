@@ -384,13 +384,15 @@ async def desks_to_bring_up(runtime: KernelRuntime, copy_id: str, tools: Iterabl
     """The Desks of `copy_id`, in ID order, that the startup rebuild brings up: each with no
     `tools` row for one of `tools`, the native tools the kernel registers (a Desk created before
     one of them was), and each whose active rules version was stored under a baseline other than
-    `baseline_sha256`, the one the kernel enforces. Read through the copy's own `KernelRepo`, as
+    `baseline_sha256`, the one the kernel enforces; never a deleted Desk, which decides nothing and
+    whose owner has nothing to be told. Read through the copy's own `KernelRepo`, as
     `orphan_intents` reads each copy, so row-level security still holds the reads to one copy."""
     wanted = set(tools)
     copy = KernelRepo(copy_id)
     async with runtime.sessions() as db:
         copy.bind(db)
-        desk_ids = (await db.scalars(copy.scoped(select(Desk.desk_id).order_by(Desk.desk_id)))).all()
+        desk_ids = (await db.scalars(copy.scoped(select(Desk.desk_id).where(Desk.deleted_at.is_(None))
+                                                 .order_by(Desk.desk_id)))).all()
         rows = await db.execute(copy.scoped(select(Tool.desk_id, Tool.tool).where(Tool.tool.in_(sorted(wanted)))))
         have: dict[str, set[str]] = {}
         for desk_id, tool in rows:
