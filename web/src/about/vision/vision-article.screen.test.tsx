@@ -156,6 +156,14 @@ describe('The Vision article', () => {
     }
     expect(facts, 'the cards hold the facts the test looks for').toBeGreaterThanOrEqual(6);
 
+    // Statuses too: the permit's status is the card's to state, and Claude's words in the city screen only point to it.
+    const city = pictures[0];
+    const inCards = [...(city?.querySelectorAll('[data-part="card"] *') ?? [])].map(flat);
+    expect(inCards).toContain('Plan check passed');
+    const claude = [...(city?.querySelectorAll('[data-part="claude"]') ?? [])].map(flat);
+    expect(claude.length).toBeGreaterThan(0);
+    for (const words of claude) expect(words).not.toMatch(/passed|plan check/i);
+
     // A held or declined outcome is a receipt right under Claude's message, as the app draws it.
     const outcomes = pictures.flatMap((picture) => [...(picture?.querySelectorAll('[data-part="receipt"]') ?? [])]);
     const heldOrDeclined = outcomes.filter((receipt) => ['held', 'declined'].includes(receipt.getAttribute('data-tone') ?? ''));

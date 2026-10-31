@@ -63,7 +63,7 @@ export const CITY: ChatScreen = {
   parts: [
     { kind: 'visitor', text: 'Where’s my kitchen remodel permit at?' },
     { kind: 'system', text: 'Marcus Bell, verified by a code to his application email' },
-    { kind: 'claude', text: 'It passed plan check. Here’s where it stands.' },
+    { kind: 'claude', text: 'Here’s where it stands.' },
     {
       kind: 'card',
       label: 'Permit status',
