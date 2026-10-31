@@ -20,6 +20,7 @@ import type {
   OwnerTranscript,
   PeopleOut,
   PolicyVersionOut,
+  RuleChatOut,
   RulesDraft,
   RulesView,
   SetupState,
@@ -1240,6 +1241,28 @@ describe('rules and tools', () => {
     for (const key of ['rules', 'people'] as const) expect((await call(key, { params: { desk_id: deskId } })).status).toBe(401);
     expect((await draftOf(8)).status).toBe(401);
     expect((await confirm(8)).status).toBe(401);
+  });
+
+  it('rule_chat_answers_about_the_hold_a_question_names', async () => {
+    const ask = async (text: string) => ((await call('ruleChat', { params: { desk_id: deskId }, body: { text } })).body as RuleChatOut).answer;
+    const offer = "If you'd like requests like this to go through on their own, ask me to draft that rule.";
+    const refund = mockStore.world.addHeldRefund();
+    const record = mockStore.world.decisions.get(refund.decision_id);
+    const main = mockStore.world.desk(deskId);
+    if (!record || !main) throw new Error('Dana has a refund held on the main Desk');
+
+    // Held by the refund rule: the request, the rule that held it, and an offer to draft one.
+    expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} It was held by your rule: Refunds to a customer wait for your answer. ${offer}`);
+
+    // Held with no rule of the owner's deciding it: the kernel's own words for the default ask.
+    record.decision.card_ids = [];
+    expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} Not covered by a rule yet, so it asks you. ${offer}`);
+
+    // Above the payment limit, which no rule goes past: no offer to draft one, with a rule or without.
+    main.policy.auto_money_cap_cents = 10_000;
+    expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} Not covered by a rule yet, so it asks you.`);
+    record.decision.card_ids = ['rv-refund'];
+    expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} It was held by your rule: Refunds to a customer wait for your answer.`);
   });
 
   it('people_mark_replayed_leads', async () => {

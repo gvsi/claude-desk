@@ -65,9 +65,19 @@ export function useToday(deskId: string, { retryOnMount = true }: ReadOptions = 
   return useQuery({ ...todayQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('today'), retryOnMount });
 }
 
-/** What waits for the owner on a Desk: held requests and open callbacks, polled. */
-export function useNeedsYou(deskId: string, { retryOnMount = true }: ReadOptions = {}) {
-  return useQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('needsYou'), retryOnMount });
+/**
+ * What waits for the owner on a Desk: held requests and open callbacks, polled. With `readOnOpen`,
+ * the page reads it again as it opens however fresh the kept read is, for a page that shows only
+ * what a read of its own says (Rules' question about a hold).
+ */
+export function useNeedsYou(deskId: string, { retryOnMount = true, readOnOpen = false }: ReadOptions & { readOnOpen?: boolean } = {}) {
+  return useQuery({
+    ...needsYouQuery(deskId),
+    staleTime: FRESH_MS,
+    refetchInterval: pollMs('needsYou'),
+    retryOnMount,
+    ...(readOnOpen ? { refetchOnMount: 'always' as const } : {}),
+  });
 }
 
 /**
