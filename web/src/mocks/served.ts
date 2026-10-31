@@ -667,7 +667,8 @@ const SERVED: ServedRoutes = {
     const readers = forced ? ['owner'] : [...(item.label.readers ?? ['owner'])];
     const stored: KnowledgeItem = { ...item, label: { readers, record_owner: item.label.record_owner ?? null } };
     const key = `${desk.summary.desk_id}:${item.item_id}`;
-    const createdAt = sv.world.knowledge.get(key)?.createdAt ?? sv.world.now();
+    const previous = sv.world.knowledge.get(key);
+    const createdAt = previous === undefined ? sv.world.now() : previous.createdAt;
     sv.world.knowledge.set(key, { deskId: desk.summary.desk_id, item: stored, createdAt, forced });
     return ok(stored);
   },

@@ -12,7 +12,7 @@ import { useRef, useState } from 'react';
 
 import type { KnowledgeItem } from '../../api/contracts.ts';
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../../api/http.ts';
-import type { KnowledgeListItem } from '../../api/views.ts';
+import type { KnowledgeRow } from '../../api/views.ts';
 import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, Notice, type KnowledgeRowView } from '../../ds/index.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -59,19 +59,17 @@ const knowledgeQuery = (deskId: string) =>
   queryOptions({ queryKey: knowledgeKey(deskId), queryFn: () => request('knowledge', { params: { desk_id: deskId } }) });
 
 /**
- * The list's rows, oldest first, each with when it was added on the business's clock. An item whose
+ * The list's rows in API order, each with when it was added on the business's clock. An item whose
  * title or text the kernel withheld is drawn as the design system draws one it keeps to the owner:
  * no title, no words, "Only you".
  */
-function rowsOf(items: readonly KnowledgeListItem[], timeZone: string): KnowledgeRowView[] {
-  return [...items]
-    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
-    .map((item) => ({
-      id: item.item_id,
-      title: item.title === null || item.text === null ? null : item.title,
-      detail: `Added ${formatDate(item.created_at, timeZone)}`,
-      readers: item.label.readers ?? [],
-    }));
+function rowsOf(items: readonly KnowledgeRow[], timeZone: string): KnowledgeRowView[] {
+  return items.map((item) => ({
+    id: item.item_id,
+    title: item.title === null || item.text === null ? null : item.title,
+    detail: item.created_at === null ? 'Added date unknown' : `Added ${formatDate(item.created_at, timeZone)}`,
+    readers: item.readers,
+  }));
 }
 
 /** "What I know now": the list once read, the loading line while it is, and a failed read with Try again over it. */
@@ -159,7 +157,7 @@ export function KnowledgePage() {
    * the list doesn't, or null when it can't be read either, so the outcome stays unknown. A read
    * already in flight may have left before the write landed, so it is cancelled and a new one sent.
    */
-  const readBack = async (itemId: string): Promise<KnowledgeListItem | 'missing' | null> => {
+  const readBack = async (itemId: string): Promise<KnowledgeRow | 'missing' | null> => {
     try {
       await queryClient.cancelQueries({ queryKey: knowledgeKey(deskId) });
       const items = await queryClient.fetchQuery({ ...knowledgeQuery(deskId), staleTime: 0 });
@@ -209,7 +207,7 @@ export function KnowledgePage() {
       else if (now === 'missing') setError(KNOWLEDGE_COPY.notAdded);
       else {
         // The list may withhold its words; the card keeps the ones posted, with the label read back.
-        setAdded({ ...item, label: now.label });
+        setAdded({ ...item, label: { readers: now.readers } });
         if (kind === 'note') setNote('');
         setSwitchLine(undefined);
       }
@@ -282,8 +280,9 @@ export function KnowledgePage() {
           setSwitchLine(KNOWLEDGE_COPY.switchUnconfirmed);
           return;
         }
-        show(now.label);
-        setSwitchLine(lineFor(now.label));
+        const label = { readers: now.readers };
+        show(label);
+        setSwitchLine(lineFor(label));
       }
     });
   };

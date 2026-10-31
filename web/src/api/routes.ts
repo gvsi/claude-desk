@@ -43,7 +43,7 @@ import type {
   GenerationBody,
   HealthOut,
   KnowledgeBody,
-  KnowledgeListItem,
+  KnowledgeRow,
   MessageAccepted,
   MoneyCapIn,
   NeedsYouItem,
@@ -211,7 +211,7 @@ interface RouteShapes {
   suggestions: { body: undefined; response: Suggestion[] };
   simulateToolChange: { body: ToolBody; response: ToolProfile };
   addKnowledge: { body: KnowledgeBody; response: KnowledgeItem };
-  knowledge: { body: undefined; response: KnowledgeListItem[] };
+  knowledge: { body: undefined; response: KnowledgeRow[] };
   people: { body: undefined; response: PeopleOut };
 
   ruleChat: { body: TextBody; response: RuleChatOut };

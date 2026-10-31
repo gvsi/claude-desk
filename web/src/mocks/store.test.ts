@@ -16,6 +16,7 @@ import type {
   ConversationSummary,
   CopyOut,
   DemoAgentRun,
+  KnowledgeRow,
   NeedsYouItem,
   OwnerTranscript,
   PeopleOut,
@@ -1292,6 +1293,41 @@ describe('rules and tools', () => {
     expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} It was held by your rule: Refunds to a customer wait for your answer.`);
   });
 
+  it('knowledge_seed_returns_every_generated_row_field', async () => {
+    const answer = await call('knowledge', { params: { desk_id: deskId } });
+    expect(answer.status).toBe(200);
+    const rows = answer.body as KnowledgeRow[];
+    expect(rows.map((row) => row.item_id)).toEqual(['kn-website', 'kn-price-list']);
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(['created_at', 'item_id', 'readers', 'source', 'text', 'title']);
+      expect(row.readers).toEqual(['public']);
+      expect(row.title).toEqual(expect.any(String));
+      expect(row.text).toEqual(expect.any(String));
+      expect(row.created_at).toEqual(expect.any(String));
+    }
+    expect(rows.map((row) => row.source)).toEqual(['website', 'setup']);
+    expect(Date.parse(rows[0]!.created_at!)).toBeLessThan(Date.parse(rows[1]!.created_at!));
+  });
+
+  it('knowledge_lists_legacy_items_first_then_timestamp_and_item_id', async () => {
+    mockStore.world.knowledge.clear();
+    const item: KnowledgeItem = { item_id: 'kn-legacy', source: 'setup', title: 'An older note', text: 'An older note', label: { readers: ['owner'] } };
+    const at = Date.parse('2026-10-30T19:30:00Z');
+    // Insert out of order, including a pre-epoch date, so null cannot sort as zero. Ties use the
+    // item's id rather than the host locale's collation.
+    for (const [itemId, createdAt] of [['kn-a', at], ['kn-legacy', null], ['kn-Z', at], ['kn-oldest', -1], ['kn-A-legacy', null]] as const) {
+      mockStore.world.knowledge.set(`${deskId}:${itemId}`, { deskId, item: { ...item, item_id: itemId }, createdAt, forced: false });
+    }
+    const list = () => call('knowledge', { params: { desk_id: deskId } });
+    const rows = (await list()).body as KnowledgeRow[];
+    expect(rows.map((row) => row.item_id)).toEqual(['kn-A-legacy', 'kn-legacy', 'kn-oldest', 'kn-Z', 'kn-a']);
+    expect(rows.map((row) => row.created_at)).toEqual([null, null, '1969-12-31T23:59:59.999000Z', '2026-10-30T19:30:00.000000Z', '2026-10-30T19:30:00.000000Z']);
+
+    // Updating readers preserves the original timestamp, including an unknown one.
+    await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, label: { readers: ['public'] } } } });
+    expect(((await list()).body as typeof rows).find((row) => row.item_id === item.item_id)?.created_at).toBeNull();
+  });
+
   it('knowledge_answers_what_the_kernel_keeps', async () => {
     mockStore.world.knowledge.clear();
     const note: KnowledgeItem = {
@@ -1321,10 +1357,11 @@ describe('rules and tools', () => {
 
     // Listed, with when it was first added: one the kernel keeps to the owner has its words withheld.
     const listed = await call('knowledge', { params: { desk_id: deskId } });
-    expect(listed).toEqual({ status: 200, body: [{ ...labelled(['owner']), title: null, text: null, created_at: expect.any(String) }] });
+    const { label: _label, ...words } = note;
+    expect(listed).toEqual({ status: 200, body: [{ ...words, readers: ['owner'], title: null, text: null, created_at: expect.any(String) }] });
     mockStore.world.keepsKnowledgeOwnerOnly = () => false;
     await add({ ...note, label: { readers: ['public'] } });
-    expect((await call('knowledge', { params: { desk_id: deskId } })).body).toEqual([{ ...labelled(['public']), created_at: (listed.body as { created_at: string }[])[0]?.created_at }]);
+    expect((await call('knowledge', { params: { desk_id: deskId } })).body).toEqual([{ ...words, readers: ['public'], created_at: (listed.body as KnowledgeRow[])[0]?.created_at }]);
 
     // Not an item: refused, nothing stored.
     for (const bad of [undefined, { ...note, title: 3 }, { ...note, label: { readers: 'public' } }, { ...note, source: 'gossip' }, { ...note, item_id: '' }]) {

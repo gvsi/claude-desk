@@ -9,7 +9,7 @@ import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { KnowledgeItem } from '../../api/contracts.ts';
-import type { KnowledgeBody } from '../../api/views.ts';
+import type { KnowledgeBody, KnowledgeRow } from '../../api/views.ts';
 import { SPEC } from '../../ds/boards/spec.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -354,7 +354,7 @@ describe('knowledge', () => {
 
     // 1. The list read the add sets off is held in flight, answering the note as the owner's alone.
     const stale = held();
-    const ownerOnly = { item_id: id, source: 'setup', title: NOTE_TITLE, text: NOTE, label: { readers: ['owner'], record_owner: null }, created_at: new Date().toISOString() };
+    const ownerOnly: KnowledgeRow = { item_id: id, source: 'setup', title: NOTE_TITLE, text: NOTE, readers: ['owner'], created_at: new Date().toISOString() };
     mockStore.inject({ route: 'knowledge', status: 200, until: stale.until, body: [ownerOnly] });
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
@@ -428,6 +428,30 @@ describe('knowledge', () => {
     const column = main(screen).element().getBoundingClientRect();
     for (const el of main(screen).element().querySelectorAll('*')) {
       expect(Math.round(el.getBoundingClientRect().right), el.className.toString()).toBeLessThanOrEqual(Math.round(column.right));
+    }
+  });
+
+  it('knowledge_keeps_api_order_and_handles_unknown_added_dates', async () => {
+    const rows: KnowledgeRow[] = [
+      { item_id: 'legacy', title: 'An older note', text: 'An older note', readers: ['owner'], source: 'setup', created_at: null },
+      { item_id: 'recent', title: 'A recent note', text: 'A recent note', readers: ['public'], source: 'setup', created_at: '2026-10-30T19:30:00Z' },
+      { item_id: 'withheld', title: null, text: null, readers: ['owner'], source: 'memory_import', created_at: null },
+      { item_id: 'earlier', title: 'An earlier note', text: 'An earlier note', readers: ['public'], source: 'setup', created_at: '2026-10-26T19:30:00Z' },
+    ];
+    // Keep exactly the order received, even when an injected answer is not chronological.
+    for (const viewport of ['desktop', 'phone'] as const) {
+      mockStore.inject({ route: 'knowledge', status: 200, body: rows });
+      const { screen } = await renderRoute(KNOWLEDGE, { viewport, pollScale: 100 });
+      const list = main(screen).getByRole('list', { name: 'What I know now' });
+      await expect.element(list).toBeVisible();
+      expect(list.getByRole('listitem').elements().map((row) => row.textContent)).toEqual([
+        'An older noteAdded date unknownOnly you',
+        'A recent noteAdded Oct 30Customers can see this',
+        'A note only you can seeAdded date unknownOnly you',
+        'An earlier noteAdded Oct 26Customers can see this',
+      ]);
+      expectNoHorizontalScroll();
+      await expectScreenBasics(screen.container, { owner: true });
     }
   });
 
