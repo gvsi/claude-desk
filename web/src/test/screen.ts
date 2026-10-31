@@ -74,13 +74,30 @@ async function animationsSettled(root: HTMLElement): Promise<void> {
   await Promise.all(ending.map((animation) => animation.finished.catch(() => undefined)));
 }
 
+/**
+ * Runs `check` on the screen at rest: nothing animates or transitions while it runs, as under
+ * reduced motion, so axe reads each line as it settles, never halfway through fading in, even a
+ * reply that lands while axe is reading. Motion comes back afterwards; anything that had already
+ * moved plays once more.
+ */
+async function atRest<T>(check: () => Promise<T>): Promise<T> {
+  const still = document.createElement('style');
+  still.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }';
+  document.head.append(still);
+  try {
+    return await check();
+  } finally {
+    still.remove();
+  }
+}
+
 export async function expectScreenBasics(root: HTMLElement, { owner }: ScreenBasicsOptions): Promise<void> {
   await animationsSettled(root);
   const footers = root.querySelectorAll('[data-ds="concept-footer"]');
   expect(footers, 'one concept footer').toHaveLength(1);
   expect(footers[0]?.textContent?.replace(/\s+/g, ' ').trim()).toBe(CONCEPT_FOOTER_TEXT);
   assertCleanCopy(root);
-  const violations = await axeViolations(root);
+  const violations = await atRest(() => axeViolations(root));
   if (violations.length > 0) throw new Error(`axe found ${violations.length} violations:\n${violations.map((v) => `- ${v}`).join('\n')}`);
   if (owner) assertNoJargon(root);
 }
