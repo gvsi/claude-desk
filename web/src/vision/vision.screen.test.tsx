@@ -5,9 +5,12 @@
  * for nothing; and each is drawn as its signed board draws it.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
+import { SPEC, expectFooter, expectOwnerFrame, expectTabOrder, expectVisionBar, one, some } from '../ds/boards/spec.ts';
 import { VISION_LINE } from '../ds/index.ts';
+import { expectComputed } from '../ds/test/expectComputed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 
@@ -100,3 +103,113 @@ describe('Vision pages', () => {
     expect(textOutsideFactCards(page)).not.toMatch(FACT_OUTSIDE_A_CARD);
   });
 });
+
+describe('Vision pages against their boards', () => {
+  it('city_office_matches_its_board', async () => {
+    // As Boards/Vision, city office draws it, measured in the window the screens run in.
+    const { screen } = await renderRoute(CITY_OFFICE);
+    const live = main(screen).getByRole('region', { name: 'Live now' });
+    await expect.element(live).toBeVisible();
+    const root = screen.container;
+    const bar = await expectVisionBar(root, BACK_HREF);
+    await expectOwnerFrame(root, 'Today', { fill: true });
+    const sidebar = screen.getByRole('complementary', { name: 'Claude Desk' });
+    expect(top(sidebar.element())).toBe(bottom(bar));
+
+    // The city's sidebar: its business, its people's word, its Answering line and its supervisor.
+    await expect.element(sidebar.getByRole('button', { name: 'Switch business, current: Meridian Bay Permits' })).toBeVisible();
+    await expect.element(sidebar.getByRole('link', { name: 'Residents' })).toBeVisible();
+    await expect.element(sidebar.getByRole('switch', { name: 'Answering' })).toHaveAccessibleDescription('Claude answers under the City’s rules');
+    await expect.element(sidebar.getByText('Permit Center supervisor')).toBeVisible();
+
+    // The page padded 24 px 40 px from the sidebar's seam, the greeting at its top.
+    const area = main(screen).element();
+    const greeting = main(screen).getByRole('heading', { level: 1, name: 'Good morning, Nadia' }).element();
+    expectComputed(greeting, SPEC.greeting);
+    expect(round(greeting.getBoundingClientRect().left)).toBe(264 + 40);
+    expect(round(top(greeting) - top(area))).toBe(24);
+    await expect.element(main(screen).getByText('Nine residents are talking to the Desk right now.')).toBeVisible();
+    await expect.element(main(screen).getByText('desk.example/meridian-bay-permits')).toBeVisible();
+
+    // Live now: the four conversations, each with who, their level and what it is about.
+    await expect.element(live.getByRole('link', { name: 'See all in Conversations' })).toBeVisible();
+    const items = live.getByRole('listitem').elements();
+    expect(items.map((item) => one(item, '[data-copy="user"]').textContent)).toEqual(['Marcus Bell', 'Visitor in Eastshore', 'Visitor', 'Joan Park']);
+    expect(items.map((item) => one(item, '.cd-pill').textContent)).toEqual(['Verified', 'Public', 'Public', 'Verified']);
+    expect(items.map((item) => one(item, '.cd-vision-live__head').lastElementChild?.textContent)).toEqual([
+      'Permit status, 3 min',
+      'Program deadline, in Spanish',
+      'Asked about a neighbor’s permit',
+      'Eligibility, waiting 4 min',
+    ]);
+    // Rows under hairlines, not cards: the only cards in Live now are the fact cards.
+    const liveRegion = live.element();
+    expect(liveRegion.querySelectorAll('.cd-card:not(.cd-fact-card .cd-card)')).toHaveLength(0);
+    for (const item of items.slice(1)) expectComputed(item, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
+
+    // Claude's words in serif, word for word as ruled, each leading into its card.
+    const prose = some(liveRegion, '.cd-claude-message__prose');
+    for (const line of prose) expectComputed(line, SPEC.reply);
+    expect(prose.map((line) => line.textContent)).toEqual([
+      'Here’s where your kitchen remodel stands.',
+      'Esta es la fecha límite del programa.',
+      'Plans and applicant details go only to the applicant. Here’s what’s public.',
+      'Whether your garage conversion is exempt is a plan checker’s decision. I’ve asked one to join.',
+    ]);
+    const facts = some(liveRegion, '.cd-fact-card');
+    expect(facts.map((fact) => one(fact, '.cd-fact-card__label').textContent)).toEqual(['Permit status', 'Fecha límite', 'Public record']);
+    expect(one(liveRegion, '.cd-fact-card[lang="es"]').textContent).toContain('Programa de refuerzo sísmico');
+    // Each card 8 px under Claude's words.
+    for (const fact of facts) expect(round(top(fact) - bottom(fact.previousElementSibling as HTMLElement))).toBe(8);
+
+    // Each receipt under its conversation in its tone: handled, handled, refused, held for a person.
+    const receipts = items.map((item) => one(item, '.cd-margin-line'));
+    expect(receipts.map((receipt) => one(receipt, '.cd-status-dot').className.replace('cd-status-dot cd-status-dot--', ''))).toEqual([
+      'handled',
+      'handled',
+      'refused',
+      'held',
+    ]);
+    for (const receipt of receipts) expectComputed(receipt, SPEC.receipt);
+    const assign = live.getByRole('listitem').nth(3).getByRole('button', { name: 'Assign staff' });
+
+    // The right column: what can't be switched off, and today's numbers, 360 px wide, 32 px from Live now.
+    const alwaysOn = main(screen).getByRole('region', { name: 'Always on' }).element();
+    expect(round(alwaysOn.getBoundingClientRect().left - liveRegion.getBoundingClientRect().right)).toBe(32);
+    expect(round(alwaysOn.getBoundingClientRect().width)).toBe(360);
+    expectComputed(alwaysOn, { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' });
+    expect([...alwaysOn.querySelectorAll('li')].map((item) => item.querySelector('.cd-type-control')?.textContent)).toEqual([
+      'No legal or financial determinations without a qualified person',
+      'Files only to the applicant',
+      'No promised outcomes',
+    ]);
+    await expect.element(main(screen).getByText('Can’t be switched off', { exact: true })).toBeVisible();
+    await expect
+      .element(main(screen).getByText('Also always on: says it’s an AI, and logs every conversation for City records.', { exact: true }))
+      .toBeVisible();
+    expect(alwaysOn.querySelectorAll('button, input, a')).toHaveLength(0);
+    const today = main(screen).getByRole('region', { name: 'Today so far' }).element();
+    expect(round(top(today) - bottom(alwaysOn))).toBe(16);
+    expect([...today.querySelectorAll('li')].map((item) => item.textContent)).toEqual([
+      '214 questions answered in 6 languages',
+      '38 applicants verified for their own files',
+      '7 handed to staff',
+      '0 determinations made without a person',
+    ]);
+    await expectFooter(root);
+
+    // focus_order_is_logical: the bar's link, the sidebar, then the page from the top.
+    await expectTabOrder(userEvent, [
+      bar.querySelector('a') as HTMLElement,
+      sidebar.getByRole('button', { name: 'Switch business, current: Meridian Bay Permits' }).element() as HTMLElement,
+      sidebar.getByRole('switch', { name: 'Answering' }).element() as HTMLElement,
+      main(screen).getByRole('button', { name: 'Copy your Desk link' }).element() as HTMLElement,
+      live.getByRole('link', { name: 'See all in Conversations' }).element() as HTMLElement,
+      assign.element() as HTMLElement,
+    ]);
+  });
+});
+
+const round = Math.round;
+const top = (el: Element) => el.getBoundingClientRect().top;
+const bottom = (el: Element) => el.getBoundingClientRect().bottom;
