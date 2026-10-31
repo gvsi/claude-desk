@@ -650,8 +650,9 @@ def _turn(interview_id: str) -> Iterator[None]:
 
 def _clear_configs(interview: Interview) -> None:
     for entry in interview.transcript:
-        if entry.card is not None and entry.card.job is not None:
-            entry.card.job.config = None
+        for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
+            if card.job is not None:
+                card.job.config = None
 
 
 def setup_state(interview: Interview, slug: str, *, cards: bool = False,
