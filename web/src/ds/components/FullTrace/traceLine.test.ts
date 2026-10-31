@@ -12,18 +12,18 @@ describe('traceLine', () => {
   });
 
   it('kernel_entries_are_recorded_by_the_checkpoint', () => {
-    expect(traceLine({ kind: 'decide', origin: 'kernel' })).toBe(`A decision on an action Claude asked to take. ${RECORDED}`);
+    expect(traceLine({ kind: 'decide', origin: 'kernel', summary: {} })).toBe(`A decision on an action Claude asked to take. ${RECORDED}`);
   });
 
   it('chat_service_entries_read_as_reported', () => {
-    expect(traceLine({ kind: 'decide', origin: 'api' })).toBe(`A decision on an action Claude asked to take. ${REPORTED}`);
-    expect(traceLine({ kind: 'whisper', origin: 'api' })).toBe(`A whisper to Claude. ${REPORTED}`);
+    expect(traceLine({ kind: 'decide', origin: 'api', summary: {} })).toBe(`A decision on an action Claude asked to take. ${REPORTED}`);
+    expect(traceLine({ kind: 'whisper', origin: 'api', summary: {} })).toBe(`A whisper to Claude. ${REPORTED}`);
   });
 
   it('unknown_origin_reads_as_reported_never_as_checked', () => {
     // Only an entry the kernel wrote says the checkpoint recorded it.
     for (const origin of ['bogus', 'Kernel', 'kernel ', '', undefined, null]) {
-      const line = traceLine({ kind: 'decide', origin: origin as unknown as LedgerEvent['origin'] });
+      const line = traceLine({ kind: 'decide', origin: origin as unknown as LedgerEvent['origin'], summary: {} });
       expect(line, JSON.stringify(origin)).toBe(`A decision on an action Claude asked to take. ${REPORTED}`);
       expect(line).not.toContain(RECORDED);
     }
@@ -31,10 +31,33 @@ describe('traceLine', () => {
 
   it('unknown_kind_reads_as_an_entry', () => {
     for (const kind of ['bogus', '', '__proto__', 'toString', undefined]) {
-      const event = { kind: kind as unknown as LedgerEvent['kind'] };
+      const event = { kind: kind as unknown as LedgerEvent['kind'], summary: {} };
       expect(traceLine({ ...event, origin: 'kernel' }), JSON.stringify(kind)).toBe(`An entry in the record. ${RECORDED}`);
       expect(traceLine({ ...event, origin: 'api' }), JSON.stringify(kind)).toBe(`An entry in the record. ${REPORTED}`);
     }
+  });
+
+  it.each([
+    ['opened', { kind: 'card' }, 'The Desk handed a chat to you.'],
+    ['done', {}, 'You marked a chat done.'],
+    ['replaced', { replaced_by: 'h-2' }, 'A call-back request replaced the handoff.'],
+    ['took_over', { closed_by: 'takeover' }, 'You took the chat over.'],
+    ['wrote', { closed_by: 'owner_message' }, 'You wrote in the chat.'],
+  ] as const)('names_the_%s_handoff_entry', (_state, details, what) => {
+    const event = { kind: 'desk_data', summary: { part: 'handoffs', refs: ['h-1'], ...details } } as const;
+    expect(traceLine({ ...event, origin: 'kernel' })).toBe(`${what} ${RECORDED}`);
+    expect(traceLine({ ...event, origin: 'api' })).toBe(`${what} ${REPORTED}`);
+  });
+
+  it('non_handoff_desk_data_keeps_the_kind_line', () => {
+    const event = { kind: 'desk_data', origin: 'kernel', summary: { part: 'calendar' } } as const;
+    expect(traceLine(event)).toBe(`A change to your Desk's details. ${RECORDED}`);
+  });
+
+  it('unknown_handoff_closing_keeps_the_kind_line', () => {
+    const event = { kind: 'desk_data', summary: { part: 'handoffs', refs: ['h-1'], closed_by: 'expired' } } as const;
+    expect(traceLine({ ...event, origin: 'kernel' })).toBe(`A change to your Desk's details. ${RECORDED}`);
+    expect(traceLine({ ...event, origin: 'api' })).toBe(`A change to your Desk's details. ${REPORTED}`);
   });
 });
 

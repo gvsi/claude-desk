@@ -1,4 +1,5 @@
 import type { LedgerEvent, LedgerPage } from '../../../api/contracts.ts';
+import { handoffEntryOf, type HandoffEntry } from '../../../api/handoffEntry.ts';
 import type { StatusTone } from '../StatusDot/StatusDot.tsx';
 
 /** What each kind of ledger entry records, in plain words. A kind missing here is a compile error. */
@@ -25,6 +26,15 @@ const KIND_LINES = {
   web_search: 'Web search.',
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
+/** Handoff entries share the owner's history rule; every handoff state has its own words. */
+const HANDOFF_LINES = {
+  opened: 'The Desk handed a chat to you.',
+  done: 'You marked a chat done.',
+  replaced: 'A call-back request replaced the handoff.',
+  took_over: 'You took the chat over.',
+  wrote: 'You wrote in the chat.',
+} as const satisfies Record<HandoffEntry, string>;
+
 /** Who wrote the entry: the checkpoint, or the chat service, whose report is recorded as it arrived, unchecked. */
 const ORIGIN_LINES = {
   kernel: 'Recorded by the checkpoint.',
@@ -32,12 +42,15 @@ const ORIGIN_LINES = {
 } as const satisfies Record<LedgerEvent['origin'], string>;
 
 /**
- * The trace's plain line: what the entry records, then who recorded it. A kind this build doesn't
- * know reads as "An entry in the record."; an origin it doesn't know reads as reported, never as
- * checked.
+ * The trace's plain line: what the entry records (handoffs have their own line), then who recorded
+ * it. A kind this build doesn't know reads as "An entry in the record."; an origin it doesn't
+ * know reads as reported, never as checked.
  */
-export function traceLine(event: Pick<LedgerEvent, 'kind' | 'origin'>): string {
-  const what = Object.hasOwn(KIND_LINES, event.kind) ? KIND_LINES[event.kind] : 'An entry in the record.';
+export function traceLine(event: Pick<LedgerEvent, 'kind' | 'origin' | 'summary'>): string {
+  const handoff = handoffEntryOf(event);
+  const what = handoff !== null
+    ? HANDOFF_LINES[handoff]
+    : Object.hasOwn(KIND_LINES, event.kind) ? KIND_LINES[event.kind] : 'An entry in the record.';
   const who = event.origin === 'kernel' ? ORIGIN_LINES.kernel : ORIGIN_LINES.api;
   return `${what} ${who}`;
 }
