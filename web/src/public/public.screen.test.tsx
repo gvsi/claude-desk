@@ -1899,8 +1899,9 @@ describe('public chat page', () => {
   });
 
   it('break_it_idea_leaves_focus_where_the_visitor_put_it', async () => {
-    // The chat opens late, and meanwhile the visitor has moved to a link in the about column: the
-    // idea is typed in, and focus stays on the link.
+    // The chat opens late. Its whole first view waits for the session read, so its about links
+    // aren't usable yet. A visitor who focuses a link elsewhere keeps that focus when the idea
+    // is typed in; nothing in the skeleton itself can take focus.
     let release = (): void => undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -1916,13 +1917,16 @@ describe('public chat page', () => {
       }),
     );
     const { screen } = await renderRoute(`${PAGE}?try=${handOff()}`);
-    const link = screen.getByRole('link', { name: 'What agents can do here' });
-    await expect.element(link).toBeVisible();
-    (link.element() as HTMLElement).focus();
+    await vi.waitFor(() => expect(held).toBe(true));
+    const link = document.body.appendChild(document.createElement('a'));
+    link.href = '#elsewhere';
+    link.textContent = 'A link elsewhere';
+    onTestFinished(() => link.remove());
+    link.focus();
     release();
     await expect.element(chatBox(screen)).toHaveValue(IDEA);
     await frames();
-    expect(document.activeElement).toBe(link.element());
+    expect(document.activeElement).toBe(link);
   });
 
   it('break_it_idea_stays_with_its_desk', async () => {

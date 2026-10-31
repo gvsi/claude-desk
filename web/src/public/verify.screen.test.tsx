@@ -394,11 +394,13 @@ describe('Demo inbox', () => {
   });
 
   it('owner_inbox_that_cant_be_read_says_so', async () => {
-    // While Today reads it, the inbox's place says so; when the read and its retry fail, it says
+    // Today's full-page skeleton waits for the inbox too; when the read and its retry fail, it says
     // the Demo inbox couldn't be opened, with "Try again", never a sheet that would say it's empty.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2, delayMs: 300 });
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
-    await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Demo inbox' })).toBeVisible();
+    const opening = screen.getByRole('status').filter({ hasText: 'Opening your Desk' });
+    await expect.element(opening).toHaveTextContent('Opening your Desk');
+    await expect.element(opening).toHaveClass('cd-sr-only');
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
     expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
