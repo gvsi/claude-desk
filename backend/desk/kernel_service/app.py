@@ -10,9 +10,9 @@ refuses to start, then the policy engine over the always-on baseline
 (`app.state.engine`; a baseline it can't take stops the start too) with the shipped proof reports
 in its cache, then runs `desk-prove --selftest` once to pick the proof mode for the whole process
 (`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), then
-rebuilds the active rules versions an earlier kernel stored under another baseline
-(`activation.rebuild_at_startup`), and last reconciles the executions a stopped kernel left behind
-(`execute.reconcile_at_startup`).
+gives every Desk the native tools it was created without and rebuilds the active rules versions an
+earlier kernel stored under another baseline (`activation.rebuild_at_startup`), and last reconciles
+the executions a stopped kernel left behind (`execute.reconcile_at_startup`).
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown

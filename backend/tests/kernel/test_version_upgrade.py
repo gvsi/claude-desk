@@ -112,7 +112,9 @@ async def test_a_kernel_core_version_decides_after_the_upgrade(app, client, regi
     assert rebuilt.baseline_sha256 == compiler.baseline_sha256() != KERNEL_CORE["version"]["baseline_sha256"]
     assert "auto_money_cap_cents" in rebuilt.schema_json
     assert rebuilt.proof is not None and activation.proved(rebuilt.proof)
-    assert sorted(card.card_id for card in rebuilt.cards) == owner_cards
+    assert sorted(card.card_id for card in rebuilt.cards if not card.is_default) == owner_cards
+    # the Desk was given the native tools registered since, and the one no card for anyone covers asks by default
+    assert [card.card_id for card in rebuilt.cards if card.is_default] == ["default:native.release_document"]
     policy = await entries_of(client, copy, "policy")
     assert policy[-1] == {"version": 2, "status": "active", "rebuilt": True, "auto_money_cap_cents": KERNEL_CORE_CAP,
                           "cedar_sha256": rebuilt.cedar_sha256,
@@ -186,6 +188,60 @@ async def test_a_seed_version_from_an_earlier_kernel_is_rebuilt_from_its_shipped
     # a version stored under this kernel's baseline is left as it was, and nothing is ledgered for it
     assert stored_columns(await stored_version(app, current, 1)) == untouched
     assert all("rebuilt" not in entry for entry in await entries_of(client, current, "policy"))
+
+
+# The native tools this plan registered, which a Desk created before it has no rows for.
+NEW_NATIVE_TOOLS = ("native.capture_lead", "native.release_document", "native.request_callback",
+                    "native.start_verification")
+
+
+async def without_new_native_tools(app: FastAPI, copy: Rivera) -> None:
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        await ctx.db.execute(delete(Tool).where(Tool.desk_id == copy.desk_id, Tool.tool.in_(NEW_NATIVE_TOOLS)))
+
+
+def tool_columns(rows: list[Tool]) -> dict[str, dict]:
+    return {row.tool: {column.key: getattr(row, column.key) for column in Tool.__table__.columns} for row in rows}
+
+
+async def test_a_desk_from_before_new_native_tools_gets_them_at_startup(app, client, frozen_clock, reviewer):
+    # bounded mode: the seed's version from an earlier kernel is rebuilt from its shipped report only over
+    # every native tool, so the tools come first; a Desk whose version is current gets them all the same
+    current, upgraded = await rivera(app, client), await rivera(app, client)
+    made_now = tool_columns(await rows_of(app, current.copy_id, select(Tool).where(Tool.desk_id == current.desk_id)))
+    assert set(NEW_NATIVE_TOOLS) <= set(made_now) == {p.tool for p in adapters.registered_profiles(source="native")}
+    for copy in (current, upgraded):
+        await without_new_native_tools(app, copy)
+    await seed_from_an_earlier_kernel(app, upgraded)
+
+    async with upgraded_kernel(frozen_clock, reviewer) as http:
+        visitor = await open_visitor(http, upgraded)
+        slots = await decided(http, visitor, "native.find_slots", call_id="slots")
+        assert (slots.outcome, slots.policy_version) == ("allow", 1)
+
+    shipped = activation.ShippedReport.model_validate_json((activation.PROOFS_DIR / "rivera.json").read_bytes())
+    rebuilt = await stored_version(app, upgraded, 1)
+    assert activation.VersionHashes(*(getattr(rebuilt, field) for field in activation.VersionHashes._fields)) \
+        == shipped.hashes
+    for copy in (current, upgraded):
+        rows = await rows_of(app, copy.copy_id, select(Tool).where(Tool.desk_id == copy.desk_id))
+        # as a Desk made now has them: enabled, with the registered profile and its hash
+        assert {tool: {**columns, "desk_id": None, "copy_id": None} for tool, columns in tool_columns(rows).items()} \
+            == {tool: {**columns, "desk_id": None, "copy_id": None} for tool, columns in made_now.items()}
+        assert [entry for entry in await entries_of(client, copy, "desk_data") if entry["part"] == "tools"] == [
+            {"part": "tools", "refs": sorted(NEW_NATIVE_TOOLS)}]
+
+    # a second start finds nothing to add or rebuild, and writes nothing
+    before = {copy.desk_id: (tool_columns(await rows_of(app, copy.copy_id, select(Tool).where(
+        Tool.desk_id == copy.desk_id))), await entries_of(client, copy, "desk_data"),
+        await entries_of(client, copy, "policy")) for copy in (current, upgraded)}
+    async with upgraded_kernel(frozen_clock, reviewer):
+        pass
+    after = {copy.desk_id: (tool_columns(await rows_of(app, copy.copy_id, select(Tool).where(
+        Tool.desk_id == copy.desk_id))), await entries_of(client, copy, "desk_data"),
+        await entries_of(client, copy, "policy")) for copy in (current, upgraded)}
+    assert after == before
 
 
 async def test_cards_this_kernel_refuses_are_never_rebuilt(app, client, frozen_clock, reviewer):

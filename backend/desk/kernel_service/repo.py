@@ -84,7 +84,10 @@ ledger head: its own `policy` entry first, then the hooks' `payment` events. A d
 key's advisory lock before the `versions` lock. The startup rebuild of a version an earlier kernel
 stored (`activation.rebuild_version`) takes the same `versions` lock and active row `FOR UPDATE`,
 then the ledger head; the owner alert it writes when it can't rebuild is an insert under a fresh
-key. An owner write refused for a document canary (`desks.refuse_public_canaries`) appends in its
+key. Before it, in a transaction of its own, startup gives a Desk the native tools it has no row
+for (`desks.add_native_tools`) under the Desk row `FOR UPDATE`, as an owner's write holds it: the
+rows are inserts under fresh keys, and its `desk_data` entry takes the ledger head. An owner write
+refused for a document canary (`desks.refuse_public_canaries`) appends in its
 `persist` alone, holding nothing else, to each Desk it names in ID order, and one refused past a
 Desk's cap of documents or knowledge items (`labels.refuse_past_cap`, counted without a lock under
 the Desk row's) to its Desk likewise; the public page's owner
@@ -118,7 +121,7 @@ import logging
 import re
 import secrets
 import traceback
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -130,7 +133,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from desk.db import logs as db_logs
-from desk.db.models import Execution, PolicyVersion
+from desk.db.models import Desk, Execution, PolicyVersion, Tool
 from desk.db.session import CopyResolver, KernelRepo, resolve_copy
 from desk.kernel_api import KernelError
 from desk.kernel_service.clock import Clock
@@ -334,8 +337,9 @@ async def copy_of_document_link(ctx: KernelCtx, token_sha256: str) -> str | None
     return await _resolve(ctx, "copy_of_document_link", token_sha256)
 
 
-# Startup's two lookups across copies: which copies hold an execution to settle, and which hold an
-# active rules version an earlier kernel stored, to rebuild.
+# Startup's lookups across copies: which copies hold an execution to settle, which hold an active
+# rules version an earlier kernel stored, to rebuild, and which hold a Desk without a native tool
+# this kernel registers, to add.
 
 async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[tuple[str, str]]:
     """`(copy_id, action_id)` of every execution startup reconciliation must settle: an intent
@@ -374,4 +378,27 @@ async def outdated_versions(runtime: KernelRuntime, baseline_sha256: str) -> lis
                 PolicyVersion.status == "active", PolicyVersion.baseline_sha256 != baseline_sha256)
                 .order_by(PolicyVersion.desk_id)))
             found += [(copy_id, desk_id, version) for desk_id, version in rows]
+    return found
+
+
+async def desks_missing_tools(runtime: KernelRuntime, tools: Iterable[str]) -> list[tuple[str, str]]:
+    """`(copy_id, desk_id)` of every Desk with no `tools` row for one of `tools`, the native tools
+    the kernel registers: a Desk created before one of them was. Used only by the startup rebuild
+    (`activation.rebuild_at_startup`), which adds them through each copy's `KernelRepo`. It visits
+    every copy (`kernel.copy_ids()`) and reads each through its own `KernelRepo`, as
+    `orphan_intents` does."""
+    wanted = sorted(set(tools))
+    async with runtime.engine.connect() as conn:
+        copy_ids = list((await conn.scalars(select(func.kernel.copy_ids()))).all())
+    found: list[tuple[str, str]] = []
+    for copy_id in copy_ids:
+        copy = KernelRepo(copy_id)
+        async with runtime.sessions() as db:
+            copy.bind(db)
+            desk_ids = (await db.scalars(copy.scoped(select(Desk.desk_id).order_by(Desk.desk_id)))).all()
+            rows = await db.execute(copy.scoped(select(Tool.desk_id, Tool.tool).where(Tool.tool.in_(wanted))))
+            have: dict[str, set[str]] = {}
+            for desk_id, tool in rows:
+                have.setdefault(desk_id, set()).add(tool)
+            found += [(copy_id, desk_id) for desk_id in desk_ids if have.get(desk_id, set()) != set(wanted)]
     return found

@@ -30,7 +30,9 @@ kernel rebuilds each such active version in place (`rebuild_at_startup`): its ow
 cap, checked, compiled and loaded as a draft is, and written only with a proof of all seven
 obligations, from the cache (a shipped report) in either mode or proved live in `symcc` mode. One
 it can't rebuild stays as stored, refusing every call (`version_outdated`), and each attempt is
-ledgered and alerts the owner.
+ledgered and alerts the owner. First, startup gives every Desk the native tools the kernel
+registers that it has no row for (one created before they were), so a version is rebuilt over the
+tools a Desk made now has, and a seed's from its shipped report.
 
 Loaded versions. A stored version loads into the policy engine on its first use
 (`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first,
@@ -84,7 +86,8 @@ from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain,
                                  review_thresholds, seed)
 from desk.kernel_service.auth import OwnerCtx
 from desk.kernel_service.reference import RefSets
-from desk.kernel_service.repo import KernelCtx, KernelFailure, KernelRuntime, kernel_transaction, outdated_versions
+from desk.kernel_service.repo import (KernelCtx, KernelFailure, KernelRuntime, desks_missing_tools, kernel_transaction,
+                                     log_error, outdated_versions)
 from desk.presets import PRESETS
 
 log = logging.getLogger(__name__)
@@ -688,7 +691,9 @@ async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | Non
 # (the money cap revision gave the kernel core's versions their $500), over the Desk's enabled
 # profiles, checked as a draft is, compiled, and written in place of the stored one only with a
 # proof of all seven obligations. The version keeps its number, status and cap, so nothing the
-# owner chose changes.
+# owner chose changes. Before that, each Desk without a native tool the kernel registers is given
+# it (`desks.add_native_tools`), so the profiles a version is rebuilt over are those a Desk made
+# now has.
 
 # What a rebuild rewrites: the compiled sets, what they were proved against and the proof.
 _REBUILT_COLUMNS = ("cards", "cedar", "schema_json", *VersionHashes._fields, "proof")
@@ -703,10 +708,20 @@ def outdated(row: PolicyVersionRow) -> bool:
 
 
 async def rebuild_at_startup(runtime: KernelRuntime) -> dict[tuple[str, int], str | None]:
-    """Rebuilds every copy's active versions stored under another baseline (`rebuild_version`),
-    each in its own transaction, and returns what became of each `(desk_id, version)`: None when
-    rebuilt, else why not. A failure is logged and the next version is tried; a version left as
-    stored decides nothing."""
+    """Gives every Desk the registered native tools it has no row for (`desks.add_native_tools`),
+    then rebuilds every copy's active versions stored under another baseline (`rebuild_version`),
+    each Desk's tools and each version in a transaction of its own, and returns what became of each
+    `(desk_id, version)`: None when rebuilt, else why not. A failure is logged and the next is
+    tried; a Desk left without a tool can't be called on it, and a version left as stored decides
+    nothing."""
+    native = [profile.tool for profile in adapters.registered_profiles(source="native")]
+    for copy_id, desk_id in await desks_missing_tools(runtime, native):
+        try:
+            async with kernel_transaction(runtime) as ctx:
+                ctx.bind(copy_id)
+                await desks.add_native_tools(ctx, desk_id)
+        except Exception as exc:
+            log_error(log, exc, "native_tools_failed copy_id=%s desk_id=%s", copy_id, desk_id)
     results: dict[tuple[str, int], str | None] = {}
     for copy_id, desk_id, version in await outdated_versions(runtime, compiler.baseline_sha256()):
         try:

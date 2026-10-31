@@ -213,6 +213,25 @@ def tool_row(copy_id: str, desk_id: str, profile: ToolProfile) -> Tool:
                 profile_sha256=adapters.profile_sha256(enabled))
 
 
+async def add_native_tools(ctx: KernelCtx, desk_id: str) -> list[str]:
+    """Gives the Desk the registered native tools it has no `tools` row for (one created before
+    they were registered), enabled as `create_desk` writes them, in the caller's transaction under
+    the Desk row's lock, as an owner's write takes it, and ledgered `desk_data` `{part: "tools",
+    refs}`. A row the Desk has stays as it is, whatever its status. Returns the tools added, by
+    name; [] when it has them all, and then nothing is written."""
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id).with_for_update()
+                                                     .execution_options(populate_existing=True)))).one()
+    have = set((await ctx.db.scalars(ctx.repo.scoped(select(Tool.tool).where(Tool.desk_id == desk_id)))).all())
+    missing = [profile for profile in adapters.registered_profiles(source="native") if profile.tool not in have]
+    if not missing:
+        return []
+    ctx.db.add_all(tool_row(desk_row.copy_id, desk_id, profile) for profile in missing)
+    await ctx.db.flush()
+    added = sorted(profile.tool for profile in missing)
+    await ledger_desk_data(ctx, desk_row, {"part": "tools", "refs": added})
+    return added
+
+
 def hours_claim(hours: Sequence[HoursWindow]) -> Claim:
     """Fact `charter:hours`'s one claim: the canonical JSON of the Desk's hours windows."""
     windows = json.dumps([window.model_dump(mode="json") for window in hours])
