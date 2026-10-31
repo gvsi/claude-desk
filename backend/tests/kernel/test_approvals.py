@@ -771,6 +771,7 @@ async def test_a_desk_deleted_after_the_answer_commits_runs_nothing(app, client,
     assert (result.decision.state, result.execution) == ("refused_at_execution", ExecResult(
         action_id=held.action.action_id, state="failed", facts=[], model_view={}))
     assert result.decision.visitor_plain == "The rules changed, so this didn't go ahead"
+    assert result.approved is None                    # nothing ran, so the visitor isn't shown it approved
     assert "execute" not in quote.calls and quote.calls[-1] == "on_failed"     # prepared, then undone
     assert await committed(app, rows.copy_id, held.action.action_id) == ("failed", "refused_at_execution")
     [entry] = [e.event.summary for e in await ledger_rows(app, rows) if e.seq == result.decision.ledger_seq]

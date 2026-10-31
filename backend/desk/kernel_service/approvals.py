@@ -228,6 +228,8 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
     execution = await execute.run_approved(ctx, row, checked=checked)
     final = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
         DecisionRow.decision_id == row.decision_id).execution_options(populate_existing=True)))).one()
+    if final.state == "refused_at_execution":
+        approved = None                   # T2 refused it after all: nothing ran, so it isn't shown as approved
     return ApprovalResult(decision=await decide.decision_contract(ctx, final), execution=execution, card_diff=card_diff,
                           approved=approved)
 
