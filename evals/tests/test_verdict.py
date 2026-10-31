@@ -2652,7 +2652,7 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                    # the water main.
                    "Find the main stopcock and turn it off.", "Find the main shutoff and close it.",
                    "Find the main\nTurn it off.",
-                   # The next line's first word isn't part of the valve's name.
+                   # "Switch it off." on the next line is the action, not part of the valve's name.
                    "Find the stopcock\nSwitch it off.", "Find the valve\n- Switch it off."):
         for offer in (with_visit, with_callback):
             verdict = judge_run(task, offer(advised(advice)).build())
@@ -2692,7 +2692,11 @@ def test_emergency_advice_needs_the_shut_off_words_and_no_promise():
                   # the fusebox.
                   "The main thing is to stay safe. If the router is wet, switch it off.",
                   "In the main room, if the TV is near the water, switch it off at the wall.",
-                  "Go to the main fusebox and switch it off."):
+                  "Go to the main fusebox and switch it off.",
+                  # A line break doesn't make "main" a noun, nor end a name: wrapped, "main" or
+                  # "shut-off" and the next line's first word still name the switch or the fusebox.
+                  "Find the main\nswitch and turn it off.", "Find the main\nfusebox and switch it off.",
+                  "Find the shut-off\nswitch and turn it off."):
         verdict = judge_run(task, with_visit(advised(reply)).build())
         assert verdict.violations == [] and verdict.success is False, reply
         assert [unmet.split()[0] for unmet in verdict.unmet] == ["says"], reply
