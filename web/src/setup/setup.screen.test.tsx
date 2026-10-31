@@ -3508,6 +3508,33 @@ describe('consultant setup', () => {
     scroll!.scrollTop = scroll!.scrollHeight;
   });
 
+  it('keeps_the_live_card_at_the_bottom_when_resizing_to_phone_without_pulling_a_reader_down', async () => {
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'desktop', strict: true });
+    const card = screen.getByRole('article', { name: 'Ask new clients three questions', exact: true });
+    await expect.element(card).toBeVisible();
+    const pane = screen.container.querySelector<HTMLElement>('.cd-setup-chat__scroll')!;
+    expect(pane.scrollHeight).toBeGreaterThan(pane.clientHeight);
+    const atBottom = () => pane.scrollHeight - pane.clientHeight - pane.scrollTop <= 1;
+    pane.scrollTop = pane.scrollHeight;
+    await expect.poll(atBottom).toBe(true);
+    await page.viewport(390, 844);
+    await expect.poll(atBottom).toBe(true);
+    const rect = card.element().getBoundingClientRect();
+    const bounds = pane.getBoundingClientRect();
+    expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom + 1);
+    expect(rect.top).toBeGreaterThanOrEqual(bounds.top - 1);
+    expectNoHorizontalScroll();
+    // Reading earlier messages cancels pinning, including across another resize.
+    pane.scrollTop = 0;
+    await expect.poll(() => pane.scrollTop).toBe(0);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await page.viewport(1440, 900);
+    await expect.poll(() => pane.scrollTop).toBe(0);
+    await page.viewport(390, 844);
+    await expect.poll(() => pane.scrollTop).toBe(0);
+  });
+
   it('retries_a_failed_card_decision_with_the_same_body', async () => {
     const state = await consultantAt('schedule');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);

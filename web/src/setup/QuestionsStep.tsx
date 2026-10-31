@@ -322,6 +322,32 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     if (pane) pane.scrollTop = pane.scrollHeight;
   }, [state.messages.length, busy, sending, deciding, panel?.index]);
 
+  useEffect(() => {
+    const pane = scroll.current;
+    if (!pane) return;
+    let pinned = true;
+    let previousEnd = pane.scrollHeight - pane.clientHeight;
+    const notePlace = () => {
+      const end = pane.scrollHeight - pane.clientHeight;
+      if (end - pane.scrollTop <= 1) pinned = true;
+      // A resize can move the end before its scroll event arrives. Only a move away from
+      // both the old and the new end means the owner scrolled back to read.
+      else if (previousEnd - pane.scrollTop > 1) pinned = false;
+      previousEnd = end;
+    };
+    pane.addEventListener('scroll', notePlace, { passive: true });
+    const observer = new ResizeObserver(() => {
+      if (pinned && !pane.contains(document.activeElement)) pane.scrollTop = pane.scrollHeight;
+      previousEnd = pane.scrollHeight - pane.clientHeight;
+    });
+    observer.observe(pane);
+    if (pane.firstElementChild) observer.observe(pane.firstElementChild);
+    return () => {
+      pane.removeEventListener('scroll', notePlace);
+      observer.disconnect();
+    };
+  }, []);
+
   return (
     <div className="cd-setup-chat" ref={step}>
       <div className="cd-setup-chat__scroll" ref={scroll} tabIndex={0}
