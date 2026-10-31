@@ -699,6 +699,23 @@ async def test_money_cap_change_drafts_through_the_kernel(app, browser, fake, ke
     assert len(fake.called("POST /policy/draft")) == drafts
 
 
+async def test_the_money_limit_drafts_however_many_cards_the_desk_holds(app, browser, fake, kernel_http):
+    # The owner-card bound keeps a draft from growing a Desk past what a rules chat can carry. The money limit adds no
+    # card, so a Desk already holding more (an active version of 61 owner cards) can still change its cap.
+    owner = await new_owner(app, browser, fake, kernel_http)
+    rivera = owner_cards(fake, owner.desk_id)
+    planted(fake, owner.desk_id, *(card(f"extra-{n}", mode="ask", reason="Quotes ask you first.")
+                                   for n in range(OWNER_CARDS_MAX + 1 - len(rivera))))
+    assert len(owner_cards(fake, owner.desk_id)) == OWNER_CARDS_MAX + 1
+
+    lowered = await drafted(owner, rules_path(owner, "money_cap"), {"auto_money_cap_cents": 10_000})
+    assert (len(lowered.cards), lowered.auto_money_cap_cents) == (OWNER_CARDS_MAX + 1, 10_000)
+    assert [after.card_id for _, after in lowered.diff.changed] == ["rv-link"]
+    # A draft that adds a card is still held to the bound.
+    reply = await owner.browser.post(rules_path(owner, "draft"), json=adding(card("one-more", "native.capture_lead")))
+    assert (reply.status_code, reply.json()) == (422, {"error": "invalid"})
+
+
 async def test_the_money_cap_shown_is_the_drafted_versions(db, fake, api_settings, clock, model, browser,
                                                            kernel_http):
     # The cap a money-limit draft shows is read back from the version the kernel drafted, never the API's copy of
