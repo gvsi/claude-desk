@@ -11,8 +11,8 @@ line names that link from its own fact. A quote is paid once. A demo agent's man
 $20 charges and no more, nothing above $20 at once, nothing after its hour and no refund; two
 calls racing for its last $20 leave one spend; and a charge whose kernel died after the provider
 charged, or whose provider answered late, is committed once on reconciliation. Every agent call is
-signed by the session's own key, with a fresh
-timestamp, under a nonce that lasts one turn. An owner's setup call reaches only its own copy.
+signed by the session's own key, with a fresh timestamp, under a nonce that lasts one turn. An
+owner's setup call reaches only its own copy.
 
 On the real kernel each case also reads what the kernel stored (`kernel_ro`: tools, facts,
 mandates, payment links, decisions and the ledger) and what the mock payments server holds (its

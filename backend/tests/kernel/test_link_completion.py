@@ -785,8 +785,8 @@ async def test_a_cancelled_links_card_shows_its_own_title_and_amount(desk_prove,
             forged = verdict.model_copy(update={"blocks": [block.model_copy(update=changed)]})
             with pytest.raises(InvalidSignature):
                 verify_verdict(public, session_id, forged)
-    replies =[entry.event for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"
-               and entry.event.summary["author"] == "desk"]
+    replies = [entry.event for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"
+                and entry.event.summary["author"] == "desk"]
     assert sorted((event.session_id, tuple(event.summary["fact_ids"])) for event in replies) == sorted(
         (session_id, (f"payment_link:{link.link_id}",)) for session_id, (link, *_) in expected.items())
 
