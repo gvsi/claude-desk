@@ -1653,9 +1653,11 @@ describe('Today', () => {
     await expect.element(wants.first().getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
     expect(wants.first().getByText(CALLBACK_REASON).element().closest('[data-copy="user"]')).not.toBeNull();
     await expect.element(wants.first().getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true })).toBeVisible();
+    // A chat holds one open handoff, as the kernel keeps it: a second call-back takes over the first,
+    // so the owner keeps one item, which shows what is promised now.
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Please call me tonight' } });
-    await expect.poll(() => wants.elements().length, { timeout: 2_000 }).toBe(2);
-    await expect.element(wants.nth(1).getByText("You'll call back. No time was promised.", { exact: true })).toBeVisible();
+    await expect.element(wants.first().getByText("You'll call back. No time was promised.", { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(wants.elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Joining reads the chat, takes it over at the generation read, and opens it.

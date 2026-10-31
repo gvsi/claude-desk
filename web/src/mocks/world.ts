@@ -934,21 +934,26 @@ export class MockWorld {
     return { type: 'demo_inbox', entry_id: entry.entry_id, to: entry.to, preview: fields.preview };
   }
 
-  /** A callback request in Needs you, and the lead it makes: the name, and the rest of what they typed as its note. */
+  /**
+   * A callback request in Needs you, and the lead it makes: the name, and the rest of what they typed
+   * as its note. As the kernel's `native.request_callback` does (plan 01b), a chat holds one open
+   * handoff: when it has one, the handoff card's or an earlier call-back's, that one becomes this
+   * call-back's under the same id, so the owner keeps one item for the conversation.
+   */
   private openHandoff(session: SessionRecord, fields: { reason: string; callbackWindow: string | null; lead: string }): void {
-    const handoffId = this.id('handoff');
-    this.handoffs.set(handoffId, {
-      handoff: {
-        handoff_id: handoffId,
-        session_id: session.state.session_id,
-        reason: fields.reason,
-        callback_window: fields.callbackWindow,
-        status: 'open',
-        kind: 'callback',
-      },
-      deskId: session.deskId,
-      createdAt: this.now(),
-    });
+    const sessionId = session.state.session_id;
+    const written = { reason: fields.reason, callback_window: fields.callbackWindow, kind: 'callback' } as const;
+    const open = [...this.handoffs.values()].find((h) => h.handoff.session_id === sessionId && h.handoff.status === 'open');
+    if (open) {
+      open.handoff = { ...open.handoff, ...written };
+    } else {
+      const handoffId = this.id('handoff');
+      this.handoffs.set(handoffId, {
+        handoff: { handoff_id: handoffId, session_id: sessionId, status: 'open', ...written },
+        deskId: session.deskId,
+        createdAt: this.now(),
+      });
+    }
     const named = `${fields.lead} · `;
     this.leads.push({
       leadId: this.id('lead'),

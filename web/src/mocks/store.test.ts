@@ -740,13 +740,15 @@ describe('the scripted Desk', () => {
     expect(mockStore.world.inbox.filter((record) => record.sessionId === session.session_id)).toEqual([]);
     expect([...mockStore.world.links.values()].filter((link) => link.sessionId === session.session_id)).toEqual([]);
 
-    // A callback still goes through, with its receipt and card.
-    const handoffs = mockStore.world.handoffs.size;
+    // A callback still goes through, with its receipt and card, and takes over the handoff the card
+    // opened.
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
     const callback = await turn('Can you call me back?');
     expect(callback.map((ev) => ev.type)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
     expect(shown(callback).map(([, template]) => template)).toEqual(['callback_confirmed']);
     expect(toolsDecided(session.session_id)).toEqual(['native.request_callback']);
-    expect(mockStore.world.handoffs.size).toBe(handoffs + 1);
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['callback', 'open']]);
 
     // An agent sent from the chat gets the handoff too, and decides nothing.
     const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
@@ -943,6 +945,24 @@ describe('the scripted Desk', () => {
     await send('Can I talk to Maria?');
     await drain();
     expect(mine()).toHaveLength(2);
+  });
+
+  it('callback_takes_over_the_open_card_handoff', async () => {
+    // As the kernel's `native.request_callback` does (plan 01b): a chat holds one open handoff, so a
+    // call back asked for while the card's is open becomes that one, under the same id, now of kind
+    // `callback` with its window, and the owner keeps one item for the conversation.
+    const { session } = await openChat();
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    await send('Can I talk to Maria?');
+    await drain();
+    const card = mine()[0]?.handoff_id;
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+
+    await send('Can you call me back?');
+    await drain();
+    expect(mine().map((h) => [h.handoff_id, h.kind, h.status, h.callback_window])).toEqual([[card, 'callback', 'open', CALLBACK_WINDOW]]);
+    const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(items.filter((item) => item.handoff?.session_id === session.session_id).map((item) => item.handoff?.kind)).toEqual(['callback']);
   });
 
   it('open_handoff_quotes_its_visitors_latest_words', async () => {
