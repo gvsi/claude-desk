@@ -12,7 +12,11 @@ type Cause = Attempt['cause'];
 
 /** A refused decision's deciding policies and cards, its `decide` entry's summary, and whether its session was verified. */
 function cause(summary: Record<string, unknown>, policies: string[], { cards = [], verified = false }: { cards?: string[]; verified?: boolean } = {}): Cause {
-  return refusalCause({ policy_ids: policies, card_ids: cards }, { event: { summary } }, { verified });
+  return refusalCause(
+    { decision_id: 'dec-1', policy_ids: policies, card_ids: cards },
+    { event: { kind: 'decide', summary: { outcome: 'refuse', ...summary } } },
+    { verified },
+  );
 }
 
 describe('refusalCause', () => {
@@ -81,7 +85,21 @@ describe('refusalCause', () => {
     expect(cause({}, [], { cards: ['rv-quote'] })).toBeNull();
   });
 
+  it('entry_that_isnt_this_refusals_decide_entry_has_no_cause', () => {
+    // As the API reads it: a `decide` entry whose outcome is a refusal, for this decision when it
+    // names one, with string codes. Anything else names no cause.
+    const decision = { decision_id: 'dec-1', policy_ids: ['F.never.card'], card_ids: [] };
+    const entry = (kind: string, summary: Record<string, unknown>) => ({ event: { kind, summary } });
+    expect(refusalCause(decision, entry('decide', { outcome: 'refuse' }), { verified: false })).toBe('owner_rule');
+    expect(refusalCause(decision, entry('reply', { outcome: 'refuse' }), { verified: false })).toBeNull();
+    expect(refusalCause(decision, entry('decide', { outcome: 'hold', reason: 'paused' }), { verified: false })).toBeNull();
+    expect(refusalCause(decision, entry('decide', { outcome: 'refuse', decision_id: 'dec-2' }), { verified: false })).toBeNull();
+    expect(refusalCause(decision, entry('decide', { outcome: 'refuse', decision_id: 'dec-1' }), { verified: false })).toBe('owner_rule');
+    expect(refusalCause(decision, entry('decide', { outcome: 'refuse', reason: 7 }), { verified: false })).toBeNull();
+    expect(refusalCause(decision, entry('decide', { outcome: 'refuse', reason: 'adapter_refused', check: ['no_such_slot'] }), { verified: false })).toBeNull();
+  });
+
   it('refusal_without_its_entry_has_no_cause', () => {
-    expect(refusalCause({ policy_ids: [], card_ids: [] }, null, { verified: false })).toBeNull();
+    expect(refusalCause({ decision_id: 'dec-1', policy_ids: [], card_ids: [] }, null, { verified: false })).toBeNull();
   });
 });

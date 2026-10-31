@@ -57,16 +57,20 @@ function lookUp(table: Readonly<Record<string, RefusalCause>>, key: unknown): Re
 
 /**
  * A refused decision's cause, from its deciding policies and cards, its `decide` entry (null when
- * the record doesn't hold the entry, as with no entry the API has nothing to read), and whether
- * its session was verified.
+ * the record doesn't hold it, or holds one that isn't this refusal's, as the API reads none then),
+ * and whether its session was verified.
  */
 export function refusalCause(
-  decision: Pick<Decision, 'policy_ids' | 'card_ids'>,
-  entry: { event: { summary: Record<string, unknown> } } | null,
+  decision: Pick<Decision, 'decision_id' | 'policy_ids' | 'card_ids'>,
+  entry: { event: { kind: string; summary: Record<string, unknown> } } | null,
   { verified }: { verified: boolean },
 ): RefusalCause | null {
-  if (entry === null) return null;
+  // Only this refusal's own `decide` entry, with string codes, as the API reads it.
+  if (entry === null || entry.event.kind !== 'decide') return null;
   const { summary } = entry.event;
+  if (summary.outcome !== 'refuse') return null;
+  if (Object.hasOwn(summary, 'decision_id') && summary.decision_id !== decision.decision_id) return null;
+  if (['reason', 'check'].some((key) => Object.hasOwn(summary, key) && typeof summary[key] !== 'string')) return null;
   if (Object.hasOwn(summary, 'reason')) {
     return summary.reason === 'adapter_refused' ? lookUp(CHECKS, summary.check) : lookUp(REASONS, summary.reason);
   }
