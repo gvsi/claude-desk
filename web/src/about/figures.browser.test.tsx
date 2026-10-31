@@ -325,7 +325,9 @@ describe('ArchitectureFigure', () => {
     const litUnder = (figure: Element) =>
       [...figure.querySelectorAll('*')].flatMap((el) => {
         const { boxShadow, backgroundColor } = getComputedStyle(el);
-        return boxShadow === lit || backgroundColor === hover ? [`${el.localName} (${el.getAttribute('class') ?? ''})`] : [];
+        const overlay = getComputedStyle(el, '::after');
+        const lightOver = overlay.content !== 'none' && Number(overlay.opacity) > 0 && overlay.boxShadow === lit;
+        return boxShadow === lit || backgroundColor === hover || lightOver ? [`${el.localName} (${el.getAttribute('class') ?? ''})`] : [];
       });
 
     for (const [size, compact] of [

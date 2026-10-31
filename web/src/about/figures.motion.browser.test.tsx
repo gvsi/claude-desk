@@ -122,10 +122,14 @@ function stepIn(figure: Element, name: string): HTMLElement {
   return hook.querySelector<HTMLElement>(':scope > .cd-pill') ?? hook;
 }
 
-/** How a part of the architecture figure looks: its outline and its ground. */
+/**
+ * How a part of the architecture figure looks: its own outline and ground, and how much of the trace's light lies
+ * over them (the opacity of its overlay, 0 where none is drawn).
+ */
 function look(part: Element) {
   const { boxShadow, backgroundColor } = getComputedStyle(part);
-  return { boxShadow, backgroundColor };
+  const overlay = getComputedStyle(part, '::after');
+  return { boxShadow, backgroundColor, light: overlay.content === 'none' ? 0 : Number(overlay.opacity) };
 }
 
 describe('the about-motion project', () => {
@@ -340,13 +344,12 @@ describe('Tau3Chart with motion', () => {
 describe('ArchitectureFigure with motion', () => {
   it('architecture_traces_its_path_once', async () => {
     // The board's path: one request lights, in turn, the visitor, the chat layer, the kernel's Decide and its
-    // "Runs", Check reply and its "Shown", then the signed ledger, 300 ms apart. Each step's outline brightens to
-    // secondary ink on a hover ground over 120 ms, holds for 400 ms, and goes back over 120 ms.
+    // "Runs", Check reply and its "Shown", then the signed ledger, 300 ms apart. Each step's light (an outline in
+    // secondary ink on a hover ground, laid over the part's own look) comes up over 120 ms, holds for 400 ms, and
+    // goes back over 120 ms. The part's own look never changes.
     const PATH = ['visitor', 'chat', 'decide', 'runs', 'check', 'shown', 'ledger'];
-    const lit = {
-      boxShadow: `${tokenColor('--text-secondary')} 0px 0px 0px 1px inset`,
-      backgroundColor: tokenColor('--fill-hover'),
-    };
+    const ring = `${tokenColor('--text-secondary')} 0px 0px 0px 1px inset`;
+    const hover = tokenColor('--fill-hover');
     const ease = tokenEasing('--motion-ease');
 
     for (const compact of [false, true]) {
@@ -362,9 +365,8 @@ describe('ArchitectureFigure with motion', () => {
       const steps = PATH.map((name) => {
         const part = stepIn(figure, name);
         const rest = look(part);
-        expect(rest.boxShadow, `${size}: ${name} before`).not.toBe(lit.boxShadow);
-        expect(rest.backgroundColor, `${size}: ${name} before`).not.toBe(lit.backgroundColor);
-        return { name, part, rest };
+        expect(rest.light, `${size}: ${name} before`).toBe(0);
+        return { name, part, rest, lit: { ...rest, light: 1 } };
       });
 
       figure.scrollIntoView({ block: 'center' });
@@ -379,7 +381,14 @@ describe('ArchitectureFigure with motion', () => {
         for (const animation of animations) animation.currentTime = time;
       };
 
-      for (const [i, { name, part, rest }] of steps.entries()) {
+      for (const [i, { name, part, rest, lit }] of steps.entries()) {
+        // The light lies over the whole part, its own outline included: over a pill's border too.
+        const overlay = getComputedStyle(part, '::after');
+        expect({ ground: overlay.backgroundColor, outline: overlay.boxShadow, inset: overlay.top }, `${size}: ${name} light`).toEqual({
+          ground: hover,
+          outline: ring,
+          inset: part.classList.contains('cd-pill') ? '-1px' : '0px',
+        });
         // Its turn comes 300 ms after the step before's, and its light takes 640 ms. (Read from the animations as
         // the play began: one that has run its course by the time held is no longer listed on the part.)
         const start = i * 300;
@@ -410,7 +419,7 @@ describe('ArchitectureFigure with motion', () => {
           expect(look(part), `${size}: ${name} ${state}`).not.toEqual(lit);
         }
         // Every part of its light eases as the design system's motion does.
-        const easings = getComputedStyle(part).animationTimingFunction.split(/,\s*(?![^()]*\))/);
+        const easings = getComputedStyle(part, '::after').animationTimingFunction.split(/,\s*(?![^()]*\))/);
         for (const easing of easings) expect(easing, `${size}: ${name}`).toBe(ease);
       }
 
