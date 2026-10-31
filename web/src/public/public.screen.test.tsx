@@ -763,6 +763,37 @@ describe('public chat page', () => {
     ]);
   });
 
+  it('live_reply_lands_once_and_history_draws_still', async () => {
+    const { screen, router } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'How much is drain clearing?');
+    const live = () => [...document.querySelectorAll('.cd-transcript-row--live')];
+    const quote = () => screen.getByRole('article', { name: 'Quote' });
+
+    // The reply came on the stream, so its row lands with its receipts; the visitor's own message,
+    // shown as it was sent, doesn't.
+    await expect.element(quote()).toBeVisible();
+    expect(live()).toEqual([rowOf(quote().element())]);
+    expect(receiptsOf(rowOf(quote().element()))).toHaveLength(2);
+
+    // It lands once: leaving the page and coming back to the same chat draws it still.
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    await router.navigate(PAGE);
+    await ready(screen);
+    await expect.element(quote()).toBeVisible();
+    expect(live()).toEqual([]);
+
+    // A reload reads the stored conversation: every row draws still, and the stream it resumes adds nothing.
+    const second = await renderRoute(PAGE);
+    await ready(second.screen);
+    await expect.element(second.screen.getByRole('article', { name: 'Quote' })).toBeVisible();
+    await vi.waitFor(() => expect(requests('events').at(-1)?.path).toMatch(/after=4$/));
+    await sleep(300);
+    expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(2);
+    expect(live()).toEqual([]);
+  });
+
   it('callback_card_shows_the_kernel_title', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);

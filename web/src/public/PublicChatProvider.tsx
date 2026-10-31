@@ -81,6 +81,8 @@ export interface VisitorChatActions {
   cancel: (decisionId: string) => void;
   /** Sends a demo code to the verify route: the kernel checks it, and Claude never sees it. */
   verify: (code: string) => void;
+  /** The page has drawn the rows that arrived live: they are live no more, so a remount draws them still. */
+  shown: () => void;
 }
 
 export type VisitorChatView = VisitorChatSnapshot & VisitorChatActions;
@@ -412,6 +414,10 @@ class VisitorChat {
     void this.post(id, text);
   };
 
+  readonly shown = (): void => {
+    if (this.snapshot.state.rows.some((row) => row.live === true)) this.dispatch({ type: 'shown' });
+  };
+
   readonly resend = (id: string): void => {
     const row = this.snapshot.state.rows.find((r) => r.item.kind === 'visitor' && r.item.id === id && r.item.status === 'failed');
     if (row?.item.kind !== 'visitor' || this.snapshot.state.error === 'session') return;
@@ -633,6 +639,7 @@ export function useVisitorChat(slug: string, previewDeskId?: string): VisitorCha
       newChat: chat.newChat,
       cancel: chat.cancel,
       verify: chat.verify,
+      shown: chat.shown,
     }),
     [snapshot, chat],
   );
