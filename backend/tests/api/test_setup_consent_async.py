@@ -216,6 +216,74 @@ async def test_after_runs_after_the_commit_and_its_failure_is_logged(
         release.set()
 
 
+@pytest.mark.parametrize(("end", "slow"), [("timeout", False), ("timeout", True), ("shutdown", True)])
+async def test_after_timeout_or_shutdown_preserves_the_landed_state(
+        app, browser, fake, kernel_http, model, monkeypatch, caplog, db, end, slow):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    entered = asyncio.Event()
+    rollbacks = []
+    rollback = setup._rollback_turn
+
+    async def track_rollback(*args, **kwargs):
+        rollbacks.append(True)
+        await rollback(*args, **kwargs)
+
+    async def turn(ctx, interview, staged):
+        interview.step = "tools"
+        interview.answers = interview.answers.model_copy(update={"summary": "Committed answer"})
+        interview.transcript.append(setup.Entry(role="claude", text="Committed turn"))
+
+    async def after(ctx, interview):
+        assert interview_id in setup._RUNNING
+        stored = await setup._read(app.state.runtime.database(), ctx, interview_id)
+        assert setup._stored(stored) == setup._stored(interview)
+        entered.set()
+        await asyncio.Event().wait()
+
+    async def custom(ctx, engine, model, interview_id, allow, **kwargs):
+        return await setup.run_turn(ctx, engine, model, interview_id, **kwargs,
+                                    check=lambda interview: None,
+                                    stage=lambda interview: [setup.Entry(role="owner", text="")],
+                                    turn=turn, keep_staged=False, after=after)
+
+    monkeypatch.setattr(setup, "consent", custom)
+    monkeypatch.setattr(setup, "_rollback_turn", track_rollback)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0 if slow else 25)
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(setup, "TURN_AFTER_TIMEOUT_S", 0.4, raising=False)
+    reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": False}), 5)
+    assert reply.status_code == (202 if slow else 200), reply.text
+    if slow:
+        assert reply.json()["busy"] is True
+        await asyncio.wait_for(entered.wait(), 5)
+        assert app.state.runtime.turn_runs.holds(interview_id)
+        assert (await owner.browser.get(path)).json()["step"] == "tools"
+        if end == "shutdown":
+            task = app.state.runtime.turn_runs._tasks[interview_id]
+            await app.state.runtime.turn_runs.close()
+            assert task.cancelled()
+        else:
+            await asyncio.wait_for(app.state.runtime.turn_runs.wait(interview_id), 5)
+    assert entered.is_set()
+    landed = (await owner.browser.get(path)).json()
+    assert landed["step"] == "tools" and landed["busy"] is False
+    assert landed["messages"][-1]["text"] == "Committed turn"
+    if not slow:
+        assert reply.json() == landed
+    answers, transcript = db.execute("SELECT answers, transcript FROM app.setup_interviews WHERE interview_id = %s",
+                                     (interview_id,)).fetchone()
+    assert answers["summary"] == "Committed answer"
+    assert all("pending" not in entry and entry["text"] != "" for entry in transcript)
+    assert rollbacks == []
+    assert interview_id not in setup._RUNNING
+    assert not app.state.runtime.turn_runs.holds(interview_id)
+    assert [(record.msg, record.args) for record in caplog.records if record.name == setup.logger.name] == (
+        [("setup turn after failed (%s)", ("TimeoutError",))] if end == "timeout" else [])
+
+
 async def test_consent_answers_200_with_the_first_question_when_the_reads_finish_in_time(
         app, browser, fake, kernel_http, model, db):
     owner = await new_owner(app, browser, kernel_http)
@@ -464,9 +532,9 @@ async def test_declined_consent_reads_nothing_and_still_asks(
     assert fake.called("POST /decide") == [] and fake.called("POST /execute") == []
 
 
-@pytest.mark.parametrize("end", ["deadline", "shutdown"])
+@pytest.mark.parametrize(("end", "slow"), [("deadline", False), ("deadline", True), ("shutdown", True)])
 async def test_a_run_deadline_or_shutdown_reopens_consent(
-        app, browser, fake, kernel_http, model, monkeypatch, end, caplog):
+        app, browser, fake, kernel_http, model, monkeypatch, end, slow, caplog):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
     path = f"/api/owner/setup/{state['interview_id']}"
@@ -477,19 +545,24 @@ async def test_a_run_deadline_or_shutdown_reopens_consent(
         await release.wait()
 
     monkeypatch.setattr(setup, "_after_consent", waiting)
-    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0 if slow else 25)
     monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.2 if end == "deadline" else 100)
-    assert (await owner.browser.post(path + "/consent", json={"allow": True})).status_code == 202
+    reply = await owner.browser.post(path + "/consent", json={"allow": True})
+    assert reply.status_code == (202 if slow else 503)
     await asyncio.wait_for(entered.wait(), 5)
-    task = app.state.runtime.turn_runs._tasks[state["interview_id"]]
-    if end == "shutdown":
-        await app.state.runtime.turn_runs.close()
-        assert task.cancelled()
-        assert "CancelledError" in caplog.text
+    if slow:
+        task = app.state.runtime.turn_runs._tasks[state["interview_id"]]
+        if end == "shutdown":
+            await app.state.runtime.turn_runs.close()
+            assert task.cancelled()
+            assert "CancelledError" in caplog.text
+        else:
+            with pytest.raises(ApiProblem) as failed:
+                await asyncio.wait_for(asyncio.shield(task), 5)
+            assert (failed.value.status, failed.value.error) == (503, "model_unavailable")
+            assert "TimeoutError" in caplog.text
     else:
-        with pytest.raises(ApiProblem) as failed:
-            await asyncio.wait_for(asyncio.shield(task), 5)
-        assert (failed.value.status, failed.value.error) == (503, "model_unavailable")
+        assert reply.json() == {"error": "model_unavailable"}
         assert "TimeoutError" in caplog.text
     assert (await owner.browser.get(path)).json() == state
     assert state["interview_id"] not in setup._RUNNING

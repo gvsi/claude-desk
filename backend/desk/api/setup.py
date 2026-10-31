@@ -47,9 +47,11 @@ admission it stores staged entries with a fresh pending run ID. Any pending entr
 request waits for this commit, then up to `TURN_WAIT_S` (25 seconds): 200 with the landed state, an error if the task
 fails in time, or 202 with the stored busy state. Cancelling the request leaves the task working on its own
 connections. Any turn while busy returns that state without running or counting on the limits.
-The task commits its changes and clears or removes staged entries together. An optional `after` hook runs after
-that commit, with no transaction open; its failures are logged by type only. Failure, the `TURN_RUN_TIMEOUT_S`
-deadline (100 seconds), or shutdown removes only entries marked by that run. Removing a pending answer immediately
+The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (100
+seconds). An optional `after` hook runs outside that deadline, with no transaction open and its own
+`TURN_AFTER_TIMEOUT_S` bound (30 seconds); its failures are logged by type only and return the landed state.
+Failure, deadline or shutdown before the final commit removes only entries marked by that run. Shutdown after
+the final commit ends the task without rollback. Removing a pending answer immediately
 after Claude's consent question also reopens consent. GET and every turn recover all pending entries older than
 `TURN_ABANDONED_S` (120 seconds) when this process holds no run for the interview.
 
@@ -241,6 +243,7 @@ TURN_MAX_TOKENS = 4096
 SETUP_TIMEOUT_S = 60.0
 TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
 TURN_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
+TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
 TURN_ROLLBACK_TIMEOUT_S = 10  # cleanup also ends before another process may recover the row
 TURN_ABANDONED_S = 120       # recover only when this process holds no run
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
@@ -882,8 +885,10 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     card state, step) belongs in `turn`, so rollback needs no in-memory undo and works after a process dies.
     Hand the guard to the task immediately after admission, without an await in between. Request cancellation
     never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state.
-    `keep_staged=False` removes temporary markers on success. `after` runs after the final commit, without a
-    transaction open; its failure is logged by type only and does not undo the landed turn.
+    `keep_staged=False` removes temporary markers on success. The run deadline ends at the final commit.
+    `after` keeps the guard, without a transaction open, under its own `TURN_AFTER_TIMEOUT_S` bound; its failure
+    is logged by type only and returns the landed state. Shutdown cancellation after commit propagates without
+    rolling back the turn.
     """
     interview = await _recover_turn(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
@@ -900,9 +905,10 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
         nonlocal pending
         run_id = secrets.token_hex(8)
         busy = None
+        committed = False
         try:
-            async with asyncio.timeout(TURN_RUN_TIMEOUT_S):
-                async with detached(owner, engine, ro_schema) as ctx:
+            async with detached(owner, engine, ro_schema) as ctx:
+                async with asyncio.timeout(TURN_RUN_TIMEOUT_S):
                     slug = await _slug(ctx, desk_id)
                     staged = stage(interview)
                     for entry in staged:
@@ -923,13 +929,20 @@ async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
                     else:
                         interview.transcript = [entry for entry in interview.transcript if entry.pending != run_id]
                     await _commit(engine, ctx, interview, busy)
-                    if after is not None:
-                        try:
+                    committed = True
+                if after is not None:
+                    try:
+                        async with asyncio.timeout(TURN_AFTER_TIMEOUT_S):
                             await after(ctx, interview)
-                        except Exception as failed:
-                            logger.warning("setup turn after failed (%s)", type(failed).__name__)
-                    return render(interview, slug)
+                    except Exception as failed:
+                        logger.warning("setup turn after failed (%s)", type(failed).__name__)
+                return render(interview, slug)
         except BaseException as failed:
+            if committed:
+                if isinstance(failed, asyncio.CancelledError):
+                    raise
+                logger.warning("setup turn after failed (%s)", type(failed).__name__)
+                return render(interview, slug)
             logger.warning("setup turn failed (%s)", type(failed).__name__)
             if busy is not None:
                 try:
