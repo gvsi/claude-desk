@@ -723,16 +723,16 @@ async def test_the_same_key_for_another_task_is_a_conflict(app, browser, fake, k
     assert len(fake.called("POST /agents/demo")) == 1 and len(agent_model.requests) == 1
 
 
-async def test_a_failed_mint_frees_the_key_and_a_run_that_started_keeps_it(app, browser, fake, kernel_http,
-                                                                            agent_model):
-    # The kernel couldn't mint the agent, so nothing was made: the send answers its error and frees its key, and the
-    # same request sent again starts a run. Once a run started, the key keeps it however it ends: here its model
-    # can't answer, the run fails, and a repeat answers that failed run and mints nothing.
+async def test_a_refused_mint_frees_the_key_and_a_run_that_started_keeps_it(app, browser, fake, kernel_http,
+                                                                             agent_model):
+    # The kernel refused to mint the agent (a 4xx), so nothing was made: the send answers its error and frees its key,
+    # and the same request sent again starts a run. Once a run started, the key keeps it however it ends: here its
+    # model can't answer, the run fails, and a repeat answers that failed run and mints nothing.
     slug = await new_slug(kernel_http, fake)
     client, _, _ = await open_session(app, browser, slug)
-    fake.fail("POST /agents/demo", "500", times=1)
+    fake.fail("POST /agents/demo", "422", times=1)
     first = await send_keyed(client, slug)
-    assert (first.status_code, first.json()) == (503, {"error": "kernel", "code": "internal"})
+    assert (first.status_code, first.json()) == (422, {"error": "kernel", "code": "invalid"})
     agent_model.add(unavailable())
     again = await send_keyed(client, slug)
     assert again.status_code == 202, again.text
@@ -742,6 +742,32 @@ async def test_a_failed_mint_frees_the_key_and_a_run_that_started_keeps_it(app, 
     repeat = await send_keyed(client, slug)
     assert (repeat.status_code, repeat.json()) == (202, again.json())
     assert len(fake.called("POST /agents/demo")) == 2 and len(agent_model.requests) == 1
+
+
+@pytest.mark.parametrize(("fail", "answered"), [
+    ("lost", (503, {"error": "kernel", "code": "kernel_unavailable"})),
+    ("timeout", (503, {"error": "kernel", "code": "kernel_unavailable"})),
+    ("500", (503, {"error": "kernel", "code": "internal"})),
+], ids=["answer lost", "timeout", "kernel 500"])
+async def test_a_mint_that_may_have_happened_keeps_the_key(app, browser, fake, kernel_http, agent_model, fail,
+                                                           answered):
+    # No definite refusal came back: the kernel may have minted the agent and its mandate (here, with "lost", it did
+    # and the answer was lost on the way). The key keeps the failed run, and a repeat answers it and mints nothing.
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    if fail == "lost":
+        fake.drop_response("POST /agents/demo")
+    else:
+        fake.fail("POST /agents/demo", fail, times=1)
+    first = await send_keyed(client, slug)
+    assert (first.status_code, first.json()) == answered
+    repeat = await send_keyed(client, slug)
+    assert repeat.status_code == 202, repeat.text
+    run = (await read_run(client, slug, repeat.json()["run_id"])).json()
+    assert (run["state"], run["turns"]) == ("failed", [])
+    assert (await send_keyed(client, slug)).json() == repeat.json()
+    assert len(fake.called("POST /agents/demo")) == 1 and agent_model.requests == []
+    assert len(fake.minted) == (1 if fail == "lost" else 0)
 
 
 async def test_repeats_never_count_on_the_limit_and_a_refused_request_claims_nothing(app, browser, fake, kernel_http,

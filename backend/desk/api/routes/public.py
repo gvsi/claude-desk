@@ -39,6 +39,7 @@ from desk.api.deps import (
 )
 from desk.api.idempotency import IdempotencyKey, body_sha256
 from desk.api.jobs import defer_translation
+from desk.api.kernel_client import KernelFailed
 from desk.api.prompts import NOTES, DemoTask
 from desk.api.ratelimit import RateLimited
 from desk.api.schemas import (
@@ -428,9 +429,10 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
     run's hour; while 1000 are held, a new one is 429 `rate_limited` until the oldest one's hour ends.
 
     One rule for failures, as when starting setup: a request that fails before anything is made (refused by the limit
-    or the budget, or the kernel couldn't mint the agent) frees its key, so the same request can be sent again; once
-    the run started, the key keeps it however it ends, and a new click sends a new key. Without a key, each request
-    starts its own run."""
+    or the budget, or the kernel refused to mint the agent with a 4xx) frees its key, so the same request can be sent
+    again. Once the kernel may have minted the agent (no answer came back, or a 5xx) or the run started, the key keeps
+    the run however it ends, a failed one too, and a new click sends a new key. Without a key, each request starts
+    its own run."""
     state = runtime(request).started()
     claimed = None
     if body.idempotency_key is None:
@@ -440,18 +442,24 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
             run_id, _ = _keyed(state.agents, ctx, body, slug, claim=False)
             if run_id is not None:
                 return AgentRunStarted(run_id=run_id)
+            # The key map is full: refused before the limit counts it. Other keys can still fill it while the limit
+            # counts this one, and `claim` then refuses a send the limit counted (accepted).
             wait = state.agents.key_wait()
-            if wait is not None:                        # the key map is full: refused before the limit counts it
+            if wait is not None:
                 raise RateLimited(wait)
             await _admit_agent(request, ctx)
             run_id, claimed = _keyed(state.agents, ctx, body, slug, claim=True)
-            if claimed is None:                         # held already (not by this process's other requests)
+            if claimed is None:                 # never in practice: only claim adds a key, under this key's lock
                 return AgentRunStarted(run_id=run_id)
     try:
         issued = await _mint_agent(ctx)
+    except KernelFailed:
+        if claimed is not None:                         # a definite refusal: nothing was made, so the key is free again
+            state.agents.free(ctx.ids.copy_id, body.idempotency_key, claimed, "the kernel refused to mint the agent")
+        raise
     except BaseException:
-        if claimed is not None:                         # nothing was made: the key is free again
-            state.agents.free(ctx.ids.copy_id, body.idempotency_key, claimed, "the agent couldn't be minted")
+        if claimed is not None:                         # the agent may exist: the key keeps the failed run for good
+            state.agents.fail(claimed, "the agent's mint went unanswered")
         raise
     return AgentRunStarted(run_id=state.agents.launch(issued, body.task, slug, ctx.ids, run=claimed))
 
