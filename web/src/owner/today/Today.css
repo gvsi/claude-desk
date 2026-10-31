@@ -1,9 +1,9 @@
-/* Today: the page's column (the greeting, "Things to try", and the sections Today adds) and the
-   right column beside it from 1280 px, 420 px wide; under that the right column stacks under the
-   page. "Things to try" is a heading with its caption and "Hide this list" at the right, then one
-   card of rows divided by hairlines: a 32 px icon tile, the title and its line, and the next step
-   at the right, which drops under the words on a phone. The preview behind the intro dialog is
-   this page, drawn from a new copy's reads. */
+/* Today: the page's column (the greeting, "Not live yet" while setup isn't finished, "Things to
+   try", and the sections Today adds) and the right column beside it from 1280 px, 420 px wide;
+   under that the right column stacks under the page. "Things to try" is a heading with its caption
+   and "Hide this list" at the right, then one card of rows divided by hairlines: a 32 px icon
+   tile, the title and its line, and the next step at the right, which drops under the words on a
+   phone. The preview behind the intro dialog is this page, drawn from a new copy's reads. */
 
 .cd-today {
   display: grid;

@@ -43,13 +43,14 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
 export const COPIED_FOR_MS = 1_600;
 
 /**
- * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy,
- * "Not live yet" while the Desk's setup isn't finished, "Things to try", then, in this order, "Needs you" and "Live now" when they have something, and
- * "Since last night" always; the right column has the public page a new tab away and the last 7
- * days. Today opens no visitor chat itself, and has no composer: changing a rule by asking Claude
- * lives on Rules. An address that names a held request (`#request-<id>`, as the Demo inbox links an
- * owner's alert) brings that request's card into view and focus. Until what the page first shows is
- * read, it holds the loading line alone, so it opens drawn however the owner came to it.
+ * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy, "Not
+ * live yet" while the Desk's setup hasn't gone live, "Things to try", then, in this order, "Needs
+ * you" and "Live now" when they have something, and "Since last night" always; the right column
+ * has the public page a new tab away and the last 7 days. Today opens no visitor chat itself, and
+ * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
+ * request (`#request-<id>`, as the Demo inbox links an owner's alert) brings that request's card
+ * into view and focus. Until what the page first shows is read, it holds the loading line alone,
+ * so it opens drawn however the owner came to it.
  */
 export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const { business, desk, reachPlace } = useOwnerDesk();
