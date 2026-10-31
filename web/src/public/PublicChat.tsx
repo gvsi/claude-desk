@@ -62,7 +62,7 @@ export interface PublicChatProps {
   aboutLinks?: { label: string; href: string }[];
   /**
    * One of "Try to break it"'s fixed ideas (`BREAK_IT_IDEAS`), which this browser's Today handed to
-   * the page (`handedOffBreakItIdea`): typed into the composer once the chat can be written in, as
+   * the page (`takeBreakItHandoff`): typed into the composer once the chat can be written in, as
    * plain text, then sent only by the visitor's own Send, as typed words are, under the same limit
    * and checks. Read on mount only. Never words from a link: the page passes only an idea it looked
    * up from the hand-off.

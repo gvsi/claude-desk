@@ -4,7 +4,8 @@
  * in a new tab through this browser's own storage: a record of the Desk's slug and the idea's key,
  * under a one-time random token, which is all the new tab's link carries (`?try=<token>`). The
  * public page types the idea in only when the token matches the record this browser holds, for its
- * own Desk, under ten minutes old, and drops the record as it reads it. What that guarantees: only
+ * own Desk, under ten minutes old, and takes it: reads it and removes it in one synchronous step,
+ * never touching a record with another token (`takeBreakItHandoff`). What that guarantees: only
  * the owner's own Today, in this browser, can type one of these three lines, once for each pick; a
  * link on its own, from anyone, types nothing.
  */
@@ -52,9 +53,8 @@ export function handOffBreakItIdea(slug: string, key: BreakItIdea['key'], now: n
   return token;
 }
 
-/** The stored hand-off, or null when there is none, storage can't be read, or it isn't one. */
-function storedHandoff(): Handoff | null {
-  const raw = readLocal('breakItHandoff');
+/** The hand-off as `raw` holds it, or null when there is none or it isn't one. */
+function parseHandoff(raw: string | null): Handoff | null {
   if (raw === null) return null;
   try {
     const value: unknown = JSON.parse(raw);
@@ -67,21 +67,47 @@ function storedHandoff(): Handoff | null {
   }
 }
 
-/**
- * The public page's side: the words of the idea this browser's Today handed to `slug`'s page under
- * `token`, or null. Only a record with that exact token, for that Desk, under ten minutes old and
- * naming a known idea counts. Reading changes nothing: the page drops the record with
- * `dropBreakItHandoff` once it has read it, whether or not it matched.
- */
-export function handedOffBreakItIdea(slug: string, token: string, now: number = Date.now()): string | null {
-  const record = storedHandoff();
-  if (record === null || token === '' || record.token !== token || record.slug !== slug) return null;
-  const age = now - record.at;
-  if (age < 0 || age >= HANDOFF_MAX_AGE_MS) return null;
-  return breakItIdea(record.key);
+/** Removes the stored hand-off only if it is still exactly `raw`: a newer one written since stays. */
+function removeIfStill(raw: string): void {
+  if (readLocal('breakItHandoff') === raw) writeLocal('breakItHandoff', null);
 }
 
-/** Drops Today's hand-off: each one is read once. */
-export function dropBreakItHandoff(): void {
-  writeLocal('breakItHandoff', null);
+/**
+ * What each token taken in this page's lifetime gave, by Desk and token, so asking again (a render
+ * or an effect that React runs twice) gives the same answer and never touches storage twice.
+ */
+const taken = new Map<string, string | null>();
+
+/**
+ * The public page's side: takes the idea this browser's Today handed to `slug`'s page under
+ * `token`, in one synchronous step. When the stored record has that token, it is removed there and
+ * then, and gives its idea if it is for this Desk, under ten minutes old and names a known idea.
+ * A record with another token is never removed, so a link with a wrong or older token leaves a
+ * waiting hand-off for the tab it was made for, unless it is too old to be used, when whoever reads
+ * it removes it. Anything else, or storage that can't be read, gives null.
+ */
+export function takeBreakItHandoff(token: string, slug: string, now: number = Date.now()): string | null {
+  const memo = `${slug}\n${token}`;
+  const known = taken.get(memo);
+  if (known !== undefined) return known;
+  const raw = readLocal('breakItHandoff');
+  const record = parseHandoff(raw);
+  let idea: string | null = null;
+  if (raw !== null && record !== null) {
+    const age = now - record.at;
+    const fresh = age >= 0 && age < HANDOFF_MAX_AGE_MS;
+    if (token !== '' && record.token === token) {
+      removeIfStill(raw);
+      if (fresh && record.slug === slug) idea = breakItIdea(record.key);
+    } else if (!fresh) {
+      removeIfStill(raw);
+    }
+  }
+  taken.set(memo, idea);
+  return idea;
+}
+
+/** Forgets what this page's lifetime has taken, as a new page would: for tests that play another tab. */
+export function forgetTakenBreakItHandoffs(): void {
+  taken.clear();
 }

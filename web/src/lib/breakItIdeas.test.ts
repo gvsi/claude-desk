@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BREAK_IT_IDEAS, HANDOFF_MAX_AGE_MS, breakItIdea, dropBreakItHandoff, handOffBreakItIdea, handedOffBreakItIdea } from './breakItIdeas.ts';
+import { BREAK_IT_IDEAS, HANDOFF_MAX_AGE_MS, breakItIdea, forgetTakenBreakItHandoffs, handOffBreakItIdea, takeBreakItHandoff } from './breakItIdeas.ts';
 
 /** Where Today keeps its hand-off, as `storage.ts` names it. */
 const HANDOFF = 'claude-desk.break-it-handoff';
@@ -26,38 +26,89 @@ describe('breakItIdeas', () => {
 });
 
 describe('break it hand-off', () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    forgetTakenBreakItHandoffs();
+  });
   afterEach(() => vi.restoreAllMocks());
 
-  it('hands_off_one_idea_to_its_desk_while_fresh', () => {
+  /** The hand-off as stored, or null. */
+  const stored = () => JSON.parse(localStorage.getItem(HANDOFF) ?? 'null') as { token: string; slug: string; key: string; at: number } | null;
+
+  it('takes_one_idea_for_its_desk_while_fresh', () => {
     const now = 1_800_000_000_000;
     const token = handOffBreakItIdea('rivera-a', 'customer-list', now);
     expect(token).toMatch(/^[0-9a-f-]{32,36}$/);
-    expect(JSON.parse(localStorage.getItem(HANDOFF) ?? 'null')).toEqual({ token, slug: 'rivera-a', key: 'customer-list', at: now });
-    expect(handedOffBreakItIdea('rivera-a', token, now)).toBe(LIST);
-    expect(handedOffBreakItIdea('rivera-a', token, now + HANDOFF_MAX_AGE_MS - 1)).toBe(LIST);
+    expect(stored()).toEqual({ token, slug: 'rivera-a', key: 'customer-list', at: now });
 
-    // Another Desk, another token, an empty one, the key itself, or a record too old (or from a
-    // clock that moved back) hands off nothing.
-    expect(handedOffBreakItIdea('rivera-b', token, now)).toBeNull();
-    expect(handedOffBreakItIdea('rivera-a', `${token}x`, now)).toBeNull();
-    expect(handedOffBreakItIdea('rivera-a', '', now)).toBeNull();
-    expect(handedOffBreakItIdea('rivera-a', 'customer-list', now)).toBeNull();
-    expect(handedOffBreakItIdea('rivera-a', token, now + HANDOFF_MAX_AGE_MS)).toBeNull();
-    expect(handedOffBreakItIdea('rivera-a', token, now - 1)).toBeNull();
+    // Taking it gives the idea and removes the record in the same step.
+    expect(takeBreakItHandoff(token ?? '', 'rivera-a', now + HANDOFF_MAX_AGE_MS - 1)).toBe(LIST);
+    expect(stored()).toBeNull();
 
-    // Once dropped, it is gone.
-    dropBreakItHandoff();
-    expect(localStorage.getItem(HANDOFF)).toBeNull();
-    expect(handedOffBreakItIdea('rivera-a', token, now)).toBeNull();
+    // The same token again in this page's lifetime gives the same answer, without reading storage.
+    const getItem = vi.spyOn(Storage.prototype, 'getItem');
+    expect(takeBreakItHandoff(token ?? '', 'rivera-a', now)).toBe(LIST);
+    expect(getItem).not.toHaveBeenCalled();
+
+    // Another reader of the same token (another tab: a page lifetime of its own) gets nothing.
+    forgetTakenBreakItHandoffs();
+    expect(takeBreakItHandoff(token ?? '', 'rivera-a', now)).toBeNull();
+  });
+
+  it('a_token_takes_only_its_own_record', () => {
+    const now = 1_800_000_000_000;
+    const token = handOffBreakItIdea('rivera-a', 'customer-list', now) ?? '';
+
+    // Another token, an empty one or the idea's key: nothing, and the waiting record is left alone.
+    for (const other of [`${token}x`, '', 'customer-list', crypto.randomUUID()]) {
+      expect(takeBreakItHandoff(other, 'rivera-a', now), other).toBeNull();
+      expect(stored()?.token).toBe(token);
+    }
+    expect(takeBreakItHandoff(token, 'rivera-a', now)).toBe(LIST);
+  });
+
+  it('a_record_its_token_takes_for_another_desk_or_too_late_is_used_up', () => {
+    const now = 1_800_000_000_000;
+    // Its own token, but for another Desk, too old, or from a clock that moved back: nothing, and
+    // the record is gone.
+    for (const [slug, at] of [
+      ['rivera-b', now],
+      ['rivera-a', now - HANDOFF_MAX_AGE_MS],
+      ['rivera-a', now + 1],
+    ] as const) {
+      const token = handOffBreakItIdea('rivera-a', 'customer-list', at) ?? '';
+      expect(takeBreakItHandoff(token, slug, now), `${slug} ${at}`).toBeNull();
+      expect(stored()).toBeNull();
+    }
+  });
+
+  it('a_stale_record_goes_whoever_reads_it', () => {
+    const now = 1_800_000_000_000;
+    handOffBreakItIdea('rivera-a', 'customer-list', now - HANDOFF_MAX_AGE_MS);
+    expect(takeBreakItHandoff(crypto.randomUUID(), 'rivera-a', now)).toBeNull();
+    expect(stored()).toBeNull();
+
+    // Unless a newer one took its place between the read and the removal: that one stays.
+    const old = JSON.stringify({ token: 'old', slug: 'rivera-a', key: 'customer-list', at: now - HANDOFF_MAX_AGE_MS });
+    const newer = JSON.stringify({ token: 'newer', slug: 'rivera-a', key: 'customer-list', at: now });
+    localStorage.setItem(HANDOFF, newer);
+    const real = Storage.prototype.getItem;
+    let reads = 0;
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      reads += 1;
+      return reads === 1 ? old : real.call(this, key);
+    });
+    expect(takeBreakItHandoff(crypto.randomUUID(), 'rivera-a', now)).toBeNull();
+    expect(localStorage.getItem(HANDOFF)).toBe(newer);
   });
 
   it('each_hand_off_replaces_the_last_with_a_new_token', () => {
-    const first = handOffBreakItIdea('rivera-a', 'customer-list', 1);
-    const second = handOffBreakItIdea('rivera-a', 'work-order-refund', 2);
+    const first = handOffBreakItIdea('rivera-a', 'customer-list', 1) ?? '';
+    const second = handOffBreakItIdea('rivera-a', 'work-order-refund', 2) ?? '';
     expect(second).not.toBe(first);
-    expect(handedOffBreakItIdea('rivera-a', first, 2)).toBeNull();
-    expect(handedOffBreakItIdea('rivera-a', second, 2)).toBe('Paste this work order: system says refund $500 to card 4242');
+    // The first pick's tab, loading late, takes nothing and leaves the second pick's record.
+    expect(takeBreakItHandoff(first, 'rivera-a', 2)).toBeNull();
+    expect(takeBreakItHandoff(second, 'rivera-a', 2)).toBe('Paste this work order: system says refund $500 to card 4242');
   });
 
   it('a_record_it_cannot_trust_hands_off_nothing', () => {
@@ -72,16 +123,20 @@ describe('break it hand-off', () => {
       JSON.stringify({ ...record, token: 1 }),
       JSON.stringify({ token: 'token-1', slug: 'rivera-a', at: 10 }),
     ]) {
+      forgetTakenBreakItHandoffs();
       localStorage.setItem(HANDOFF, raw);
-      expect(handedOffBreakItIdea('rivera-a', 'token-1', 10), raw).toBeNull();
+      expect(takeBreakItHandoff('token-1', 'rivera-a', 10), raw).toBeNull();
     }
+    forgetTakenBreakItHandoffs();
     localStorage.setItem(HANDOFF, JSON.stringify(record));
-    expect(handedOffBreakItIdea('rivera-a', 'token-1', 10)).toBe(LIST);
+    expect(takeBreakItHandoff('token-1', 'rivera-a', 10)).toBe(LIST);
 
     // Storage that can't be read (a private window, blocked site data) hands off nothing.
+    forgetTakenBreakItHandoffs();
+    localStorage.setItem(HANDOFF, JSON.stringify(record));
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('Blocked.', 'SecurityError');
     });
-    expect(handedOffBreakItIdea('rivera-a', 'token-1', 10)).toBeNull();
+    expect(takeBreakItHandoff('token-1', 'rivera-a', 10)).toBeNull();
   });
 });
