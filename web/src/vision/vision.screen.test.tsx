@@ -1,14 +1,15 @@
 /**
- * The vision pages in a real browser against the mock API: a team Desk, a returning visitor signed
- * in with a Claude account, and the app on a phone. Each says it is vision under the vision bar,
- * with the way back to the owner's Desk; each is static, so it asks the API for nothing; and each
- * is drawn as its signed board draws it.
+ * The vision pages in a real browser against the mock API: a resident on a city permits office's
+ * public Desk, a team Desk, a returning visitor signed in with a Claude account, and the app on a
+ * phone. Each says it is vision under the vision bar, with the way back to the owner's Desk; each is
+ * static, so it asks the API for nothing; and each is drawn as its signed board draws it.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import {
+  FACT_IN_PROSE,
   SPEC,
   expectConversationType,
   expectFooter,
@@ -27,10 +28,35 @@ import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
+const CITY_OFFICE = '/vision/city-office';
 const TEAM_DESK = '/vision/team-desk';
 const CLAUDE_ACCOUNT = '/vision/claude-account';
 const PHONE = '/vision/phone';
-const VISION_ROUTES = [TEAM_DESK, CLAUDE_ACCOUNT, PHONE] as const;
+const VISION_ROUTES = [CITY_OFFICE, TEAM_DESK, CLAUDE_ACCOUNT, PHONE] as const;
+
+/** The vision pages that picture a public page, a visitor's: the others are the owner's. */
+const VISITOR_PAGES: readonly string[] = [CITY_OFFICE, CLAUDE_ACCOUNT];
+
+/**
+ * Real places and government offices the fictional city office must not name: the region around
+ * Rivera's service area, nearby cities' permit offices, and a government site's domain.
+ */
+const REAL_PLACE =
+  /\b(?:Oakland|Berkeley|Alameda|Emeryville|San Francisco|San Jose|California|Bay Area)\b|Department of Building Inspection|Planning and Building Department|\.gov\b/i;
+
+/** Each fee, date, time and permit status in Marcus's conversation, as its cards write it. */
+const CITY_FACTS = [
+  'Plan check passed',
+  'Kitchen remodel, permit B-2026-0412',
+  'Fee due before issue: $1,286',
+  'Permit B-2026-0412, once the fee is paid',
+  'Wednesday, November 4, 8:00 am to 12:00 pm',
+  'Thursday, November 5, 1:00 pm to 4:00 pm',
+  'Monday, November 9, 8:00 am to 12:00 pm',
+];
+
+/** A fee, a permit's number or its recorded status: on the city office, only ever in a card. */
+const CITY_FACT_ANYWHERE = /[$€£]\s?\d|\bB-\d{4}-\d{4}\b|\b(?:passed|approved|issued|denied)\b/i;
 
 /** Where "Back to your Desk" goes: the app's entry, which opens a returning owner's Today. */
 const BACK_HREF = '/';
@@ -66,6 +92,17 @@ function main(screen: RenderResult) {
   return screen.getByRole('main');
 }
 
+/** Each line of text a person reads under `root`, one text node at a time, outside any card. */
+function linesOutsideCards(root: HTMLElement): string[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const lines: string[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent?.trim() ?? '';
+    if (text !== '' && !node.parentElement?.closest('.cd-card, [aria-hidden="true"]')) lines.push(text);
+  }
+  return lines;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   // The last Desk opened lives in this browser's storage, which outlives a test.
@@ -97,6 +134,27 @@ describe('Vision pages', () => {
         .map((url) => url.pathname);
       expect(toTheApi, path).toEqual([]);
     }
+
+    // The city office names no real place or government office: Meridian Bay Permits is fictional.
+    const { screen } = await renderRoute(CITY_OFFICE);
+    const log = main(screen).getByRole('log', { name: 'Conversation with Meridian Bay Permits' });
+    await expect.element(log).toBeVisible();
+    const page = screen.container;
+    expect(page.textContent).toContain('Meridian Bay Permits');
+    expect(page.textContent).not.toMatch(REAL_PLACE);
+
+    // Every fee, date and permit status sits only in a card, never in Claude's words: each is shown
+    // once, inside a card; Claude's words, the receipts and the system line state none of them; and
+    // nowhere on the page outside a card names a fee, a permit or its status.
+    for (const fact of CITY_FACTS) {
+      const shown = [...page.querySelectorAll<HTMLElement>('p, li, span')].filter((el) => el.textContent === fact);
+      expect(shown, fact).toHaveLength(1);
+      expect(shown[0]?.closest('.cd-card'), `${fact}: in a card`).not.toBeNull();
+    }
+    const transcript = log.element() as HTMLElement;
+    expect(await expectNoFactsInProse(transcript)).toBe(5);
+    for (const line of linesOutsideCards(transcript)) expect(line, 'outside a card in the conversation').not.toMatch(FACT_IN_PROSE);
+    for (const line of linesOutsideCards(page)) expect(line, 'outside a card on the page').not.toMatch(CITY_FACT_ANYWHERE);
   });
 
   it('vision_pages_carry_no_api_address', async () => {
@@ -154,13 +212,14 @@ describe('Vision pages', () => {
 
   it('vision_pages_pass_the_screen_checks', async () => {
     // On a laptop and on a phone: one footer, clean copy, no axe violations, nothing scrolling
-    // sideways, and on the owner's pages no technical words. The Claude account page is a visitor's.
+    // sideways, and on the owner's pages no technical words. The city office and Claude account
+    // pages are a visitor's.
     for (const viewport of ['desktop', 'phone'] as const) {
       for (const path of VISION_ROUTES) {
         const { screen } = await renderRoute(path, { viewport });
         await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
         await expect.element(screen.getByRole('main')).toBeVisible();
-        await expectScreenBasics(screen.container, { owner: path !== CLAUDE_ACCOUNT });
+        await expectScreenBasics(screen.container, { owner: !VISITOR_PAGES.includes(path) });
         expectNoHorizontalScroll();
       }
     }

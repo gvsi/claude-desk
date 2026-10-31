@@ -1,21 +1,25 @@
 /**
  * Mirrors the design system's vision board stories word for word: `ds/boards/vision.tsx`, drawn by
- * `VisionTeamDesk.stories.tsx`, `VisionClaudeAccount.stories.tsx` and `VisionPhone.stories.tsx`.
- * Those import Storybook, so the app can't import them; change both together.
+ * `VisionCityOffice.stories.tsx`, `VisionTeamDesk.stories.tsx`, `VisionClaudeAccount.stories.tsx`
+ * and `VisionPhone.stories.tsx`. Those import Storybook, so the app can't import them; change both
+ * together.
  *
  * What the vision pages show, in the signed boards' words (the "Run 2 · vision" boards,
- * N-R2-Vision-*): Rivera Plumbing's team Desk, a returning visitor signed in with a Claude account,
- * and the app on a phone. Fixed data only: no page reads anything from the API. Rivera's own facts
- * come from the design system's Rivera fixtures, as the first visit's still preview of Today does.
+ * N-R2-Vision-*): a resident on a fictional city permits office's public Desk, Rivera Plumbing's
+ * team Desk, a returning visitor signed in with a Claude account, and the app on a phone. Fixed data
+ * only: no page reads anything from the API. Rivera's own facts come from the design system's Rivera
+ * fixtures, as the first visit's still preview of Today does.
  *
- * Dates, documents and bookings sit only in cards, never in Claude's words, as on every Desk.
+ * Fees, dates, statuses, documents and bookings sit only in cards, never in Claude's words, as on
+ * every Desk.
  */
-import type { DecisionState } from '../api/contracts.ts';
+import type { DecisionState, PublicDesk } from '../api/contracts.ts';
 import { cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import type { FactCardProps, NavCount, NavKey, PhoneTab, ReceiptSource, SidebarHrefs, StatusTone } from '../ds/index.ts';
 
-/** Where each vision page lives. */
+/** Where each vision page lives. Today's "Things to try" leads to the city office. */
 export const VISION_PATHS = {
+  cityOffice: '/vision/city-office',
   teamDesk: '/vision/team-desk',
   claudeAccount: '/vision/claude-account',
   phone: '/vision/phone',
@@ -66,6 +70,117 @@ export interface VisionOwner {
   /** The Answering switch's line: whom Claude answers, under whose rules. */
   answeringDescription: string;
 }
+
+// ---------------------------------------------------------------------------------------------
+// The city office (N-R2-Vision-CityOffice-Resident): a resident on a city permits office's public
+// page. Meridian Bay Permits is fictional; no vision page names a real place or city office.
+
+/** Who answers for the city when Claude hands over, as the page names them ("Ask for Permit Center staff"). */
+const CITY_STAFF = 'Permit Center staff';
+
+/**
+ * The city's public Desk as the kernel would serve it (`PublicDesk`): its name and the Permit
+ * Center, its charter (hours, who decides what needs a permit, and how to reach the Permit Center)
+ * and the kernel's open status, as the board draws them.
+ *
+ * Its brand colors aren't here. The app's sources hold no raw colors and no token holds the city's,
+ * so the header takes the shell's own field and rule (`brandFrom`'s fallbacks) where the board draws
+ * the city's slate, until the city's Desk comes from a source that may hold them, as Rivera's comes
+ * from the design system's fixtures.
+ */
+export const CITY_DESK: PublicDesk = {
+  business_name: 'Meridian Bay Permits',
+  desk_name: 'City of Meridian Bay, Permit Center',
+  owner_display_name: CITY_STAFF,
+  brand: {},
+  charter: [
+    cardBlock('hours', {
+      fact_id: 'charter:hours',
+      title: 'Monday to Friday, 8:00 am to 4:30 pm',
+      lines: ['Inspections, Monday to Friday, 8:00 am to 4:00 pm'],
+    }),
+    cardBlock('policy', { fact_id: 'charter:policy:decisions', title: 'Plan checkers decide what needs a permit and what’s exempt.' }),
+    cardBlock('contact', { fact_id: 'charter:contact', title: '(415) 555-0186', lines: ['Permit Center, 250 Harbor Street'] }),
+  ],
+  agent_card: [],
+  open_status: {
+    open: true,
+    until: '2026-10-30T16:30:00-07:00',
+    opens_at: null,
+    text: 'Open now, until 4:30 pm',
+    as_of: '2026-10-30T10:00:00-07:00',
+    refresh_at: '2026-10-30T16:30:00-07:00',
+  },
+};
+
+/**
+ * Marcus Bell's visit, word for word as the board writes it: his messages, Claude's words, the
+ * line when he's verified and the kernel's receipts. Claude's words lead into the cards and state
+ * no status, fee, date or time; the garage question is a plan checker's decision, so it is held
+ * for staff.
+ */
+export const CITY_TURNS = {
+  status: 'Hi, it’s Marcus Bell. What’s the status of my kitchen remodel permit?',
+  verifyFirst: 'I can look that up after you confirm it’s you.',
+  codeSent: 'Code sent to the email on the application',
+  verified: 'Verified with a code sent to the email on the application',
+  stands: 'Thanks, Marcus. Here’s where your kitchen remodel stands.',
+  next: 'Here’s what comes next.',
+  readFile: 'Read from your own permit file',
+  inspector: 'When can an inspector come out?',
+  times: 'These times are open on the inspection calendar. Which one works for you?',
+  readCalendar: 'Times read from the inspection calendar',
+  garage: 'One more thing. I’d like to turn my garage into a home office. Does that need a permit at all?',
+  staffDecides: 'Whether your garage conversion needs a permit is a plan checker’s decision, so I’ve asked one to get back to you.',
+  heldForStaff: 'Held for a person: whether work needs a permit is a staff decision',
+  checked: 'Reply checked against the City’s rules',
+} as const;
+
+/** The kernel's prompt before it sends a code: to the email on the application, the contact on record. */
+export const CITY_VERIFY_PROMPT = cardBlock('verify_prompt', { fact_id: null, title: 'I’ll send a code to the email on the application.' });
+
+/**
+ * Marcus's permit, as fact cards: its status and the fee due (the fee is only ever here), then
+ * what comes next. No reply card template covers a permit, so these are `FactCard`s.
+ */
+export const CITY_PERMIT = {
+  status: {
+    label: 'Permit status',
+    icon: 'document',
+    title: 'Plan check passed',
+    lines: ['Kitchen remodel, permit B-2026-0412', 'Fee due before issue: $1,286'],
+  },
+  nextSteps: {
+    label: 'Next steps',
+    icon: 'rules',
+    title: 'Pay the fee, then book the first inspection',
+    lines: ['Pay online or at the Permit Center, 250 Harbor Street', 'First inspection: rough-in for electrical, plumbing and framing'],
+  },
+} as const satisfies Record<string, FactCardProps>;
+
+/** The inspection calendar's open times for a rough-in, as the board lists them. */
+const INSPECTION_SLOTS = [
+  { option_id: 'I-20261104-AM', label: 'Wednesday, November 4, 8:00 am to 12:00 pm' },
+  { option_id: 'I-20261105-PM', label: 'Thursday, November 5, 1:00 pm to 4:00 pm' },
+  { option_id: 'I-20261109-AM', label: 'Monday, November 9, 8:00 am to 12:00 pm' },
+];
+
+/**
+ * The open inspection times as the kernel renders open times (`booking_options`): the inspection,
+ * when it can happen, then each time as a line and as an option Marcus answers in the chat.
+ */
+export const CITY_INSPECTION_TIMES = cardBlock('booking_options', {
+  fact_id: 'inspections:B-2026-0412',
+  title: 'Rough-in inspection',
+  lines: ['Permit B-2026-0412, once the fee is paid', ...INSPECTION_SLOTS.map((slot) => slot.label)],
+  options: INSPECTION_SLOTS,
+});
+
+/** What a resident might ask next, under the conversation. */
+export const CITY_SUGGESTIONS = ['Book an inspection', 'Pay the fee', 'Talk to staff'] as const;
+
+/** The receipts' sources on the city office page: a checked reply, a lookup that ran, a question held for staff. */
+export const CITY_SOURCES = { checked: CHECKED, executed: decided('executed'), held: decided('held') } as const;
 
 // ---------------------------------------------------------------------------------------------
 // The team Desk (N-R2-Vision-TeamDesk): Rivera Plumbing's team asking its own Desk.
