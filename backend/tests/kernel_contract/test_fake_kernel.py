@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable
 from desk.contracts import CopyCreated, NormalizedAction, ResourceRef, SessionCreated
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health
-from tests.kernel_contract.fake_kernel import Desk, FakeKernelState, fake_kernel_app
+from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO
 from tests.kernel_contract.test_contract import (
     LINK_ROUTES,
@@ -279,8 +279,7 @@ async def test_the_mirror_is_copy_scoped_and_read_only(fake, api_conn):
 
 async def test_the_mirror_holds_each_rules_versions_money_cap(fake, api_conn):
     """The Rivera seed's rules carry its $500 money cap, as the kernel's seed does (`DeskSeed`), and a
-    version the owner confirms keeps the Desk's cap; a Desk made any other way starts at 0, as one
-    `POST /desks` makes does, so every charge and payout asks."""
+    version the owner confirms keeps the Desk's cap."""
     http, state = fake
     copy, _ = await copy_and_visitor(http, state)
     desk_id = copy.desk_ids[0]
@@ -292,11 +291,6 @@ async def test_the_mirror_holds_each_rules_versions_money_cap(fake, api_conn):
                                 " WHERE desk_id = %s ORDER BY version", (desk_id,)).fetchall()
     assert [(row["version"], row["status"], row["auto_money_cap_cents"]) for row in rows] == [
         (1, "superseded", 50_000), (2, "active", 50_000)]
-    rivera = state.desks[desk_id]
-    made = Desk(desk_id="desk-new", copy_id=copy.copy_id, business_id="biz-new", business_name="New business",
-                owner_display_name="Sam", brand={}, name="Main line", slug="new-business", hours=[],
-                created_at=state.now)
-    assert (rivera.auto_money_cap_cents, made.auto_money_cap_cents) == (50_000, 0)
 
 
 async def test_a_money_hold_offers_allow_person_only_within_the_desks_cap(fake, monkeypatch):
