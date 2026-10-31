@@ -319,7 +319,7 @@ function Illustration({ played, onPlayed }: IllustrationProps) {
         <path d="M-40 640 C 120 520, 300 520, 470 430" />
       </svg>
 
-      <div className="cd-intro__card">
+      <div className="cd-intro__card cd-intro__card--asked">
         <span className="cd-intro__avatar">DW</span>
         <div className="cd-intro__card-body">
           <p className="cd-intro__who cd-type-body">
@@ -329,7 +329,7 @@ function Illustration({ played, onPlayed }: IllustrationProps) {
         </div>
       </div>
 
-      <div className="cd-intro__card">
+      <div className="cd-intro__card cd-intro__card--answered">
         {/* The mark alone in an avatar's place: no tile and no frame, in its dark ink on the light card. */}
         <Mark size={32} ground="light" />
         <div className="cd-intro__card-body cd-intro__card-body--reply">

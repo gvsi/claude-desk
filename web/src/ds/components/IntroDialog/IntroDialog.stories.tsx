@@ -422,7 +422,8 @@ export const PlaysOnce: Story = {
 
     const panel = the(dialog, '.cd-intro__panel');
     const art = the(dialog, '.cd-intro__illustration');
-    const [dana, claude] = [...art.querySelectorAll<HTMLElement>(':scope > .cd-intro__card')] as [HTMLElement, HTMLElement];
+    const dana = the(art, ':scope > .cd-intro__card--asked');
+    const claude = the(art, ':scope > .cd-intro__card--answered');
     const check = the<SVGPathElement>(art, '.cd-intro__check path');
     const [checked, booked] = [...art.querySelectorAll<HTMLElement>('.cd-intro__receipt')] as [HTMLElement, HTMLElement];
 
@@ -443,6 +444,13 @@ export const PlaysOnce: Story = {
     await expect(fromTheTokens).toEqual([290, 600, 860, 1000, 1150]);
     const beats = [dana, claude, check, checked, booked];
     await expect(beats.map((el) => ms(getComputedStyle(el).animationDelay))).toEqual(fromTheTokens);
+    // cards_keep_their_beats: each card takes its delay from its own class, not from its place among
+    // the illustration's elements, so a decorative element drawn before the cards moves neither.
+    const decoration = document.createElement('div');
+    art.insertBefore(decoration, dana);
+    const withADecoration = [dana, claude].map((el) => ms(getComputedStyle(el).animationDelay));
+    decoration.remove();
+    await expect(withADecoration).toEqual(fromTheTokens.slice(0, 2));
     await expect(beats.map((el) => getComputedStyle(el).animationName)).toEqual([
       'cd-intro-rise',
       'cd-intro-rise',
