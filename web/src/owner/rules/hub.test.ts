@@ -3,7 +3,7 @@
  * give it, the rules that govern a tool (for the connector and tool pages), the card an outcome
  * menu drafts, and the payment limit's field.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { RuleCard, ToolName } from '../../api/contracts.ts';
 import type { PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
@@ -190,8 +190,11 @@ describe('the Rules hub', () => {
     expect(governingRules(rowOf(rules, 'native.fetch_website'), rules.active).map((c) => c.card_id)).toContain('card-reads-never');
     const rows = toolRuleRows(rowOf(rules, 'native.find_slots'), rules.active, people(), rules.tools);
     expect(rows.find((r) => r.rule.card_id === 'card-reads-never')?.shared?.appliesTo).toBe('Applies to every tool that only reads: Find open times.');
-    // Without the Desk's tools, a shared rule names its group alone.
-    expect(toolRuleRows(rowOf(rules, 'native.find_slots'), rules.active, people()).find((r) => r.rule.card_id === 'card-reads-never')?.shared?.appliesTo).toBe(
+    // The Desk's tools are required, so no caller drops the names of the tools a shared rule covers;
+    // given none, a shared rule names its group alone.
+    type Args = Parameters<typeof toolRuleRows>;
+    expectTypeOf<[Args[0], Args[1], Args[2]]>().not.toExtend<Args>();
+    expect(toolRuleRows(rowOf(rules, 'native.find_slots'), rules.active, people(), []).find((r) => r.rule.card_id === 'card-reads-never')?.shared?.appliesTo).toBe(
       'Applies to every tool that only reads.',
     );
   });

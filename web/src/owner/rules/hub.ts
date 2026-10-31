@@ -125,8 +125,8 @@ function onConnectors(tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): Pick
 /**
  * A shared rule's line under each tool it governs: its group and the tools it covers on this Desk
  * (`coveredTools`, among the Desk's tools on its connectors), "Applies to every tool that charges
- * money: Payment link and Charge within a signed limit.", or its group alone when the caller lists
- * no tools it covers.
+ * money: Payment link and Charge within a signed limit.", or its group alone when it covers none
+ * of them.
  */
 function sharedWords(card: RuleCard, cards: readonly RuleCard[], tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): string {
   const group = targetWords(card.applies_to);
@@ -139,14 +139,14 @@ function sharedWords(card: RuleCard, cards: readonly RuleCard[], tools: readonly
  * A row per rule that governs `row` (`governingRules`), most specific first, for the connector and
  * tool pages and the house rules: its words (`ruleWords`), its limit for an automatic rule with an
  * amount, and for a shared rule the line that names its group and the tools it covers among
- * `tools` (the Desk's tool rows; without them, its group alone). Read-only: a page that offers an
- * outcome menu adds `onChangeOutcome`. What happens to anything else is `toolFallback`'s.
+ * `tools` (the Desk's tool rows, required so no caller drops those names). Read-only: a page that
+ * offers an outcome menu adds `onChangeOutcome`. What happens to anything else is `toolFallback`'s.
  */
 export function toolRuleRows(
   row: Pick<ToolRow, 'tool' | 'effects'>,
   active: ActiveCards,
   people: PeopleOut | null | undefined,
-  tools: readonly Pick<ToolRow, 'tool' | 'effects'>[] = [],
+  tools: readonly Pick<ToolRow, 'tool' | 'effects'>[],
 ): RuleRowProps[] {
   return governingRules(row, active).map((card): RuleRowProps => {
     const limit = card.mode === 'auto' && card.max_amount_cents != null ? formatCents(card.max_amount_cents) : undefined;
