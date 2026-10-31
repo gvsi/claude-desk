@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 
 import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Icon, Notice, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
-import { BREAK_IT_IDEAS, type BreakItIdea } from '../../lib/breakItIdeas.ts';
+import { BREAK_IT_IDEAS, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
 import { VISION_PATHS } from '../../vision/data.ts';
 import { customerLink } from '../customerLink.ts';
@@ -23,6 +23,8 @@ const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 /** What happened to the "Try to break it" idea the owner picked, by its key. */
 interface Pick {
   key: BreakItIdea['key'];
+  /** The token of the hand-off this pick made, which the blocked tab's link carries too. */
+  token: string;
   /** Counts the picks, so each one draws its line afresh and a screen reader hears it again. */
   n: number;
   /** `opened`: the public page opened in a new tab, the idea in its chat box. `blocked`: the browser kept the tab from opening. */
@@ -167,12 +169,14 @@ function Thing({ icon, title, held = false, detail, below, children }: ThingProp
 }
 
 /**
- * "Try to break it": the fixed ideas. A pick opens the public page in a new tab with the idea's key
- * in its link (`?try=`), and the page types that idea into its chat box for the owner to send;
- * nothing is sent without their Send, and nothing is written to the owner's clipboard. The tab
- * opens in the click itself, so the browser counts it as the owner's own. It is opened without
- * `noopener` (with it the browser hides whether the tab opened), and this page cuts the new tab's
- * link back to it. A browser that blocks the tab gets a link to open it by hand, the key in it too.
+ * "Try to break it": the fixed ideas. A pick hands the idea to the public page through this
+ * browser's storage (`handOffBreakItIdea`) and opens the page in a new tab with the hand-off's
+ * one-time token in its link (`?try=`), never the idea's key or words; the page types the idea into
+ * its chat box for the owner to send. Nothing is sent without their Send, and nothing is written to
+ * the owner's clipboard. The tab opens in the click itself, so the browser counts it as the owner's
+ * own. It is opened without `noopener` (with it the browser hides whether the tab opened), and this
+ * page cuts the new tab's link back to it. A browser that blocks the tab gets a link to open it by
+ * hand, with the same token.
  */
 function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ownerName: string }) {
   const [showing, setShowing] = useState(false);
@@ -182,13 +186,14 @@ function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ow
     const idea = BREAK_IT_IDEAS.find((each) => each.text === text);
     if (idea === undefined) return;
     const n = (pick?.n ?? 0) + 1;
-    const tab = window.open(customerLink(slug, deskId, idea.key), '_blank');
+    const token = handOffBreakItIdea(slug, idea.key);
+    const tab = window.open(customerLink(slug, deskId, token), '_blank');
     if (tab === null) {
-      setPick({ key: idea.key, n, outcome: 'blocked' });
+      setPick({ key: idea.key, token, n, outcome: 'blocked' });
       return;
     }
     tab.opener = null;
-    setPick({ key: idea.key, n, outcome: 'opened' });
+    setPick({ key: idea.key, token, n, outcome: 'opened' });
   };
 
   const below = showing ? (
@@ -204,7 +209,7 @@ function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ow
           key={pick.n}
           tone="info"
           action={
-            <Button variant="secondary" href={customerLink(slug, deskId, pick.key)} external>
+            <Button variant="secondary" href={customerLink(slug, deskId, pick.token)} external>
               Open your public page
             </Button>
           }
