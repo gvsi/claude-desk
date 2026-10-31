@@ -211,14 +211,18 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     const { title, connector, place } = move?.label ?? labelOf(card, before === null ? afterLabels : beforeLabels);
     const retargeted = before !== null && after !== null && after.applies_to !== before.applies_to;
     const target = (side: RuleCard, covered: string | undefined) => covered ?? (retargeted ? targetWords(side.applies_to) : undefined);
-    // A shared rule's own row (an effect card that doesn't move) is where the design system's
-    // `ChangeRowView.shared` goes once it has one. A row that moves, in its target or in the tools
-    // it covers, shows the move in `appliesTo`, the after side's target tagged as changed.
+    // A rule on a group of tools on every side it has (dropped, changed, added, or replaced by
+    // another group's rule) is a shared rule, and its row says so: "Payments · Shared rule". A rule
+    // that moves between one tool and a group leaves it unset, since its sides' `appliesTo` show
+    // the move. A row that moves, in its target or in the tools it covers, shows the move in
+    // `appliesTo`, the after side's target tagged as changed.
+    const shared = (before === null || isEffectCard(before)) && (after === null || isEffectCard(after));
     const row: ChangeRowView = {
       key: card.card_id,
       change: change.change,
       title,
       ...(connector === undefined ? {} : { connector }),
+      ...(shared ? { shared: true } : {}),
       before: before === null ? null : cardSide(before, people, target(before, move?.before)),
       after: after === null ? defaultSide() : cardSide(after, people, target(after, move?.after)),
       changed: move === undefined || change.fields.includes('applies_to') ? change.fields : ['applies_to', ...change.fields],

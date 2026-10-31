@@ -510,17 +510,57 @@ describe('rule drafts', () => {
     // cover Share a document, which also touches private data: only "Confirm it's them".
     expect(rowFor('card-auto-messages')).toMatchObject({ title: "Confirm it's them", connector: view('verification') });
     // The added rows by the tools' places: Verification, then Payments, then the one that spans.
-    expect(rows.map((row) => row.key)).toEqual(['rv-quote', 'card-auto-messages', 'rv-agent-charges', 'card-never-private']);
+    // Each shared rule's row says so ("Payments · Shared rule", or "Shared rule" leading with no
+    // connector); a tool's own rule doesn't.
+    expect(rows.map((row) => [row.key, row.shared])).toEqual([
+      ['rv-quote', undefined],
+      ['card-auto-messages', true],
+      ['rv-agent-charges', true],
+      ['card-never-private', true],
+    ]);
 
     // With no tool in the Desk's catalog to name, a shared rule keeps its group's words, with no
-    // connector, and goes last.
+    // connector, and goes last, still marked shared.
     const bare = changeRows(draft, PEOPLE);
-    expect(bare.map((row) => [row.key, row.title, row.connector])).toEqual([
-      ['rv-quote', 'Quote', view('quotes')],
-      ['card-never-private', 'Every tool that touches private data', undefined],
-      ['card-auto-messages', 'Every tool that sends a message out', undefined],
-      ['rv-agent-charges', 'Every tool that charges money', undefined],
+    expect(bare.map((row) => [row.key, row.title, row.connector, row.shared])).toEqual([
+      ['rv-quote', 'Quote', view('quotes'), undefined],
+      ['card-never-private', 'Every tool that touches private data', undefined, true],
+      ['card-auto-messages', 'Every tool that sends a message out', undefined, true],
+      ['rv-agent-charges', 'Every tool that charges money', undefined, true],
     ]);
+
+    // A shared rule dropped with nothing to go to, or changed in place, is still the shared rule.
+    const withShared = version(7, [...RIVERA_CARDS, rivera.sharedChargeCard]);
+    const dropped = changeRows(draftFromDiff(rulesDraft({ cards: RIVERA_CARDS, diff: { added: [], removed: [rivera.sharedChargeCard], changed: [] } }), withShared), PEOPLE, TOOLS);
+    expect(dropped).toEqual([expect.objectContaining({ key: 'rv-agent-charges', change: 'changed', connector: view('payments'), shared: true, after: DEFAULT_SIDE })]);
+    const lower = changed(rivera.sharedChargeCard, { max_amount_cents: 1500 });
+    const inPlace = changeRows(
+      draftFromDiff(rulesDraft({ cards: [...RIVERA_CARDS, lower], diff: { added: [], removed: [], changed: [[rivera.sharedChargeCard, lower]] } }), withShared),
+      PEOPLE,
+      TOOLS,
+    );
+    expect(inPlace).toEqual([expect.objectContaining({ key: 'rv-agent-charges', changed: ['limits'], shared: true })]);
+
+    // Replaced by "Recommended rules": the shared rule goes to the preset's rule for every tool that
+    // charges money, still a shared rule, so its row says so; Payment link's own rule moves to that
+    // group, which its sides show, so its row doesn't.
+    const owner = [...PRESETS.ask_first, ...RIVERA_CARDS, rivera.sharedChargeCard];
+    const preset = PRESETS.auto.map((card) => ({ ...card }));
+    const presetIds = new Set(ids(preset));
+    const recommended = changeRows(
+      draftFromDiff(
+        rulesDraft({ cards: preset, diff: { added: preset.filter((card) => !ids(owner).includes(card.card_id)), removed: owner.filter((card) => !presetIds.has(card.card_id)), changed: [] } }),
+        version(7, owner),
+        'auto',
+      ),
+      PEOPLE,
+      TOOLS,
+    );
+    const replaced = recommended.find((row) => row.key === 'rv-agent-charges');
+    expect(replaced).toMatchObject({ change: 'changed', title: 'Payment link and Charge within a signed limit', connector: view('payments'), shared: true });
+    expect(replaced?.after).toMatchObject({ mode: 'ask', reason: 'Taking a payment asks you first.' });
+    expect(replaced?.after?.appliesTo).toBeUndefined();
+    expect(recommended.find((row) => row.key === 'rv-link')?.shared).toBeUndefined();
 
     // A shared rule retargeted to one of its tools keeps the title, connector and place of the
     // tools it covered, and each side names its target: the group's words, then the tool.
@@ -545,6 +585,8 @@ describe('rule drafts', () => {
     expect(narrowed[1]).toMatchObject({ change: 'changed', title: 'Payment link and Charge within a signed limit', connector: view('payments'), changed: ['applies_to'] });
     expect(narrowed[1]?.before?.appliesTo).toBe('Every tool that charges money');
     expect(narrowed[1]?.after?.appliesTo).toBe('Payment link');
+    // It moves from a group of tools to one tool, which its sides show: no "Shared rule".
+    expect(narrowed.map((row) => row.shared)).toEqual([undefined, undefined, undefined]);
   });
 
   /** Rivera's rules with a shared rule on private data changed in place from `was` to `now`, beside a quote and a refund change. */
@@ -578,11 +620,12 @@ describe('rule drafts', () => {
   it('shared_rule_covering_more_after_a_change_names_every_tool', () => {
     // Made "Never", the rule also blocks Share a document and Refund: the row names every tool on
     // either side, spans connectors so it has none and goes last, and each side names what it
-    // covers, the after side's target tagged as changed.
+    // covers, the after side's target tagged as changed. It is a shared rule on both sides, so
+    // its row says "Shared rule".
     const rows = privateDataChange(autoPrivate, neverPrivate);
     expect(rows.map((row) => row.key)).toEqual(['rv-quote', 'rv-refund', 'card-private']);
     const row = rows[2];
-    expect(row).toMatchObject({ change: 'changed', title: 'Share a document, See charges and Refund', changed: ['applies_to', 'mode', 'who', 'reason'] });
+    expect(row).toMatchObject({ change: 'changed', title: 'Share a document, See charges and Refund', shared: true, changed: ['applies_to', 'mode', 'who', 'reason'] });
     expect(row?.connector).toBeUndefined();
     expect(row?.before).toEqual({ appliesTo: 'See charges', mode: 'auto', reason: autoPrivate.reason, words: ruleWords(autoPrivate, PEOPLE) });
     expect(row?.after).toEqual({ appliesTo: 'Share a document, See charges and Refund', mode: 'never', reason: neverPrivate.reason, words: ruleWords(neverPrivate, PEOPLE) });
@@ -594,7 +637,7 @@ describe('rule drafts', () => {
     const rows = privateDataChange(neverPrivate, autoPrivate);
     expect(rows.map((row) => row.key)).toEqual(['rv-quote', 'rv-refund', 'card-private']);
     const row = rows[2];
-    expect(row).toMatchObject({ change: 'changed', title: 'Share a document, See charges and Refund', changed: ['applies_to', 'mode', 'who', 'reason'] });
+    expect(row).toMatchObject({ change: 'changed', title: 'Share a document, See charges and Refund', shared: true, changed: ['applies_to', 'mode', 'who', 'reason'] });
     expect(row?.connector).toBeUndefined();
     expect(row?.before?.appliesTo).toBe('Share a document, See charges and Refund');
     expect(row?.after?.appliesTo).toBe('See charges');

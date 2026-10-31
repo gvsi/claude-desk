@@ -339,19 +339,28 @@ describe('rule draft review', () => {
   });
 
   it('draft_review_matches_its_board', async () => {
-    // "Ask me first" on Rivera's rules, as N-Conn-18-Preset-Review draws it.
+    // "Ask me first" on Rivera's rules with the board's shared rule for Alex Kim's assistant, as
+    // N-Conn-18-Preset-Review draws it.
+    desk().policy.cards = [...desk().policy.cards, rivera.sharedChargeCard];
     const stored = mockStore.world.draftCards(desk(), PRESETS.ask_first);
     const { screen } = await openDraft(stored.version, { draft: draftFromDiff(stored, desk().policy, 'ask_first'), title: 'Ask me first' } satisfies RuleDraftState);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
     const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' });
     await expect.element(breadcrumb.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
     await expect.element(breadcrumb.getByText('Ask me first', { exact: true })).toHaveAttribute('aria-current', 'page');
-    // Every rule of Rivera's own goes to the default ask, and the starter's cards it keeps make no row.
-    await expect.element(screen.getByRole('region', { name: 'Changes' })).toBeVisible();
+    // Every rule of Rivera's own and the shared rule go to the default ask, and the starter's cards
+    // it keeps make no row.
+    const changes = screen.getByRole('region', { name: 'Changes' });
+    await expect.element(changes).toBeVisible();
     const rows = rowTexts(screen);
-    expect(rows).toHaveLength(Object.keys(rivera.ruleCards).length);
+    expect(rows).toHaveLength(Object.keys(rivera.ruleCards).length + 1);
     for (const text of rows) expect(text).toMatch(/^Changed/);
     for (const text of rows) expect(text).toContain('Not covered by a rule you set, so I ask you.');
+    // The shared rule's row says so under its title, after its connector, and it's the only one.
+    const sharedLine = changes.getByText('Payments · Shared rule', { exact: true });
+    await expect.element(sharedLine).toBeVisible();
+    expect(sharedLine.element().closest('li')?.textContent).toContain('Payment link and Charge within a signed limit');
+    expect(changes.getByText('Shared rule', { exact: true }).elements()).toHaveLength(1);
     // The check, then what the preset keeps running on its own.
     expect(checkLines(screen)).toEqual(['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.']);
 
