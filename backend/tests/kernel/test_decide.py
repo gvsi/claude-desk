@@ -1184,6 +1184,8 @@ def test_status_lines_are_digit_free():
     # their session ended, so these aren't status lines and `render.status` can't render them
     reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed"}
     assert render.STATUS_KEYS == states | receipts                         # one line per decision state
+    # a decision's line is never a receipt, so never the owner's `owner_say_blocked`
+    assert (render.DECISION_STATUS_KEYS, render.RECEIPT_KEYS) == (states, receipts)
     assert render.OWNER_STATUS_KEYS == reasons and not reasons & render.STATUS_KEYS
     for lang in ("en", "es"):
         for key in render.STATUS_KEYS:
@@ -1202,12 +1204,13 @@ def test_status_lines_are_digit_free():
 
 
 @pytest.mark.parametrize("key", ["refused_contact_changed", "refused_person_removed", "refused_session_closed",
-                                 "verify_started"])
+                                 "owner_say_blocked", "owner_said", "verify_started"])
 async def test_a_decision_takes_only_a_visitor_status_line(app, client, registry, key):
     """A decision's status line is `visitor_plain`, which the visitor reads, so `set_state` takes only a
-    visitor status line as its template: an owner-only line (why an approved release went nowhere) or
-    any other text (a verify card's message) raises `ValueError` before anything changes, so the
-    decision keeps its state and line and nothing is ledgered."""
+    decision's status line as its template: an owner-only line (why an approved release went nowhere,
+    or the receipt of an owner's say that was never sent), a reply's or an owner say's receipt, or any
+    other text (a verify card's message) raises `ValueError` before anything changes, so the decision
+    keeps its state and line and nothing is ledgered."""
     rows = await desk_with(app, [FakeAdapter("native.quote")],
                            [rule("ask-quotes", "ask", "Quotes wait for your answer.")])
     held = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})

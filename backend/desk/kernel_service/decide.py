@@ -338,10 +338,10 @@ def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: 
     given; once a visitor's or an agent's action has run, what was done (`render.executed_status`,
     which raises KeyError for a tool without a line); in any other state, or for an owner session's
     own setup action, the state's template. The line is the decision's `visitor_plain`, which the
-    visitor reads, so a `key` that isn't a visitor status line (`render.STATUS_KEYS`), an owner-only
-    line above all, raises ValueError."""
-    if key is not None and key not in render.STATUS_KEYS:
-        raise ValueError(f"{key!r} is not a visitor status line")
+    visitor reads, so a `key` that isn't a decision's status line (`render.DECISION_STATUS_KEYS`: no
+    receipt, so no owner-only line) raises ValueError."""
+    if key is not None and key not in render.DECISION_STATUS_KEYS:
+        raise ValueError(f"{key!r} is not a decision's status line")
     lang = render.language(session.last_language)
     if key is not None:
         return render.status(key, lang, owner=owner)
@@ -353,10 +353,12 @@ def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: 
 async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str = "decide",
                     summary: dict[str, Any], status: str | None = None) -> LedgerEntry:
     """Moves a decision to `state` in the caller's transaction: the status line for the new state
-    (`status_line`, the template `status` when given, which must be a visitor status line), a ledger
-    entry (`kind`, `summary`, kernel-built values only) and a signature over both. The line is
-    rendered first, so a `status` that isn't a visitor status line raises ValueError with nothing
-    changed. Lock the row first."""
+    (`status_line`, the template `status` when given, which must be a decision's status line), a
+    ledger entry (`kind`, `summary`, kernel-built values only) and a signature over both. Lock the
+    row first. The line is rendered first, so a `status` that isn't a decision's status line raises
+    ValueError before anything here changes. The caller's handling decides the rest: in T1 and on
+    the answer path the request fails and its transaction rolls back; in T2, `execute._run` settles
+    the action `unknown`, with nothing delivered."""
     session = (await ctx.db.scalars(ctx.repo.scoped(
         select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
     visitor_plain = status_line(state, tool=row.tool, session=session,

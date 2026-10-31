@@ -546,10 +546,11 @@ async def _refused_in_t2(ctx: KernelCtx, target: _Target, execution: Execution, 
     session no longer stands (`session_ended`), after T1 and before the side effect: nothing runs.
     Its intent is `failed` (after `on_failed`), the decision `refused_at_execution` (`reason`, "rules
     changed" unless given), its `execute` entry naming the `check` that failed, committed. The
-    visitor sees the state's own status line, never why their session ended; `status`, when given,
-    can only be another visitor status line (`decide.status_line`). An allow answers 409 `conflict`,
-    as a refusal in T1 does; an approved hold answers with its failed result, so the owner's answer
-    reads the decision as refused."""
+    visitor sees the state's own status line, never why their session ended. A `status`, when given,
+    must be a decision's status line (`decide.status_line`): any other raises ValueError, which `_run`
+    settles as `unknown`, with nothing delivered. An allow answers 409 `conflict`, as a refusal in T1
+    does; an approved hold answers with its failed result, so the owner's answer reads the decision
+    as refused."""
     await _undo(ctx, target)
     result = _no_result(target.action.action_id, "failed")
     await _finish(ctx, target, execution, result, "refused_at_execution",
@@ -599,9 +600,10 @@ async def _undo(ctx: KernelCtx, target: _Target) -> None:
 async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result: ExecResult, decision_state: str,
                   summary: dict[str, Any], *, status: str | None = None) -> None:
     """The execution's final row and the decision's state (its status line the template `status`
-    when given, which can only be a visitor status line: `decide.status_line`), ledgered and signed,
-    in the caller's transaction, which holds the decision row (`target.decision`) and the execution
-    row."""
+    when given, which must be a decision's status line: `decide.status_line` raises ValueError for
+    any other, which `_run` settles as `unknown` on T2's path, with nothing delivered), ledgered and
+    signed, in the caller's transaction, which holds the decision row (`target.decision`) and the
+    execution row."""
     execution.state = {"executed": "succeeded", "failed": "failed", "expired": "failed",
                        "refused_at_execution": "failed"}[decision_state]
     execution.result = result

@@ -2,7 +2,7 @@
 
 Status lines (`status`) are fixed templates, one per decision state plus the reply receipts
 (an owner's say has its own two: written by the owner, or not sent, which only the owner sees);
-they name the business's owner and nothing else, so they never carry an amount, a date or a
+a decision's status line is never a receipt (`DECISION_STATUS_KEYS`); they name the business's owner and nothing else, so they never carry an amount, a date or a
 limit. An action a visitor or agent asked for that ran says what was done, one line per tool
 (`executed_status`), in place of the generic executed line, which only the owner's own setup
 actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
@@ -43,6 +43,12 @@ if TYPE_CHECKING:
 Language = Literal["en", "es"]
 LANGUAGES: dict[str, dict[str, str]] = {"en": en.STATUS, "es": es.STATUS}
 STATUS_KEYS = frozenset(en.STATUS)
+# The receipts `reply_check` gives a checked reply (`reply_checked`, `reply_handed_off`) and an owner's
+# say (`owner_said`, and `owner_say_blocked`, which only the owner sees, since that say was never sent).
+RECEIPT_KEYS = frozenset({"reply_checked", "reply_handed_off", "owner_said", "owner_say_blocked"})
+# What a decision's status line, its `visitor_plain`, can be: a status line that is no receipt, so no
+# owner-only line (`decide.status_line` refuses any other key).
+DECISION_STATUS_KEYS = STATUS_KEYS - RECEIPT_KEYS
 MESSAGES: dict[str, dict[str, str]] = {"en": en.MESSAGES, "es": es.MESSAGES}
 MESSAGE_KEYS = frozenset(en.MESSAGES)
 EXECUTED: dict[str, dict[str, str]] = {"en": en.EXECUTED, "es": es.EXECUTED}
@@ -55,6 +61,8 @@ OPEN_STATUS: dict[str, Callable[[bool, datetime | None, datetime], str]] = {"en"
 
 if any(set(templates) != STATUS_KEYS for templates in LANGUAGES.values()):
     raise RuntimeError("every language has a template for every status line")
+if not RECEIPT_KEYS < STATUS_KEYS:
+    raise RuntimeError("every receipt is a status line, and some status line is a decision's")
 if any(set(templates) != MESSAGE_KEYS for templates in MESSAGES.values()) or MESSAGE_KEYS & STATUS_KEYS:
     raise RuntimeError("every language has every message, and no message shares a status line's key")
 if (any(set(lines) != OWNER_STATUS_KEYS for lines in OWNER_STATUS.values())
