@@ -316,11 +316,14 @@ export const CLAUDE_ACCOUNT_TURNS = {
   checked: 'Reply checked against Maria Rivera’s rules',
 } as const;
 
-/** Dana's last visit, as the kernel renders a booking card: its start, then the job, who and the booking. */
+/**
+ * Dana's last visit, the drain clearing, as the kernel renders a booking card: the day, then
+ * "Arriving {start} to {end}" and "With {owner}", with no booking number.
+ */
 const DANA_LAST_VISIT = cardBlock('booking_confirmed', {
   fact_id: 'booking:B-61',
-  title: 'Tuesday, October 20, 10:00 am',
-  lines: ['Drain clearing', 'With Maria Rivera', 'Booking B-61'],
+  title: 'Tuesday, October 20',
+  lines: ['Arriving 10:00 am to 12:00 pm', 'With Maria Rivera'],
 });
 
 /** Claude's welcome back: its words, then her last visit's booking card. */
@@ -366,6 +369,13 @@ export const PHONE_TODAY = {
   ] satisfies readonly { name: string; kind: string; tone: StatusTone }[],
 } as const;
 
+/** The visitor's booking on the phone, as the kernel renders a booking card: the day, when Maria arrives, and who. */
+const PHONE_BOOKING = cardBlock('booking_confirmed', {
+  fact_id: 'booking:B-77',
+  title: 'Tuesday, November 3',
+  lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
+});
+
 /**
  * A visitor's chat on a phone: the booking, confirmed only next to its card. Owner's copy ruling,
  * 2026-10-30, for invariant 2: the booking is the kernel's booking card, which carries the day and
@@ -375,7 +385,7 @@ export const PHONE_CHAT = {
   disclosureUnderName: 'Claude, an AI, answers for Maria Rivera',
   asked: 'Can someone come Tuesday afternoon?',
   /** Claude's words, then the booking card, as one message. */
-  reply: [proseBlock('You’re all set. Here’s your visit.'), rivera.blocks.booking_confirmed.en],
+  reply: [proseBlock('You’re all set. Here’s your visit.'), PHONE_BOOKING],
   receipt: { source: decided('executed'), plain: 'Booked on Maria Rivera’s calendar' } satisfies VisionReceipt,
   composer: 'Message Rivera Plumbing',
   disclosure: 'This chat is with Claude, an AI.',

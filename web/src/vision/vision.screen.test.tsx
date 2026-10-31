@@ -636,11 +636,11 @@ describe('Vision pages against their boards', () => {
     ]);
     expect(transcript.querySelector('.cd-transcript-row__margin button')).toBeNull();
 
-    // Her last visit is the kernel's booking card under the welcome, in the same message: the date,
-    // the job, who and the booking.
+    // Her last visit is the kernel's booking card under the welcome, in the same message, as the
+    // kernel renders one: the day, when Maria arrives and who, with no booking number.
     const lastVisit = log.getByRole('article', { name: 'Booked' });
     await expect.element(lastVisit).toBeVisible();
-    expect(lastVisit.element().textContent).toBe('BookedTuesday, October 20, 10:00 amDrain clearingWith Maria RiveraBooking B-61');
+    expect(lastVisit.element().textContent).toBe('BookedTuesday, October 20Arriving 10:00 am to 12:00 pmWith Maria Rivera');
     expect(lastVisit.element().closest('.cd-claude-message')?.querySelector('.cd-claude-message__prose')?.textContent).toBe(ACCOUNT.matched);
 
     // The invoice is a document card, only for her, with its download. A vision page makes no
@@ -731,9 +731,10 @@ describe('Vision pages against their boards', () => {
     expect(await expectNoFactsInProse(log)).toEqual({ prose: 1, receipts: 1 });
     expect(await expectReceiptsUnderMessages(log)).toBe(1);
     expect(one(log, '.cd-margin-line').textContent).toBe('Booked on Maria Rivera’s calendar');
-    // The booking is the kernel's booking card, in the same message as Claude's words.
+    // The booking is the kernel's booking card, in the same message as Claude's words, as the kernel
+    // renders one: the day, when Maria arrives and who, with no booking number.
     const booked = visitor.getByRole('article', { name: 'Booked' });
-    expect(booked.element().textContent).toBe('BookedTuesday, November 3, 2:00 pm120 minutesBooking B-77');
+    expect(booked.element().textContent).toBe('BookedTuesday, November 3Arriving 2:00 pm to 4:00 pmWith Maria Rivera');
     const reply = one(log, '.cd-claude-message__prose');
     expect(reply.textContent).toBe('You’re all set. Here’s your visit.');
     expect(booked.element().closest('.cd-claude-message')).toBe(reply.closest('.cd-claude-message'));
