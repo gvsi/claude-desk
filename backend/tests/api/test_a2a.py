@@ -1019,3 +1019,31 @@ async def test_mode_owner_answers_with_the_owners_blocks(app, browser, fake, ker
     assert paused.status_code == 200
     assert [block["template"] for block in paused.json()["blocks"]] == ["handoff"]
     assert len(model.requests) == 1
+
+
+# The turn's language (GitHub issue #121) --------------------------------------------------------------------------
+
+
+async def test_an_agents_message_starts_its_turn_in_the_kernel(app, browser, fake, kernel_http, model, engine):
+    """An agent's turn runs through the same loop as a visitor's: the message the agent signed goes to
+    `POST /sessions/{session_id}/turn` under the request's own signature, once and before `/context`, so the
+    kernel speaks the agent's language in the turn's receipts."""
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(say("Happy to help."))
+    assert (await agent.send("Hello, can you help with a water heater?")).status_code == 200
+    message = "Hola, ¿pueden revisar mi calentador mañana?"
+    model.add(response(tool_use("native__find_slots", {"days": 3})), say("Tengo horarios mañana por la mañana."))
+    sent = agent.sign(agent.body(message))
+    fake.calls.clear()
+
+    assert (await agent.post(sent)).status_code == 200
+
+    (turn,) = fake.called("POST /sessions/{session_id}/turn")
+    assert turn.path == f"/sessions/{agent.session_id}/turn"
+    assert turn.body == {"generation": fake.sessions[agent.session_id].generation, "text": message, "desk_id": None}
+    assert turn.headers["x-agent-nonce"] == sent.headers["X-Agent-Nonce"] and "x-session-token" not in turn.headers
+    routes = [call.route for call in fake.calls]
+    assert routes.index("POST /sessions/{session_id}/turn") < routes.index("GET /context/{session_id}?desk_id=")
+    assert routes.index("GET /context/{session_id}?desk_id=") < routes.index("POST /decide")
+    (receipt,) = [payload for _, type, payload in await sse(engine, agent.session_id) if type == "receipt"]
+    assert receipt["visitor_plain"] == "Horarios tomados del calendario de Maria Rivera"

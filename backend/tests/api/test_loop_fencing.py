@@ -24,6 +24,7 @@ from desk.api.tools import Caller, send_reply
 from desk.contracts import ToolCall
 from desk.db.session import API_CONNECT_OPTIONS, database_url
 from desk.kernel_api import DecideRequest, KernelError
+from tests.api.conftest import new_visitor
 from tests.api.fakes import ScriptedModel, gated, response, thinking, tool_use, unavailable
 from tests.api.test_deliver import waiting_for_lock
 from tests.api.test_loop_turns import (
@@ -1142,3 +1143,72 @@ async def test_past_the_budget_reopening_the_stream_hands_off_once(api_conn, eng
     assert await rows(api_conn, caller.session_id, "visitor_text", "model_seq", "wake") == [(None, False)]
     await said(api_conn, caller, "Is anyone there?")
     assert await stream_opens() == [["handoff"], ["handoff"]]
+
+
+# The turn's language (GitHub issue #121) --------------------------------------------------------------------------
+
+
+def turn_path(caller: Caller) -> str:
+    return f"/sessions/{caller.session_id}/turn"
+
+
+def context_path(caller: Caller) -> str:
+    return f"/context/{caller.session_id}"
+
+
+@pytest.mark.parametrize(("status", "code", "ended", "shown"), [
+    (409, "closed", "session_ended", [("writing", None), ("error", "session"), ("turn_end", None)]),
+    (409, "stale_generation", "fenced", [("writing", None), ("turn_end", None)]),
+    (422, "invalid", "kernel_unavailable", [("writing", None), ("error", "kernel_unavailable"), ("turn_end", None)]),
+    (500, "internal", "kernel_unavailable", [("writing", None), ("error", "kernel_unavailable"), ("turn_end", None)]),
+], ids=["closed", "stale_generation", "invalid", "unavailable"])
+async def test_the_turn_routes_refusals_end_the_turn_as_contexts_do(api_conn, kernel_http, fake, ro_schema, status,
+                                                                    code, ended, shown):
+    """The turn's first kernel call, `POST /sessions/{session_id}/turn`, runs just before `/context`, and the same
+    answer from either ends the turn the same way: a closed session with the session error, a stale generation
+    silently, anything else as the kernel being unavailable. Claude is never called and no tool runs."""
+    seen = {}
+    for refused in (turn_path, context_path):
+        visitor = await new_visitor(kernel_http, fake)
+        kernel = Kernel(fake)
+        async with KernelHttp("http://fake-kernel", transport=kernel) as http:
+            caller = Caller(copy_id=visitor.ids.copy_id, desk_id=visitor.ids.desk_id,
+                            session_id=visitor.ids.session_id, kind="visitor", kernel=http.session(visitor.token),
+                            ro_schema=ro_schema)
+            kernel.refuse[refused(caller)] = (status, code)
+            await said(api_conn, caller, "Hola, ¿tienen citas mañana?")
+            model = ScriptedModel()
+            outcome = await loop.run_turn(api_conn, caller, model)
+        events_shown = [(event.type, getattr(event, "code", None)) for event in await events(api_conn,
+                                                                                             caller.session_id)]
+        seen[refused.__name__] = (outcome, events_shown, model.requests)
+        if refused is turn_path:
+            assert kernel.answered(context_path(caller)) == [] and fake.called("/decide") == []
+    assert seen["turn_path"] == seen["context_path"] == (ended, shown, [])
+
+
+async def test_a_take_over_or_a_close_just_before_the_turn_starts_ends_it(api_conn, kernel_http, fake, ro_schema):
+    """The session moved on between `/whoami` and the turn's first call: a take-over (a new generation) makes the
+    kernel refuse the turn as stale, and the turn ends silently; a closed conversation ends with the session error.
+    Either way nothing reaches Claude, and `/context` isn't read."""
+    for change, ended, shown in (("take_over", "fenced", ["writing", "turn_end"]),
+                                 ("close", "session_ended", ["writing", "error", "turn_end"])):
+        visitor = await new_visitor(kernel_http, fake)
+        session_id = visitor.ids.session_id
+
+        async def moved_on(request: httpx.Request) -> None:
+            if change == "take_over":
+                fake.set_mode(session_id, "owner")
+            else:
+                fake.sessions[session_id].closed_at = fake.now
+
+        kernel = Kernel(fake, before={f"/sessions/{session_id}/turn": moved_on})
+        async with KernelHttp("http://fake-kernel", transport=kernel) as http:
+            caller = Caller(copy_id=visitor.ids.copy_id, desk_id=visitor.ids.desk_id, session_id=session_id,
+                            kind="visitor", kernel=http.session(visitor.token), ro_schema=ro_schema)
+            await said(api_conn, caller, "Can someone come tomorrow?")
+            model = ScriptedModel()
+            assert await loop.run_turn(api_conn, caller, model) == ended, change
+        assert kernel.answered(turn_path(caller)) == [(409, "stale_generation" if change == "take_over" else "closed")]
+        assert kernel.answered(context_path(caller)) == [] and model.requests == [], change
+        assert [event.type for event in await events(api_conn, session_id)] == shown, change

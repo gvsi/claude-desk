@@ -2,9 +2,10 @@
 Plan 02a, Task 5).
 
 `run_turn(conn, caller, model)` answers what is waiting in a session. It reads the session's mode and generation
-from the kernel (`GET /whoami`) and its tools and facts (`GET /context`), brings the model context up to date
-(a `desk_context` row when the facts change, tool changes, or a fresh context, which a changed system prompt opens
-too), then calls Claude on the system prompt and tools the context froze, and acts on each response by its stop
+from the kernel (`GET /whoami`), sends it the visitor's or agent's newest message so it renders the turn in that
+message's language (`POST /sessions/{session_id}/turn`), reads the session's tools and facts (`GET /context`), brings
+the model context up to date (a `desk_context` row when the facts change, tool changes, or a fresh context, which a
+changed system prompt opens too), then calls Claude on the system prompt and tools the context froze, and acts on each response by its stop
 reason. Claude only proposes: every tool call goes through `/decide` (`tools.route_call`),
 and every reply through `/check_reply` and `deliver()` (`tools.send_reply`).
 
@@ -57,6 +58,7 @@ from desk.api.store import (
     delivered_reply,
     last_context_hash,
     latest_pending,
+    latest_said,
     lock_key,
     prepare_model_input,
     start_fresh_context,
@@ -81,13 +83,16 @@ from desk.api.tools import (
 from desk.api.triage import Stopped
 from desk.contracts import SessionState
 from desk.events import EvError, EvTurnEnd, EvWriting
-from desk.kernel_api import SessionContext
+from desk.kernel_api import SessionContext, TurnRequest
 
 TurnOutcome = Literal["done", "fenced", "session_ended", "kernel_unavailable", "handoff", "turn_over", "not_ai",
                       "internal"]
 logger = logging.getLogger(__name__)
 # The model calls one turn may make before it hands off.
 MAX_MODEL_CALLS = 6
+# The most of a turn's newest visitor or agent message the kernel takes (master plan, `POST /sessions/{session_id}/turn`,
+# 422 above it); the rest is cut before it is sent.
+TURN_TEXT_MAX = 2000
 THINKING = frozenset({"thinking", "redacted_thinking"})
 # The static error a visitor sees when a turn fails ("Fail-closed behavior"); other ends are silent.
 ERROR_CODES = {"session_ended": "session", "kernel_unavailable": "kernel_unavailable", "internal": "internal"}
@@ -220,6 +225,9 @@ class _Turn:
         if self.visitor:
             await emit(conn, caller.ids, EvWriting(type="writing"))
             await conn.commit()
+        refused = await self._start()
+        if refused is not None:
+            return refused
         try:
             context = await caller.kernel.call("GET /context/{session_id}?desk_id=",
                                                path={"session_id": caller.session_id})
@@ -237,6 +245,28 @@ class _Turn:
             outcome = await self._act(response)
             if outcome is not None:
                 return outcome
+
+    async def _start(self) -> TurnOutcome | None:
+        """Tell the kernel the turn's language before any tool runs (GitHub issue #121): the newest visitor or agent
+        message that woke the turn (`store.latest_said`), cut to `TURN_TEXT_MAX`, goes to
+        `POST /sessions/{session_id}/turn`, and the kernel keeps the language it detects as the session's, which the
+        turn's receipts and the reply check's fallback then speak. A turn woken by anything else sends nothing. The
+        text is untrusted and goes only to the kernel's detector: nothing here logs or keeps it. How the turn ends
+        when the kernel refuses, as it would on `/context` (`_failed`), else None."""
+        conn, caller = self.conn, self.caller
+        said = await latest_said(conn, caller.session_id)
+        await conn.commit()
+        if said is None:
+            return None
+        try:
+            await caller.kernel.call("POST /sessions/{session_id}/turn",
+                                     TurnRequest(generation=self.generation, text=said[:TURN_TEXT_MAX]),
+                                     path={"session_id": caller.session_id})
+        except KernelFailed as failure:
+            return _failed(failure)
+        except KernelUnavailable:
+            return "kernel_unavailable"
+        return None
 
     async def _bring_up_to_date(self, context: SessionContext, system: list[dict]) -> None:
         """A `desk_context` row when the facts or knowledge changed, then the tool changes `/context` calls for:

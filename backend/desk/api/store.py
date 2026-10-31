@@ -682,6 +682,16 @@ async def latest_pending(conn: AsyncConnection, session_id: str) -> int | None:
         MESSAGES.c.model_content.is_not(None)))).scalar_one()
 
 
+async def latest_said(conn: AsyncConnection, session_id: str) -> str | None:
+    """The text of the session's newest pending visitor or agent message: the words that woke its turn, whose
+    language the turn tells the kernel (`loop`). None when no such message waits (a whisper, an action update or
+    the verification note woke the turn)."""
+    return (await conn.execute(select(MESSAGES.c.text).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind.in_(("visitor_text", "agent_text")),
+        MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake, NOT_REPLAYED)
+        .order_by(MESSAGES.c.n.desc()).limit(1))).scalar_one_or_none()
+
+
 async def clear_wake(conn: AsyncConnection, session_id: str) -> int:
     """Stop the session's pending work from starting turns (a paused session hands off instead); the rows still wait
     for the model and reach it at its next call. Returns how many rows it cleared."""
