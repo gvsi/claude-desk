@@ -414,7 +414,7 @@ describe('chatReducer', () => {
         transcript: transcript(9, [...STORED_TAKEN_OVER, { ...item(5, 'owner_left'), event: { type: 'owner_left' } }, { ...item(6, 'delivered'), event: later }]),
       },
     ]);
-    // Her join, then her leave, in their places: never "Claude is helping again" with no join before it.
+    // Her join, then her leave, in their places, as the page open throughout showed them.
     const lines = reloaded.rows.flatMap(({ item }) => (item.kind === 'system' ? [item.ev.type] : []));
     expect(lines).toEqual(['owner_joined', 'owner_left']);
     expect(reloaded.rows.map((row) => row.item.kind)).toEqual(['visitor', 'message', 'system', 'message', 'system', 'message']);
@@ -422,31 +422,100 @@ describe('chatReducer', () => {
     expect(flags(reloaded)).toEqual(flags(live));
   });
 
-  it('join_and_leave_show_once_when_history_and_stream_overlap', () => {
+  it('join_and_leave_show_once_when_the_stream_resumes_after_the_transcript', () => {
     // Open throughout, to the hand-back.
     const handBack: SseEvent[] = [...TAKEN_OVER, { type: 'owner_left' }];
     const live = run([{ type: 'sent', id: 'local-1', text: ASK }, ...events(handBack)]);
 
     // Reloaded during the take-over, then the stream replays from seq 1 (a reconnect from an older
-    // cursor): what the transcript held adds nothing, and the hand-back after it shows once.
+    // cursor): the join carries no identity, so the transcript's `last_seq` is what keeps it from
+    // showing twice. What the transcript held adds nothing, and the hand-back after it shows once.
     const reloaded = run([{ type: 'history', transcript: transcript(5, STORED_TAKEN_OVER) }]);
     expect(run(events(TAKEN_OVER), reloaded)).toEqual(reloaded);
     const handedBack = run(events(handBack), reloaded);
     expect(shown(handedBack)).toEqual(shown(live));
     expect(flags(handedBack)).toEqual(flags(live));
-
-    // A transcript read before its events' seqs were known (`last_seq` 0), and the stream replays
-    // the take-over from seq 1: the messages match by id, the join the chat already shows as its
-    // latest line adds nothing, and the hand-back shows once.
-    const early = run([{ type: 'history', transcript: transcript(0, STORED_TAKEN_OVER) }]);
-    const caughtUp = run(events(handBack), early);
-    expect(shown(caughtUp)).toEqual(shown(live));
-    expect(flags(caughtUp)).toEqual(flags(live));
-    expect(caughtUp.lastSeq).toBe(6);
+    expect(lines(handedBack)).toEqual([
+      ['n3', 'owner_joined'],
+      ['s6', 'owner_left'],
+    ]);
     // Replayed again from seq 1, nothing changes.
-    expect(run(events(handBack), caughtUp)).toEqual(caughtUp);
+    expect(run(events(handBack), handedBack)).toEqual(handedBack);
+  });
+
+  it('two_joins_in_a_row_each_show', () => {
+    // A hand-back the kernel made but whose leave the API never kept (its answer was lost), then a
+    // second take-over: two joins with no leave between, each a take-over of its own.
+    const later: EvMessage = { ...quoteMessage, message_id: 'msg-after-hand-back' };
+    const live = run([
+      { type: 'sent', id: 'local-1', text: ASK },
+      ...events([...TAKEN_OVER, { type: 'writing' }, later, { type: 'turn_end' }, ownerJoined]),
+    ]);
+    expect(lines(live)).toEqual([
+      ['s4', 'owner_joined'],
+      ['s9', 'owner_joined'],
+    ]);
+
+    // Reloaded after the second: both joins come back, each in its place.
+    const stored = [...STORED_TAKEN_OVER, { ...item(5, 'delivered'), event: later }, { ...item(6, 'owner_joined'), event: ownerJoined }];
+    const reloaded = run([{ type: 'history', transcript: transcript(9, stored) }]);
+    expect(lines(reloaded)).toEqual([
+      ['n3', 'owner_joined'],
+      ['n6', 'owner_joined'],
+    ]);
+    expect(shown(reloaded)).toEqual(shown(live));
+    expect(flags(reloaded)).toEqual(flags(live));
+  });
+
+  it('a_second_take_over_shows_each_line', () => {
+    // Live: Maria joins, hands the chat back and joins again, three lines in order.
+    const left: SseEvent = { type: 'owner_left' };
+    const live = run(events([ownerJoined, left, ownerJoined]));
+    expect(lines(live)).toEqual([
+      ['s1', 'owner_joined'],
+      ['s2', 'owner_left'],
+      ['s3', 'owner_joined'],
+    ]);
+
+    // Reloaded after the second join: the same three, and her next hand-back adds a fourth.
+    const stored: TranscriptItem[] = [
+      { ...item(1, 'owner_joined'), event: ownerJoined },
+      { ...item(2, 'owner_left'), event: left },
+      { ...item(3, 'owner_joined'), event: ownerJoined },
+    ];
+    const reloaded = run([{ type: 'history', transcript: transcript(3, stored) }]);
+    expect(lines(reloaded)).toEqual([
+      ['n1', 'owner_joined'],
+      ['n2', 'owner_left'],
+      ['n3', 'owner_joined'],
+    ]);
+    expect(shown(reloaded)).toEqual(shown(live));
+    expect(lines(run(events([left], 4), reloaded))).toEqual([...lines(reloaded), ['s4', 'owner_left']]);
+  });
+
+  it('a_leave_with_no_join_before_it_still_shows', () => {
+    // A take-over whose join the API never kept: Maria types and writes, then hands the chat back.
+    // Her leave is a line of its own, and it ends her typing and anything shown writing.
+    const left: SseEvent = { type: 'owner_left' };
+    const live = run(events([{ type: 'writing' }, ownerTyping, ownerSaid, ownerTyping, left]));
+    expect(lines(live)).toEqual([['s5', 'owner_left']]);
+    expect(live.writing).toBe(false);
+    expect(live.ownerTyping).toBeNull();
+
+    // Read back after a reload, the same line, in the same place.
+    const reloaded = run([
+      { type: 'history', transcript: transcript(5, [{ ...item(1, 'delivered'), event: ownerSaid }, { ...item(2, 'owner_left'), event: left }]) },
+    ]);
+    expect(lines(reloaded)).toEqual([['n2', 'owner_left']]);
+    expect(shown(reloaded)).toEqual(shown(live));
+    expect(flags(reloaded)).toEqual(flags(live));
   });
 });
+
+/** The lines about the chat, in order: each one's id and whether the owner joined or left. */
+function lines(state: ChatState): [string, string][] {
+  return state.rows.flatMap(({ item }) => (item.kind === 'system' ? [[item.id, item.ev.type] as [string, string]] : []));
+}
 
 /** Dana asks for Maria: what she types, and what Claude answers. */
 const ASK = "I'd like to talk to Maria Rivera.";
