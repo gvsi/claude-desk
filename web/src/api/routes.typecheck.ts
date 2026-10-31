@@ -84,6 +84,8 @@ export const ROUTE_MODELS = {
   setup: 'SetupState',
   setupConsent: 'SetupState',
   setupAnswer: 'SetupState',
+  setupProposal: 'SetupState',
+  setupSuggestions: 'SetupState',
   setupTools: 'SetupTools',
   setupConnect: 'ToolRow[]',
 
@@ -114,7 +116,11 @@ export const ROUTE_MODELS = {
  * missing from the document: once the API serves one, both checks fail until it comes off this
  * list and its answers match `ROUTE_MODELS`.
  */
-export const NOT_YET_SERVED = [] as const satisfies readonly RouteKey[];
+export const NOT_YET_SERVED = [
+  // Setup's consultant conversation, until the API serves proposals and suggestions.
+  'setupProposal',
+  'setupSuggestions',
+] as const satisfies readonly RouteKey[];
 
 /**
  * Operations the API serves that the web deliberately never calls, as "METHOD /path": one served

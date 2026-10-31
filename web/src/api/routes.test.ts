@@ -64,6 +64,8 @@ const PLAN_02: Record<RouteKey, string> = {
   setup: 'GET /api/owner/setup/{id}',
   setupConsent: 'POST /api/owner/setup/{id}/consent',
   setupAnswer: 'POST /api/owner/setup/{id}/answer',
+  setupProposal: 'POST /api/owner/setup/{id}/proposals/{proposal_id}',
+  setupSuggestions: 'POST /api/owner/setup/{id}/suggestions',
   setupTools: 'GET /api/owner/setup/{id}/tools',
   setupConnect: 'POST /api/owner/setup/{id}/tools/connect',
   // Public
@@ -87,7 +89,7 @@ const PLAN_02: Record<RouteKey, string> = {
 };
 
 /** The model turns: the routes that wait on Claude rather than on the kernel. */
-const MODEL_ROUTES = ['startSetup', 'setupConsent', 'setupAnswer'];
+const MODEL_ROUTES = ['startSetup', 'setupConsent', 'setupAnswer', 'setupSuggestions'];
 
 const entries = Object.entries(ROUTES) as [RouteKey, (typeof ROUTES)[RouteKey]][];
 

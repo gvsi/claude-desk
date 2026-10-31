@@ -60,6 +60,8 @@ import type {
   RulesView,
   SafetyCheck,
   SetupAnswerBody,
+  SetupProposalBody,
+  SetupSuggestionsBody,
   SetupState,
   SetupTools,
   SituationResult,
@@ -149,6 +151,8 @@ export const ROUTES = {
   setup: { method: 'GET', path: '/api/owner/setup/{id}', owner: true },
   setupConsent: { method: 'POST', path: '/api/owner/setup/{id}/consent', owner: true, model: true },
   setupAnswer: { method: 'POST', path: '/api/owner/setup/{id}/answer', owner: true, model: true },
+  setupProposal: { method: 'POST', path: '/api/owner/setup/{id}/proposals/{proposal_id}', owner: true },
+  setupSuggestions: { method: 'POST', path: '/api/owner/setup/{id}/suggestions', owner: true, model: true },
   setupTools: { method: 'GET', path: '/api/owner/setup/{id}/tools', owner: true },
   setupConnect: { method: 'POST', path: '/api/owner/setup/{id}/tools/connect', owner: true },
 
@@ -231,6 +235,8 @@ interface RouteShapes {
   setup: { body: undefined; response: SetupState };
   setupConsent: { body: ConsentBody; response: SetupState };
   setupAnswer: { body: SetupAnswerBody; response: SetupState };
+  setupProposal: { body: SetupProposalBody; response: SetupState };
+  setupSuggestions: { body: SetupSuggestionsBody; response: SetupState };
   setupTools: { body: undefined; response: SetupTools };
   setupConnect: { body: ConnectBody; response: ToolRow[] };
 

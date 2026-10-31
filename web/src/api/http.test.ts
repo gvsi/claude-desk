@@ -109,6 +109,26 @@ describe('request', () => {
     await expect(request('setupConsent', { params: { id: 's1' }, body: { allow: true } })).rejects.toMatchObject({ kind: 'unavailable' });
   });
 
+  it('sends_setup_suggestions_as_an_empty_object', async () => {
+    reply({ status: 200, body: { step: 'tools' } });
+    await request('setupSuggestions', { params: { id: 'i1' }, body: {} });
+    expect(call(0).url).toBe('/api/owner/setup/i1/suggestions');
+    expect(call(0).init.method).toBe('POST');
+    expect(call(0).init.body).toBe('{}');
+  });
+
+  it('sends_setup_decisions_with_both_encoded_path_parameters', async () => {
+    reply({ status: 200, body: { step: 'questions' } });
+    await request('setupProposal', {
+      params: { id: 'interview /1', proposal_id: 'p/2' },
+      body: { accept: true, title: 'Intro consult' },
+    });
+    expect(call(0).url).toBe('/api/owner/setup/interview%20%2F1/proposals/p%2F2');
+    expect(call(0).init.method).toBe('POST');
+    expect(call(0).init.credentials).toBe('same-origin');
+    expect(JSON.parse(String(call(0).init.body))).toEqual({ accept: true, title: 'Intro consult' });
+  });
+
   it('maps_status_to_error_kind', async () => {
     const cases: [number, ApiErrorKind][] = [
       [401, 'unauthorized'],

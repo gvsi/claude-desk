@@ -492,9 +492,58 @@ export type QuestionKey =
   | 'money_limit'
   | 'contact_and_after_hours';
 
+/** 2..4 choices per question, text ≤ 80; at most one recommended choice, listed first. */
+export type Choice = { text: string; recommended: boolean };
+
+/** One proposal per Claude card message; stable id `p-` + 12 hex for the interview. */
+export type ProposalCard = {
+  proposal_id: string;
+  kind: 'job' | 'connector';
+  state: 'proposed' | 'accepted' | 'declined';
+  job: JobProposal | null;
+  connector: ConnectorProposal | null;
+};
+
+/** The closed catalog of jobs setup can propose. */
+export type JobKind = 'answer' | 'intake' | 'schedule' | 'price' | 'documents' | 'status' | 'payment' | 'urgent';
+
+/** Title ≤ 60, why ≤ 200, how ≤ 300; unavailable jobs take details for a person to reply. */
+export type JobProposal = {
+  job: JobKind;
+  title: string;
+  why: string;
+  how: string;
+  can_do_today: boolean;
+  config: BlockConfig | null;
+};
+
+/**
+ * Intake: 1..5 questions, each ≤ 120. Booking: appointment type ≤ 60, minutes 15..240.
+ * Payment: purpose ≤ 60, integer amount_cents 0..1_000_000. Urgent: urgent_when ≤ 300.
+ */
+export type BlockConfig =
+  | { block: 'intake'; questions: string[] }
+  | { block: 'typed_booking'; appointment_type: string; minutes: number }
+  | { block: 'purpose_payment'; purpose: string; amount_cents: number }
+  | { block: 'urgent'; urgent_when: string };
+
+/** Setup's closed connector catalog. */
+export type ConnectorKey = 'google_calendar' | 'gmail' | 'google_drive' | 'quickbooks' | 'stripe' | 'square' | 'calendly';
+
+/** Why ≤ 200; only Stripe (the mock payments server) is connectable today. */
+export type ConnectorProposal = {
+  app: ConnectorKey;
+  label: string;
+  why: string;
+  connectable: boolean;
+};
+
+/** Card messages have role Claude, empty text and no choices; ordinary messages have card null. */
 export interface SetupMessage {
   role: 'claude' | 'owner' | 'tool_label';
   text: string;
+  choices: Choice[];
+  card: ProposalCard | null;
 }
 
 export interface SetupState {
@@ -733,6 +782,12 @@ export interface SetupAnswerBody {
   question: QuestionKey;
   text: string;
 }
+
+/** Changes always accept: trimmed title 1..60; payment-only integer cents 0..1_000_000. */
+export type SetupProposalBody = { accept: boolean; title?: string; amount_cents?: number };
+
+/** Sent as an empty JSON object. */
+export type SetupSuggestionsBody = Record<string, never>;
 
 export interface ConsentBody {
   allow: boolean;

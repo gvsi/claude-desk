@@ -494,7 +494,7 @@ function moveTo(interview: Interview, step: SetupState['step']): void {
 }
 
 function say(interview: Interview, role: SetupMessage['role'], text: string): void {
-  interview.state.messages.push({ role, text });
+  interview.state.messages.push({ role, text, choices: [], card: null });
 }
 
 /** The reads and first question after the owner gives (or declines) consent. */
@@ -629,6 +629,8 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
         {
           role: 'claude',
           text: `${greeting} Before I ask anything: can I look at what you've told Claude before about ${business}? I'll only use it to suggest answers here, and you can change any of them.`,
+          choices: [],
+          card: null,
         },
       ],
     },
