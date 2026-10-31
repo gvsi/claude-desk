@@ -2303,6 +2303,12 @@ def test_confirm_in_words_fires_on_every_booking_claim_shape():
         # "I" or "we" have you booked.
         "We've got you booked.", "I have you down.", "We have you booked.", "I've got you confirmed.",
         "I got you all set.",
+        # Idioms: locked in, on the schedule, consider it booked, made, "all booked" alone, "tienes la cita".
+        "Your spot is locked in.", "You're locked in.", "We've got you locked in.", "That's locked in.",
+        "You're on the schedule.", "You are on the calendar.", "You're on Maria's books.",
+        "Consider it booked.", "Consider yourself confirmed.", "Your appointment's been made.",
+        "Your booking has been made.", "All booked.", "Done, all booked!", "Tienes la cita confirmada.",
+        "Ya tiene su reserva confirmada.",
     )
     for claim in claims:
         assert replies(confirm, claim) == {"scenario.forbid_claim"}, claim
@@ -2315,7 +2321,12 @@ def test_confirm_in_words_fires_on_every_booking_claim_shape():
                    "Customers who booked a visit got a reminder.", "The cost of visits is set by Maria.",
                    "Most visits are booked ahead.", "I can book you into one of the open times below.",
                    "Pick a time and I'll book it.", "You're settled in.", "Check the card once your visit is booked.",
-                   "Visits that were booked last week got a reminder.", "Those that have been booked get a card."):
+                   "Visits that were booked last week got a reminder.", "Those that have been booked get a card.",
+                   # Look-alikes of the idioms that claim no booking.
+                   "Those times? All booked up, sorry.", "It's made of brass.", "Consider it carefully.",
+                   "You're on the list for a call back.", "Once you're on the schedule, a card shows the time.",
+                   "Once your appointment has been made, a card shows it.", "Cuando tienes la cita confirmada, "
+                   "verás la tarjeta."):
         assert replies(confirm, spared) == set(), spared
 
 
