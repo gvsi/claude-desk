@@ -137,7 +137,8 @@ export function StartStep() {
 
   const send = async (attempt: Attempt) => {
     const signal = leaving.current?.signal;
-    if (signal === undefined) return;
+    // Nothing is sent once the owner has left, even while this page is still on screen.
+    if (signal === undefined || signal.aborted) return;
     sending.current = attempt;
     setPending(true);
     setError(null);
