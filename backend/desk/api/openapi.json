@@ -11782,7 +11782,7 @@
           "days"
         ],
         "title": "ThisWeek",
-        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier\nbooking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last\none `end`."
+        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier\nbooking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last\none `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the\nreply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the\ndrafts."
       },
       "Today": {
         "properties": {
@@ -12481,7 +12481,8 @@
           "bookings",
           "stopped"
         ],
-        "title": "WeekDay"
+        "title": "WeekDay",
+        "description": "One date of \"Last 7 days\", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,\nnot Claude's own drafts the reply check stopped."
       },
       "WentLive": {
         "properties": {

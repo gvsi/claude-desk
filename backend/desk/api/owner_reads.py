@@ -478,12 +478,14 @@ def briefing(done: Activity, frame: Windows) -> Briefing:
 @dataclass(frozen=True)
 class WeekCounted:
     """What a span of days counts from `start` to `end`, Today's last 7 days and the reports alike: the conversations'
-    text rows, the bookings and stopped attempts, and the owner stepping into those conversations; and from them, how
-    many conversations there were, how many the owner stepped into and how many Claude handled alone."""
+    text rows, the bookings, the requests the kernel refused, and the owner stepping into those conversations; and
+    from them, how many conversations there were, how many the owner stepped into and how many Claude handled alone.
+    `stopped` holds the refused requests only: a draft of Claude's the reply check stopped is no attempt anyone made,
+    so it is listed on Safety and in the briefing but never counted here."""
 
     texts: list[Timed]
     bookings: list[Timed]
-    stopped: list[Timed]
+    stopped: list[Stopped]
     stepped: list[Timed]
 
     @property
@@ -507,14 +509,14 @@ def week_counts(done: Activity, start: datetime, end: datetime) -> WeekCounted:
     texts = _within(done.texts, start, end)
     conversations = _sessions(texts)
     return WeekCounted(texts=texts, bookings=_within(done.bookings, start, end),
-                       stopped=_within(done.stopped, start, end),
+                       stopped=[attempt for attempt in _within(done.stopped, start, end) if attempt.kind == "refused"],
                        stepped=[thing for thing in _within(done.stepped, start, end)
                                 if thing.session_id in conversations])
 
 
 def this_week(done: Activity, frame: Windows) -> ThisWeek:
-    """The last 7 days: totals from `start` to now, and each local date's conversations, bookings and stopped
-    attempts (`week_counts`). A conversation the owner stepped into (inside the window) isn't one Claude handled.
+    """The last 7 days: totals from `start` to now, and each local date's conversations, bookings and refused
+    requests (`week_counts`). A conversation the owner stepped into (inside the window) isn't one Claude handled.
     Each booking's amount is taken over all the Desk's bookings, so a quote a booking before the window took backs
     none in it."""
     counted = week_counts(done, frame.start, frame.now)
@@ -522,13 +524,13 @@ def this_week(done: Activity, frame: Windows) -> ThisWeek:
     for text in counted.texts:
         talked.setdefault(frame.local_date(text.at), set()).add(text.session_id)
     booked = Counter(frame.local_date(booking.at) for booking in counted.bookings)
-    blocked = Counter(frame.local_date(attempt.at) for attempt in counted.stopped)
+    refused = Counter(frame.local_date(attempt.at) for attempt in counted.stopped)
     return ThisWeek(
         timezone=frame.zone.key, start=frame.dates[0], end=frame.dates[-1], bookings=len(counted.bookings),
         booked_cents=sum(done.booked[booking.ref_id] for booking in counted.bookings),
         conversations=counted.conversations, handled=counted.handled, stepped_in=counted.stepped_in,
         stopped=len(counted.stopped),
-        days=[WeekDay(date=day, conversations=len(talked[day]), bookings=booked[day], stopped=blocked[day])
+        days=[WeekDay(date=day, conversations=len(talked[day]), bookings=booked[day], stopped=refused[day])
               for day in frame.dates])
 
 

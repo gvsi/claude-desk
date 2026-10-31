@@ -748,7 +748,9 @@ export interface Suggestion {
  * "Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
  * `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
  * booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
- * one `end`.
+ * one `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the
+ * reply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the
+ * drafts.
  */
 export interface ThisWeek {
   timezone: string;
@@ -762,6 +764,10 @@ export interface ThisWeek {
   stopped: number;
   days: WeekDay[];
 }
+/**
+ * One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,
+ * not Claude's own drafts the reply check stopped.
+ */
 export interface WeekDay {
   date: string;
   conversations: number;
