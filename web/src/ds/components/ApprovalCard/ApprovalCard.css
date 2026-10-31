@@ -2,6 +2,83 @@
    then the answers: Allow and Deny side by side, each a plain button or a menu button. A menu is a
    popover under its button; in a narrow card it opens inline, a full-width list under the two. */
 
+/* The card and what follows it (`after`): one region, whose height settles as an answer lands. */
+.cd-approval-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* The card's own box, which takes focus when the screen asks: its ring follows the card's corners. */
+.cd-approval-card__card {
+  border-radius: var(--radius-card);
+}
+
+/* The card's body: the answered layer, and while an answer lands the outgoing one, in one cell.
+   Each keeps its own height, so either can be measured. */
+.cd-approval-card__body {
+  display: grid;
+  align-items: start;
+}
+
+.cd-approval-card__layer {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.cd-approval-card__after {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* An answer given on the card lands (UXC-P202-After). The held layer fades out over motion-fast as
+   the answered layer, and anything that came under the card with the answer, fade in over
+   motion-base on the emphasis ease. Once the held layer has gone, the dot pulses if it left held,
+   and the card and its region ease from their held heights to their answered ones, which the
+   component measures and sets. Each is clipped to its easing height top to bottom only, so the
+   pulse isn't cut at the side. */
+.cd-approval-card--settling,
+.cd-approval-card--settling .cd-approval-card__body {
+  overflow-x: visible;
+  overflow-y: clip;
+  transition: height var(--motion-base) var(--motion-ease-emphasis) var(--motion-fast);
+}
+
+.cd-approval-card__layer--leaving {
+  pointer-events: none;
+  animation: cd-approval-card-out var(--motion-fast) var(--motion-ease) forwards;
+}
+
+.cd-approval-card--settling .cd-approval-card__layer--live,
+.cd-approval-card--settling .cd-approval-card__after--new {
+  animation: cd-approval-card-in var(--motion-base) var(--motion-ease-emphasis) both;
+}
+
+.cd-approval-card--pulse .cd-approval-card__layer--live .cd-approval-card__status > .cd-status-dot {
+  animation: cd-approval-card-pulse var(--motion-base) var(--motion-ease-emphasis) var(--motion-fast) both;
+}
+
+@keyframes cd-approval-card-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes cd-approval-card-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes cd-approval-card-pulse {
+  50% {
+    transform: scale(1.8);
+  }
+}
+
 .cd-approval-card__top {
   display: flex;
   flex-wrap: wrap;
@@ -124,7 +201,9 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--motion-instant) var(--motion-ease);
+  transition:
+    background-color var(--motion-instant) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease-emphasis);
 }
 
 .cd-approval-card__item:hover,
@@ -180,9 +259,29 @@
   }
 }
 
+/* The chosen answer presses in a little further than a plain button. */
+.cd-approval-card__row .cd-button:active:not(:disabled, [aria-disabled='true']),
+.cd-approval-card__item:active {
+  transform: scale(0.97);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cd-approval-card__item {
+  .cd-approval-card__item,
+  .cd-approval-card--settling,
+  .cd-approval-card--settling .cd-approval-card__body {
     transition: none;
+  }
+
+  .cd-approval-card__layer--leaving,
+  .cd-approval-card--settling .cd-approval-card__layer--live,
+  .cd-approval-card--settling .cd-approval-card__after--new,
+  .cd-approval-card--pulse .cd-approval-card__layer--live .cd-approval-card__status > .cd-status-dot {
+    animation: none;
+  }
+
+  .cd-approval-card__row .cd-button:active:not(:disabled, [aria-disabled='true']),
+  .cd-approval-card__item:active {
+    transform: none;
   }
 }
 
