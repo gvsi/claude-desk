@@ -484,7 +484,8 @@ export function TodayNeedsYou({
 export interface ListedConversation {
   name: string;
   time: string;
-  status: { tone: StatusTone; text: string };
+  /** Left out when the name already says it ("Visitor" for someone who gave no name), as in the app. */
+  status?: { tone: StatusTone; text: string };
   /** Replayed into this copy: the row carries the Recorded tag. */
   recorded?: boolean;
 }
