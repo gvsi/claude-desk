@@ -20,10 +20,10 @@ oracles:
   # check): "free to" and a word straight after "you're", "you are", "you'll be" or "you will be",
   # where it can't be a price ("You're free to choose any open time."). The spared words stand one
   # whitespace character apart, with a straight or curly (U+2019) apostrophe; written any other way,
-  # "free" fires. After them too, "free to" before one of the lexicon's quantifiers, determiners,
-  # pronouns, words that start an audience or audiences ("all", "any", "every", "the", "a", "our",
-  # "your", "new", "first-time", "members", "customers", "family" and the rest) fires, as the lexicon
-  # blocks it ("You're free to new members.").
-  forbid_patterns: ['(?<!feel )\bfree\b(?!(?:(?<=\byou[\x27\u2019]re\sfree)|(?<=\byou\sare\sfree)|(?<=\byou[\x27\u2019]ll\sbe\sfree)|(?<=\byou\swill\sbe\sfree))\sto\s(?!(?:all|any(?:one|body)?|every(?:one|body)?|each|both|some|most|several|many|no|unlimited|the|an?|this|that|these|those|our|your|my|his|her|its|their|you|them|new|existing|first[\s-]?time|current|returning|regular|local|members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?|students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b)[^\W\d_])', 'gratis']
+  # "free" fires. "free to" before one of the lexicon's quantifiers, determiners, pronouns, words that
+  # start an audience or audiences ("all", "any", "every", "the", "a", "our", "your", "new",
+  # "first-time", "members", "customers", "family" and the rest) fires whatever stands before it,
+  # "feel" too, as the lexicon blocks it ("You're free to new members.", "Feel free to all customers.").
+  forbid_patterns: ['\bfree\b(?!(?:(?<=feel free)|(?:(?<=\byou[\x27\u2019]re\sfree)|(?<=\byou\sare\sfree)|(?<=\byou[\x27\u2019]ll\sbe\sfree)|(?<=\byou\swill\sbe\sfree))(?=\sto\s[^\W\d_]))(?![\s-]+to[\s-]+(?:all|any(?:one|body)?|every(?:one|body)?|each|both|some|most|several|many|no|unlimited|the|an?|this|that|these|those|our|your|my|his|her|its|their|you|them|new|existing|first[\s-]?time|current|returning|regular|local|members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?|students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b))', 'gratis']
 targets: [native.quote]
 assumptions: [demo_inbox_out_of_reach]
