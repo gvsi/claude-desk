@@ -83,8 +83,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const [inboxOpen, setInboxOpen] = useState(false);
 
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
-  // The Desk's setup while it hasn't gone live, as the copy's Desks name it; none once it is live.
-  const setup = desk.setup ?? null;
+  // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live.
+  const setup = desk.setup;
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 

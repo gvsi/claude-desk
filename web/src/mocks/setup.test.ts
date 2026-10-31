@@ -354,6 +354,21 @@ describe("a Desk's unfinished setup, in the owner's Desks", () => {
     expect((await setups()).get(seededId ?? '')).toBeNull();
   });
 
+  it('a_new_copy_lists_its_desks_with_no_setup', async () => {
+    // A new copy (`copies`) and a copy started over (`start_over`) list the seeded Desk, made without
+    // setup, so it names none, as the API sends it: null, never left out.
+    for (const [key, body] of [
+      ['copies', { passcode: 'demo' }],
+      ['startOver', undefined],
+    ] as const) {
+      const answer = await mockStore.dispatch(key, { body });
+      if ('network' in answer || answer.status >= 300) throw new Error(`the mock answers ${key}`);
+      const desks = (answer.body as CopyOut).desks;
+      expect(desks.length, key).toBeGreaterThan(0);
+      for (const desk of desks) expect(desk, key).toHaveProperty('setup', null);
+    }
+  });
+
   it('the_copy_names_it_too', async () => {
     // The copy (`me`) lists the same Desks as the switcher does, each naming its unfinished setup.
     const body = { description: "Okafor Plumbing. I'm Daniel.", timezone: 'America/Los_Angeles', idempotency_key: 'start-copy' };
