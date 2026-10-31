@@ -80,12 +80,12 @@ The change:
 
 - [ ] Tests first:
   - Through the real screens (the `screens` project runs with motion):
-    - On Today, answering the seeded hold with "Allow this time" keeps the same card element in the same place (element identity before and after). It shows "You allowed this. It's done." with Dismiss under it, and no "Answered just now" heading. Once the card settles, the section after Needs you ends higher by the held item's height minus the settled item's height (card, drafted rule, Dismiss), and it never moves down during the settle.
+    - On Today, answering the seeded hold with "Allow this time" keeps the same card element in the same place (element identity before and after). It shows "You allowed this. It's done." with Dismiss under it, and no "Answered just now" heading. Once the card settles, the section after Needs you ends higher by the held item's height minus the settled item's height (card, drafted rule, Dismiss), and it moves in one direction only, eased, never jumping. After an "Always" answer the settled item (card, drafted rule, Dismiss) can be taller than the held one, and then the section moves down, eased.
     - The same on Today and in a conversation for an "Always" answer, which adds the drafted-rule notice under the card.
     - In a conversation, the same card element settles in its slot.
   - In ApprovalCard story plays (`--project storybook`, which runs with motion; name the stories, for example `AnswerLands` and `DenyLands`). `ds-browser` forces reduced motion, so only the end-state-at-once assertion goes there:
     - While the card settles, the held and answered layers cross, and its height eases from the held height to the answered height.
-    - From the first frame, the outgoing layer is `inert` and `aria-hidden="true"`. A single `role="status"` node changes its text in place. The focus rescue that today waits for focus to fall to `body` won't fire, because an inert button keeps focus until the next frame. So before the outgoing layer takes `inert`, if it holds `document.activeElement`, focus moves to the status line in the same layout effect.
+    - From the first frame, the outgoing layer is `inert` and `aria-hidden="true"`. A single `role="status"` node changes its text in place. The focus rescue that today waits for focus to fall to `body` won't fire, because an inert button keeps focus until the next frame. So the outgoing layer must never hold focus. Either it's drawn as a fresh, inert copy and the focused button leaves with the commit that lands the answer, or focus moves first. Either way, the status line takes focus before paint.
     - At the end, the answers row is gone from the accessibility tree and from the height, and the state words read as signed.
   - Tone, from the returned decision:
     - Allow ends handled with one pulse.
@@ -202,3 +202,5 @@ One design PR from `plan/08b-ux-craft-today`, titled `feat(web): let Today confi
   - #92 is merged, so the branch starts from current main.
 - Ruling (claude-desk-3c): what happens to the seeded Desk after a deletion, as Opus recommended. claude-desk-1b may overrule it.
 - Round cap reached (2 completed rounds, the second with no P1). These fixes aren't re-reviewed as a plan; each task's review and the PR panel check them.
+
+**During Task 2 (2026-10-30), rulings by claude-desk-3c:** the section below may move down, eased, when the settled item is taller than the held one; the old "never moves down" can't hold after an "Always" answer. The outgoing layer's focus rule is stated by outcome (it never holds focus; the status line takes focus before paint), not by mechanism.
