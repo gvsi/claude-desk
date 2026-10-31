@@ -3359,7 +3359,7 @@
     "/api/public/desks/{slug}/session": {
       "get": {
         "summary": "Visitor Session",
-        "description": "The session's state and its transcript as the visitor sees it: their own words, what was delivered to them\nand where the owner joined and left, never model, note, owner-only or other sessions' rows. `last_seq` is read in\nthe same snapshot, so the event stream opened after it neither misses nor repeats an item.",
+        "description": "The session's state and its transcript as the visitor sees it: their own words, what was delivered to them\nand where the owner joined and left, never model, note, owner-only or other sessions' rows.\n\nThe items, `last_seq` and then the state (the session's kernel_ro row) are read in one snapshot. The kernel\ncommits a take-over or a hand-back before the API writes its event, so the state holds every change whose event\n`last_seq` covers, and a later change's event comes past it: the event stream opened after `last_seq` neither\nmisses nor repeats an item, and agrees with the state it starts from. The mode `GET /whoami` answered with is\nolder and could predate a hand-back whose event `last_seq` covers. A session closed by then, or no longer the\nkernel's, is 401 `no_session`, which clears the cookie.",
         "operationId": "public_visitor_session",
         "parameters": [
           {

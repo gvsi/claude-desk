@@ -57,7 +57,7 @@ from desk.api.schemas import (
 )
 from desk.api.sse import OWNER, RUN_EVENTS, ControlRow, Wakeup, emit_inbox, event_stream
 from desk.api.store import MESSAGES, append_message, append_note_once, transcript
-from desk.contracts import DemoAgentIssued, DemoInboxEntry, LedgerEvent
+from desk.contracts import DemoAgentIssued, DemoInboxEntry, LedgerEvent, SessionState
 from desk.kernel_api import (
     CancelRequest,
     CreateSessionRequest,
@@ -145,10 +145,16 @@ async def open_session(slug: str, request: Request, response: Response) -> Visit
 
 
 @router.get("/desks/{slug}/session", response_model=VisitorTranscript, responses=error_responses(401, 422, 503))
-async def visitor_session(ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> VisitorTranscript:
+async def visitor_session(slug: str, ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> VisitorTranscript:
     """The session's state and its transcript as the visitor sees it: their own words, what was delivered to them
-    and where the owner joined and left, never model, note, owner-only or other sessions' rows. `last_seq` is read in
-    the same snapshot, so the event stream opened after it neither misses nor repeats an item."""
+    and where the owner joined and left, never model, note, owner-only or other sessions' rows.
+
+    The items, `last_seq` and then the state (the session's kernel_ro row) are read in one snapshot. The kernel
+    commits a take-over or a hand-back before the API writes its event, so the state holds every change whose event
+    `last_seq` covers, and a later change's event comes past it: the event stream opened after `last_seq` neither
+    misses nor repeats an item, and agrees with the state it starts from. The mode `GET /whoami` answered with is
+    older and could predate a hand-back whose event `last_seq` covers. A session closed by then, or no longer the
+    kernel's, is 401 `no_session`, which clears the cookie."""
     conn = ctx.conn
     await conn.commit()
     await conn.execution_options(isolation_level="REPEATABLE READ")   # reset when the connection is pooled again
@@ -156,8 +162,13 @@ async def visitor_session(ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> V
     last_seq = (await conn.execute(select(func.max(RUN_EVENTS.c.seq)).where(
         RUN_EVENTS.c.copy_id == ctx.ids.copy_id, RUN_EVENTS.c.session_id == ctx.ids.session_id,
         RUN_EVENTS.c.kind == "sse"))).scalar_one()
+    session = await ctx.ro.session(ctx.ids.session_id)
     await conn.commit()
-    return VisitorTranscript(state=ctx.state, items=items, last_seq=last_seq or 0)
+    if session is None or session["closed_at"] is not None:
+        raise ApiProblem(401, "no_session", clear_visitor=slug)
+    state = SessionState(session_id=ctx.ids.session_id, kind=session["kind"], verified=session["verified"],
+                         assurance=session["assurance"], mode=session["mode"], generation=session["generation"])
+    return VisitorTranscript(state=state, items=items, last_seq=last_seq or 0)
 
 
 # Messages and the event stream -------------------------------------------------------------------------------
