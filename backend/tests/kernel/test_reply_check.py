@@ -1654,6 +1654,19 @@ def test_a_booking_noun_in_a_modified_subject_keeps_its_claim(subject):
         assert reply_check.scan_prose(prose, booking_card=True, callback_card=True) == []
 
 
+@pytest.mark.parametrize("subject", ["service call", "service-call", "emergency service call",
+                                    "emergency service-call", "service call with Maria"])
+@pytest.mark.parametrize("tail", ["up", "to proceed"])
+def test_phrasal_set_service_calls_still_need_a_booking_receipt(subject, tail):
+    prose = f"Your {subject} is set {tail}."
+    for booking_card, callback_card in ((False, False), (False, True), (True, False), (True, True)):
+        expected = set() if booking_card else {"lex.en.booking"}
+        assert {v.rule_id for v in reply_check.scan_prose(
+            prose, booking_card=booking_card, callback_card=callback_card)} == expected
+    for honest in ("Your account is set up.", "Your workspace is set up."):
+        assert reply_check.scan_prose(honest) == []
+
+
 @pytest.mark.parametrize("honest", [
     "Have you previously booked a consultation with us?",
     "You said you'd booked a consultation with us before.",
@@ -1680,6 +1693,19 @@ def test_visitor_booking_context_does_not_hide_an_independent_claim(honest):
     assert {v.rule_id for v in reply_check.scan_prose(claim)} == {rule}
     assert {v.rule_id for v in reply_check.scan_prose(f"{honest} {claim}", callback_card=True)} == {rule}
     assert reply_check.scan_prose(claim, booking_card=True) == []
+
+
+@pytest.mark.parametrize("history", ["consultation", "callback"])
+@pytest.mark.parametrize(("noun", "category"), [("appointment", "booking"), ("call", "callback")])
+@pytest.mark.parametrize("separator", ["—", "–", "-", " - ", "\n- ", "\n* ", "\n", "; ", ": ", ", ", "/ "])
+def test_visitor_history_stops_before_a_later_completed_claim(history, noun, category, separator):
+    prefix = "- " if "\n" in separator else ""
+    prose = f"{prefix}You said you'd booked a {history}{separator}Booked your {noun}."
+    for booking_card, callback_card in ((False, False), (True, False), (False, True), (True, True)):
+        backed = booking_card if category == "booking" else callback_card
+        expected = set() if backed else {f"lex.en.{category}"}
+        assert {v.rule_id for v in reply_check.scan_prose(
+            prose, booking_card=booking_card, callback_card=callback_card)} == expected
 
 
 def test_a_booking_card_lets_only_the_booking_claim_through():

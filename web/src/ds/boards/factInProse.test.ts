@@ -142,6 +142,40 @@ describe('fact_in_prose', () => {
     expect(factsInProse("We've booked your appointment—call us for details.", { callbackCard: true }).map((hit) => hit.rule)).toEqual(['lex.en.booking']);
   });
 
+  it('requires_booking_backing_for_phrasal_set_service_calls', () => {
+    for (const subject of ['service call', 'service-call', 'emergency service call', 'emergency service-call', 'service call with Maria']) {
+      for (const tail of ['up', 'to proceed']) {
+        const text = `Your ${subject} is set ${tail}.`;
+        for (const bookingCard of [false, true]) {
+          for (const callbackCard of [false, true]) {
+            expect([...new Set(factsInProse(text, { bookingCard, callbackCard }).map((hit) => hit.rule))], text)
+              .toEqual(bookingCard ? [] : ['lex.en.booking']);
+          }
+        }
+      }
+    }
+    expect(factsInProse('Your account is set up.')).toEqual([]);
+    expect(factsInProse('Your workspace is set up.')).toEqual([]);
+  });
+
+  it('stops_visitor_history_before_independent_completed_claims', () => {
+    for (const history of ['consultation', 'callback']) {
+      for (const [noun, category] of [['appointment', 'booking'], ['call', 'callback']]) {
+        for (const separator of ['—', '–', '-', ' - ', '\n- ', '\n* ', '\n', '; ', ': ', ', ', '/ ']) {
+          const prefix = separator.includes('\n') ? '- ' : '';
+          const text = `${prefix}You said you'd booked a ${history}${separator}Booked your ${noun}.`;
+          for (const bookingCard of [false, true]) {
+            for (const callbackCard of [false, true]) {
+              const backed = category === 'booking' ? bookingCard : callbackCard;
+              expect([...new Set(factsInProse(text, { bookingCard, callbackCard }).map((hit) => hit.rule))], text)
+                .toEqual(backed ? [] : [`lex.en.${category}`]);
+            }
+          }
+        }
+      }
+    }
+  });
+
   it('preserves_honest_context_and_claim_group_spans', () => {
     const honest = ['Your identity is confirmed.', 'Your IDENTITY is confirmed.', 'Your contact details are confirmed.', 'Your account is set up.',
       'Your custom workspace is set to receive messages.', 'Have you previously booked a consultation with us?',
