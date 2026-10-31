@@ -5,6 +5,7 @@
  */
 import QRCode from 'qrcode';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { userEvent } from 'vitest/browser';
 import { cleanup } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
@@ -16,6 +17,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE } from '../../mocks/world.ts';
+import { expectTabOrder } from '../../ds/boards/spec.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
@@ -164,7 +166,9 @@ describe('customers', () => {
     expect(page.match(UNMASKED_EMAIL) ?? []).toEqual([]);
     expect(page).toContain(bob.maskedContact);
 
-    // The leads, newest first: each one's name, its note as they wrote it, and when it came in.
+    // The leads, newest first: each one's name, when it came in, and its note as they wrote it, bare,
+    // as the design system's LeadRow sets it: the section's heading says they are leads, so no
+    // "Lead ·" before it (N-Run2-People-Phone).
     const leads = screen.getByRole('list', { name: 'Leads' });
     await expect.element(screen.getByLabelText('2 leads')).toBeVisible();
     const rows = leads.getByRole('listitem').elements();
@@ -173,6 +177,8 @@ describe('customers', () => {
       [SAM.name, SAM.note],
       [JORDAN.name, JORDAN.note],
     ]);
+    expect(rows.map((row) => row.querySelector('.cd-lead-row__note')?.textContent)).toEqual([SAM.note, JORDAN.note]);
+    expect(leads.element().textContent).not.toContain('Lead ·');
     expect(rows[0]?.textContent).toContain(formatWhen(samAt, LA, now));
     expect(rows[1]?.textContent).toContain(formatWhen(jordanAt, LA, now));
     expect(formatWhen(samAt, LA, now)).toMatch(/, \d{1,2}:\d{2} (am|pm)$/);
@@ -224,6 +230,7 @@ describe('customers', () => {
     expect(again.screen.getByRole('link', { name: 'Includes recorded history' }).query()).toBeNull();
   });
 
+  // Tab stops in the page: each person's row, then the recorded-history link, and no lead.
   it('people_match_their_board', async () => {
     addLead(SAM);
     addLead({ ...JORDAN, replayed: true });
@@ -248,12 +255,16 @@ describe('customers', () => {
     expect(rows).toHaveLength(5);
     expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([51]));
 
-    // The frame with Customers current, no card on the page, and Tab through each person on record,
-    // then the caption: the leads link nowhere.
+    // The frame with Customers current and no card on the page. Tab, once past the sidebar, stops at
+    // each person's row (a link to their page), then the recorded-history link, and nowhere else: a
+    // lead is a static row, since the list gives it no conversation or page to open.
     const people = screen.getByRole('list', { name: 'Contacts on record' }).getByRole('link').elements() as HTMLElement[];
     const caption = screen.getByRole('link', { name: 'Includes recorded history' }).element() as HTMLElement;
+    expect(people).toHaveLength(2);
     expect(screen.getByRole('list', { name: 'Leads' }).getByRole('link').elements()).toEqual([]);
-    await expectOwnerBoard(screen.container, { current: 'Customers', cards: false, tabStops: [...people, caption] });
+    await expectOwnerBoard(screen.container, { current: 'Customers', cards: false });
+    const reached = await expectTabOrder(userEvent, [...people, caption]);
+    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption]);
   });
 
   it('empty_people_is_kind', async () => {
@@ -338,13 +349,19 @@ describe('customers', () => {
   });
 
   it('person_page_states_name_a_next_step', async () => {
-    // Someone outside this copy's list: what happened and the way back, nothing of anyone's.
-    const { screen, router } = await renderRoute(`${PEOPLE}/per-someone-else`);
-    await expect.element(screen.getByText("This customer isn't in your copy", { exact: true })).toBeVisible();
-    expect(screen.getByRole('region').query()).toBeNull();
+    // Someone outside this copy's list: the app's not-found screen in place of the owner frame, as
+    // for a Desk outside the copy, with its way back, no retry and nothing of anyone's. (React
+    // reports the page's error on the console, as it does for any page that hands one to its route.)
+    const reported = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { screen } = await renderRoute(`${PEOPLE}/per-someone-else`);
+    await expect.element(screen.getByRole('main', { name: "This page doesn't exist" })).toBeVisible();
+    await expect.element(screen.getByText('Check the link, or start again from the home page.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('link', { name: 'start again from the home page' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('complementary', { name: 'Claude Desk' }).query()).toBeNull();
+    expect(screen.getByRole('button', { name: 'Try again' }).query()).toBeNull();
+    expect(screen.getByText(dana.maskedContact).query()).toBeNull();
     await expectScreenBasics(screen.container, { owner: true });
-    await screen.getByRole('link', { name: 'Go to Customers' }).click();
-    await expect.poll(() => router.state.location.pathname).toBe(PEOPLE);
+    reported.mockRestore();
 
     // While the list is on its way, the loading line; while the rules are, theirs. The list, still
     // polling, goes first, and a read it sent late reaches nothing, so it can't take the answers

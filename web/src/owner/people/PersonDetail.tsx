@@ -2,25 +2,17 @@
  * A person's page under Customers (N-Run2-People-Person): the way back to the list, their name, the
  * rules just for them, read only, with the way to change them on Rules, and beside them the contact
  * on record as the API masked it, where codes go and nowhere else. The page reads the same polled
- * list as Customers, and the Desk's active rules.
+ * list as Customers, and the Desk's active rules. Someone the list doesn't hold is outside the
+ * copy: the not-found screen.
  */
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import type { PeopleOut } from '../../api/views.ts';
+import { OutsideTheCopy } from '../../app/NotFound.tsx';
 import { pollMs } from '../../app/poll.ts';
-import {
-  Breadcrumb,
-  Card,
-  EmptyState,
-  LoadingLine,
-  PageHeader,
-  PersonRules,
-  TextLink,
-  type PersonRuleView,
-  type RulesLinkProps,
-} from '../../ds/index.ts';
+import { Breadcrumb, Card, LoadingLine, PageHeader, PersonRules, type PersonRuleView, type RulesLinkProps } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -88,19 +80,9 @@ export function PersonDetail() {
     return <div className="cd-person">{failure === null ? <LoadingLine>Loading this customer</LoadingLine> : <ReadFailed failure={failure} />}</div>;
   }
 
+  // Someone the copy's list doesn't hold: the not-found screen, never anyone else's page.
   const person = people.data.people.find((p) => p.person_id === personId);
-  if (person === undefined) {
-    return (
-      <div className="cd-person" onClick={followInAppLinks(navigate)}>
-        <ReadFailed failure={failure} />
-        <EmptyState
-          title="This customer isn't in your copy"
-          body="They may belong to another demo copy, or the link is wrong. Pick someone from your customers."
-          action={<TextLink href={peoplePath(deskId)}>Go to {PEOPLE_LABEL}</TextLink>}
-        />
-      </div>
-    );
-  }
+  if (person === undefined) throw new OutsideTheCopy();
 
   const name = person.display_name;
   return (
