@@ -626,8 +626,8 @@ class SetupInterview(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     # A start's client key (migration api_idempotency): unique per copy, with its body's hash, the answer it failed
     # with, if it did, and when it asked the kernel for the Desk. The failure is kept for diagnosis: a repeat answers
-    # 409 `key_spent` from its presence, never from its content. Every start sends a key now; a row from before the
-    # key was required leaves all four null.
+    # 409 `key_spent` from its presence, never from its content. Every start sends a key now; a row written without a
+    # key, before the key was required, leaves all four null.
     idempotency_key: Mapped[str | None] = mapped_column(Text)
     request_sha256: Mapped[str | None] = mapped_column(Text)
     start_error: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
