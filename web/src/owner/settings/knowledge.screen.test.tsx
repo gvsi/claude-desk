@@ -215,6 +215,15 @@ describe('knowledge', () => {
     expect(posts()[0]?.item_id).toMatch(/^note-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
+  it('knowledge_lost_publish_before_commit_says_the_change_failed', async () => {
+    const screen = await addNote(NOTE, { retryScale: 0 });
+    mockStore.inject({ route: 'addKnowledge', status: 'network' });
+    await switchOf(screen).click();
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
+    await expect.element(main(screen).getByText("That didn't go through. Check it and try again.", { exact: true })).toBeVisible();
+    expect(main(screen).getByText(KNOWLEDGE_COPY.keptPrivate, { exact: true }).query()).toBeNull();
+  });
+
   it('knowledge_switch_follows_the_returned_label', async () => {
     const screen = await addNote();
     const [item] = posts();

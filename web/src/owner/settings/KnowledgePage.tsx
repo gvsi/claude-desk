@@ -13,7 +13,7 @@ import { useRef, useState } from 'react';
 import type { KnowledgeItem } from '../../api/contracts.ts';
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../../api/http.ts';
 import type { KnowledgeRow } from '../../api/views.ts';
-import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, Notice, type KnowledgeRowView } from '../../ds/index.ts';
+import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, Notice, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { useReadFailure } from '../useReadFailure.ts';
@@ -285,7 +285,7 @@ export function KnowledgePage() {
         }
         const label = { readers: now.readers };
         show(label);
-        setSwitchLine(lineFor(label));
+        setSwitchLine(makePublic && !now.readers.includes('public') && now.title !== null ? errorCopy('invalid') : lineFor(label));
       }
     });
   };
