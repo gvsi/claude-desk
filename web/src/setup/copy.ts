@@ -216,7 +216,7 @@ export const SETUP_COPY = {
     who: {
       public: 'A visitor, not verified',
       verified: 'A customer, verified',
-      agent: 'Someone’s agent, signed limit',
+      agent: "Someone's agent, signed limit",
       after_hours: 'A visitor, after hours',
     },
   },
@@ -224,7 +224,7 @@ export const SETUP_COPY = {
   safety: {
     title: 'Safety check',
     loading: 'Trying tricks people use on your draft rules',
-    blocked: (blocked: number, total: number) => `${blocked} of ${total} blocked`,
+    stopped: (stopped: number, total: number) => `${stopped} of ${total} stopped`,
     lead: (total: number) => `I tried ${total} tricks people really use, on your draft rules. Nothing was real, and no one was contacted.`,
     label: 'Tricks tried',
     empty: 'No tricks to show',
