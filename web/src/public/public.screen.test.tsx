@@ -1518,6 +1518,82 @@ describe('public chat page', () => {
     }
   });
 
+  it('a_replayed_join_doesnt_confirm_the_owner_while_her_hand_back_is_on_its_way', async () => {
+    const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+
+    // Away from the page, Maria takes the chat over, then the kernel hands it back to Claude; her
+    // leave, and anything Claude says after it, reach the stream late.
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    mockStore.world.takeOver(chat);
+    chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
+    // The read of the session the page sends to confirm her is slow too.
+    const slowRead = { body: await request('visitorSession', { params: { slug: RIVERA.slug } }), release: () => {} };
+    mockStore.inject({ route: 'visitorSession', status: 200, body: slowRead.body, until: new Promise<void>((resolve) => (slowRead.release = resolve)) });
+    const texts = watchTexts();
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+
+    // Back on the page, the stream replays her join at once and then nothing, for longer than the chat
+    // waits to call itself caught up. The replayed join doesn't say she is still there.
+    await until(() => expect(systemLines()).toEqual(['Maria Rivera joined the chat']));
+    await vi.advanceTimersByTimeAsync(CAUGHT_UP_AFTER_MS + MARGIN_MS);
+    await settle();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the owner line on a replayed join alone').toBe(false);
+
+    // The read lands (Claude's), then her leave at last.
+    slowRead.release();
+    vi.useRealTimers();
+    await settle();
+    mockStore.emit(RIVERA.slug, { type: 'owner_left' });
+    await vi.waitFor(() => expect(systemLines()).toEqual(['Maria Rivera joined the chat', 'Claude is helping again.']));
+    texts.stop();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the owner line, however briefly').toBe(false);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+  });
+
+  it('a_newer_read_keeps_an_older_replayed_join_from_bringing_the_owner_back', async () => {
+    const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+
+    // Away from the page, Maria hands the chat back and takes it over again, and then the kernel
+    // hands it back to Claude with no leave on the stream yet.
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    mockStore.world.handBack(chat);
+    mockStore.world.takeOver(chat);
+    chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
+
+    // Back on the page, the stream's replay is slow, and the page's read of the session lands first:
+    // the chat is in Claude's hands, as of a cursor past her second join.
+    const replay = holdStreamEvents();
+    const reads = requests('visitorSession').length;
+    const texts = watchTexts();
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await settle();
+
+    // Then the replay: her leave and her second join, both older than the read. The join doesn't
+    // bring her back, however long the stream is quiet after it.
+    replay.release();
+    await until(() => expect(systemLines()).toEqual(['Maria Rivera joined the chat', 'Claude is helping again.', 'Maria Rivera joined the chat']));
+    await vi.advanceTimersByTimeAsync(CAUGHT_UP_AFTER_MS + MARGIN_MS);
+    await settle();
+    texts.stop();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the owner line from a join older than the read').toBe(false);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+  });
+
   it('the_head_goes_back_to_claude_when_the_chat_ends', async () => {
     const takenOver = async () => {
       const chat = mockStore.visitorSession(RIVERA.slug);
@@ -2764,6 +2840,37 @@ function countStreams(): StreamCount {
     window.EventSource = native;
   });
   return count;
+}
+
+/**
+ * Holds every event the page's streams deliver from here on until `release`, as a slow network would
+ * hold a stream's replay while the page's other requests go through. Only the events wait: a stream
+ * still opens, and says so, at once.
+ */
+function holdStreamEvents(): { release: () => void } {
+  const native = window.EventSource;
+  const queued: (() => void)[] = [];
+  let holding = true;
+  window.EventSource = class extends native {
+    constructor(url: string | URL, init?: EventSourceInit) {
+      super(url, init);
+      const add = this.addEventListener.bind(this);
+      const held = (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+        const deliver = (event: Event) => (typeof listener === 'function' ? listener.call(this, event) : listener.handleEvent(event));
+        add(type, (event: Event) => (holding ? queued.push(() => deliver(event)) : deliver(event)), options);
+      };
+      this.addEventListener = held as typeof this.addEventListener;
+    }
+  };
+  onTestFinished(() => {
+    window.EventSource = native;
+  });
+  return {
+    release: () => {
+      holding = false;
+      for (const deliver of queued.splice(0)) deliver();
+    },
+  };
 }
 
 /** What the chat has opened so far: sessions, reads of its conversation and streams. */
