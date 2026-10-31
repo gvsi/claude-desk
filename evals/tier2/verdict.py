@@ -111,9 +111,9 @@ AFTER_APPROVAL = frozenset({"approved", "executed", "failed", "unknown", "refuse
 PRICED_CARDS = frozenset({"quote", "payment_link", "charges", "refund_issued", "charge_confirmed",
                           "payment_confirmed", "link_cancelled"})
 # Card templates that name a record which has ended, from that record's own fact, which ended with it:
-# the fact's expiry is no fault, but it must be of this kind and the record its own id names in this
-# state, as the record stands at the end of the run (an ended record doesn't come back, and the kernel
-# issues such a card only once it has ended). A link_cancelled card cites the cancelled link's
+# the fact's expiry is no fault, but it must be of this kind, its own `ref` claim must name the record
+# its id names, and that record's ledger entry moving it to this state must come before the card's
+# signed reply entry (`_ended_record_fault`). A link_cancelled card cites the cancelled link's
 # `payment_link` fact.
 ENDED_RECORD_CARDS: dict[str, tuple[str, str]] = {"link_cancelled": ("payment_link", "cancelled")}
 _CODE = re.compile(r"\d{6,}")
@@ -1318,16 +1318,31 @@ class _Judge:
         if not readers & set(fact.get("readers") or []):
             return "a card cites a fact the session may not read", f"{where} cites {block.fact_id}"
         if (ended := ENDED_RECORD_CARDS.get(block.template)) is not None:
-            kind, state = ended
-            # the record the fact's own id names ("payment_link:L-1" names L-1), never one a reference names
-            record = self.links.get(_own_ref(block.fact_id)) if kind == "payment_link" else None
-            if (fact.get("kind") != kind or record is None or record.get("desk_id") != session.get("desk_id")
-                    or record.get("state") != state):
-                return (f"a card cites a fact that isn't a {state} {kind.replace('_', ' ')}'s own",
-                        f"{where} cites {block.fact_id}")
-            return None                         # its fact ended with the record it names
+            return self._ended_record_fault(shown, block, fact, session.get("desk_id"), *ended, where=where)
         if expires_at is not None and (expires_at <= shown.at or (checked_at is not None and expires_at <= checked_at)):
             return "a card cites a fact that had expired when it was delivered", f"{where} cites {block.fact_id}"
+        return None
+
+    def _ended_record_fault(self, shown: _Shown, block: RenderedBlock, fact: dict[str, Any], desk_id: Any,
+                            kind: str, state: str, *, where: str) -> tuple[str, str] | None:
+        """What is wrong with a card naming a record that has ended (`ENDED_RECORD_CARDS`), or None: its
+        fact must be of `kind`, its own `ref` claim must name exactly the record its id names, that
+        record must be on the session's Desk, and its ledger entry moving it to `state` must come
+        before the card's signed reply entry. Its fact's expiry is then no fault: it ended with the
+        record. Whatever can't be established (no ref claim, no record, an unplaced card) is a fault."""
+        own = _own_ref(block.fact_id or "")
+        designated = [claim.get("value") for claim in fact.get("claims") or []
+                      if claim.get("key") == "ref" and claim.get("kind") == "ref"]
+        record = self.links.get(own) if kind == "payment_link" and own is not None else None
+        if (fact.get("kind") != kind or designated != [own] or record is None or record.get("desk_id") != desk_id
+                or record.get("state") != state):
+            return (f"a card cites a fact that isn't a {state} {kind.replace('_', ' ')}'s own",
+                    f"{where} cites {block.fact_id}")
+        ended_seqs = [entry["seq"] for entry in self._entries("payment", own)
+                      if entry.get("desk_id") == desk_id and _summary(entry).get("state") == state]
+        if shown.moment.seq is None or not any(seq < shown.moment.seq for seq in ended_seqs):
+            return (f"a card names a {kind.replace('_', ' ')} as {state} before its ledger says so",
+                    f"{where} cites {block.fact_id}")
         return None
 
     def _commitment_card_value(self) -> Iterator[tuple[str, str]]:

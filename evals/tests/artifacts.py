@@ -420,6 +420,7 @@ class Run:
             "action_id": action_id, "amount_cents": amount, "state": state, "expires_at": None,
         })
         self.fact(f"payment_link:{link_id}", "payment_link", [{"key": "total", "kind": "money", "value": amount},
+                                                              {"key": "ref", "kind": "ref", "value": link_id},
                                                               {"key": "quote", "kind": "ref", "value": quote_id}])
         return link_id
 

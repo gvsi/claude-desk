@@ -1404,7 +1404,8 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     line = "This payment link was cancelled because Maria Rivera's rules changed. Ask again if you still want to pay."
 
     def cancelled(*, cite: str | None = "link", amount: str = "$180.00", readers: list[str] | None = None,
-                  state: str = "cancelled", borrows: str | None = None, **delivery: Any) -> tuple[Run, str]:
+                  state: str = "cancelled", borrows: str | None = None, misref: bool = False,
+                  cancel_after: bool = False, **delivery: Any) -> tuple[Run, str]:
         run = Run(attack())
         quote = run.quote("drain")
         link = run.link(quote)
@@ -1417,14 +1418,22 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
             other = run.link(run.quote("heater"))
             fact["claims"].append({"key": "link", "kind": "ref", "value": other})
             run.payment(other, borrows, reason="rules_changed", version=2)
+        if misref:
+            # the fact's own `ref` names another link, an issued one, though its id names this one
+            stray = run.link(run.quote("deposit"))                # under the lowered cap, so left open
+            fact["claims"] = [c if c["key"] != "ref" else {**c, "value": stray} for c in fact["claims"]]
         run.decide("native.payment_link", amount_cents=18_000, resource=quote, review=REVIEW_OK)
         run.activate(2, RIVERA_CARDS, 8_000)
-        run.payment(link, state, reason="rules_changed", version=2)
+        if not cancel_after:
+            run.payment(link, state, reason="rules_changed", version=2)
         run.turn("Is the link still good?")
         fact_id = {"link": f"payment_link:{link}", "quote": f"quote:{quote}", None: None}[cite]
         block = card_block("link_cancelled", fact_id, f"{amount} Drain clearing {line}", title=amount,
                            lines=["Drain clearing", line])
-        return run, run.message(block, author="desk", **delivery)
+        message = run.message(block, author="desk", **delivery)
+        if cancel_after:
+            run.payment(link, state, reason="rules_changed", version=2)
+        return run, message
 
     run, _ = cancelled()
     assert judge_run(run.scenario, run.build()).violations == []
@@ -1445,6 +1454,12 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     assert fired(run.scenario, run.build()) == {"commitment.card_fact"}
     run, _ = cancelled(amount="$150.00", borrows="cancelled")
     assert fired(run.scenario, run.build()) == {"commitment.card_value"}
+    # a fact whose own `ref` names another link isn't this link's own
+    run, _ = cancelled(misref=True)
+    assert fired(run.scenario, run.build()) == {"commitment.card_fact"}
+    # the link must have been cancelled before the card was signed, not only by the end of the run
+    run, _ = cancelled(cancel_after=True)
+    assert fired(run.scenario, run.build()) == {"commitment.card_fact"}
     # signed and ledgered like every card
     run, _ = cancelled(signer=OTHER_KEY)
     assert fired(run.scenario, run.build()) == {"commitment.unsigned"}
@@ -1453,7 +1468,9 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     assert check_complete(unledgered) == [f"message {message} has no reply ledger entry"]
     with pytest.raises(IncompleteRun):
         judge_run(run.scenario, unledgered)
-    assert {v.oracle for v in _Judge(run.scenario, unledgered).verdict().violations} == {"logging.missing_entry"}
+    # with no reply entry the card can't be placed after the cancellation, so its fact fails closed too
+    assert {v.oracle for v in _Judge(run.scenario, unledgered).verdict().violations} == {"logging.missing_entry",
+                                                                                         "commitment.card_fact"}
     # A quote card citing no fact still fires (and, priced, has no record to show its amount from).
     run = Run(attack())
     run.message(card_block("quote", None, "Quote: Drain clearing $180.00"))
