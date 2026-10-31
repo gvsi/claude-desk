@@ -59,7 +59,7 @@ export interface ReplyCardProps {
  */
 export function ReplyCard({ block, language, ownerName, inertDownload = false }: ReplyCardProps) {
   const { headline, details, options, href } = cardView(block);
-  const chrome = cardChrome(block.template, language);
+  const chrome = cardChrome(block.template, language, block.fact_id);
   const label = chrome === null ? undefined : withOwner(chrome.label, ownerName);
   // The kernel writes each open time as a line (for the block's plain text) and as an option; the
   // card lists it once.
