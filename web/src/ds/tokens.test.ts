@@ -451,6 +451,11 @@ describe('design tokens', () => {
     expect(mono?.styles.find((style) => style.name === 'quote')).toMatchObject({ fontSize: '12px', lineHeight: '18px', fontWeight: 400 });
   });
 
+  test('agents_measures_are_tokens', () => {
+    // The agents page's one column, 760 px between its gutters, as the signed agents boards draw it.
+    expect(tokenValue('size-agents-column')).toBe('760px');
+  });
+
   test('settings_measures_are_tokens', () => {
     // Settings' section links, 200 px wide beside the content, as the signed Settings boards draw them.
     expect(tokenValue('size-sub-nav')).toBe('200px');

@@ -1179,8 +1179,8 @@
   color: var(--text-secondary);
 }
 
-/* The agents page: the brand header, then one 760 px column 32 px under it, its cards 16 px apart,
-   and the footer at the window's foot. */
+/* The agents page: the brand header, then one size-agents-column (760 px) column 32 px under it,
+   its cards 16 px apart, and the footer at the window's foot. */
 .board-agents {
   display: flex;
   flex-direction: column;
@@ -1194,7 +1194,7 @@
   flex-direction: column;
   box-sizing: border-box;
   width: 100%;
-  max-width: calc(760px + 2 * var(--space-40));
+  max-width: calc(var(--size-agents-column) + 2 * var(--space-40));
   margin: 0 auto;
   padding: var(--space-32) var(--space-40) var(--space-20);
 }
