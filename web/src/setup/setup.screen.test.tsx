@@ -1332,6 +1332,16 @@ describe('setup', () => {
         await expect.element(screen.getByRole('list', { name: 'Set up your Desk' }).getByRole('listitem').first()).toBeInTheDocument();
         await expect.element(screen.getByRole('link', { name: 'Save and exit' })).toBeVisible();
         await expect.element(screen.getByText('Rivera Plumbing', { exact: true }).first()).toBeVisible();
+        // At 390 px the business's name is what gives way: it is cut with an ellipsis where it doesn't
+        // fit (below, a longer one is), never running into the steps beside it, and "Save and exit"
+        // keeps its one line.
+        const business = screen.getByText('Rivera Plumbing', { exact: true }).first().element() as HTMLElement;
+        expect(getComputedStyle(business).textOverflow).toBe('ellipsis');
+        const steps = screen.getByText('Step 1 of 5: Questions', { exact: true }).element().getBoundingClientRect();
+        expect(business.getBoundingClientRect().right).toBeLessThanOrEqual(steps.left);
+        const exit = screen.getByRole('link', { name: 'Save and exit' }).element() as HTMLElement;
+        expect(Math.round(exit.getBoundingClientRect().height)).toBeLessThanOrEqual(32);
+        expect(exit.scrollWidth).toBeLessThanOrEqual(exit.clientWidth);
       }
     }
 

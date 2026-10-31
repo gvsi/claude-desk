@@ -37,12 +37,13 @@
   min-width: 0;
 }
 
+/* The 20 px bell, then the wordmark 10 px on, as the setup frame draws them. */
 .cd-setup__brand {
   grid-area: brand;
   display: flex;
   flex: none;
   align-items: center;
-  gap: var(--space-12);
+  gap: var(--space-10);
 }
 
 .cd-setup__business {
