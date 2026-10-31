@@ -13,6 +13,28 @@ from tests.kernel_contract.test_contract import (
 )
 
 
+def link_hours(local: datetime, *, controlled_clock: bool) -> HoursWindow:
+    if not controlled_clock:
+        # The real-kernel contract fixture talks to a process with no clock-control hook.
+        # It cannot cross a boundary on demand: allow every day, including midnight
+        # (an end of 00:00 means minute 1440), through copy creation and rule proving.
+        return HoursWindow(days=["mon", "tue", "wed", "thu", "fri", "sat", "sun"], start=time(0), end=time(0))
+    return HoursWindow(days=[local.strftime("%a").lower()], start=time(local.hour),
+                       end=time((local.hour + 1) % 24))
+
+
+@pytest.mark.parametrize("hour", range(24))
+def test_link_hours_uses_whole_minutes_at_every_hour(hour):
+    local = datetime(2026, 10, 30, hour, 59, tzinfo=ZoneInfo("America/Los_Angeles"))
+    for controlled_clock in (True, False):
+        hours = link_hours(local, controlled_clock=controlled_clock)
+        assert hours.start.second == hours.start.microsecond == 0
+        assert hours.end.second == hours.end.microsecond == 0
+        if not controlled_clock:
+            assert set(hours.days) == {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+            assert hours.start == hours.end == time(0)
+
+
 @pytest.mark.kernel_plan("01c")
 async def test_unrelated_activation_keeps_link_allowed_at_its_decision_time(kernel, ro_read):
     http, schema, state = kernel
@@ -21,8 +43,7 @@ async def test_unrelated_activation_keeps_link_allowed_at_its_decision_time(kern
         state.now = datetime(2026, 10, 30, 16, 59, tzinfo=UTC)
     now = state.now if state is not None else datetime.now(UTC)
     local = now.astimezone(ZoneInfo("America/Los_Angeles"))
-    hours = HoursWindow(days=[local.strftime("%a").lower()], start=time(local.hour),
-                        end=time(local.hour + 1) if local.hour < 23 else time(23, 59, 59))
+    hours = link_hours(local, controlled_clock=state is not None)
     copy = await new_copy(http)
     owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
     (row,) = ro_read(schema, copy.copy_id, "SELECT version, cards FROM {ro}.policy_versions"
