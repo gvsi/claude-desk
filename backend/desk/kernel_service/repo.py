@@ -304,14 +304,16 @@ Persist = Callable[[KernelCtx], Awaitable[object]]
 
 
 class KernelFailure(Exception):
-    """A refusal answered with `status` and `KernelError{code}`.
+    """A refusal answered with `status` and `KernelError{code, detail?}`.
 
     `reason` is internal, for the kernel's log (never a token or contact). `persist`, when given,
     runs in a fresh transaction after the request's transaction has rolled back and before the
     answer; if it fails, the answer is 500 `internal` instead, since the attempt went unrecorded.
+    `detail`, when given, names refused public-policy keys and rule IDs, never their values.
     """
 
-    def __init__(self, status: int, code: str, reason: str | None = None, persist: Persist | None = None):
+    def __init__(self, status: int, code: str, reason: str | None = None, persist: Persist | None = None, *,
+                 detail: dict[str, list[str]] | None = None):
         if code not in ERROR_CODES:
             raise ValueError(f"{code!r} is not a KernelError code")
         if not 400 <= status <= 599:
@@ -321,6 +323,7 @@ class KernelFailure(Exception):
         self.code = code
         self.reason = reason or code
         self.persist = persist
+        self.detail = detail
 
 
 def log_error(logger: logging.Logger, exc: BaseException, message: str, *args: object) -> None:

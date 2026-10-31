@@ -353,6 +353,7 @@ class Health(BaseModel):                  # GET /health (selftest result cached 
 class KernelError(BaseModel):             # the body of every non-2xx kernel answer
     code: Literal["auth", "not_found", "closed", "stale_generation", "mode_owner", "mode_paused", "replayed",
                   "conflict", "invalid", "rate_limited", "seed_unproved", "internal"]   # rate_limited: 429 (POST /agents/demo)
+    detail: dict[str, list[str]] | None = None   # refused public policy keys and rule IDs, never their values
 
 KERNEL_RESPONSES: tuple[type[BaseModel], ...] = (
     DeskCreated, DeskUpdated, DocumentCreated, VerifyStarted, WhoAmI, SessionContext, TurnStarted, ToolConfirmed,

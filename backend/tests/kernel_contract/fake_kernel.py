@@ -234,9 +234,10 @@ PUBLIC_KEY_HEX = "00" * 32           # no real key: fake signatures verify again
 class Refusal(Exception):
     """A non-2xx answer: its status and `KernelError.code`."""
 
-    def __init__(self, status: int, code: str):
+    def __init__(self, status: int, code: str, detail: dict[str, list[str]] | None = None):
         super().__init__(f"{status} {code}")
         self.status, self.code = status, code
+        self.detail = detail
 
 
 def sha256_hex(value: str | bytes) -> str:
@@ -835,6 +836,20 @@ def scan_prose(prose: str, canaries: dict[str, str]) -> list[Violation]:
 
 def money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
+
+
+def public_policy_rules(text: str) -> list[str]:
+    """Mirror the contract's numeric and English/Spanish promise examples, not the full scan.
+
+    The real scan imports kernel-service modules; this API test fake stays outside that boundary.
+    Exhaustive lexicon behavior is covered by the real kernel's own tests.
+    """
+    rules = {"percent_sign" if hit.rule_id == "percent" else hit.rule_id for hit in scan_prose(text, {})}
+    for language, pattern in (("en", r"\b(?:free|discounts?|refunds?|guarantees?)\b"),
+                              ("es", r"\b(?:descuentos?|garantiz\w*|reembols\w*)\b")):
+        if re.search(pattern, text, re.IGNORECASE):
+            rules.add(f"lex.{language}.promise")
+    return sorted(rules)
 
 
 # Signed agents ---------------------------------------------------------------------------------------
@@ -3007,6 +3022,12 @@ class FakeKernelState:
         keys = [claim.key for claim in body.charter]
         if len(set(keys)) != len(keys):
             raise Refusal(422, "invalid")
+        fields = {claim.key: rules for claim in body.charter
+                  if claim.key.startswith("policy:") and claim.kind == "text"
+                  and (rules := public_policy_rules(claim.value))}
+        if fields:
+            self.append(desk, "desk_data", {"part": "charter", "refused": "promise", "fields": fields})
+            raise Refusal(422, "invalid", fields)
         for fact_id in [fact_id for fact_id, fact in desk.facts.items()
                         if fact.kind == "charter" and fact_id != "charter:hours"]:
             del desk.facts[fact_id]
@@ -3776,8 +3797,9 @@ FAKE_ROUTES: dict[str, str] = {
 }
 
 
-def _error(status: int, code: str) -> Response:
-    return Response(KernelError(code=code).model_dump_json(), status_code=status, media_type="application/json")
+def _error(status: int, code: str, detail: dict[str, list[str]] | None = None) -> Response:
+    return Response(KernelError(code=code, detail=detail).model_dump_json(exclude_none=True),
+                    status_code=status, media_type="application/json")
 
 
 def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any], Any]):
@@ -3813,7 +3835,7 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
         if state._take_drop(key):
             raise httpx.ReadTimeout("the fake kernel committed, then timed out")
         if isinstance(result, Refusal):
-            return _error(result.status, result.code)
+            return _error(result.status, result.code, result.detail)
         if isinstance(result, Response):                # a document's bytes
             return result
         if response_adapter is None:

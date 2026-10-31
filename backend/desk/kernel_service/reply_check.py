@@ -402,6 +402,15 @@ def scan_prose(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Iter
     return [violation for _, _, violation in sorted(hits, key=lambda hit: (hit[0], hit[1]))]
 
 
+def scan_public_text(text: str) -> list[str]:
+    """Rule IDs for public text: the prose scan with no canaries, names or booking card.
+
+    Both lexicons run, whatever the text's language. Pure: no reads or writes, and no matched
+    text returned to callers that record a refusal.
+    """
+    return sorted({violation.rule_id for violation in scan_prose(text)})
+
+
 # ---- Clauses --------------------------------------------------------------------------------------
 
 def _clause_violation(clause: Clause, kind: str, rule_id: str) -> Violation:

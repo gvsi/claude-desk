@@ -1744,3 +1744,28 @@ async def test_public_desk_serves_only_public_fields(app, client, frozen_clock):
         desk.deleted_at = frozen_clock.now()
     deleted = await client.get(f"/public/{copy.slug}")
     assert (deleted.status_code, deleted.json()) == (404, {"code": "not_found"})
+@pytest.mark.parametrize(("text", "rules"), [
+    ("20% off for first-time clients", ["digit", "percent_sign"]),
+    ("$50 deposit", ["currency", "digit"]),
+    ("free consultation", ["lex.en.promise"]),
+    ("we guarantee", ["lex.en.promise"]),
+    ("refund within 30 days", ["digit", "lex.en.promise"]),
+    ("within two hours", ["lex.en.date", "lex.en.number"]),
+    ("after 6 pm", ["digit", "lex.en.date"]),
+    ("Monday to Friday", ["lex.en.date"]),
+    ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
+    ("garantizamos", ["lex.es.promise"]),
+    ("reembolso", ["lex.es.promise"]),
+    ("You're booked.", ["lex.en.booking"]),
+    ("Tu cita está confirmada.", ["lex.es.booking"]),
+    ("$50, $50, twenty dollars and veinte pesos", ["currency", "digit", "lex.en.money", "lex.en.number",
+                                                "lex.es.money", "lex.es.number"]),
+    ("We work with small businesses and families.", []),
+    ("Tell us what you need and we'll suggest next steps.", []),
+    ("Ask about our services.", []),
+    ("Trabajamos con pequeños negocios y familias.", []),
+    ("Cuéntenos qué necesita y le sugeriremos los siguientes pasos.", []),
+    ("Pregunte por nuestros servicios.", []),
+])
+def test_scan_public_text(text, rules):
+    assert reply_check.scan_public_text(text) == rules

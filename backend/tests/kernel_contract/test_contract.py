@@ -2213,6 +2213,40 @@ def quote_card(**limits) -> RuleCard:
                     reason="Quotes from the price list, at list price.", **limits)
 
 
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize(("text", "rules"), [
+    ("20% off for first-time clients", ["digit", "percent_sign"]),
+    ("free consultation", ["lex.en.promise"]),
+    ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
+])
+async def test_charter_public_promise_refusal_keeps_fields_and_rules(kernel, ro_read, text, rules):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    path = {"id": desk_id}
+    honest = "We work with small businesses and families."
+    await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+        Claim(key="policy:about", kind="text", value=honest)]), path=path)
+    query = "SELECT fact_id, claims FROM {ro}.facts WHERE desk_id = %s AND kind = 'charter' ORDER BY fact_id"
+    before = ro_read(schema, copy.copy_id, query, (desk_id,))
+    seq = (await ledger_page(owner, desk_id)).entries[-1].seq
+    fields = {"policy:about": rules, "policy:pricing": rules}
+    with pytest.raises(KernelFailed) as refused:
+        await owner.call("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+            Claim(key=key, kind="text", value=text) for key in fields]), path=path)
+    assert (refused.value.status, refused.value.code, refused.value.detail) == (422, "invalid", fields)
+    assert ro_read(schema, copy.copy_id, query, (desk_id,)) == before
+    page = await ledger_page(owner, desk_id)
+    [entry] = [entry for entry in page.entries if entry.seq > seq]
+    assert entry.event.kind == "desk_data"
+    assert entry.event.summary == {"part": "charter", "refused": "promise", "fields": fields}
+    [desk] = ro_read(schema, copy.copy_id, "SELECT slug FROM {ro}.desks WHERE desk_id = %s", (desk_id,))
+    public = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": desk["slug"]})
+    [policy] = [block for block in public.charter if block.template == "policy"]
+    assert policy.text == honest
+    assert text not in public.model_dump_json()
+
+
 async def draft(owner: CredentialView, desk_id: str, cards: list[RuleCard], parent: int):
     return await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
                                                                      expected_parent=parent))
