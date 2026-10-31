@@ -1,6 +1,6 @@
 # Plan amendment: bookings check the service area (issue #172)
 
-Status: reviewed by the kernel safety reviewer and the API lane, 2026-10-31. Nothing here is built yet. The owner signed off section 4's copy on 2026-10-31. Issue #172.
+Status: reviewed by the kernel safety reviewer and the API lane, 2026-10-31. The owner signed off section 4's copy on 2026-10-31. Issue #172. The kernel pull request is parked until after the submission (the owner's decision, 2026-10-31): part of K1 and K2 is built on the branch `plan/172-service-area-kernel`, unmerged. Meanwhile the prompt line ships prompt-only in plan 09's visitor prompt, reading the charter's service-area sentence, with no kernel hold behind it, as today.
 
 Owner decision, 2026-10-31: build all three layers, and hold whenever a visit's place is outside the service area or unclear.
 
