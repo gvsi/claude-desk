@@ -1760,17 +1760,27 @@ describe('idempotency keys', () => {
   it('start_without_a_key_is_refused', async () => {
     // As the API does (plan 02b): send_agent and setup's start each require the client's key, so a
     // body with none (missing or null) is 422 `invalid`, as a malformed key is, and starts nothing.
+    const agentBodies = [{ task: 'book_visit' }, { task: 'book_visit', idempotency_key: null }];
+    const setup = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
+    const setupBodies = [setup, { ...setup, idempotency_key: null }];
+
+    // The session comes first, as the API's session dependencies run before it reads the body: with
+    // no chat, or signed out, a keyless start is 401, not 422.
+    mockStore.reset('rivera', { signedIn: false });
+    for (const body of agentBodies) {
+      expect(await call('sendAgent', { params: { slug }, body })).toEqual({ status: 401, body: { error: 'no_session' } });
+    }
+    for (const body of setupBodies) {
+      expect(await call('startSetup', { body })).toEqual({ status: 401, body: { error: 'no_owner_session' } });
+    }
+
+    mockStore.reset('rivera');
     await openChat();
     const sessions = mockStore.world.sessions.size;
     const desks = mockStore.world.desks.length;
     const refused = { status: 422, body: { error: 'invalid' } };
-    for (const body of [{ task: 'book_visit' }, { task: 'book_visit', idempotency_key: null }]) {
-      expect(await call('sendAgent', { params: { slug }, body })).toEqual(refused);
-    }
-    const setup = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
-    for (const body of [setup, { ...setup, idempotency_key: null }]) {
-      expect(await call('startSetup', { body })).toEqual(refused);
-    }
+    for (const body of agentBodies) expect(await call('sendAgent', { params: { slug }, body })).toEqual(refused);
+    for (const body of setupBodies) expect(await call('startSetup', { body })).toEqual(refused);
     expect(mockStore.world.sessions.size).toBe(sessions);
     expect(mockStore.world.desks.length).toBe(desks);
   });
