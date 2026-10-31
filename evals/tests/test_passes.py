@@ -258,6 +258,26 @@ async def test_a_run_that_times_out_is_charged_its_known_usage_and_the_estimate(
     assert result.served_models["api"] == [opus]   # the models it read are recorded, as a judged run's are
 
 
+async def test_a_harness_error_is_written_with_its_passwords_masked(repo):
+    """A run whose harness fails with a DSN in its message (here, the stand-in `run_one` itself) is
+    written to its transcript and `errors.jsonl` with the URL's password and any `password=` parameter
+    masked, since every run error's detail is built in one place (`RunError`)."""
+    from evals.tier2.passes import pass_dir
+
+    async def run_one(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        raise ConnectionError("could not connect to postgresql://desk_api:s3cret-pass@db.example.invalid/desk"
+                              "?password=query-secret")
+
+    result = await run_pass(config(runs=1, split="heldout"), deps(repo, run_one))
+    out = pass_dir(repo, result.pass_id)
+    written = "".join(path.read_text() for path in sorted(out.rglob("*")) if path.is_file())
+    assert "s3cret-pass" not in written and "query-secret" not in written
+    errors = [json.loads(line) for line in (out / "errors.jsonl").read_text().splitlines()]
+    assert len(errors) == 4 and {error["kind"] for error in errors} == {"infra"}
+    assert all("postgresql://desk_api:***@db.example.invalid/desk?password=***" in error["detail"]
+               for error in errors)
+
+
 def spend_rows(path: Path, *rows: tuple[str, str, int, float, float]) -> None:
     """Spend rows (date, provider, runs, claude_api_usd, total_usd), as earlier passes appended them."""
     from evals.tier2.passes import append_spend

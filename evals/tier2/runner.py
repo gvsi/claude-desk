@@ -67,7 +67,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr, StrictStr, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, PrivateAttr, StrictStr, TypeAdapter, ValidationError, field_validator
 
 from desk.contracts import Decision, DemoInboxEntry, KnowledgeItem, Label, RenderedBlock, SeedDocument
 from desk.events import EvError, EvHeld, EvMessage, EvResolved, EvTurnEnd, SseEvent
@@ -114,6 +114,11 @@ _LINK = re.compile(r"(/api/d/|/api/pay/|/pay/)([^/?#\s\"'\\]+)")
 _SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")   # between sentences of a tool's description
 REDACTED = "[redacted]"
 MIN_SECRET = 6   # shorter values aren't redacted as text (a code is six digits)
+# A URL's password (`scheme://user:password@host`, up to the token's last @, so an unencoded @ in the password
+# is masked whole) and any `password=` parameter, as a database or HTTP error's message can carry them.
+_URL_PASSWORD = re.compile(r"(?P<head>\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^:/?#@\s'\"]*:)[^\s'\"]*@")
+_PASSWORD_PARAM = re.compile(r"(?i)\b(password=)[^&\s'\"]*")
+MASKED = "***"
 # What the artifact says when the run left the owner's Demo inbox unread. The kernel writes owner alerts and
 # checkpoint notices to its Demo inbox already; plan 01b adds the route that reads it and the verification codes.
 OWNER_INBOX_UNREAD = ("not read: plan 01b, which adds the kernel's Demo inbox read route and the verification codes "
@@ -125,9 +130,25 @@ NO_VERIFICATION = "This chat doesn't offer verification."
 
 
 class RunError(BaseModel):
+    """Why a run has no verdict. Every error detail a run writes (its transcript, `errors.jsonl`, the
+    report) is built here: a URL's password and any `password=` parameter are masked
+    (`mask_credentials`) and link tokens replaced (`redact`), and the runner also replaces the run's own
+    secrets, so no credential an error's message carried is ever written."""
+
     model_config = ConfigDict(extra="forbid")
     kind: RunErrorKind
     detail: str
+
+    @field_validator("detail")
+    @classmethod
+    def _masked(cls, detail: str) -> str:
+        return redact(mask_credentials(detail), ())
+
+
+def mask_credentials(text: str) -> str:
+    """`text` with each URL's password and every `password=` parameter's value replaced by `***`."""
+    text = _URL_PASSWORD.sub(lambda m: m.group("head") + MASKED + "@", text)
+    return _PASSWORD_PARAM.sub(lambda m: m.group(1) + MASKED, text)
 
 
 class SimulatorStats(BaseModel):
@@ -250,7 +271,7 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
     sim = run.sim_run
     outcome = RunOutcome(
         scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=pass_id, artifact=artifact, verdict=verdict,
-        error=error.model_copy(update={"detail": redact(error.detail, run.secrets)}) if error else None,
+        error=RunError(kind=error.kind, detail=redact(error.detail, run.secrets)) if error else None,
         simulator=SimulatorStats(provider=simulator.provider, model=simulator.model, turns=len(sim.turns),
                                  fallback_turns=sim.fallback_turns, switches=sim.switches,
                                  served_models=sim.served_models),
@@ -955,5 +976,5 @@ def _blocks(events: Iterable[TimedEvent]) -> list[RenderedBlock]:
 # Planted marker phrases: random each run, so no run can learn another's.
 _RNG = random.SystemRandom()
 
-__all__ = ["DESK_MODELS", "KERNEL_CHECK_MODELS", "HeldUsage", "RunError", "RunOutcome", "SimulatorStats", "redact",
-           "rivera_seed_data", "run_scenario"]
+__all__ = ["DESK_MODELS", "KERNEL_CHECK_MODELS", "HeldUsage", "RunError", "RunOutcome", "SimulatorStats",
+           "mask_credentials", "redact", "rivera_seed_data", "run_scenario"]

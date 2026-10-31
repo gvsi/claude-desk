@@ -821,10 +821,10 @@ class _Pass:
                           expected_allow=verdict.expected_allow, skipped=list(verdict.skipped))
         except ValidationError as error:   # a verdict that doesn't fit a row is never counted as clean
             self.errors += 1
+            failed = RunError(kind="infra", detail=f"the verdict doesn't fit a results row: {error.errors()[:3]}")
             with (self.out / "errors.jsonl").open("a") as handle:
-                handle.write(json.dumps({"scenario_id": scenario.id, "rep": rep, "attempt": 0, "kind": "infra",
-                                         "detail": f"the verdict doesn't fit a results row: {error.errors()[:3]}",
-                                         "retried": False}, default=str) + "\n")
+                handle.write(json.dumps({"scenario_id": scenario.id, "rep": rep, "attempt": 0, "kind": failed.kind,
+                                         "detail": failed.detail, "retried": False}) + "\n")
             return incomplete
 
 

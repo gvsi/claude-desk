@@ -44,7 +44,7 @@ from evals.tests.artifacts import (
 from evals.tests.test_usage_and_latency import HAIKU, call_usage
 from evals.tier2.passes import PassProviders, priced_spend
 from evals.tier2.prompts import Observation
-from evals.tier2.runner import RunOutcome, run_scenario
+from evals.tier2.runner import RunError, RunOutcome, run_scenario
 from evals.tier2.simulator import ServedTurn, SimulatorRun, VisitorTurn
 
 COPY_ID, SLUG = "copy-1", "rivera-plumbing-abc123"
@@ -1486,6 +1486,41 @@ async def test_a_run_cut_short_keeps_the_usage_it_holds(case):
     said = outcome.redacted()
     assert RunOutcome.model_validate(said).held_usage.model_dump(mode="json") == held.model_dump(mode="json")
     assert RunOutcome.model_validate({k: v for k, v in said.items() if k != "held_usage"}).held_usage is None
+
+
+async def test_an_error_detail_never_carries_a_password(tmp_path):
+    """Every error detail a run writes is built in one place (`RunError`), which masks a URL's password
+    and any `password=` parameter and replaces link tokens, besides the run's own secrets the runner
+    replaces: a records read that fails with the connection's DSN in its message is written with its
+    password masked, in the outcome and in its transcript."""
+    scenario = attack(max_turns=1)
+    desk = Desk(chat(scenario, 1))
+    on = target(desk)
+    on.kernel.records = SnapshotUnreadable(desk)
+    outcome = await run_scenario(scenario, 1, on, Visitor(desk), new_client=lambda: Client(desk), seed=seed,
+                                 pass_id="pass-test", out_dir=tmp_path)
+    assert outcome.error.kind == "infra"
+    assert "could not connect to postgresql://kernel_ro:***@127.0.0.1:5432/desk" in outcome.error.detail
+    written = (tmp_path / f"{scenario.id}-1.json").read_text()
+    assert "a-database-password" not in written and "postgresql://kernel_ro:***@127.0.0.1:5432/desk" in written
+
+    masked = {
+        "connect to postgresql+asyncpg://desk_api:s3cret%40pass@db.example.invalid:5432/desk failed":
+            "connect to postgresql+asyncpg://desk_api:***@db.example.invalid:5432/desk failed",
+        "postgresql://u:pw-secret@h/d?ssl=require&password=query-secret":
+            "postgresql://u:***@h/d?ssl=require&password=***",
+        "a libpq DSN: host=db user=desk password=s3cret dbname=desk":
+            "a libpq DSN: host=db user=desk password=*** dbname=desk",
+        "PASSWORD=Hunter2x in the environment": "PASSWORD=*** in the environment",
+        "redis://:s3cret@cache:6379/0 refused": "redis://:***@cache:6379/0 refused",
+        "an unencoded @: postgresql://desk_api:s3cret@t4il@db.example.invalid/desk":
+            "an unencoded @: postgresql://desk_api:***@db.example.invalid/desk",
+        "send answered 503 from https://desk.example.com/api/public/send": (
+            "send answered 503 from https://desk.example.com/api/public/send"),
+        "a link: /pay/tok-abcdef123": "a link: /pay/[redacted]",
+    }
+    for given, said in masked.items():
+        assert RunError(kind="infra", detail=given).detail == said, given
 
 
 async def test_a_run_that_never_entered_a_copy_holds_only_the_simulators_usage():
