@@ -32,7 +32,20 @@ const WINDOWS: readonly Size[] = [
   [320, 568],
 ];
 
+/**
+ * Windows shorter than the pinned header, chat head and composer need: a phone turned on its side,
+ * a short phone, and a 360 × 640 phone with its on-screen keyboard open.
+ */
+const SHORT: readonly Size[] = [
+  [568, 320],
+  [320, 480],
+  [360, 380],
+];
+
 const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";
+
+/** The long draft that once pushed the disclosure off a short window: six lines and a counter. */
+const LONG_DRAFT = 'word '.repeat(380);
 
 const desk = rivera.publicDesk.en;
 
@@ -49,17 +62,27 @@ function brandOf(publicDesk: PublicDesk): PublicBrand {
   };
 }
 
+interface LongChatOptions {
+  language?: 'en' | 'es';
+  /** The links for people's agents in the about column. */
+  links?: boolean;
+  /** A tagline in place of the Desk's name, long enough to wrap the header onto more lines. */
+  tagline?: string;
+}
+
 /**
  * The public page with a chat of 80 messages, each with the screen-reader-only line a receipt
  * carries: absolutely placed, so it would stretch the document if the conversation's scroll region
- * didn't hold it.
+ * didn't hold it. In English or Spanish, whose disclosure is longer, and with the links for
+ * people's agents in the about column if asked.
  */
-function LongChat() {
+function LongChat({ language = 'en', links = false, tagline }: LongChatOptions) {
+  const page = rivera.publicDesk[language];
   return (
     <PublicShell
-      brand={brandOf(desk)}
+      brand={{ ...brandOf(page), ...(tagline ? { tagline } : {}) }}
       ownerName={rivera.business.ownerName}
-      language="en"
+      language={language}
       openStatus={{
         open: true,
         until: '2026-10-29T18:00:00-07:00',
@@ -69,7 +92,8 @@ function LongChat() {
         refresh_at: '2026-10-29T18:00:00-07:00',
       }}
       onAskForOwner={() => {}}
-      about={desk.charter}
+      about={page.charter}
+      aboutLinks={links ? [{ label: 'What agents can do here', href: `/d/${rivera.business.slug}/agents` }] : undefined}
       composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={() => {}} />}
     >
       <Transcript label="Conversation with Rivera Plumbing">
@@ -122,10 +146,10 @@ afterEach(async () => {
 });
 
 /** Opens the long chat in a window of `size`, once the conversation has laid out. */
-async function renderLongChat([width, height]: Size): Promise<void> {
+async function renderLongChat([width, height]: Size, options: LongChatOptions = {}): Promise<void> {
   act(() => root.render(null));
   await page.viewport(width, height);
-  act(() => root.render(<LongChat />));
+  act(() => root.render(<LongChat {...options} />));
   await vi.waitFor(() => expect(container.querySelectorAll('.cd-transcript-row')).toHaveLength(80));
 }
 
@@ -140,6 +164,61 @@ function disclosure(): HTMLElement {
   const lines = [...container.querySelectorAll<HTMLElement>('p')].filter((line) => line.textContent === DISCLOSURE);
   if (lines.length !== 1) throw new Error(`expected one disclosure line, found ${lines.length}`);
   return lines[0] as HTMLElement;
+}
+
+/** The AI disclosure's line, in either language. */
+function disclosureLine(): HTMLElement {
+  return one('.cd-public-shell__disclosure');
+}
+
+/** Two frames on: the composer has sized its text box to what was typed. */
+function nextFrames(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}
+
+/** Types the long draft into the composer, as a paste does. */
+async function pasteLongDraft(): Promise<void> {
+  await userEvent.fill(one('.cd-composer__input'), LONG_DRAFT);
+  await nextFrames();
+}
+
+/**
+ * The element whose scrolling moves the conversation: its scroll region, or on a short window the
+ * shell itself.
+ */
+function scroller(): HTMLElement {
+  const shell = one('.cd-public-shell');
+  for (let node = one('[role="log"]').parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+    if (node === shell) break;
+  }
+  throw new Error('nothing in the shell scrolls the conversation');
+}
+
+/** How much of the conversation shows between the chat's head and the composer area. */
+function conversationShown(): number {
+  return one('.cd-public-shell__composer').getBoundingClientRect().top - one('.cd-public-shell__chat-head').getBoundingClientRect().bottom;
+}
+
+/**
+ * Whether `el` is wholly inside the window and nothing covers it: what the browser finds on top at
+ * each of its corners and at its middle is `el` or inside it.
+ */
+function uncovered(el: Element): boolean {
+  if (!inWindow(el)) return false;
+  const { top, bottom, left, right } = el.getBoundingClientRect();
+  const points = [
+    [left + 1, top + 1],
+    [right - 1, top + 1],
+    [left + 1, bottom - 1],
+    [right - 1, bottom - 1],
+    [(left + right) / 2, (top + bottom) / 2],
+  ] as const;
+  return points.every(([x, y]) => {
+    const hit = document.elementFromPoint(x, y);
+    return hit !== null && el.contains(hit);
+  });
 }
 
 /** Whether `el` is wholly inside the window. */
@@ -278,16 +357,20 @@ it('about_column_moves_as_the_window_crosses_900_and_the_draft_stays', async () 
   const inTheRegion = () => scrollRegion()?.contains(one('[aria-labelledby]:is(aside, section)')) ?? false;
   expect(inTheRegion()).toBe(false);
 
+  expect(document.activeElement).toBe(textarea);
+
   await page.viewport(820, 900);
   await vi.waitFor(() => expect(inTheRegion()).toBe(true));
   expect(box.element()).toBe(textarea);
   expect(textarea.value).toBe('Keep this draft');
+  expect(document.activeElement).toBe(textarea);
   expect(document.documentElement.scrollHeight).toBe(900);
 
   await page.viewport(1440, 900);
   await vi.waitFor(() => expect(inTheRegion()).toBe(false));
   expect(box.element()).toBe(textarea);
   expect(textarea.value).toBe('Keep this draft');
+  expect(document.activeElement).toBe(textarea);
 });
 
 it('the_scroll_region_takes_the_keyboard', async () => {
@@ -341,5 +424,190 @@ it('a_short_conversation_reaches_down_to_the_composer', async () => {
   expect(seen).toEqual([
     { window: '1440x900', reaches: true, scrolls: false },
     { window: '390x844', reaches: true, scrolls: false },
+  ]);
+});
+
+it('short_windows_keep_the_disclosure_and_composer_in_view', async () => {
+  // A phone on its side, a short phone or one with its keyboard open, in either language, with an
+  // empty composer or a long draft in it: the AI disclosure and the composer are wholly on screen
+  // at the start of a long chat, at the very end (where the footer shows under the composer) and
+  // where the page keeps a chat it follows (the newest message just above the composer), the
+  // document doesn't scroll, and there at least 96 px of the conversation shows between the chat's
+  // head and the composer.
+  const seen = [];
+  for (const size of SHORT) {
+    for (const language of ['en', 'es'] as const) {
+      for (const draft of ['empty', 'long'] as const) {
+        await renderLongChat(size, { language });
+        if (draft === 'long') await pasteLongDraft();
+        const scrolls = scroller();
+        scrolls.scrollTop = 0;
+        const atTheStart = uncovered(disclosureLine()) && uncovered(one('.cd-composer'));
+        scrolls.scrollTop = scrolls.scrollHeight;
+        const atTheEnd = uncovered(disclosureLine()) && uncovered(one('.cd-composer'));
+        // The page's own rule for following a chat: scroll until the newest message's foot meets
+        // the composer area's top.
+        scrolls.scrollTop = 0;
+        scrolls.scrollTop += lastRow().getBoundingClientRect().bottom - one('.cd-public-shell__composer').getBoundingClientRect().top;
+        const following =
+          uncovered(disclosureLine()) &&
+          uncovered(one('.cd-composer')) &&
+          Math.abs(lastRow().getBoundingClientRect().bottom - one('.cd-public-shell__composer').getBoundingClientRect().top) <= 1;
+        seen.push({
+          window: named(size),
+          language,
+          draft,
+          atTheStart,
+          atTheEnd,
+          following,
+          documentFits: document.documentElement.scrollHeight <= innerHeight,
+          conversationShown: conversationShown() >= 96 ? '96 px or more' : `${conversationShown()} px`,
+        });
+      }
+    }
+  }
+  expect(seen).toEqual(
+    SHORT.flatMap((size) =>
+      (['en', 'es'] as const).flatMap((language) =>
+        (['empty', 'long'] as const).map((draft) => ({
+          window: named(size),
+          language,
+          draft,
+          atTheStart: true,
+          atTheEnd: true,
+          following: true,
+          documentFits: true,
+          conversationShown: '96 px or more',
+        })),
+      ),
+    ),
+  );
+});
+
+it('short_windows_scroll_the_brand_header_and_footer_with_the_chat', async () => {
+  // On a short window the brand header and the footer give their room to the conversation: the
+  // header is at the top of what scrolls and the footer at its end, while the chat's head and the
+  // composer stay put. On a taller window both stay pinned.
+  const seen = [];
+  for (const size of [...SHORT, [320, 568] as const]) {
+    await renderLongChat(size);
+    const scrolls = scroller();
+    const header = one('.cd-public-brand');
+    const footer = one('[data-ds="concept-footer"]');
+    scrolls.scrollTop = 0;
+    const start = { header: inWindow(header), footer: inWindow(footer) };
+    scrolls.scrollTop = scrolls.scrollHeight;
+    const end = {
+      header: inWindow(header),
+      footer: inWindow(footer),
+      chatHeadAtTheTop: one('.cd-public-shell__chat-head').getBoundingClientRect().top === (inWindow(header) ? header.getBoundingClientRect().bottom : 0),
+    };
+    seen.push({ window: named(size), start, end });
+  }
+  expect(seen).toEqual([
+    ...SHORT.map((size) => ({
+      window: named(size),
+      start: { header: true, footer: false },
+      end: { header: false, footer: true, chatHeadAtTheTop: true },
+    })),
+    { window: '320x568', start: { header: true, footer: true }, end: { header: true, footer: true, chatHeadAtTheTop: true } },
+  ]);
+});
+
+it('a_long_draft_never_pushes_the_disclosure_out', async () => {
+  // At every height the composer's text box stops growing at under a third of the shell's height
+  // and scrolls inside, so a long draft never pushes the disclosure off the screen.
+  const seen = [];
+  for (const size of [...WINDOWS, ...SHORT]) {
+    await renderLongChat(size, { language: 'es' });
+    await pasteLongDraft();
+    const input = one<HTMLTextAreaElement>('.cd-composer__input');
+    const scrolls = scroller();
+    scrolls.scrollTop = scrolls.scrollHeight;
+    seen.push({
+      window: named(size),
+      disclosure: uncovered(disclosureLine()),
+      composer: uncovered(one('.cd-composer')),
+      documentFits: document.documentElement.scrollHeight <= innerHeight,
+      capped: input.getBoundingClientRect().height <= 0.3 * one('.cd-public-shell').clientHeight,
+      scrollsInside: input.scrollHeight > input.clientHeight,
+    });
+  }
+  expect(seen).toEqual(
+    [...WINDOWS, ...SHORT].map((size) => ({
+      window: named(size),
+      disclosure: true,
+      composer: true,
+      documentFits: true,
+      capped: true,
+      scrollsInside: true,
+    })),
+  );
+});
+
+it('focus_in_the_about_column_survives_the_move', async () => {
+  // A keyboard visitor on a link in the about column keeps their place when the window crosses
+  // 900 px and the column moves, both ways.
+  await renderLongChat([901, 900], { links: true });
+  const link = () => page.getByRole('link', { name: 'What agents can do here' }).element() as HTMLElement;
+  const inTheRegion = () => one('.cd-public-shell__scroll').contains(one('[aria-labelledby]:is(aside, section)'));
+  link().focus();
+  expect(document.activeElement).toBe(link());
+
+  await page.viewport(899, 900);
+  await vi.waitFor(() => expect(inTheRegion()).toBe(true));
+  expect(document.activeElement).toBe(link());
+
+  await page.viewport(901, 900);
+  await vi.waitFor(() => expect(inTheRegion()).toBe(false));
+  expect(document.activeElement).toBe(link());
+});
+
+it('the_about_column_takes_the_keyboard_only_when_it_scrolls', async () => {
+  // Beside the chat, a charter taller than the column scrolls in the column, so the column is a
+  // stop in the tab order, named by its heading; when it fits, or when it opens the conversation's
+  // scroll region, it isn't.
+  const seen = [];
+  for (const size of [[1024, 640], [1440, 900], [390, 844]] satisfies Size[]) {
+    await renderLongChat(size);
+    const about = one('[aria-labelledby]:is(aside, section)');
+    seen.push({
+      window: named(size),
+      scrolls: about.scrollHeight > about.clientHeight,
+      tabStop: about.tabIndex === 0,
+      named: document.getElementById(about.getAttribute('aria-labelledby') ?? '')?.textContent,
+    });
+  }
+  expect(seen).toEqual([
+    { window: '1024x640', scrolls: true, tabStop: true, named: 'About Rivera Plumbing' },
+    { window: '1440x900', scrolls: false, tabStop: false, named: 'About Rivera Plumbing' },
+    { window: '390x844', scrolls: false, tabStop: false, named: 'About Rivera Plumbing' },
+  ]);
+});
+
+it('the_composer_never_covers_the_disclosure', async () => {
+  // At the top of a chat on a short window, the brand header, the chat's head and a composer holding
+  // a long draft can be taller than the window together, as with a tagline that wraps. The chat's
+  // head then stays over the composer, so the AI disclosure is never covered, wherever the visitor
+  // has scrolled to.
+  const seen = [];
+  for (const size of [[568, 320], [360, 380]] satisfies Size[]) {
+    await renderLongChat(size, {
+      language: 'es',
+      tagline:
+        'Fontanería de urgencia, calentadores de agua, desagües, tuberías y reformas de baños y cocinas para casas y negocios en Oakland, Berkeley, Alameda, Emeryville y Piedmont, de lunes a sábado',
+    });
+    await pasteLongDraft();
+    const scrolls = scroller();
+    const covered = [];
+    for (let top = 0; top <= scrolls.scrollHeight; top += 40) {
+      scrolls.scrollTop = top;
+      if (!uncovered(disclosureLine())) covered.push(scrolls.scrollTop);
+    }
+    seen.push({ window: named(size), covered });
+  }
+  expect(seen).toEqual([
+    { window: '568x320', covered: [] },
+    { window: '360x380', covered: [] },
   ]);
 });

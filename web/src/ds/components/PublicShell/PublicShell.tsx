@@ -106,30 +106,101 @@ const COPY = {
 const ABOUT_BESIDE_FROM = 900;
 
 /**
- * Whether the shell is wide enough for the about column beside the chat, or `null` until it has
- * measured itself. The shell lays out by its own width (inside an owner's panel as on a page of its
- * own), so it watches itself, not the window.
- *
- * It measures before the first paint, and until then the column is drawn in neither place: the
- * chat takes the shell's whole width, as it will on a phone, so nothing in it (the composer sizing
- * its text box) measures itself at a width the visitor never sees. When the shell crosses the
- * width, the column moves at once, before the browser paints and before the page's own observers
- * measure the conversation (the page keeps the newest message above the composer as the shell
- * resizes).
+ * Below this height the brand header and the footer can't stay pinned and leave the conversation
+ * room: a phone on its side, a short phone, or a phone with its on-screen keyboard open.
  */
-function useAboutBeside(shell: RefObject<HTMLElement | null>): boolean | null {
-  const [beside, setBeside] = useState<boolean | null>(null);
+const SHORT_BELOW = 520;
+
+/** Whatever can take focus inside the about column, in order. */
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** How the shell lays out at its size. */
+interface ShellFit {
+  /** Whether the about column stands beside the chat; `null` until the shell has measured itself. */
+  aboutBeside: boolean | null;
+  /** Whether the shell is too short to keep the brand header and the footer pinned. */
+  short: boolean;
+}
+
+const UNMEASURED: ShellFit = { aboutBeside: null, short: false };
+
+/**
+ * Where focus is in the about column, as a way to put it back once the column has moved: the same
+ * link in the moved column, or the scroll region when the column itself had focus and is no longer
+ * a stop of its own. `null` when focus is elsewhere.
+ */
+function focusInAbout(shell: HTMLElement): (() => void) | null {
+  const column = shell.querySelector('.cd-public-shell__about');
+  const active = document.activeElement;
+  if (!column || !(active instanceof HTMLElement) || !column.contains(active)) return null;
+  const index = [...column.querySelectorAll(FOCUSABLE)].indexOf(active);
+  return () => {
+    if (active.isConnected) return;
+    const moved = shell.querySelector('.cd-public-shell__about');
+    const same = index >= 0 ? moved?.querySelectorAll<HTMLElement>(FOCUSABLE)[index] : undefined;
+    (same ?? shell.querySelector<HTMLElement>('.cd-public-shell__scroll'))?.focus();
+  };
+}
+
+/**
+ * How the shell lays out at its own size. It lays out by its own size, inside an owner's panel as on
+ * a page of its own, so it watches itself, not the window:
+ *
+ * - Whether the about column stands beside the chat. Until the shell has measured itself before the
+ *   first paint, the column is drawn in neither place: the chat takes the shell's whole width, as it
+ *   will on a phone, so nothing in it (the composer sizing its text box) measures itself at a width
+ *   the visitor never sees.
+ * - Whether the shell is short, when the brand header and the footer scroll with the conversation.
+ * - Its height, as `--cd-public-shell-height`, which caps the composer's text box.
+ *
+ * When the shell crosses a width or a height, it changes at once, before the browser paints and
+ * before the page's own observers measure the conversation (the page keeps the newest message above
+ * the composer as the shell resizes). If the about column moves with focus in it, focus goes to the
+ * same place in the moved column.
+ */
+function useShellFit(shell: RefObject<HTMLElement | null>): ShellFit {
+  const [fit, setFit] = useState<ShellFit>(UNMEASURED);
   useLayoutEffect(() => {
     const el = shell.current;
     if (!el) return undefined;
-    const fits = () => el.offsetWidth >= ABOUT_BESIDE_FROM;
-    setBeside(fits());
+    const measure = () => {
+      const height = el.offsetHeight;
+      el.style.setProperty('--cd-public-shell-height', `${height}px`);
+      const next = { aboutBeside: el.offsetWidth >= ABOUT_BESIDE_FROM, short: height < SHORT_BELOW };
+      setFit((now) => (now.aboutBeside === next.aboutBeside && now.short === next.short ? now : next));
+    };
+    measure();
     if (typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(() => flushSync(() => setBeside(fits())));
+    const observer = new ResizeObserver(() => {
+      const restoreFocus = focusInAbout(el);
+      flushSync(measure);
+      restoreFocus?.();
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, [shell]);
-  return beside;
+  return fit;
+}
+
+/**
+ * Whether the about column, beside the chat, holds more than it shows and scrolls on its own. It is
+ * measured after every render and whenever the column or what is in it changes size.
+ */
+function useColumnScrolls(column: RefObject<HTMLElement | null>, beside: boolean): boolean {
+  const [scrolls, setScrolls] = useState(false);
+  useLayoutEffect(() => {
+    const el = column.current;
+    setScrolls(beside && el !== null && el.scrollHeight > el.clientHeight);
+  });
+  useLayoutEffect(() => {
+    const el = column.current;
+    if (!beside || !el || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => setScrolls(el.scrollHeight > el.clientHeight));
+    observer.observe(el);
+    for (const child of el.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, [column, beside]);
+  return scrolls;
 }
 
 /**
@@ -137,8 +208,9 @@ function useAboutBeside(shell: RefObject<HTMLElement | null>): boolean | null {
  * the kernel's open status when the Desk has hours) and the chat's head with its title, the AI
  * disclosure and "Ask for {owner}" at the top; the composer with the concept footer under it at the
  * bottom; and only the conversation's scroll region scrolling between them, so the disclosure never
- * leaves the screen. The business's charter is an about column at the right, or, when the page is
- * too narrow for it, the start of the conversation's scroll region.
+ * leaves the screen. On a short shell the brand header and the footer scroll with the conversation
+ * and only the chat's head and the composer stay put. The business's charter is an about column at
+ * the right, or, when the page is too narrow for it, the start of the conversation's scroll region.
  */
 export function PublicShell({
   brand,
@@ -157,7 +229,11 @@ export function PublicShell({
   const aboutId = useId();
   const chatId = useId();
   const shellRef = useRef<HTMLDivElement>(null);
-  const aboutBeside = useAboutBeside(shellRef);
+  const aboutRef = useRef<HTMLElement>(null);
+  const { aboutBeside, short } = useShellFit(shellRef);
+  // Beside the chat, a column that scrolls on its own is a stop in the tab order, so it scrolls from
+  // the keyboard too; it is already named by its heading.
+  const aboutScrolls = useColumnScrolls(aboutRef, aboutBeside === true);
   const name = <Name>{brand.name}</Name>;
   const owner = <Name>{ownerName}</Name>;
 
@@ -174,7 +250,7 @@ export function PublicShell({
   const hasAbout = blocks.length > 0 || links.length > 0;
 
   const aboutColumn = hasAbout ? (
-    <About className="cd-public-shell__about" aria-labelledby={aboutId}>
+    <About ref={aboutRef} className="cd-public-shell__about" aria-labelledby={aboutId} tabIndex={aboutScrolls ? 0 : undefined}>
       <h2 id={aboutId} className="cd-public-shell__heading cd-type-section">
         {copy.about(name)}
       </h2>
@@ -209,7 +285,11 @@ export function PublicShell({
   ) : null;
 
   return (
-    <div ref={shellRef} className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`} lang={language}>
+    <div
+      ref={shellRef}
+      className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}${short ? ' cd-public-shell--short' : ''}`}
+      lang={language}
+    >
       <PublicBrandHeader brand={brand} language={language} openStatus={openStatus} landmark={!embedded} nameAsHeading={!embedded} />
       <div className="cd-public-shell__body">
         <Chat className="cd-public-shell__chat">
@@ -224,18 +304,20 @@ export function PublicShell({
               {copy.askFor(owner)}
             </Button>
           </div>
-          {/* The one part of the page that scrolls. Too narrow for the about column beside the chat,
-              the column opens it, above the first message. A stop in the tab order, named by the
-              chat's title, so a conversation with nothing to focus in it still scrolls from the
-              keyboard. */}
+          {/* The one part of the page that scrolls (on a short shell, it grows and the shell
+              scrolls). Too narrow for the about column beside the chat, the column opens it, above
+              the first message. A stop in the tab order, named by the chat's title, so a
+              conversation with nothing to focus in it still scrolls from the keyboard. */}
           <div className="cd-public-shell__scroll" role="group" aria-labelledby={chatId} tabIndex={0}>
             {aboutBeside === false ? aboutColumn : null}
             <div className="cd-public-shell__conversation">{children}</div>
           </div>
-          <div className="cd-public-shell__composer">
-            {composer}
-            {embedded ? null : <ConceptFooter poweredBy />}
-          </div>
+          <div className="cd-public-shell__composer">{composer}</div>
+          {embedded ? null : (
+            <div className="cd-public-shell__footer">
+              <ConceptFooter poweredBy />
+            </div>
+          )}
         </Chat>
         {aboutBeside === true ? aboutColumn : null}
       </div>

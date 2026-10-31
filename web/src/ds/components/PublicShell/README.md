@@ -49,17 +49,30 @@ The header says whether the business is open now, in the kernel's words.
 The shell is the window's height (`100dvh`, or `100vh` in a browser without dynamic viewport units), and the document itself never scrolls, as with `AppShell`.
 
 - **Pinned at the top:** the brand header, and under it the chat's head with "Chat with {name}", the AI disclosure and "Ask for {ownerName}".
-- **Pinned at the bottom:** the composer area, the `composer` with the footer under it.
+- **Pinned at the bottom:** the composer area (`.cd-public-shell__composer`, the `composer`), and the footer under it.
 - **The scroll region** (`.cd-public-shell__scroll`) between them is the only part that scrolls. It holds the conversation, runs the chat's full width (so the scrollbar is at the chat's edge and the wheel scrolls it anywhere over the chat), and is positioned, so a receipt's screen-reader label scrolls with it instead of stretching the document. It is a stop in the tab order after "Ask for {ownerName}", a group named by the chat's title, so a conversation with nothing to focus in it still scrolls from the keyboard.
-- **The disclosure must stay in view.** It is part of the always-on baseline: however long the chat, and wherever the visitor has scrolled to, the business's header and the disclosure are on screen. Nothing may be added to the page that scrolls them away, such as content under the composer or a page that scrolls as a whole.
+- **The disclosure must stay in view.** It is part of the always-on baseline: however long the chat, and wherever the visitor has scrolled to, the chat's head with the disclosure is on screen and nothing covers it. Nothing may be added to the page that scrolls it away or covers it, such as content under the composer or a page that scrolls as a whole.
+- **A long draft scrolls in the composer.** The composer's text box grows with what is typed up to a sixth of the shell's height (two lines at least, and never more than its own six), then scrolls inside, so a draft can't push the chat's head off the screen. The shell writes its measured height as `--cd-public-shell-height` for this.
 - **What the page does:** the shell scrolls nothing itself. Keeping the newest message just above the composer as the chat goes on, and leaving a visitor who has scrolled back to read where they are, is the page's job (`PublicChat`), in this scroll region.
 - **On a phone,** `100dvh` follows the browser's toolbars as they show and hide, so the composer stays above them. Where the browser shrinks the page for the on-screen keyboard, the composer stays just above the keyboard too; where it doesn't, the browser moves the page to keep the composer in view while the visitor types.
+
+### A short shell
+
+Below 520 px of shell height (a phone on its side, a short phone, or a 640 px phone with its on-screen keyboard open), pinning the brand header and the footer as well would leave the conversation a sliver. So on a short shell they scroll with the conversation, and only the chat's head and the composer stay put:
+
+- The shell itself scrolls (the document still never does), and its scroll region grows with the conversation. The brand header is at the top of what scrolls, the footer at its end.
+- The chat's head with the disclosure sticks to the top of the shell and the composer area to its bottom, each 8 px tighter at top and bottom, over the app ground. Their ground runs out into the gutters, so the about column passing under them doesn't show beside them.
+- At the top of a chat, the brand header, the chat's head and a composer holding a long draft can be taller than the shell together. The chat's head then stays over the composer, so the composer can never cover the disclosure.
+- Where the page keeps a chat it follows (the newest message just above the composer), the footer is just below the window and the conversation has the shell's height less the chat's head and the composer: at least 96 px at 568 × 320, 320 × 480 and 360 × 380, in English and Spanish, with a long draft in the composer. Scrolled right to the end, the footer shows under the composer.
+- The page's rule for following a chat works the same: its scroller is the shell, found as the nearest scrolling ancestor of the conversation.
 
 ## Layout
 
 The shell is an inline-size container, so it lays out by its own width, not the window's. Below 720 px (each state of the handoff board at 640 px, a phone, or the owner's 420 px panel) the gutters are 16 px instead of 40, and below 640 px the open status also has its own line under the name.
 
-From 900 px of shell width the about column stands at the right of the chat. Below 900 px there is no room for it beside the chat, and the page doesn't scroll, so it opens the scroll region instead: the first thing above the conversation, the region's full width on the panel, with a hairline between it and the first message. It scrolls away as the chat goes on and comes back at the chat's start. The shell watches its own width and moves the column before the browser paints, so the column never shows beside a narrow chat, and the rest of the page stays mounted as it moves (an unsent draft is kept).
+From 900 px of shell width the about column stands at the right of the chat. Below 900 px there is no room for it beside the chat, and the page doesn't scroll, so it opens the scroll region instead: the first thing above the conversation, the region's full width on the panel, with a hairline between it and the first message. It scrolls away as the chat goes on and comes back at the chat's start. The shell watches its own width and moves the column before the browser paints, so the column never shows beside a narrow chat, and the rest of the page stays mounted as it moves (an unsent draft is kept, and stays focused). If focus is on a link in the column when it moves, focus goes to the same link in the moved column.
+
+Beside the chat, a charter taller than the column scrolls in the column, on its own. While it does, the column is a stop in the tab order (it is already named by its heading), so it scrolls from the keyboard too. When it fits, or when it opens the scroll region, it isn't a stop of its own.
 
 ## Standalone or embedded
 
@@ -100,7 +113,7 @@ From 900 px of shell width the about column stands at the right of the chat. Bel
 | `about` | `RenderedBlock[]` | The charter blocks. |
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
 | `footer` | `boolean` | `true` by default; `false` when embedded. |
-| `composer` | `ReactNode` | Required. Pinned at the bottom, with the footer under it. |
+| `composer` | `ReactNode` | Required. Pinned at the bottom, with the footer under it (the footer scrolls on a short shell). |
 | `children` | `ReactNode` | Required. The conversation, in the scroll region. |
 
 `PublicBrand` and `PublicOpenStatus` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.
