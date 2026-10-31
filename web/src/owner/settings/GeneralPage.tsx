@@ -47,6 +47,9 @@ export function GeneralPage() {
   const deleteId = useId();
   const [confirming, setConfirming] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // A delete whose answer was lost, and the copy couldn't be read after it to say whether it went through.
+  const [unconfirmed, setUnconfirmed] = useState(false);
+  const [rereading, setRereading] = useState(false);
 
   const details: DetailItem[] = [
     { label: 'Business', value: business.name },
@@ -66,25 +69,54 @@ export function GeneralPage() {
     await invalidateCopy(queryClient);
   };
 
+  /**
+   * Reads the copy's Desks to settle a delete whose answer was lost: gone, the owner moves on;
+   * still there, `stillThere` says so; unreadable, the delete stays unconfirmed until a read settles it.
+   */
+  const settle = async (stillThere: () => void) => {
+    const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
+    if (read === null) {
+      setConfirming(false);
+      setUnconfirmed(true);
+      return;
+    }
+    setUnconfirmed(false);
+    if (findDesk(read, desk.desk_id) === null) await leave(read);
+    else stillThere();
+  };
+
   const remove = useMutation({
     mutationFn: () => request('deleteDesk', { params: { desk_id: desk.desk_id } }),
     onMutate: () => setFailure(null),
     onSuccess: () => leave(),
     onError: async (err) => {
+      const kind = err instanceof ApiError ? err.kind : null;
       // An ended session returns to the start, as on every owner page.
-      if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      // A lost answer may still have deleted it: if the copy no longer has this Desk, it did.
-      if (isUncertain(err)) {
-        const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
-        if (read !== null && findDesk(read, desk.desk_id) === null) {
-          await leave(read);
-          return;
-        }
+      if (kind === 'unauthorized') return;
+      // Not found: it was deleted already, from another tab or by a delete whose answer was lost.
+      if (kind === 'not_found') {
+        await leave();
+        return;
       }
-      setConfirming(false);
-      setFailure(ownerErrorCopy(err));
+      const failed = () => {
+        setConfirming(false);
+        setFailure(ownerErrorCopy(err));
+      };
+      // A lost answer may still have deleted it: the copy without this Desk says it did.
+      if (isUncertain(err)) await settle(failed);
+      else failed();
     },
   });
+
+  /** "Reload" on an unconfirmed delete: the copy read again; a Desk still there can be deleted again. */
+  const reread = async () => {
+    setRereading(true);
+    try {
+      await settle(() => setFailure(null));
+    } finally {
+      setRereading(false);
+    }
+  };
 
   return (
     <>
@@ -99,11 +131,27 @@ export function GeneralPage() {
         <SectionHeader id={deleteId} title="Delete this Desk" />
         <div className="cd-settings__delete-row">
           <p className="cd-settings__delete-line cd-settings__quiet cd-type-meta">{DELETE_LINE}</p>
-          <Button variant="secondary" size="main" onClick={() => setConfirming(true)}>
-            Delete this Desk
-          </Button>
+          {/* Never a second delete while the first one's outcome is unknown. */}
+          {unconfirmed ? null : (
+            <Button variant="secondary" size="main" onClick={() => setConfirming(true)}>
+              Delete this Desk
+            </Button>
+          )}
         </div>
-        {failure !== null ? <Notice tone="error">{failure}</Notice> : null}
+        {unconfirmed ? (
+          <Notice
+            tone="error"
+            action={
+              <Button variant="secondary" busy={rereading} onClick={() => void reread()}>
+                Reload
+              </Button>
+            }
+          >
+            We couldn't confirm that <span data-copy="user">{desk.name}</span> was deleted. Reload to see where it stands.
+          </Notice>
+        ) : failure !== null ? (
+          <Notice tone="error">{failure}</Notice>
+        ) : null}
       </section>
       {confirming ? (
         <Dialog

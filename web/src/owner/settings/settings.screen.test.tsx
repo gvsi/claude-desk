@@ -29,6 +29,9 @@ const ANSWERING_LINE = 'Claude answers under your rules.';
 /** What deleting a Desk does, beside its button and in the dialog that asks first. */
 const DELETE_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
 
+/** The owner's line when a delete's answer and the read after it were both lost, as the Answering switch words its own. */
+const UNCONFIRMED = "We couldn't confirm that Main line was deleted. Reload to see where it stands.";
+
 /** The owner's line for a request the server failed. */
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
 
@@ -216,6 +219,37 @@ describe('Settings', () => {
     await expect.poll(() => lost.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     expect(lost.screen.getByText(UNAVAILABLE).elements()).toEqual([]);
 
+    // Both answers lost: the delete went through, and the read after it failed too. The page says it
+    // can't confirm the delete, offers no second delete, and reads the copy again when asked.
+    const unsure = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
+    await expect.element(main(unsure.screen).getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
+    mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'desks', status: 'network', times: 2 });
+    await main(unsure.screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    await unsure.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    const unconfirmed = main(unsure.screen).getByRole('region', { name: 'Delete this Desk' }).getByRole('alert');
+    // The line, then its one action: read the copy again.
+    await expect.element(unconfirmed).toHaveTextContent(`${UNCONFIRMED}Reload`);
+    await expect.element(unsure.screen.getByRole('dialog')).not.toBeInTheDocument();
+    expect(main(unsure.screen).getByRole('button', { name: 'Delete this Desk' }).elements()).toEqual([]);
+    expect(unsure.router.state.location.pathname).toBe(GENERAL);
+    expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
+    const reads = requests('desks').length;
+    await unconfirmed.getByRole('button', { name: 'Reload' }).click();
+    await expect.poll(() => unsure.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+    expect(requests('desks').length).toBeGreaterThan(reads);
+    expect(requests('deleteDesk')).toHaveLength(1);
+
+    // Deleted elsewhere (another tab) since the page was read: the delete answers not found, which
+    // means it is gone, so the owner moves on as from a 204.
+    const elsewhere = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
+    await expect.element(main(elsewhere.screen).getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
+    expect(await mockStore.dispatch('deleteDesk', { params: { desk_id: RIVERA.deskId } })).toMatchObject({ status: 204 });
+    await main(elsewhere.screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    await elsewhere.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.poll(() => elsewhere.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+    expect(elsewhere.screen.getByRole('alert').elements()).toEqual([]);
+
     // The business's last Desk: deleting it opens setup, to make another.
     const last = await renderRoute(GENERAL, { seed: 'rivera' });
     await main(last.screen).getByRole('button', { name: 'Delete this Desk' }).click();
@@ -358,8 +392,16 @@ describe('Settings against its boards', () => {
     await expect.element(main(screen).getByRole('alert')).toHaveTextContent(UNAVAILABLE);
     await expectScreenBasics(screen.container, { owner: true });
 
+    // A delete it couldn't confirm.
+    mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'desks', status: 'network', times: 2 });
+    await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.element(main(screen).getByRole('alert')).toHaveTextContent(`${UNCONFIRMED}Reload`);
+    await expectScreenBasics(screen.container, { owner: true });
+
     // On a phone too, with nothing scrolling sideways.
-    const phone = await renderRoute(NOTIFICATIONS, { viewport: 'phone' });
+    const phone = await renderRoute(NOTIFICATIONS, { viewport: 'phone', seed: 'rivera' });
     await expect.element(main(phone.screen).getByRole('region', { name: 'Set for a plumber' })).toBeVisible();
     await expectScreenBasics(phone.screen.container, { owner: true });
     expectNoHorizontalScroll();
