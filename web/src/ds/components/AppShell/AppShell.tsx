@@ -194,12 +194,67 @@ interface PanelSlotState {
 
 type PanelPhase = 'none' | 'open' | 'leaving';
 
+/** Where a block of the page is drawn: its top and its height. */
+interface BlockBox {
+  top: number;
+  height: number;
+}
+
 /** How the panel and the page are drawn just before a change, for the move after it to start from. */
 interface PanelSnapshot {
   /** The page's left edge, mid-glide included; null without a page. */
   page: number | null;
+  /** Each block of the page, down to `BLOCK_DEPTH` under its content, where it is drawn. */
+  blocks: Map<Element, BlockBox>;
   /** A panel leaving as another opens: where it is drawn, so the new one comes in from there. */
   panel: { transform: string; opacity: string } | null;
+}
+
+/** How far under the page's content a block that its new width moved up or down is looked for. */
+const BLOCK_DEPTH = 10;
+
+/** Where each element under `content`, down to `BLOCK_DEPTH`, is drawn now, moves under way included. */
+function blocksOf(content: Element | null): Map<Element, BlockBox> {
+  const blocks = new Map<Element, BlockBox>();
+  const visit = (parent: Element, depth: number) => {
+    if (depth > BLOCK_DEPTH) return;
+    for (const child of Array.from(parent.children)) {
+      const box = child.getBoundingClientRect();
+      blocks.set(child, { top: box.top, height: box.height });
+      visit(child, depth + 1);
+    }
+  };
+  if (content) visit(content, 1);
+  return blocks;
+}
+
+/**
+ * The blocks of the page that its new width moved up or down, and by how much each must be put
+ * back to be drawn where it was: a block's own move, less what the blocks around it carry it. Only
+ * a block whose height changed laid its children out anew, so only there are its children looked
+ * at; an element with no box of its own (`display: contents`) passes its children through. Measured
+ * with nothing moving, before any move starts.
+ */
+function blockShifts(content: Element, before: Map<Element, BlockBox>): [Element, number][] {
+  const shifts: [Element, number][] = [];
+  const walk = (parent: Element, carried: number, depth: number) => {
+    if (depth > BLOCK_DEPTH) return;
+    for (const child of Array.from(parent.children)) {
+      const was = before.get(child);
+      if (!was) continue;
+      if (child.getClientRects().length === 0) {
+        walk(child, carried, depth + 1);
+        continue;
+      }
+      const box = child.getBoundingClientRect();
+      const shift = was.top - box.top - carried;
+      const moved = Math.abs(shift) >= 0.5;
+      if (moved) shifts.push([child, shift]);
+      if (Math.abs(was.height - box.height) >= 0.5) walk(child, carried + (moved ? shift : 0), depth + 1);
+    }
+  };
+  walk(content, 0, 1);
+  return shifts;
 }
 
 const phaseOf = (state: PanelSlotState): PanelPhase => (state.node ? (state.leaving ? 'leaving' : 'open') : 'none');
@@ -223,6 +278,9 @@ class PanelSlot extends Component<PanelSlotProps, PanelSlotState> {
 
   private glide: Animation | null = null;
 
+  /** The page's blocks gliding up or down to their new places, beside the sideways glide. */
+  private lifts: Animation[] = [];
+
   private fallback: number | undefined;
 
   static getDerivedStateFromProps(props: PanelSlotProps, state: PanelSlotState): Partial<PanelSlotState> | null {
@@ -242,8 +300,10 @@ class PanelSlot extends Component<PanelSlotProps, PanelSlotState> {
     // a panel opened again as the last one leaves comes in from where that one is drawn.
     const leaving = phaseOf(prev) === 'leaving' ? this.slot.current : null;
     const drawn = leaving ? getComputedStyle(leaving) : null;
+    const content = this.props.contentRef.current;
     return {
-      page: this.props.contentRef.current?.getBoundingClientRect().left ?? null,
+      page: content?.getBoundingClientRect().left ?? null,
+      blocks: blocksOf(content),
       panel: drawn ? { transform: drawn.transform, opacity: drawn.opacity } : null,
     };
   }
@@ -254,16 +314,25 @@ class PanelSlot extends Component<PanelSlotProps, PanelSlotState> {
     if (props.moves && !this.props.moves) {
       for (const animation of this.slot.current?.getAnimations() ?? []) animation.finish();
       this.glide?.finish();
+      for (const lift of this.lifts) lift.finish();
     }
     if (snapshot === null) return;
     const phase = phaseOf(this.state);
     const content = this.props.contentRef.current;
     this.glide?.cancel();
     this.glide = null;
+    for (const lift of this.lifts) lift.cancel();
+    this.lifts = [];
     if (!content || snapshot.page === null || reducesMotion()) return;
     const first = snapshot.page;
     const opening = phase === 'open';
     const timing = { duration: tokenMillis(opening ? '--motion-base' : '--motion-fast'), easing: tokenValue('--motion-ease-emphasis') };
+    // Where the new width moved blocks up or down (a subtitle taking a second line), measured
+    // before anything moves; each glides from where it was drawn on transform, added to any it has.
+    const lifted = blockShifts(content, snapshot.blocks);
+    this.lifts = lifted.map(([block, by]) =>
+      block.animate([{ transform: `translateY(${by}px)` }, { transform: 'translateY(0px)' }], { ...timing, composite: 'add' }),
+    );
     const shift = first - content.getBoundingClientRect().left;
     if (Math.abs(shift) >= 0.5) {
       const glide = content.animate([{ transform: `translateX(${shift}px)` }, { transform: 'none' }], timing);

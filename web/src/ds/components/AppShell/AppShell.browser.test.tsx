@@ -3,7 +3,7 @@
  * 768 px. The page inside must survive the switch: resizing a window or turning a phone keeps an
  * unsent draft and every other bit of page state.
  */
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
@@ -197,7 +197,7 @@ function easing(value: string): string {
 }
 
 /** A shell around a page, with the Ask Claude panel beside it while `open`. */
-function shellWithPanel(open: boolean, onClose: () => void = () => {}) {
+function shellWithPanel(open: boolean, onClose: () => void = () => {}, page: ReactNode = <p>Rules</p>) {
   return (
     <AppShell
       sidebar={<nav aria-label="Main">Today</nav>}
@@ -210,7 +210,7 @@ function shellWithPanel(open: boolean, onClose: () => void = () => {}) {
         ) : undefined
       }
     >
-      <p>Rules</p>
+      {page}
     </AppShell>
   );
 }
@@ -465,4 +465,60 @@ it('a_late_exit_never_cancels_the_next_panels_fallback', async () => {
     await first.finished;
   });
   await vi.waitFor(() => expect(slot()).toBeNull(), { timeout: 1000 });
+});
+
+/**
+ * A page whose first block is as tall as an eighth of its width, as a header whose subtitle takes
+ * a second line in a narrower column is taller: 120 px at the page's 960 px, 96 px at 768 px. What
+ * sits under it moves up or down as the panel opens or closes.
+ */
+const reflowingPage = (
+  <div>
+    <div style={{ aspectRatio: '8 / 1' }} />
+    <p data-testid="below">Quotes</p>
+  </div>
+);
+
+/** Every animation now playing in the shell, paused at `time`; or finished, with `time` null. */
+function holdAll(time: number | null): void {
+  for (const animation of container.getAnimations({ subtree: true })) {
+    if (time === null) {
+      animation.finish();
+      continue;
+    }
+    if (animation.playState !== 'running') continue;
+    animation.pause();
+    animation.currentTime = time;
+  }
+}
+
+it('what_the_new_width_moves_up_or_down_glides_too', async () => {
+  // Laid out at its new width at once, the page changes height where its text or blocks reflow,
+  // and what is under them moves: it glides there on transform, as the page glides sideways, so
+  // nothing jumps on the first frame of the open or the close.
+  await motion();
+  await page.viewport(LAPTOP.width, LAPTOP.height);
+  const below = () => container.querySelector('[data-testid="below"]') as HTMLElement;
+  const top = () => below().getBoundingClientRect().top;
+  act(() => root.render(shellWithPanel(false, () => {}, reflowingPage)));
+  const closed = top();
+
+  act(() => root.render(shellWithPanel(true, () => {}, reflowingPage)));
+  holdAll(0);
+  expect(Math.abs(top() - closed), 'opening: the first frame').toBeLessThanOrEqual(0.5);
+  const lifts = below().getAnimations();
+  expect(lifts).toHaveLength(1);
+  expect(properties(lifts[0] as Animation)).toEqual(['transform']);
+  expect(lifts[0]?.effect?.getTiming().duration).toBe(Number.parseFloat(token('--motion-base')));
+  expect(easing(lifts[0]?.effect?.getTiming().easing ?? '')).toBe(easing(token('--motion-ease-emphasis')));
+  holdAll(null);
+  const opened = top();
+  expect(closed - opened).toBeCloseTo(24, 0);
+
+  act(() => root.render(shellWithPanel(false, () => {}, reflowingPage)));
+  holdAll(0);
+  expect(Math.abs(top() - opened), 'closing: the first frame').toBeLessThanOrEqual(0.5);
+  expect(below().getAnimations()[0]?.effect?.getTiming().duration).toBe(Number.parseFloat(token('--motion-fast')));
+  holdAll(null);
+  expect(top()).toBeCloseTo(closed, 0);
 });

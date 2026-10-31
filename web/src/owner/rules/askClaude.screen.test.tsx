@@ -6,6 +6,7 @@
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { cdp, userEvent } from 'vitest/browser';
 
+import { settled } from '../../ds/test/settled.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll } from '../../test/screen.ts';
@@ -50,6 +51,41 @@ describe('ask claude', () => {
     await Promise.all(glides.map((glide) => glide.finished));
     expect(sent - composer.element().getBoundingClientRect().left).toBeCloseTo(68, 0);
     expectNoHorizontalScroll();
+  });
+
+  it('the_page_under_the_header_has_no_vertical_jump', async () => {
+    // Beside the panel at 1440 px, the header's subtitle takes a second line, so everything under
+    // the header sits 20 px lower; closing, it goes back up. That move is a glide too: on the first
+    // frame of the open and of the close, the first group is where it was.
+    await cdp().send('Animation.enable');
+    onTestFinished(async () => {
+      await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    });
+    const { screen } = await renderRoute(RULES);
+    const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+    await expect.element(composer).toBeVisible();
+    const group = () => screen.container.querySelector<HTMLElement>('.cd-connector-section__header');
+    await expect.poll(() => group()).not.toBeNull();
+    const top = () => (group() as HTMLElement).getBoundingClientRect().top;
+    const closed = top();
+
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
+    await composer.fill(ASK);
+    await userEvent.keyboard('{Enter}');
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    await expect.element(panel).toBeVisible();
+    expect(Math.abs(top() - closed), `opening: ${top()}, was ${closed}`).toBeLessThanOrEqual(0.5);
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await settled(screen.container);
+    const opened = top();
+    expect(opened - closed).toBeCloseTo(20, 0);
+
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
+    await panel.getByRole('button', { name: 'Close' }).click();
+    expect(Math.abs(top() - opened), `closing: ${top()}, was ${opened}`).toBeLessThanOrEqual(0.5);
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await settled(screen.container);
+    expect(top()).toBeCloseTo(closed, 0);
   });
 
   it('ask_claude_opens_at_once_under_reduced_motion', async () => {
