@@ -120,7 +120,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
  */
 export const HANDOFF_ENTRY_COPY = {
   card: 'Chat handed to you',
-  done: 'Handoff marked done',
+  done: 'Chat marked done',
 } as const;
 
 /**

@@ -626,7 +626,7 @@ describe('Safety', () => {
 
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
     await expect.element(recordRow(screen, opened ?? 0).getByText('Chat handed to you', { exact: true })).toBeVisible();
-    await expect.element(recordRow(screen, done ?? 0).getByText('Handoff marked done', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, done ?? 0).getByText('Chat marked done', { exact: true })).toBeVisible();
     await expect.element(recordRow(screen, hours).getByText('Desk details changed', { exact: true })).toBeVisible();
     expect(screen.getByText('Desk details changed').elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
