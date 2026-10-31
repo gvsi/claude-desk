@@ -17,6 +17,7 @@ import { HELD_PROSE, SCRIPT, matchRule, type RuleName } from '../mocks/script.ts
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
+import { watchLandings } from '../test/landings.ts';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
 const PAGE = `/d/${RIVERA.slug}`;
@@ -215,6 +216,25 @@ describe('public chat page', () => {
     expect(cancel.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(held.element().getBoundingClientRect().bottom);
     // Receipts are lines to read, never controls.
     expect(screen.container.querySelectorAll('.cd-margin-receipt button, button.cd-margin-receipt')).toHaveLength(0);
+  });
+
+  it('cancelled_line_under_a_landed_reply_shows_at_once', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 15% off if I pay cash?');
+    const reply = rowOf(screen.getByText(rivera.decisions.held.visitor_plain, { exact: true }).element());
+    // The held reply has landed, with its receipts and the cancel under them.
+    await expect.poll(() => reply.getAnimations({ subtree: true }).length).toBe(0);
+
+    // What cancelling says attaches under it later, and shows at once: no beat to wait for.
+    await screen.getByRole('button', { name: 'Cancel this request' }).click();
+    const cancelled = screen.getByText('Cancelled', { exact: true });
+    await expect.element(cancelled).toBeInTheDocument();
+    const line = cancelled.element().closest('.cd-margin-receipt');
+    if (!line) throw new Error('the cancelled line is a receipt');
+    expect(rowOf(line)).toBe(reply);
+    expect(getComputedStyle(line).animationName).toBe('none');
+    expect(getComputedStyle(line).animationDelay).toBe('0s');
   });
 
   it('held_request_can_be_cancelled', async () => {
@@ -764,16 +784,16 @@ describe('public chat page', () => {
   });
 
   it('live_reply_lands_once_and_history_draws_still', async () => {
+    const landed = watchLandings();
     const { screen, router } = await renderRoute(PAGE);
     await ready(screen);
     await say(screen, 'How much is drain clearing?');
-    const live = () => [...document.querySelectorAll('.cd-transcript-row--live')];
     const quote = () => screen.getByRole('article', { name: 'Quote' });
 
     // The reply came on the stream, so its row lands with its receipts; the visitor's own message,
     // shown as it was sent, doesn't.
     await expect.element(quote()).toBeVisible();
-    expect(live()).toEqual([rowOf(quote().element())]);
+    expect(landed.rows()).toEqual([rowOf(quote().element())]);
     expect(receiptsOf(rowOf(quote().element()))).toHaveLength(2);
 
     // It lands once: leaving the page and coming back to the same chat draws it still.
@@ -782,7 +802,7 @@ describe('public chat page', () => {
     await router.navigate(PAGE);
     await ready(screen);
     await expect.element(quote()).toBeVisible();
-    expect(live()).toEqual([]);
+    expect(landed.rows()).toHaveLength(1);
 
     // A reload reads the stored conversation: every row draws still, and the stream it resumes adds nothing.
     const second = await renderRoute(PAGE);
@@ -791,7 +811,7 @@ describe('public chat page', () => {
     await vi.waitFor(() => expect(requests('events').at(-1)?.path).toMatch(/after=4$/));
     await sleep(300);
     expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(2);
-    expect(live()).toEqual([]);
+    expect(landed.rows()).toHaveLength(1);
   });
 
   it('axe_check_leaves_a_landed_reply_still', async () => {

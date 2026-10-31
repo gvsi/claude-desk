@@ -29,8 +29,9 @@ A row with `live` lands once, in about 450 ms, so the eye sees the Desk's checks
 - What is attached lands one by one, `motion-stagger` apart, the first one beat after the message: each slides in `space-4` from the left and fades in, and a receipt's dot grows from half size with it (`MarginReceipt`). From the third on they share the third beat, so a long list never keeps the reply waiting.
 - A booking's or a payment's check (`drawCheck`) draws as its line lands.
 - `live` is read once, when the row is first drawn: changing it later neither starts nor stops the motion, and a re-render never replays it.
+- It lands once. When the last line has landed, the row is like any other: a line attached later (a held request's outcome, an approval) shows at once, and nothing in it can land again.
 - The motion is visual only. The log announces the row as it does without it, and the words, order and colors are the same.
-- Under reduced motion nothing moves: the row and everything attached show at once.
+- Under reduced motion nothing moves: the row and everything attached show at once, and the landing is spent, so turning motion back on never plays it.
 
 ## Props
 
@@ -40,7 +41,7 @@ A row with `live` lands once, in about 450 ms, so the eye sees the Desk's checks
 | --- | --- | --- |
 | `children` | `ReactNode` | Required. The message. |
 | `margin` | `ReactNode` | Optional. Receipts and notes, attached under the message. An empty list, or only `null` and `false`, attaches nothing. |
-| `live` | `boolean` | Optional. The row arrived live: it lands once (see "Arriving live"). Read when the row is first drawn. Never for a row read from history. |
+| `live` | `boolean` | Optional. The row arrived live: it lands once (see "Arriving live"). Read when the row is first drawn; spent once the landing has played, or at once under reduced motion. Never for a row read from history. |
 
 `TranscriptHeader`:
 

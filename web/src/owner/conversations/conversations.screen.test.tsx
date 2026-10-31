@@ -18,6 +18,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
+import { watchLandings } from '../../test/landings.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
 
@@ -747,8 +748,8 @@ describe('Conversations', () => {
   });
   it('a_reply_that_arrives_while_open_lands', async () => {
     const chat = named(DANA_LIVE, DANA);
+    const landed = watchLandings();
     const { screen, router } = await renderRoute(conversation(DANA_LIVE));
-    const live = () => [...log(screen).element().querySelectorAll('.cd-transcript-row--live')];
     const quotes = () => log(screen).getByRole('article', { name: 'Quote' }).elements();
     const rowOf = (el: Element | undefined) => el?.closest('.cd-transcript-row') ?? null;
 
@@ -757,7 +758,7 @@ describe('Conversations', () => {
     await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
     const before = quotes().length;
     await readsMore('conversation', 2);
-    expect(live()).toEqual([]);
+    expect(landed.rows()).toEqual([]);
 
     // Dana asks while the owner watches, and Claude answers: her words show as they come, and
     // Claude's reply lands, with its receipts.
@@ -770,9 +771,8 @@ describe('Conversations', () => {
     for (const step of [...price.steps, turnEnd]) world.emit(chat, step(turn));
     await expect.poll(() => quotes().length).toBe(before + 1);
     const reply = rowOf(quotes().at(-1));
-    expect(live()).toEqual([reply]);
+    expect(landed.rows()).toEqual([reply]);
     expect(reply?.querySelectorAll('.cd-margin-receipt')).toHaveLength(2);
-    expect(rowOf(log(screen).getByText(question, { exact: true }).element())?.classList.contains('cd-transcript-row--live')).toBe(false);
 
     // It lands once: coming back to the chat draws it still.
     await router.navigate(LIST);
@@ -781,7 +781,7 @@ describe('Conversations', () => {
     await router.navigate(conversation(DANA_LIVE));
     await expect.poll(() => quotes().length).toBe(before + 1);
     await readsMore('conversation', 2);
-    expect(live()).toEqual([]);
+    expect(landed.rows()).toHaveLength(1);
   });
 
   it('a_recorded_chat_never_lands', async () => {
@@ -794,13 +794,14 @@ describe('Conversations', () => {
     mockStore.inject({ route: 'conversation', status: 200, times: 1, body: { ...read, replayed: true } });
     mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, replayed: true, items: [...read.items, later] } });
 
+    const landed = watchLandings();
     const { screen } = await renderRoute(conversation(SEEDED_HOLD));
     const rows = () => log(screen).element().querySelectorAll('.cd-transcript-row:not(.cd-transcript-header)');
     await expect.element(screen.getByText('Recorded history, replayed into your copy. It happened before you arrived.', { exact: true })).toBeVisible();
     const shownFirst = rows().length;
     // The reply the next read adds shows where it belongs, and draws still: nothing in a recorded chat arrives live.
     await expect.poll(() => rows().length).toBe(shownFirst + 1);
-    expect(log(screen).element().querySelectorAll('.cd-transcript-row--live')).toHaveLength(0);
+    expect(landed.rows()).toEqual([]);
   });
 
   it('answer_row_follows_the_decided_look', async () => {
