@@ -657,8 +657,9 @@ async def _claim(engine: AsyncEngine, copy_id: str, key: str, request_sha256: st
 
 
 def _failure_record(error: BaseException) -> dict:
-    """What a keyed start that failed once its Desk was asked for answered, kept on its row: the row is settled and
-    its key spent (a repeat answers 409 `key_spent`)."""
+    """What a start that failed once its Desk was asked for answered, kept on its row: the row is settled and its key
+    spent. The record is kept for diagnosis only: a repeat answers 409 `key_spent` from its presence, never from its
+    content."""
     if isinstance(error, ApiProblem):
         return {"status": error.status, "error": error.error, "code": error.code}
     if isinstance(error, KernelFailed):
