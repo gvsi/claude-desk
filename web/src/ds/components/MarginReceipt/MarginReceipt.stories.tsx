@@ -4,6 +4,7 @@ import { expect, fn } from 'storybook/test';
 import type { Decision, SseEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { settled } from '../../test/settled.ts';
 import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
@@ -207,7 +208,8 @@ export const Expired: Story = {
 export const BookedWithCheck: Story = {
   args: { ...booked, drawCheck: true },
   parameters: {
-    canvasNote: "The board's booking note ends with the sage check that draws once; here it follows the kernel's line for the executed booking.",
+    canvasNote:
+      "The board's booking note ends with the sage check that draws once, short arm first; here it follows the kernel's line for the executed booking. Storybook shows the motion your system asks for: under reduced motion the check is drawn from the start.",
   },
   play: async ({ canvas, canvasElement }) => {
     const receipt = canvas.getByRole('button', { name: `${booked.plain} Open the full trace.` });
@@ -216,10 +218,16 @@ export const BookedWithCheck: Story = {
     if (!check) throw new Error('no check on the booked receipt');
     await expect(check).toHaveAttribute('aria-hidden', 'true');
     expectComputed(check, { color: 'rgb(111, 168, 89)' });
+    await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
     const stroke = check.querySelector('path');
     if (!stroke) throw new Error('no check stroke');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Under reduced motion the check doesn't move: it is drawn from the start.
+      expectComputed(stroke, { animationName: 'none', strokeDashoffset: '0px' });
+      return;
+    }
     expectComputed(stroke, { animationName: /^(?!none$).+/, animationIterationCount: '1', animationDuration: '0.2s' });
-    await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
+    await expectDrawsShortArmFirst(stroke);
   },
 };
 
@@ -245,7 +253,7 @@ export const BookedLandsLive: Story = {
     const lines = [...canvasElement.querySelectorAll<HTMLElement>('.cd-margin-receipt')];
     await expect(lines.map(visibleText)).toEqual([bookedReplyChecked.plain, booked.plain]);
     const bookedLine = lines[1] as HTMLElement;
-    const stroke = bookedLine.querySelector('.cd-margin-line__check path');
+    const stroke = bookedLine.querySelector<SVGPathElement>('.cd-margin-line__check path');
     if (!stroke) throw new Error('no check on the booked receipt');
     const dot = dotIn(bookedLine);
 
@@ -263,6 +271,8 @@ export const BookedLandsLive: Story = {
     expectComputed(bookedLine, { animationName: /^(?!none$).+/, animationDelay: beat });
     expectComputed(dot, { animationName: /^(?!none$).+/, animationDelay: beat });
     expectComputed(stroke, { animationName: /^(?!none$).+/, animationDelay: beat, animationDuration: '0.2s', animationIterationCount: '1' });
+    // Landing live doesn't change which way the check draws: short arm first, once its beat comes.
+    await expectDrawsShortArmFirst(stroke);
   },
 };
 

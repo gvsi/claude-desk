@@ -6,7 +6,8 @@
  * `no_invisible_characters_in_any_file` reads every text file, `danger_only_for_refusing_answers`
  * every file but the docs, so a story or fixture can't show the red look on anything but a refusal,
  * `caps_badge_only_in_the_lockup` every file but the docs too, so nothing but the lockup's badge
- * draws capitals, and the clay and mark guards the canvas boards too.
+ * draws capitals, the clay and mark guards the canvas boards too, and `no_positive_dash_offsets`
+ * every stylesheet.
  *
  * Each guard first proves its matcher on a known-bad sample, so it can't pass by matching nothing.
  */
@@ -210,6 +211,29 @@ const REDUCED_MOTION_BLOCK = /@media[^{]*\(\s*prefers-reduced-motion\s*:\s*reduc
 /** True when a stylesheet moves something without saying what happens under reduced motion. */
 function movesWithoutReducedMotion(css: string): boolean {
   return MOVES.test(css) && !REDUCED_MOTION_BLOCK.test(css);
+}
+
+// A `stroke-dashoffset` declaration and its value, not a custom property that ends in the name.
+const DASH_OFFSET = /(?<![\w-])stroke-dashoffset\s*:\s*([^;}]+)/g;
+
+/** Every `stroke-dashoffset` declaration in a stylesheet, as "stroke-dashoffset: value". */
+function dashOffsets(css: string): string[] {
+  return [...css.matchAll(DASH_OFFSET)].map((m) => `stroke-dashoffset: ${(m[1] ?? '').trim()}`);
+}
+
+/**
+ * The dash offsets that are neither 0 nor negative. The check icon's path starts at the long arm's
+ * tip, so a draw from a positive offset goes long arm first.
+ */
+function positiveDashOffsets(css: string): string[] {
+  return dashOffsets(css).filter((declaration) => !/^stroke-dashoffset: (?:0(?:px)?|-\S.*)$/.test(declaration));
+}
+
+/** Every stylesheet under `src/ds/`, the boards', tokens and base styles included. */
+function allStylesheets(): Source[] {
+  return filesUnder(DS)
+    .filter((file) => file.endsWith('.css'))
+    .map((file) => ({ file, text: readFileSync(path.join(DS, file), 'utf8') }));
 }
 
 // Capitals drawn by code: CSS transforms and small caps, JavaScript upper-casing, title case.
@@ -488,6 +512,24 @@ describe('design system source guards', () => {
     const stylesheets = sources.filter(({ file }) => file.endsWith('.css'));
     expect(stylesheets.map(({ file }) => file)).toContain('base.css');
     expect(stylesheets.filter(({ text }) => movesWithoutReducedMotion(text)).map(({ file }) => file)).toEqual([]);
+  });
+
+  it('no_positive_dash_offsets', () => {
+    // A drawn check goes short arm first: its dash offset runs from minus its dash length to 0, so
+    // a stylesheet only ever sets 0 or a negative offset.
+    expect(positiveDashOffsets('.a path { stroke-dashoffset: 24; } .b { stroke-dashoffset:12px }')).toEqual([
+      'stroke-dashoffset: 24',
+      'stroke-dashoffset: 12px',
+    ]);
+    expect(
+      positiveDashOffsets(
+        '.a { stroke-dashoffset: -24; } .b { stroke-dashoffset: 0 } @keyframes k { to { stroke-dashoffset: 0px } } .c { --stroke-dashoffset: 3 }',
+      ),
+    ).toEqual([]);
+    const css = allStylesheets();
+    // It reads the offsets the checks set, so it can't pass by finding none.
+    expect(findAll(css, dashOffsets).length).toBeGreaterThanOrEqual(4);
+    expect(findAll(css, positiveDashOffsets)).toEqual([]);
   });
 
   it('no_uppercase_or_arrows_in_source', () => {

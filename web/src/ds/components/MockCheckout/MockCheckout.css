@@ -206,11 +206,13 @@
   height: 1lh;
 }
 
-/* The paid check, drawn once in the line's own ink: status color stays on the dot. */
+/* The paid check, drawn once in the line's own ink: status color stays on the dot. It draws short
+   arm first, as a hand writes a check: the dash (24) covers the whole path, and the offset starts
+   negative, so the stroke shows from the path's end (the short arm's tip). */
 
 .cd-checkout__check path {
   stroke-dasharray: 24;
-  stroke-dashoffset: 24;
+  stroke-dashoffset: -24;
   animation: cd-checkout-draw var(--motion-base) var(--motion-ease-emphasis) forwards;
 }
 

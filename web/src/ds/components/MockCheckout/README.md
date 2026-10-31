@@ -71,7 +71,7 @@ The merchant, the title and the customer's name are someone's own words, marked 
 - Pay (primary) over Cancel (secondary), both main buttons as wide as the card's content, `space-8` apart. Any error line follows.
 - A final state's line in `body` type and `text-primary`: the dot, then the words, `space-10` apart, the dot and the paid check on the middle of the first line, the check `space-6` before the words, in the same ink.
 - The footnote in `caption` type and `text-secondary`, `space-12` under a `line-hairline` rule.
-- The paid check draws once at `motion-base`; the buttons follow `Button`. Nothing moves under reduced motion.
+- The paid check draws once at `motion-base`, short arm first as a hand writes one; the buttons follow `Button`. Nothing moves under reduced motion.
 
 ## Props
 
