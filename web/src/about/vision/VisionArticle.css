@@ -1,0 +1,629 @@
+/* The Vision article: the named exception to design system v2, a newsroom-style page on warm paper with phone
+   screens drawn inline. Every rule sits under .vision-article, and every color is a custom property on it, so
+   none of the article's colors or sizes reach the app's tokens or any other page. Clay stays out. Nothing on
+   the page moves. */
+
+.vision-article {
+  /* The page. */
+  --va-paper: #f4f2ec;
+  --va-band: #eae6dc;
+  --va-ink: #1c1b19;
+  --va-ink-2: #5c5850;
+  --va-line: rgba(28, 27, 25, 0.13);
+  --va-link: #2d5b8a;
+  --va-bar: rgba(244, 242, 236, 0.94);
+  /* The phones: a dark device holding a light, crisp app screen. */
+  --va-device: #151513;
+  --va-device-shadow: 0 1px 2px rgba(28, 27, 25, 0.18), 0 24px 48px -18px rgba(28, 27, 25, 0.32);
+  --va-screen: #fbfaf7;
+  --va-screen-ink-2: #55514a;
+  --va-screen-ink-3: #6a665e;
+  /* The composer's placeholder: the board's grey, darkened to pass 4.5:1 on the composer's white. */
+  --va-screen-faint: #7a756c;
+  --va-bubble: #e8e4da;
+  --va-system: #efece4;
+  --va-card: #ffffff;
+  --va-card-edge: rgba(28, 27, 25, 0.12);
+  --va-card-shadow: 0 1px 2px rgba(28, 27, 25, 0.06);
+  --va-control-edge: rgba(28, 27, 25, 0.14);
+  --va-tab-line: rgba(28, 27, 25, 0.1);
+  --va-done: #4f8a3b;
+  --va-held: #c79a16;
+  --va-declined: #c2475a;
+  /* The businesses' own header colors, and what sits on them. */
+  --va-city: #16324d;
+  --va-rivera: #1f4e4a;
+  --va-on-field: #ffffff;
+  --va-on-field-tile: rgba(255, 255, 255, 0.16);
+  --va-on-field-fill: rgba(255, 255, 255, 0.13);
+
+  width: 100%;
+  background: var(--va-paper);
+  color: var(--va-ink);
+  color-scheme: light;
+  font-family: var(--font-sans);
+  font-weight: 400;
+}
+
+.vision-article a {
+  color: var(--va-link);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.vision-article :focus-visible {
+  outline-color: var(--va-link);
+}
+
+/* The bar across the top, which stays while the page scrolls: the name, where you are, and the way back. */
+
+.vision-article .va-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 56px;
+  padding: 0 40px;
+  background: var(--va-bar);
+  border-bottom: 1px solid var(--va-line);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.vision-article .va-bar__brand {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 460;
+  letter-spacing: -0.1px;
+}
+
+.vision-article .va-bar__here {
+  color: var(--va-ink-2);
+}
+
+.vision-article .va-bar__back {
+  margin-left: auto;
+}
+
+/* The headline block: the meta line, the headline, the dek and the note under it. */
+
+.vision-article .va-hero {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 88px 40px 40px;
+  text-align: center;
+}
+
+.vision-article .va-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 18px;
+  margin: 0 0 28px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--va-ink-2);
+}
+
+.vision-article .va-meta strong {
+  color: var(--va-ink);
+  font-weight: 560;
+}
+
+.vision-article .va-h1 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 68px;
+  line-height: 72px;
+  letter-spacing: -1.4px;
+  font-variation-settings: 'opsz' 60;
+  text-wrap: balance;
+}
+
+.vision-article .va-dek {
+  max-width: 720px;
+  margin: 26px auto 0;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 33px;
+  color: var(--va-ink-2);
+  font-variation-settings: 'opsz' 24;
+  text-wrap: pretty;
+}
+
+.vision-article .va-note {
+  display: inline-block;
+  margin: 30px 0 0;
+  padding: 6px 14px;
+  border: 1px solid var(--va-line);
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--va-ink-2);
+}
+
+/* The cover band: the four phones' tops, peeking under the headline. */
+
+.vision-article .va-band {
+  height: 300px;
+  margin: 16px 0 0;
+  padding: 56px 40px 0;
+  overflow: hidden;
+  background: var(--va-band);
+}
+
+.vision-article .va-trio {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 28px;
+}
+
+.vision-article .va-trio .va-phone {
+  width: 260px;
+  padding: 9px;
+  border-radius: 42px;
+}
+
+.vision-article .va-trio .va-screen {
+  border-radius: 33px;
+}
+
+.vision-article .va-trio .va-phone:nth-child(2n) {
+  margin-top: 36px;
+}
+
+/* The article's text: a serif column, its section headings in the interface face. */
+
+.vision-article .va-body {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 0 40px 24px;
+}
+
+.vision-article .va-body--intro {
+  padding: 72px 40px 0;
+}
+
+.vision-article .va-p {
+  margin: 0 0 24px;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  line-height: 31px;
+  font-variation-settings: 'opsz' 20;
+  text-wrap: pretty;
+}
+
+.vision-article .va-h2 {
+  margin: 56px 0 18px;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 620;
+  letter-spacing: -0.3px;
+  text-wrap: balance;
+}
+
+.vision-article .va-quote {
+  margin: 40px 0;
+  padding: 0;
+}
+
+.vision-article .va-quote p {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 300;
+  font-size: 30px;
+  line-height: 40px;
+  letter-spacing: -0.3px;
+}
+
+/* A figure: a 300 px phone and its caption, bottom-aligned, on alternating sides. */
+
+.vision-article .va-fig {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 48px;
+  align-items: end;
+  max-width: 760px;
+  margin: 48px auto 56px;
+  padding: 0 40px;
+}
+
+.vision-article .va-fig--right {
+  grid-template-columns: minmax(0, 1fr) 300px;
+}
+
+.vision-article .va-fig--right .va-phone {
+  order: 2;
+}
+
+.vision-article .va-cap {
+  margin: 0 0 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--va-line);
+  font-size: 15px;
+  line-height: 23px;
+  color: var(--va-ink-2);
+}
+
+.vision-article .va-cap b {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--va-ink);
+  font-weight: 600;
+}
+
+/* The end: the note that it's vision, the way back, and the footer line. */
+
+.vision-article .va-end {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px 40px 96px;
+}
+
+.vision-article .va-end__rule {
+  margin: 40px 0 24px;
+  border: 0;
+  border-top: 1px solid var(--va-line);
+}
+
+.vision-article .va-end p {
+  margin: 0 0 10px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 400;
+  color: var(--va-ink-2);
+}
+
+/* The phones. */
+
+.vision-article .va-phone {
+  flex: none;
+  width: 300px;
+  padding: 10px;
+  border-radius: 48px;
+  background: var(--va-device);
+  box-shadow: var(--va-device-shadow);
+}
+
+.vision-article .va-screen {
+  display: flex;
+  flex-direction: column;
+  height: 628px;
+  overflow: hidden;
+  border-radius: 38px;
+  background: var(--va-screen);
+  color: var(--va-ink);
+}
+
+.vision-article .ph-head {
+  flex: none;
+  padding: 24px 16px 12px;
+  color: var(--va-on-field);
+}
+
+.vision-article .ph-head--city {
+  background: var(--va-city);
+}
+
+.vision-article .ph-head--rivera {
+  background: var(--va-rivera);
+}
+
+.vision-article .ph-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.vision-article .ph-mono {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--va-on-field-tile);
+  font-family: var(--font-serif);
+  font-size: 17px;
+}
+
+.vision-article .ph-name {
+  font-size: 15px;
+  line-height: 19px;
+  font-weight: 620;
+}
+
+.vision-article .ph-sub {
+  font-size: 11.5px;
+  line-height: 15px;
+  opacity: 0.82;
+}
+
+.vision-article .ph-ai {
+  margin: 10px 0 0;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--va-on-field-fill);
+  font-size: 11.5px;
+  line-height: 15px;
+}
+
+.vision-article .ph-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 14px 14px 10px;
+  overflow: hidden;
+}
+
+.vision-article .ph-you {
+  align-self: flex-end;
+  max-width: 210px;
+  padding: 8px 12px;
+  border-radius: 16px 16px 4px 16px;
+  background: var(--va-bubble);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.vision-article .ph-claude {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.vision-article .ph-card {
+  padding: 10px 12px;
+  border: 1px solid var(--va-card-edge);
+  border-radius: 14px;
+  background: var(--va-card);
+  box-shadow: var(--va-card-shadow);
+}
+
+.vision-article .ph-card__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  line-height: 14px;
+  color: var(--va-screen-ink-3);
+}
+
+.vision-article .ph-card__head {
+  margin-top: 3px;
+  font-size: 14px;
+  line-height: 19px;
+  font-weight: 620;
+}
+
+.vision-article .ph-card__line {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--va-screen-ink-2);
+}
+
+/* The owner's held request: the ask in the serif, then the rule that held it and her two answers. */
+.vision-article .ph-card__ask {
+  margin-top: 3px;
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 21px;
+}
+
+.vision-article .ph-card__rule {
+  margin-top: 6px;
+}
+
+.vision-article .ph-card .ph-btns {
+  margin-top: 10px;
+}
+
+.vision-article .ph-card__lines {
+  margin-top: 4px;
+}
+
+.vision-article .ph-receipt {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: -2px;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--va-screen-ink-3);
+}
+
+.vision-article .ph-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 4.5px;
+  border-radius: 99px;
+}
+
+.vision-article .ph-card__label .ph-dot {
+  margin-top: 0;
+}
+
+.vision-article .ph-dot--done {
+  background: var(--va-done);
+}
+
+.vision-article .ph-dot--held {
+  background: var(--va-held);
+}
+
+.vision-article .ph-dot--declined {
+  background: var(--va-declined);
+}
+
+.vision-article .ph-system {
+  align-self: center;
+  padding: 3px 10px;
+  border-radius: 99px;
+  background: var(--va-system);
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--va-screen-ink-3);
+}
+
+.vision-article .ph-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vision-article .ph-btn {
+  padding: 7px 11px;
+  border: 1px solid var(--va-control-edge);
+  border-radius: 10px;
+  background: var(--va-card);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--va-ink);
+}
+
+.vision-article .ph-btn--primary {
+  border-color: var(--va-ink);
+  background: var(--va-ink);
+  color: var(--va-on-field);
+}
+
+.vision-article .ph-compose {
+  flex: none;
+  margin: 0 12px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--va-control-edge);
+  border-radius: 16px;
+  background: var(--va-card);
+  font-size: 12.5px;
+  color: var(--va-screen-faint);
+}
+
+/* The owner's app: the greeting on the screen's own paper, and the tabs along the bottom. */
+.vision-article .ph-today {
+  padding: 30px 18px 6px;
+}
+
+.vision-article .ph-today__business {
+  font-size: 11.5px;
+  line-height: 15px;
+  color: var(--va-screen-ink-3);
+}
+
+.vision-article .ph-greet {
+  margin: 2px 0 0;
+  font-family: var(--font-serif);
+  font-size: 26px;
+  line-height: 31px;
+  font-weight: 300;
+  letter-spacing: -0.3px;
+}
+
+.vision-article .ph-tabs {
+  display: flex;
+  flex: none;
+  justify-content: space-around;
+  padding: 10px 6px 16px;
+  border-top: 1px solid var(--va-tab-line);
+  font-size: 10.5px;
+  color: var(--va-screen-ink-3);
+}
+
+.vision-article .ph-tabs b {
+  color: var(--va-ink);
+  font-weight: 600;
+}
+
+/* Phones: the headline block to the left, no cover band, and each figure stacked and centered. */
+@media (max-width: 720px) {
+  .vision-article .va-bar {
+    gap: 10px;
+    padding: 0 16px;
+  }
+
+  .vision-article .va-bar__here {
+    display: none;
+  }
+
+  .vision-article .va-hero {
+    padding: 56px 16px 28px;
+    text-align: left;
+  }
+
+  .vision-article .va-meta {
+    justify-content: flex-start;
+    margin-bottom: 20px;
+  }
+
+  .vision-article .va-h1 {
+    font-size: 42px;
+    line-height: 46px;
+    letter-spacing: -0.8px;
+  }
+
+  .vision-article .va-dek {
+    margin-top: 18px;
+    font-size: 19px;
+    line-height: 28px;
+  }
+
+  .vision-article .va-band {
+    display: none;
+  }
+
+  .vision-article .va-body {
+    padding: 0 16px 8px;
+  }
+
+  .vision-article .va-body--intro {
+    padding: 48px 16px 0;
+  }
+
+  .vision-article .va-p {
+    font-size: 17px;
+    line-height: 28px;
+  }
+
+  .vision-article .va-h2 {
+    margin-top: 44px;
+    font-size: 24px;
+    line-height: 30px;
+  }
+
+  .vision-article .va-quote p {
+    font-size: 24px;
+    line-height: 32px;
+  }
+
+  .vision-article .va-fig,
+  .vision-article .va-fig--right {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+    justify-items: center;
+    margin: 32px auto 40px;
+    padding: 0 16px;
+  }
+
+  .vision-article .va-fig--right .va-phone {
+    order: 0;
+  }
+
+  .vision-article .va-cap {
+    max-width: 300px;
+    margin: 0;
+  }
+
+  .vision-article .va-end {
+    padding: 8px 16px 64px;
+  }
+}

@@ -18,9 +18,10 @@ import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { Inlines } from './Inlines.tsx';
-import { ABOUT_LINKS, type AboutId } from './links.ts';
+import { DOCUMENT_LINKS, type AboutId } from './links.ts';
 import { MONTHS } from './months.ts';
 import { PrototypeLink } from './PrototypeLink.tsx';
+import { useNoIndex } from './useNoIndex.ts';
 
 import './reader.css';
 
@@ -363,7 +364,7 @@ function ReadNext({ other, compact }: { other: AboutDocument; compact: boolean }
 function DocumentSwitch({ current, compact }: { current: AboutId; compact: boolean }) {
   return (
     <nav className={`cd-about-switch${compact ? ' cd-about-switch--compact' : ''}`} aria-label="Documents">
-      {ABOUT_LINKS.links.map((link) => (
+      {DOCUMENT_LINKS.map((link) => (
         <Link
           key={link.id}
           className="cd-about-switch__link cd-type-control"
@@ -425,17 +426,8 @@ export function ReaderPage({ id }: ReaderPageProps) {
   const { hash } = useLocation();
   useReadingPlace(id, hash);
 
-  // Search engines are asked not to list the page while it is open. A best effort: the app serves one
-  // index.html for every address, so the tag exists only once the page has drawn. Both this and the title
-  // (useDocumentTitle) are set and taken back in the commit that draws or leaves the page, so the next page
-  // never inherits them.
-  useLayoutEffect(() => {
-    const robots = document.createElement('meta');
-    robots.name = 'robots';
-    robots.content = 'noindex';
-    document.head.append(robots);
-    return () => robots.remove();
-  }, []);
+  // Search engines are asked not to list the page while it is open.
+  useNoIndex();
 
   // The tab names the document while it is open, and goes back to what it said when it closes.
   useDocumentTitle(inApp(about.title));

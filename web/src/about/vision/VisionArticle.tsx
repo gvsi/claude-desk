@@ -1,0 +1,263 @@
+/**
+ * The Vision article: a long-form page under About this prototype on where a Desk could go next, with four phone
+ * screens drawn inline. It is the named exception to the design system, on its own light palette and type scale
+ * (`VisionArticle.css`, every rule under `.vision-article`), and it says on the page that it is vision, not the
+ * prototype.
+ *
+ * The phone screens are pictures made of live text: each is read by its label, with its caption under it. The
+ * cover band under the headline peeks at the same four screens and is decoration only. The page is static: its
+ * words come from `text.ts`, nothing on it moves, and it makes no request.
+ */
+import { Fragment } from 'react';
+import { Link } from 'react-router';
+
+import { ConceptFooter } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { prototypeHref } from '../prototypeHref.ts';
+import { useNoIndex } from '../useNoIndex.ts';
+import {
+  ARTICLE,
+  READ_MINUTES,
+  SCREENS,
+  SECTIONS,
+  type ChatPart,
+  type ChatScreen,
+  type Figure,
+  type OwnerScreen,
+  type Screen,
+  type Section,
+} from './text.ts';
+
+import './VisionArticle.css';
+
+/** What happened, under the message it belongs to, with a dot in its tone. */
+function Receipt({ tone, text }: { tone: 'done' | 'held' | 'declined'; text: string }) {
+  return (
+    <div className="ph-receipt" data-part="receipt" data-tone={tone}>
+      <span className={`ph-dot ph-dot--${tone}`} aria-hidden="true" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+/** Two choices drawn as buttons. They are part of the picture, so they are not buttons anyone can press. */
+function Choices({ primary, other }: { primary: string; other: string }) {
+  return (
+    <div className="ph-btns">
+      <span className="ph-btn ph-btn--primary">{primary}</span>
+      <span className="ph-btn">{other}</span>
+    </div>
+  );
+}
+
+function Part({ part }: { part: ChatPart }) {
+  switch (part.kind) {
+    case 'visitor':
+      return (
+        <div className="ph-you" data-part="visitor">
+          {part.text}
+        </div>
+      );
+    case 'claude':
+      return (
+        <p className="ph-claude" data-part="claude">
+          {part.text}
+        </p>
+      );
+    case 'system':
+      return (
+        <div className="ph-system" data-part="system">
+          {part.text}
+        </div>
+      );
+    case 'card':
+      return (
+        <div className="ph-card" data-part="card">
+          <div className="ph-card__label">{part.label}</div>
+          <div className="ph-card__head">{part.head}</div>
+          {part.lines.map((line) => (
+            <div key={line} className="ph-card__line">
+              {line}
+            </div>
+          ))}
+        </div>
+      );
+    case 'receipt':
+      return <Receipt tone={part.tone} text={part.text} />;
+    case 'choices':
+      return <Choices primary={part.primary} other={part.other} />;
+  }
+}
+
+/** A chat with a Desk: the business's header with the line that says Claude, an AI, is answering, then the chat. */
+function Chat({ screen }: { screen: ChatScreen }) {
+  return (
+    <>
+      <div className={`ph-head ph-head--${screen.field}`} data-screen-head="">
+        <div className="ph-row">
+          <span className="ph-mono" aria-hidden="true">
+            {screen.monogram}
+          </span>
+          <div>
+            <div className="ph-name">{screen.name}</div>
+            <div className="ph-sub">{screen.sub}</div>
+          </div>
+        </div>
+        <p className="ph-ai">{screen.ai}</p>
+      </div>
+      <div className="ph-body">
+        {screen.parts.map((part, i) => (
+          <Part key={i} part={part} />
+        ))}
+      </div>
+      <div className="ph-compose">{screen.composer}</div>
+    </>
+  );
+}
+
+/** The owner's app on Today: the request held for her answer, who's live now, the night's count and the tabs. */
+function Owner({ screen }: { screen: OwnerScreen }) {
+  const { held, live } = screen;
+  return (
+    <>
+      <div className="ph-today">
+        <div className="ph-today__business">{screen.business}</div>
+        <p className="ph-greet">{screen.greeting}</p>
+      </div>
+      <div className="ph-body">
+        <div className="ph-card" data-part="card">
+          <div className="ph-card__label">
+            <span className="ph-dot ph-dot--held" aria-hidden="true" />
+            {held.label}
+          </div>
+          <div className="ph-card__ask">{held.ask}</div>
+          <div className="ph-card__line ph-card__rule">{held.rule}</div>
+          <Choices primary={held.allow} other={held.deny} />
+        </div>
+        <div className="ph-card" data-part="card">
+          <div className="ph-card__label">{live.label}</div>
+          <div className="ph-card__lines">
+            {live.lines.map((line) => (
+              <div key={line} className="ph-card__line">
+                {line}
+              </div>
+            ))}
+          </div>
+        </div>
+        <Receipt tone="done" text={screen.receipt} />
+      </div>
+      <div className="ph-tabs">
+        {screen.tabs.map((tab) => (tab === screen.tab ? <b key={tab}>{tab}</b> : <span key={tab}>{tab}</span>))}
+      </div>
+    </>
+  );
+}
+
+/**
+ * A phone holding a screen. In the article it is a picture, read by its label; in the cover band, which is
+ * hidden from screen readers, it is decoration with no label of its own.
+ */
+function Phone({ screen, decorative = false }: { screen: Screen; decorative?: boolean }) {
+  const picture = decorative ? {} : { role: 'img', 'aria-label': screen.label };
+  return (
+    <div className="va-phone" {...picture}>
+      <div className="va-screen">{screen.kind === 'chat' ? <Chat screen={screen} /> : <Owner screen={screen} />}</div>
+    </div>
+  );
+}
+
+/** A screen and its caption: the phone on its side at a laptop's width, above the caption on a phone. */
+function ArticleFigure({ figure }: { figure: Figure }) {
+  return (
+    <figure className={`va-fig${figure.side === 'right' ? ' va-fig--right' : ''}`}>
+      <Phone screen={figure.screen} />
+      <figcaption className="va-cap">
+        <b>{figure.lead}</b> {figure.caption}
+      </figcaption>
+    </figure>
+  );
+}
+
+/** A section's text: its heading, then its paragraphs and the pull quote where it falls. */
+function SectionText({ heading, passages }: Pick<Section, 'heading' | 'passages'>) {
+  return (
+    <div className="va-body">
+      <h2 className="va-h2">{heading}</h2>
+      {passages.map((passage) =>
+        typeof passage === 'string' ? (
+          <p key={passage} className="va-p">
+            {passage}
+          </p>
+        ) : (
+          <blockquote key={passage.quote} className="va-quote">
+            <p>{passage.quote}</p>
+          </blockquote>
+        ),
+      )}
+    </div>
+  );
+}
+
+export function VisionArticle() {
+  // The tab names the page while it is open; search engines are asked not to list it, as the other About pages.
+  useDocumentTitle(inApp(ARTICLE.kicker));
+  useNoIndex();
+  // Where the reading pages' way back goes: the last Desk this browser opened, or the prototype's start.
+  const back = prototypeHref();
+
+  return (
+    <div className="vision-article">
+      <header className="va-bar">
+        <span className="va-bar__brand">Claude Desk</span>
+        <span className="va-bar__here" aria-current="page">
+          {ARTICLE.kicker}
+        </span>
+        <Link className="va-bar__back" to={back}>
+          {ARTICLE.back}
+        </Link>
+      </header>
+      <main>
+        <article>
+          <header className="va-hero">
+            {/* Spaces between the three, which the line's gaps draw, so they read as three. */}
+            <p className="va-meta" data-meta="">
+              <strong>{ARTICLE.kicker}</strong> <time dateTime={ARTICLE.date.iso}>{ARTICLE.date.text}</time>{' '}
+              <span>{`${READ_MINUTES} min read`}</span>
+            </p>
+            <h1 className="va-h1">{ARTICLE.title}</h1>
+            <p className="va-dek">{ARTICLE.dek}</p>
+            <p className="va-note">{ARTICLE.note}</p>
+          </header>
+          <div className="va-band" aria-hidden="true" data-cover="">
+            <div className="va-trio">
+              {SCREENS.map((screen) => (
+                <Phone key={screen.label} screen={screen} decorative />
+              ))}
+            </div>
+          </div>
+          <div className="va-body va-body--intro">
+            {ARTICLE.intro.map((paragraph) => (
+              <p key={paragraph} className="va-p">
+                {paragraph}
+              </p>
+            ))}
+          </div>
+          {SECTIONS.map(({ heading, passages, figure }) => (
+            <Fragment key={heading}>
+              <SectionText heading={heading} passages={passages} />
+              {figure ? <ArticleFigure figure={figure} /> : null}
+            </Fragment>
+          ))}
+        </article>
+      </main>
+      <footer className="va-end">
+        <hr className="va-end__rule" />
+        <p>{ARTICLE.end}</p>
+        <p>
+          <Link to={back}>{ARTICLE.back}</Link>
+        </p>
+        <ConceptFooter />
+      </footer>
+    </div>
+  );
+}
