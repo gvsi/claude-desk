@@ -109,7 +109,10 @@ async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) ->
         definition = BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"}))
         profile = blocks.profile(tool.tool, definition)
         row = rows.pop(tool.tool, None)
-        change = "new" if row is None else "kept" if row.definition_sha256 == profile.definition_sha256 else "changed"
+        profile_hash = adapters.profile_sha256(profile)
+        kept = (row is not None and row.definition_sha256 == profile.definition_sha256
+                and row.profile_sha256 == profile_hash)
+        change = "new" if row is None else "kept" if kept else "changed"
         if change != "kept":
             if row is None:
                 row = Tool(copy_id=ctx.copy_id, desk_id=id, tool=tool.tool)
@@ -117,7 +120,7 @@ async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) ->
             profile = profile.model_copy(update={"review_reason": change})
             row.source, row.effects, row.reversible = profile.source, profile.effects, profile.reversible
             row.description_confirmed, row.profile = profile.description_confirmed, profile
-            row.profile_sha256, row.definition_sha256 = adapters.profile_sha256(profile), profile.definition_sha256
+            row.profile_sha256, row.definition_sha256 = profile_hash, profile.definition_sha256
             row.status, row.review_reason = "needs_review", change
             row.pending_definition_text = row.pending_sha256 = None
         changes.append({"tool": tool.tool, "block": definition.config.block,

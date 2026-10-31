@@ -61,6 +61,38 @@ async def test_put_profiles_all_blocks_and_replace(app, client):
     assert 'Take the details' not in json.dumps([event.model_dump(mode='json') for event in events])
 
 
+@pytest.mark.solver
+async def test_reput_refreshes_a_profile_changed_by_kernel_code_and_can_confirm(app, client, monkeypatch, desk_prove):
+    from desk.kernel_service.adapters import blocks
+
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake()])).status_code == 200
+    old = (await business_rows(app, copy))['desk.new-enquiry']
+    old_profile_hash, definition_hash = old.profile_sha256, old.definition_sha256
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [row] = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+            Tool.desk_id == copy.desk_id, Tool.tool == old.tool)))
+        row.status, row.review_reason = 'enabled', None
+    sentence = blocks.BLOCK_SENTENCES['intake'] + ' The owner can follow up later.'
+    monkeypatch.setitem(blocks.BLOCK_SENTENCES, 'intake', sentence)
+    assert (await put(client, copy, [intake()])).status_code == 200
+    row = (await business_rows(app, copy))[old.tool]
+    assert (row.status, row.review_reason) == ('needs_review', 'changed')
+    assert row.definition_sha256 == definition_hash
+    assert row.profile_sha256 != old_profile_hash
+    assert row.profile.description_confirmed.startswith(sentence)
+    response = await client.post('/tools/confirm', headers=copy.owner, json={
+        'desk_id': copy.desk_id, 'tools': [{'tool': row.tool, 'definition_sha256': definition_hash}], 'enable': True})
+    assert response.status_code == 200, response.text
+    draft = response.json()['draft']
+    assert draft['status'] == 'proved'
+    response = await client.post('/policy/confirm', headers=copy.owner,
+                                 json={'desk_id': copy.desk_id, 'version': draft['version']})
+    assert response.status_code == 200, response.text
+    assert (await business_rows(app, copy))[old.tool].status == 'enabled'
+
+
 async def test_intake_default_ask_auto_execution_and_owner_only_answers(app, client):
     copy = await rivera(app, client)
     assert (await put(client, copy, [intake()])).status_code == 200
