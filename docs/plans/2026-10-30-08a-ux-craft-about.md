@@ -132,3 +132,4 @@ One design PR from `plan/08a-ux-craft-about`, titled `feat(web): play the About 
 - Task 2: P3 parked — a step that already finished can relight once if the layout crosses 1100 px during the 2.44 s trace (rotating a tablet mid-trace); the figure still ends at rest, and a switch after the play has ended replays nothing — rare and harmless, needs per-part played state across remounts.
 
 **During Task 3 (2026-10-31), rulings by claude-desk-3c:** `useCurrentSection` also returns `follow`, the click handler updates the address before it scrolls (in the other order, Back under reduced motion landed 848 px off), and the short-last-section test sizes its window from the page. Interfaces and Task 3 now say so.
+- Task 3: P3 parked — the 1 s hold fallback in `useCurrentSection` (scrollend missing) and its restart during continued scrolling have no direct test; normal scroll completion is covered — a timer regression would leave the marker held a second longer.
