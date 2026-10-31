@@ -47,10 +47,10 @@ ending `-estimated` when any call was charged its bound; provider `anthropic`; r
 and the spend as the Desk's and the Claude API's. A calibration's row counts against the monthly
 limit but never measures what a tier 2 run costs (`passes.CALIBRATION_PREFIX`).
 
-Results. `evals/out/soft-promise/<label>-<time>.json` holds the run (the prompt, where it came from and
-its sha256, the commit, the model, samples, estimate, spend, calls, whether the cap stopped it and
-whether the spend went past it) and,
-per case, its expectation, whether the code check blocks it, the samples asked for (`requested`), the
+Results. `evals/out/soft-promise/<label>-<time>.json` (git-ignored; a run the records cite is copied
+into `evals/calibration/results/` and committed) holds the run (the prompt, where it came from and its
+sha256, the commit, the model, samples, estimate, spend, calls, whether the cap stopped it and whether
+the spend went past it) and, per case, its expectation, whether the code check blocks it, the samples asked for (`requested`), the
 count of each verdict over the samples taken (`pass`; `flag`, promises_beyond_cards alone; `flag_ai`,
 denies_being_ai alone; `flag_both`; and `error`, no verdict) and its errors by status. A sample meets
 `pass` with neither flag, `flag` with promises_beyond_cards set and `flag_ai` with denies_being_ai set,

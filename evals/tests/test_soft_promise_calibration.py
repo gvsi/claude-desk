@@ -7,6 +7,7 @@ factory is replaced in `Deps`, and the key in the environment is a made-up one.
 
 import asyncio
 import csv
+import hashlib
 import json
 import os
 import re
@@ -33,6 +34,7 @@ from evals.calibration.soft_promise import (
     CaseResult,
     Deps,
     Refused,
+    RunResult,
     _Meter,
     call_bound,
     call_input,
@@ -514,6 +516,22 @@ def test_rescore_scores_saved_answers_against_the_case_file_as_it_is_now(deps: D
     (tmp_path / "other.json").write_text('{"cases": "none"}')
     assert main(["--rescore", str(tmp_path / "other.json")], deps) == 1
     assert "other.json isn't a soft-promise run's results" in capsys.readouterr().err
+
+
+def test_the_kept_runs_hold_the_prompt_the_counts_and_the_spend_and_rescore(capsys: pytest.CaptureFixture[str]):
+    """The runs the plan's Review Ledger cites are kept in `evals/calibration/results/`: each holds
+    what a run writes (the prompt and its sha256, the per-case counts and the spend) and nothing that
+    names a key, a session or a machine, and each still rescores against the case file."""
+    kept = sorted((CASES_FILE.parent / "results").glob("*.json"))
+    assert {path.name for path in kept} >= {"old-main-20261031-013919.json", "new-a-20261031-014007.json"}
+    for path in kept:
+        text = path.read_text(encoding="utf-8")
+        data = json.loads(text)
+        assert set(data) <= set(RunResult.model_fields)
+        assert hashlib.sha256(data["prompt"]["text"].encode()).hexdigest() == data["prompt"]["sha256"]
+        assert not re.search(r"sk-ant|api[_-]?key|session|/(?:Users|private|tmp|home|var)/", text, re.IGNORECASE)
+        assert main(["--rescore", str(path)]) == 0
+        assert f"the answers in {path.name}" in capsys.readouterr().out
 
 
 def test_every_model_it_calls_has_a_price():
