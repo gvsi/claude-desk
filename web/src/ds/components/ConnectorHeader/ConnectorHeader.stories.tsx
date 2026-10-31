@@ -72,7 +72,7 @@ export const Stripe: Story = {
     await expect(canvas.getByRole('heading', { level: 1, name: 'Stripe Mock' })).toBeVisible();
     await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     await expectStatus(canvasElement, 'Connected', 'handled');
-    // The brand tile, one of the three light surfaces with the intro illustration and the mark's tile.
+    // The brand tile, the one light surface besides the intro illustration.
     expectComputed(canvasElement.querySelector('.cd-connector-icon') as Element, { backgroundColor: 'rgb(255, 255, 255)' });
   },
 };

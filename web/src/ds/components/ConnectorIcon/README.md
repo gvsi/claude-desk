@@ -10,7 +10,7 @@
 ## What it shows
 
 - `icon` picks the mark. Built in, on `fill-secondary` with the icon in `text-primary`: `quotes` (`quote`), `bookings` (`calendar`), `leads` (`person`), `verification` (`lock`), `documents` (`document`), `payments` (`card`).
-- External, on the light `connector-tile-brand` tile: `stripe` and `google_calendar`, each brand's real mark as inline SVG in its brand color token (`connector-stripe`, `connector-google-blue`). The brand tile is one of the product's three light surfaces, with the intro illustration's cards and the mark's own white tile; nothing is read on it, so its colors are in `DECORATIVE_COLORS`.
+- External, on the light `connector-tile-brand` tile: `stripe` and `google_calendar`, each brand's real mark as inline SVG in its brand color token (`connector-stripe`, `connector-google-blue`). The brand tile is the one light surface besides the intro illustration's cards; nothing is read on it, so its colors are in `DECORATIVE_COLORS`.
 - An icon this build doesn't know shows an empty built-in tile.
 
 | `size` | Tile | Mark | Where |
