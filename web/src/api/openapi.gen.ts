@@ -234,11 +234,21 @@ export interface CheckedDraft {
   prose: string;
   clauses: Clause[];
 }
+export interface Choice {
+  text: string;
+  recommended: boolean;
+}
 /**
  * `POST /api/owner/policy/{desk_id}/confirm`: the drafted version the owner read and confirms.
  */
 export interface ConfirmRulesIn {
   version: number;
+}
+export interface ConnectorProposal {
+  app: "google_calendar" | "gmail" | "google_drive" | "quickbooks" | "stripe" | "square" | "calendly";
+  label: string;
+  why: string;
+  connectable: boolean;
 }
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
@@ -346,6 +356,42 @@ export interface Handoff {
 export interface HealthOut {
   ok: boolean;
   kernel: Health | null;
+}
+export interface IntakeConfig {
+  block: "intake";
+  /**
+   * @minItems 1
+   * @maxItems 5
+   */
+  questions:
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string];
+}
+export interface JobProposal {
+  job: "answer" | "intake" | "schedule" | "price" | "documents" | "status" | "payment" | "urgent";
+  title: string;
+  why: string;
+  how: string;
+  autonomy: "auto" | "ask";
+  can_do_today: boolean;
+  config: (IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig) | null;
+}
+export interface TypedBookingConfig {
+  block: "typed_booking";
+  appointment_type: string;
+  minutes: number;
+}
+export interface PurposePaymentConfig {
+  block: "purpose_payment";
+  purpose: string;
+  amount_cents: number | null;
+}
+export interface UrgentConfig {
+  block: "urgent";
+  urgent_when: string;
 }
 /**
  * `POST /api/owner/desks/{desk_id}/knowledge`: something the owner tells Claude about the business (untrusted
@@ -499,6 +545,13 @@ export interface PersonOnRecord {
  */
 export interface PresetIn {
   preset: "ask_first" | "auto";
+}
+export interface ProposalCard {
+  proposal_id: string;
+  kind: "job" | "connector";
+  state: "proposed" | "accepted" | "declined";
+  job: JobProposal | null;
+  connector: ConnectorProposal | null;
 }
 /**
  * 202: the rules are still being drafted or checked. Send `retry` again in a few seconds: it picks up the same
@@ -658,11 +711,14 @@ export interface SetupConsentIn {
 }
 /**
  * One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
- * owner's memory or website (`tool_label`).
+ * owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
+ * only to a card message, with role `claude` and empty text.
  */
 export interface SetupMessage {
   role: "claude" | "owner" | "tool_label";
   text: string;
+  choices?: Choice[];
+  card?: ProposalCard | null;
 }
 /**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)

@@ -78,7 +78,7 @@ import logging
 import re
 import secrets
 import unicodedata
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
 from time import monotonic
@@ -134,10 +134,12 @@ from desk.api.prompts import (
     SITUATIONS_SYSTEM,
     TOOLS_TAG,
     BusinessType,
+    Choice,
     DraftedRules,
     DraftedSituations,
     PlannedOutcome,
     PriceAnswer,
+    ProposalCard,
     QuestionKey,
     RuleCardDraft,
     SetupAnswers,
@@ -321,7 +323,8 @@ def website_url(text: str | None) -> tuple[str, str] | None:
 class Entry(BaseModel):
     """One stored line of an interview: what the owner sees (`role`, `text`), and for code alone, the question a
     Claude line asks, the read a label stands for and what it returned (untrusted text, for later turns), and a
-    website the line named or read."""
+    website the line named or read. A Claude question can carry choices; a card is a Claude entry with empty text.
+    Covered topics record what this entry's turn finished or skipped, for code alone."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -331,6 +334,9 @@ class Entry(BaseModel):
     read: Literal["memory", "website"] | None = None
     content: str | None = None
     website: str | None = None
+    choices: list[Choice] = []
+    card: ProposalCard | None = None
+    covered: list[QuestionKey] = []
 
 
 @dataclass
@@ -356,6 +362,18 @@ class Interview:
 
     def tried_websites(self) -> set[str]:
         return {entry.website for entry in self.transcript if entry.read == "website" and entry.website}
+
+    @property
+    def covered(self) -> set[QuestionKey]:
+        return {key for entry in self.transcript for key in entry.covered}
+
+    def cover(self, keys: Iterable[QuestionKey]) -> None:
+        """Record newly finished or skipped topics on the last entry, keeping answered limits and all facts."""
+        added = set(keys) - self.covered
+        self.transcript[-1].covered.extend(key for key in QUESTION_KEYS if key in added)
+        # Unanswered amounts already ask, the cap is already 0, and refunds keep their existing value.
+        if LIMIT_QUESTIONS["documents"] in added and self.answers.documents is None:
+            self.answers.documents = "ask"
 
 
 async def _load(conn: AsyncConnection, copy_id: str, interview_id: str, *, lock: bool = False) -> Interview:
@@ -384,7 +402,11 @@ async def _load(conn: AsyncConnection, copy_id: str, interview_id: str, *, lock:
 def _stored(interview: Interview) -> dict:
     return {"step": interview.step, "consent": interview.consent,
             "answers": interview.answers.model_dump(mode="json"),
-            "transcript": [entry.model_dump(mode="json", exclude_none=True) for entry in interview.transcript],
+            # Omit only top-level nulls and empty additions; nested card nulls are part of its payload.
+            "transcript": [entry.model_dump(mode="json", exclude={name for name, value in entry
+                                                                 if value is None or
+                                                                 (name in {"choices", "covered"} and not value)})
+                           for entry in interview.transcript],
             "draft_cards": [card.model_dump(mode="json") for card in interview.draft_cards],
             "draft_version": interview.draft_version}
 
@@ -427,13 +449,14 @@ def _turn(interview_id: str) -> Iterator[None]:
         _RUNNING.discard(interview_id)
 
 
-def setup_state(interview: Interview, slug: str) -> SetupState:
+def setup_state(interview: Interview, slug: str, *, cards: bool = False) -> SetupState:
     """The interview as the owner sees it. Its messages leave out the transcript's first entry, the owner's own
     description (`start` puts it there), which the owner isn't shown back; the stored transcript, which later turns
-    read, keeps it."""
+    read, keeps it. Card messages appear only when requested by a client that can render them."""
     return SetupState(interview_id=interview.interview_id, desk_id=interview.desk_id, slug=slug, step=interview.step,
                       consent=interview.consent, question=interview.question,
-                      messages=[SetupMessage(role=entry.role, text=entry.text) for entry in interview.transcript[1:]])
+                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=entry.card)
+                                for entry in interview.transcript[1:] if cards or entry.card is None])
 
 
 async def _slug(owner: OwnerCtx, desk_id: str) -> str:
@@ -685,7 +708,8 @@ async def _desks_now(owner: OwnerCtx) -> OwnerCtx:
     return replace(owner, desk_ids=tuple(who.desk_ids))
 
 
-async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartIn) -> SetupState | None:
+async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartIn, *,
+                         cards: bool = False) -> SetupState | None:
     """The interview a start with this key made in the copy, as it stands now; None when none holds the key. 409
     `conflict` when the key's start had another body, and 409 `key_spent` when it failed: its Desk was asked for and
     may exist, so the key can't start again. While the first is still starting, 409 `in_progress` at once, to be sent
@@ -713,7 +737,7 @@ async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartI
         raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
     if row["desk_id"] not in owner.desk_ids:          # made after this request read the copy's Desks
         owner = await _desks_now(owner)
-    return await read(owner, engine, row["interview_id"])
+    return await read(owner, engine, row["interview_id"], cards=cards)
 
 
 async def _drop_abandoned(engine: AsyncEngine, copy_id: str, interview_id: str) -> bool:
@@ -730,20 +754,20 @@ async def _drop_abandoned(engine: AsyncEngine, copy_id: str, interview_id: str) 
 
 
 async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: SetupStartIn, *,
-                admit: Callable[[], Awaitable[None]]) -> SetupState:
+                admit: Callable[[], Awaitable[None]], cards: bool = False) -> SetupState:
     """Read the owner's description, make the Desk with Answering off, and ask for consent, once `admit` (the route's
     limits) lets the start through. A repeat of the client's key is answered before `admit` counts it; otherwise the
     interview's row is written first, under the key's lock, and the start's outcome saved to it, its failure too
     (module docstring). A request another process admitted meanwhile is answered as a repeat."""
     key = body.idempotency_key
     async with ADMISSIONS.admitting(owner.copy_id, key):
-        repeat = await repeated_start(owner, engine, body)
+        repeat = await repeated_start(owner, engine, body, cards=cards)
         if repeat is not None:
             return repeat
         await admit()
         interview_id = await _claim(engine, owner.copy_id, key, start_sha256(body))
     if interview_id is None:                        # another process took the key since this one looked
-        repeat = await repeated_start(owner, engine, body)
+        repeat = await repeated_start(owner, engine, body, cards=cards)
         if repeat is None:                          # and has let it go again: this one is to be sent again
             raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
         return repeat
@@ -765,7 +789,7 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
         await _settle(engine, update(INTERVIEWS).where(*keyed).values(start_error=_failure_record(error),
                                                                       updated_at=func.now()))
         raise
-    return setup_state(interview, slug)
+    return setup_state(interview, slug, cards=cards)
 
 
 async def _asking_for_desk(engine: AsyncEngine, keyed: tuple) -> None:
@@ -791,17 +815,18 @@ async def _settle(engine: AsyncEngine, statement: Executable) -> None:
         logger.warning("a keyed setup start's row couldn't be settled (%s)", type(failed).__name__)
 
 
-async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SetupState:
+async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, cards: bool = False) -> SetupState:
     async with engine.connect() as conn:
         interview = await _load(conn, owner.copy_id, interview_id)
-    return setup_state(interview, await _slug(owner, interview.desk_id))
+    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards)
 
 
 def _ask(interview: Interview, key: QuestionKey) -> Entry:
     return Entry(role="claude", text=question_text(key, interview.business_type), question=key)
 
 
-async def consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, allow: bool) -> SetupState:
+async def consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, allow: bool, *,
+                  cards: bool = False) -> SetupState:
     """Store the owner's consent, once; on yes, search their memory and read the website the description named.
     Then the first question. The reads run with no lock held (module docstring)."""
     interview = await _read(engine, owner, interview_id)
@@ -820,7 +845,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, allow
         interview.transcript += entries
         interview.transcript.append(_ask(interview, QUESTION_KEYS[0]))
         await _commit(engine, owner, interview, seen)
-    return setup_state(interview, await _slug(owner, desk_id))
+    return setup_state(interview, await _slug(owner, desk_id), cards=cards)
 
 
 def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
@@ -922,7 +947,7 @@ async def _rename(owner: OwnerCtx, desk_id: str, patch: SetupPatch) -> None:
 
 
 async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, question: QuestionKey,
-                 text: str) -> SetupState:
+                 text: str, *, cards: bool = False) -> SetupState:
     """One answer turn on the question waiting (module docstring); 409 `conflict`, before any model call, when none
     is, the answer names another (an answer sent twice finds the next question waiting) or one is running already.
     The model call, the website read and the kernel's rename run with no lock held."""
@@ -957,7 +982,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
                 entries.append(Entry(role="claude", text=QUESTIONS_DONE))
         interview.transcript += entries
         await _commit(engine, owner, interview, seen)
-    return setup_state(interview, await _slug(owner, desk_id))
+    return setup_state(interview, await _slug(owner, desk_id), cards=cards)
 
 
 # Setup, part 2 (Task 7): the Desk's parts, rule cards, situations, the safety check and going live -----------------

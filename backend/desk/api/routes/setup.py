@@ -65,7 +65,7 @@ async def _moving_on(request: Request, ctx: OwnerCtx, *, model: bool = True) -> 
 @router.post("", status_code=201, response_model=SetupState,
              responses=error_responses(401, 404, 409, 422, 429, 503))
 async def start_setup(body: SetupStartIn, request: Request,
-                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
+                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with
     Answering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives
     here is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude
@@ -93,37 +93,37 @@ async def start_setup(body: SetupStartIn, request: Request,
     async def admit() -> None:
         await _moving_on(request, ctx)
 
-    return await setup.start(ctx, state.database(), state.model, body, admit=admit)
+    return await setup.start(ctx, state.database(), state.model, body, admit=admit, cards=cards)
 
 
 @router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 422, 503))
 async def setup_interview(interview_id: InterviewId, request: Request,
-                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """The setup interview as it stands."""
-    return await setup.read(ctx, runtime(request).started().database(), interview_id)
+    return await setup.read(ctx, runtime(request).started().database(), interview_id, cards=cards)
 
 
 @router.post("/{id}/consent", response_model=SetupState,
              responses=error_responses(401, 404, 409, 422, 429, 503))
 async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request: Request,
-                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
+                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """The owner's answer to whether Claude may read their Claude memory and website, given once (409 `conflict`
     after). On yes, both are read through the kernel as the owner's setup tools, each shown as a label; on no,
     neither ever is. Then the first question."""
     state = await _moving_on(request, ctx)
-    return await setup.consent(ctx, state.database(), interview_id, body.allow)
+    return await setup.consent(ctx, state.database(), interview_id, body.allow, cards=cards)
 
 
 @router.post("/{id}/answer", response_model=SetupState,
              responses=error_responses(401, 404, 409, 422, 429, 503))
 async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: Request,
-                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """The owner's answer to the question waiting, which the answer names (409 `conflict` when none is waiting or
     another is, so an answer sent twice answers once): Claude replies, the answers are updated and, once the question
     is covered, the next one is asked. 503 `model_unavailable` when Claude couldn't answer, with nothing stored, so the
     same answer can be sent again."""
     state = await _moving_on(request, ctx)
-    return await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text)
+    return await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text, cards=cards)
 
 
 @router.get("/{id}/tools", response_model=SetupTools, responses=error_responses(401, 404, 422, 503))

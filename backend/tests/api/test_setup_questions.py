@@ -19,13 +19,13 @@ import re
 import secrets
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import get_origin
+from typing import get_args, get_origin
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 from sqlalchemy import text as sql
 
 from desk.api import setup as desk_setup
@@ -169,6 +169,67 @@ async def stored(engine, interview_id: str) -> dict:
     return dict(row)
 
 
+def test_the_seam_models_hold_their_bounds():
+    from desk.api.prompts import (
+        BLOCK_FOR_JOB, CAPABILITIES, CONNECTOR_LABELS, BlockConfig, Choice, ConnectorKey,
+        ConnectorProposal, IntakeConfig, JobKind, JobProposal, ProposalCard, PurposePaymentConfig,
+        TypedBookingConfig, UrgentConfig, new_proposal_id,
+    )
+
+    job = JobProposal(job="answer", title="Answer questions", why="Save time", how="Use business facts",
+                      autonomy="auto", can_do_today=True, config=None)
+    connector = ConnectorProposal(app="stripe", label="Stripe", why="Take payments", connectable=True)
+    card = {"proposal_id": "p-012345abcdef", "state": "proposed", "kind": "job", "job": job,
+            "connector": None}
+    assert ProposalCard(**card).job == job
+    assert ProposalCard(**{**card, "kind": "connector", "job": None, "connector": connector}).connector == connector
+    for fields in ({"job": None}, {"connector": connector}, {"kind": "connector"},
+                   {"kind": "connector", "job": None}, {"proposal_id": "p-012345ABCDEf"},
+                   {"proposal_id": "p-123"}, {"proposal_id": "p-012345abcdef\n"}):
+        with pytest.raises(ValidationError):
+            ProposalCard(**{**card, **fields})
+    assert all(re.fullmatch(r"p-[0-9a-f]{12}", new_proposal_id()) for _ in range(10))
+    for value in ("a", "a" * 80):
+        assert Choice(text=value, recommended=False).text == value
+    for value in ("", " " * 3, "a" * 81):
+        with pytest.raises(ValidationError):
+            Choice(text=value, recommended=False)
+    configs = TypeAdapter(BlockConfig)
+    for value, expected in (
+        ({"block": "intake", "questions": ["What do you need?"]}, IntakeConfig),
+        ({"block": "typed_booking", "appointment_type": "Intro", "minutes": 15}, TypedBookingConfig),
+        ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}, PurposePaymentConfig),
+        ({"block": "urgent", "urgent_when": "A burst pipe"}, UrgentConfig),
+    ):
+        assert isinstance(configs.validate_python(value), expected)
+    booking = {"block": "typed_booking", "appointment_type": "Intro", "minutes": 60}
+    assert configs.validate_python(booking).minutes == 60
+    for minutes in (14, 61):
+        with pytest.raises(ValidationError):
+            configs.validate_python({**booking, "minutes": minutes})
+    for questions in ([], ["a"] * 6, [""], ["a" * 121]):
+        with pytest.raises(ValidationError):
+            IntakeConfig(block="intake", questions=questions)
+    for amount in (-1, 1_000_001, 1.5):
+        with pytest.raises(ValidationError):
+            PurposePaymentConfig(block="purpose_payment", purpose="Deposit", amount_cents=amount)
+    with pytest.raises(ValidationError):
+        JobProposal(**{**job.model_dump(), "job": "price", "config": {"block": "intake", "questions": ["Why?"]}})
+    for model_type, values in ((Choice, {"text": "A", "recommended": False}),
+                                (JobProposal, job.model_dump()), (ProposalCard, card),
+                                (ConnectorProposal, connector.model_dump())):
+        with pytest.raises(ValidationError):
+            model_type(**{**values, "unknown": True})
+    assert set(CAPABILITIES) == set(BLOCK_FOR_JOB) == set(get_args(JobKind))
+    assert CAPABILITIES == {key: key not in {"documents", "status"} for key in get_args(JobKind)}
+    assert BLOCK_FOR_JOB == {key: {"intake": "intake", "schedule": "typed_booking",
+                                   "payment": "purpose_payment", "urgent": "urgent"}.get(key)
+                            for key in get_args(JobKind)}
+    assert CONNECTOR_LABELS == dict(zip(get_args(ConnectorKey),
+                                       ("Google Calendar", "Gmail", "Google Drive", "QuickBooks", "Stripe",
+                                        "Square", "Calendly"), strict=True))
+
+
 async def answered_up_to(owner: Owner, model: ScriptedModel, interview_id: str, key: str) -> dict:
     """Answer each question from the one waiting until `key`, each in one turn; the state with `key` waiting."""
     state = (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()
@@ -178,6 +239,152 @@ async def answered_up_to(owner: Owner, model: ScriptedModel, interview_id: str, 
     state = (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()
     assert state["question"] == key
     return state
+
+
+def proposal_entries() -> list[dict]:
+    return [
+        {"role": "claude", "text": "Here are two suggestions."},
+        {"role": "claude", "text": "", "card": {
+            "proposal_id": "p-012345abcdef", "kind": "job", "state": "proposed", "connector": None,
+            "job": {"job": "schedule", "title": "Book an intro", "why": "Meet new clients", "how": "Book a slot",
+                    "autonomy": "auto", "can_do_today": True,
+                    "config": {"block": "typed_booking", "appointment_type": "Intro", "minutes": 30}}}},
+        {"role": "claude", "text": "", "card": {
+            "proposal_id": "p-fedcba543210", "kind": "connector", "state": "proposed", "job": None,
+            "connector": {"app": "stripe", "label": "Stripe", "why": "Take payments", "connectable": True}}},
+        {"role": "claude", "text": "Who do you help?", "question": "what_you_do",
+         "choices": [{"text": "Individuals", "recommended": True}, {"text": "Businesses", "recommended": False}]},
+    ]
+
+
+async def test_card_messages_reach_the_owner_only_with_cards_1(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    await consent(owner, interview_id, False)
+    transcript = (await stored(engine, interview_id))["transcript"] + proposal_entries()
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
+                               " WHERE interview_id = :id"), {"transcript": json.dumps(transcript), "id": interview_id})
+        key = (await conn.execute(sql("SELECT idempotency_key FROM app.setup_interviews WHERE interview_id = :id"),
+                                  {"id": interview_id})).scalar_one()
+
+    def check(state: dict, cards: bool):
+        messages = state["messages"]
+        assert not any(message["text"] == DESCRIPTION for message in messages)
+        assert next(message for message in messages if message["text"] == "Who do you help?")["choices"] == (
+            proposal_entries()[-1]["choices"])
+        shown = [message for message in messages if message["card"] is not None]
+        assert [message["card"]["proposal_id"] for message in shown] == (
+            ["p-012345abcdef", "p-fedcba543210"] if cards else [])
+        assert all(message["role"] == "claude" and message["text"] == "" and message["choices"] == []
+                   for message in shown)
+        if not cards:
+            assert all(message["text"] for message in messages)
+
+    for cards in (False, True):
+        query = "?cards=1" if cards else ""
+        response = await owner.browser.get(path + query)
+        assert response.status_code == 200, response.text
+        check(response.json(), cards)
+        response = await owner.browser.post("/api/owner/setup" + query, json=start_body(idempotency_key=key))
+        assert response.status_code == 201, response.text
+        check(response.json(), cards)
+        async with engine.begin() as conn:
+            await conn.execute(sql("UPDATE app.setup_interviews SET consent = NULL WHERE interview_id = :id"),
+                               {"id": interview_id})
+        response = await owner.browser.post(path + "/consent" + query, json={"allow": False})
+        assert response.status_code == 200, response.text
+        check(response.json(), cards)
+        model.add(turn())
+        response = await owner.browser.post(path + "/answer" + query,
+                                            json={"question": "what_you_do", "text": "Individuals"})
+        assert response.status_code == 200, response.text
+        check(response.json(), cards)
+
+
+async def test_an_interview_with_cards_choices_and_covered_topics_reloads_as_stored(
+    app, browser, kernel_http, model, engine,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False)
+    record = await stored(engine, interview_id)
+    entries = proposal_entries()
+    entries[1]["card"]["state"] = "accepted"
+    entries[-1]["covered"] = ["what_you_do", "documents_and_payments"]
+    record["transcript"] += entries
+    # The canonical stored form omits empty top-level additions, retaining nulls inside a card.
+    for entry in record["transcript"]:
+        if not entry.get("choices"):
+            entry.pop("choices", None)
+    written = {**record, "draft_cards": [], "draft_version": None}
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
+                               " WHERE interview_id = :id"),
+                           {"transcript": json.dumps(record["transcript"]), "id": interview_id})
+    async with engine.connect() as conn:
+        loaded = await desk_setup._load(conn, owner.copy_id, interview_id)
+    assert loaded.transcript[-3].card.state == "accepted"
+    assert loaded.transcript[-3].card.job.config.appointment_type == "Intro"
+    assert loaded.transcript[-3].card.job.config.minutes == 30
+    assert [choice.model_dump() for choice in loaded.transcript[-1].choices] == entries[-1]["choices"]
+    assert loaded.transcript[-1].covered == ["what_you_do", "documents_and_payments"]
+    assert loaded.covered == {"what_you_do", "documents_and_payments"}
+    assert desk_setup._stored(loaded) == written
+
+
+def interview_with(answers: SetupAnswers, transcript: list[desk_setup.Entry]) -> desk_setup.Interview:
+    return desk_setup.Interview(interview_id="setup-test", copy_id="copy-test", desk_id="desk-test",
+                                business_type="office", step="questions", consent=False, answers=answers,
+                                transcript=transcript)
+
+
+def test_a_transcript_from_before_keeps_its_stored_form():
+    legacy = [
+        {"role": "owner", "text": DESCRIPTION, "website": WEBSITE},
+        {"role": "claude", "text": "May I read it?", "question": "consent"},
+        {"role": "owner", "text": "Yes"},
+        {"role": "tool_label", "text": "Read the website", "read": "website", "content": "", "website": WEBSITE},
+        {"role": "claude", "text": "What do you do?", "question": "what_you_do"},
+    ]
+    interview = interview_with(SetupAnswers(summary="Plumbing"),
+                               [desk_setup.Entry.model_validate(entry) for entry in legacy])
+    dumped = desk_setup._stored(interview)["transcript"]
+    assert json.dumps(dumped) == json.dumps(legacy)
+    assert all(not ({"choices", "card", "covered"} & entry.keys()) for entry in dumped)
+
+
+def test_covering_a_skipped_limit_topic_leaves_it_asking():
+    answers = SetupAnswers(summary="Tax advice", service_area="Oakland", public_contact="hello@example.test",
+                           quote_auto_max_cents=2500, discount_auto_max_bp=500, refunds="never")
+    interview = interview_with(answers, [desk_setup.Entry(role="claude", text="A question"),
+                                         desk_setup.Entry(role="owner", text="Skip these")])
+    before = answers.model_dump()
+    interview.cover(["documents_and_payments", "money_limit", "documents_and_payments"])
+    assert interview.covered == {"documents_and_payments", "money_limit"}
+    assert interview.transcript[0].covered == []
+    assert interview.transcript[-1].covered == ["documents_and_payments", "money_limit"]
+    assert interview.answers.model_dump() == {**before, "documents": "ask"}
+    assert interview.answers.payment_link_auto_max_cents is None
+    assert interview.answers.auto_money_cap_cents == 0
+    assert interview.answers.refunds == "never"
+    interview.cover(["money_limit", "documents_and_payments"])
+    assert interview.transcript[-1].covered == ["documents_and_payments", "money_limit"]
+
+    answered = interview_with(SetupAnswers(**{**before, "documents": "verified_owner",
+                                              "payment_link_auto_max_cents": 5000, "auto_money_cap_cents": 10000}),
+                               [desk_setup.Entry(role="claude", text="Skip more")])
+    kept = answered.answers.model_dump()
+    answered.cover(reversed(QUESTION_KEYS))
+    assert answered.covered == set(QUESTION_KEYS)
+    assert answered.transcript[-1].covered == list(QUESTION_KEYS)
+    assert answered.answers.model_dump() == kept
+    answered.transcript.append(desk_setup.Entry(role="tool_label", text="A read"))
+    answered.cover(QUESTION_KEYS)
+    assert answered.transcript[-1].covered == []
 
 
 def turn_text(model: ScriptedModel, call: int = -1) -> str:
@@ -289,7 +496,8 @@ async def test_setups_messages_leave_out_the_owners_description(app, browser, fa
     # description stays first in the stored transcript, which later turns read.
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
-    assert state["messages"] == [{"role": "claude", "text": desk_setup.CONSENT_QUESTION}]
+    assert state["messages"] == [{"role": "claude", "text": desk_setup.CONSENT_QUESTION,
+                                   "choices": [], "card": None}]
     interview_id = state["interview_id"]
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["messages"] == state["messages"]
     transcript = (await stored(engine, interview_id))["transcript"]
@@ -371,7 +579,8 @@ async def test_setup_tools_use_the_owner_session_and_desk(app, browser, fake, ke
     desk = fake.desks[other["desk_id"]]
     desk.tools["native.fetch_website"] = desk.tools["native.fetch_website"].model_copy(update={"status": "disabled"})
     consented = await consent(owner, other["interview_id"], True)
-    assert consented["messages"][3] == {"role": "tool_label", "text": "Couldn't read rivera-plumbing.example"}
+    assert consented["messages"][3] == {"role": "tool_label", "text": "Couldn't read rivera-plumbing.example",
+                                        "choices": [], "card": None}
     proposed = [call.body["call"]["tool"] for call in fake.called("POST /decide")
                 if call.body["desk_id"] == other["desk_id"]]
     assert proposed == ["native.read_memory"]
@@ -455,7 +664,8 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
         if key == "discounts":                          # a follow-up first: the same question stays, asked once
             followed = await answer(owner, model, interview_id, "Maybe?", turn("How much, at most?", step_done=False))
             assert followed.json()["question"] == "discounts"
-            assert followed.json()["messages"][-1] == {"role": "claude", "text": "How much, at most?"}
+            assert followed.json()["messages"][-1] == {"role": "claude", "text": "How much, at most?",
+                                                       "choices": [], "card": None}
         patch = {"owner_display_name": "Maria Rivera", "public_contact": "(510) 555-0142"} \
             if key == "contact_and_after_hours" else {}
         reply = await answer(owner, model, interview_id, f"About {key}.", turn(**patch))

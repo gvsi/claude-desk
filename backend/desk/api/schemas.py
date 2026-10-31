@@ -28,6 +28,8 @@ from desk.api.prompts import (
     CARD_ID_MAX_LENGTH,
     CARD_REASON_MAX_LENGTH,
     OWNER_CARDS_MAX,
+    Choice,
+    ProposalCard,
     PlannedOutcome,
     DemoTask,
     QuestionKey,
@@ -590,10 +592,13 @@ class SetupAnswerIn(BaseModel):
 
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
-    owner's memory or website (`tool_label`)."""
+    owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
+    only to a card message, with role `claude` and empty text."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
+    choices: list[Choice] = []
+    card: ProposalCard | None = None
 
 
 class SetupState(BaseModel):

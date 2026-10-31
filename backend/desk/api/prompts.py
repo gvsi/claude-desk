@@ -38,6 +38,7 @@ call and checks every reply, so a prompt that is ignored or talked around still 
 """
 
 import re
+import secrets
 from collections.abc import Sequence
 from datetime import time
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, get_args
@@ -47,7 +48,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, create_model, mode
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.1"
+PROMPT_VERSION = "2026-10-31.2"
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
 # here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
 # one list or the other.
@@ -674,6 +675,118 @@ class SetupAnswers(BaseModel):
     refunds: Refunds | None = None
     public_contact: str | None = Field(None, max_length=200)
     price_items: list[PriceAnswer] = Field([], max_length=PRICE_ITEMS_MAX)
+
+
+# Setup's proposal cards and question choices --------------------------------------------------------------------
+
+JobKind = Literal["answer", "intake", "schedule", "price", "documents", "status", "payment", "urgent"]
+Block = Literal["intake", "typed_booking", "purpose_payment", "urgent"]
+Autonomy = Literal["auto", "ask"]
+ConnectorKey = Literal["google_calendar", "gmail", "google_drive", "quickbooks", "stripe", "square", "calendly"]
+CONNECTOR_LABELS: dict[ConnectorKey, str] = {
+    "google_calendar": "Google Calendar", "gmail": "Gmail", "google_drive": "Google Drive",
+    "quickbooks": "QuickBooks", "stripe": "Stripe", "square": "Square", "calendly": "Calendly",
+}
+CAPABILITIES: dict[JobKind, bool] = {
+    "answer": True, "intake": True, "schedule": True, "price": True, "documents": False,
+    "status": False, "payment": True, "urgent": True,
+}
+BLOCK_FOR_JOB: dict[JobKind, Block | None] = {
+    "answer": None, "intake": "intake", "schedule": "typed_booking", "price": None, "documents": None,
+    "status": None, "payment": "purpose_payment", "urgent": "urgent",
+}
+
+
+class Choice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=80, pattern=r"\S")
+    recommended: bool
+
+
+class IntakeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    block: Literal["intake"]
+    questions: list[Annotated[str, Field(min_length=1, max_length=120)]] = Field(min_length=1, max_length=5)
+
+
+class TypedBookingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    block: Literal["typed_booking"]
+    appointment_type: str = Field(min_length=1, max_length=60)
+    minutes: int = Field(ge=15, le=60)
+
+
+class PurposePaymentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    block: Literal["purpose_payment"]
+    purpose: str = Field(min_length=1, max_length=60)
+    amount_cents: Cents | None
+
+
+class UrgentConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    block: Literal["urgent"]
+    urgent_when: str = Field(min_length=1, max_length=300)
+
+
+BlockConfig = Annotated[IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig,
+                        Field(discriminator="block")]
+
+
+class JobProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    job: JobKind
+    title: str = Field(max_length=60)
+    why: str = Field(max_length=200)
+    how: str = Field(max_length=300)
+    autonomy: Autonomy
+    can_do_today: bool
+    config: BlockConfig | None
+
+    @model_validator(mode="after")
+    def matching_block(self) -> Self:
+        if self.config is not None and self.config.block != BLOCK_FOR_JOB[self.job]:
+            raise ValueError("config block must match the job kind")
+        return self
+
+
+class ConnectorProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    app: ConnectorKey
+    label: str
+    why: str = Field(max_length=200)
+    connectable: bool
+
+
+class ProposalCard(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_id: str = Field(pattern=r"^p-[0-9a-f]{12}$")
+    kind: Literal["job", "connector"]
+    state: Literal["proposed", "accepted", "declined"]
+    job: JobProposal | None
+    connector: ConnectorProposal | None
+
+    @model_validator(mode="after")
+    def matching_payload(self) -> Self:
+        if self.kind == "job":
+            valid = self.job is not None and self.connector is None
+        else:
+            valid = self.connector is not None and self.job is None
+        if not valid:
+            raise ValueError("card must carry only the payload named by its kind")
+        return self
+
+
+def new_proposal_id() -> str:
+    return "p-" + secrets.token_hex(6)
 
 
 # Setup's rules (Plan 02b, Task 7) --------------------------------------------------------------------------------
