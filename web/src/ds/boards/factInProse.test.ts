@@ -59,6 +59,9 @@ describe('fact_in_prose', () => {
       ['That one is free.', 'lex.en.promise'],
       ['Te damos un descuento.', 'lex.es.promise'],
       ['It comes at no extra charge.', 'lex.en.promise'],
+      // "set" starts no price, but "set up" does.
+      ['There’s no set up fee.', 'lex.en.promise'],
+      ['There’s no set up charge.', 'lex.en.promise'],
       ['Sin recargos.', 'lex.es.promise'],
       ['No hay cargo extra.', 'lex.es.promise'],
       ['Your appointment is confirmed.', 'lex.en.booking'],

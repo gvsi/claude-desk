@@ -201,13 +201,18 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("There's no one-off charge.", "lex.en.promise", "no one-off charge"),
     ("There's no one-time cost.", "lex.en.promise", "no one-time cost"),
     # nor after "worries", "problem", "questions", "set", "exact", "single", "fixed" or "standard",
-    # which pass (below), nor "set" with a hyphen going on, on the charge and cost line and the fee line
+    # which pass (below), nor "set" with a hyphen or "up" going on, on the charge and cost line and
+    # the fee line
     ("No worries, there's no extra charge.", "lex.en.promise", "no extra charge"),
     ("No problem: no hidden fees.", "lex.en.promise", "no hidden fees"),
     ("No questions asked, no fee.", "lex.en.promise", "no fee"),
     ("There's no set-up charge.", "lex.en.promise", "no set-up charge"),
     ("There's no set-up fee.", "lex.en.promise", "no set-up fee"),
     ("There's no setup cost.", "lex.en.promise", "no setup cost"),
+    ("There's no set up fee.", "lex.en.promise", "no set up fee"),
+    ("There's no set up charge.", "lex.en.promise", "no set up charge"),
+    ("No set up cost for new customers.", "lex.en.promise", "No set up cost"),
+    ("There's no set  up fee.", "lex.en.promise", "no set  up fee"),
     ("There's no extra fee for that.", "lex.en.promise", "no extra fee"),
     ("There's no service fee.", "lex.en.promise", "no service fee"),
     ("There are no added fees.", "lex.en.promise", "no added fees"),
