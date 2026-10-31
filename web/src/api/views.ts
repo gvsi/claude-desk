@@ -309,6 +309,12 @@ export interface PeopleOut {
   leads: { lead_id: string; display_name: string | null; note: string | null; created_at: string; replayed?: boolean }[];
 }
 
+/**
+ * Why a tool waits for the owner's review (kernel payments, plan 01c Task 4): connected and never
+ * confirmed (`new`), its definition changed (`changed`), or no longer listed by its connector (`delisted`).
+ */
+export type ToolReviewReason = 'new' | 'changed' | 'delisted';
+
 /** A tool as the owner reviews it: the kernel's tool row (`ToolProfile`'s columns). */
 export interface ToolRow {
   tool: ToolName;
@@ -322,6 +328,11 @@ export interface ToolRow {
   /** A changed definition waiting for review. Untrusted. */
   pending_definition_text: string | null;
   pending_sha256: string | null;
+  /**
+   * Why it waits for review, set by the kernel and null unless `status` is `needs_review`. Typed
+   * here, and optional, until the regenerated contract types have it: a row without it gives no reason.
+   */
+  review_reason?: ToolReviewReason | null;
   /**
    * The active version's cards that cover the tool, in card order, `shared` for a rule on an effect
    * group (plan 02b Task 9; pending, typed here and optional until the API sends it). Screens read
