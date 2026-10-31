@@ -62,8 +62,7 @@ export const ROUTE_MODELS = {
   suggestions: 'Suggestion[]',
   simulateToolChange: 'ToolProfile',
   addKnowledge: 'KnowledgeItem',
-  // pending: GET knowledge (API); the model's name follows the API's document once it serves it.
-  knowledge: 'KnowledgeListItem[]',
+  knowledge: 'KnowledgeRow[]',
   people: 'PeopleOut',
 
   // Proving
@@ -118,8 +117,6 @@ export const ROUTE_MODELS = {
 export const NOT_YET_SERVED = [
   // Proving
   'confirmTool',
-  // The knowledge the owner may see, for Settings › Knowledge's list (plan 04, Open question 1).
-  'knowledge',
 ] as const satisfies readonly RouteKey[];
 
 /**
@@ -150,8 +147,6 @@ export const NEVER_CALLED = [
   // Task 14 (Connectors) adds `connectTools` and `toolDecisions`.
   'POST /api/owner/desks/{desk_id}/tools/connect',
   'GET /api/owner/desks/{desk_id}/tools/{tool}/decisions',
-  // Settings > Knowledge adds its client route in the web follow-up.
-  'GET /api/owner/desks/{desk_id}/knowledge',
 ] as const satisfies readonly string[];
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
