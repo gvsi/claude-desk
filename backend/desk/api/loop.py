@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from desk.api.jobs import defer_turn_annotations
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.metrics import RevealMetric, TurnMetric, over_daily_budget, record_model_call
-from desk.api.model import ModelClient, ModelRequest, ModelResponse, ModelUnavailable
+from desk.api.model import ModelClient, ModelRequest, ModelResponse, ModelUnavailable, ThinkingBoundElsewhere
 from desk.api.prompts import NOTES, DeskIdentity, conversation_system
 from desk.api.ratelimit import RateLimiter, RateLimitLedger
 from desk.api.ro import KernelRO
@@ -189,6 +189,9 @@ class _Turn:
     limiter: RateLimiter | None = None                 # the process's limits, for the conversation's translations
     stopped: list[Stopped] = field(default_factory=list)   # attempts the checkpoint stopped this turn
     replied: list[str] = field(default_factory=list)   # the kernel's message IDs of Claude's messages delivered
+    context: SessionContext | None = None              # the session's tools and facts, as `/context` gave them
+    system: list[dict] = field(default_factory=list)   # the system prompt this turn rendered
+    rebound: bool = False                              # a thinking-binding 400 started a fresh context this turn
 
     @property
     def visitor(self) -> bool:
@@ -223,8 +226,8 @@ class _Turn:
             return _failed(failure)
         except KernelUnavailable:
             return "kernel_unavailable"
-        system = conversation_system(await desk_identity(conn, caller))
-        await self._bring_up_to_date(context, system)
+        self.context, self.system = context, conversation_system(await desk_identity(conn, caller))
+        await self._bring_up_to_date(context, self.system)
         await conn.commit()
         while True:
             if self.model_calls >= MAX_MODEL_CALLS:
@@ -261,21 +264,37 @@ class _Turn:
 
     async def _call(self) -> ModelResponse | None:
         """One model call on the context as it stands (the system prompt and tools it froze, and its messages), its
-        usage recorded at once; None when the model was unavailable."""
+        usage recorded at once; None when the model was unavailable. A 400 saying a replayed thinking block is bound
+        to a different conversation calls once more on a fresh context (`_rebind`); a second one, like any other
+        failure, is None."""
         conn, caller = self.conn, self.caller
-        model_input = await prepare_model_input(conn, caller.session_id)
-        await conn.commit()
-        self.model_calls += 1
-        try:
-            response = await self.model.call(ModelRequest(route="conversation", system=model_input.system,
-                                                          messages=model_input.messages, tools=model_input.tools))
-            failed = None
-        except ModelUnavailable as unavailable:
-            response, failed = unavailable.response, unavailable
-        self.returned_at = time.monotonic()
-        await record_model_call(conn, caller.copy_id, caller.session_id, "conversation", response)
-        await conn.commit()
-        return None if failed else response
+        while True:
+            model_input = await prepare_model_input(conn, caller.session_id)
+            await conn.commit()
+            self.model_calls += 1
+            try:
+                response = await self.model.call(ModelRequest(route="conversation", system=model_input.system,
+                                                              messages=model_input.messages, tools=model_input.tools))
+                failed = None
+            except ModelUnavailable as unavailable:
+                response, failed = unavailable.response, unavailable
+            self.returned_at = time.monotonic()
+            await record_model_call(conn, caller.copy_id, caller.session_id, "conversation", response)
+            await conn.commit()
+            if not (isinstance(failed, ThinkingBoundElsewhere) and await self._rebind()):
+                return None if failed else response
+
+    async def _rebind(self) -> bool:
+        """After a 400 saying a replayed thinking block is bound to a different conversation, start a fresh context
+        through the summary path, as a changed prompt does, so the next call replays no thinking: once a turn, and
+        only while the turn has a model call left. Whether it did."""
+        if self.rebound or self.model_calls >= MAX_MODEL_CALLS or self.context is None:
+            return False
+        self.rebound = True
+        logger.warning("a replayed thinking block was bound to a different conversation: a fresh context starts")
+        await start_fresh_context(self.conn, self.caller.ids, model_tools(self.context), system=self.system)
+        await self.conn.commit()
+        return True
 
     async def _act(self, response: ModelResponse | None) -> TurnOutcome | None:
         """Act on a response by its stop reason; None calls Claude again. No response (the model was unavailable),

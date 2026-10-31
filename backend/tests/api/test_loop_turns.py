@@ -9,6 +9,7 @@ from dataclasses import replace
 from datetime import timedelta
 
 import httpx
+import httpx2
 import pytest
 from pydantic import TypeAdapter
 from sqlalchemy import text
@@ -16,14 +17,16 @@ from sqlalchemy import text
 from desk.api import prompts
 from desk.api.kernel_client import KernelHttp
 from desk.api.loop import MAX_MODEL_CALLS, run_turn
-from desk.api.model import ModelUsage
+from desk.api.model import AnthropicModel, ModelUsage
 from desk.api.prompts import NOTES, REWRITE_INSTRUCTION, DeskIdentity, conversation_system
 from desk.api.store import append_message, has_pending
 from desk.api.tools import Caller
 from desk.contracts import AgentAuth
 from desk.events import SseEvent
 from tests.api.conftest import new_visitor
-from tests.api.fakes import FINISHED_AT, ScriptedModel, response, thinking, tool_use, unavailable
+from tests.api.fakes import FINISHED_AT, FakeMessagesApi, ScriptedModel, response, thinking, tool_use, unavailable
+from tests.api.test_model import USAGE as STREAM_USAGE
+from tests.api.test_model import BOUND_ELSEWHERE_TEXT, bad_request, stream_events
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 EVENT = TypeAdapter(SseEvent)
@@ -709,7 +712,8 @@ async def test_a_context_sends_the_prompt_it_opened_with_and_a_new_template_star
     assert await frozen_systems(api_conn, caller.session_id) == [(0, opened_with), (1, renders_now)]
 
 
-NEW_NAMES = {"business_name": "Rivera Plumbing & Sons", "desk_name": "Evenings line", "owner_name": "Maria Rivera Ortiz"}
+NEW_NAMES = {"business_name": "Rivera Plumbing & Sons", "desk_name": "Evenings line",
+             "owner_name": "Maria Rivera Ortiz"}
 
 
 def rename(fake, desk_id: str, renamed: str) -> None:
@@ -774,6 +778,59 @@ async def test_a_context_opened_before_prompts_were_frozen_starts_a_fresh_one(ap
     assert fresh.system == conversation_system(RIVERA) and thinking_blocks(fresh) == []
     opens_from_the_summary(fresh, "visitor: Hi, when are you open?")
     assert await frozen_systems(api_conn, caller.session_id) == [(0, None), (1, conversation_system(RIVERA))]
+
+
+def sent(server: FakeMessagesApi) -> list[dict]:
+    """The bodies the fake Messages API was sent."""
+    return [json.loads(request.content) for request in server.requests]
+
+
+def streamed_reply(prose: str) -> httpx2.Response:
+    return stream_events(reply(prose), stop_reason="tool_use", usage=STREAM_USAGE)
+
+
+async def test_a_thinking_binding_400_starts_a_fresh_context_and_calls_once_more(api_conn, caller, fake):
+    """The backstop: should a replayed thinking block still be refused as bound to a different conversation, the turn
+    starts a fresh context from the summary and calls once more, instead of handing off."""
+    await said(api_conn, caller, "Hi, when are you open?")
+    first = ScriptedModel([response(thinking(), reply("We're open on weekdays and Saturday mornings.", HOURS))])
+    assert await run_turn(api_conn, caller, first) == "done"
+
+    await said(api_conn, caller, "Can someone come tomorrow?")
+    server = FakeMessagesApi(bad_request(BOUND_ELSEWHERE_TEXT), streamed_reply("Let me find the open times."))
+    model = AnthropicModel("test-key", base_url="https://model.test", http_client=server.client())
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    refused, again = sent(server)
+    assert any(block["type"] == "thinking" for message in refused["messages"] for block in message["content"])
+    assert again["system"] == refused["system"] and [message["role"] for message in again["messages"]] == ["user"]
+    summary = again["messages"][0]["content"][0]["text"]
+    assert summary.startswith("<conversation_so_far>") and "visitor: Can someone come tomorrow?" in summary
+    assert "claude (shown to the visitor): We're open on weekdays and Saturday mornings." in summary
+    *_, message, end = await events(api_conn, caller.session_id)
+    assert (message.type, message.handoff, end.type) == ("message", False, "turn_end")
+    assert message.blocks[0].text == "Let me find the open times."
+    assert [stopped for stopped, *_ in await model_call_rows(api_conn, caller.session_id)] == [
+        "tool_use", "error", "tool_use"]                               # the refused call is on record too
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
+
+
+async def test_a_second_binding_400_or_any_other_400_hands_off(api_conn, kernel_http, fake, ro_schema):
+    cases = [("a second binding 400", bad_request(BOUND_ELSEWHERE_TEXT), 2, [0, 1]),
+             ("another 400", bad_request("prompt is too long: 230000 tokens > 200000 maximum"), 1, [0])]
+    for name, answer, calls, contexts in cases:
+        caller = await new_caller(kernel_http, fake, ro_schema)
+        await said(api_conn, caller, "Hi, when are you open?")
+        first = ScriptedModel([response(thinking(), reply("We're open on weekdays and Saturday mornings.", HOURS))])
+        assert await run_turn(api_conn, caller, first) == "done", name
+
+        await said(api_conn, caller, "Can someone come tomorrow?")
+        server = FakeMessagesApi(answer)                        # it answers every call so
+        model = AnthropicModel("test-key", base_url="https://model.test", http_client=server.client())
+        assert await run_turn(api_conn, caller, model) == "handoff", name
+        assert len(server.requests) == calls, name
+        await assert_handed_off(api_conn, fake, caller, checks=2)
+        assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == contexts, name
 
 
 async def metric_rows(conn, session_id: str) -> list[tuple[str, dict]]:

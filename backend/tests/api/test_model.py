@@ -27,12 +27,14 @@ from desk.api.main import app_factory, create_app
 from desk.api.metrics import PRICES_PER_MTOK
 from desk.api.model import (
     BEDROCK_MODEL_IDS,
+    THINKING_BINDING_400,
     TOOL_CHANGES_BETA,
     AnthropicModel,
     BedrockModel,
     ModelRequest,
     ModelUnavailable,
     ModelUsage,
+    ThinkingBoundElsewhere,
     build_kwargs,
     make_model,
     parse_structured,
@@ -52,6 +54,16 @@ TOOLS = [
         "type": "object", "properties": {}, "required": [], "additionalProperties": False}},
 ]
 MESSAGES = [{"role": "user", "content": [{"type": "text", "text": "<visitor_message>Hi</visitor_message>"}]}]
+# The Messages API's 400 for a replayed thinking block whose conversation changed, as the API words it.
+BOUND_ELSEWHERE_TEXT = (
+    "messages.7.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. "
+    "Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to \"drop_block\". Content that "
+    "preceded this block when it was created is missing from this request, starting at `messages.2`.")
+
+
+def bad_request(message: str) -> httpx2.Response:
+    """The Messages API's 400, with this message."""
+    return httpx2.Response(400, json={"type": "error", "error": {"type": "invalid_request_error", "message": message}})
 
 
 def stream_events(*blocks: dict, stop_reason: str, usage: dict, model: str = "claude-opus-5-5") -> httpx2.Response:
@@ -291,6 +303,29 @@ async def test_api_errors_become_model_unavailable():
             200, headers={"content-type": "text/event-stream"}, content=broken()))))
     with pytest.raises(ModelUnavailable):
         await cut.call(conversation())
+
+
+async def test_a_thinking_binding_400_is_told_apart_from_any_other_400():
+    """The 400 for a replayed thinking block whose conversation changed is known by its message, the API's own words
+    (`THINKING_BINDING_400`), and raised as `ThinkingBoundElsewhere`, still a `ModelUnavailable`; any other 400 is a
+    plain `ModelUnavailable`, as before."""
+    assert THINKING_BINDING_400 == "bound to a different conversation"
+    assert THINKING_BINDING_400 in BOUND_ELSEWHERE_TEXT
+    server = FakeMessagesApi(bad_request(BOUND_ELSEWHERE_TEXT))
+    with pytest.raises(ThinkingBoundElsewhere) as failed:
+        await claude(server).call(conversation())
+    assert len(server.requests) == 1                    # a 400 isn't retried: the same body fails the same way
+    assert isinstance(failed.value, ModelUnavailable) and str(failed.value) == "model unavailable: BadRequestError"
+    assert (failed.value.response.stop_reason, failed.value.response.usage) == ("error", None)
+    assert failed.value.__cause__ is None
+
+    for name, answer in (
+            ("another 400", bad_request("prompt is too long: 230000 tokens > 200000 maximum")),
+            ("the words, but not a 400", httpx2.Response(500, json={"type": "error", "error": {
+                "type": "api_error", "message": BOUND_ELSEWHERE_TEXT}}))):
+        with pytest.raises(ModelUnavailable) as failed:
+            await claude(FakeMessagesApi(answer)).call(conversation())
+        assert not isinstance(failed.value, ThinkingBoundElsewhere), name
 
 
 async def test_scripted_model_plays_its_script():
