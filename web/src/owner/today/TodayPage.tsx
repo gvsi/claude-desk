@@ -125,6 +125,11 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   }, []);
   // Focus brings the card into view too. A request with no card here is left alone.
   const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
+  // Where focus goes on to when dismissing Needs you's last request takes Needs you away: the
+  // section after it, Live now when a chat is live, else Since last night, where the page stands.
+  const liveNow = useRef<HTMLElement>(null);
+  const sinceLastNight = useRef<HTMLElement>(null);
+  const focusAfterNeedsYou = useCallback(() => (liveNow.current ?? sinceLastNight.current)?.focus({ preventScroll: true }), []);
   const focusFirstHeld = () => {
     if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
   };
@@ -224,6 +229,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
           <ContinueSetup business={desk.business_name} interviewId={setup.interview_id} step={setup.step} answering={desk.answering} />
         ) : null}
         <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
+        {/* Drawn while it lists something or a read has failed: its Dismiss sends focus on when neither is left. */}
         {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
           <NeedsYou
             held={held}
@@ -233,10 +239,11 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
             registerCard={registerCard}
             answeredFocus={answeredFocus}
             readFailure={readFailure}
+            focusNextSection={focusAfterNeedsYou}
           />
         ) : null}
-        {live.length > 0 ? <LiveNow live={live} /> : null}
-        <SinceLastNight />
+        {live.length > 0 ? <LiveNow live={live} sectionRef={liveNow} /> : null}
+        <SinceLastNight sectionRef={sinceLastNight} />
       </div>
       <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
     </div>

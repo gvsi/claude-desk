@@ -42,6 +42,11 @@ export interface NeedsYouProps {
   answeredFocus: AnsweredFocus;
   /** The latest read failed: said first, over whatever was read before it. */
   readFailure: ReadFailure | null;
+  /**
+   * Puts focus on the section after Needs you, without scrolling. Today stops drawing Needs you once
+   * it lists nothing and no read has failed, so Dismiss on the last request it lists sends focus there.
+   */
+  focusNextSection: () => void;
 }
 
 /**
@@ -50,7 +55,7 @@ export interface NeedsYouProps {
  * each open callback. A request answered here stays where it was answered, with its final line and
  * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
  */
-export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure }: NeedsYouProps) {
+export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, focusNextSection }: NeedsYouProps) {
   const titleId = useId();
   const now = new Date();
   const open = held.length + callbacks.length;
@@ -66,13 +71,17 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
   );
 
   const dismiss = (id: string) => {
-    // Focus goes to the next answered card, else the one before, else the section.
+    // Focus goes to the next answered card, else the one before, else the section; and when this
+    // was the last thing listed, with no failed read to say, the section goes too, so focus goes on
+    // to the one after it.
     const ids = requests.map((item) => item.decision.decision_id).filter((decisionId) => answers.answered.has(decisionId));
     const at = ids.indexOf(id);
     const next = ids[at + 1] ?? ids[at - 1];
+    const emptied = requests.length + callbacks.length === 1 && readFailure === null;
     answers.dismiss(id);
     const target = next === undefined ? undefined : answeredFocus.cardFor(next);
     if (target) target.focus();
+    else if (emptied) focusNextSection();
     else document.getElementById(titleId)?.closest<HTMLElement>('section')?.focus();
   };
 
