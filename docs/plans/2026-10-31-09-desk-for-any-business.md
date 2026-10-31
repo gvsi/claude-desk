@@ -371,6 +371,18 @@ Lanes, as staffed: 76 (A2a, A2b), the cards lane (A3 and the finish step), 19 (A
 - Testable pivot: tonight (Giovanni's goal), with the core (A1c, A1, A2, A3, A4, B7, C1, D2, D3) live by about 23:00.
 - Cut checkpoint: if the blocks core with B1 isn't open by 02:00 Sunday, B2 to B4 go words only.
 
+## Owner rulings after round 1 (2026-10-31; these win too)
+
+- **Money maximums are optional** (Giovanni: "it's something the owner can set but they shouldn't be mandated to set one"). The money cap with refunds, and the payment-link limit, are opt-in topics, never asked by default. Until the owner sets an amount, every payment asks the owner (cap 0, refunds "ask", link limit unset), so invariant 3 holds. The consultant mentions it once, with a choice to set an amount it handles on its own, now or later in Rules. Only on opt-in does code ask the isolated limit question. The money question loses its "I'd suggest $X to start" sentence, and no limit choice is marked recommended.
+- **An unpriced purpose-payment card at finish becomes "declined"** ("Not now"). It isn't a job, a tool or part of `how_we_help`.
+- **Copy signed off:**
+  - the 13 D1 boards, their words and calls, and board 14 with editing in place (built Sunday);
+  - "Urgent", "Amount" and "Enter an amount to accept this.";
+  - the four starters in en/es;
+  - the About labels (About us, Pricing, Getting started, After hours, Urgent help, How we help);
+  - the web search strings;
+  - the safety check's "6 of 6 stopped", with each row keeping "Blocked" or "Asks you".
+
 ## Review Ledger
 
 | Round | Seats | Findings | What changed |
