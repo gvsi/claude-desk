@@ -223,7 +223,14 @@ export function RulesPage() {
         <PageHeader
           title={RULES_TITLE}
           subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
-          actions={<PresetMenu onPick={(preset) => void pickPreset(preset)} pending={presetPending} />}
+          actions={
+            <>
+              <span className="cd-type-control">
+                <TextLink href={`${deskPath(deskId)}/rules/all`}>See all rules</TextLink>
+              </span>
+              <PresetMenu onPick={(preset) => void pickPreset(preset)} pending={presetPending} />
+            </>
+          }
           actionsBelowOnPhone
           hideSubtitleOnPhone
         />
