@@ -119,7 +119,9 @@ const IMPORTS_INTRO_FROM_THE_INDEX = /\bimport\s*\{[^}]*\bIntroDialog\b[^}]*\}\s
 // opens one only from the card's own link, which the visitor clicks. As whole words, so React
 // Query's `prefetchQuery`, which reads the app's own data, isn't one.
 const LINK_HINT = /(?<![\w-])(?:dns-prefetch|prefetch|preload|prerender|prefetchDNS)(?![\w-])|speculationrules/i;
-const DOCUMENT_LINK = /\/api\/d\//i;
+// An API operation's name ("GET /api/d/{token}" in the generated operation list and the route
+// checks) names the route for a type check, not a link, so a path right after an HTTP method isn't one.
+const DOCUMENT_LINK = /(?<!\b(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) )\/api\/d\//i;
 
 /** The app's page, read as the browser first gets it. */
 const INDEX_HTML: Source = { file: '../index.html', text: readFileSync(path.join(SRC, '..', 'index.html'), 'utf8') };
@@ -347,10 +349,17 @@ describe('app source guards', () => {
     expect(hits(LINK_HINT, sample("queryClient.prefetchQuery(desksQuery()); <link rel=\"modulepreload\" href=\"/x.js\">; // a link never prefetched"))).toEqual([]);
     expect(hits(DOCUMENT_LINK, sample("fetch(`/api/d/${token}`); const href = '/API/d/x';"))).toHaveLength(2);
     expect(hits(DOCUMENT_LINK, sample("request('paymentLink', { params: { token } }); const page = '/d/rivera';"))).toEqual([]);
+    // A link built any other way is one too: a whole address, or a path joined to a token.
+    expect(hits(DOCUMENT_LINK, sample("const a = 'https://desk.example/api/d/tok'; const b = '/api/d/' + token; const c = `${origin}/api/d/${t}`;"))).toHaveLength(3);
+    // An API operation's name, "METHOD /path", as the generated operation list and the route checks
+    // write it, names the route for a check, never a link: it doesn't trip the guard.
+    expect(hits(DOCUMENT_LINK, sample("\"GET /api/d/{token}\": { 200: null },\nexport const NEVER_CALLED = ['GET /api/d/{token}'];"))).toEqual([]);
 
     // The app's code and its page: no hint that fetches a link ahead, and no document link written out.
     expect(INDEX_HTML.text).toContain('<div id="root"></div>');
     expect(hits(LINK_HINT, [...sources, INDEX_HTML])).toEqual([]);
+    // The scan reads the generated operation list, which names the route, and finds no link in it.
+    expect(sources.find((s) => s.file === 'api/openapi.gen.ts')?.text).toContain('GET /api/d/{token}');
     expect(hits(DOCUMENT_LINK, [...sources, INDEX_HTML])).toEqual([]);
   });
 

@@ -9,7 +9,7 @@ import { userEvent } from 'vitest/browser';
 import { cleanup } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
-import type { RulesView, SetupState } from '../../api/views.ts';
+import type { BusinessOut, RulesView, SetupState } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { copyResultLine } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
@@ -118,7 +118,8 @@ function stubClipboard() {
 async function setupAtPreview(): Promise<SetupState> {
   const description = "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.";
   const started = await mockStore.dispatch('startSetup', { body: { description, timezone: LA } });
-  if ('network' in started || started.status !== 200) throw new Error('the mock starts a setup');
+  // A new interview answers 201, as the API's does.
+  if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
   const state = started.body as SetupState;
   const params = { id: state.interview_id };
   await mockStore.dispatch('setupConsent', { params, body: { allow: true } });
@@ -474,6 +475,11 @@ describe('share', () => {
     await screen.getByRole('button', { name: 'Go live' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
     const url = `${window.location.origin}/d/${state.slug}`;
+    // The new Desk's owner, as the copy's Desks name them: from the description's own words, "I'm Maria".
+    const desks = await mockStore.dispatch('desks');
+    if ('network' in desks || desks.status !== 200) throw new Error('the mock reads the Desks');
+    const owner = (desks.body as BusinessOut[]).find((b) => b.desks.some((d) => d.desk_id === state.desk_id))?.owner_display_name;
+    expect(owner).toBe('Maria');
 
     // Under the link and Go to Today, the share kit as Share has it, with no second link card: the
     // printable card with the QR code for the API's public link, the ready-made words, and the
@@ -483,7 +489,7 @@ describe('share', () => {
     const card = screen.getByRole('figure', { name: 'Rivera Plumbing' });
     await expect.element(card.getByRole('img', { name: `QR code for ${url}` })).toBeVisible();
     await expect.element(card.getByText(displayLink(url), { exact: true })).toBeVisible();
-    await expect.element(card.getByText(`Answered by Claude, an AI. Ask for ${rivera.business.ownerName} any time.`, { exact: true })).toBeVisible();
+    await expect.element(card.getByText(`Answered by Claude, an AI. Ask for ${owner} any time.`, { exact: true })).toBeVisible();
     expect(screen.getByRole('list', { name: 'Ready-made words' }).getByRole('listitem').elements()).toHaveLength(3);
     await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
     expect(screen.getByRole('region', { name: 'Your link' }).query()).toBeNull();
