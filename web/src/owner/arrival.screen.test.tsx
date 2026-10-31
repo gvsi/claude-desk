@@ -956,7 +956,13 @@ describe('OwnerLayout', () => {
     // top that the page has scrolled past, or that sits at the column's top edge, is in sight below
     // the bar when the keyboard reaches it (WCAG 2.2, 2.4.11 Focus Not Obscured), on Today and on
     // Safety's record. Each page is measured once every read on it is in, so nothing loads in above
-    // a control, or below it, while the column is being scrolled.
+    // a control, or below it, while the column is being scrolled. The built-in agent's charge over
+    // its signed limit is refused first, so Safety's count of refused requests loads in above the
+    // record too.
+    const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
+    await expect.poll(refused, { timeout: 5_000 }).toBe(1);
     const pages = [
       {
         path: TODAY,

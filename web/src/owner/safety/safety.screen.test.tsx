@@ -183,6 +183,20 @@ function stoppedDraft(seq: number, at: string): { entry: LedgerEntry; attempt: A
   };
 }
 
+/**
+ * The built-in agent tries to charge $250 in one go, over its signed limit, and the kernel refuses
+ * it: a request this week's count takes in, unlike a draft of Claude's the reply check stopped.
+ */
+async function refuseTheAgentsCharge(): Promise<void> {
+  const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
+  const before = refused();
+  await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+  const body = { task: 'push_the_limit', idempotency_key: `refuse-${before}` };
+  const sent = await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body });
+  if ('network' in sent || sent.status !== 202) throw new Error('the mock sends the built-in agent');
+  await expect.poll(refused, { timeout: 5_000 }).toBe(before + 1);
+}
+
 /** A read the test lets land when it chooses. */
 function held(): { until: Promise<void>; release: () => void } {
   let release = () => {};
@@ -317,9 +331,12 @@ describe('Safety', () => {
     expect(screen.getByText(NOTHING).elements()).toHaveLength(0);
   });
 
-  it('headline_counts_the_listed_attempts', async () => {
+  it('headline_counts_the_listed_refusals', async () => {
     // A visitor asks for 50% off, the Desk holds it for Maria, and she allows it. A hold is hers to
-    // answer, not an attempt that was stopped: the count and the list both leave it out.
+    // answer, not an attempt that was stopped: the count and the list both leave it out. Then the
+    // built-in agent tries to charge over its signed limit, which is refused. The count is the
+    // refused requests, the rows stopped at the action checkpoint; the seeded draft of Claude's the
+    // reply check stopped is listed, and not counted.
     const ask = 'Can I get 50% off if I pay cash?';
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: ask } });
@@ -327,13 +344,17 @@ describe('Safety', () => {
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('held');
     await mockStore.dispatch('answer', { params: { decision_id: asked()?.decision_id ?? '' }, body: { answer: 'allow_once' } });
     await expect.poll(() => asked()?.state, { timeout: 5_000 }).toBe('executed');
+    await refuseTheAgentsCharge();
 
     const { screen } = await renderRoute(SAFETY);
-    const headline = screen.getByText(/^\d+ attempts? to talk me around (?:was|were) stopped this week\.$/);
+    const headline = screen.getByText(HEADLINE);
     await expect.element(headline).toBeVisible();
-    const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('listitem');
-    await expect.element(rows.first()).toBeVisible();
-    expect(rows.elements()).toHaveLength(Number.parseInt(headline.element().textContent ?? '', 10));
+    const list = screen.getByRole('list', { name: 'Attempts, newest first' });
+    await expect.element(list.getByRole('link').first()).toBeVisible();
+    const refused = list.getByRole('link', { name: /Stopped by: Action checkpoint$/ }).elements();
+    expect(refused).toHaveLength(Number.parseInt(headline.element().textContent ?? '', 10));
+    expect(list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ }).elements()).toHaveLength(1);
+    expect(list.getByRole('link').elements()).toHaveLength(refused.length + 1);
 
     // Newest first, by the time each row shows.
     const ledger = await mockLedger();
@@ -760,6 +781,7 @@ describe('Safety', () => {
   it('headline_read_failure_says_so', async () => {
     // This week's count was read; then a later read fails. The line says so over the count, which
     // stays, until a read works.
+    await refuseTheAgentsCharge();
     const { screen } = await renderRoute(SAFETY);
     const headline = screen.getByText(/stopped this week\.$/);
     await expect.element(headline).toBeVisible();
@@ -770,8 +792,10 @@ describe('Safety', () => {
     await expect.element(headline).toBeVisible();
     await readsMore('today', 2);
     expect(line.elements()).toHaveLength(1);
+    // A fresh copy answers again; once the agent's charge is refused in it too, the count is back.
     mockStore.reset('rivera');
     await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
+    await refuseTheAgentsCharge();
     await expect.element(headline).toBeVisible();
   });
 

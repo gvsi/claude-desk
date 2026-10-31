@@ -581,6 +581,23 @@ describe('Today', () => {
     expect(again.getByText(/No one has needed you/).elements()).toHaveLength(0);
   });
 
+  it('attempts_count_refused_requests_only', async () => {
+    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody tried:
+    // "Since last night" shows it as blocked, and the last 7 days have no attempt to talk Claude around.
+    const { screen } = await renderRoute(TODAY);
+    const block = region(screen, 'Last 7 days');
+    const night = region(screen, 'Since last night');
+    await expect.element(night.getByText('A reply was stopped before it was shown.', { exact: true })).toBeVisible();
+    await expect.element(block.getByText('No attempts in the last 7 days.', { exact: true })).toBeVisible();
+
+    // The built-in agent tries to charge over its signed limit, which the kernel refuses: that one counts.
+    const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
+    await expect.poll(refused, { timeout: 5_000 }).toBe(1);
+    await expect.element(block.getByText('1 stopped', { exact: true })).toBeVisible();
+  });
+
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
     // The signed Today boards draw each day's bar 24 px wide, centered over its initial in one of
     // seven equal columns 6 px apart, at every width: a busy day is a taller bar, never a wider one.

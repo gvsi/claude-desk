@@ -134,8 +134,9 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
 }
 
 /**
- * One of Claude's replies the check stopped, as Safety and Today count them: its `reply` entry
- * wasn't ok for a reason other than a paused chat. An owner's stopped say isn't an attempt.
+ * One of Claude's replies the check stopped, as Safety lists them and Today's briefing shows them:
+ * its `reply` entry wasn't ok for a reason other than a paused chat. An owner's stopped say isn't
+ * an attempt. Nobody tried anything, so the last 7 days don't count it as stopped.
  */
 function stoppedReplies(desk: DeskRecord) {
   return desk.ledger.filter((e) => {
@@ -262,8 +263,8 @@ interface Activity {
   texts: Happened[];
   bookings: Booking[];
   leads: (Happened & { leadId: string; displayName: string; note: string | null })[];
-  /** Refusals at decide time, and Claude's replies the check stopped. */
-  stopped: (Happened & { refId: string; line: string | null })[];
+  /** Refusals at decide time, and Claude's replies the check stopped, each with its kind as Safety lists it. */
+  stopped: (Happened & { kind: 'refused' | 'reply_blocked'; refId: string; line: string | null })[];
   holds: Happened[];
   callbacks: Happened[];
   /** The owner answering a hold, taking over, whispering, resuming, or writing in the chat. */
@@ -320,8 +321,8 @@ function activityOf(world: MockWorld, desk: DeskRecord): Activity {
     stopped: [
       ...decisions
         .filter((d) => d.decision.outcome === 'refuse')
-        .map((d) => ({ sessionId: d.decision.session_id, at: d.createdAt, refId: d.decision.decision_id, line: d.decision.reason_plain })),
-      ...stoppedReplies(desk).map((e) => ({ sessionId: sessionOf(e), at: Date.parse(e.created_at), refId: String(e.seq), line: null })),
+        .map((d) => ({ sessionId: d.decision.session_id, at: d.createdAt, kind: 'refused' as const, refId: d.decision.decision_id, line: d.decision.reason_plain })),
+      ...stoppedReplies(desk).map((e) => ({ sessionId: sessionOf(e), at: Date.parse(e.created_at), kind: 'reply_blocked' as const, refId: String(e.seq), line: null })),
     ],
     holds: decisions.filter((d) => d.decision.outcome === 'hold').map((d) => ({ sessionId: d.decision.session_id, at: d.createdAt })),
     callbacks: executed('native.request_callback').map((d) => ({ sessionId: d.decision.session_id, at: reachedAt(d.decision) })),
@@ -402,12 +403,18 @@ function briefingOf(a: Activity): Briefing {
   };
 }
 
+/**
+ * The last 7 days, as the API core's `this_week` counts them. `stopped` is the requests the kernel
+ * refused, total and by day: a draft of Claude's the reply check stopped is no attempt anyone made,
+ * so the briefing and Safety list it but the week doesn't count it.
+ */
 function thisWeekOf(a: Activity): ThisWeek {
   const { days, weekFrom, now } = a.window;
   const end = now + 1;
   const conversations = conversationsIn(a, weekFrom, end);
   const steppedIn = new Set(within(a.steppedIn, weekFrom, end).map((h) => h.sessionId).filter((id) => conversations.has(id)));
   const bookings = within(a.bookings, weekFrom, end);
+  const refused = a.stopped.filter((s) => s.kind === 'refused');
   return {
     timezone: BUSINESS.timezone,
     start: days[0]?.date ?? '',
@@ -417,12 +424,12 @@ function thisWeekOf(a: Activity): ThisWeek {
     conversations: conversations.size,
     handled: conversations.size - steppedIn.size,
     stepped_in: steppedIn.size,
-    stopped: within(a.stopped, weekFrom, end).length,
+    stopped: within(refused, weekFrom, end).length,
     days: days.map(({ date, from, to }) => ({
       date,
       conversations: conversationsIn(a, from, Math.min(to, end)).size,
       bookings: within(a.bookings, from, Math.min(to, end)).length,
-      stopped: within(a.stopped, from, Math.min(to, end)).length,
+      stopped: within(refused, from, Math.min(to, end)).length,
     })),
   };
 }
@@ -448,8 +455,9 @@ export function reports(world: MockWorld, desk: DeskRecord): Reports {
 
 /**
  * Safety's attempts, newest first: decisions refused at decide time and Claude's replies the check
- * stopped, the same filter as Today's "stopped" (the API core's `_stopped_attempts`). A hold is the
- * owner's to answer, not an attempt that was stopped, so it isn't listed.
+ * stopped, the same filter as the briefing's blocked items (the API core's `_stopped_attempts`);
+ * the last 7 days count only the refused ones. A hold is the owner's to answer, not an attempt
+ * that was stopped, so it isn't listed.
  */
 export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
   const stopped: Attempt[] = decisionsOf(world, desk.summary.desk_id)
