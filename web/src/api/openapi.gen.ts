@@ -203,6 +203,15 @@ export interface CardDiff {
   changed: [unknown, unknown][];
 }
 /**
+ * 422 from a drafting route: the cards named in `card_ids`, in the draft's order, would change starting a
+ * verification, which is always on (codes go only to the contact on record, under the built-in rule), so nothing
+ * was drafted.
+ */
+export interface ChangesAlwaysOn {
+  error?: "changes_always_on";
+  card_ids: string[];
+}
+/**
  * A reply of Claude's exactly as it was sent to the kernel's reply check: its prose and its clauses.
  */
 export interface CheckedDraft {
@@ -347,6 +356,15 @@ export interface MessageAccepted {
 }
 export interface MessageIn {
   text: string;
+}
+/**
+ * `POST /api/owner/policy/{desk_id}/money_cap`: the money cap to draft the active rules at, the most an auto rule
+ * may take or pay out in one action without asking, in cents: from 0 (every payment asks) to the $10,000 platform
+ * ceiling. Above the ceiling, 422 `above_platform_ceiling`; anything but a whole number of cents from 0, 422
+ * `invalid`.
+ */
+export interface MoneyCapIn {
+  auto_money_cap_cents: number;
 }
 /**
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
@@ -932,5 +950,6 @@ export const API_OPERATIONS = {
   "POST /api/owner/policy/{desk_id}/draft": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/preset": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/suggestions/{tool}": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/money_cap": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/confirm": { 200: "PolicyVersion", 202: "ProvingPending" },
 } as const;

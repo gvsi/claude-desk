@@ -5,7 +5,8 @@ and an interview is read only within it.
 - Under `/api/owner/policy/setup/{id}` (`id` is the interview's), the proving routes: the rules draft, the
   situations, the safety check, the confirm and going live. Each runs its work through `desk.api.proving`: past
   `PROVING_WAIT_S` it answers 202 `ProvingPending`, and the same request sent again joins the work or takes its
-  answer.
+  answer. A draft holding cards that would change starting a verification is 422 `changes_always_on` naming them,
+  with nothing sent to the kernel (`proving_answer`, which the Rules page's proving routes share).
 
 Each request that moves the interview on counts on the copy's `setup_turn` limit (80 an hour; a proving re-post that
 joins work already running counts once) and, on a route that calls the model, answers 503 `demo_budget` in
@@ -20,11 +21,12 @@ from fastapi import APIRouter, Depends, Path, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from desk.api import proving, setup
+from desk.api import proving, setup, versions
 from desk.api.deps import OwnerCtx, Runtime, owner_ctx, public_origin, require_model_budget, runtime
 from desk.api.idempotency import body_sha256
 from desk.api.schemas import (
     ApiError,
+    ChangesAlwaysOn,
     ProvingPending,
     ProvingRetry,
     RulesChanged,
@@ -146,6 +148,8 @@ async def setup_connect_tools(interview_id: InterviewId, request: Request,
 Work = Callable[[OwnerCtx, Runtime], Awaitable[Any]]
 PROVING_RESPONSES: dict[int | str, dict[str, Any]] = {202: {"model": ProvingPending},
                                                       **error_responses(401, 404, 409, 422, 429, 503)}
+# The 422 of a proving route that posts owner cards to `POST /policy/draft` (`versions.post_draft`).
+ALWAYS_ON_RESPONSES: dict[int | str, dict[str, Any]] = {422: {"model": ChangesAlwaysOn | ApiError}}
 
 
 async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *, started: float,
@@ -155,7 +159,9 @@ async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Wo
     `ProvingPending` naming the same request (path and JSON body) once `PROVING_WAIT_S` has passed since `started`.
     `admit` (the route's limits) runs for new work only; a re-post that joins it isn't counted again. The work runs
     on its own database connection, since it may outlive the request. Work that `changes_rules` drops the Desk's other
-    kept answers once it ends, since they were about the rules before."""
+    kept answers once it ends, since they were about the rules before. Cards the work's draft refused before the
+    kernel was asked, for changing starting a verification (`versions.ChangesAlwaysOn`), are 422 `changes_always_on`
+    naming them."""
     state = runtime(request).started()
     payload = None if body is None else body.model_dump(mode="json")
 
@@ -167,8 +173,11 @@ async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Wo
             if changes_rules:
                 state.proving.forget(desk_id)
 
-    answer = await state.proving.run((desk_id, request.url.path, body_sha256(payload)), run, admit=admit,
-                                     deadline=started + proving.PROVING_WAIT_S)
+    try:
+        answer = await state.proving.run((desk_id, request.url.path, body_sha256(payload)), run, admit=admit,
+                                         deadline=started + proving.PROVING_WAIT_S)
+    except versions.ChangesAlwaysOn as refused:
+        return JSONResponse(ChangesAlwaysOn(card_ids=refused.card_ids).model_dump(mode="json"), status_code=422)
     if answer is proving.PENDING:
         pending = ProvingPending(retry=ProvingRetry(path=request.url.path, body=payload))
         return JSONResponse(pending.model_dump(mode="json"), status_code=202)
@@ -189,7 +198,7 @@ async def _proving(request: Request, ctx: OwnerCtx, interview_id: str, work: Wor
                                 changes_rules=changes_rules)
 
 
-@policy_router.post("/{id}/rules", response_model=RulesDraft, responses=PROVING_RESPONSES)
+@policy_router.post("/{id}/rules", response_model=RulesDraft, responses={**PROVING_RESPONSES, **ALWAYS_ON_RESPONSES})
 async def setup_rules(interview_id: InterviewId, request: Request,
                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
     """The new Desk's first rules: its hours, prices, calendar and public details go to the kernel, Claude drafts rule
@@ -226,7 +235,7 @@ async def setup_safety_check(interview_id: InterviewId, request: Request,
 
 
 @policy_router.post("/{id}/confirm", response_model=PolicyVersion,
-                    responses={**PROVING_RESPONSES, 409: {"model": RulesChanged | ApiError}})
+                    responses={**PROVING_RESPONSES, 409: {"model": RulesChanged | ApiError}, **ALWAYS_ON_RESPONSES})
 async def setup_confirm(interview_id: InterviewId, request: Request,
                         ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
     """Activate the drafted rules, with Answering still off, so the owner can try the Desk before it goes live. When

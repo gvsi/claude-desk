@@ -115,7 +115,6 @@ export const ROUTE_MODELS = {
  */
 export const NOT_YET_SERVED = [
   // Proving
-  'draftMoneyCap',
   'confirmTool',
 ] as const satisfies readonly RouteKey[];
 
