@@ -86,9 +86,12 @@ export function RulesPage() {
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
   const people = useQuery(peopleQuery(deskId));
   const suggestions = useQuery({ ...suggestionsQuery(deskId), refetchInterval: pollMs('rules') });
-  // The Desk's held requests, as Needs you lists them: the latest is one more thing to ask about.
+  // The Desk's held requests, as Needs you lists them: the latest is one more thing to ask about,
+  // but only from a read made since the page opened, with no failed read since the last that
+  // worked and none waiting for the network, so a hold answered or expired since never shows.
   const needsYou = useNeedsYou(deskId);
-  const question = holdQuestion(needsYou.data ?? []);
+  const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
+  const question = current ? holdQuestion(needsYou.data ?? []) : null;
   const chips = question === null ? RULES_CHIPS : [...RULES_CHIPS, question];
   const failure = useReadFailure(rules);
   const [presetPending, setPresetPending] = useState(false);

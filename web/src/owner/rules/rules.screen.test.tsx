@@ -3,14 +3,17 @@
  * the page, the presets and the payment limit, each change through its proved review, and the
  * house rules.
  */
+import { http, HttpResponse } from 'msw';
 import type { RouteObject } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 
 import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
+import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { EXTRA_RULES, type DeskRecord } from '../../mocks/world.ts';
@@ -93,6 +96,45 @@ const FIXED_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up
 /** The words of each suggestion in `group`, in order. */
 function chipWords(group: Locator): string[] {
   return group.getByRole('button').elements().map((chip) => chip.textContent ?? '');
+}
+
+/** The main Desk's Needs you, as the app reads it. */
+const NEEDS_YOU_PATH = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
+
+/** Holds every read of the main Desk's Needs you until `release()` lets them through to the mock; `held()` counts them. */
+function holdNeedsYou(): { held: () => number; release: () => void } {
+  let waiting = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  worker.use(
+    http.get(NEEDS_YOU_PATH, async () => {
+      waiting += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => waiting, release };
+}
+
+/** Every read of the main Desk's Needs you fails until `recover()`, then goes through to the mock; `failed()` counts the failures. */
+function failNeedsYou(): { failed: () => number; recover: () => void } {
+  let failing = true;
+  let failures = 0;
+  worker.use(
+    http.get(NEEDS_YOU_PATH, () => {
+      if (!failing) return undefined;
+      failures += 1;
+      return HttpResponse.json({ error: 'unavailable' }, { status: 503 });
+    }),
+  );
+  return {
+    failed: () => failures,
+    recover: () => {
+      failing = false;
+    },
+  };
 }
 
 /** Rivera's payment limit, atop Payments and Stripe. */
@@ -822,6 +864,53 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.world.answer(held, 'deny_once');
     await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).not.toBeInTheDocument();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+  });
+
+  it('hold_question_never_shows_a_hold_from_an_earlier_read', async () => {
+    // The seed's quote, held and read, so the app keeps it.
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+
+    // Answered elsewhere while Needs you's reads are slow to come back: on Rules again, the kept
+    // read still holds the quote, and no chip asks about it while the page's own read is on its way.
+    const reads = holdNeedsYou();
+    const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
+    if (!held) throw new Error('the seed holds a quote');
+    mockStore.world.answer(held, 'deny_once');
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(`${DESK}/rules`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    const again = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(again.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
+    const waiting = reads.held();
+    await expect.poll(() => reads.held()).toBeGreaterThan(waiting);
+    expect(chipWords(again)).toEqual([...FIXED_CHIPS]);
+
+    // Dana's refund is held meanwhile: once the reads come back, the chip asks about it.
+    mockStore.world.addHeldRefund();
+    reads.release();
+    await expect.element(again.getByRole('button', { name: 'Why was this refund held?' })).toBeVisible();
+    expect(chipWords(again)).toEqual([...FIXED_CHIPS, 'Why was this refund held?']);
+  });
+
+  it('hold_question_goes_while_needs_you_cannot_be_read', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { retryScale: 0.05 });
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+
+    // A read of Needs you fails, its retry too: what was read before may be out of date, so no
+    // chip asks about it, and the others stay.
+    const reads = failNeedsYou();
+    await expect.poll(() => reads.failed()).toBeGreaterThanOrEqual(2);
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).not.toBeInTheDocument();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+
+    // Once a read works again, the quote, still held, is asked about again.
+    reads.recover();
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
   });
 
   it('hold_question_reaches_ask_claude_as_typed', async () => {
