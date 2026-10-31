@@ -413,6 +413,15 @@ describe('Today', () => {
     expect(night.getByText('Booked').elements()).toHaveLength(0);
     await expect.element(night.getByRole('link', { name: /A reply was stopped/ })).toHaveAttribute('href', `${DESK}/safety/41`);
     expect(night.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
+
+    // Three things, but no booking among the newest, so two rows: "See all 3" opens the third.
+    mockStore.reset('rivera');
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { blocked: REFUSAL, booking: null, lead_or_answer: ANSWER } } }));
+    const third = await renderRoute(TODAY);
+    const two = region(third.screen, 'Since last night');
+    await expect.element(two.getByText(REFUSAL.line ?? '', { exact: true })).toBeVisible();
+    expect(two.getByRole('listitem').elements()).toHaveLength(2);
+    await expect.element(two.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
   });
 
   it('see_all_opens_the_full_briefing', async () => {
