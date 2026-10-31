@@ -1,20 +1,22 @@
 /**
  * Settings › Knowledge (N-Run2-Settings-Knowledge): what Claude answers from, which never changes
- * the owner's rules. A note or a text file is added for the owner only, then the "Added" card's
- * "Customers can see this" switch posts it again for customers or for the owner alone, and shows
- * the readers the kernel returned, never the ones asked for, so an item the kernel keeps to the
- * owner stays off.
- *
- * "What I know now" (`KnowledgeList`) waits on an API that lists a Desk's knowledge to its owner
- * (Open question 1): until it lands, no list is drawn. It goes above "Add something", as the board
- * draws it.
+ * the owner's rules. "What I know now" lists what the owner may see, each item with when it was
+ * added and who can see it; one the kernel forces owner-only comes with its title and text withheld
+ * and reads "A note only you can see". Under it, a note or a text file is added for the owner only,
+ * then the "Added" card's "Customers can see this" switch posts it again for customers or for the
+ * owner alone, and shows the readers the kernel returned, never the ones asked for, so an item the
+ * kernel keeps to the owner stays off.
  */
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import type { KnowledgeItem } from '../../api/contracts.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
-import { KnowledgeAdd } from '../../ds/index.ts';
+import type { KnowledgeListItem } from '../../api/views.ts';
+import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, Notice, type KnowledgeRowView } from '../../ds/index.ts';
+import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { useReadFailure } from '../useReadFailure.ts';
 
 const LEAD = 'Knowledge is what I answer from. It never changes your rules.';
 
@@ -41,6 +43,56 @@ export const KNOWLEDGE_COPY = {
 
 type Busy = 'note' | 'file' | 'switch';
 
+/** A Desk's knowledge, as the owner may see it. Query keys start with the route key. */
+const knowledgeKey = (deskId: string) => ['knowledge', deskId] as const;
+
+/**
+ * The list's rows, oldest first, each with when it was added on the business's clock. An item whose
+ * title or text the kernel withheld is drawn as the design system draws one it keeps to the owner:
+ * no title, no words, "Only you".
+ */
+function rowsOf(items: readonly KnowledgeListItem[], timeZone: string): KnowledgeRowView[] {
+  return [...items]
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+    .map((item) => ({
+      id: item.item_id,
+      title: item.title === null || item.text === null ? null : item.title,
+      detail: `Added ${formatDate(item.created_at, timeZone)}`,
+      readers: item.label.readers ?? [],
+    }));
+}
+
+/** "What I know now": the list once read, the loading line while it is, and a failed read with Try again over it. */
+function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
+  const list = useQuery({ queryKey: knowledgeKey(deskId), queryFn: () => request('knowledge', { params: { desk_id: deskId } }) });
+  const failure = useReadFailure(list);
+  return (
+    <>
+      {failure === null ? null : (
+        <Notice
+          tone="error"
+          action={
+            <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
+              Try again
+            </Button>
+          }
+        >
+          {failure.line}
+        </Notice>
+      )}
+      {list.data === undefined ? (
+        failure === null ? (
+          <LoadingLine>Loading what I know</LoadingLine>
+        ) : null
+      ) : (
+        // With nothing known yet, no list: the board never draws it empty. A failed read says so
+        // over the list read before.
+        <KnowledgeList items={rowsOf(list.data, timeZone)} />
+      )}
+    </>
+  );
+}
+
 /** The first `TITLE_LENGTH` characters of `text`, by character rather than code unit. */
 function titleOf(text: string): string {
   return [...text].slice(0, TITLE_LENGTH).join('');
@@ -57,8 +109,11 @@ function sameItem(a: KnowledgeItem, b: Omit<KnowledgeItem, 'item_id'>): boolean 
 }
 
 export function KnowledgePage() {
-  const { desk } = useOwnerDesk();
+  const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
+  const queryClient = useQueryClient();
+  /** The list is read again after anything is added or changed. */
+  const listChanged = () => void queryClient.invalidateQueries({ queryKey: knowledgeKey(deskId) });
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<Busy | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -82,6 +137,7 @@ export function KnowledgePage() {
       const stored = await post(item);
       setAdded(stored);
       setSwitchLine(undefined);
+      listChanged();
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
       setError(isUncertain(err) ? KNOWLEDGE_COPY.unconfirmed : ownerErrorCopy(err));
@@ -126,6 +182,7 @@ export function KnowledgePage() {
     try {
       const stored = await post({ ...added, label: { ...added.label, readers: makePublic ? ['public'] : ['owner'] } });
       setAdded(stored);
+      listChanged();
       if (makePublic && !(stored.label.readers ?? []).includes('public')) setSwitchLine(KNOWLEDGE_COPY.keptPrivate);
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
@@ -138,6 +195,7 @@ export function KnowledgePage() {
   return (
     <>
       <p className="cd-type-summary">{LEAD}</p>
+      <WhatIKnow deskId={deskId} timeZone={business.timezone} />
       <KnowledgeAdd
         note={note}
         onNoteChange={setNote}

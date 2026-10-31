@@ -119,6 +119,14 @@ export function formatWhen(iso: string, timeZone: string, now: Date): string {
   return `${day}, ${clock(at)}`;
 }
 
+/** The date of `iso` on the business's clock: "Oct 27". A time that can't be read shows as nothing. */
+export function formatDate(iso: string, timeZone: string): string {
+  const at = readDate(iso);
+  if (at === null) return '';
+  const local = localTime(at, timeZone);
+  return `${MONTHS[local.month - 1] ?? ''} ${local.day}`;
+}
+
 /** Whole days from `at`'s local date to `now`'s, on the business's clock: 0 today, 1 yesterday. */
 function daysBefore(at: Date, now: Date, timeZone: string): number {
   const day = (t: LocalTime) => Date.UTC(t.year, t.month - 1, t.day);

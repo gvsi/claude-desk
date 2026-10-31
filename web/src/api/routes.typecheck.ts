@@ -62,6 +62,8 @@ export const ROUTE_MODELS = {
   suggestions: 'Suggestion[]',
   simulateToolChange: 'ToolProfile',
   addKnowledge: 'KnowledgeItem',
+  // pending: GET knowledge (API); the model's name follows the API's document once it serves it.
+  knowledge: 'KnowledgeListItem[]',
   people: 'PeopleOut',
 
   // Proving
@@ -116,6 +118,8 @@ export const ROUTE_MODELS = {
 export const NOT_YET_SERVED = [
   // Proving
   'confirmTool',
+  // The knowledge the owner may see, for Settings › Knowledge's list (plan 04, Open question 1).
+  'knowledge',
 ] as const satisfies readonly RouteKey[];
 
 /**

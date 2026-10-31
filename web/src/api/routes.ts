@@ -43,6 +43,7 @@ import type {
   GenerationBody,
   HealthOut,
   KnowledgeBody,
+  KnowledgeListItem,
   MessageAccepted,
   MoneyCapIn,
   NeedsYouItem,
@@ -126,6 +127,7 @@ export const ROUTES = {
   suggestions: { method: 'GET', path: '/api/owner/desks/{desk_id}/suggestions', owner: true },
   simulateToolChange: { method: 'POST', path: '/api/owner/desks/{desk_id}/tools/simulate_change', owner: true },
   addKnowledge: { method: 'POST', path: '/api/owner/desks/{desk_id}/knowledge', owner: true },
+  knowledge: { method: 'GET', path: '/api/owner/desks/{desk_id}/knowledge', owner: true },
   people: { method: 'GET', path: '/api/owner/desks/{desk_id}/people', owner: true },
 
   // Proving: every route under /api/owner/policy/
@@ -209,6 +211,7 @@ interface RouteShapes {
   suggestions: { body: undefined; response: Suggestion[] };
   simulateToolChange: { body: ToolBody; response: ToolProfile };
   addKnowledge: { body: KnowledgeBody; response: KnowledgeItem };
+  knowledge: { body: undefined; response: KnowledgeListItem[] };
   people: { body: undefined; response: PeopleOut };
 
   ruleChat: { body: TextBody; response: RuleChatOut };

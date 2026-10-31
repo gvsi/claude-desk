@@ -598,6 +598,18 @@ export interface KnowledgeBody {
   item: KnowledgeItem;
 }
 
+// pending: GET knowledge (API); drop when openapi.gen.ts has it
+/**
+ * One item of `GET /api/owner/desks/{desk_id}/knowledge`, the knowledge the owner may see: a
+ * `KnowledgeItem` with when it was added. One the kernel forces owner-only comes back with its
+ * `title` and `text` null (`kernel_ro.knowledge_items` withholds them).
+ */
+export interface KnowledgeListItem extends Omit<KnowledgeItem, 'title' | 'text'> {
+  title: string | null;
+  text: string | null;
+  created_at: string;
+}
+
 export interface TextBody {
   text: string;
 }

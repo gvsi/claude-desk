@@ -234,8 +234,11 @@ export class MockWorld {
   readonly decisions = new Map<string, DecisionRecord>();
   readonly handoffs = new Map<string, HandoffRecord>();
   readonly leads: LeadRecord[] = [];
-  /** What the owner told each Desk, by Desk and `item_id`, as the kernel stored it. */
-  readonly knowledge = new Map<string, { deskId: string; item: KnowledgeItem }>();
+  /**
+   * What the owner told each Desk, by Desk and `item_id`, as the kernel stored it: when it was first
+   * added, and whether the kernel forces it owner-only, which withholds its title and text when listed.
+   */
+  readonly knowledge = new Map<string, { deskId: string; item: KnowledgeItem; createdAt: number; forced: boolean }>();
   /**
    * Whether the kernel keeps an item to the owner whatever readers it's posted with, as it does one
    * holding a customer's private data (kernel verification fixes, plan 01b Task 6c). It never does

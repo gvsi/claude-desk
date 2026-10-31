@@ -1318,6 +1318,13 @@ describe('rules and tools', () => {
     expect(forced.body).toEqual(labelled(['owner']));
     expect(validateContract('KnowledgeItem', forced.body)).toEqual([]);
 
+    // Listed, with when it was first added: one the kernel keeps to the owner has its words withheld.
+    const listed = await call('knowledge', { params: { desk_id: deskId } });
+    expect(listed).toEqual({ status: 200, body: [{ ...labelled(['owner']), title: null, text: null, created_at: expect.any(String) }] });
+    mockStore.world.keepsKnowledgeOwnerOnly = () => false;
+    await add({ ...note, label: { readers: ['public'] } });
+    expect((await call('knowledge', { params: { desk_id: deskId } })).body).toEqual([{ ...labelled(['public']), created_at: (listed.body as { created_at: string }[])[0]?.created_at }]);
+
     // Not an item: refused, nothing stored.
     for (const bad of [undefined, { ...note, title: 3 }, { ...note, label: { readers: 'public' } }, { ...note, source: 'gossip' }, { ...note, item_id: '' }]) {
       expect((await add(bad)).status).toBe(422);

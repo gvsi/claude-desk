@@ -35,6 +35,7 @@ import {
   needsYou,
   ownerTranscript,
   paymentLinkOut,
+  knowledgeList,
   peopleOut,
   publicDesk,
   reports,
@@ -662,10 +663,17 @@ const SERVED: ServedRoutes = {
     if (req.malformed || !isKnowledgeItem(item)) return INVALID;
     // Posted again under its id, it replaces the item. The label is the one the kernel keeps, with
     // every field, as the API's models send them (readers default to the owner's).
-    const readers = sv.world.keepsKnowledgeOwnerOnly(item) ? ['owner'] : [...(item.label.readers ?? ['owner'])];
+    const forced = sv.world.keepsKnowledgeOwnerOnly(item);
+    const readers = forced ? ['owner'] : [...(item.label.readers ?? ['owner'])];
     const stored: KnowledgeItem = { ...item, label: { readers, record_owner: item.label.record_owner ?? null } };
-    sv.world.knowledge.set(`${desk.summary.desk_id}:${item.item_id}`, { deskId: desk.summary.desk_id, item: stored });
+    const key = `${desk.summary.desk_id}:${item.item_id}`;
+    const createdAt = sv.world.knowledge.get(key)?.createdAt ?? sv.world.now();
+    sv.world.knowledge.set(key, { deskId: desk.summary.desk_id, item: stored, createdAt, forced });
     return ok(stored);
+  },
+  knowledge(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    return isFailure(desk) ? desk : ok(knowledgeList(sv.world, desk.summary.desk_id));
   },
   people(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
