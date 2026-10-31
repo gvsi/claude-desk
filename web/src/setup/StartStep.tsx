@@ -43,7 +43,7 @@ interface Unresolved {
 /**
  * "Tell me about your business": a few sentences in the owner's own words, from which the API
  * takes the business's name and the owner's, and makes the new Desk with Answering off. Under the
- * box, three examples to start from: a chip puts its description in the box, focused, for the owner
+ * box, four examples to start from: a chip puts its description in the box, focused, for the owner
  * to change, and sends nothing; while a start is being settled they are off, as the box is.
  *
  * Each press of "Start" sends a new idempotency key, and its retries send it again, so the API
@@ -75,6 +75,31 @@ export function StartStep() {
   const boxRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   // Each example put in the box, counted, so the box takes focus after each, the same one again too.
   const [picks, setPicks] = useState(0);
+  // Older Safari fits the box here; CSS keeps the same four-line floor and ten-line cap.
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (box === null || CSS.supports('field-sizing', 'content')) return;
+    const fit = () => {
+      box.style.height = 'auto';
+      box.style.height = `${box.scrollHeight + 2}px`;
+    };
+    fit();
+    let width = box.getBoundingClientRect().width;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = box.getBoundingClientRect().width;
+      if (nextWidth === width) return;
+      width = nextWidth;
+      // Keep height writes outside observer delivery; height-only changes never schedule a fit.
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fit);
+    });
+    observer.observe(box);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [description, picks]);
   useEffect(() => {
     let controller = new AbortController();
     leaving.current = controller;
@@ -104,9 +129,9 @@ export function StartStep() {
     const box = boxRef.current;
     if (picks === 0 || box === null) return;
     box.focus();
-    // The caret at the start, where the business's name is to change, and the box scrolled to it.
-    box.setSelectionRange(0, 0);
-    box.scrollTop = 0;
+    // The caret at the end, ready for more detail, with that end in view even at the line cap.
+    box.setSelectionRange(box.value.length, box.value.length);
+    box.scrollTop = box.scrollHeight;
     // The words fade in with each press: the fill's animation (SetupPage.css) starts over.
     box.style.animation = 'none';
     void box.offsetWidth;
@@ -222,7 +247,7 @@ export function StartStep() {
         />
         <div className="cd-setup-start__examples">
           <p className="cd-setup-start__line cd-type-meta">{examples.line}</p>
-          <SuggestionChips label={examples.label} suggestions={examples.examples.map((example) => example.chip)} onPick={pick} disabled={locked} />
+          <SuggestionChips label={examples.label} suggestions={examples.examples.map((example) => example.chip)} max={4} onPick={pick} disabled={locked} />
         </div>
       </div>
       {error === null ? null : <Notice tone="error">{error}</Notice>}
