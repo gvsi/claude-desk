@@ -46,7 +46,7 @@ function Tiles({ connectors }: { connectors: readonly ConnectorView[] }) {
   );
 }
 
-/** Checks one tile: its size, its 8 px radius, its ground, and its icon's size; hidden from screen readers. */
+/** Checks one icon: its box's size, its 8 px radius, its ground, and its mark's size; hidden from screen readers. */
 function expectTile(tile: Element, size: (typeof SIZES)[number], ground: string) {
   expectComputed(tile, { width: TILE_PX[size], height: TILE_PX[size], borderTopLeftRadius: '8px', backgroundColor: ground });
   const mark = tile.querySelector('svg');
@@ -78,15 +78,18 @@ export const Brands: Story = {
   render: () => <Tiles connectors={[rivera.connectors.views.stripe, GOOGLE_CALENDAR]} />,
   parameters: {
     canvas: 'N-Conn-07b-Add-Picker-ComingSoon',
-    canvasNote: 'Google Calendar is catalog-only in the demo; its tile shows what the component draws once it works.',
+    canvasNote:
+      'Google Calendar is catalog-only in the demo; its mark shows what the component draws once it works. The board draws the marks on a white tile; they have none (N-Explore-Connector-Decided, signed 2026-10-30).',
   },
   play: async ({ canvasElement }) => {
-    // A third-party tile: the brand's own mark, in its colors, on the light brand tile.
-    const fills = { stripe: 'rgb(99, 91, 255)', google_calendar: 'rgb(66, 133, 244)' } as const;
+    // brand_marks_have_no_tile: a third-party connector's own mark with no tile behind it (owner,
+    // 2026-10-30): Stripe's in white on the dark page, as Stripe's guidelines allow, and Google
+    // Calendar's in its own blue.
+    const fills = { stripe: 'rgb(255, 255, 255)', google_calendar: 'rgb(66, 133, 244)' } as const;
     for (const [id, fill] of Object.entries(fills)) {
       const tiles = [...canvasElement.querySelectorAll(`[data-connector="${id}"] .cd-connector-icon`)];
       await expect(tiles).toHaveLength(3);
-      tiles.forEach((tile, index) => expectTile(tile, SIZES[index] ?? 'section', 'rgb(255, 255, 255)'));
+      tiles.forEach((tile, index) => expectTile(tile, SIZES[index] ?? 'section', 'rgba(0, 0, 0, 0)'));
       for (const tile of tiles) {
         await expect(tile).toHaveAttribute('aria-hidden', 'true');
         const path = tile.querySelector('path');

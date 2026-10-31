@@ -93,7 +93,7 @@ export const Stripe: Story = {
     await expect(canvas.getByRole('region', { name: 'Stripe' })).toBeVisible();
     // mock_badge_always_beside_external_names
     await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
-    // The brand tile, and the refund's held outcome.
+    // Stripe's own mark, and the refund's held outcome.
     await expect(canvasElement.querySelector('.cd-connector-icon--brand')).not.toBeNull();
     const refund = stripe.tools[1];
     if (!refund) throw new Error('The Stripe fixture lost Refund');

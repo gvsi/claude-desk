@@ -255,7 +255,8 @@ export const CONNECTORS_SPEC = {
   },
   sectionHeader: { paddingTop: '14px', paddingRight: '16px', paddingBottom: '14px', paddingLeft: '16px' },
   iconTile: { width: '36px', height: '36px', borderTopLeftRadius: '8px', backgroundColor: 'rgba(250, 249, 245, 0.1)' },
-  brandTile: { width: '36px', height: '36px', borderTopLeftRadius: '8px', backgroundColor: 'rgb(255, 255, 255)' },
+  /** A third-party connector's mark: the same box, with no tile behind it (owner, 2026-10-30). */
+  brandTile: { width: '36px', height: '36px', borderTopLeftRadius: '8px', backgroundColor: 'rgba(0, 0, 0, 0)' },
   toolRow: {
     paddingTop: '12px',
     paddingRight: '16px',

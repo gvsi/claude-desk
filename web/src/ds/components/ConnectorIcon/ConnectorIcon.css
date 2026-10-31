@@ -1,7 +1,7 @@
-/* ConnectorIcon: a square tile at the control radius. Built in, a line icon on the secondary fill;
-   a third-party connector, its own mark on the light brand tile, the one light surface besides the
-   intro illustration's cards. The icon scales with the tile, as on the boards: 26 px on a 48 px
-   tile, 20 px on 36 px, 13 px on 24 px. */
+/* ConnectorIcon: a square box at the control radius. Built in, a line icon on a tile of the
+   secondary fill; a third-party connector, its own mark with no tile behind it (owner, 2026-10-30).
+   The icon scales with the box, as on the boards: 26 px in a 48 px box, 20 px in 36 px, 13 px in
+   24 px. */
 
 .cd-connector-icon {
   display: inline-flex;
@@ -15,10 +15,6 @@
 
 .cd-connector-icon--built-in {
   background: var(--fill-secondary);
-}
-
-.cd-connector-icon--brand {
-  background: var(--connector-tile-brand);
 }
 
 .cd-connector-icon__mark {

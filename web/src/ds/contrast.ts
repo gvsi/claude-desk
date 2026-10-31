@@ -203,7 +203,6 @@ export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze
   'mark-hairline': "The edge of the mark's tile on the About pages' top bar; the tile itself carries the mark's contrast.",
   'illustration-line': "The booked box's outline on an intro illustration card; the words inside it say what it is.",
   'illustration-arc': "Two soft arcs on the intro illustration's clay field, behind the cards; they carry nothing.",
-  'connector-tile-brand': 'A third-party brand mark beside its name; nothing is read on it.',
   'connector-stripe': 'A third-party brand mark beside its name; nothing is read on it.',
   'connector-google-blue': 'A third-party brand mark beside its name; nothing is read on it.',
 });

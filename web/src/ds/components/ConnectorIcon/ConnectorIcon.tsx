@@ -24,8 +24,9 @@ const BUILT_IN = {
 } as const satisfies Partial<Record<ConnectorIconName, IconName>>;
 
 /**
- * Each third-party connector's own mark on the 24-unit grid, filled in its brand color token. The
- * path data is Simple Icons' (https://simpleicons.org), released under CC0.
+ * Each third-party connector's own mark on the 24-unit grid, filled in its brand color token: Stripe's
+ * in white on the dark grounds, as Stripe's guidelines allow, and Google Calendar's in its own blue.
+ * The path data is Simple Icons' (https://simpleicons.org), released under CC0.
  */
 const BRAND = {
   stripe: {
@@ -45,9 +46,9 @@ export interface ConnectorIconProps {
 }
 
 /**
- * A connector's tile, always beside its name and hidden from screen readers. A built-in connector's
- * line icon on `fill-secondary`; a third-party connector's own mark, in its brand's colors, on the
- * light brand tile. An icon this build doesn't know shows an empty built-in tile.
+ * A connector's icon, always beside its name and hidden from screen readers. A built-in connector's
+ * line icon on a `fill-secondary` tile; a third-party connector's own mark, in its brand's color, with
+ * no tile. An icon this build doesn't know shows an empty built-in tile.
  */
 export function ConnectorIcon({ icon, size }: ConnectorIconProps) {
   const brand = Object.hasOwn(BRAND, icon) ? BRAND[icon as keyof typeof BRAND] : null;
