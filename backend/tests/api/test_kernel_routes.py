@@ -67,8 +67,8 @@ PENDING_KERNEL_ROUTES: dict[str, str] = {
 API = Path(desk.api.__file__).parent
 SEGMENT = r"[^/?\s]+"     # what an f-string's formatted value stands for: one path segment
 # Receivers whose `.call` or `.stream` isn't a kernel view's: the model client and the Anthropic client inside it
-# (desk.api.model).
-NOT_KERNEL_VIEWS = frozenset({"model", "self.model", "self._client.beta.messages"})
+# (desk.api.model), and a Starlette request (`request.stream()`, desk.api.a2a).
+NOT_KERNEL_VIEWS = frozenset({"model", "self.model", "self._client.beta.messages", "request"})
 
 
 def bindings(tree: ast.AST) -> Counter[str]:
@@ -94,10 +94,19 @@ def bindings(tree: ast.AST) -> Counter[str]:
     return bound
 
 
+def wildcard_imports(tree: ast.AST) -> list[ast.ImportFrom]:
+    """Each `from x import *` in `tree`."""
+    return [node for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names)]
+
+
 def module_constants(tree: ast.Module) -> dict[str, ast.expr]:
     """The names a module binds exactly once, by an assignment at its top level, with the expression each holds. A
     name bound anywhere else too (a parameter, a local, a loop or `with` target, a comprehension variable) isn't one,
-    so a call that passes it is unreadable instead of read as the module's value."""
+    so a call that passes it is unreadable instead of read as the module's value. A module with a wildcard import has
+    none, since the import can rebind any name."""
+    if wildcard_imports(tree):
+        return {}
     bound = bindings(tree)
     constants = {}
     for node in tree.body:
@@ -134,12 +143,11 @@ def route_keys(node: ast.expr, constants: Mapping[str, ast.expr], keys: Set[str]
 
 def route_argument(call: ast.Call) -> ast.expr | None:
     """The route a kernel view's `.call(route, ...)` or `.stream(route, ...)` passes, by position or as `route=`, or
-    the call itself when it passes neither (only other keywords, or `**mapping`), which the scan can't read. None for
-    a call that isn't one: another method, a receiver in NOT_KERNEL_VIEWS, or a call with no arguments at all, which
-    names no route (Starlette's `request.stream()`; a kernel view's would raise before sending anything)."""
+    the call itself when it passes neither (no arguments, only other keywords, or `**mapping`), which the scan can't
+    read. None for a call that isn't one: another method, or a receiver in NOT_KERNEL_VIEWS."""
     func = call.func
     if (not isinstance(func, ast.Attribute) or func.attr not in ("call", "stream")
-            or ast.unparse(func.value) in NOT_KERNEL_VIEWS or not (call.args or call.keywords)):
+            or ast.unparse(func.value) in NOT_KERNEL_VIEWS):
         return None
     if call.args:
         return call.args[0]
@@ -147,13 +155,14 @@ def route_argument(call: ast.Call) -> ast.expr | None:
 
 
 def routes_called(source: str, keys: Set[str]) -> tuple[set[str], list[str]]:
-    """The keys of `keys` a module's kernel calls name, and by line each call whose route the scan can't read. Every
-    `.call(...)` and `.stream(...)` but the model client's is taken for a kernel view's, so a call the scan can't read
-    fails the test instead of going unchecked. A route named anywhere else (an error's text, the client's route sets)
-    isn't a call."""
+    """The keys of `keys` a module's kernel calls name, and by line each call whose route the scan can't read, and
+    each wildcard import, which can rebind a route constant. Every `.call(...)` and `.stream(...)` on a receiver not
+    in NOT_KERNEL_VIEWS is taken for a kernel view's, so a call the scan can't read fails the test instead of going
+    unchecked. A route named anywhere else (an error's text, the client's route sets) isn't a call."""
     tree = ast.parse(source)
     constants = module_constants(tree)
-    called, unreadable = set(), []
+    called = set()
+    unreadable = [(node.lineno, f"line {node.lineno}: {ast.unparse(node)}") for node in wildcard_imports(tree)]
     for node in ast.walk(tree):
         route = route_argument(node) if isinstance(node, ast.Call) else None
         if route is None:
@@ -373,12 +382,13 @@ async def read(kernel, request, route, kwargs):
     async with kernel.stream(**kwargs):
         pass
     await kernel.call(path={"id": "d1"})
+    await kernel.call()
     async for chunk in request.stream():
         pass
 '''
-    assert routes_called(source, SCAN_KEYS) == (set(), [   # with no argument at all, a call names no route
+    assert routes_called(source, SCAN_KEYS) == (set(), [   # Starlette's request.stream() is in NOT_KERNEL_VIEWS
         "line 3: kernel.call(**{'route': route})", "line 4: kernel.stream(**kwargs)",
-        "line 6: kernel.call(path={'id': 'd1'})"])
+        "line 6: kernel.call(path={'id': 'd1'})", "line 7: kernel.call()"])
 
 
 REBINDINGS = {
@@ -397,3 +407,15 @@ def test_a_module_constant_that_an_enclosing_scope_rebinds_is_unreadable():
         called, unreadable = routes_called(constants + function, SCAN_KEYS)
         assert (called, [line.partition(": ")[2] for line in unreadable]) == (
             set(), ["STEPS[step]" if "STEPS" in function else "ROUTE"]), binding
+
+
+def test_a_wildcard_import_is_unreadable():
+    source = '''
+ROUTE = "GET /health"
+from desk.api.routes.proxy import *
+
+async def read(kernel):
+    await kernel.call(ROUTE)
+'''
+    assert routes_called(source, SCAN_KEYS) == (set(), [   # it can rebind any name, so no name is a constant
+        "line 3: from desk.api.routes.proxy import *", "line 6: ROUTE"])
