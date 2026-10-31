@@ -74,6 +74,27 @@ const firstAt = (key: RouteKey) => mockStore.requests.findIndex((r) => r.key ===
 
 const DISCLOSURE = /You're chatting with Claude, an AI answering for/;
 
+/**
+ * An interview at the safety check whose rules changed after it drafted its own (Payments turned
+ * on), opened with "Confirm rules" pressed: the conflict review is on screen.
+ */
+async function openConflictReview(): Promise<{ state: SetupState; screen: RenderResult }> {
+  const { state } = await interviewAtSafety();
+  const desk = deskOf(state);
+  const entries = ['native.payment_link', 'native.charge_mandate'].map((tool) => ({
+    tool: tool as 'native.payment_link',
+    definition_sha256: desk.tools.find((t) => t.tool === tool)?.definition_sha256 ?? '',
+  }));
+  const turnedOn = mockStore.world.confirmTools(desk, entries, true);
+  if (typeof turnedOn === 'string' || turnedOn.draft === null) throw new Error('the mock drafts the tools');
+  mockStore.world.confirmDraft(desk, turnedOn.draft.version);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+  await screen.getByRole('button', { name: 'Confirm rules' }).click();
+  await expect.element(screen.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+  return { state, screen };
+}
+
 /** The mock's Desk for an interview. */
 function deskOf(state: SetupState): DeskRecord {
   const desk = mockStore.world.desk(state.desk_id);
@@ -536,7 +557,7 @@ describe('setup', () => {
     // when the test moves it).
     const slow = await interviewAtTools();
     const retry = { retry: { path: `/api/owner/policy/setup/${slow.interview_id}/rules`, body: null } };
-    mockStore.inject({ route: 'setupRules', status: 202, body: retry, times: 5 });
+    mockStore.inject({ route: 'setupRules', status: 202, body: retry });
     const waiting = (await renderRoute(`/app/setup/${slow.interview_id}`)).screen;
     await expect.element(waiting.getByRole('button', { name: 'Continue' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout'], shouldAdvanceTime: true });
@@ -862,7 +883,7 @@ describe('setup', () => {
     const from = mockStore.requests.length;
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout'], shouldAdvanceTime: true });
     const retry = { retry: { path: `/api/owner/policy/setup/${second.state.interview_id}/confirm`, body: null } };
-    mockStore.inject({ route: 'setupConfirm', status: 202, body: retry, times: 5 });
+    mockStore.inject({ route: 'setupConfirm', status: 202, body: retry });
     await page.getByRole('button', { name: 'Confirm rules' }).click();
     await expect.poll(() => requests('setupConfirm', from).length).toBe(1);
     vi.setSystemTime(Date.now() + PROVING_GIVE_UP_MS);
@@ -880,6 +901,42 @@ describe('setup', () => {
     expect(page.getByRole('button', { name: 'Confirm rules' }).elements()).toHaveLength(0);
     await expect.element(page.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
     expect(deskOf(second.state).summary.answering).toBe(false);
+  });
+
+  it('conflict_review_confirm_recovers_as_setup_does', async () => {
+    // A confirm the API took, answered 409 (setup is past the safety check): read, and the preview opens.
+    const first = await openConflictReview();
+    mockStore.inject({ route: 'setupConfirm', status: 409, body: { error: 'conflict' }, afterCommit: true });
+    await first.screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(first.screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' })).toBeVisible();
+    expect(deskOf(first.state).summary.answering).toBe(false);
+
+    // The checking ran out of time on this side: the outcome is unknown, the line says so, and
+    // "Confirm change" stays, since pressing again joins the work still running.
+    const second = await openConflictReview();
+    const from = mockStore.requests.length;
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout'], shouldAdvanceTime: true });
+    const retry = { retry: { path: `/api/owner/policy/setup/${second.state.interview_id}/confirm`, body: null } };
+    mockStore.inject({ route: 'setupConfirm', status: 202, body: retry });
+    await second.screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.poll(() => requests('setupConfirm', from).length).toBe(1);
+    vi.setSystemTime(Date.now() + PROVING_GIVE_UP_MS);
+    await vi.advanceTimersByTimeAsync(3_000);
+    await expect.element(second.screen.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+    vi.useRealTimers();
+    await expect.element(second.screen.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    expect(second.screen.getByText(CANT_CHECK, { exact: true }).elements()).toHaveLength(0);
+    expect(requests('setup', from).length).toBeGreaterThan(0);
+
+    // The API says the rules can't be checked: the signed line, and only "Save and exit".
+    const third = await openConflictReview();
+    mockStore.inject({ route: 'setupConfirm', status: 409, body: { error: 'rules_cannot_be_checked' } });
+    await third.screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(third.screen.getByText(CANT_CHECK, { exact: true })).toBeVisible();
+    expect(third.screen.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
+    expect(third.screen.getByRole('button', { name: 'Confirm rules' }).elements()).toHaveLength(0);
+    await expect.element(third.screen.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
+    expect(deskOf(third.state).summary.answering).toBe(false);
   });
 
   it('conflict_review_back_runs_the_check_again', async () => {

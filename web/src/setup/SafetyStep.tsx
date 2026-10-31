@@ -86,6 +86,34 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
     setConflict(conflictReview(active, draft));
   };
 
+  /**
+   * Setup's way to settle a confirm that failed, for "Confirm rules" and the conflict review's
+   * "Confirm change" alike. Resolves to the line to show, or null when the step has moved on: a
+   * rules change shows its new draft; the server's own can't-check answer leaves only "Save and
+   * exit"; a lost answer, the proving give-up or a 409 (setup is past the safety check once
+   * confirmed) reads the interview, and at the preview it was confirmed. A give-up that hasn't moved
+   * on is unknown, not failed: the button stays, since pressing again joins the work still running.
+   */
+  const recover = async (err: unknown): Promise<string | null> => {
+    if (err instanceof ApiError && err.code === 'rules_changed_since_draft' && err.draft !== null) {
+      try {
+        await showConflict(err.draft);
+        return null;
+      } catch (readError) {
+        return ownerErrorCopy(readError);
+      }
+    }
+    if (err instanceof ApiError && err.code === 'rules_cannot_be_checked' && !gaveUp(err)) {
+      setConflict(null);
+      setUnchecked(true);
+      return null;
+    }
+    const unsure = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
+    const now = unsure ? await reread() : null;
+    if (now !== null && (now.step === 'preview' || now.step === 'live')) return null;
+    return gaveUp(err) ? stillCheckingLine() : ownerErrorCopy(err);
+  };
+
   const confirm = async () => {
     setConfirming(true);
     setError(null);
@@ -94,35 +122,15 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
       onConfirmed();
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      if (err instanceof ApiError && err.code === 'rules_changed_since_draft' && err.draft !== null) {
-        await showConflict(err.draft).catch((readError: unknown) => setError(ownerErrorCopy(readError)));
-        return;
-      }
-      if (err instanceof ApiError && err.code === 'rules_cannot_be_checked' && !gaveUp(err)) {
-        setUnchecked(true);
-        return;
-      }
-      // A lost answer, the give-up, or a 409 (setup is past the safety check once confirmed) may
-      // mean they were confirmed: the interview as it stands says whether it moved on.
-      const unsure = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
-      const now = unsure ? await reread() : null;
-      if (now !== null && (now.step === 'preview' || now.step === 'live')) return;
-      setError(gaveUp(err) ? stillCheckingLine() : ownerErrorCopy(err));
+      const line = await recover(err);
+      if (line !== null) setError(line);
     } finally {
       setConfirming(false);
     }
   };
 
   if (conflict !== null) {
-    // The review's "Confirm change" confirms setup again; a second conflict shows its own new draft.
-    const confirmAgain = async () => {
-      try {
-        await confirmSetup();
-      } catch (err) {
-        if (err instanceof ApiError && err.code === 'rules_changed_since_draft' && err.draft !== null) await showConflict(err.draft);
-        throw err;
-      }
-    };
+    // The review's "Confirm change" confirms setup again, and a failure is settled as "Confirm rules" settles it.
     return (
       <div className="cd-setup-step">
         <PageHeader title={SETUP_COPY.rules.title} subtitle={copy.conflictSubtitle} />
@@ -132,7 +140,8 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
           deskId={state.desk_id}
           draft={conflict}
           inline
-          confirm={confirmAgain}
+          confirm={confirmSetup}
+          onConfirmError={recover}
           cancelLabel={copy.back}
           onDone={(outcome) => {
             if (outcome === 'confirmed') {

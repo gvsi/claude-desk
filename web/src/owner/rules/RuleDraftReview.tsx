@@ -85,6 +85,11 @@ export interface RuleDraftReviewProps {
   confirm?: () => Promise<unknown>;
   /** The keep button's words where the review sits inside a flow ("Back" in setup's conflict review); the review's own by default. */
   cancelLabel?: string;
+  /**
+   * Settles a confirm that failed, in the caller's way (setup reads its interview): resolves to the
+   * line to show, or null when the caller has taken it from here. Without it, the review's own.
+   */
+  onConfirmError?: (err: unknown) => Promise<string | null>;
 }
 
 /**
@@ -92,7 +97,7 @@ export interface RuleDraftReviewProps {
  * has nothing to compare with, then `ChangeReview` with a row per change and the check in plain
  * words. Only a draft whose check passed can be confirmed, and nothing changes until it is.
  */
-export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, confirm, cancelLabel }: RuleDraftReviewProps) {
+export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, confirm, cancelLabel, onConfirmError }: RuleDraftReviewProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -130,7 +135,10 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
     } catch (err) {
       // The session ended: the app goes back to the start, and there is nothing to say here.
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      if (err instanceof ApiError && err.code === 'rules_changed_since_draft') {
+      if (onConfirmError) {
+        const line = await onConfirmError(err);
+        if (line !== null) setError(line);
+      } else if (err instanceof ApiError && err.code === 'rules_changed_since_draft') {
         setError(CHANGED_SINCE);
       } else if (isUncertain(err)) {
         // The answer was lost, so it may have applied: the rules as they stand say whether it did.
