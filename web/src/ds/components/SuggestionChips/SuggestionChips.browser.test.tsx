@@ -94,3 +94,30 @@ it('touch_hit_areas_side_by_side_stay_apart', async () => {
     unmount();
   }
 });
+
+it('touch_hit_areas_add_no_scroll_where_the_chips_end_a_scroll_region', async () => {
+  // The chips can end a scroll region flush, as they end the conversation on a vision page's public
+  // page: their hit areas reach past its end, but it scrolls no further than before.
+  const { host, unmount } = mount(
+    <div className="scroller" style={{ width: 358, height: 120, overflowY: 'auto' }}>
+      <div style={{ height: 200 }} />
+      <SuggestionChips label="Try asking" suggestions={['Book an inspection', 'Pay the fee', 'Talk to staff']} onPick={() => {}} />
+    </div>,
+  );
+  try {
+    const scroller = host.querySelector<HTMLElement>('.scroller') as HTMLElement;
+    const fine = scroller.scrollHeight;
+    const chips = [...host.querySelectorAll<HTMLElement>('.cd-chip')];
+    const boxes = chips.map((chip) => chip.getBoundingClientRect().toJSON());
+    await coarsePointer();
+    expect(chips.map((chip) => chip.getBoundingClientRect().toJSON()), 'the chips keep their boxes').toEqual(boxes);
+    expect(scroller.scrollHeight, 'the region scrolls no further').toBe(fine);
+    scroller.scrollTop = scroller.scrollHeight;
+    for (const chip of chips) {
+      const own = chip.getBoundingClientRect();
+      expect(chip.contains(document.elementFromPoint(own.left + 4, own.top - 3)), `${chip.textContent}: still takes a tap just above it`).toBe(true);
+    }
+  } finally {
+    unmount();
+  }
+});
