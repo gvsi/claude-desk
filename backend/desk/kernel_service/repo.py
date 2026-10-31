@@ -90,7 +90,9 @@ ledger head: its own `policy` entry first, then the hooks' `payment` events. A d
 key's advisory lock before the `versions` lock. The rebuild of a version an earlier kernel stored
 (`activation.rebuild_version`), at startup or in the background while the kernel serves, takes the
 same `versions` lock and active row `FOR UPDATE`, then the ledger head; the owner alert it writes
-when it can't rebuild is an insert under a fresh key. Before it, in a transaction of its own,
+when it can't rebuild is an insert under a fresh key. The owner alert the background rebuild sends
+while a version waits (`activation._alert_waiting`) runs in a transaction of its own that takes
+the Desk's `waiting-alert` advisory lock first, before any row, and nothing else takes that lock. Before it, in a transaction of its own,
 startup gives a Desk the native tools it has no row for (`desks.add_native_tools`) under the Desk
 row `FOR UPDATE`, as an owner's write holds it: the rows are inserts under fresh keys, and its
 `desk_data` entry takes the ledger head. An owner write

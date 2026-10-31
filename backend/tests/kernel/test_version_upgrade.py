@@ -482,6 +482,28 @@ async def test_a_copy_listing_that_fails_at_startup_leaves_all_of_it_to_the_back
     assert len(calls) == 2
 
 
+async def test_two_kernels_starting_at_once_alert_a_waiting_owner_once(app, client, monkeypatch):
+    # two starts that both find the Desk waiting each check for a recent alert and write one if there's none:
+    # they take the Desk's turn one after the other, so the second sees the first's alert
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    deliver, arrived, both = activation.demo_inbox.deliver, [], asyncio.Event()
+
+    async def together(*args, **kwargs):                  # each waits briefly for the other before it writes
+        arrived.append(1)
+        if len(arrived) == 2:
+            both.set()
+        try:
+            await asyncio.wait_for(both.wait(), timeout=0.5)
+        except TimeoutError:
+            pass
+        return await deliver(*args, **kwargs)
+
+    monkeypatch.setattr(activation.demo_inbox, "deliver", together)
+    await asyncio.gather(*(activation._alert_waiting(app.state.kernel, copy.copy_id, copy.desk_id) for _ in range(2)))
+    assert await rules_alerts(app, copy) == [WAITING_ALERT]
+
+
 async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
     # in symcc mode no shipped report covers the kernel core's tools, so only a live proof answers its version
     copy = await rivera(app, client)

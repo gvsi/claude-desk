@@ -877,10 +877,13 @@ async def _alert_waiting(runtime: KernelRuntime, copy_id: str, desk_id: str) -> 
     active version, stored by an earlier kernel and left to the background rebuild, refuses every
     call until it is checked (`WAITING_ALERT`), unless it did within `WAITING_ALERT_EVERY`. Nothing
     is written for a Desk whose version is current, which refuses nothing meanwhile. In a
-    transaction of its own; a failure is logged, and the version refuses all the same."""
+    transaction of its own, which first takes the Desk's `waiting-alert` advisory lock, so two
+    kernels starting at once check and write one after the other and the owner is told once; a
+    failure is logged, and the version refuses all the same."""
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
+            await _lock(ctx, "waiting-alert", desk_id)
             row = await active_version(ctx, desk_id)
             if row is None or not outdated(row):
                 return
