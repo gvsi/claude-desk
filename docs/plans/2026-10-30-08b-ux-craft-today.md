@@ -10,7 +10,7 @@
 **Architecture:**
 - Two design system components gain a state: `Greeting` shows "Copied", and `ApprovalCard` animates from held to answered.
 - Today wires the first.
-- Things to try (`web/src/owner/arrival/ThingsToTry.tsx`) gains a done state per row, computed from reads the owner app already has. No API or kernel change: claude-desk-cb confirmed the four signals come from existing reads (2026-10-30).
+- Things to try (`web/src/owner/arrival/ThingsToTry.tsx`) gains a done state per row, computed from reads the owner app already has. No API or kernel change: the API lead confirmed the four signals come from existing reads (2026-10-30).
 - Motion uses the design system's tokens, and the base stylesheet stops it under reduced motion.
 
 **Tech stack:** the web app's toolchain as plan 04 pins it, and the design system's as plans 03a and 03b do. No new dependencies.
@@ -22,7 +22,7 @@
 - P2-02, the answer lands: `UXC-P202-Before` (`#artboard-77469d4a302e`) and `UXC-P202-After` (`#artboard-29c2c26976df`).
 - P2-03, Copied: `UXC-P203-Before` (`#artboard-58f03f543b85`) and `UXC-P203-After` (`#artboard-b61b4190cb78`).
 
-Spec note: `.plan-runs/ux-review/craft-2026-10-30-1840.md` in the main checkout. Where the note and this plan differ, this plan wins.
+Spec note: the UX craft review's note (craft-2026-10-30-1840.md, kept outside the repository). Where the note and this plan differ, this plan wins.
 
 **A signed decision changes.** N-Today-Empty-Run1's decision 1 says "'Answer a held request' in Things to try waits until something is held". The project owner approved changing its second half on 2026-10-30 (P2-01, as drawn): the row still waits until something is held, but once answered it stays, ticked, instead of leaving. Nothing else in that decision changes: Needs you and Live now still don't show when empty.
 
@@ -38,7 +38,7 @@ The master plan's Global Constraints apply as plan 04 copies them. Specific to t
 - **Status by words, not colour alone.** The Done pill pairs a handled `StatusDot` with "Done". The answered card keeps its state words beside its dot.
 - **No fake progress.** A row ticks only on what the reads show the owner did in this copy, never on replayed history (`replayed` rows, the seed's own stopped reply or approval) and never on a click alone.
 - **Reduced motion.** Every animation stops under `prefers-reduced-motion: reduce` (the base stylesheet). The end states draw directly.
-- **Design system process.** Each design system change updates the component's README, its stories and its tests. A story names its board in `parameters.canvas` when the board is in the design system's reference list (`web/src/ds/reference/boards.ts`). The UX craft boards (`UXC-*`) aren't in that list, so their stories say `canvas: 'none'` with a `canvasNote` naming the UXC board, as `web/src/ds/reference/README.md` allows. The board stories that mount it keep passing. claude-desk-34 reviews the design system parts in the PR.
+- **Design system process.** Each design system change updates the component's README, its stories and its tests. A story names its board in `parameters.canvas` when the board is in the design system's reference list (`web/src/ds/reference/boards.ts`). The UX craft boards (`UXC-*`) aren't in that list, so their stories say `canvas: 'none'` with a `canvasNote` naming the UXC board, as `web/src/ds/reference/README.md` allows. The board stories that mount it keep passing. the design system reviewer reviews the design system parts in the PR.
 - **Coordination.** PR #105 (`design/vision-pieces`) adds `inertAnswers` to `ApprovalCard`. Whichever lands second rebases, and this plan's answered-state animation must not run on an inert card. PR #92 (Settings, with Delete this Desk) has merged, so the plan branch starts from current `origin/main`. Task 3 reads Desks through the existing hook and adds no new read.
 - **Viewports.** 1440×900 and 390×844, with no horizontal scroll or clipped text. QA compares with the boards at 1512.
 - Git: small conventional commits, each ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -66,7 +66,7 @@ The master plan's Global Constraints apply as plan 04 copies them. Specific to t
 
 **Files:** `web/src/ds/components/ApprovalCard/{ApprovalCard.tsx,ApprovalCard.css,README.md,ApprovalCard.stories.tsx}` and its tests; `web/src/owner/approvals/HeldRequest.tsx`; `web/src/owner/today/NeedsYou.tsx` and `TodayPage.tsx` (its held filter); `web/src/owner/conversations/ConversationDetail.tsx` (`renderHeld`); `web/src/owner/today/today.screen.test.tsx` and the conversations screen test.
 
-**The project owner's decision (2026-10-30, through claude-desk-1b's questions tool): "Stay in its slot."** A request answered on Today settles where it was answered in Needs you, with Dismiss under it. The "Answered just now" heading goes. In a conversation it settles in its slot, as it does now.
+**The project owner's decision (2026-10-30, through the UX craft reviewer's questions): "Stay in its slot."** A request answered on Today settles where it was answered in Needs you, with Dismiss under it. The "Answered just now" heading goes. In a conversation it settles in its slot, as it does now.
 
 **One card from held to answered.** Today and a conversation both replace the held card with a new answered one, so an animation inside `ApprovalCard` alone would never run:
 - On Today, `TodayPage` filters answered requests out of `held`, and `NeedsYou` mounts them as `AnsweredRequest` under "Answered just now".
@@ -113,13 +113,13 @@ The change:
 
 **Files:** `web/src/owner/arrival/ThingsToTry.tsx`, `web/src/owner/arrival/ideas.ts`, a new `web/src/owner/arrival/doneSignals.ts` (the four signals, pure), a new `web/src/owner/arrival/useDoneSignals.ts` (the reads behind them), `web/src/owner/today/TodayPage.tsx` (what it passes the list), `web/src/owner/today/Today.css` (or the arrival CSS the list uses), `web/src/mocks/world.ts` (its `answer()` writes the kernel's approval summary, `{decision_id, action_id, answer, state}` with `state: 'approved'` for an allow and `'denied'` for a deny, instead of `{answer}` alone, so the ledger signal can match in the mock), any other mock seed or handler a signal needs, and `web/src/owner/arrival.screen.test.tsx` and `today.screen.test.tsx`.
 
-**Scope (rulings by claude-desk-1b, the proposals' owner, 2026-10-30).** The list is the copy's tour.
+**Scope (rulings by the UX craft reviewer, the proposals' owner, 2026-10-30).** The list is the copy's tour.
 - Signals 1 to 3 read from the Desk the copy started with (the seeded one), on whichever Desk the list shows.
 - Signal 4 is copy-wide.
-- The seeded Desk is the first Desk in the copy's Desks read (the API lists Desks in the order they were made), while it is listed. Settings can now delete a Desk (#92). Once the seeded one isn't listed, signals 1 to 3 keep what this view already saw and tick nothing new, and signal 4 counts the Desks other than the seeded one that this view has seen. Ruling by claude-desk-3c, 2026-10-30, as Opus recommended in round 2; claude-desk-1b may overrule it.
+- The seeded Desk is the first Desk in the copy's Desks read (the API lists Desks in the order they were made), while it is listed. Settings can now delete a Desk (#92). Once the seeded one isn't listed, signals 1 to 3 keep what this view already saw and tick nothing new, and signal 4 counts the Desks other than the seeded one that this view has seen. Ruling by the coordinator, 2026-10-30, as Opus recommended in round 2; the UX craft reviewer may overrule it.
 - The count stays "of 4", the four things in the intro dialog, even before "Answer a held request" is drawn.
 
-**The signals and their reads** (all existing routes and query keys, no new endpoint; claude-desk-cb confirmed the data exists, 2026-10-30). Each predicate is a pure function in `doneSignals.ts` over the read types in `web/src/api/views.ts` and `contracts.gen.ts`:
+**The signals and their reads** (all existing routes and query keys, no new endpoint; the API lead confirmed the data exists, 2026-10-30). Each predicate is a pure function in `doneSignals.ts` over the read types in `web/src/api/views.ts` and `contracts.gen.ts`:
 
 | Signal | Reads (route, query key) | Done when | Read only when |
 |---|---|---|---|
@@ -170,11 +170,11 @@ The change:
 
 ## Landing
 
-One design PR from `plan/08b-ux-craft-today`, titled `feat(web): let Today confirm what you did: Copied, a landing answer and a list that ticks off`. It carries screenshots at 1440×900 and 390×844 of Today before and after answering, and of a conversation's held card before and after answering. It also carries a short recording of each interaction: the copy, the answer on Today and in a conversation, and the list ticking. claude-desk-1b (QA) captures them after testing. Then the review panel (Opus 5.5 and GPT-6.1 Sol), claude-desk-34's review of the design system parts, green CI, and the project owner's sign-off before merge.
+One design PR from `plan/08b-ux-craft-today`, titled `feat(web): let Today confirm what you did: Copied, a landing answer and a list that ticks off`. It carries screenshots at 1440×900 and 390×844 of Today before and after answering, and of a conversation's held card before and after answering. It also carries a short recording of each interaction: the copy, the answer on Today and in a conversation, and the list ticking. the UX craft reviewer (QA) captures them after testing. Then the review panel (Opus 5.5 and GPT-6.1 Sol), the design system reviewer's review of the design system parts, green CI, and the project owner's sign-off before merge.
 
 ## Review Ledger
 
-**Round 1 (2026-10-30), Opus 5.5 and GPT-6.1 Sol, both "with fixes"; validated and fixed by claude-desk-3c.**
+**Round 1 (2026-10-30), Opus 5.5 and GPT-6.1 Sol, both "with fixes"; validated and fixed by the coordinator.**
 - The answer can't land on the real screens (both seats, P1): Today and a conversation remount the card on answer. The project owner decided "Stay in its slot". Task 2 now keeps one card instance from held to answered, through `HeldRequest`, Needs you's single list and `renderHeld`, with screen tests on both pages.
 - Refused answers would tick the list (both seats, P1/P2): signal 3 now counts only the entries the kernel writes when it takes an answer (`summary.state`, no `summary.refused`), with negative tests.
 - The row vanishes mid-answer (Opus, P1): a state table for "Answer a held request", and `TodayPage` passes its state.
@@ -183,10 +183,10 @@ One design PR from `plan/08b-ux-craft-today`, titled `feat(web): let Today confi
 - Crossfade accessibility (Opus, P2): the outgoing layer is `inert` and `aria-hidden`, with one status node.
 - Test commands (both seats): `screens`, not `screen`, plus `npm run check:ds`.
 - P3s taken: Copied's timer restarts and clears, and its words are `aria-hidden`; measured height required; refresh on focus; Conversations captures in Landing.
-- Rulings by claude-desk-1b: signals 1 to 3 from the seeded Desk and signal 4 copy-wide; the count stays "of 4".
+- Rulings by the UX craft reviewer: signals 1 to 3 from the seeded Desk and signal 4 copy-wide; the count stays "of 4".
 - Valid P1s, so the fixes get a second round (P1 extension).
 
-**Round 2 (2026-10-30), Opus 5.5 and GPT-6.1 Sol, both "with fixes", no P1; validated and fixed by claude-desk-3c.** Both seats confirmed the one-card model, the ledger predicate, the join and the tone fix.
+**Round 2 (2026-10-30), Opus 5.5 and GPT-6.1 Sol, both "with fixes", no P1; validated and fixed by the coordinator.** Both seats confirmed the one-card model, the ledger predicate, the join and the tone fix.
 - Signal 3's in-view shortcut (both seats, P2): it counted a 409 that settled a request as `expired` or `cancelled`. Now limited to answer states, and to the seeded Desk, with a screen test.
 - The settled item (Opus, P2): Dismiss and the drafted-rule notice sit inside the eased height. Needs you keeps the list while an answered-here card remains. The height test's arithmetic is corrected, and "Always" cases are added.
 - Focus with an inert outgoing layer (Opus, P2, reproduced in Chromium): focus moves to the status line before the layer goes inert. The keyboard check runs after the transition.
@@ -200,9 +200,9 @@ One design PR from `plan/08b-ux-craft-today`, titled `feat(web): let Today confi
   - the reads live in `ThingsToTry` with `enabled: !hidden`;
   - "done at load" is defined;
   - #92 is merged, so the branch starts from current main.
-- Ruling (claude-desk-3c): what happens to the seeded Desk after a deletion, as Opus recommended. claude-desk-1b may overrule it.
+- Ruling (the coordinator): what happens to the seeded Desk after a deletion, as Opus recommended. the UX craft reviewer may overrule it.
 - Round cap reached (2 completed rounds, the second with no P1). These fixes aren't re-reviewed as a plan; each task's review and the PR panel check them.
 
-**During Task 2 (2026-10-30), rulings by claude-desk-3c:** the section below may move down, eased, when the settled item is taller than the held one; the old "never moves down" can't hold after an "Always" answer. The outgoing layer's focus rule is stated by outcome (it never holds focus; the status line takes focus before paint), not by mechanism.
+**During Task 2 (2026-10-30), rulings by the coordinator:** the section below may move down, eased, when the settled item is taller than the held one; the old "never moves down" can't hold after an "Always" answer. The outgoing layer's focus rule is stated by outcome (it never holds focus; the status line takes focus before paint), not by mechanism.
 - Task 2: P3 parked — the ApprovalCard story records the first frame's focus but doesn't assert it (assert the leaving layer isn't focused and focus is the status line) — the settled-focus test covers the end state.
 - Task 2: P3 parked — the "Always" screen test accepts either direction and its fixture moves about 1 px; add a case where the settled item is taller and assert it eases down — the rule is stated and the one-direction check holds.
