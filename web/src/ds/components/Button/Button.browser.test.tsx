@@ -11,6 +11,7 @@ import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
 
 import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea } from '../../test/touch.ts';
+import { Card } from '../Card/Card.tsx';
 import { Button } from './Button.tsx';
 import meta, { BusyReducedMotion } from './Button.stories.tsx';
 
@@ -141,6 +142,49 @@ it('touch_hit_areas_of_neighbours_never_overlap', async () => {
     expect(hitArea(share).bottom, 'stacked: the hit area stops halfway across the gap').toBe(share.getBoundingClientRect().bottom + 4);
     expectApart(hitArea(share), hitArea(start), 'stacked');
     for (const button of [allow, deny, share, start]) expectHitAreaLands(button);
+  } finally {
+    unmount();
+  }
+});
+
+it('touch_hit_areas_past_card_edges_stay_apart', async () => {
+  // Rules cards sit 16 px apart on phones (20 px on desktop). Zero padding puts these controls
+  // right against the facing edges: both hit areas must work beyond their cards without meeting.
+  const { host, unmount } = mount(
+    <div style={{ display: 'grid', gap: 'var(--space-16)', width: 358, padding: 40 }}>
+      <Card padding={0} label="First card">
+        <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+          <Button variant="secondary">Open first rule</Button>
+        </div>
+      </Card>
+      <Card padding={0} label="Next card">
+        <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+          <Button variant="secondary">Open next rule</Button>
+        </div>
+      </Card>
+    </div>,
+  );
+  try {
+    const cards = [...host.querySelectorAll<HTMLElement>('.cd-card')];
+    const buttons = [...host.querySelectorAll<HTMLElement>('.cd-button')];
+    const [firstCard, nextCard] = cards as [HTMLElement, HTMLElement];
+    const [first, next] = buttons as [HTMLElement, HTMLElement];
+    const visibleBoxes = () => [...cards, ...buttons].map((element) => element.getBoundingClientRect().toJSON());
+    const fine = visibleBoxes();
+    expect(nextCard.getBoundingClientRect().top - firstCard.getBoundingClientRect().bottom, 'the usual phone card gap').toBe(16);
+
+    await coarsePointer();
+    expect(visibleBoxes(), 'the cards and controls keep their visible boxes').toEqual(fine);
+    const firstArea = hitArea(first);
+    const nextArea = hitArea(next);
+    expect(firstArea.bottom, 'the first hit area extends below its card').toBeGreaterThan(firstCard.getBoundingClientRect().bottom);
+    expect(nextArea.top, 'the next hit area extends above its card').toBeLessThan(nextCard.getBoundingClientRect().top);
+    expectApart(firstArea, nextArea, 'controls across the card gap');
+    for (const button of buttons) {
+      expect(hitArea(button).height, 'the full 44 px target is available across the card edge').toBe(44);
+      expectHitAreaLands(button);
+      expectUnseen(button);
+    }
   } finally {
     unmount();
   }
