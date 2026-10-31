@@ -367,9 +367,9 @@ describe('public chat page', () => {
     await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
     expect(receiptsOf(rowOf(screen.getByText(line, { exact: true }).element()))).toEqual([
       "Reply checked against Maria Rivera's rules",
-      held.visitor_plain,
       line,
     ]);
+    expect(rowOf(screen.getByText(line, { exact: true }).element()).textContent).not.toContain(held.visitor_plain);
 
     // In a second chat the visitor goes on after the hold: the cancel stays under the held
     // message, and so does what cancelling it says, never under the booking that followed.
@@ -391,7 +391,8 @@ describe('public chat page', () => {
 
     await cancel.click();
     await expect.element(second.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
-    await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(["Reply checked against Maria Rivera's rules", held.visitor_plain, 'Cancelled']));
+    await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(["Reply checked against Maria Rivera's rules", 'Cancelled']));
+    expect(heldRow.textContent).not.toContain(held.visitor_plain);
     expect(receiptsOf(bookedRow)).toEqual(booked);
 
     // In a third chat two requests are held. While the first one's cancel is out, the other

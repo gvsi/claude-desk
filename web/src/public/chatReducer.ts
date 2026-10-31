@@ -13,8 +13,8 @@
  * identity, so only the cursor keeps one from showing twice: the API reads `last_seq` in the same
  * snapshot as the items, so the stream resumes after the last join or leave the transcript holds.
  *
- * A held request's later lines ("Cancelled", "Maria Rivera approved this") stay under the message
- * that holds it, as every receipt stays under its own message, however far the chat has gone on.
+ * A decision's later status replaces its previous receipt under the same message, however far
+ * the chat has gone on. Every line remains the event's own visitor_plain.
  * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
  * its own (after the visitor confirmed it's them) explains its reply too.
  *
@@ -84,8 +84,8 @@ export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   error: EvErrorCode | null;
   /** Held requests the visitor can still cancel, oldest first. */
   openHolds: string[];
-  /** Each decision held on the page, by `decision_id`: its held receipt, which its later statuses attach beside. */
-  holds: ReadonlyMap<string, ReceiptView>;
+  /** Each decision on the page, by `decision_id`: its latest receipt, replaced by later statuses. */
+  latest: ReadonlyMap<string, ReceiptView>;
   /** Demo inbox notices for this chat (no code in them). */
   inbox: EvDemoInbox[];
   /** What the chat already shows: `m:{message_id}` and `s:{decision_id}:{ledger_seq}`. */
@@ -130,7 +130,7 @@ export function initialChatState(): ChatState {
     connection: 'open',
     error: null,
     openHolds: [],
-    holds: new Map(),
+    latest: new Map(),
     inbox: [],
     seen: new Set(),
   };
@@ -210,23 +210,25 @@ function withHolds(openHolds: string[], ev: StatusEvent): string[] {
 }
 
 /**
- * A status as it joins the chat: its receipt, placed beside its hold's when the decision was held
- * on the page, and the holds with this one added when it is the hold itself.
+ * A status as it joins the chat: a decision's latest receipt replaces its previous one.
+ * Keep the latest reference for any further status, whether or not the decision was held.
  */
 function statusPart(
-  holds: ReadonlyMap<string, ReceiptView>,
+  latest: ReadonlyMap<string, ReceiptView>,
   ev: StatusEvent,
-): { part: RowPart<ChatItem, ReceiptView>; holds: ReadonlyMap<string, ReceiptView> } {
+): { part: RowPart<ChatItem, ReceiptView>; latest: ReadonlyMap<string, ReceiptView> } {
   const receipt = receiptFromEvent(ev);
-  if (ev.type === 'held') return { part: { kind: 'receipt', receipt }, holds: new Map(holds).set(ev.decision_id, receipt) };
-  return { part: { kind: 'receipt', receipt, beside: holds.get(ev.decision_id) }, holds };
+  return {
+    part: { kind: 'receipt', receipt, replaces: latest.get(ev.decision_id) },
+    latest: new Map(latest).set(ev.decision_id, receipt),
+  };
 }
 
 function fromHistory(transcript: VisitorTranscript): ChatState {
   const items = [...transcript.items].sort((a, b) => a.n - b.n);
   const seen = new Set<string>();
   let openHolds: string[] = [];
-  let holds: ReadonlyMap<string, ReceiptView> = new Map();
+  let latest: ReadonlyMap<string, ReceiptView> = new Map();
   // How a stored item joins the chat: the visitor's words, a delivered message, a status, or where
   // the owner joined or left, as the stream's events for them do.
   const partOf = (item: TranscriptItem): RowPart<ChatItem, ReceiptView> | null => {
@@ -241,8 +243,8 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
     if (item.kind === 'status' && isStatus(event)) {
       seen.add(statusKey(event));
       openHolds = withHolds(openHolds, event);
-      const status = statusPart(holds, event);
-      holds = status.holds;
+      const status = statusPart(latest, event);
+      latest = status.latest;
       return status.part;
     }
     // Each join and leave kept is a line of its own.
@@ -253,7 +255,7 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
   // A stored conversation has no writing events: a turn Claude started on its own is found by what
   // follows a decision's status, as the owner's view finds it.
   const groups = groupRows(items, partOf, { writingBefore: opensAReply });
-  return { ...initialChatState(), ...groups, lastSeq: transcript.last_seq, openHolds, holds, seen };
+  return { ...initialChatState(), ...groups, lastSeq: transcript.last_seq, openHolds, latest, seen };
 }
 
 function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
@@ -282,12 +284,12 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'resolved': {
       const key = statusKey(ev);
       if (state.seen.has(key)) return state;
-      const { part, holds } = statusPart(state.holds, ev);
+      const { part, latest } = statusPart(state.latest, ev);
       return {
         ...state,
         ...addPart(state, part),
         openHolds: withHolds(state.openHolds, ev),
-        holds,
+        latest,
         seen: new Set(state.seen).add(key),
       };
     }

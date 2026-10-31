@@ -1,0 +1,157 @@
+/**
+ * Ask Claude opening beside the Rules page, in a real browser against the mock API: the page is
+ * laid out beside the panel at once and glides there from where it was, so what the owner just
+ * used doesn't leap from under them. Under reduced motion the page is in its new place at once.
+ */
+import { describe, expect, it, onTestFinished } from 'vitest';
+import { cdp, userEvent } from 'vitest/browser';
+
+import { settled } from '../../ds/test/settled.ts';
+import { RIVERA } from '../../mocks/seed.ts';
+import { renderRoute } from '../../test/renderRoute.tsx';
+import { expectNoHorizontalScroll } from '../../test/screen.ts';
+
+const RULES = `/app/${RIVERA.deskId}/rules`;
+const ASK = 'Stop quoting on weekends';
+
+/** Sets prefers-reduced-motion for the page, back to no preference after the test. */
+async function reduceMotion(): Promise<void> {
+  await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  onTestFinished(async () => {
+    await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+  });
+  await expect.poll(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+}
+
+describe('ask claude', () => {
+  it('ask_claude_opens_without_the_page_jumping', async () => {
+    // Every animation on the page held at its first frame while the owner sends, then let go.
+    await cdp().send('Animation.enable');
+    onTestFinished(async () => {
+      await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    });
+    const { screen } = await renderRoute(RULES);
+    const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+    await expect.element(composer).toBeVisible();
+    const sent = composer.element().getBoundingClientRect().left;
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
+    await composer.fill(ASK);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('complementary', { name: 'Ask Claude' })).toBeVisible();
+
+    // At its first frame the page is where it was, though it is laid out beside the panel already.
+    const content = screen.container.querySelector('.cd-app-shell__content') as HTMLElement;
+    const glides = content.getAnimations();
+    expect(glides).toHaveLength(1);
+    expect(composer.element().getBoundingClientRect().left).toBeCloseTo(sent, 0);
+    expectNoHorizontalScroll();
+
+    // Let go, it glides to its place beside the panel: 68 px left at 1440 px.
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await Promise.all(glides.map((glide) => glide.finished));
+    expect(sent - composer.element().getBoundingClientRect().left).toBeCloseTo(68, 0);
+    expectNoHorizontalScroll();
+  });
+
+  it('the_page_under_the_header_has_no_vertical_jump', async () => {
+    // Beside the panel at 1440 px, the header's subtitle takes a second line, so everything under
+    // the header sits 20 px lower; closing, it goes back up. That move is a glide too: on the first
+    // frame of the open and of the close, the first group is where it was.
+    await cdp().send('Animation.enable');
+    onTestFinished(async () => {
+      await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    });
+    const { screen } = await renderRoute(RULES);
+    const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+    await expect.element(composer).toBeVisible();
+    const group = () => screen.container.querySelector<HTMLElement>('.cd-connector-section__header');
+    await expect.poll(() => group()).not.toBeNull();
+    const top = () => (group() as HTMLElement).getBoundingClientRect().top;
+    const closed = top();
+
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
+    await composer.fill(ASK);
+    await userEvent.keyboard('{Enter}');
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    await expect.element(panel).toBeVisible();
+    expect(Math.abs(top() - closed), `opening: ${top()}, was ${closed}`).toBeLessThanOrEqual(0.5);
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await settled(screen.container);
+    const opened = top();
+    expect(opened - closed).toBeCloseTo(20, 0);
+
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
+    await panel.getByRole('button', { name: 'Close' }).click();
+    expect(Math.abs(top() - opened), `closing: ${top()}, was ${opened}`).toBeLessThanOrEqual(0.5);
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await settled(screen.container);
+    expect(top()).toBeCloseTo(closed, 0);
+  });
+
+  it('nothing_in_the_payments_rows_jumps_at_1512', async () => {
+    // At 1512 px the header keeps one line, but inside the Payments and Stripe rows, whose own
+    // height stays the same, the summary lines move when the column narrows. Scrolled to them, on
+    // the first frame of the open and of the close, every part of those rows is where it was.
+    await cdp().send('Animation.enable');
+    onTestFinished(async () => {
+      await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    });
+    const { screen } = await renderRoute(RULES, { viewport: { width: 1512, height: 982 } });
+    const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+    await expect.element(composer).toBeVisible();
+    const sections = () =>
+      [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section')].filter((section) =>
+        /^(Payments|Stripe)/.test(section.querySelector('.cd-connector-section__header')?.textContent?.trim() ?? ''),
+      );
+    await expect.poll(() => sections().length).toBe(2);
+    // The words go in first, since typing brings the composer into view; then the rows are scrolled to.
+    await composer.fill(ASK);
+    (sections()[0] as HTMLElement).scrollIntoView({ block: 'start' });
+    const main = screen.container.querySelector('main') as HTMLElement;
+    expect(main.scrollTop).toBeGreaterThan(0);
+    const parts = () => sections().flatMap((section) => [...section.querySelectorAll<HTMLElement>('*')]);
+    // Where each part is in the page, wherever it is scrolled (closing returns focus to the composer, which scrolls).
+    const tops = () => parts().map((el) => Math.round((el.getBoundingClientRect().top + main.scrollTop) * 10) / 10);
+    /** Each part that moved more than half a pixel from `was`, as "class: from → to". */
+    const jumps = (was: number[]) =>
+      tops().flatMap((top, index) => (Math.abs(top - (was[index] ?? top)) > 0.5 ? [`${parts()[index]?.className}: ${was[index]} → ${top}`] : []));
+    const closed = tops();
+
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
+    await userEvent.keyboard('{Enter}');
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    await expect.element(panel).toBeVisible();
+    expect(jumps(closed), 'opening').toEqual([]);
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await settled(screen.container);
+    const opened = tops();
+
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
+    await panel.getByRole('button', { name: 'Close' }).click();
+    expect(jumps(opened), 'closing').toEqual([]);
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await settled(screen.container);
+  });
+
+  it('ask_claude_opens_at_once_under_reduced_motion', async () => {
+    await reduceMotion();
+    const { screen } = await renderRoute(RULES);
+    const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+    await expect.element(composer).toBeVisible();
+    const sent = composer.element().getBoundingClientRect().left;
+    await composer.fill(ASK);
+    await userEvent.keyboard('{Enter}');
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    await expect.element(panel).toBeVisible();
+    // The end state at once: the page in its place beside the panel, nothing moving.
+    const content = screen.container.querySelector('.cd-app-shell__content') as HTMLElement;
+    expect(content.getAnimations()).toHaveLength(0);
+    expect(sent - composer.element().getBoundingClientRect().left).toBeCloseTo(68, 0);
+
+    // Closing too: the panel goes and the page is back in its place, at once.
+    await panel.getByRole('button', { name: 'Close' }).click();
+    expect(screen.container.querySelector('.cd-ask-claude')).toBeNull();
+    expect(content.getAnimations()).toHaveLength(0);
+    expect(composer.element().getBoundingClientRect().left).toBeCloseTo(sent, 0);
+  });
+});

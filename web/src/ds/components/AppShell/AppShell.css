@@ -17,10 +17,32 @@
   color: var(--text-primary);
 }
 
+/* Positioned, so a panel that is leaving can sit at its right edge, out of the row (below). It is
+   the window's width, and a panel sliding in or out is drawn past its right edge for a moment: that
+   part is clipped, so the window never scrolls sideways. Clipping is not scrolling, and a sheet
+   fixed over the window isn't clipped. */
 .cd-app-shell__body {
+  position: relative;
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+  overflow-x: clip;
+}
+
+/* The panel's slot at the right of the page: the panel's own width and the body's height. A sheet
+   inside it is fixed over the window, so the slot takes no room. */
+.cd-app-shell__panel {
+  display: flex;
+  flex: none;
+  min-height: 0;
+}
+
+/* A panel sliding out has left the row: the page beside it takes its full width at once, and the
+   panel stays over its right edge until it has gone. The slide is a script's (AppShell.tsx), and
+   never runs under reduced motion. */
+.cd-app-shell__panel--leaving {
+  position: absolute;
+  inset: 0 0 0 auto;
 }
 
 /* The banner keeps its own height above the rest. */
@@ -53,6 +75,12 @@
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-24) var(--space-40) var(--space-20);
+}
+
+/* While the page glides to a new place (a panel opening or closing beside it), it may be drawn past
+   the main area's edge for a moment: the main area clips it rather than scrolling sideways. */
+.cd-app-shell__main[data-gliding] {
+  overflow-x: hidden;
 }
 
 .cd-app-shell__content {

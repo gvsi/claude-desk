@@ -56,6 +56,7 @@ export const VISITOR_PLAIN = {
     allowed: "Checked against Maria Rivera's rules",
     held: 'Waiting for Maria Rivera to approve',
     refused: 'Not something I can do here',
+    refused_over_mandate: 'Refused: over the signed limit for this agent',
     approved: 'Maria Rivera approved this',
     denied: 'Maria Rivera decided not to go ahead',
     expired: 'This request timed out',
@@ -71,6 +72,7 @@ export const VISITOR_PLAIN = {
     allowed: 'Revisado con las reglas de Maria Rivera',
     held: 'Esperando la aprobación de Maria Rivera',
     refused: 'No es algo que pueda hacer aquí',
+    refused_over_mandate: 'Rechazado: supera el límite firmado para este agente',
     approved: 'Maria Rivera lo aprobó',
     denied: 'Maria Rivera decidió no seguir adelante',
     expired: 'Esta solicitud venció',
@@ -84,7 +86,7 @@ export const VISITOR_PLAIN = {
   },
 } as const satisfies Record<
   Language,
-  Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
+  Record<Exclude<DecisionState, 'executed'> | 'refused_over_mandate' | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
 >;
 
 /**
@@ -107,7 +109,7 @@ const OWNER = rivera.business.ownerName;
  * The visitor's line for a decision in `state`: an executed one names what its tool did, in the
  * signed per-tool words the design system's fixtures carry, never a bare "Done".
  */
-export function statusLine(language: Language, state: DecisionState, tool: ToolName | null): string {
+export function statusLine(language: Language, state: DecisionState | 'refused_over_mandate', tool: ToolName | null): string {
   if (state !== 'executed') return VISITOR_PLAIN[language][state];
   if (tool === null || !hasExecutedLine(tool)) throw new Error(`the mock has no executed line for ${tool ?? 'a decision with no tool'}`);
   return executedLine(tool, language, OWNER);
@@ -274,6 +276,8 @@ export interface DecisionSpec {
   executed: boolean;
   cardIds: string[];
   reasonPlain: string;
+  /** A refusal with the kernel's more specific visitor status line. */
+  visitorStatus?: 'refused_over_mandate';
   /** For a `hold`: what held it, which decides the answers it offers (`answersFor`). */
   hold?: HoldKind;
   listCents?: number | null;
