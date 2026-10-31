@@ -22,10 +22,13 @@ export {
 
 export { Notice, type NoticeProps, type NoticeTone } from './components/Notice/Notice.tsx';
 export {
+  AGENT_START_LOST_COPY,
   CHANGED_REFRESHED,
   CHAT_ENDED_COPY,
+  DEMO_BUDGET_COPY,
   NEW_CHAT_LABEL,
   RATE_LIMITED_COPY,
+  RELOAD_PAGE_LABEL,
   UNREACHABLE_COPY,
   errorCopy,
   evErrorCopy,
