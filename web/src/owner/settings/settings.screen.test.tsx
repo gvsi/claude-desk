@@ -245,8 +245,9 @@ describe('Settings', () => {
     await main(unsure.screen).getByRole('button', { name: 'Delete this Desk' }).click();
     await unsure.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     const unconfirmed = main(unsure.screen).getByRole('region', { name: 'Delete this Desk' }).getByRole('alert');
-    // The line, then its one action: read the copy again.
+    // The line, then its one action: read the copy again. Focus moves to it from the Delete button it replaced.
     await expect.element(unconfirmed).toHaveTextContent(`${UNCONFIRMED}Reload`);
+    await expect.element(unconfirmed.getByRole('button', { name: 'Reload' })).toHaveFocus();
     await expect.element(unsure.screen.getByRole('dialog')).not.toBeInTheDocument();
     expect(main(unsure.screen).getByRole('button', { name: 'Delete this Desk' }).elements()).toEqual([]);
     expect(unsure.router.state.location.pathname).toBe(GENERAL);
@@ -270,6 +271,23 @@ describe('Settings', () => {
     expect(requests('desks').length).toBeGreaterThan(before);
     expect(requests('deleteDesk')).toHaveLength(1);
     expect(unsureSawNotFound()).toBe(false);
+
+    // Both answers lost, and the delete never reached the copy: Reload, pressed from the keyboard,
+    // finds the Desk still there, so the notice goes and focus is back on Delete this Desk.
+    const kept = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
+    const keptSection = main(kept.screen).getByRole('region', { name: 'Delete this Desk' });
+    await expect.element(keptSection.getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
+    mockStore.inject({ route: 'deleteDesk', status: 'network' });
+    mockStore.inject({ route: 'desks', status: 'network' });
+    await keptSection.getByRole('button', { name: 'Delete this Desk' }).click();
+    await kept.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.element(keptSection.getByRole('alert').getByRole('button', { name: 'Reload' })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(keptSection.getByRole('button', { name: 'Delete this Desk' })).toHaveFocus();
+    expect(keptSection.getByRole('alert').elements()).toEqual([]);
+    expect(kept.router.state.location.pathname).toBe(GENERAL);
+    expect(mockStore.world.desk(RIVERA.deskId)).toBeDefined();
+    expect(requests('deleteDesk')).toHaveLength(1);
 
     // Deleted elsewhere (another tab) since the page was read: the delete answers not found, and the
     // copy, read again, doesn't list the Desk, so the owner moves on as from a 204.

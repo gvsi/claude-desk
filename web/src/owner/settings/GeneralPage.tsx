@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { ApiError, OWNER_ERROR_COPY, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
@@ -61,6 +61,21 @@ export function GeneralPage() {
   // A delete whose answer was lost, and the copy couldn't be read after it to say whether it went through.
   const [unconfirmed, setUnconfirmed] = useState(false);
   const [rereading, setRereading] = useState(false);
+  const removeButtonId = useId();
+  const reloadId = useId();
+
+  // Focus that went with a replaced control moves to the one in its place: Reload when the notice
+  // takes the place of Delete this Desk, and Delete this Desk when a read shows the Desk still there.
+  // Focus the owner has put somewhere else stays there.
+  const wasUnconfirmed = useRef(false);
+  useEffect(() => {
+    const was = wasUnconfirmed.current;
+    wasUnconfirmed.current = unconfirmed;
+    if (unconfirmed === was) return;
+    const active = document.activeElement;
+    if (active !== null && active !== document.body) return;
+    document.getElementById(unconfirmed ? reloadId : removeButtonId)?.focus();
+  }, [unconfirmed, reloadId, removeButtonId]);
 
   const details: DetailItem[] = [
     { label: 'Business', value: business.name },
@@ -166,7 +181,7 @@ export function GeneralPage() {
           <p className="cd-settings__delete-line cd-settings__quiet cd-type-meta">{DELETE_LINE}</p>
           {/* Never a second delete while the first one's outcome is unknown. */}
           {unconfirmed ? null : (
-            <Button variant="secondary" size="main" onClick={() => setConfirming(true)}>
+            <Button id={removeButtonId} variant="secondary" size="main" onClick={() => setConfirming(true)}>
               Delete this Desk
             </Button>
           )}
@@ -175,7 +190,7 @@ export function GeneralPage() {
           <Notice
             tone="error"
             action={
-              <Button variant="secondary" busy={rereading} onClick={() => void reread()}>
+              <Button id={reloadId} variant="secondary" busy={rereading} onClick={() => void reread()}>
                 Reload
               </Button>
             }
