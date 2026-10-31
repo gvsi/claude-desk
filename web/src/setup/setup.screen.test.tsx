@@ -1226,6 +1226,39 @@ describe('setup', () => {
     return screen;
   }
 
+  it('setup_bar_shows_the_preview_badge_from_1100_px', async () => {
+    // The app's lockup, as the setup board draws it: the bell with no tile at 36 px beside "Claude
+    // Desk". From 1100 px up the wordmark carries its Preview badge; below, a top bar is a phone's
+    // and carries none. "Save and exit" keeps its width and one line either way, and the lockup
+    // stays clear of the steps beside it.
+    const state = await startInterview();
+    const exitWidths: number[] = [];
+    for (const [width, badge] of [
+      [1100, true],
+      [1099, false],
+    ] as const) {
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+      await page.viewport(width, 900);
+      const bar = screen.container.querySelector<HTMLElement>('.cd-setup__bar');
+      if (!bar) throw new Error('the setup bar renders');
+      const where = `at ${width}`;
+      await expect.poll(() => bar.querySelector('.cd-wordmark')?.textContent, { message: where }).toBe(badge ? 'Claude DeskPreview' : 'Claude Desk');
+      const mark = bar.querySelector('svg.cd-mark');
+      expect(mark?.getAttribute('width'), where).toBe('36');
+      // No tile: the bell alone draws no rectangle behind it.
+      expect(mark?.querySelector('rect'), where).toBeNull();
+      const exit = screen.getByRole('link', { name: 'Save and exit' }).element() as HTMLElement;
+      expect(exit.scrollWidth, where).toBeLessThanOrEqual(exit.clientWidth);
+      expect(Math.round(exit.getBoundingClientRect().height), where).toBeLessThanOrEqual(32);
+      exitWidths.push(Math.round(exit.getBoundingClientRect().width));
+      const brand = bar.querySelector('.cd-setup__brand')?.getBoundingClientRect();
+      const steps = bar.querySelector('.cd-setup__steps')?.getBoundingClientRect();
+      if (badge && brand && steps) expect(brand.right, where).toBeLessThanOrEqual(steps.left);
+      expectNoHorizontalScroll();
+    }
+    expect(exitWidths[1]).toBe(exitWidths[0]);
+  });
+
   it('setup_fits_phone_width', async () => {
     for (const { name, path, ready } of await everyStep()) {
       const screen = await openStep(path, ready, 'phone');
