@@ -139,6 +139,14 @@ function motion(name: 'instant' | 'fast' | 'base' | 'stagger'): number {
 /** `motion-ease-emphasis`, as the browser computes it. */
 const EMPHASIS = 'cubic-bezier(0.165, 0.84, 0.44, 1)';
 
+/**
+ * Leaves a story at rest for the accessibility check that runs after its play: a few frames into
+ * the panel's arrival, its text is still faint enough for axe to read it as low contrast.
+ */
+async function atRest(canvasElement: HTMLElement): Promise<void> {
+  await settled(canvasElement);
+}
+
 /** The element `selector` finds in `root`; throws when there is none. */
 function the<T extends Element = HTMLElement>(root: ParentNode, selector: string): T {
   const el = root.querySelector<T>(selector);
@@ -436,7 +444,7 @@ async function expectStartingSpinner(button: HTMLElement, status: HTMLElement): 
 
 export const Busy: Story = {
   args: { busy: true },
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     // busy_submits_once: while the demo starts the button shows the spinner, like every busy button,
     // is still named "Start the demo", stays focusable but inert, and nothing is sent.
     const button = canvas.getByRole('button', { name: 'Start the demo' });
@@ -450,12 +458,13 @@ export const Busy: Story = {
     await userEvent.keyboard('{Enter}');
     await userEvent.click(button);
     await expect(args.onSubmit).not.toHaveBeenCalled();
+    await atRest(canvasElement);
   },
 };
 
 export const StartingFlow: Story = {
   render: (args) => <StartingPage {...args} />,
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     // busy_submits_once, from a click: the button then shows the spinner and keeps focus, still
     // reachable but inert (aria-disabled, not disabled), and nothing more is sent. The status line,
     // empty until then, says the demo is starting.
@@ -487,6 +496,7 @@ export const StartingFlow: Story = {
     await userEvent.tab();
     await expect(button).toHaveFocus();
     await expect(args.onSubmit).toHaveBeenCalledTimes(1);
+    await atRest(canvasElement);
   },
 };
 
@@ -615,7 +625,7 @@ export const WrongPasscode: Story = {
 export const WrongPasscodeAgain: Story = {
   args: { error: 'wrong_passcode' },
   render: (args) => <SameErrorPage {...args} />,
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     // A second failure with the same code is a new alert, so it is announced again: the line isn't
     // shown while the try is out, even though the page kept `error` set.
     const first = canvas.getByRole('alert');
@@ -629,20 +639,23 @@ export const WrongPasscodeAgain: Story = {
     await expect(first.isConnected).toBe(false);
     await expectErrorOnTheField(canvas, 'wrong_passcode');
     await expect([field.selectionStart, field.selectionEnd]).toEqual([0, 'rivera'.length]);
+    await atRest(canvasElement);
   },
 };
 
 export const RateLimited: Story = {
   args: { error: 'rate_limited' },
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
     await expectErrorOnTheField(canvas, 'rate_limited');
+    await atRest(canvasElement);
   },
 };
 
 export const Unreachable: Story = {
   args: { error: 'unreachable' },
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
     await expectErrorOnTheField(canvas, 'unreachable');
+    await atRest(canvasElement);
   },
 };
 
