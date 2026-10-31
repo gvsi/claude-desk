@@ -38,7 +38,8 @@ from evals.calibration.soft_promise import (
     Deps,
     Refused,
     RunResult,
-    _Meter,
+    SpendMeter,
+    WithSystem,
     call_bound,
     call_input,
     code_blocked,
@@ -320,7 +321,7 @@ def test_a_call_that_costs_more_than_the_cap_fails_the_run(deps: Deps, tmp_path:
 
 
 def test_a_call_starts_only_while_the_spend_and_the_calls_in_flight_leave_room_for_its_bound():
-    meter = _Meter(0.003)
+    meter = SpendMeter(0.003)
     assert meter.start(0.001) and meter.start(0.001) and meter.start(0.001)
     assert not meter.start(0.0001)                       # three calls in flight hold the whole cap
     meter.end(0.001, None)                               # no usage to price: charged its whole bound
@@ -330,6 +331,18 @@ def test_a_call_starts_only_while_the_spend_and_the_calls_in_flight_leave_room_f
     assert meter.spent == pytest.approx(0.0012) and not meter.start(0.00081) and meter.start(0.0008)
     assert (meter.calls, meter.estimated, meter.over) == (4, 1, False)
     assert meter.estimated_usd == pytest.approx(0.001)  # only the bound charged for want of usage
+
+
+async def test_public_prompt_override_preserves_the_rest_of_the_request():
+    requests = []
+
+    async def create(**request):
+        requests.append(request)
+        return "answer"
+
+    client = WithSystem(SimpleNamespace(messages=SimpleNamespace(create=create)), "measured prompt")
+    assert await client.messages.create(system="original prompt", model=HAIKU, max_tokens=17) == "answer"
+    assert requests == [{"system": "measured prompt", "model": HAIKU, "max_tokens": 17}]
 
 
 def test_a_calls_bound_counts_its_prompt_its_request_and_the_longest_answer():

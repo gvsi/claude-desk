@@ -39,8 +39,8 @@ from desk.kernel_service.decisions import (AnthropicDecisions, CallUsage, Review
                                            ReviewInput)
 from desk.kernel_service.review_thresholds import thresholds_for
 from evals import results
-from evals.calibration.soft_promise import (DECISIONS_PATH, EPSILON, REPO_ROOT, Prompt, Refused, _Meter,
-                                           _WithSystem, anthropic_client, api_key, month_guard)
+from evals.calibration.soft_promise import (DECISIONS_PATH, EPSILON, REPO_ROOT, Prompt, Refused, SpendMeter,
+                                           WithSystem, anthropic_client, api_key, month_guard)
 from evals.pricing import NoPrice, cost_usd, price_of
 from evals.tier2.passes import CALIBRATION_PREFIX, append_spend, shared_spend_file
 
@@ -216,7 +216,7 @@ def call_cost(system: str, data: ReviewInput, *, bound: bool = False) -> float:
     return float((tokens * rate + output * price.output) / 1_000_000)
 
 
-class Meter(_Meter):
+class Meter(SpendMeter):
     """Reuse the soft-promise reservation/cap protocol with the central price table."""
 
     def end(self, bound: float, usage: CallUsage | None) -> None:
@@ -419,7 +419,7 @@ async def run(deps: Deps, cases: list[Case], prompts: dict[str, Prompt], samples
     month_guard(deps, spend_file, max_usd)
     decisions.refuse_custom_headers()
     client = deps.client(api_key())
-    checkers = {arm: AnthropicDecisions(_WithSystem(client, prompt.text)) for arm, prompt in prompts.items()}
+    checkers = {arm: AnthropicDecisions(WithSystem(client, prompt.text)) for arm, prompt in prompts.items()}
     meter, records = Meter(max_usd), []
     inputs = {case.id: call_input(case) for case in cases}
     now = deps.now().astimezone(UTC)
