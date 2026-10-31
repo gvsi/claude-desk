@@ -62,6 +62,7 @@ export interface RenderedBlock {
         | "charge_confirmed"
         | "callback_confirmed"
         | "payment_confirmed"
+        | "link_cancelled"
       )
     | null;
   text: string;
@@ -336,7 +337,8 @@ export interface Clause {
     | "refund_issued"
     | "charge_confirmed"
     | "callback_confirmed"
-    | "payment_confirmed";
+    | "payment_confirmed"
+    | "link_cancelled";
   fact_id?: string | null;
 }
 export interface CopyCreated {
@@ -642,6 +644,11 @@ export interface LedgerPage {
   public_key_hex: string;
   key_id: string;
 }
+export interface LinkCancelled {
+  link_id: string;
+  session_id: string;
+  verdict: ReplyVerdict;
+}
 export interface ModeRequest {
   mode: "ai" | "owner" | "paused";
   generation: number;
@@ -675,6 +682,9 @@ export interface PaymentLinkView {
   amount_cents: number;
   state: "issued" | "paid" | "expired" | "cancelled" | "unknown";
   language: "en" | "es";
+  business_name: string;
+  customer_name: string | null;
+  cancel_reason?: "rules_changed" | null;
 }
 export interface PolicyConfirmRequest {
   desk_id: string;
@@ -783,17 +793,17 @@ export interface ToolProfile {
   pending_definition_text?: string | null;
   pending_sha256?: string | null;
   status: "enabled" | "needs_review" | "disabled";
+  review_reason?: ("new" | "changed" | "delisted") | null;
 }
 export interface SessionCreated {
   state: SessionState;
   session_token: string | null;
 }
 export interface ToolConfirmed {
-  profile: ToolProfile;
+  profiles: ToolProfile[];
   draft: PolicyVersion | null;
 }
-export interface ToolsConfirmRequest {
-  desk_id: string;
+export interface ToolPin {
   tool:
     | "native.quote"
     | "native.find_slots"
@@ -808,8 +818,43 @@ export interface ToolsConfirmRequest {
     | "native.read_memory"
     | "payments.list_charges"
     | "payments.create_refund";
+  definition_sha256: string;
+}
+export interface ToolsConfirmRequest {
+  desk_id: string;
+  /**
+   * @minItems 1
+   * @maxItems 13
+   */
+  tools:
+    | [ToolPin]
+    | [ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ];
   enable: boolean;
-  definition_sha256?: string | null;
 }
 export interface ToolsConnectRequest {
   desk_id: string;

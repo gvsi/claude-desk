@@ -526,17 +526,9 @@ export function publicDesk(desk: DeskRecord, language: Language): PublicDesk {
   };
 }
 
-/**
- * The mock checkout's view of a link: the kernel's `PaymentLinkView` and the fields kernel plan 01c
- * adds (`views.ts` `PaymentLinkOut`). The customer's name shows only while the link is open.
- */
+/** The mock checkout's view of a link: the kernel's `PaymentLinkView`, as the link holds it. */
 export function paymentLinkOut(link: LinkRecord): PaymentLinkOut {
-  return {
-    ...link.view,
-    cancel_reason: link.cancelReason,
-    business_name: BUSINESS.name,
-    customer_name: link.view.state === 'issued' ? link.customerName : null,
-  };
+  return { ...link.view };
 }
 
 export const HEALTH: HealthOut = {

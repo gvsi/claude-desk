@@ -554,23 +554,17 @@ export interface DemoAgentRun {
 // Tokens
 
 /** Why a payment link was cancelled: only a change to the business's rules gives a reason. */
-export type CancelReason = 'rules_changed';
+export type CancelReason = NonNullable<PaymentLinkView['cancel_reason']>;
 
 /**
- * `GET /api/pay/{token}`: the kernel's `PaymentLinkView` with the fields the kernel payments,
- * agents and setup plan (plan 01c) adds to it, typed here and optional until plan 01c's
- * regenerated types have them. `business_name` is the Desk's business as the kernel names it; the
- * live API doesn't send it yet, and the checkout leaves the business's name out when it's missing,
- * never naming one of its own. `cancel_reason` is `rules_changed` for a link a rule change
+ * `GET /api/pay/{token}`: the kernel's `PaymentLinkView` as it is. `business_name` is the Desk's
+ * business as the kernel names it; if one ever arrives missing or empty, the checkout leaves the
+ * name out, never naming one of its own. `cancel_reason` is `rules_changed` for a link a rule change
  * cancelled, else null; `customer_name` is the kernel's first name and last initial for a link from
  * a verified session ("Dana W."), present only while the link is open. Names are someone's own
  * words and render as text.
  */
-export interface PaymentLinkOut extends PaymentLinkView {
-  business_name?: string;
-  cancel_reason?: CancelReason | null;
-  customer_name?: string | null;
-}
+export type PaymentLinkOut = PaymentLinkView;
 
 // Request bodies
 
@@ -635,10 +629,11 @@ export interface ToolConfirmEntry {
 }
 
 /**
- * `confirmTool`'s batch body (plan 02b Task 7, with kernel payments Task 4, plan 01c; typed here
- * until the regenerated types have it): a whole connector in one action, one tool a list of one.
- * Turning on drafts one version for the listed tools, confirmed like any rules draft; turning off
- * applies at once, with no draft.
+ * `confirmTool`'s batch body (plan 02b Task 7, with kernel payments Task 4, plan 01c): the kernel's
+ * `ToolsConfirmRequest` without its `desk_id`, which the API takes from the path, and with `tools`
+ * as a plain list. A whole connector in one action, one tool a list of one. Turning on drafts one
+ * version for the listed tools, confirmed like any rules draft; turning off applies at once, with
+ * no draft. The answer lists every tool of the batch as it stands now, in the request's order.
  */
 export interface ConfirmToolBody {
   tools: ToolConfirmEntry[];

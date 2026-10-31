@@ -35,15 +35,7 @@ from tests.kernel.test_app import LATER_ROUTES
 # The routes the API calls that the kernel doesn't serve yet, by `KERNEL_ROUTES` key, each with the kernel plan whose
 # "Produced" list adds it: 01b, the kernel's verification and owner data plan, and 01c, its payments, agents and setup
 # plan. A kernel PR takes out the entries it serves; an API change that calls a route no landed kernel serves adds one.
-PENDING_KERNEL_ROUTES: dict[str, str] = {
-    "POST /tools/connect": "01c",
-    "POST /tools/simulate_change": "01c",
-    "GET /payment_links/{token}": "01c",
-    "POST /payment_links/{token}/complete": "01c",
-    "POST /payment_links/{token}/cancel": "01c",
-    "POST /agents/demo": "01c",
-    "POST /policy/{version}/probe": "01c",
-}
+PENDING_KERNEL_ROUTES: dict[str, str] = {}
 
 API = Path(desk.api.__file__).parent
 SEGMENT = r"[^/?\s]+"     # what an f-string's formatted value stands for: one path segment

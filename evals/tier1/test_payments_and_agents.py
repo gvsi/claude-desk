@@ -6,11 +6,13 @@ The Desk's payments tools are pinned to the definitions the owner reviewed. A ch
 the rules are proved and confirmed again; an operation the server lists that no adapter pins is
 given to no one and refused when called; and a refund resolves only its own copy's charges. A
 payment link pays once, within a day, and a completion whose outcome is unknown settles at the
-provider once. A demo agent's mandate allows five $20 charges and no more, nothing above $20 at
-once, nothing after its hour and no refund; two calls racing for its last $20 leave one spend; and a
-charge whose kernel died after the provider charged, or whose provider answered late, is committed
-once on reconciliation. Every agent call is signed by the session's own key, with a fresh
-timestamp, under a nonce that lasts one turn. An owner's setup call reaches only its own copy.
+provider once; a rule change that no longer allows an open link cancels it, and the kernel's chat
+line names that link from its own fact. A quote is paid once. A demo agent's mandate allows five
+$20 charges and no more, nothing above $20 at once, nothing after its hour and no refund; two
+calls racing for its last $20 leave one spend; and a charge whose kernel died after the provider
+charged, or whose provider answered late, is committed once on reconciliation. Every agent call is
+signed by the session's own key, with a fresh timestamp, under a nonce that lasts one turn. An
+owner's setup call reaches only its own copy.
 
 On the real kernel each case also reads what the kernel stored (`kernel_ro`: tools, facts,
 mandates, payment links, decisions and the ledger) and what the mock payments server holds (its
@@ -33,11 +35,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from desk.contracts import Decision, DemoAgentIssued, ExecResult, LedgerEntry, ToolName, ToolProfile
+from desk.contracts import Decision, DemoAgentIssued, ExecResult, LedgerEntry, RuleCard, ToolName, ToolProfile
 from desk.db.session import database_url
 from desk.kernel_api import PaymentLinkView, SessionContext
 from evals.fakes import FakeAnthropic, Json
-from evals.oracles import find_markers, verify_verdict_sig
+from evals.oracles import card_amount_problems, find_markers, verify_verdict_sig
 from evals.tier1.args import charge_mandate_args, fetch_website_args, payment_link_args, refund_args
 from evals.tier1.golden_desk import (
     CUSTOM_ITEMS,
@@ -47,6 +49,7 @@ from evals.tier1.golden_desk import (
     Caller,
     GoldenDesk,
     check_args_schema,
+    confirm_cards,
     decide,
     demo_agent,
     desk_of,
@@ -67,7 +70,7 @@ from evals.tier1.test_labels_and_injection import (
     stored_charges,
     viewed_charges,
 )
-from evals.tier1.test_reply_golden import CLEAN_EN, check_reply, passes, shown_blocks, signing_key
+from evals.tier1.test_reply_golden import CLEAN_EN, check_reply, handed_off, passes, shown_blocks, signing_key
 from evals.tier1.test_restart_and_ledger import ORPHAN_AFTER_S, execute_body
 from evals.tier1.test_sessions import (
     NOT_FOUND,
@@ -158,9 +161,9 @@ def pin_hashes(k: KernelHarness, drifted: ToolProfile) -> tuple[str, str]:
 
 
 async def confirm_tool(k: KernelHarness, desk: GoldenDesk, tool: str, sha256: str, *, expect: Expect) -> Any:
-    """The owner turns an MCP tool on, naming the hash of the definition they reviewed."""
-    return await k.call("POST /tools/confirm", body={"desk_id": desk.desk_id, "tool": tool, "enable": True,
-                                                     "definition_sha256": sha256},
+    """The owner turns an MCP tool on, naming the hash of the definition they reviewed: a batch of one."""
+    return await k.call("POST /tools/confirm", body={"desk_id": desk.desk_id, "enable": True,
+                                                     "tools": [{"tool": tool, "definition_sha256": sha256}]},
                         auth=desk.owner, expect=expect)
 
 
@@ -183,7 +186,7 @@ async def test_confirm_with_a_stale_hash_409(k: KernelHarness, records):
         assert (row["status"], row["definition_sha256"], row["pending_sha256"]) == ("needs_review", old, new), (
             f"confirming the old pin changed the tool: {row['status']}")
     confirmed = await confirm_tool(k, desk, REFUND, new, expect=Expect(fields={
-        "profile.tool": REFUND, "profile.status": "needs_review", "draft.desk_id": desk.desk_id,
+        "profiles.0.tool": REFUND, "profiles.0.status": "needs_review", "draft.desk_id": desk.desk_id,
         "draft.status": "proved",
     }))
     waiting = await tools_given(k, dana)
@@ -231,18 +234,23 @@ async def mockpay_db() -> AsyncIterator[AsyncConnection]:
         await engine.dispose()
 
 
-async def list_extra_tool(k: KernelHarness, desk: GoldenDesk) -> None:
-    """The mock payments server lists one more tool to the copy: no route of Plan 01c's adds one,
-    so the entry is written into the server's own store (`mockpay.tool_definitions`) as its role
-    (desk_mockpay) would, as a provider changing what it offers. The server is then asked, as any
-    MCP client would ask it, and must list the entry beside the two pinned operations, or the case
-    would show nothing (real kernel only)."""
-    async with mockpay_db() as conn:
-        await conn.execute(text(
-            "INSERT INTO mockpay.tool_definitions (copy_id, name, definition) "
-            "VALUES (:copy_id, :name, CAST(:definition AS jsonb)) "
-            "ON CONFLICT (copy_id, name) DO UPDATE SET definition = EXCLUDED.definition"
-        ), {"copy_id": desk.copy.copy_id, "name": EXTRA_TOOL, "definition": json.dumps(EXTRA_DEFINITION)})
+async def list_extra_tool(k: KernelHarness, desk: GoldenDesk, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The mock payments server lists one more tool to the copy, as a provider changing what it
+    offers would. The server lists only its two tools (master plan, "Mock payments server") and no
+    route makes it offer another, so the case edits what this run's server, started in this
+    process, lists for the copy: its store's definitions gain the entry, as Plan 01c's own pin tests
+    present an extra listed tool. The server is then asked, as any MCP client would ask it, and must
+    list the entry beside the two pinned operations, or the case would show nothing (real kernel
+    only)."""
+    from desk.mockpay.store import Store   # Plan 01c
+
+    definitions = Store.definitions
+
+    async def with_the_extra(self: Store, copy_id: str) -> list[dict[str, Any]]:
+        listed = await definitions(self, copy_id)
+        return [*listed, EXTRA_DEFINITION] if copy_id == desk.copy.copy_id else listed
+
+    monkeypatch.setattr(Store, "definitions", with_the_extra)
     listed = await k.mockpay.listed_tools(desk.copy.copy_id)
     assert {EXTRA_TOOL, *MCP_OPERATIONS} <= listed.keys(), (
         f"the mock payments server lists {sorted(listed)} to the copy, so the case can't show that an extra "
@@ -256,7 +264,7 @@ async def owner_context(k: KernelHarness, desk: GoldenDesk) -> SessionContext:
 
 
 @pytest.mark.requires("01c")
-async def test_unpinned_operation_refused(k: KernelHarness, records):
+async def test_unpinned_operation_refused(k: KernelHarness, records, monkeypatch: pytest.MonkeyPatch):
     """Only the operations the Desk pinned are ever given. With the payments server also listing
     `transfer_funds`, verified Dana's call to `payments.transfer_funds` is refused before it is
     normalized, and ledgered, with nothing to run or approve. Connecting the server again profiles
@@ -265,7 +273,7 @@ async def test_unpinned_operation_refused(k: KernelHarness, records):
     Dana's payment history still runs past the server's extra entry."""
     desk = await golden_desk(k)
     if k.is_real:
-        await list_extra_tool(k, desk)
+        await list_extra_tool(k, desk, monkeypatch)
     dana = await open_caller(k, desk, "dana")
     callers = {"a visitor's": await open_caller(k, desk, "visitor"), "Dana's": dana,
                "an agent's": await open_caller(k, desk, "agent")}
@@ -280,7 +288,8 @@ async def test_unpinned_operation_refused(k: KernelHarness, records):
 
     if k.is_real:
         connected = sorted((profile.tool, profile.status) for profile in profiles)
-        assert connected == [(LIST_CHARGES, "enabled"), (REFUND, "enabled")], f"connecting again gave {connected}"
+        expected = sorted([(LIST_CHARGES, "enabled"), (REFUND, "enabled")])
+        assert connected == expected, f"connecting again gave {connected}"
         known = set(get_args(ToolName))
         for whose, context in contexts.items():
             tools = {profile.tool for profile in (*context.tools, *context.tools_declared)}
@@ -560,6 +569,51 @@ async def test_payment_link_expires_after_a_day(k: KernelHarness, fake: FakeAnth
         assert (await link_row(records, desk, link))["state"] == "expired"
 
 
+# Rules without the seed's rv-link: a payment link now falls to the compiler's default ask
+QUOTES_ONLY = RuleCard(card_id="g-auto-quote", applies_to="native.quote", mode="auto", who="anyone",
+                       reason="Quotes at list price.")
+
+
+@pytest.mark.requires("01c")
+async def test_cancelled_link_card_names_its_own_link(k: KernelHarness, fake: FakeAnthropic, records):
+    """A confirmed rule change that no longer allows an open link cancels it, and the kernel's chat
+    line for it says which link: one `link_cancelled` card citing the link's own `payment_link` fact,
+    its title the link's amount and nothing else, what the link was for in its lines, signed with the
+    card, for the link's session alone (another visitor's gets none). Claude drafting
+    `link_cancelled`, even citing that same fact, is refused as `unknown_fact`."""
+    desk = await golden_desk(k)
+    visitor = await open_caller(k, desk, "visitor")
+    stranger = await open_caller(k, desk, "visitor")
+    link = await issue_link(k, fake, desk, visitor)
+    version = await confirm_cards(k, desk, [QUOTES_ONLY])
+    link_id = link.fact_id.removeprefix("payment_link:")
+    lines = await k.call(
+        "GET /policy/{version}/cancelled_links?desk_id=", path={"version": version.version},
+        query={"desk_id": desk.desk_id}, auth=desk.owner, expect=Expect(fields={
+            "0.link_id": link_id, "0.session_id": visitor.state.session_id, "0.verdict.ok": True,
+            "0.verdict.violations": [], "0.verdict.generation": visitor.state.generation,
+            **{f"0.verdict.{path}": value for path, value in shown_blocks(["link_cancelled"]).items()},
+            "0.verdict.blocks.0.fact_id": link.fact_id, "0.verdict.blocks.0.lines": {"$len": 2},
+        }))
+    await check_reply(k, visitor, "Your payment link was cancelled.",
+                      [{"template": "link_cancelled", "fact_id": link.fact_id}],
+                      expect=handed_off(visitor, "unknown_fact"))
+
+    if k.is_real:
+        sessions = [line.session_id for line in lines]
+        assert sessions == [visitor.state.session_id], (
+            f"{len(sessions)} lines, the stranger's session among them: {stranger.state.session_id in sessions}")
+        verdict = lines[0].verdict
+        assert verify_verdict_sig(visitor.state.session_id, verdict, await signing_key(k)), "the card's signature"
+        [fact] = [row for row in await records.facts(desk.copy.copy_id) if row["fact_id"] == link.fact_id]
+        stated = {claim["key"]: claim["value"] for claim in fact["claims"]}
+        assert f"session:{visitor.state.session_id}" in fact["readers"], "the card's fact isn't the session's"
+        [block] = verdict.blocks
+        problems = card_amount_problems(block, {stated["total"]}, headline=stated["total"])
+        assert stated["total"] == P and not problems, f"the card doesn't show its link's amount: {problems}"
+        assert block.lines[0] == stated["title"], "the card's first line isn't what its link was for"
+
+
 # The provider answering late: Plan 01c's provider deadline is 2 s, and `k.mockpay.delay` is the one
 # timeout hook. Nothing reads the kernel between the late answer and the restart: a read settles an
 # unknown outcome at once, before the delayed call could land.
@@ -738,6 +792,33 @@ async def test_mandate_expired_refused(k: KernelHarness, records):
     await decide_spend(k, desk, agent, CHARGE, expect=spent(CHARGE, "refuse"))
 
     if k.is_real:
+        await assert_spend(records, desk, agent, committed=DEPOSIT_CENTS, reserved=0)
+        await assert_charged(k, records, desk, agent, 1, store)
+
+
+@pytest.mark.requires("01c")
+async def test_pay_the_same_quote_twice(k: KernelHarness, records):
+    """A quote is paid once. A demo agent's charge of its $20 deposit quote is allowed and run; the
+    same charge of the same quote asked again in a new turn, as a resent request would ask it, is
+    refused at `/decide` before it is normalized, with nothing to run or approve, and its `decide`
+    entry names why (`quote_paid`). $20 is committed, nothing is reserved, and the copy's store
+    gained one $20 charge."""
+    desk = await golden_desk(k)
+    store = await store_before(k, desk)
+    agent = await open_caller(k, desk, "agent")
+    quote_id = await make_quote(k, desk, agent, DEPOSIT)
+    agent.turn()
+    first = await decide(k, agent, CHARGE, charge_mandate_args(quote_id), expect=spent(CHARGE, "allow"))
+    await execute(k, agent, first, expect=SUCCEEDED)
+    agent.turn()
+    async with assert_ledgered(records, desk.copy, desk.desk_id, "decide", session_id=agent.state.session_id) as new:
+        again = await decide(k, agent, CHARGE, charge_mandate_args(quote_id), expect=UNNORMALIZED)
+    await execute(k, agent, again, expect=CONFLICT)   # a refusal has nothing to run
+    await read(k, desk.owner, again, "refused")
+
+    if k.is_real:
+        why = [entry.event.summary.get("check") for entry in new if entry.event.kind == "decide"]
+        assert why == ["quote_paid"], f"the second charge's decide entries name {why}, not quote_paid"
         await assert_spend(records, desk, agent, committed=DEPOSIT_CENTS, reserved=0)
         await assert_charged(k, records, desk, agent, 1, store)
 

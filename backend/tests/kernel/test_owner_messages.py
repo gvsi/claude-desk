@@ -31,6 +31,7 @@ from .test_reply_check import (assert_handed_off, checked, clause, post_check, p
 
 ROUTE = "POST /owner/messages"
 SAY = "A tank replacement usually runs $1,400 to $1,900."
+KERNEL_ONLY = {"owner_said", "payment_confirmed", "link_cancelled"}   # cards Claude may never draft
 
 
 async def post_message(client: httpx.AsyncClient, copy: Rivera, session_id: str, text: str, kind: str = "say", *,
@@ -176,7 +177,9 @@ async def test_owner_statements_never_back_a_quote(app, client):
         refused[template] = (violation.kind, violation.rule_id)
     assert refused["quote"] == ("unknown_fact", "template_mismatch")
     assert refused["owner_said"] == ("unknown_fact", "kernel_only_template")
-    assert refused == {template: ("unknown_fact", "kernel_only_template" if template == "owner_said"
+    # the cards only the kernel issues are pinned here, never read from the checker under test
+    assert KERNEL_ONLY <= set(render.TEMPLATES)
+    assert refused == {template: ("unknown_fact", "kernel_only_template" if template in KERNEL_ONLY
                                   else "names_no_fact" if not render.TEMPLATES[template].fact_kinds
                                   else "template_mismatch") for template in render.TEMPLATES}
 

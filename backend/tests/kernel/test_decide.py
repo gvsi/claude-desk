@@ -798,6 +798,7 @@ async def test_tools_not_given_are_refused(app, client, registry):
 
 
 async def test_unknown_tool_names_are_refused_and_ledgered(app, client, registry):
+    del registry["native.payment_link"]                # a tool the contract names, with no adapter here
     rows = await desk_with(app, [FakeAdapter("native.quote")], [card("quote", "native.quote")])
     visitor = await open_visitor(client, rows)
     long_name = "native." + "x" * 193
@@ -1184,9 +1185,12 @@ def test_status_lines_are_digit_free():
     # their session ended, so these aren't status lines and `render.status` can't render them
     reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed",
                "refused_rules_changed", "refused_desk_deleted", "refused_fallback"}
-    assert render.STATUS_KEYS == states | receipts                         # one line per decision state
+    # refused_at_execution's line when a connected tool can't be reached, and refused's when an agent's charge is
+    # over what its signed mandate has left
+    variants = {"tool_unavailable", "refused_over_mandate"}
+    assert render.STATUS_KEYS == states | receipts | variants              # one line per decision state, and variants
     # a decision's line is never a receipt, so never the owner's `owner_say_blocked`
-    assert (render.DECISION_STATUS_KEYS, render.RECEIPT_KEYS) == (states, receipts)
+    assert (render.DECISION_STATUS_KEYS, render.RECEIPT_KEYS) == (states | variants, receipts)
     assert render.OWNER_STATUS_KEYS == reasons and not reasons & render.STATUS_KEYS
     for lang in ("en", "es"):
         for key in render.STATUS_KEYS:

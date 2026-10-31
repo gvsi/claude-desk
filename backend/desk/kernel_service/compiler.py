@@ -5,9 +5,10 @@ directory, so the kernel reads the same files from a test, the repo root or the 
 (`/app/kernel/cedar`):
 
 - `BASE_SCHEMA`: the master plan's "Cedar request shape" with one action per native tool, each a
-  member of its effect groups (`effect:*`), which every Desk's schema starts from. Importing this
-  module raises RuntimeError when `desk.always_on.ALWAYS_ON_EFFECTS`, the always-on tools'
-  effects as the API reads them, differs from those groups, so such a kernel doesn't start.
+  member of its effect groups (`effect:*`), which every Desk's schema starts from; `desk_schema`
+  adds an action for each pinned MCP tool the Desk enables. Importing this module raises
+  RuntimeError when `desk.always_on.ALWAYS_ON_EFFECTS`, the always-on tools' effects as the API
+  reads them, differs from those groups, so such a kernel doesn't start.
 - `BASELINE`: set `B`, the always-on forbids, which `PolicyEngine(BASELINE)` adds to every
   evaluation.
 - `invariants(auto_money_cap_cents)`: the proof spec sets `desk-prove` checks every activation
@@ -116,14 +117,42 @@ def _sha256_canonical(value: Any) -> str:
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(value)).encode()).hexdigest()
 
 
+# The principal types each pinned MCP tool's action applies to: its "Given to" row in the master
+# plan's "Model-visible tools" (a refund is a verified visitor's alone; agents never pay out).
+MCP_PRINCIPAL_TYPES: dict[str, tuple[str, ...]] = {
+    "payments.list_charges": ("Visitor", "Agent"),
+    "payments.create_refund": ("Visitor",),
+}
+MCP_RESOURCE_TYPE = "Charge"
+
+
 def desk_schema(profiles: Iterable[ToolProfile]) -> dict[str, Any]:
-    """The Cedar schema for a Desk with these tool profiles: a fresh copy of the base schema,
-    which declares every native tool. MCP actions are appended by Plan 01c; until then an MCP
-    profile is refused rather than left out of the schema without a word."""
-    for profile in profiles:
-        if profile.source != "native":
-            raise ValueError(f"{profile.tool}: MCP actions aren't in the schema yet")
-    return copy.deepcopy(BASE_SCHEMA)
+    """The Cedar schema for a Desk with these tool profiles: a fresh copy of the base schema, which
+    declares every native tool, plus one action per MCP profile, a member of its effect groups,
+    applying to the principal types of its "Given to" row (`MCP_PRINCIPAL_TYPES`) and to resource
+    `Charge`. Raises ValueError for a native tool the base schema doesn't declare, an MCP tool with
+    no "Given to" row, an effect with no group, or a tool given twice, rather than leave it out."""
+    schema = copy.deepcopy(BASE_SCHEMA)
+    actions = schema[""]["actions"]
+    seen: set[str] = set()
+    for profile in sorted(profiles, key=lambda p: p.tool):
+        if profile.tool in seen:
+            raise ValueError(f"{profile.tool} is given twice")
+        seen.add(profile.tool)
+        if profile.source == "native":
+            if "appliesTo" not in actions.get(profile.tool, {}):
+                raise ValueError(f"{profile.tool}: the base schema doesn't declare it")
+            continue
+        principals = MCP_PRINCIPAL_TYPES.get(profile.tool)
+        groups = [f"effect:{effect}" for effect in profile.effects]
+        if principals is None or not groups or any(group not in actions for group in groups):
+            raise ValueError(f"{profile.tool}: no action can be declared for it")
+        actions[profile.tool] = {
+            "memberOf": [{"id": group} for group in groups],
+            "appliesTo": {"principalTypes": list(principals), "resourceTypes": [MCP_RESOURCE_TYPE],
+                          "context": {"type": "Ctx"}},
+        }
+    return schema
 
 
 def schema_sha256(schema: dict[str, Any]) -> str:

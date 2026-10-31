@@ -23,6 +23,7 @@ from sqlalchemy.types import TypeDecorator
 
 from desk import contracts as c
 from desk.events import A2AResponse
+from desk.kernel_api import ToolPin
 
 NOW = text("now()")
 FALSE = text("false")
@@ -190,25 +191,43 @@ class VerificationChallenge(Base):
 
 
 class AgentKey(Base):
+    """A visiting agent's public key; the private half went once to the agent's runner."""
+
     __tablename__ = "agent_keys"
     __table_args__ = {"schema": "kernel"}
     copy_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    agent_key_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    agent_key_id: Mapped[str] = mapped_column(Text, primary_key=True)   # first 16 hex of sha256(public key)
+    desk_id: Mapped[str] = mapped_column(Text)                          # the Desk it was minted for
+    public_key_hex: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text)                           # "demo"
+    minted_by: Mapped[str] = mapped_column(Text)                        # the minting session's ID, or "owner"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class AgentNonce(Base):
+    """One signed A2A turn: its nonce, bound to one session and one body hash."""
+
     __tablename__ = "agent_nonces"
     __table_args__ = {"schema": "kernel"}
     copy_id: Mapped[str] = mapped_column(Text, primary_key=True)
     agent_key_id: Mapped[str] = mapped_column(Text, primary_key=True)
     nonce: Mapped[str] = mapped_column(Text, primary_key=True)
+    session_id: Mapped[str] = mapped_column(Text)
+    body_sha256: Mapped[str] = mapped_column(Text)
+    first_used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    check_replies: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    spent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DemoWalletKey(Base):
+    """The copy's demo wallet, the trusted issuer of its mandates (one per copy)."""
+
     __tablename__ = "demo_wallet_keys"
     __table_args__ = {"schema": "kernel"}
     copy_id: Mapped[str] = mapped_column(Text, primary_key=True)
     key_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    public_key_hex: Mapped[str] = mapped_column(Text)
+    private_key_hex: Mapped[str] = mapped_column(Text)
 
 
 class Mandate(Base):
@@ -224,13 +243,26 @@ class Mandate(Base):
     committed_cents: Mapped[int] = mapped_column(Cents, server_default=text("0"))
     reserved_cents: Mapped[int] = mapped_column(Cents, server_default=text("0"))
     expires_at: Mapped[str] = mapped_column(Text)            # the signed SignedTime text
+    session_id: Mapped[str] = mapped_column(Text)            # the agent session it opened
+    issuer: Mapped[str] = mapped_column(Text)                # "demo-wallet"
+    nonce: Mapped[str] = mapped_column(Text)                 # unique per copy; never in a view
+    envelope: Mapped[c.Mandate] = mapped_column(ContractJSON(c.Mandate))   # the signed envelope as presented
 
 
 class MandateReservation(Base):
+    """What one agent money action holds on its mandate (01c_5_mandate_reservations): `reserved`
+    until its outcome is known, then `committed` or `released`."""
+
     __tablename__ = "mandate_reservations"
     __table_args__ = {"schema": "kernel"}
     reservation_id: Mapped[str] = mapped_column(Text, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
+    mandate_id: Mapped[str] = mapped_column(Text)
+    action_id: Mapped[str] = mapped_column(Text)             # unique: the action that holds it
+    amount_cents: Mapped[int] = mapped_column(Cents)
+    state: Mapped[str] = mapped_column(Text)                 # reserved, committed, released
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Tool(Base):
@@ -244,11 +276,13 @@ class Tool(Base):
     reversible: Mapped[bool] = mapped_column(Boolean)
     status: Mapped[str] = mapped_column(Text)
     description_confirmed: Mapped[str] = mapped_column(Text)
-    definition_sha256: Mapped[str | None] = mapped_column(Text)     # MCP tools' pinned definition; None for native tools
+    # an MCP tool's pinned definition hash; a native tool's adapter profile_sha256, the hash /tools/confirm names
+    definition_sha256: Mapped[str | None] = mapped_column(Text)
     pending_definition_text: Mapped[str | None] = mapped_column(Text)
     pending_sha256: Mapped[str | None] = mapped_column(Text)
     profile: Mapped[c.ToolProfile | None] = mapped_column(ContractJSON(c.ToolProfile))
-    profile_sha256: Mapped[str | None] = mapped_column(Text)   # the profile without status or pending fields
+    profile_sha256: Mapped[str | None] = mapped_column(Text)   # the profile without status, review or pending fields
+    review_reason: Mapped[str | None] = mapped_column(Text)    # only while needs_review: new, changed or delisted
 
 
 class PolicyVersion(Base):
@@ -275,6 +309,9 @@ class PolicyVersion(Base):
     cedar: Mapped[dict[str, str] | None] = mapped_column(ContractJSON(dict[str, str]))   # {F, A, H, A0} Cedar texts
     schema_json: Mapped[str | None] = mapped_column(Text)             # the Desk's Cedar schema, as loaded
     preset: Mapped[str | None] = mapped_column(Text)                  # the preset or seed it came from, if any
+    # the tools a /tools/confirm draft turns on, each at the hash it was proved with; empty otherwise
+    enables: Mapped[list[ToolPin]] = mapped_column(ContractJSON(list[ToolPin]), server_default=EMPTY_LIST,
+                                                   default=list)
 
 
 class Action(Base):
@@ -485,6 +522,10 @@ class DocumentLink(Base):
 
 
 class PaymentLink(Base):
+    """A quote's single-use link to the mock checkout; the rest of its columns arrive in
+    01c_2_payment_links, and why and by which version it was cancelled in 01c_3_link_cancellation.
+    Its token and the token's hash are never in a view."""
+
     __tablename__ = "payment_links"
     __table_args__ = {"schema": "kernel"}
     link_id: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -493,8 +534,20 @@ class PaymentLink(Base):
     session_id: Mapped[str | None] = mapped_column(Text)
     quote_id: Mapped[str | None] = mapped_column(Text)
     amount_cents: Mapped[int] = mapped_column(Cents)
-    state: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)                 # PaymentLinkState
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    action_id: Mapped[str] = mapped_column(Text)             # unique: the action that issued it
+    title: Mapped[str] = mapped_column(Text)                 # from the quote's items, never from a provider
+    token: Mapped[str] = mapped_column(Text)                 # unique; the link's one credential, only ever here
+    token_sha256: Mapped[str] = mapped_column(Text)          # unique; what the copy resolver looks up
+    provider_checkout_id: Mapped[str] = mapped_column(Text)
+    customer_id: Mapped[str] = mapped_column(Text)           # person:<id> when verified, else session:<id>
+    mandate_id: Mapped[str | None] = mapped_column(Text)     # an agent link's mandate
+    completion_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    cancel_reason: Mapped[str | None] = mapped_column(Text)  # rules_changed, person_removed, mandate_expired, amount_mismatch
+    cancelled_by_version: Mapped[int | None] = mapped_column(Integer)   # the rules version whose activation moved it
 
 
 class Handoff(Base):
@@ -684,13 +737,21 @@ class ModelCall(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))   # the call's finish; no default stands in
 
 
-# mockpay.*: the mock payments server (role desk_mockpay); keys are unique per copy
+# mockpay.*: the mock payments server (role desk_mockpay); keys are unique per copy, and so are
+# idempotency keys (migration 01c_0_mockpay). A `voided` row holds only its key: it settles a key the
+# kernel never used, so a later request with it fails.
 
 class Checkout(Base):
     __tablename__ = "checkouts"
     __table_args__ = {"schema": "mockpay"}
     copy_id: Mapped[str] = mapped_column(Text, primary_key=True)
     checkout_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    amount_cents: Mapped[int | None] = mapped_column(Cents)
+    title: Mapped[str | None] = mapped_column(Text)
+    customer_id: Mapped[str | None] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)                  # open, succeeded, cancelled, voided
+    charge_id: Mapped[str | None] = mapped_column(Text)       # once succeeded
 
 
 class Charge(Base):
@@ -698,6 +759,14 @@ class Charge(Base):
     __table_args__ = {"schema": "mockpay"}
     copy_id: Mapped[str] = mapped_column(Text, primary_key=True)
     charge_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    owner_person_id: Mapped[str | None] = mapped_column(Text)   # for a `person:<id>` customer
+    customer_id: Mapped[str | None] = mapped_column(Text)
+    amount_cents: Mapped[int | None] = mapped_column(Cents)
+    description: Mapped[str | None] = mapped_column(Text)
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)                  # succeeded, voided
+    refunded_cents: Mapped[int] = mapped_column(Cents, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 
 class Refund(Base):
@@ -705,6 +774,10 @@ class Refund(Base):
     __table_args__ = {"schema": "mockpay"}
     copy_id: Mapped[str] = mapped_column(Text, primary_key=True)
     refund_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    charge_id: Mapped[str | None] = mapped_column(Text)
+    amount_cents: Mapped[int | None] = mapped_column(Cents)
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)                  # succeeded, voided
 
 
 class ToolDefinition(Base):
@@ -712,3 +785,4 @@ class ToolDefinition(Base):
     __table_args__ = {"schema": "mockpay"}
     copy_id: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text, primary_key=True)
+    definition: Mapped[dict[str, Any]] = mapped_column(JSONB)   # the MCP tool entry, as listed

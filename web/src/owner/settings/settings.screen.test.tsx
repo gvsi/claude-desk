@@ -444,13 +444,17 @@ describe('Settings against its boards', () => {
     let content = await expectSettingsColumns(screen, 'General');
 
     // The details 8 px under their heading, as wide as the column, with no Change; Answering in its
-    // own card 20 px under them; Delete this Desk's heading 28 px under that, its neutral button at
-    // the column's right.
+    // own card 20 px under them, the card's look with its switch row 20 px in from its top and
+    // bottom (the row pads its own sides, so its words line up with the details'); Delete this
+    // Desk's heading 28 px under that, its neutral button at the column's right.
     const card = one(business.element(), '.cd-card');
     expect(round(top(card) - bottom(one(business.element(), 'h2')))).toBe(8);
     expect(round(card.getBoundingClientRect().width)).toBe(720);
     const answeringCard = main(screen).getByRole('region', { name: 'Answering' }).element();
-    expectComputed(answeringCard, SPEC.card);
+    expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });
+    const switchRow = answering.element();
+    expect(round(top(switchRow) - top(answeringCard))).toBe(21);
+    expect(round(bottom(answeringCard) - bottom(switchRow))).toBe(21);
     expect(round(top(answeringCard) - bottom(card))).toBe(20);
     const removal = main(screen).getByRole('region', { name: 'Delete this Desk' }).element();
     expect(round(top(one(removal, 'h2')) - bottom(answeringCard))).toBe(28);
@@ -534,6 +538,34 @@ describe('Settings against its boards', () => {
     expect(round(button.getBoundingClientRect().left)).toBe(16);
     expect(round(top(one(phone.screen.container, '[data-ds="concept-footer"]')) - bottom(button))).toBe(16);
     expectNoHorizontalScroll();
+  });
+
+  it('answering_lines_up_with_the_details', async () => {
+    // Answering's words start where the details' do, on a laptop and on a phone: its label under
+    // "Business", its line under "Rivera Plumbing", and the switch's track as far in from the card's
+    // right edge as the words are from its left.
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(GENERAL, { viewport });
+      const business = main(screen).getByRole('region', { name: 'Your business' });
+      await expect.element(business).toBeVisible();
+      const answering = main(screen).getByRole('region', { name: 'Answering' });
+      const detailCard = one(business.element(), '.cd-card');
+      const words = (el: Element) => {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return range.getBoundingClientRect().left;
+      };
+      const term = business.getByRole('term').first().element();
+      const value = business.getByRole('definition').first().element();
+      const label = answering.getByText('Answering', { exact: true }).element();
+      const line = answering.getByText(ANSWERING_LINE, { exact: true }).element();
+      const inset = words(term) - detailCard.getBoundingClientRect().left;
+      expect(Math.abs(words(label) - words(term)), `label at ${viewport}`).toBeLessThanOrEqual(1);
+      expect(Math.abs(words(line) - words(value)), `line at ${viewport}`).toBeLessThanOrEqual(1);
+      const card = answering.element().getBoundingClientRect();
+      const track = one(answering.element(), '.cd-switch__track').getBoundingClientRect();
+      expect(Math.abs(card.right - track.right - inset), `track at ${viewport}`).toBeLessThanOrEqual(1);
+    }
   });
 
   it('settings_have_no_jargon', async () => {

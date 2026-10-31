@@ -6,11 +6,12 @@ An execution takes up to three transactions, so that a crash leaves a record of 
 - T1 locks the decision (for an allow, once it holds the session row `FOR SHARE`), settles it as
   any read does (`refresh_decision`), re-checks it against the current rows (`recheck`, step 6
   of "Evaluation", against the active version at its money cap, which the `execute` entries that
-  follow name as `policy_version` and `auto_money_cap_cents`), makes sure the receipt it will end
-  on can be written (`_receipt_ready`),
-  runs the adapter's `prepare` and commits the `executions` row in state `intent`, with whatever
-  `prepare` reserved and the version and cap the re-check ran under. Nothing outside the kernel
-  has happened yet.
+  follow name as `policy_version` and `auto_money_cap_cents`, and with an agent's mandate spend as
+  it stands, `mandates.session_remaining`), makes sure the receipt it will end on can be written
+  (`_receipt_ready`), runs the adapter's `prepare` (an agent's money action reserves its amount on
+  its mandate there, under the mandate row's lock) and commits the `executions` row in state
+  `intent`, with whatever `prepare` reserved and the version and cap the re-check ran under.
+  Nothing outside the kernel has happened yet.
 - T2 first holds the session row (`_hold_session`), on either path: `FOR SHARE`, so a take-over,
   or a Desk's deletion closing the session, waits for a running execution, and one that came
   first stops it (the fence); `FOR UPDATE` for an adapter that writes the session's own rows
@@ -38,18 +39,35 @@ happened (`reconcile`, by `action_id`), on every read of the decision and at sta
 retried blindly. Its entries name the version and cap the execution row recorded in T1, never the
 ones active when it runs. What it settles is a record of what already happened, like a T2 or T3
 commit, so each action it settles commits at once, before a read goes on: no recheck of the read's
-session takes it back.
+session takes it back. The adapter is asked even for an action that releases private data whose
+session no longer stands for its person, so that what it did is recorded as it happened, and
+nothing it answers is delivered (`_refused_in_recovery`).
+
+A connected (MCP) tool is listed again in every re-check, before the server is asked anything
+else, and its pin is checked last, under its `tools` row's lock: a changed or delisted definition
+refuses the call ("rules changed") and is recorded, the owner alerted, in the refusal's own
+transaction; a server that can't list refuses it with the visitor line `tool_unavailable`. The
+re-check takes the `tools` row and then the ledger head, the order `activation.confirm` takes them
+in after the active version, and it never takes the active version itself. One exception: on the
+approved path, the owner's answer holds the decision row across the re-list, and may already hold
+the ledger head when reading the decision recomputed a held money decision's answers
+(`decide.refresh_answers`). Against a concurrent confirm that changes the same tool, Postgres may
+then end one of the two transactions; either way it fails closed, with nothing run.
 
 Claude sees an execution only through its `model_view`: kept to the adapter's `model_view_keys`,
 and emptied when a fact the session can't read was dropped or a value carries a document canary,
-which the `execute` entry records (`violation: "canary"`). This one check runs wherever a result
-is stored: an allow, an approved hold and a reconciled orphan.
+which the `execute` entry records (`violation: "canary"`). A result an adapter declared not to
+release private data mustn't carry is withheld whole, never failed, since the adapter may already
+have acted outside the kernel: the action is executed with nothing in its result, the fact rows the
+result names are narrowed to the owner, and the entry records both (`violation:
+"undeclared_private_data"`, `narrowed`). This one check runs wherever a result is stored: an
+allow, an approved hold and a reconciled orphan.
 """
 
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Literal, NamedTuple
 
@@ -58,12 +76,14 @@ from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 
-from desk.contracts import ExecResult, Fact, LedgerEvent, NormalizedAction, Principal
+from desk.contracts import ExecResult, Fact, InboxNotice, LedgerEvent, NormalizedAction, Principal
 from desk.db.models import Action as ActionRow
 from desk.db.models import Approval, Business, Desk, Execution, Person, Tool
 from desk.db.models import Decision as DecisionRow
+from desk.db.models import Fact as FactRow
 from desk.kernel_api import ExecuteRequest
-from desk.kernel_service import activation, adapters, auth, decide, labels, ledger, repo
+from desk.kernel_service import (activation, adapters, auth, decide, labels, ledger, mandates, mcp_client, mcp_pins,
+                                 repo)
 from desk.kernel_service.adapters.base import (Adapter, AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown,
                                                ExecCtx, Normalized, NormalizeCtx)
 from desk.kernel_service.auth import AuthError, Named, SessionRow
@@ -76,6 +96,14 @@ log = logging.getLogger(__name__)
 ORPHAN_AFTER = timedelta(seconds=30)      # an intent younger than this may still be running
 EXECUTE_ROUTE = "POST /execute"
 ExecPath = Literal["allow", "approved"]   # an allow through /execute, an approved hold inside the answer
+UNAVAILABLE = "unavailable"               # the re-check's code for a connected tool's server that couldn't list
+PIN = "pin"                               # its code for a connected tool not listed at its pin
+
+
+def visitor_template(check: str | None) -> str | None:
+    """The status line a `refused_at_execution` takes for the re-check part that failed, when it
+    isn't the state's own ("rules changed"): `tool_unavailable` for a server that couldn't list."""
+    return "tool_unavailable" if check == UNAVAILABLE else None
 
 
 def binding_sha256(*, copy_id: str, desk_id: str, session_id: str, action_id: str, args_sha256: str,
@@ -93,14 +121,6 @@ async def _after_intent() -> None:
 
 
 # ---- The rows an execution works on --------------------------------------------------------------
-
-class UndeclaredPrivateData(AdapterFailure):
-    """An adapter declared not to release private data returned some (`undeclared_private_data`):
-    the action settles `failed`, ledgered with that reason, and nothing it returned is kept."""
-
-    def __init__(self) -> None:
-        super().__init__("undeclared_private_data")
-
 
 class Checked(NamedTuple):
     """The rules version a re-check ran against, and its money cap: what the `execute` entries of
@@ -123,9 +143,15 @@ class _Target:
     adapter: Adapter | None
     principal: Principal
     checked: Checked | None = None       # the version and cap step 6 ran against, once it has
+    notices: list[InboxNotice] = field(default_factory=list)   # owner alerts the re-check wrote (a drift)
 
-    def xctx(self, ctx: KernelCtx) -> ExecCtx:
-        return ExecCtx(ctx=ctx, desk_row=self.desk_row, session_row=self.session_row, principal=self.principal)
+    def xctx(self, ctx: KernelCtx, *, reconciling: bool = False) -> ExecCtx:
+        """The adapter's context, with the version step 6 passed under: None before it runs, and when
+        `reconciling`, since reconciliation runs no re-check (`checked` then holds the version T1's
+        re-check ran under, which its entries name, and no adapter may take for a re-check of its own)."""
+        version = self.checked.policy_version if self.checked is not None and not reconciling else None
+        return ExecCtx(ctx=ctx, desk_row=self.desk_row, session_row=self.session_row, principal=self.principal,
+                       recheck_version=version)
 
 
 async def _one(ctx: KernelCtx, stmt: Any) -> Any:
@@ -218,6 +244,12 @@ def _no_result(action_id: str, state: Literal["failed", "unknown"]) -> ExecResul
     return ExecResult(action_id=action_id, state=state, facts=[], model_view={})
 
 
+def _withheld(action_id: str) -> ExecResult:
+    """The result of an action that ran but whose result reaches no one: no facts, an empty
+    `model_view` and no inbox notices."""
+    return ExecResult(action_id=action_id, state="succeeded", facts=[], model_view={}, inbox=[])
+
+
 # ---- Step 6: the re-check -------------------------------------------------------------------------
 
 async def recheck(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> bool:
@@ -227,19 +259,41 @@ async def recheck(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) 
     and the approval's binding. Either way the Desk must stand, the tool must be registered and
     enabled, and the adapter must normalize the stored args to exactly the stored action. The rules
     are the active version's, evaluated at its money cap, so a re-check after a confirm uses the
-    new version's cap."""
+    new version's cap, and an agent's charge is bounded by what its mandate has left now."""
     return isinstance(await recheck_under(ctx, decision_row, path=path), Checked)
 
 
 async def recheck_under(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Checked | str:
     """`recheck`, answering with the version and money cap it passed under, or, when it fails, with
-    the part that failed (`desk`, `tool`, `session`, `args`, `profile`, `policy` or `binding`), the
-    `check` its refusal is ledgered with, as an allow's is. A pass that named no version fails as
-    `policy`, so the refusal never ledgers a null check."""
+    the part that failed (`desk`, `tool`, `session`, `args`, `profile`, `policy` or `binding`, and
+    `UNAVAILABLE` or `PIN` for a connected tool), the `check` its refusal is ledgered with, as an
+    allow's is. A pass that named no version fails as `policy`, so the refusal never ledgers a null
+    check."""
+    outcome = await recheck_outcome(ctx, decision_row, path=path)
+    return outcome.checked if outcome.checked is not None else outcome.failed
+
+
+@dataclass(frozen=True)
+class Rechecked:
+    """A re-check's outcome: exactly one of the version and money cap it passed under (`checked`)
+    and the part that failed (`failed`, a ledgered code as `recheck_under` names it), and the owner
+    alerts it wrote, which go in the transaction the caller commits."""
+
+    checked: Checked | None
+    failed: str | None
+    notices: tuple[InboxNotice, ...] = ()
+
+
+async def recheck_outcome(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Rechecked:
+    """`recheck`, with the part that failed and the alerts it wrote. A pass that named no version
+    fails as `policy`."""
     target = await _target(ctx, decision_row)
-    if (failed := await _recheck(ctx, target, path)) is not None:
-        return failed
-    return target.checked if target.checked is not None else "policy"
+    failed = await _recheck(ctx, target, path)
+    if failed is None and target.checked is None:
+        failed = "policy"
+    if failed is not None:
+        return Rechecked(checked=None, failed=failed, notices=tuple(target.notices))
+    return Rechecked(checked=target.checked, failed=None, notices=tuple(target.notices))
 
 
 async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | None:
@@ -259,6 +313,13 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
             return "session"
         if action.tool not in decide.tools_given(target.principal, session, desk_row, enabled):
             return "tool"
+    # (1b) a connected tool's definitions, listed again before the server is asked anything else
+    listed: dict[str, dict[str, Any]] | None = None
+    if mcp_pins.is_mcp(action.tool):
+        try:
+            listed = await mcp_client.client(ctx.settings).list_tools_raw(action.copy_id)
+        except mcp_client.McpUnavailable:
+            return UNAVAILABLE
     # (2) the same action from the stored args, at the current profile
     try:
         args = adapter.Args.model_validate(target.action_row.args_json)
@@ -279,8 +340,9 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
         return "policy"
     cap = activation.version_cap(version_row)
     target.checked = Checked(policy_version=version_row.version, auto_money_cap_cents=cap)
+    remaining = await mandates.session_remaining(ctx, target.session_row, desk_row.desk_id)   # the spend left now
     request = decide.cedar_request(target.principal, action, tz=target.business.timezone, now=ctx.clock.now(),
-                                   auto_money_cap_cents=cap)
+                                   auto_money_cap_cents=cap, mandate_remaining_cents=remaining)
     if path == "allow":
         stored_review = Reviewed(review=decision.review, usage=None)
 
@@ -289,17 +351,27 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
 
         if (await decide.evaluate(ctx, version_row, request, review_source=review_source)).outcome != "allow":
             return "policy"
-        return None
-    key = activation.version_key(version_row.desk_id, version_row.version) + ":approvable"
-    verdict = json.loads(ctx.policies.engine.decide(key, json.dumps(request), "final"))
-    if verdict["errors"] or verdict["outcome"] != "hold":
-        return "policy"
-    approval = (await ctx.db.scalars(ctx.repo.scoped(
-        select(Approval).where(Approval.decision_id == decision.decision_id)))).one_or_none()
-    if approval is None or not approval.nonce or approval.binding_sha256 != binding_sha256(
-            copy_id=action.copy_id, desk_id=action.desk_id, session_id=action.session_id, action_id=action.action_id,
-            args_sha256=args_sha256, profile_sha256=tool_row.profile_sha256, nonce=approval.nonce):
-        return "binding"
+    else:
+        key = activation.version_key(version_row.desk_id, version_row.version) + ":approvable"
+        verdict = json.loads(ctx.policies.engine.decide(key, json.dumps(request), "final"))
+        if verdict["errors"] or verdict["outcome"] != "hold":
+            return "policy"
+        approval = (await ctx.db.scalars(ctx.repo.scoped(
+            select(Approval).where(Approval.decision_id == decision.decision_id)))).one_or_none()
+        if approval is None or not approval.nonce or approval.binding_sha256 != binding_sha256(
+                copy_id=action.copy_id, desk_id=action.desk_id, session_id=action.session_id,
+                action_id=action.action_id, args_sha256=args_sha256, profile_sha256=tool_row.profile_sha256,
+                nonce=approval.nonce):
+            return "binding"
+    # (4) a connected tool listed at its pin: checked last, under its row's lock (`check_pin`), which
+    # records a drift and alerts the owner in this transaction, so they commit with the refusal
+    if listed is not None:
+        check = await mcp_pins.check_pin(ctx, desk_row.desk_id, action.tool, listed=listed)
+        if check.notice is not None:
+            target.notices.append(check.notice)
+        if (check.state != "ok" or tool_row.status != "enabled" or check.sha256 != tool_row.definition_sha256
+                or tool_row.profile_sha256 != action.profile_sha256):
+            return PIN
     return None
 
 
@@ -361,8 +433,11 @@ async def _prepare_intent(ctx: KernelCtx, target: _Target) -> bool:
 
 
 async def _refused_at_execution(ctx: KernelCtx, target: _Target, check: str) -> KernelFailure:
-    """The decision becomes `refused_at_execution` ("rules changed"), committed; the answer is 409."""
+    """The decision becomes `refused_at_execution` ("rules changed", or `tool_unavailable` for a
+    connected tool's server that couldn't list), committed with whatever the re-check recorded (a
+    drift and its alert); the answer is 409."""
     await decide.set_state(ctx, target.decision, "refused_at_execution", kind="execute",
+                           status=visitor_template(check),
                            summary=_summary(target, "refused_at_execution", reason="rules_changed", check=check))
     await ctx.db.commit()
     return KernelFailure(409, "conflict", f"refused_at_execution:{check}")
@@ -590,11 +665,11 @@ async def _fenced(ctx: KernelCtx, target: _Target, execution: Execution, code: s
     return KernelFailure(409, code, f"fenced:{code}")
 
 
-async def _undo(ctx: KernelCtx, target: _Target) -> None:
+async def _undo(ctx: KernelCtx, target: _Target, *, reconciling: bool = False) -> None:
     """The adapter's optional `on_failed`, undoing what `prepare` reserved."""
     on_failed = getattr(target.adapter, "on_failed", None)
     if on_failed is not None:
-        await on_failed(target.xctx(ctx), target.action)
+        await on_failed(target.xctx(ctx, reconciling=reconciling), target.action)
 
 
 async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result: ExecResult, decision_state: str,
@@ -679,14 +754,20 @@ async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tu
     Demo inbox: one an adapter returns is dropped and logged by its kind alone.
 
     An adapter declared not to release private data that returns some anyway
-    (`undeclared_private_data`) fails closed: logged by its tool and action alone, never the data,
-    and raised as `UndeclaredPrivateData`, so T2 rolls back everything the adapter wrote and settles
-    the action `failed` with nothing delivered, and a reconciliation settles it `failed` likewise,
-    for good (`_ask_adapter`)."""
+    (`undeclared_private_data`) is withheld, never failed: what it did stands, since it may have
+    acted outside the kernel (a charge made must never read as not made), but nothing it returned
+    reaches the session (`_withheld`), and its entry adds `{violation: "undeclared_private_data"}`.
+    It is logged by its tool and action alone, never the data. The execution still `succeeded`, so
+    no `on_failed` runs, and the adapter's own writes stay, except that every fact row the refused
+    result names is narrowed to the owner in the caller's transaction (`_narrow_to_owner`), since a
+    misdeclared adapter's labels can't be trusted for the session's later reads; the entry adds how
+    many (`narrowed`). Only the facts it returns are read, so a row it writes without returning it
+    is left as written: the guard holds reviewed adapter code to its word, it is no sandbox for it."""
     if undeclared_private_data(target, result):
         log.error("adapter_undeclared_private_data tool=%s action_id=%s", target.action.tool,
                   target.action.action_id)
-        raise UndeclaredPrivateData()
+        narrowed = await _narrow_to_owner(ctx, target.action.desk_id, result.facts)
+        return _withheld(target.action.action_id), {"violation": "undeclared_private_data", "narrowed": narrowed}
     readers = labels.session_readers(target.session_row)
     facts = [fact for fact in result.facts if labels.can_read(fact.label, readers)]
     keys = target.adapter.model_view_keys if target.adapter is not None else frozenset()
@@ -703,6 +784,21 @@ async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tu
     return ExecResult(action_id=target.action.action_id, state="succeeded", facts=facts, model_view=view,
                       inbox=inbox), flagged
 
+
+async def _narrow_to_owner(ctx: KernelCtx, desk_id: str, facts: list[Fact]) -> int:
+    """Every row of the Desk's `facts` that one of `facts` names, readable by the owner alone
+    (`readers ["owner"]`, a fact row's default; its record owner kept), in the caller's
+    transaction; returns how many rows that is. It runs after the adapter's hook and before the
+    step ledgers its record (`repo.py`, step 11), and rows the hook itself wrote wait for nothing."""
+    fact_ids = sorted({fact.fact_id for fact in facts if repo.storable(fact.fact_id)})
+    if not fact_ids:
+        return 0
+    rows = list(await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == desk_id, FactRow.fact_id.in_(fact_ids)).order_by(FactRow.fact_id).with_for_update())))
+    for row in rows:
+        row.readers = list(labels.OWNER_ONLY)
+    await ctx.db.flush()
+    return len(rows)
 
 
 def releases_private_data(tool: str) -> bool:
@@ -821,11 +917,12 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     running execution holds both) are skipped, never waited on; a lock this transaction holds
     already is no wait. Each entry names the version and cap the row recorded in T1 (`_checked`).
 
-    An action that releases private data is recovered only into a session that still stands for
-    its person, as T2 runs it: the session's row is held `FOR SHARE` first, before the decision's
-    (`repo.py`), and if the session no longer stands (`auth.session_stands`, `session_ended`) the
-    adapter isn't asked and nothing it holds is exposed: the action is settled
-    `refused_at_execution` with the plain reason, once `on_failed` has run."""
+    An action that releases private data is recovered into its session only while the session
+    still stands for its person, as T2 runs it: the session's row is held `FOR SHARE` first, before
+    the decision's (`repo.py`). If the session no longer stands (`auth.session_stands`,
+    `session_ended`), the adapter is still asked, under that row, since what it did outside the
+    kernel must be recorded as it happened, but nothing it answers reaches the session
+    (`_refused_in_recovery`)."""
     tool = (await ctx.db.execute(ctx.repo.scoped(select(ActionRow.tool).where(
         ActionRow.action_id == action_id)))).scalar_one_or_none()
     private = tool is None or releases_private_data(tool)
@@ -844,20 +941,19 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     target = await _target(ctx, decision)
     target.checked = _checked(execution)
     orphaned = execution.state == "intent"
+    ended = None
     if private and not await auth.session_stands(ctx, _named(target), None):
         # `session_ended` names nothing once the Desk is gone, whose deletion closed the session: "desk", as
         # every other refusal names a deleted Desk
         ended = await session_ended(ctx, decision) or ("desk" if target.desk_row.deleted_at is not None
                                                        else "session_closed")
-        return await _refused_in_recovery(ctx, target, execution, ended, orphaned=orphaned)
-    outcome = await _ask_adapter(ctx, target, action_id)
+    outcome = await _ask_adapter(ctx, target, action_id, ended=ended)
     if orphaned:
         await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
     if outcome is not None:
-        result, state, flagged = outcome
-        await _finish(ctx, target, execution, result, state, _summary(target, state, reconciled=True, **flagged))
+        result, state, extra = outcome
+        await _finish(ctx, target, execution, result, state, _summary(target, state, reconciled=True, **extra))
     return True
-
 
 
 async def _hold_session_for(ctx: KernelCtx, decision_id: str) -> bool:
@@ -874,62 +970,46 @@ async def _hold_session_for(ctx: KernelCtx, decision_id: str) -> bool:
                                                  .execution_options(populate_existing=True)))).one_or_none() is not None
 
 
-async def _refused_in_recovery(ctx: KernelCtx, target: _Target, execution: Execution, ended: str, *,
-                               orphaned: bool) -> bool:
-    """A private action's outcome, recovered once its session no longer stands for its person: the
-    adapter isn't asked. `on_failed` runs first, before anything is ledgered, so the rows it locks
-    come before the ledger head (`repo.py`). Then the record: an intent is `unknown` (ledgered as
-    orphaned), then the action is `refused_at_execution` with nothing in its result, ledgered as
-    reconciled with the reason `session_ended` and the part that ended it (`ended`: how the session
-    ended, or `desk` when its Desk was deleted) as its check, which picks the owner's line
-    (`decide.set_state`); the visitor sees the state's own status line, never why their session
-    ended. If `on_failed` fails, what `prepare` reserved may stand, so, with whatever it wrote taken
-    back, the action stays `unknown` with nothing in its result, for the next try."""
-    action_id = target.action.action_id
-    try:
-        async with ctx.db.begin_nested():
-            await _undo(ctx, target)
-        undone = True
-    except Exception as exc:                        # its writes and row locks taken back with the savepoint
-        repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
-        undone = False
-    if orphaned:
-        await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
-    if undone:
-        await _finish(ctx, target, execution, _no_result(action_id, "failed"), "refused_at_execution",
-                      _summary(target, "refused_at_execution", reason="session_ended", check=ended,
-                               reconciled=True))
-    return True
+def _refused_in_recovery(action_id: str, ended: str, *, ran: bool) -> tuple[ExecResult, str, dict[str, Any]]:
+    """What the recovery of an action that releases private data records once its session no
+    longer stands for its person (`ended`, why: the `check`), as `_ask_adapter` answers: the result,
+    the decision's state and what its entry adds. Nothing reaches the session either way. It ran
+    (`ran`): `executed`, with an empty result (`_withheld`) and the entry adding `{withheld:
+    "session_ended", check}`, no `on_failed`, and no fact row narrowed: the adapter declares that
+    it releases private data, so its labels stand, and the session they name has ended. It didn't:
+    `refused_at_execution`, with the plain reason `session_ended`, the `check` and nothing in its
+    result, after `on_failed` has run. The visitor's line is the state's own, never why the session
+    ended."""
+    if ran:
+        return _withheld(action_id), "executed", {"withheld": "session_ended", "check": ended}
+    return _no_result(action_id, "failed"), "refused_at_execution", {"reason": "session_ended", "check": ended}
 
-async def _ask_adapter(ctx: KernelCtx, target: _Target,
-                       action_id: str) -> tuple[ExecResult, str, dict[str, Any]] | None:
+
+async def _ask_adapter(ctx: KernelCtx, target: _Target, action_id: str, *,
+                       ended: str | None = None) -> tuple[ExecResult, str, dict[str, Any]] | None:
     """What the adapter's `reconcile` says happened to an orphan, as its result, the decision's
     state and what its `execute` entry adds, ledgering nothing: a result is `executed`, rebuilt as
-    the session may see it (`_visible`, which flags a canary); None is `failed`, once `on_failed`
-    has undone what `prepare` reserved. A result an adapter declared not to release private data
-    mustn't carry (`UndeclaredPrivateData`) is `failed` too, for good, with nothing in it and its
-    reason in the entry, once whatever `reconcile` wrote is taken back and `on_failed` has run.
-    None when it can't say (no adapter, `AdapterUnknown` or any other error), with whatever its
-    hooks wrote taken back."""
+    the session may see it (`_visible`, which flags a canary, and withholds a result an adapter
+    declared not to release private data mustn't carry, narrowing the fact rows it names to the
+    owner, with no `on_failed`); None is `failed`, once `on_failed` has undone what `prepare`
+    reserved, so its rows come before the ledger head (`repo.py`). With `ended`, the reason a
+    private action's session no longer stands, it is asked just the same and nothing it answers is
+    delivered (`_refused_in_recovery`). None when it can't say (no adapter, `AdapterUnknown` or any
+    other error, a failing `on_failed` included), with whatever its hooks wrote taken back."""
     if target.adapter is None:
         log.warning("reconcile_no_adapter action_id=%s", action_id)
         return None
     try:
         async with ctx.db.begin_nested():
-            result = await target.adapter.reconcile(target.xctx(ctx), target.action)
+            result = await target.adapter.reconcile(target.xctx(ctx, reconciling=True), target.action)
             if result is None:
-                await _undo(ctx, target)
+                await _undo(ctx, target, reconciling=True)
+            if ended is not None:
+                return _refused_in_recovery(action_id, ended, ran=result is not None)
+            if result is None:
                 return _no_result(action_id, "failed"), "failed", {}
             visible, flagged = await _visible(ctx, target, result)
             return visible, "executed", flagged
-    except UndeclaredPrivateData:                   # its writes taken back with the savepoint; terminal
-        try:
-            async with ctx.db.begin_nested():
-                await _undo(ctx, target)
-        except Exception as exc:                    # what `prepare` reserved may stand: still unknown
-            repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
-            return None
-        return _no_result(action_id, "failed"), "failed", {"reason": "undeclared_private_data"}
     except AdapterUnknown:
         log.info("reconcile_still_unknown action_id=%s", action_id)
     except Exception as exc:                        # still unknown; the next read tries again

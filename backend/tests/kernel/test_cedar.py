@@ -104,11 +104,22 @@ def test_schema_matches_the_tool_table():
 
     assert compiler.desk_schema([]) is not compiler.BASE_SCHEMA  # a copy each time: callers may extend it
     assert compiler.desk_schema([]) == compiler.BASE_SCHEMA
+    # a pinned MCP tool gets an action of its own, in its effect groups, for the principal types of
+    # its "Given to" row and resource Charge (plan 01c); the base schema itself is never changed
     refund = ToolProfile(tool="payments.create_refund", source="mcp", effects=["pay_out", "private_data"],
                          reversible=False, adapter="mcp", resource_kind="charge", description_confirmed="Refunds",
                          input_schema={}, status="enabled")
-    with pytest.raises(ValueError):
-        compiler.desk_schema([refund])                          # refused, not silently left out of the schema
+    charges = refund.model_copy(update={"tool": "payments.list_charges", "effects": ["private_data"]})
+    actions = compiler.desk_schema([refund, charges])[""]["actions"]
+    assert actions["payments.create_refund"] == {
+        "memberOf": [{"id": "effect:pay_out"}, {"id": "effect:private_data"}],
+        "appliesTo": {"principalTypes": ["Visitor"], "resourceTypes": ["Charge"], "context": {"type": "Ctx"}}}
+    assert actions["payments.list_charges"]["appliesTo"]["principalTypes"] == ["Visitor", "Agent"]
+    assert "payments.create_refund" not in compiler.BASE_SCHEMA[""]["actions"]
+    # a tool given twice, or one no action can be declared for, is refused rather than left out
+    for refused in ([refund, refund], [refund.model_copy(update={"effects": []})]):
+        with pytest.raises(ValueError):
+            compiler.desk_schema(refused)
 
 
 LOAD_OUTSIDE_THE_REPO = """

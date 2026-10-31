@@ -28,6 +28,7 @@ from desk.kernel_service.seed import RIVERA_CARDS
 from .fakes import FakeAdapter
 from .helpers import CopyRows, kernel_ctx, ledger_rows, verify_session
 from .test_adapters import Rivera, quote_args, visitor_of
+from .test_agent_auth import mint, open_agent, turn
 from .test_approvals import (ASK_QUOTES, ENDINGS, add_person, answered, held_on, held_quote, person_id, post_cancel,
                              public_key)
 from .test_compiler import card
@@ -81,7 +82,7 @@ def test_an_owner_line_is_in_the_owners_language():
     ("rules_changed", "desk", "refused_desk_deleted"),
     ("session_ended", "desk", "refused_desk_deleted"),
     *[("rules_changed", check, "refused_rules_changed")
-      for check in ("tool", "session", "args", "profile", "policy", "binding")],
+      for check in ("tool", "session", "args", "profile", "policy", "binding", "pin", "unavailable")],
     ("rules_changed", "prepare", "refused_fallback"),      # an adapter's own refusal is no re-check
     ("rules_changed", "closed", "refused_fallback"),       # an allow's session closed before it ran
     ("session_ended", "policy", "refused_fallback"),       # a pairing no path writes
@@ -162,6 +163,25 @@ async def test_session_answers_hide_the_owner_line_whatever_the_row_holds(app, c
         assert response.json()["owner_plain"] is None
         assert response.json()["visitor_plain"] == GENERIC["en"]
     assert (await owner_read(client, rows.owner, held.decision_id)).owner_plain == line
+    await assert_not_ledgered(app, rows, line)
+
+
+async def test_signed_agent_answers_never_carry_the_owner_line(app, client, registry, frozen_clock):
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], ASK_QUOTES)
+    agent = await mint(client, rows.owner, rows.desk_id)
+    created = await open_agent(client, rows.slug, agent, frozen_clock)
+    signed = turn(agent, rows.slug, created.state.session_id, frozen_clock)
+    held = await decided(client, signed, "native.quote", {"qty": 1})
+    assert held.state == "held" and held.owner_plain is None
+    quote.script["prepare"] = AdapterRefusal("no room")
+
+    result = await answered(client, rows.owner, held.decision_id, "allow_once")
+
+    line = OWNER_LINES["en"]["refused_fallback"]
+    assert result.decision.owner_plain == line
+    assert (await owner_read(client, rows.owner, held.decision_id)).owner_plain == line
+    await assert_owner_only(client, signed, held, {"qty": 1}, line)
     await assert_not_ledgered(app, rows, line)
 
 
@@ -403,8 +423,8 @@ async def unknown_release(app: FastAPI, client: httpx.AsyncClient) -> tuple[Fake
 async def test_a_release_recovered_after_its_session_ended_tells_the_owner_why(app, client, registry, frozen_clock,
                                                                               ended):
     """Reconciliation finds the session of an approved release whose outcome nobody knew no longer
-    standing: its contact changed (closed with Dana still on record), or its Desk was deleted. Nothing
-    is recovered, and the owner's read says why."""
+    standing: its contact changed (closed with Dana still on record), or its Desk was deleted. The
+    adapter confirms nothing ran, and the owner's read says why the release was refused."""
     release, rows, visitor, held = await unknown_release(app, client)
     if ended == "contact_changed":
         await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())
@@ -415,7 +435,7 @@ async def test_a_release_recovered_after_its_session_ended_tells_the_owner_why(a
 
     read = await owner_read(client, rows.owner, held.decision_id)
 
-    assert "reconcile" not in release.calls
+    assert "reconcile" in release.calls and "on_failed" in release.calls
     assert (read.state, read.owner_plain, read.visitor_plain) == ("refused_at_execution", line, GENERIC["en"])
     await assert_not_ledgered(app, rows, line)
 

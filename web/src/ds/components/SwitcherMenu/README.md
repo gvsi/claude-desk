@@ -13,7 +13,7 @@
 - Each business: an initials monogram (`aria-hidden`), the name, and how many Desks it has ("2 Desks", "1 Desk"). The current business has a check.
 - A hairline, then "New business", always last.
 - A business with no Desks says "No Desks yet" and can't be picked (`aria-disabled`).
-- Business names are shown as written (`data-copy="user"`).
+- Business names are shown as written (`data-copy="user"`). A name too long for its row is cut with an ellipsis, and its `title` holds it in full, so it can still be read; the row's name for screen readers stays the business's name and its Desk count.
 - Never the current business's Desks: those are in the sidebar's Desk picker ("Switch Desk, current: {name}").
 
 ## Keyboard and focus

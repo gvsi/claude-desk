@@ -6,7 +6,7 @@ own tables and the tokens or signatures it checks.
 """
 
 from datetime import UTC, timedelta
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal, Self, get_args
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, StringConstraints, model_validator
 
@@ -31,7 +31,6 @@ from desk.contracts import (
     LedgerEntry,
     LedgerEvent,
     LedgerPage,
-    MCP_TOOLS,
     Mandate,
     NotificationDefaults,
     OwnerMessageResult,
@@ -185,20 +184,21 @@ class ToolsConnectRequest(KernelRequest):     # POST /tools/connect
     desk_id: str
     server: Literal["mock_payments"]
 
-class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm (enabling drafts a version to prove)
-    desk_id: str
+class ToolPin(BaseModel):                  # a tool and the hash the owner reviewed: an MCP tool's listed definition_sha256,
+    model_config = ConfigDict(extra="forbid")   # a native tool's adapter profile_sha256
+
     tool: ToolName
-    enable: bool
-    definition_sha256: Sha256Hex | None = None   # required to enable an MCP tool: the hash the owner reviewed, which must
-                                                 # equal the current listing, else 409; never set for a native tool
+    definition_sha256: Sha256Hex
+
+class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole connector in one batch, one tool a list of one
+    desk_id: str
+    tools: list[ToolPin] = Field(min_length=1, max_length=len(get_args(ToolName)))
+    enable: bool                          # true drafts one rules version enabling them all; false disables them all at once
 
     @model_validator(mode="after")
-    def _names_the_reviewed_definition(self) -> Self:
-        if self.tool not in MCP_TOOLS:
-            if self.definition_sha256 is not None:
-                raise ValueError("a native tool has no definition hash")
-        elif self.enable and self.definition_sha256 is None:
-            raise ValueError("enabling an MCP tool names the definition_sha256 the owner reviewed")
+    def _each_tool_once(self) -> Self:
+        if len({pin.tool for pin in self.tools}) != len(self.tools):
+            raise ValueError("a batch names each tool once")
         return self
 
 class ToolsSimulateChangeRequest(KernelRequest):   # POST /tools/simulate_change (demo)
@@ -266,19 +266,30 @@ class SessionContext(BaseModel):          # GET /context/{session_id}; facts and
     knowledge: list[KnowledgeItem]
 
 class ToolConfirmed(BaseModel):           # POST /tools/confirm
-    profile: ToolProfile
-    draft: PolicyVersion | None           # enabling drafts a version to prove
+    profiles: list[ToolProfile]           # the batch's tools as they stand now, in the request's order
+    draft: PolicyVersion | None           # enabling drafts one version to prove; disabling and a no-op draft nothing
 
 class PaymentLinkView(BaseModel):         # GET /payment_links/{token}, for the mock checkout
     title: str
     amount_cents: int
     state: PaymentLinkState
     language: Literal["en", "es"]
+    business_name: str                    # the link's Desk's public business name, as PublicDesk serves it
+    customer_name: str | None             # display only, never read back: the verified customer's first name and last
+                                          # initial ("Dana W."), from the person on record at view time, only while the
+                                          # link is live (issued, unexpired) and was made in a visitor session verified
+                                          # as that person; None otherwise (agents, unverified sessions, removed people)
+    cancel_reason: Literal["rules_changed"] | None = None   # rules_changed: a rule change cancelled it; else None
 
 class PaymentLinkStateResult(BaseModel):  # POST /payment_links/{token}/complete and /cancel
     state: PaymentLinkState
     session_id: str
     verdict: ReplyVerdict | None          # the payment_confirmed verdict on paid; None on cancel
+
+class LinkCancelled(BaseModel):           # GET /policy/{version}/cancelled_links: a link that version's activation cancelled
+    link_id: str
+    session_id: str
+    verdict: ReplyVerdict                 # one link_cancelled block, signed at the session's current generation when read
 
 class OpenStatus(BaseModel):              # PublicDesk's header line: computed from charter:hours on the kernel's clock
     open: bool
@@ -333,7 +344,7 @@ class KernelError(BaseModel):             # the body of every non-2xx kernel ans
 
 KERNEL_RESPONSES: tuple[type[BaseModel], ...] = (
     DeskCreated, DeskUpdated, DocumentCreated, VerifyStarted, WhoAmI, SessionContext, ToolConfirmed,
-    PaymentLinkView, PaymentLinkStateResult, PublicDesk, Health, KernelError,
+    PaymentLinkView, PaymentLinkStateResult, LinkCancelled, PublicDesk, Health, KernelError,
 )
 
 # Every row of the kernel API table: (request model, response model). None only for a bodiless
@@ -372,6 +383,7 @@ KERNEL_ROUTES: dict[str, tuple[type[BaseModel] | None, type | None]] = {
     "POST /policy/draft": (PolicyDraftRequest, PolicyVersion),
     "POST /policy/{version}/probe": (PolicyProbeRequest, list[ProbeResult]),
     "POST /policy/confirm": (PolicyConfirmRequest, PolicyVersion),
+    "GET /policy/{version}/cancelled_links?desk_id=": (None, list[LinkCancelled]),
     "POST /tools/connect": (ToolsConnectRequest, list[ToolProfile]),
     "POST /tools/confirm": (ToolsConfirmRequest, ToolConfirmed),
     "POST /tools/simulate_change": (ToolsSimulateChangeRequest, ToolProfile),

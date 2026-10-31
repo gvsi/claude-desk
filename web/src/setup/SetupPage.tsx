@@ -1,5 +1,5 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
@@ -48,6 +48,11 @@ interface SetupShellProps {
   business: string | null;
   /** The step the bar marks, counted from 0. */
   step: number;
+  /**
+   * The Desk is live: the bar's last step reads done, its check drawing once when the Desk went
+   * live on this page (`draw`) or drawn already when the page opened on it (`drawn`).
+   */
+  live?: 'draw' | 'drawn';
   exitTo: string;
   /** The preview's wider column. */
   wide?: boolean;
@@ -60,7 +65,7 @@ interface SetupShellProps {
  * business once known, the five steps and "Save and exit"; one column; the concept footer at the
  * window's foot.
  */
-function SetupShell({ business, step, exitTo, wide = false, children }: SetupShellProps) {
+function SetupShell({ business, step, live, exitTo, wide = false, children }: SetupShellProps) {
   const navigate = useNavigate();
   const compact = useSyncExternalStore(subscribeCompactBar, isCompactBar, () => false);
   // Setup's name, as its steps are labelled, at every step; the preview's public page leaves it be.
@@ -73,14 +78,15 @@ function SetupShell({ business, step, exitTo, wide = false, children }: SetupShe
             <Mark size={20} />
             <Wordmark preview={!compact} />
           </span>
+          {/* A name too long for the bar is cut with an ellipsis; its title holds it in full. */}
           {business ? (
-            <span className="cd-setup__business cd-type-control" data-copy="user">
+            <span className="cd-setup__business cd-type-control" data-copy="user" title={business}>
               {business}
             </span>
           ) : null}
         </div>
         <div className="cd-setup__steps">
-          <Steps label={SETUP_COPY.stepsLabel} steps={STEP_NAMES} current={step} />
+          <Steps label={SETUP_COPY.stepsLabel} steps={STEP_NAMES} current={step} finished={live !== undefined} drawCheck={live === 'draw'} />
         </div>
         <span className="cd-setup__exit">
           <Button variant="ghost" href={exitTo}>
@@ -112,8 +118,8 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const deskId = setup.data?.desk_id ?? null;
   // The business's name: the API names it from the owner's words, on the new Desk.
   const desks = useQuery({ ...desksQuery(), enabled: deskId !== null });
-  const business = deskId === null || desks.data === undefined ? null : (findDesk(desks.data, deskId)?.desk.business_name ?? null);
-
+  const desk = deskId === null || desks.data === undefined ? null : (findDesk(desks.data, deskId)?.desk ?? null);
+  const business = desk?.business_name ?? null;
   /** The interview moved on: the screen shows its next step, as the API's state now says. */
   const moveTo = useCallback(
     (step: SetupStep) => queryClient.setQueryData<SetupState>(setupQuery(setupId).queryKey, (now) => (now === undefined ? now : { ...now, step })),
@@ -133,6 +139,12 @@ function SetupInterview({ setupId }: { setupId: string }) {
   );
 
   const state = setup.data;
+  // The step setup opened at on this page: a step come to after it was reached live, and its
+  // results land as they arrive. A Desk that goes live here is a moment (the last step's check
+  // draws once); a page opened on a live Desk shows it already drawn.
+  const [openedAt, setOpenedAt] = useState<SetupStep | null>(null);
+  if (openedAt === null && state !== undefined) setOpenedAt(state.step);
+  const opened = openedAt ?? state?.step;
   // An interview outside this copy: the app's not-found screen.
   if (state === undefined && setup.error instanceof ApiError && setup.error.kind === 'not_found') return <NotFound />;
   if (state === undefined) {
@@ -157,6 +169,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
   }
 
   const name = business ?? '';
+  const wentLiveHere = state.step === 'live' && openedAt !== null && openedAt !== 'live';
+  // "Answering now" follows the latest Desks read alone, whatever this page saw happen: going live
+  // here writes Answering on into them, and a Desk whose owner has turned Answering off since, here
+  // or elsewhere, doesn't claim it. The check's drawing is the page's own history, kept apart.
+  const answering = desk?.answering === true;
   let body: ReactNode;
   switch (state.step) {
     case 'questions':
@@ -167,18 +184,32 @@ function SetupInterview({ setupId }: { setupId: string }) {
       break;
     case 'rules':
     case 'situations':
-      body = <RulesStep state={state} business={name} onNext={moveTo} />;
+      body = <RulesStep state={state} business={name} onNext={moveTo} live={opened !== 'situations'} />;
       break;
     case 'safety_check':
-      body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} reread={reread} />;
+      body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} reread={reread} live={opened !== 'safety_check'} />;
       break;
     case 'preview':
     case 'live':
-      body = <LiveStep state={state} business={name} onLive={() => moveTo('live')} reread={reread} />;
+      // Live, the title names the business and "Answering now" follows the Desks, so while they are
+      // first read (on a reload) the step waits whole on the loading line, rather than drawing a
+      // title and a link that their arrival would rewrite and push down.
+      body =
+        state.step === 'live' && desks.isPending ? (
+          <LoadingLine>{SETUP_COPY.questions.loading}</LoadingLine>
+        ) : (
+          <LiveStep state={state} business={name} answering={answering} onLive={() => moveTo('live')} reread={reread} />
+        );
       break;
   }
   return (
-    <SetupShell business={business} step={STEP_INDEX[state.step]} exitTo={todayPath(state.desk_id)} wide={state.step === 'preview'}>
+    <SetupShell
+      business={business}
+      step={STEP_INDEX[state.step]}
+      live={state.step !== 'live' ? undefined : wentLiveHere ? 'draw' : 'drawn'}
+      exitTo={todayPath(state.desk_id)}
+      wide={state.step === 'preview'}
+    >
       {body}
     </SetupShell>
   );

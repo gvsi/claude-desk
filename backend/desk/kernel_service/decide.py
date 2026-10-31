@@ -1,7 +1,8 @@
 """Decisions: deciding a proposed tool call (`POST /decide`) and reading decisions back.
 
 `cedar_request` builds the master plan's `request_json` ("Cedar request shape") from kernel-built
-values only: the principal from the session's rows, the action as its adapter normalized it, and
+values only: the principal from the session's rows (an agent's `mandate_remaining_cents` from its
+mandate as it stands, `mandates.session_remaining`), the action as its adapter normalized it, and
 the money cap of the version it will be evaluated against (`context.auto_money_cap_cents`, which
 the baseline's `auto_money_cap` reads; `evaluate` refuses a request whose cap isn't its version's).
 Optional attributes appear only when set, since the schema reads them behind `has`.
@@ -75,7 +76,8 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, render, repo
+from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, mandates,
+                                 render, repo)
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, claudes_note, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import CallUsage, ReviewAction, ReviewCard, ReviewFact, ReviewInput, Reviewed
@@ -335,11 +337,12 @@ def _sign(ctx: KernelCtx, row: DecisionRow) -> None:
 
 def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: str | None = None) -> str:
     """A decision's status line in `state`, in the session's language: the template `key` when
-    given; once a visitor's or an agent's action has run, what was done (`render.executed_status`,
-    which raises KeyError for a tool without a line); in any other state, or for an owner session's
-    own setup action, the state's template. The line is the decision's `visitor_plain`, which the
-    visitor reads, so a `key` that isn't a decision's status line (`render.DECISION_STATUS_KEYS`: no
-    receipt, so no owner-only line) raises ValueError."""
+    given (why a refusal happened, say, or `tool_unavailable` for a `refused_at_execution` whose
+    connected tool couldn't be reached); once a visitor's or an agent's action has run, what was
+    done (`render.executed_status`, which raises KeyError for a tool without a line); in any other
+    state, or for an owner session's own setup action, the state's template. The line is the
+    decision's `visitor_plain`, which the visitor reads, so a `key` that isn't a decision's status
+    line (`render.DECISION_STATUS_KEYS`: no receipt, so no owner-only line) raises ValueError."""
     if key is not None and key not in render.DECISION_STATUS_KEYS:
         raise ValueError(f"{key!r} is not a decision's status line")
     lang = render.language(session.last_language)
@@ -353,7 +356,7 @@ def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: 
 # How a session that no longer stands ended (`execute.session_ended`), and the parts of the re-check
 # that can fail (`execute.recheck_under`) other than the Desk's, each a refusal at execution's `check`.
 SESSION_ENDED_CHECKS = frozenset({"contact_changed", "person_removed", "session_closed"})
-RECHECK_CHECKS = frozenset({"tool", "session", "args", "profile", "policy", "binding"})
+RECHECK_CHECKS = frozenset({"tool", "session", "args", "profile", "policy", "binding", "pin", "unavailable"})
 
 
 def owner_refusal_key(reason: str | None, check: str | None) -> str:
@@ -688,22 +691,12 @@ def free_text(adapter: Adapter, args: BaseModel) -> dict[str, str]:
             if isinstance(value := getattr(args, name, None), str) and value}
 
 
-def _percent(bp: int) -> str:
-    return f"{bp // 100}%" if bp % 100 == 0 else f"{bp / 100:g}%"
-
-
 def _asked(subject: str, tool: str, action: NormalizedAction | None) -> str:
-    """"<subject> asked to <what>.", with the amount and discount the kernel computed; a name that
-    is no tool is never repeated."""
-    phrases = explain.PHRASES.get(tool)
-    if phrases is None:
-        return f"{subject} asked for something this Desk can't do."
-    plain, with_amount = phrases
-    amount = action.amount_cents if action is not None else None
-    what = with_amount.format(amount=explain.money(amount)) if with_amount and amount is not None else plain
-    if action is not None and action.discount_bp:
-        what += f" with {_percent(action.discount_bp)} off"
-    return f"{subject} asked to {what}."
+    """"<subject> asked to <what>.", with the amount and discount the kernel computed
+    (`explain.asked`, which setup probes share)."""
+    if action is None:
+        return explain.asked(subject, "asked", tool, None, None)
+    return explain.asked(subject, "asked", tool, action.amount_cents, action.discount_bp)
 
 
 @dataclass
@@ -722,6 +715,7 @@ class _Call:
     args: BaseModel | None = None
     action: NormalizedAction | None = None
     quotes: dict[str, str] = field(default_factory=dict)
+    mandate_remaining_cents: int | None = None   # what an agent's mandate had left, as the request was built
 
     @property
     def policy_version(self) -> int:
@@ -783,8 +777,8 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
     try:
         normalized = await call.adapter.normalize(NormalizeCtx(ctx=ctx, desk_row=desk_row, principal=principal),
                                                   call.args)
-    except AdapterRefusal:
-        return await _refuse(ctx, call, "adapter_refused")
+    except AdapterRefusal as refusal:
+        return await _refuse(ctx, call, "adapter_refused", check=refusal.code)
 
     args_json = call.args.model_dump(mode="json", exclude_none=True)
     profile = tools[tool]
@@ -800,8 +794,10 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
         return await _refuse(ctx, call, "version_outdated", args_json=args_json)
     if ctx.policies.versions.use(call.version_row):
         return await _refuse(ctx, call, "version_unloadable", args_json=args_json)
+    call.mandate_remaining_cents = await mandates.session_remaining(ctx, session_row, principal.desk_id)
     request = cedar_request(principal, call.action, tz=call.business.timezone, now=ctx.clock.now(),
-                            auto_money_cap_cents=call.auto_money_cap_cents)
+                            auto_money_cap_cents=call.auto_money_cap_cents,
+                            mandate_remaining_cents=call.mandate_remaining_cents)
     evaluation = await evaluate(ctx, call.version_row, request,
                                 review_source=lambda pending: _review(ctx, call, pending))
     if evaluation.errored:
@@ -858,8 +854,8 @@ async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Revie
 
 
 async def _refuse(ctx: KernelCtx, call: _Call, reason: str, *, args_json: dict[str, Any] | None = None,
-                  evaluation: Evaluation | None = None) -> Decision:
-    return await _store(ctx, call, "refuse", reason=reason, args_json=args_json, evaluation=evaluation)
+                  evaluation: Evaluation | None = None, check: str | None = None) -> Decision:
+    return await _store(ctx, call, "refuse", reason=reason, args_json=args_json, evaluation=evaluation, check=check)
 
 
 async def _repeat(ctx: KernelCtx, row: DecisionRow, sha: str) -> Decision:
@@ -925,11 +921,33 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
     return " ".join(parts)
 
 
+MANDATE_POLICY = "B.agent_charge_within_mandate"     # the baseline's bound on an agent's charge
+
+
+def _status_key(call: _Call, state: str, reason: str | None, evaluation: Evaluation | None) -> str:
+    """The status line a new decision is stored with: its state's, except for a refusal the
+    evaluation made (no early `reason`) with the baseline's mandate rule as its only deciding
+    policy, for an agent holding a mandate whose charge is above what that mandate had left
+    (`refused_over_mandate`). Any other refusal by that rule (no mandate, no amount), or one
+    another policy also decided, keeps the generic line, so the line never names a cause that
+    isn't the real one."""
+    action, left = call.action, call.mandate_remaining_cents
+    over = (state == "refused" and reason is None and evaluation is not None
+            and evaluation.policy_ids == [MANDATE_POLICY] and call.principal.kind == "agent"
+            and left is not None and action is not None and action.amount_cents is not None
+            and action.amount_cents > left)
+    return "refused_over_mandate" if over else state
+
+
 async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str | None = None,
-                 args_json: dict[str, Any] | None = None, evaluation: Evaluation | None = None) -> Decision:
+                 args_json: dict[str, Any] | None = None, evaluation: Evaluation | None = None,
+                 check: str | None = None) -> Decision:
     """Writes the decision (and its action, when one was normalized) with its ledger entries, the
-    breaker's strike and the owner's alerts, in the caller's transaction, and signs it. A twin call
-    that committed first wins: its decision is returned instead."""
+    breaker's strike and the owner's alerts, in the caller's transaction, and signs it with its
+    status line (`_status_key`). A twin call that committed first wins: its decision is returned
+    instead. `check` is an adapter's own code for a step-1 refusal (`AdapterRefusal.code`), which
+    its `decide` entry records beside the reason, through `ledger.safe_ref`; it changes neither the
+    owner's words nor the visitor's line."""
     principal, session_row, action = call.principal, call.session_row, call.action
     now = ctx.clock.now()
     state = STATE_OF[outcome]
@@ -947,7 +965,8 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         policy_ids=evaluation.policy_ids if evaluation and reason is None else [],
         review=evaluation.review if evaluation else None,
         reason_plain=_reason_plain(call, outcome, reason, evaluation),
-        visitor_plain=render.status(state, render.language(session_row.last_language),
+        visitor_plain=render.status(_status_key(call, state, reason, evaluation),
+                                    render.language(session_row.last_language),
                                     owner=call.business.owner_display_name),
         expires_at=now + LIFETIME[outcome], ledger_seq=0, created_at=now, updated_at=now,
         action_id=action.action_id if action else None)
@@ -969,6 +988,8 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         await _append(ctx, row, "review", {"decision_id": row.decision_id, **evaluation.usage.model_dump()})
     if action is None:
         summary: dict[str, Any] = {"outcome": "refuse", "tool": ledger.safe_ref(call.req.call.tool), "reason": reason}
+        if check is not None:
+            summary["check"] = ledger.safe_ref(check)
     else:
         summary = {"decision_id": row.decision_id, "action_id": action.action_id, "tool": action.tool,
                    "outcome": outcome, "card_ids": row.card_ids, "policy_version": row.policy_version,

@@ -14,12 +14,13 @@ import {
   ABOUT_DOCUMENTS,
   documentText,
   MarkdownError,
+  PROTOTYPE_SENTENCE as READERS_SENTENCE,
   proposalForThePage,
   readDocument,
   type Block,
   type Inline,
 } from './documents.ts';
-import { ABOUT_LINKS } from './links.ts';
+import { ABOUT_LINKS, DOCUMENT_LINKS } from './links.ts';
 
 const DOCS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../docs');
 
@@ -50,8 +51,8 @@ function links(blocks: Block[]): Extract<Inline, { kind: 'link' }>[] {
 }
 
 // The page's one change to the proposal's words, as the About readers plan writes it, so a change to the
-// pattern or the words in documents.ts fails here.
-const PROTOTYPE_SENTENCE = /The prototype, v1['’]s enforced core, is at .+?, with the code at (.+?)\./g;
+// pattern or the words in documents.ts fails here: the replacement test checks the reader's pattern is this one.
+const PROTOTYPE_SENTENCE = /The prototype, v1['’]s enforced core, is at .+?, with the code at (.+?)\.(?=\s|$)/g;
 const ON_THE_PAGE = 'You’re in it. The code is at $1.';
 
 /** Quote marks as the Markdown types them, so the page's curly ones compare equal to the document's words. */
@@ -159,13 +160,16 @@ describe('the About documents', () => {
   });
 
   it('the_registry_and_the_links_name_each_page', () => {
+    // The two documents, then the Vision article, which the reader's switch between the documents leaves out.
+    const documents = [
+      { id: 'prediction', label: 'Capability prediction', href: '/about/prediction' },
+      { id: 'proposal', label: 'Product proposal', href: '/about/proposal' },
+    ];
     expect(ABOUT_LINKS).toEqual({
       title: 'About this prototype',
-      links: [
-        { id: 'prediction', label: 'Capability prediction', href: '/about/prediction' },
-        { id: 'proposal', label: 'Product proposal', href: '/about/proposal' },
-      ],
+      links: [...documents, { id: 'vision', label: 'Vision', href: '/about/vision' }],
     });
+    expect(DOCUMENT_LINKS).toEqual(documents);
     const { blocks: _proposal, ...proposal } = ABOUT_DOCUMENTS.proposal;
     expect(proposal).toEqual({
       route: '/about/proposal',
@@ -251,48 +255,53 @@ describe('the About documents', () => {
   });
 
   const HOSTED = '[owner: hosted URL; the passcode comes with the link]';
-  const REPO = '[owner: repo link]';
+  const REPO = '[github.com/gvsi/claude-desk](https://github.com/gvsi/claude-desk)';
+  // The sentence as the page shows it, the repository a link.
+  const YOURE_IN_IT = {
+    kind: 'paragraph',
+    children: [
+      { kind: 'text', text: 'You’re in it. The code is at ' },
+      {
+        kind: 'link',
+        href: 'https://github.com/gvsi/claude-desk',
+        internal: false,
+        children: [{ kind: 'text', text: 'github.com/gvsi/claude-desk' }],
+      },
+      { kind: 'text', text: expect.stringMatching(/^\. Each visitor acts as Maria/) },
+    ],
+  };
 
   it('the_replacement_matches_once_before_and_after_the_fill', () => {
+    // The document links the public repository; the hosted address is still the owner's to give.
     const proposal = raw('product-proposal.md');
-    const filled = proposal
-      .replace(HOSTED, '[desk.example.com](https://desk.example.com)')
-      .replace(REPO, '[github.com/example/claude-desk](https://github.com/example/claude-desk)');
+    const sentence = `The prototype, v1's enforced core, is at ${HOSTED}, with the code at ${REPO}.`;
+    expect(proposal.split(sentence)).toHaveLength(2);
+    const filled = proposal.replace(HOSTED, '[desk.example.com](https://desk.example.com)');
     expect(filled).not.toContain('[owner:');
     expect(proposal.match(PROTOTYPE_SENTENCE)).toHaveLength(1);
     expect(filled.match(PROTOTYPE_SENTENCE)).toHaveLength(1);
+    // The reader's pattern is the plan's.
+    expect(READERS_SENTENCE.source).toBe(PROTOTYPE_SENTENCE.source);
+    expect(READERS_SENTENCE.flags).toBe(PROTOTYPE_SENTENCE.flags);
+    // Its `$1` is the whole repository link, its dots included, and the placeholder before it was given. It ends at
+    // the sentence's period, whether whitespace follows or the text ends there.
+    const repository = (markdown: string) => [...markdown.matchAll(READERS_SENTENCE)].map((match) => match[1]);
+    expect(repository(proposal)).toEqual([REPO]);
+    expect(repository(filled)).toEqual([REPO]);
+    expect(sentence.endsWith(`${REPO}.`)).toBe(true);
+    expect(repository(sentence)).toEqual([REPO]);
+    expect(repository(proposal.replace(REPO, '[owner: repo link]'))).toEqual(['[owner: repo link]']);
 
-    // Before the fill: the hosted address goes, and the repository placeholder stays visible.
+    // Before the fill: the hosted address goes, the repository link stays, and nothing else changes.
     const page = proposalForThePage(proposal);
     expect(page).toContain(`You’re in it. The code is at ${REPO}. Each visitor acts as Maria`);
     expect(page).not.toContain(HOSTED);
-    expect(page.replace(`You’re in it. The code is at ${REPO}.`, '')).toBe(proposal.replace(PROTOTYPE_SENTENCE, ''));
-    const paragraph = ABOUT_DOCUMENTS.proposal.blocks.find(
-      (block) => block.kind === 'paragraph' && block.children[0]?.kind === 'text' && block.children[0].text.startsWith('You’re in it.'),
-    );
-    expect(paragraph).toMatchObject({
-      children: [
-        { kind: 'text', text: 'You’re in it. The code is at ' },
-        { kind: 'placeholder', text: 'owner: repo link' },
-        { kind: 'text', text: expect.stringMatching(/^\. Each visitor acts as Maria/) },
-      ],
-    });
+    expect(page).toBe(proposal.replace(sentence, `You’re in it. The code is at ${REPO}.`));
+    expect(ABOUT_DOCUMENTS.proposal.blocks).toContainEqual(YOURE_IN_IT);
 
-    // After the fill: the repository link survives as a link.
+    // After the fill: the repository link survives as a link, and the hosted address isn't on the page.
     const { blocks } = readDocument('proposal', filled);
-    expect(blocks).toContainEqual({
-      kind: 'paragraph',
-      children: [
-        { kind: 'text', text: 'You’re in it. The code is at ' },
-        {
-          kind: 'link',
-          href: 'https://github.com/example/claude-desk',
-          internal: false,
-          children: [{ kind: 'text', text: 'github.com/example/claude-desk' }],
-        },
-        { kind: 'text', text: expect.stringMatching(/^\. Each visitor acts as Maria/) },
-      ],
-    });
+    expect(blocks).toContainEqual(YOURE_IN_IT);
     expect(links(blocks).map((link) => link.href)).not.toContain('https://desk.example.com');
 
     // Anything but exactly one match fails loudly, naming the second match's line.
@@ -307,6 +316,22 @@ describe('the About documents', () => {
     );
     // The documents write straight apostrophes; a curly one still matches.
     expect(proposalForThePage(proposal.replace("v1's enforced", 'v1’s enforced'))).toBe(page);
+  });
+
+  it('the_exported_pattern_keeps_no_state_for_the_page', () => {
+    // An importer's `test` leaves the global pattern's `lastIndex` past the sentence; the page still finds it once.
+    const proposal = raw('product-proposal.md');
+    const page = proposalForThePage(proposal);
+    try {
+      expect(READERS_SENTENCE.test(proposal)).toBe(true);
+      const moved = READERS_SENTENCE.lastIndex;
+      expect(moved).toBeGreaterThan(0);
+      expect(proposalForThePage(proposal)).toBe(page);
+      // And the page leaves the exported pattern as it found it.
+      expect(READERS_SENTENCE.lastIndex).toBe(moved);
+    } finally {
+      READERS_SENTENCE.lastIndex = 0;
+    }
   });
 
   it('a_bad_document_names_its_file_and_line', () => {

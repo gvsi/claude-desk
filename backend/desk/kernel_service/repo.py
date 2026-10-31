@@ -27,7 +27,11 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    adapter's own rows), and by the owner's write to them (`desks.put_people`);
 6. their live verification challenges, after the people (a Desk's deletion, which locks no
    person, takes its live codes after its sessions);
-7. a payment link (Plan 01c);
+7. a quote (Plan 01c), `FOR UPDATE`, by each payment of it before the provider is asked, held
+   across the provider call (a mandate charge's T2, a payment link's issue in T2 and its
+   completion's C2; reconciliation takes it `NOWAIT` or `SKIP LOCKED`), then a payment link (Plan
+   01c), written before its fact; a Desk's deletion locks its issued ones before its document links
+   (`payments.lock_desk_links`) and cancels them after;
 8. document links: an open marks its link in one UPDATE, and a person's removal or new contact,
    or a Desk's deletion, voids theirs in one;
 9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which
@@ -37,7 +41,9 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
     4 to 9 the same transaction takes;
 11. facts: an open expires its link's, voiding expires the links', a removal relabels its
     person's documents', a right code relabels the session's (`labels.relabel_on_verify`), closing
-    a handoff expires its own, an hours write rewrites the Desk's;
+    a handoff expires its own, an hours write rewrites the Desk's, an execution or reconciliation
+    that withholds a result narrows the ones it names (`execute._narrow_to_owner`), after the
+    adapter's hook wrote them;
 12. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
     reads it `FOR SHARE`).
 
@@ -52,12 +58,13 @@ asks for a Desk or business row.
 A transaction that holds a later lock never asks for an earlier one: a refusal's `persist` locks
 the decision before it appends, nothing holds a payment link and then asks for the policy row,
 and every step runs its adapter's hooks before it appends (T1 `prepare`, T2 `execute`, T3
-`on_failed`, reconciliation `reconcile` and then `on_failed`, or `on_failed` alone when it
-refuses a private action whose session no longer stands, activation its `ON_ACTIVATE` hooks), so
-a hook may wait for the rows it locks like any other step. An insert under a fresh key
-waits for nothing, so it may come after a later step: T1 and an approved answer run `prepare`
-(step 10) before they insert the intent row (step 3), since a new `action_id` could wait only on
-another uncommitted insert of the same action, which the decision's lock (step 2) rules out, and
+`on_failed`, reconciliation `reconcile` and then, when it answers that nothing happened,
+`on_failed`, also for a private action whose session no longer stands, activation its
+`ON_ACTIVATE` hooks), so a hook may wait for the rows it locks like any other step. An insert
+under a fresh key waits for nothing, so it may come after a later step: T1 and an approved
+answer run `prepare` (step 10) before they insert the intent row (step 3), since a new
+`action_id` could wait only on another uncommitted insert of the same action, which the
+decision's lock (step 2) rules out, and
 Plan 01c's new payment link (step 7) may follow a mandate reservation (step 10). A row is taken
 the first time in the strongest mode the transaction will need, since going from `FOR SHARE` to
 `FOR UPDATE` waits like a new lock. Reading a row without a lock (the session a decision names,
@@ -76,6 +83,27 @@ the decision to commit, up to the review's timeout (`decisions.REVIEW_TIMEOUT_S`
 bumps the generation, and an allow from the old generation expires at `/execute`. No other
 kernel call holds the row across a model call.
 
+A payment link's completion holds the same row `FOR SHARE` across its provider call (C2,
+`payments._pay`, Plan 01c), so a decision and a completion on one session take turns: each takes
+the row first and asks for nothing the other holds, so neither deadlocks. A decision that arrives
+during C2 waits for it to commit, up to the provider's deadline (`payments.PROVIDER_DEADLINE_S`,
+2 s), and then runs its own normalize and review. A completion that arrives during a decision
+waits for the decision's normalize (a refund's charge read at most `payments.READ_DEADLINE_S`,
+1 s; other normalize steps only read rows) and review (4 s), then has up to 2 s at the provider:
+about 7 s. A decision isn't the only request that holds the row across a slow call: any session
+request that proves its token writes the row's `last_seen_at`, which holds it until that
+request's transaction commits, and an execution's T1 does so through its re-list of a connected
+tool (`mcp_client.MCP_DEADLINE_S`, 2 s) and its re-normalize (a refund's charge read, 1 s). A
+decision's `FOR UPDATE` waiting behind such a T1 is queued ahead of a completion's `FOR SHARE`, so
+the completion can wait about 3 s more: about 10 s in the worst case, past the API client's 6 s
+(`desk.api.kernel_client.DEFAULT_TIMEOUT_S`). C2 also holds the link's quote across its provider
+call, as a mandate charge's T2 holds its own (step 7), so a completion and a charge of one quote
+take turns as well, the second waiting about the first's 2 s at the provider. The
+API can then give up on a completion that goes on to finish. Every path still fails closed: C1
+commits the completion's marker before anything is sent, so the link is paid at most once, and a
+completion nobody saw finish is settled from that marker at the provider by the next read or by
+reconciliation (`reconcile_link`).
+
 A person's removal or new contact (`desks.put_people`) is the one step that may ask for an
 earlier row, and only for a session a check verified as the person after the write's session
 step and before it held their row: it takes that session too once it holds the people, so the
@@ -87,13 +115,15 @@ Activation (`activation.confirm`) holds no session, decision or execution row an
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the
 payment links its `ON_ACTIVATE` hooks lock and move (Plan 01c; a hook appends nothing), then the
 ledger head: its own `policy` entry first, then the hooks' `payment` events. A draft takes its
-key's advisory lock before the `versions` lock. The rebuild of a version an earlier kernel stored
+key's advisory lock before the `versions` lock. The rebuild of a version due one
 (`activation.rebuild_version`), at startup or in the background while the kernel serves, takes the
-same `versions` lock and active row `FOR UPDATE`, then the ledger head; the owner alert it writes
-when it can't rebuild is an insert under a fresh key. Before the rebuild, in a transaction of its
-own, startup or the background gives a Desk the native tools it has no row for
-(`desks.add_native_tools`) under the Desk row `FOR UPDATE`, as an owner's write holds it: the rows
-are inserts under fresh keys, and its `desk_data` entry takes the ledger head. Before both, the
+same `versions` lock and active row `FOR UPDATE`, reads the Desk's tools rows without a lock, then
+takes the ledger head; the owner alert it writes when it can't rebuild is an insert under a fresh
+key. Before the rebuild, in a transaction of its own, startup or the background brings a Desk's
+native tools up to date (`desks.update_native_tools`) under the Desk row `FOR UPDATE`, as an
+owner's write holds it, then its native tools rows `FOR UPDATE` in tool order, as a confirm that
+enables tools takes them (`mcp_pins.enable_tools`, which asks for no Desk row): new rows are
+inserts under fresh keys, and its `desk_data` entry takes the ledger head. Before both, the
 owner alert the background sends while a version waits (`activation._alert_waiting`) runs in a
 transaction of its own that takes the Desk's `waiting-alert` advisory lock first, before any row,
 and nothing else takes that lock; then the Desk row `FOR SHARE`, held to its commit, so a Desk's
@@ -134,7 +164,7 @@ import logging
 import re
 import secrets
 import traceback
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -146,7 +176,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from desk.db import logs as db_logs
-from desk.db.models import Desk, Execution, PolicyVersion, Tool
+from desk.db.models import Desk, Execution, PaymentLink, PolicyVersion, Tool
 from desk.db.session import CopyResolver, KernelRepo, resolve_copy
 from desk.kernel_api import KernelError
 from desk.kernel_service.clock import Clock
@@ -311,15 +341,16 @@ def route_template(request: Request) -> str:
 
 
 # Credential lookups. A request names a session token, a session ID, a decision ID (whose session
-# `GET /decisions/{id}` names), a public slug or a document link's token, not a copy; these find
-# the copy it belongs to (a token by its sha256, never the token itself) through the database's
-# copy resolvers (SECURITY DEFINER functions that return only a copy id), on their own connection,
-# so the caller can bind the request's transaction to that copy and read the rows through
-# KernelRepo as usual. Only auth.py, GET /whoami, GET /decisions/{id}, POST /sessions,
-# GET /public/{desk_slug} and GET /document_links/{token} use them, and they run before the
-# request's transaction has run anything: a request that held its transaction's connection while it
-# waited for a resolver's would, with as many such requests at once as the pool has connections,
-# wait until checkout timed out. Asked later, a resolver raises (500 `internal`) instead.
+# `GET /decisions/{id}` names), a public slug or a document or payment link's token, not a copy;
+# these find the copy it belongs to (a token by its sha256, never the token itself) through the
+# database's copy resolvers (SECURITY DEFINER functions that return only a copy id), on their own
+# connection, so the caller can bind the request's transaction to that copy and read the rows
+# through KernelRepo as usual. Only auth.py, GET /whoami, GET /decisions/{id}, POST /sessions,
+# GET /public/{desk_slug}, GET /document_links/{token} and the three /payment_links/{token} routes
+# use them, and they run before the request's transaction has run anything: a request that held
+# its transaction's connection while it waited for a resolver's would, with as many such requests
+# at once as the pool has connections, wait until checkout timed out. Asked later, a resolver
+# raises (500 `internal`) instead.
 
 async def _resolve(ctx: KernelCtx, resolver: CopyResolver, key: str) -> str | None:
     if ctx.db.in_transaction():
@@ -350,9 +381,15 @@ async def copy_of_document_link(ctx: KernelCtx, token_sha256: str) -> str | None
     return await _resolve(ctx, "copy_of_document_link", token_sha256)
 
 
-# Startup's lookups across copies: which copies hold an execution to settle, and, one copy at a time
-# so the startup rebuild can stop within its budget, which Desks of a copy have an active rules
-# version an earlier kernel stored, to rebuild, or lack a native tool this kernel registers, to add.
+async def copy_of_payment_link(ctx: KernelCtx, token_sha256: str) -> str | None:
+    """The copy of the payment link whose token has this sha256: the resolver sees only hashes."""
+    return await _resolve(ctx, "copy_of_payment_link", token_sha256)
+
+
+# Startup's lookups across copies: which copies hold an execution or a payment link to settle, and,
+# one copy at a time so the startup rebuild can stop within its budget, which Desks of a copy have
+# an active rules version an earlier kernel stored, to rebuild, or lack a native tool this kernel
+# registers, to add.
 
 async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[tuple[str, str]]:
     """`(copy_id, action_id)` of every execution startup reconciliation must settle: an intent
@@ -374,31 +411,61 @@ async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[t
     return found
 
 
+async def unsettled_links(runtime: KernelRuntime, older_than: datetime) -> list[tuple[str, str]]:
+    """`(copy_id, link_id)` of every payment link startup reconciliation must settle: one left
+    `unknown`, or an issued one whose completion started before `older_than` and never finished.
+    Used only by startup reconciliation (`payments.reconcile_links_at_startup`), on the same terms
+    as `orphan_intents`: it visits every copy and reads each through its own `KernelRepo`, so
+    row-level security still holds every read to one copy."""
+    found: list[tuple[str, str]] = []
+    for copy_id in await copy_ids(runtime):
+        copy = KernelRepo(copy_id)
+        async with runtime.sessions() as db:
+            copy.bind(db)
+            rows = await db.scalars(copy.scoped(select(PaymentLink.link_id).where(or_(
+                PaymentLink.state == "unknown",
+                and_(PaymentLink.state == "issued", PaymentLink.completion_started_at < older_than)))
+                .order_by(PaymentLink.link_id)))
+            found += [(copy_id, link_id) for link_id in rows]
+    return found
+
+
 async def copy_ids(runtime: KernelRuntime) -> list[str]:
     """Every copy's ID (`kernel.copy_ids()`), in order: the copies the startup rebuild
-    (`activation.rebuild_at_startup`) looks at one at a time, through `desks_to_bring_up`."""
+    (`activation.rebuild_at_startup`) looks at one at a time, through `desks_to_bring_up`, and the
+    ones startup reconciliation visits for unsettled payment links (`unsettled_links`)."""
     async with runtime.engine.connect() as conn:
         return sorted((await conn.scalars(select(func.kernel.copy_ids()))).all())
 
 
-async def desks_to_bring_up(runtime: KernelRuntime, copy_id: str, tools: Iterable[str],
-                            baseline_sha256: str) -> list[str]:
+async def desks_to_bring_up(runtime: KernelRuntime, copy_id: str, native: Mapping[str, str],
+                            due: Callable[[PolicyVersion, list[Tool]], bool]) -> list[str]:
     """The Desks of `copy_id`, in ID order, that the startup rebuild brings up: each with no
-    `tools` row for one of `tools`, the native tools the kernel registers (a Desk created before
-    one of them was), and each whose active rules version was stored under a baseline other than
-    `baseline_sha256`, the one the kernel enforces; never a deleted Desk, which decides nothing and
+    `tools` row for one of the native tools the kernel registers (a Desk created before one of them
+    was), or with a row for one at another `profile_sha256` than `native` names for it (written by
+    an earlier kernel), and each whose active rules version `due` says is to be rebuilt, given the
+    Desk's `tools` rows (`activation.rebuild_due`); never a deleted Desk, which decides nothing and
     whose owner has nothing to be told. Read through the copy's own `KernelRepo`, as
-    `orphan_intents` reads each copy, so row-level security still holds the reads to one copy."""
-    wanted = set(tools)
+    `orphan_intents` reads each copy, so row-level security still holds the reads to one copy. A
+    version is read without its cards and Cedar, only the columns `due` needs."""
     copy = KernelRepo(copy_id)
     async with runtime.sessions() as db:
         copy.bind(db)
         desk_ids = (await db.scalars(copy.scoped(select(Desk.desk_id).where(Desk.deleted_at.is_(None))
                                                  .order_by(Desk.desk_id)))).all()
-        rows = await db.execute(copy.scoped(select(Tool.desk_id, Tool.tool).where(Tool.tool.in_(sorted(wanted)))))
-        have: dict[str, set[str]] = {}
-        for desk_id, tool in rows:
-            have.setdefault(desk_id, set()).add(tool)
-        outdated = set((await db.scalars(copy.scoped(select(PolicyVersion.desk_id).where(
-            PolicyVersion.status == "active", PolicyVersion.baseline_sha256 != baseline_sha256)))).all())
-    return [desk_id for desk_id in desk_ids if have.get(desk_id, set()) != wanted or desk_id in outdated]
+        tools: dict[str, list[Tool]] = {}
+        for row in await db.scalars(copy.scoped(select(Tool).order_by(Tool.desk_id, Tool.tool))):
+            tools.setdefault(row.desk_id, []).append(row)
+        versions = {row.desk_id: row for row in await db.execute(copy.scoped(select(
+            PolicyVersion.desk_id, PolicyVersion.version, PolicyVersion.baseline_sha256,
+            PolicyVersion.invariants_sha256, PolicyVersion.profiles_sha256, PolicyVersion.auto_money_cap_cents,
+        ).where(PolicyVersion.status == "active")))}
+
+    def found(desk_id: str) -> bool:
+        pins = {row.tool: row.profile_sha256 for row in tools.get(desk_id, [])}
+        if any(pins.get(tool) != sha for tool, sha in native.items()):
+            return True
+        version = versions.get(desk_id)
+        return version is not None and due(version, tools.get(desk_id, []))
+
+    return [desk_id for desk_id in desk_ids if found(desk_id)]

@@ -55,6 +55,72 @@ const RAW_COLOR = /#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})\b|\b(?:rgba?|hsla?
 const RAW_MS = /\b\d+(?:\.\d+)?ms\b/;
 const RAW_CSS_SECONDS = /(?<![\w.-])\d*\.?\d+s\b/;
 
+// The Vision article is the named exception to design system v2, with its own light palette scoped to the article.
+const VISION_ARTICLE_STYLES = 'about/vision/VisionArticle.css';
+// A CSS comment; the article's root rule, its class alone as the selector (read with comments blanked); and a
+// custom property's name, which is a declaration's whole name.
+const CSS_COMMENT = /\/\*[\s\S]*?(?:\*\/|$)/g;
+const VISION_ROOT_RULE = /(?<=^|[{};])\s*\.vision-article\s*\{([^{}]*)\}/g;
+const CUSTOM_PROPERTY_NAME = /^--[\w-]+$/;
+
+/** Where each declaration in a rule's body starts and ends: split at semicolons outside strings and brackets. */
+function declarationRanges(body: string, offset: number): [number, number][] {
+  const ranges: [number, number][] = [];
+  let start = 0;
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < body.length; i += 1) {
+    const c = body[i];
+    if (quote !== null) {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === '(' || c === '[') {
+      depth += 1;
+    } else if (c === ')' || c === ']') {
+      depth = Math.max(0, depth - 1);
+    } else if (c === ';' && depth === 0) {
+      ranges.push([offset + start, offset + i + 1]);
+      start = i + 1;
+    }
+  }
+  ranges.push([offset + start, offset + body.length]);
+  return ranges;
+}
+
+/**
+ * The Vision article's stylesheet as the color scan reads it: each declaration on its root rule whose own name
+ * is a custom property is blanked, and everything else stays, comments included. Comments are blanked only to
+ * find the rule and read its declarations' names, so a name in a comment or a string never passes for one.
+ */
+function withoutTheArticlePalette(text: string): string {
+  const code = text.replace(CSS_COMMENT, (comment) => ' '.repeat(comment.length));
+  const read = text.split('');
+  for (const rule of code.matchAll(VISION_ROOT_RULE)) {
+    const bodyStart = rule.index + rule[0].indexOf('{') + 1;
+    for (const [start, end] of declarationRanges(rule[1] ?? '', bodyStart)) {
+      const declaration = code.slice(start, end);
+      const colon = declaration.indexOf(':');
+      if (colon < 0 || !CUSTOM_PROPERTY_NAME.test(declaration.slice(0, colon).trim())) continue;
+      // Outside the comments, which still count, the declaration is the palette's.
+      for (let i = start; i < end; i += 1) if (code[i] === text[i]) read[i] = ' ';
+    }
+  }
+  return read.join('');
+}
+
+/**
+ * Every raw color in `scanned`, as "file: match", but the custom properties on the root rule of the Vision
+ * article's stylesheet: that one file keeps its palette there, and any other color in it still counts.
+ */
+function rawColors(scanned: Source[] = sources): string[] {
+  return hits(
+    RAW_COLOR,
+    scanned.map((source) => (source.file === VISION_ARTICLE_STYLES ? { ...source, text: withoutTheArticlePalette(source.text) } : source)),
+  );
+}
+
 // A label swapped for a waiting one ("Starting…", "Sending your answer..."): a busy button keeps its words and spins.
 const BUSY_LABEL = /['"`>]\s*[A-Z][a-z]+ing\b[^'"`<>{}\n]*(?:…|\.{3})\s*(?=['"`<])/;
 
@@ -351,7 +417,43 @@ describe('app source guards', () => {
     expect(hits(RAW_COLOR, bad)).toHaveLength(3);
     expect(hits(RAW_MS, bad)).toHaveLength(1);
     expect(hits(RAW_CSS_SECONDS, [{ file: 'x.css', text: 'transition: opacity .2s; gap: var(--space-2s);' }])).toHaveLength(1);
-    expect(hits(RAW_COLOR)).toEqual([]);
+
+    // The Vision article's stylesheet, and no other file, may hold colors, and only as custom properties on
+    // its root rule. A neighbour holding the same palette is caught: the article's own code, a sibling
+    // stylesheet, the reading pages' and the vision pages' styles, and a path that only ends the same way.
+    const palette = '.vision-article {\n  --va-paper: #F4F2EC;\n  --va-line: rgba(28, 27, 25, 0.13);\n}';
+    expect(rawColors([{ file: VISION_ARTICLE_STYLES, text: palette }])).toEqual([]);
+    // A custom property after a comment, as the stylesheet writes its groups, is one too.
+    const grouped = '/* The page. */\n.vision-article {\n  /* The ground. */\n  --va-paper: #F4F2EC;\n  color: var(--va-ink);\n}';
+    expect(rawColors([{ file: VISION_ARTICLE_STYLES, text: grouped }])).toEqual([]);
+    const neighbours = ['about/vision/VisionArticle.tsx', 'about/vision/Screens.css', 'about/reader.css', 'vision/Vision.css', 'xabout/vision/VisionArticle.css'];
+    for (const file of neighbours) {
+      expect(rawColors([{ file, text: palette }]), file).toEqual([`${file}: #F4F2EC`, `${file}: rgba(`]);
+    }
+    // In the stylesheet itself, a color anywhere else still counts: a plain declaration on the root, a custom
+    // property on another rule or on a list or descendant selector that names the root, and a comment.
+    const stray = [
+      '.vision-article { color: #1C1B19; }',
+      '.vision-article .va-bar { --va-ink: #1C1B19; }',
+      '.vision-article, .va-bar { --va-ink: #1C1B19; }',
+      '.va-bar .vision-article { --va-ink: #1C1B19; }',
+      '/* #1C1B19 */ .vision-article { --va-ink: var(--va-paper); }',
+    ];
+    for (const text of stray) expect(rawColors([{ file: VISION_ARTICLE_STYLES, text }]), text).toEqual([`${VISION_ARTICLE_STYLES}: #1C1B19`]);
+    // Only a declaration whose own name is a custom property is one: not a plain declaration with a custom
+    // property's name in a comment or a string, before it or inside it.
+    const posing = [
+      '.vision-article { color: /* --x: */ #123456; }',
+      '.vision-article { background: url("--x:") #123456; }',
+      '.vision-article { /* --x: */ color: #123456; }',
+    ];
+    for (const text of posing) expect(rawColors([{ file: VISION_ARTICLE_STYLES, text }]), text).toEqual([`${VISION_ARTICLE_STYLES}: #123456`]);
+    // Its durations are read as anywhere else.
+    const timed = [{ file: VISION_ARTICLE_STYLES, text: '.vision-article { --va-fade: 150ms; transition: opacity .2s; }' }];
+    expect(hits(RAW_MS, timed)).toHaveLength(1);
+    expect(hits(RAW_CSS_SECONDS, timed)).toHaveLength(1);
+
+    expect(rawColors()).toEqual([]);
     expect(hits(RAW_MS)).toEqual([]);
     expect(hits(RAW_CSS_SECONDS, sources.filter((s) => s.file.endsWith('.css')))).toEqual([]);
   });

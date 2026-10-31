@@ -9,14 +9,17 @@ server, a stand-in prover, an offline reviewer, a frozen clock), then builds the
 refuses to start, then the policy engine over the always-on baseline
 (`app.state.engine`; a baseline it can't take stops the start too) with the shipped proof reports
 in its cache, then runs `desk-prove --selftest` once to pick the proof mode for the whole process
-(`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), then
-gives every Desk the native tools it was created without and rebuilds the active rules versions an
-earlier kernel stored under another baseline, within a budget that finding them counts against
-too, and from cached reports only (`activation.rebuild_at_startup`), then starts the rebuild of
-the copies and Desks startup left, which runs in the background while the kernel serves
-(`activation.rebuild_in_background`, `app.state.rebuilding`) and is cancelled at shutdown, and last
-reconciles the executions a stopped kernel left behind (`execute.reconcile_at_startup`), within
-`STARTUP_RECONCILE_S`, since a read settles them too.
+(`symcc` or `bounded`, which `/health` reports), then the database engine (role desk_kernel), then,
+when it runs the mock payments server as its child (`python -m desk.kernel_service`, or
+`MOCKPAY_SPAWN=1`), starts it and waits for it, then gives every Desk the native tools it was
+created without and rebuilds the active rules versions an earlier kernel stored under another
+baseline, within a budget that finding them counts against too, and from cached reports only
+(`activation.rebuild_at_startup`), then starts the rebuild of the copies and Desks startup left,
+which runs in the background while the kernel serves (`activation.rebuild_in_background`,
+`app.state.rebuilding`) and is cancelled at shutdown, and last reconciles the executions and the
+payment links a stopped kernel left behind (`execute.reconcile_at_startup`,
+`payments.reconcile_links_at_startup`), each within `STARTUP_RECONCILE_S`, since a read settles
+them too.
 
 Every non-2xx answer is a `KernelError{code}` ("Session state responses"): a `KernelFailure`
 answers its own code, request validation 422 `invalid`, the framework's own errors (an unknown
@@ -27,40 +30,50 @@ the request's transaction has rolled back.
 import asyncio
 import logging
 import os
+import pathlib
 import re
+import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Annotated, Any
+from urllib.parse import urlsplit
 
 import desk_kernel
+import httpx2
 import uvicorn
 from fastapi import APIRouter, FastAPI, Path, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, BeforeValidator
+from pydantic_core import PydanticSerializationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+import desk
 from desk.contracts import (DemoInboxEntry, KnowledgeItem, LedgerEntry, LedgerEvent, LedgerPage, OwnerMessageResult,
-                            PolicyVersion)
+                            PolicyVersion, Probe, ProbeResult, ToolProfile)
 from desk.db import logs as db_logs
 from desk.db.models import Desk, Fact, Handoff
 from desk.db.session import KernelSession, database_url
 from desk.env import is_development
 from desk.kernel_api import (CreateDeskRequest, DeskCreated, DeskUpdated, DocumentCreated, DocumentUploadRequest,
-                             Health, KernelError, KnowledgeRequest, LedgerAppendRequest, OwnerMessageRequest,
-                             PolicyConfirmRequest, PolicyDraftRequest)
-from desk.kernel_service import (activation, approvals, auth, context, copies, decide, demo_inbox, desks, execute,
-                                 labels, ledger, public, reply_check, sessions, verification)
+                             Health, KernelError, KnowledgeRequest, LedgerAppendRequest, LinkCancelled,
+                             OwnerMessageRequest, PaymentLinkActionRequest, PaymentLinkStateResult, PaymentLinkView,
+                             PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest, ToolConfirmed,
+                             ToolsConfirmRequest, ToolsConnectRequest, ToolsSimulateChangeRequest)
+from desk.kernel_service import (activation, agents, approvals, auth, context, copies, decide, demo_inbox, desks,
+                                 execute, labels, ledger, mcp_pins, payments, public, reply_check, sessions,
+                                 verification)
 from desk.kernel_service.adapters import release_document
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.clock import Clock, SystemClock
 from desk.kernel_service.decisions import DecisionsBackend, make_decisions
 from desk.kernel_service.repo import (Ctx, KernelCtx, KernelFailure, KernelRuntime, kernel_transaction, log_error,
                                       route_template, storable)
+from desk.mockpay.definitions import EXIT_BIND_FAILED, is_placeholder_key
 
 log = logging.getLogger("desk.kernel_service")
 STARTUP_RECONCILE_S = 10.0         # startup's limit on settling the executions a stopped kernel left
@@ -90,16 +103,24 @@ class RedactLinkTokens(logging.Filter):
 ACCESS_LOG_FILTER = RedactLinkTokens()
 
 
+MOCKPAY_URL = "http://127.0.0.1:8702"
+
+
 @dataclass(frozen=True)
 class KernelSettings:
     database_url: str = field(repr=False)   # carries the role's password
     env: str = "dev"                        # DESK_ENV
     decisions: str = "anthropic"            # DESK_DECISIONS: "anthropic", or "offline" (a test hook)
+    mockpay_url: str = MOCKPAY_URL          # MOCKPAY_URL: the mock payments server the kernel calls
+    mockpay_key: str = field(default="", repr=False)   # MOCKPAY_KEY: the kernel's alone, never the API's
+    mockpay_spawn: bool = False             # MOCKPAY_SPAWN=1: run that server as the kernel's child
 
     @classmethod
     def from_env(cls) -> "KernelSettings":
         return cls(database_url=database_url("KERNEL"), env=os.environ.get("DESK_ENV", "dev"),
-                   decisions=os.environ.get("DESK_DECISIONS", "anthropic"))
+                   decisions=os.environ.get("DESK_DECISIONS", "anthropic"),
+                   mockpay_url=os.environ.get("MOCKPAY_URL") or MOCKPAY_URL,
+                   mockpay_key=os.environ.get("MOCKPAY_KEY", ""), mockpay_spawn=os.environ.get("MOCKPAY_SPAWN") == "1")
 
 
 TEST_HOOK_VARIABLES = ("ANTHROPIC_BASE_URL", "DESK_PROVE")   # a fake model server; a stand-in prover
@@ -123,6 +144,141 @@ def refuse_test_hooks(settings: KernelSettings, clock: Clock, decisions: Decisio
         raise RuntimeError(f"test hooks can't run with DESK_ENV={env!r}: {', '.join(hooks)}")
 
 
+MOCKPAY_KEY_MIN_LENGTH = 32     # the mock payments server refuses a shorter key
+MOCKPAY_START_TIMEOUT_S = 10.0  # how long the kernel's start waits for the server to answer
+MOCKPAY_BACKOFF_S = (1.0, 30.0)  # a restart waits 1 s, doubling to 30 s while it keeps exiting
+BACKEND_ROOT = pathlib.Path(desk.__file__).resolve().parents[1]   # the child's cwd, so `desk` imports from it
+
+
+class MockpayChild:
+    """The mock payments server as the kernel's child process (master plan, "Payments (mocked)").
+
+    It runs `python -m desk.mockpay.server` on MOCKPAY_URL's loopback port, in a session of its
+    own with only the four variables it needs, restarts it whenever it exits (`mockpay_restarted`,
+    or `mockpay_bind_failed` when something else holds the port) and stops it with the kernel.
+    While it is down, every payments call fails closed: nothing else answers there with the
+    kernel's key."""
+
+    def __init__(self, url: str, key: str, database_url: str, env: str):
+        parts = urlsplit(url)
+        self.url = url
+        self.port = parts.port
+        self._key = key
+        self.argv = [sys.executable, "-m", "desk.mockpay.server", "--host", parts.hostname, "--port", str(parts.port)]
+        self._env = {"PATH": os.environ.get("PATH", os.defpath), "MOCKPAY_DATABASE_URL": database_url,
+                     "MOCKPAY_KEY": key, "DESK_ENV": env}
+        self.process: asyncio.subprocess.Process | None = None
+        self._stopping = asyncio.Event()
+        self._supervisor: asyncio.Task | None = None
+
+    async def start(self) -> None:
+        """Start the child and wait up to 10 s for it to answer; a child that doesn't still leaves the
+        kernel starting, and payments fail closed until it does."""
+        self._supervisor = asyncio.create_task(self._supervise(), name="mockpay-supervisor")
+        if not await self._answers_within(MOCKPAY_START_TIMEOUT_S):
+            log.warning("mockpay_unhealthy url=%s", self.url)
+
+    async def _answers_within(self, seconds: float) -> bool:
+        deadline = asyncio.get_running_loop().time() + seconds
+        async with httpx2.AsyncClient(headers={"X-Mockpay-Key": self._key}, trust_env=False, timeout=1.0) as http:
+            while asyncio.get_running_loop().time() < deadline:
+                try:
+                    if (await http.get(f"{self.url}/provider/health")).json() == {"ok": True}:
+                        return True
+                except (httpx2.HTTPError, ValueError):
+                    pass
+                await asyncio.sleep(0.1)
+        return False
+
+    async def _supervise(self) -> None:
+        loop = asyncio.get_running_loop()
+        backoff = MOCKPAY_BACKOFF_S[0]
+        while not self._stopping.is_set():
+            started = loop.time()
+            try:
+                # a session of its own: a Ctrl-C at the kernel's terminal reaches the kernel alone, whose
+                # shutdown stops the child (the child seeing it too read as a crash, restarted mid-shutdown)
+                self.process = await asyncio.create_subprocess_exec(
+                    *self.argv, cwd=BACKEND_ROOT, env=self._env, stdin=asyncio.subprocess.DEVNULL,
+                    start_new_session=True)
+            except Exception as exc:
+                log_error(log, exc, "mockpay_spawn_failed")
+            else:
+                if self._stopping.is_set():   # stopped while it was starting
+                    await self._terminate(self.process)
+                    return
+                code = await self.process.wait()
+                if self._stopping.is_set():
+                    return
+                if loop.time() - started >= MOCKPAY_BACKOFF_S[1]:   # it ran a while: start the backoff over
+                    backoff = MOCKPAY_BACKOFF_S[0]
+                if code == EXIT_BIND_FAILED:   # its port is taken, most likely by an earlier server still running
+                    log.warning("mockpay_bind_failed port=%s wait_s=%.0f", self.port, backoff)
+                else:
+                    log.warning("mockpay_restarted exit=%s wait_s=%.0f", code, backoff)
+            try:
+                await asyncio.wait_for(self._stopping.wait(), backoff)
+            except TimeoutError:
+                backoff = min(backoff * 2, MOCKPAY_BACKOFF_S[1])
+
+    @staticmethod
+    async def _terminate(process: asyncio.subprocess.Process) -> None:
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), 5)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+
+    async def stop(self) -> None:
+        """Stop the child and its supervisor; never raises, so the kernel's shutdown carries on."""
+        self._stopping.set()
+        try:
+            if self.process is not None:
+                await self._terminate(self.process)
+            if self._supervisor is not None:
+                await self._supervisor
+        except Exception as exc:
+            log_error(log, exc, "mockpay_stop_failed")
+
+
+def mockpay_child(settings: KernelSettings) -> MockpayChild | None:
+    """The child to start, when the kernel runs the mock payments server (`mockpay_spawn`). Without a
+    key of at least 32 characters (outside development, one that isn't a change-me placeholder such
+    as `.env.example`'s), a database URL for it or a loopback URL with a port, there is no child and
+    payments fail closed; outside development (the settings' DESK_ENV or the process's) the kernel
+    refuses to start instead."""
+    if not settings.mockpay_spawn:
+        return None
+    # the child runs in whichever of the two environments isn't development, never a laxer one
+    process_env = os.environ.get("DESK_ENV", "")
+    env = process_env if is_development(settings.env) and not is_development(process_env) else settings.env
+    problem, store_url = None, ""
+    parts = urlsplit(settings.mockpay_url)
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if len(settings.mockpay_key) < MOCKPAY_KEY_MIN_LENGTH:
+        problem = f"MOCKPAY_KEY is missing or shorter than {MOCKPAY_KEY_MIN_LENGTH} characters"
+    elif not is_development(env) and is_placeholder_key(settings.mockpay_key):
+        problem = "MOCKPAY_KEY is a placeholder; outside development make a key of your own (openssl rand -hex 32)"
+    elif parts.scheme != "http" or parts.hostname not in ("127.0.0.1", "localhost") or port is None:
+        problem = "MOCKPAY_URL must be http://127.0.0.1:<port>"
+    else:
+        try:
+            store_url = database_url("MOCKPAY")
+        except RuntimeError as missing:
+            problem = str(missing)
+    if problem is None:
+        return MockpayChild(settings.mockpay_url, settings.mockpay_key, store_url, env)
+    if not is_development(env):
+        raise RuntimeError(f"the mock payments server can't start: {problem}")
+    log.warning("mockpay_not_started reason=%s", problem)
+    return None
+
+
 def create_app(settings: KernelSettings | None = None, clock: Clock | None = None,
                decisions: DecisionsBackend | None = None) -> FastAPI:
     """The kernel app. `clock` and `decisions` are test hooks (the reviewer by default comes from
@@ -135,6 +291,7 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         refuse_test_hooks(settings, clock, decisions)
+        mockpay = mockpay_child(settings)   # production refuses to start without its key
         reviewer = decisions if decisions is not None else make_decisions(settings)
         signer = desk_kernel.Signer.from_env()   # raises without a seed outside development
         if signer.dev_key and not is_development(settings.env):
@@ -151,7 +308,10 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
         app.state.kernel = KernelRuntime(settings=settings, clock=clock, signer=signer, engine=engine,
                                          sessions=factory, policies=policies, decisions=reviewer)
         rebuilding: asyncio.Task | None = None
+        app.state.mockpay = mockpay
         try:
+            if mockpay is not None:
+                await mockpay.start()
             startup: activation.StartupRebuild | None = None
             try:
                 # active versions an earlier kernel stored under another baseline, rebuilt and
@@ -166,24 +326,30 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
                 # until it is rebuilt. Started first, so nothing after it can keep it from starting
                 rebuilding = asyncio.create_task(activation.rebuild_in_background(app.state.kernel, startup))
             app.state.rebuilding = rebuilding
-            try:
-                # executions a stopped kernel left behind; a read settles them too, so a failure or
-                # a run past STARTUP_RECONCILE_S is logged and the kernel starts
-                await asyncio.wait_for(execute.reconcile_at_startup(app.state.kernel), STARTUP_RECONCILE_S)
-            except TimeoutError:
-                log.info("startup_reconcile_cut_off")
-            except Exception as exc:
-                log_error(log, exc, "startup_reconcile_failed")
+            # executions and payment links a stopped kernel left behind; a read settles them too, so a
+            # failure or a run past STARTUP_RECONCILE_S is logged and the kernel starts. Each has its own
+            # limit, so one that hangs can't keep the other from running
+            for name, reconcile in (("startup_reconcile", execute.reconcile_at_startup),
+                                    ("startup_link_reconcile", payments.reconcile_links_at_startup)):
+                try:
+                    await asyncio.wait_for(reconcile(app.state.kernel), STARTUP_RECONCILE_S)
+                except TimeoutError:
+                    log.info("%s_cut_off", name)
+                except Exception as exc:
+                    log_error(log, exc, "%s_failed", name)
             yield
         finally:
             if rebuilding is not None:
                 rebuilding.cancel()
                 await asyncio.gather(rebuilding, return_exceptions=True)
+            if mockpay is not None:
+                await mockpay.stop()
             await engine.dispose()
 
     app = FastAPI(title="Claude Desk kernel", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.proof_mode = "bounded"   # until the startup selftest passes
     app.state.rebuilding = None        # the background rebuild of what startup left, if anything
+    app.state.mockpay = None           # the mock payments child, while the kernel runs one
     app.state.unproved_seeds = set()   # shipped rule sets that couldn't activate for want of a report
     app.add_exception_handler(KernelFailure, _kernel_failure)
     app.add_exception_handler(RequestValidationError, _invalid_request)
@@ -198,8 +364,10 @@ def create_app(settings: KernelSettings | None = None, clock: Clock | None = Non
     app.include_router(reply_check.router)
     app.include_router(public.router)
     app.include_router(verification.router)
+    app.include_router(agents.router)
     app.include_router(desk_router)
     app.include_router(document_link_router)
+    app.include_router(payment_link_router)
     app.include_router(inbox_router)
     app.include_router(handoff_router)
     app.include_router(owner_router)
@@ -290,14 +458,45 @@ async def get_document_link(token: str, ctx: Ctx) -> Response:
         **DOCUMENT_HEADERS, "Content-Disposition": f'inline; filename="{document.filename}"'})
 
 
+payment_link_router = APIRouter()
+
+
+@payment_link_router.get("/payment_links/{token}", response_model=PaymentLinkView)
+async def get_payment_link(token: str, ctx: Ctx, response: Response) -> PaymentLinkView:
+    """What the mock checkout page shows of a payment link, by its token alone
+    (`payments.link_view`); 404 `not_found` for a token no link has. The API proxies it."""
+    response.headers["Cache-Control"] = "no-store"
+    return await payments.link_view(ctx, token)
+
+
+@payment_link_router.post("/payment_links/{token}/complete", response_model=PaymentLinkStateResult)
+async def complete_payment_link(token: str, body: PaymentLinkActionRequest, ctx: Ctx,
+                                response: Response) -> PaymentLinkStateResult:
+    """The mock checkout's pay button, by the link's token alone (`payments.complete_link`): the link
+    pays once, with a signed `payment_confirmed` verdict for its session; 409 `conflict` for a link
+    in no state to pay, 404 `not_found` for a token no link has. The API proxies it."""
+    response.headers["Cache-Control"] = "no-store"
+    return await payments.complete_link(ctx, token)
+
+
+@payment_link_router.post("/payment_links/{token}/cancel", response_model=PaymentLinkStateResult)
+async def cancel_payment_link(token: str, body: PaymentLinkActionRequest, ctx: Ctx,
+                              response: Response) -> PaymentLinkStateResult:
+    """The mock checkout's cancel button, by the link's token alone (`payments.cancel_link`); 409
+    `conflict` for a link in no state to cancel. The API proxies it."""
+    response.headers["Cache-Control"] = "no-store"
+    return await payments.cancel_link(ctx, token)
+
+
 inbox_router = APIRouter()
 
 
 @inbox_router.get("/demo_inbox", response_model=list[DemoInboxEntry])
 async def read_demo_inbox(ctx: Ctx, request: Request, session_id: str | None = None) -> list[DemoInboxEntry]:
-    """The Demo inbox: with `session_id` (`X-Session-Token`), the verification codes of the
-    challenges the session started, never another session's code for the same person, and nothing
-    else; without it, every entry of the owner's copy (`X-Owner-Session`)."""
+    """The Demo inbox: with `session_id` (`X-Session-Token`, or an agent session's signature), the
+    verification codes of the challenges the session, or a demo agent it minted, started, never
+    another session's code for the same person, and nothing else; without it, every entry of the
+    owner's copy (`X-Owner-Session`)."""
     if session_id is None:
         await auth.require_owner(ctx, request)
         return await demo_inbox.owner_entries(ctx)
@@ -389,9 +588,21 @@ ApiEntry = Annotated[LedgerAppendRequest, BeforeValidator(_as_reported)]
 async def append_api_entry(body: ApiEntry, ctx: Ctx, request: Request) -> LedgerEntry:
     """The API's own `session`, `rate_limit` and `agent_auth` entries (the request model refuses any
     other kind). A visitor's token may write only to its session's Desk, the owner's only to a Desk
-    of the copy, and an entry that names a session must name the one whose token sent it."""
+    of the copy, and an entry that names a session must name the one whose token sent it. An agent
+    session has no token: its entries name it and carry the agent's signature for its turn."""
     route = route_template(request)
-    if auth.OWNER_HEADER in request.headers and auth.SESSION_HEADER not in request.headers:
+    signed = auth.agent_signed(request)
+    if signed and auth.SESSION_HEADER not in request.headers and auth.OWNER_HEADER not in request.headers:
+        if body.event.session_id is None:
+            raise AuthError(401, "auth", "bad_token", route=route)
+        row = await auth.require_session(ctx, request, body.event.session_id)
+        copy_id, session_id = row.copy_id, row.session_id
+        if body.desk_id != row.desk_id:
+            raise AuthError(404, "not_found", "wrong_copy", route=route,
+                            named=Named(copy_id=copy_id, desk_id=row.desk_id, session_id=session_id))
+    elif signed:
+        raise AuthError(401, "auth", "bad_token", route=route)
+    elif auth.OWNER_HEADER in request.headers and auth.SESSION_HEADER not in request.headers:
         owner = await auth.require_owner(ctx, request, desk_id=body.desk_id)
         copy_id, session_id = owner.copy_id, owner.session_id
     elif auth.SESSION_HEADER in request.headers and auth.OWNER_HEADER not in request.headers:
@@ -443,6 +654,75 @@ async def post_policy_confirm(body: PolicyConfirmRequest, ctx: Ctx, request: Req
     await auth.require_owner(ctx, request, desk_id=body.desk_id)
     await _open_desk(ctx, request, body.desk_id)
     return await activation.confirm(ctx, body.desk_id, body.version)
+
+
+@policy_router.post("/tools/connect", response_model=list[ToolProfile])
+async def post_tools_connect(body: ToolsConnectRequest, ctx: Ctx, request: Request) -> list[ToolProfile]:
+    """Connects an MCP server to a Desk of the owner's copy (`mcp_pins.connect`): each tool it lists
+    is pinned at its listing hash and waits for the owner's review; a tool already on the Desk is
+    left as it is. An unreachable server is 503 `internal`."""
+    await auth.require_owner(ctx, request, desk_id=body.desk_id)
+    await _open_desk(ctx, request, body.desk_id)
+    return [mcp_pins.owner_profile(row) for row in await mcp_pins.connect(ctx, body.desk_id, body.server)]
+
+
+@policy_router.post("/tools/confirm", response_model=ToolConfirmed)
+async def post_tools_confirm(body: ToolsConfirmRequest, ctx: Ctx, request: Request) -> ToolConfirmed:
+    """The owner's batch confirm of a Desk's tools, each named by the hash they reviewed
+    (`mcp_pins.confirm_tools`): enabling drafts one rules version to prove and confirm; disabling
+    takes effect at once. Any entry that fails its check fails the whole batch, ledgered."""
+    owner = await auth.require_owner(ctx, request, desk_id=body.desk_id)
+    await _open_desk(ctx, request, body.desk_id)
+    return await mcp_pins.confirm_tools(ctx, owner, body.desk_id, body.tools, body.enable)
+
+
+@policy_router.post("/tools/simulate_change", response_model=ToolProfile)
+async def post_tools_simulate_change(body: ToolsSimulateChangeRequest, ctx: Ctx, request: Request) -> ToolProfile:
+    """The demo's "Simulate a tool change" (`mcp_pins.simulate_change`): the server changes the
+    copy's definition of a connected tool and the kernel re-lists at once, so the tool needs review."""
+    await auth.require_owner(ctx, request, desk_id=body.desk_id)
+    await _open_desk(ctx, request, body.desk_id)
+    return mcp_pins.owner_profile(await mcp_pins.simulate_change(ctx, body.desk_id, body.tool))
+
+
+@policy_router.get("/policy/{version}/cancelled_links", response_model=list[LinkCancelled])
+async def get_cancelled_links(version: int, desk_id: str, ctx: Ctx, request: Request) -> list[LinkCancelled]:
+    """The payment links a version's activation cancelled for a rule change, each with its signed
+    `link_cancelled` line for the chat (`payments.cancelled_links`), with the owner's credential
+    alone (a session token beside it is 401) for a Desk of its copy (another copy's is 404)."""
+    route = route_template(request)
+    if auth.SESSION_HEADER in request.headers:
+        raise AuthError(401, "auth", "bad_token", route=route)
+    if not desks.storable(desk_id):                       # text Postgres can't hold names no Desk
+        await auth.require_owner(ctx, request)
+        raise AuthError(404, "not_found", "wrong_copy", route=route)
+    await auth.require_owner(ctx, request, desk_id=desk_id)
+    return await payments.cancelled_links(ctx, desk_id, version)
+
+
+@policy_router.post("/policy/{version}/probe", response_model=list[ProbeResult])
+async def post_policy_probe(version: int, body: PolicyProbeRequest, ctx: Ctx, request: Request) -> list[ProbeResult]:
+    """Setup safety probes: what version `version` of a Desk's rules, in any status, would decide
+    for each hypothetical caller, with nothing resolved, executed or activated
+    (`activation.probe_version`). The owner of the Desk's copy only; a Desk the copy doesn't have
+    is 404, a deleted one 409 `closed`. Every probe gets a result; only a malformed body is 422
+    `invalid`: more than `MAX_PROBES` probes, or text the answer couldn't carry back."""
+    await auth.require_owner(ctx, request, desk_id=body.desk_id)
+    await _open_desk(ctx, request, body.desk_id)
+    if len(body.probes) > activation.MAX_PROBES or not _answerable(body.probes):
+        raise KernelFailure(422, "invalid", "malformed_probes")
+    return await activation.probe_version(ctx, body.desk_id, version, body.probes)
+
+
+def _answerable(probes: list[Probe]) -> bool:
+    """Every probe can go back in the answer as JSON (`ProbeResult.probe`): no text a JSON answer
+    can't carry, such as a lone surrogate the request escaped."""
+    try:
+        for probe in probes:
+            probe.model_dump_json()
+    except PydanticSerializationError:
+        return False
+    return True
 
 
 async def _open_desk(ctx: KernelCtx, request: Request, desk_id: str) -> None:

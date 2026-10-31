@@ -147,3 +147,27 @@ it('only_connectors_may_be_left_out', () => {
   act(() => root.unmount());
   column.remove();
 });
+
+it('long_business_name_carries_its_title', () => {
+  // A name too long for the business row is cut with an ellipsis, and its title holds it in full,
+  // so it can still be read; the row's name for screen readers stays the switcher's.
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const name = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland';
+  const column = document.createElement('div');
+  column.style.cssText = 'display: flex; width: 264px; height: 982px;';
+  document.body.append(column);
+  const root = createRoot(column);
+  act(() => root.render(<Sidebar {...PROPS} business={name} />));
+
+  const row = column.querySelector<HTMLElement>('.cd-sidebar__business');
+  const shown = row?.querySelector<HTMLElement>('[data-copy="user"]');
+  if (!row || !shown) throw new Error('the sidebar shows no business row');
+  expect(row.getAttribute('aria-label')).toBe(`Switch business, current: ${name}`);
+  expect(shown.textContent).toBe(name);
+  expect(shown.scrollWidth).toBeGreaterThan(shown.clientWidth);
+  expect(getComputedStyle(shown).textOverflow).toBe('ellipsis');
+  expect(shown.title).toBe(name);
+
+  act(() => root.unmount());
+  column.remove();
+});

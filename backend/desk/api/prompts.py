@@ -53,7 +53,7 @@ PROMPT_VERSION = "2026-10-30.18"
 REPLY_TEMPLATES = ("quote", "booking_options", "booking_confirmed", "payment_link", "document_link", "hours", "policy",
                    "contact", "handoff", "verify_prompt", "charges", "refund_issued", "charge_confirmed",
                    "callback_confirmed")
-KERNEL_ONLY_TEMPLATES = ("owner_said", "payment_confirmed")
+KERNEL_ONLY_TEMPLATES = ("owner_said", "payment_confirmed", "link_cancelled")
 
 
 class DeskIdentity(BaseModel):

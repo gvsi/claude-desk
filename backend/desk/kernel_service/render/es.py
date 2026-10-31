@@ -17,6 +17,7 @@ STATUS: dict[str, str] = {
     "allowed": "Revisado con las reglas de {owner}",
     "held": "Esperando la aprobación de {owner}",
     "refused": "No es algo que pueda hacer aquí",
+    "refused_over_mandate": "Rechazado: supera el límite firmado para este agente",
     "approved": "{owner} lo aprobó",
     "denied": "{owner} decidió no seguir adelante",
     "expired": "Esta solicitud venció",
@@ -25,6 +26,7 @@ STATUS: dict[str, str] = {
     "failed": "No se pudo completar",
     "unknown": "Todavía lo estamos confirmando",
     "refused_at_execution": "Las reglas cambiaron, así que no se hizo",
+    "tool_unavailable": "Esto no está disponible ahora, así que no se hizo",
     "reply_checked": "Respuesta revisada con las reglas de {owner}",
     "reply_handed_off": "Pasado a {owner} para responder",
     "owner_said": "Escrito por {owner}",
@@ -51,6 +53,10 @@ EXECUTED: dict[str, str] = {
     "native.request_callback": "Solicitud de llamada guardada para {owner}",
     "native.start_verification": "Verificación iniciada",
     "native.release_document": "Documento compartido desde los registros de {owner}",
+    "native.payment_link": "Enlace de pago creado para esta cotización",
+    "payments.list_charges": "Cargos tomados de los pagos de {owner}",
+    "payments.create_refund": "Reembolsado al pago original",
+    "native.charge_mandate": "Cobrado dentro del límite de tu mandato",
 }
 
 MESSAGES: dict[str, str] = {
@@ -171,6 +177,49 @@ def document_link(fact: Fact | None, desk: DeskInfo) -> Card:
     return Card(title=title_claim(fact))
 
 
+def payment_link(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{título}, {total}`; el enlace va en el `href` de la tarjeta, que llena la revisión."""
+    return Card(title=f"{title_claim(fact)}, {money(claims(fact)['total'])}")
+
+
+def charges(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{total}` / `{título}`, o `Pago` si el kernel no tiene uno / `{fecha y hora}` si el hecho la tiene:
+    un pago anterior del cliente verificado."""
+    found = claims(fact)
+    lines = [title_claim(fact) if "title" in found else "Pago"]
+    if "starts_at" in found:
+        lines.append(when(local(found["starts_at"], desk)))
+    return Card(title=money(found["total"]), lines=tuple(lines))
+
+
+def refund_issued(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{total} reembolsados`: lo que el reembolso devolvió al pago original."""
+    return Card(title=f"{money(claims(fact)['total'])} reembolsados")
+
+
+def charge_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{título}, {total}`, o `Pago, {total}` si el kernel no tiene un título: un cargo que se hizo,
+    desde su hecho `charge` (el cargo de un agente dentro de su mandato, o un enlace pagado que Claude
+    cita una vez conciliado)."""
+    found = claims(fact)
+    return Card(title=f"{title_claim(fact) if 'title' in found else 'Pago'}, {money(found['total'])}")
+
+
+def payment_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{título}, {total}`: lo que pagó el pago de prueba, desde el hecho `charge` del enlace."""
+    return Card(title=f"{title_claim(fact)}, {money(claims(fact)['total'])}")
+
+
+def link_cancelled(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{total}` / `{título}` / `Este enlace de pago se canceló porque cambiaron las reglas de {dueño}.
+    Pídelo de nuevo si todavía quieres pagar.`: la tarjeta del kernel para un enlace de pago que
+    canceló un cambio de reglas, desde el hecho `payment_link` de ese mismo enlace."""
+    return Card(title=money(claims(fact)["total"]), lines=(
+        title_claim(fact),
+        f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "
+        "Pídelo de nuevo si todavía quieres pagar."))
+
+
 # ---- La línea de abierto ahora de la cabecera pública ("Open status") --------------------------------
 
 def _day(moment: datetime, as_of: datetime) -> str:
@@ -211,3 +260,37 @@ def open_status(is_open: bool, boundary: datetime | None, as_of: datetime) -> st
     if boundary is None:
         raise ValueError("a closed business names when it opens")
     return f"Cerrado ahora. Abre {_day(boundary, as_of)} a {_at(boundary)}"
+
+
+# La tarjeta para agentes de la página pública (`render.agent_card`), clave por clave con `en`.
+AGENT_TOOLS: dict[str, str] = {
+    "native.quote": "pedir una cotización de la lista de precios",
+    "native.find_slots": "buscar horarios libres",
+    "native.book": "reservar una visita",
+    "native.payment_link": "pedir un enlace de pago para una cotización",
+    "native.charge_mandate": "pagar una cotización dentro del límite de un mandato firmado",
+    "native.capture_lead": "dejar datos de contacto",
+    "native.request_callback": "pedir que te devuelvan la llamada",
+    "native.start_verification": "verificar a un cliente con un código enviado a su contacto registrado",
+    "native.release_document": "recibir los documentos propios de un cliente verificado",
+    "payments.list_charges": "ver los cargos propios de un cliente verificado",
+}
+
+AGENT_CARD: tuple[str, ...] = (
+    "Los agentes también pueden hablar aquí con {business}. Las respuestas vienen de Claude, una IA, que sigue "
+    "las reglas de {owner}, salvo los mensajes marcados como de {owner}.",
+    "Lo que un agente puede hacer aquí: {tools}.",
+    "Envía cada solicitud a POST /api/a2a/{slug} en este sitio; {slug} es el identificador de este Desk.",
+    "Firma cada solicitud con Ed25519 y envía los encabezados X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce y "
+    "X-Agent-Sig. La firma cubre el JSON canónico RFC 8785 de desk_slug, ts, nonce y body_sha256, el SHA-256 en "
+    "hexadecimal minúscula del cuerpo exacto de la solicitud.",
+    "Una firma vale 5 minutos antes o después de su marca de tiempo, y cada nonce cubre un turno de la "
+    "conversación.",
+    "Las claves de agente solo dicen qué agente pregunta. No son credenciales del negocio: no cambian las reglas "
+    "de {owner} ni muestran datos privados de nadie, y el dinero solo se mueve como lo permiten esas reglas y un "
+    "mandato firmado.",
+)
+AGENT_CARD_NO_TOOLS = "nada por ahora"
+# Lo que dice la tarjeta en lugar del nombre del negocio o del dueño que la página pública retiene
+AGENT_CARD_BUSINESS = "este negocio"
+AGENT_CARD_OWNER = "la persona a cargo"

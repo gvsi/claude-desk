@@ -1,6 +1,6 @@
 /* SituationRow: a hairline over each row, padded 14 px top and bottom. The situation at the left,
    the outcome and its reason in a 300 px column at the right, both from the top. Narrow, the
-   outcome drops under who is asking. */
+   outcome drops under who is asking. A live row lands motion-stagger after the one before it. */
 
 .cd-situation-row {
   container: cd-situation-row / inline-size;
@@ -65,8 +65,43 @@
   flex: none;
 }
 
+/* A row that came with results that just arrived (live): it rises space-4 and fades in, its dot
+   growing from half size with it, index × motion-stagger after the first row, which lands at once.
+   Each is held at its start until its turn and let go at its end, so nothing lingers once it has
+   landed. Visual only: the rows are in the page from the start, in order, for screen readers. */
+.cd-situation-row--live,
+.cd-situation-row--live .cd-situation-row__outcome > .cd-status-dot {
+  animation: cd-situation-row-land var(--motion-base) var(--motion-ease-emphasis) backwards;
+  animation-delay: calc(var(--motion-stagger) * var(--cd-situation-row-index, 0));
+}
+
+.cd-situation-row--live .cd-situation-row__outcome > .cd-status-dot {
+  animation-name: cd-situation-row-dot;
+}
+
+@keyframes cd-situation-row-land {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+}
+
+@keyframes cd-situation-row-dot {
+  from {
+    transform: scale(0.5);
+  }
+}
+
 @container cd-situation-row (max-width: 559.98px) {
   .cd-situation-row__grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Reduced motion: every row is there at once, its dot whole. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-situation-row--live,
+  .cd-situation-row--live .cd-situation-row__outcome > .cd-status-dot {
+    animation: none;
   }
 }

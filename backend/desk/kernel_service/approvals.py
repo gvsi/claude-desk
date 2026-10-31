@@ -14,12 +14,14 @@ by the unique index on `decision_id` too:
 - `allow_once`, `allow_person`: the approval is bound to the exact action (`execute.binding_sha256`
   over the action and a fresh nonce) and re-checked on the `approved` path (step 6 of "Evaluation",
   which needs the binding and the current `approvable` verdict, not the session's mode or
-  generation: a take-over or a breaker pause doesn't cancel a held action). An action that releases
-  private data (`execute.releases_private_data`) is the exception: its session must still stand for
-  its person (`execute.session_ended`), or it ends `refused_at_execution` with the plain reason (the
-  person's session ended when their contact changed, or they were removed) and nothing runs; T2 asks
-  again under the session row. A failed re-check or a `prepare` refusal ends `refused_at_execution`
-  ("rules changed") with no intent row. Otherwise
+  generation: a take-over or a breaker pause doesn't cancel a held action; a connected tool is
+  listed again, so a refund approved after its definition changed is caught). An action that
+  releases private data (`execute.releases_private_data`) is the exception: its session must still
+  stand for its person (`execute.session_ended`), or it ends `refused_at_execution` with the plain
+  reason (the person's session ended when their contact changed, or they were removed) and nothing
+  runs; T2 asks again under the session row. A failed re-check or a `prepare` refusal ends
+  `refused_at_execution` ("rules changed", or "This isn't available right now" when a connected
+  tool's server can't list) with no intent row. Otherwise
   `approved`, `prepare`'s rows and the intent row commit together, and `execute.run_approved` runs
   the side effect as the session that asked, never the owner.
 
@@ -33,6 +35,7 @@ route, is 404, ledgered `auth` on the caller's Desk, or logged when the caller (
 """
 
 import secrets
+from collections.abc import Sequence
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -43,6 +46,7 @@ from desk.contracts import (
     ApprovalAnswer,
     ApprovalResult,
     Decision,
+    InboxNotice,
     LedgerEvent,
     Principal,
     RuleCard,
@@ -133,19 +137,21 @@ async def _refused(ctx: KernelCtx, row: DecisionRow, answer: ApprovalAnswer, ref
 
 
 async def _refused_at_execution(ctx: KernelCtx, row: DecisionRow, answer: ApprovalAnswer, check: str, *,
-                                reason: str = "rules_changed", status: str | None = None) -> ApprovalResult:
+                                reason: str = "rules_changed", status: str | None = None,
+                                inbox: Sequence[InboxNotice] = ()) -> ApprovalResult:
     """An approval that can't run: the re-check failed, and `check` names the part that did (a
-    deleted Desk is `desk`), or `prepare` refused (`prepare`), both "rules changed"; or it would
-    release private data into a session that no longer stands for its person
+    deleted Desk is `desk`, a connected tool's server that couldn't list is `unavailable`, its
+    status line `tool_unavailable`), or `prepare` refused (`prepare`), all "rules changed"; or it
+    would release private data into a session that no longer stands for its person
     (`execute.session_ended`, ledgered as `reason="session_ended"` with the part in `check`). The
     visitor's status line is the state's own, never why their session ended. A `status`, when given,
     must be a decision's status line (`decide.status_line`): any other raises ValueError, which fails
     the answer with nothing written. The approval is used up all the same, nothing ran and no intent
-    row was written."""
+    row was written. `inbox` holds the owner alerts the re-check wrote (a connected tool's drift)."""
     await decide.set_state(ctx, row, "refused_at_execution", kind="approval", status=status, summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer,
         "state": "refused_at_execution", "reason": reason, "check": check})
-    return ApprovalResult(decision=await decide.decision_contract(ctx, row, for_owner=True), execution=None,
+    return ApprovalResult(decision=await decide.decision_contract(ctx, row, inbox=inbox, for_owner=True), execution=None,
                           card_diff=None)
 
 
@@ -207,9 +213,13 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
     if execute.releases_private_data(row.tool) and (ended := await execute.session_ended(ctx, row)) is not None:
         # private data goes only to a session that still stands for its person; T2 asks again under its lock
         return await _refused_at_execution(ctx, row, answer, ended, reason="session_ended")
-    checked = await execute.recheck_under(ctx, row, path="approved")
-    if not isinstance(checked, execute.Checked):     # not a version: the part of the re-check that failed
-        return await _refused_at_execution(ctx, row, answer, checked)
+    rechecked = await execute.recheck_outcome(ctx, row, path="approved")
+    checked = rechecked.checked
+    if checked is None or rechecked.failed is not None:
+        # not a version: the part of the re-check that failed, named as an allow's is
+        failed = rechecked.failed or "policy"
+        return await _refused_at_execution(ctx, row, answer, failed, status=execute.visitor_template(failed),
+                                           inbox=rechecked.notices)
     if not await execute.prepare_intent(ctx, row, checked=checked):
         return await _refused_at_execution(ctx, row, answer, "prepare")
     await decide.set_state(ctx, row, "approved", kind="approval", summary={

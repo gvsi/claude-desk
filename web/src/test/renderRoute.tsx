@@ -5,6 +5,7 @@
  * as the app has them unless the test asks otherwise, the desktop or phone viewport, and the mock API (a fresh copy of `seed` when one is named). One app at a time: a
  * second call unmounts the first.
  */
+import { StrictMode } from 'react';
 import { createMemoryRouter, type DataRouter, type RouteObject } from 'react-router';
 import { page } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
@@ -50,6 +51,10 @@ export interface RenderRouteOptions {
   pollScale?: number;
   /** A failed read's retry delay at this fraction of real time (default 1); 0 retries at once. */
   retryScale?: number;
+  /** Renders the app inside React's StrictMode, as `main.tsx` does: on mount, renders and effects run twice. */
+  strict?: boolean;
+  /** Called with the router before the app renders, so a test can watch it from the first navigation. */
+  beforeRender?: (router: DataRouter) => void;
   /**
    * Draws the owner app as if the Connectors pages were built (true) or not, so their rows link to
    * them or don't; the app's own `CONNECTOR_PAGES_BUILT` by default.
@@ -90,6 +95,8 @@ export async function renderRoute(path: string, opts: RenderRouteOptions = {}): 
     mockStore.reset(name, { signedIn });
   }
   const router = createMemoryRouter(opts.routes ?? routes, { initialEntries: [path] });
-  const screen = await render(<App router={router} />);
+  opts.beforeRender?.(router);
+  const app = <App router={router} />;
+  const screen = await render(opts.strict === true ? <StrictMode>{app}</StrictMode> : app);
   return { screen, router };
 }

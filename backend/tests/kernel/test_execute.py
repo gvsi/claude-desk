@@ -348,12 +348,18 @@ async def test_reconciled_entries_name_the_version_their_check_ran_under(app, cl
         # the kernel dies after the side effect (an intent is left), or loses the provider's answer (unknown)
         raise Crash("the kernel died") if how == "crash" else RuntimeError("the provider's answer was lost")
 
+    seen = []
+
     def what_happened(xctx, action) -> AdapterResult | None:
+        seen.append(("reconcile", xctx.recheck_version))
         if outcome == "unknown":
             raise AdapterUnknown("the provider can't say yet")
         return AdapterResult(model_view={"ok": True}) if outcome == "executed" else None
 
-    quote.script.update(execute=side_effect_then_lost, reconcile=what_happened)
+    def undone(xctx, action) -> None:
+        seen.append(("on_failed", xctx.recheck_version))
+
+    quote.script.update(execute=side_effect_then_lost, reconcile=what_happened, on_failed=undone)
     run = (post_execute(client, visitor, decision) if path == "allow" else
            client.post(f"/approvals/{decision.decision_id}/answer", headers=rows.owner, json={"answer": "allow_once"}))
     if how == "crash":
@@ -376,6 +382,8 @@ async def test_reconciled_entries_name_the_version_their_check_ran_under(app, cl
     lost = {**base, "state": "unknown", "orphaned": True} if how == "crash" else {**base, "state": "unknown"}
     settled = [] if outcome == "unknown" else [{**base, "state": outcome, "reconciled": True}]
     assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [lost, *settled]
+    # while the adapter, asked with no re-check run, is given no version to take for one
+    assert seen == [("reconcile", None), *([("on_failed", None)] if outcome == "failed" else [])]
 
 
 def test_an_intent_is_never_written_without_the_check_it_passed():

@@ -115,7 +115,7 @@ export function CheckoutPage() {
     const { link } = load;
     return (
       <main className="cd-checkout-page">
-        {/* The business's name only as the kernel sends it. Until it does, the merchant's place
+        {/* The business's name only as the kernel sends it. Without one, the merchant's place
             stays empty and takes no room, and the card's top holds just the Test mode badge. */}
         <MockCheckout
           merchant={link.business_name ?? ''}

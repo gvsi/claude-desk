@@ -184,7 +184,8 @@ function CompactNav({ sidebar, business, inert }: { sidebar: ReactNode; business
     <>
       <div className="cd-app-shell__topbar" {...inertWhen(inert)}>
         <Mark />
-        <span className="cd-app-shell__business cd-type-control" data-copy="user">
+        {/* A name too long for the bar is cut with an ellipsis; its title holds it in full. */}
+        <span className="cd-app-shell__business cd-type-control" data-copy="user" title={business}>
           {business}
         </span>
         <button

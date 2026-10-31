@@ -73,8 +73,8 @@ const cardBlocks = allBlocks.filter((block) => block.kind === 'card');
 
 type CardField = 'title' | 'lines' | 'options' | 'href';
 
-// The master plan's "Clauses" row: quote and charges fill title and lines, booking_options its
-// options, payment_link and document_link title and href, the rest title.
+// The master plan's "Clauses" row: quote, charges and link_cancelled fill title and lines,
+// booking_options its options, payment_link and document_link title and href, the rest title.
 const CLAUSE_FIELDS = {
   quote: ['title', 'lines'],
   booking_options: ['options'],
@@ -92,6 +92,7 @@ const CLAUSE_FIELDS = {
   charge_confirmed: ['title'],
   callback_confirmed: ['title'],
   payment_confirmed: ['title'],
+  link_cancelled: ['title', 'lines'],
 } satisfies Record<ClauseTemplate, readonly CardField[]>;
 
 // The proxied paths that are the only place a link token reaches a visitor.
@@ -271,12 +272,22 @@ function claimProblems(text: string): string[] {
 }
 
 // Cards whose text is a statement: the charter's hours, contact and policies, the kernel's
-// handoff, verification and callback commitments, and the owner's own words. Fixture prose
-// restates no card's statement, so the stories show prose that adds nothing the cards don't
-// already carry.
+// handoff, verification, callback and cancelled-link statements, and the owner's own words.
+// Fixture prose restates no card's statement, so the stories show prose that adds nothing the
+// cards don't already carry.
 const STATEMENT_TEMPLATES: readonly ClauseTemplate[] = [
-  'hours', 'contact', 'policy', 'handoff', 'verify_prompt', 'callback_confirmed', 'owner_said',
+  'hours', 'contact', 'policy', 'handoff', 'verify_prompt', 'callback_confirmed', 'owner_said', 'link_cancelled',
 ];
+
+/**
+ * The statement a statement card makes. A cancelled link's card first names the link from its
+ * fact, its amount and then what it was for, which prose may name as it may a payment link's
+ * title; only its last line is the kernel's statement.
+ */
+function statementOf(block: RenderedBlock): string {
+  if (block.template === 'link_cancelled') return block.lines?.at(-1) ?? block.text;
+  return block.text;
+}
 
 // The signed line an executed receipt shows a visitor, per tool: what ran and whose records it
 // used, never a bare "Done". `{owner}` is the owner's display name.
@@ -340,7 +351,7 @@ const statementSentences = [
   ...new Set(
     cardBlocks
       .filter((block) => STATEMENT_TEMPLATES.includes(block.template as ClauseTemplate))
-      .flatMap((block) => block.text.split(/(?<=[.!?])\s+|\n/u))
+      .flatMap((block) => statementOf(block).split(/(?<=[.!?])\s+|\n/u))
       .map(wordsOf)
       .filter((sentence) => sentence !== ''),
   ),
@@ -429,6 +440,61 @@ describe('fixtures', () => {
     expect(card('es').lines).toEqual(['Llegada de 14:00 a 16:00', `Con ${owner}`]);
     // No booking ID in what the visitor sees; the fact it comes from keeps its id.
     for (const language of ['en', 'es'] as const) expect(card(language).text).not.toMatch(/B-77|Booking|Reserva/);
+  });
+
+  test('link_cancelled_card_has_the_kernels_shape', () => {
+    // The kernel renders a cancelled link's card from that link's own payment_link fact: its total
+    // as the title, then its title claim and a line naming the owner (render/en.py and es.py
+    // `link_cancelled`), in this order.
+    const renderer = (language: string) => {
+      const source = readFileSync(path.join(BACKEND, 'kernel_service', 'render', `${language}.py`), 'utf8');
+      const body = /^def link_cancelled\(fact: Fact \| None, desk: DeskInfo\) -> Card:\n(?:(?: {4}.*)?\n)+/m.exec(source)?.[0];
+      if (!body) throw new Error(`render/${language}.py no longer defines link_cancelled`);
+      return body;
+    };
+    const fragments = {
+      en: [
+        `f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "`,
+        '"Ask again if you still want to pay."',
+      ],
+      es: [
+        'f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "',
+        '"Pídelo de nuevo si todavía quieres pagar."',
+      ],
+    };
+    for (const language of ['en', 'es'] as const) {
+      const body = renderer(language);
+      const order = ['return Card(title=money(claims(fact)["total"]), lines=(', 'title_claim(fact),', ...fragments[language]];
+      for (const fragment of order) expect(body, language).toContain(fragment);
+      const at = order.map((fragment) => body.indexOf(fragment));
+      expect(at, language).toEqual([...at].sort((a, b) => a - b));
+    }
+
+    // The deposit link is for the seed's deposit item, whose one title the owner wrote and the
+    // kernel shows unchanged in both languages, at $20.00 (render/cards.py `money`).
+    const seed = readFileSync(path.join(BACKEND, 'kernel_service', 'seed.py'), 'utf8');
+    expect(seed).toContain('PriceItem(item_id="deposit", title="Service call deposit", unit_cents=2000)');
+    const owner = rivera.business.ownerName;
+    const line = {
+      en: `This payment link was cancelled because ${owner}'s rules changed. Ask again if you still want to pay.`,
+      es: `Este enlace de pago se canceló porque cambiaron las reglas de ${owner}. Pídelo de nuevo si todavía quieres pagar.`,
+    };
+    for (const language of ['en', 'es'] as const) {
+      // It cites the same fact as the deposit's payment link card, which reads `{title}, {total}`.
+      const link = rivera.blocks.payment_link[language];
+      expect(link.fact_id, language).toBe('payment_link:L-3301');
+      expect(link.title, language).toBe('Service call deposit, $20.00');
+      expect(rivera.blocks.link_cancelled[language], language).toEqual({
+        kind: 'card',
+        template: 'link_cancelled',
+        text: ['$20.00', 'Service call deposit', line[language]].join('\n'),
+        fact_id: 'payment_link:L-3301',
+        title: '$20.00',
+        lines: ['Service call deposit', line[language]],
+        href: null,
+        options: [],
+      });
+    }
   });
 
   test('card_amounts_print_cents_as_the_kernel_does', () => {
@@ -644,6 +710,15 @@ describe('fixtures', () => {
   test('fixture_prose_restates_no_card_statement', () => {
     // The oracle catches a charter policy repeated in prose, so a clean result means something.
     expect(restatedStatements('Thanks. Maria texts before she arrives.')).toEqual(['maria texts before she arrives']);
+    // It catches the kernel's cancelled-link line repeated in prose, in both languages, but not
+    // prose naming the link, as a payment link's own title may be named.
+    expect(restatedStatements("Sorry. This payment link was cancelled because Maria Rivera's rules changed.")).toEqual([
+      "this payment link was cancelled because maria rivera's rules changed",
+    ]);
+    expect(restatedStatements('Lo siento. Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera.')).toEqual([
+      'este enlace de pago se canceló porque cambiaron las reglas de maria rivera',
+    ]);
+    expect(restatedStatements("To hold the visit, here's a link for the service call deposit.")).toEqual([]);
     expect(statementSentences.length).toBeGreaterThan(10);
 
     for (const block of proseBlocks) {

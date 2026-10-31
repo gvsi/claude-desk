@@ -108,7 +108,7 @@ describe('mock checkout', () => {
 
     // Without the business's name, the payment's alone; before a link shows, the app's own name.
     const token = issueLink('en');
-    const asTheApiSendsIt: PaymentLinkOut = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
+    const asTheApiSendsIt: Omit<PaymentLinkOut, 'business_name' | 'customer_name'> = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
     mockStore.inject({ route: 'paymentLink', status: 200, times: 1, body: asTheApiSendsIt });
     const unnamed = await renderRoute(`/pay/${token}`);
     await expect.element(unnamed.screen.getByRole('heading', { name: 'Service call deposit' })).toBeVisible();
@@ -189,11 +189,11 @@ describe('mock checkout', () => {
   });
 
   it('checkout_leaves_out_a_missing_business_name', async () => {
-    // Today's API sends the kernel's view of the link alone: the business's name comes with the
-    // kernel payments plan (plan 01c). Until then the checkout works as it is and leaves the name out.
+    // The kernel's view names the business, but a view without the name (as the API sent before
+    // the kernel payments plan, plan 01c) still works: the checkout leaves the name out.
     const token = issueLink('en', 2000);
-    const asTheApiSendsIt: PaymentLinkOut = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
-    mockStore.inject({ route: 'paymentLink', status: 200, times: 10_000, body: asTheApiSendsIt });
+    const withoutTheName: Omit<PaymentLinkOut, 'business_name' | 'customer_name'> = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
+    mockStore.inject({ route: 'paymentLink', status: 200, times: 10_000, body: withoutTheName });
     const { screen } = await renderRoute(`/pay/${token}`);
     await expect.element(screen.getByRole('heading', { name: 'Service call deposit' })).toBeVisible();
     await expect.element(screen.getByText('This page is part of a chat with Claude, an AI.')).toBeVisible();
@@ -314,8 +314,9 @@ describe('mock checkout', () => {
     await expect.element(open.screen.getByText(CANCELLED)).not.toBeInTheDocument();
     expect(requests('completePayment')).toHaveLength(1);
 
-    // The chat shows the kernel's link_cancelled line once, from the Desk, in the design system's
-    // cancelled link card: its label and the line as written, with no link, button or amount.
+    // The chat shows the kernel's link_cancelled card once, from the Desk, as its reply card: the
+    // label beside the payment link's icon, the link's amount as the headline, then what the link
+    // was for and the kernel's line, with no link, button or test-payment note.
     expect(deskMessages()).toHaveLength(1);
     const chat = await renderRoute(CHAT);
     await ready(chat.screen);
@@ -324,8 +325,17 @@ describe('mock checkout', () => {
     expect(line.elements()).toHaveLength(1);
     const card = chat.screen.getByRole('article', { name: 'Payment link cancelled' });
     await expect.element(card).toBeVisible();
-    expect(card.element().textContent).toBe(`Payment link cancelled${LINK_CANCELLED.en}`);
+    expect(card.element().textContent).toBe(`Payment link cancelled$20.00Service call deposit${LINK_CANCELLED.en}`);
+    expect(card.element().querySelector('.cd-reply-card__headline')?.textContent).toBe('$20.00');
+    expect([...card.element().querySelectorAll('.cd-reply-card__detail')].map((detail) => detail.textContent)).toEqual([
+      'Service call deposit',
+      LINK_CANCELLED.en,
+    ]);
+    const icon = card.element().querySelector('.cd-reply-card__label svg');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect([...(icon?.querySelectorAll('rect, path') ?? [])].map((shape) => shape.tagName)).toEqual(['rect', 'path']);
     expect(card.element().querySelectorAll('a, button')).toHaveLength(0);
+    expect(card.element().textContent).not.toContain('Test payment');
     // Its receipt sits under it, as under every message.
     const row = card.element().closest('.cd-transcript-row');
     expect(row?.querySelector('.cd-margin-receipt')).not.toBeNull();

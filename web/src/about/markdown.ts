@@ -5,6 +5,7 @@
  * from this reader, throws a `MarkdownError` naming its line, so a document the page can't show as written
  * fails its tests instead of reaching the page.
  */
+import { minutesToRead, wordCount } from './readTime.ts';
 
 /** Text inside a block. */
 export type Inline =
@@ -343,10 +344,9 @@ export function curlQuotes(blocks: Block[]): Block[] {
   });
 }
 
-/** Minutes to read the article: its words at 230 a minute, rounded, and at least one. */
+/** Minutes to read the article: its words at the About pages' speed (`readTime.ts`), rounded, and at least one. */
 export function readingMinutes(blocks: Block[]): number {
-  const words = documentText(blocks).join(' ').split(/\s+/).filter(Boolean).length;
-  return Math.max(1, Math.round(words / 230));
+  return minutesToRead(wordCount(documentText(blocks)));
 }
 
 /**

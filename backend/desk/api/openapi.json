@@ -194,7 +194,7 @@
     "/api/owner/desks": {
       "get": {
         "summary": "Desks",
-        "description": "The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher.",
+        "description": "The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher. Each Desk\nnames its setup interview while that isn't finished.",
         "operationId": "owner_desks",
         "responses": {
           "200": {
@@ -3359,7 +3359,7 @@
     "/api/public/desks/{slug}/session": {
       "get": {
         "summary": "Visitor Session",
-        "description": "The session's state and its transcript as the visitor sees it: their own words, what was delivered to them\nand where the owner joined and left, never model, note, owner-only or other sessions' rows. `last_seq` is read in\nthe same snapshot, so the event stream opened after it neither misses nor repeats an item.",
+        "description": "The session's state and its transcript as the visitor sees it: their own words, what was delivered to them\nand where the owner joined and left, never model, note, owner-only or other sessions' rows.\n\nThe items, `last_seq` and then the state (the session's kernel_ro row) are read in one snapshot. The kernel\ncommits a take-over or a hand-back before the API writes its event, so the state holds every change whose event\n`last_seq` covers, and a later change's event comes past it: the event stream opened after `last_seq` neither\nmisses nor repeats an item, and agrees with the state it starts from. The mode `GET /whoami` answered with is\nolder and could predate a hand-back whose event `last_seq` covers. A session closed by then, or no longer the\nkernel's, is 401 `no_session`, which clears the cookie.",
         "operationId": "public_visitor_session",
         "parameters": [
           {
@@ -7627,7 +7627,8 @@
               "refund_issued",
               "charge_confirmed",
               "callback_confirmed",
-              "payment_confirmed"
+              "payment_confirmed",
+              "link_cancelled"
             ],
             "title": "Template"
           },
@@ -8349,6 +8350,33 @@
         ],
         "title": "DeskSeed"
       },
+      "DeskSetup": {
+        "properties": {
+          "interview_id": {
+            "type": "string",
+            "title": "Interview Id"
+          },
+          "step": {
+            "type": "string",
+            "enum": [
+              "questions",
+              "tools",
+              "rules",
+              "situations",
+              "safety_check",
+              "preview"
+            ],
+            "title": "Step"
+          }
+        },
+        "type": "object",
+        "required": [
+          "interview_id",
+          "step"
+        ],
+        "title": "DeskSetup",
+        "description": "A Desk's setup interview that hasn't gone live: its ID (`GET /api/owner/setup/{id}`) and the step it is at.\nSetup finishes at its go-live step (step `live`); an interview whose rules are confirmed but that hasn't gone live\n(`preview`) is still unfinished, since going live is setup's last step."
+      },
       "DeskSummary": {
         "properties": {
           "desk_id": {
@@ -8377,6 +8405,16 @@
           "answering": {
             "type": "boolean",
             "title": "Answering"
+          },
+          "setup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeskSetup"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -8386,9 +8424,11 @@
           "name",
           "business_name",
           "hours",
-          "answering"
+          "answering",
+          "setup"
         ],
-        "title": "DeskSummary"
+        "title": "DeskSummary",
+        "description": "One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back\ninto it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.\n`answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its\nsetup."
       },
       "DeskUpdated": {
         "properties": {
@@ -10031,6 +10071,33 @@
               "es"
             ],
             "title": "Language"
+          },
+          "business_name": {
+            "type": "string",
+            "title": "Business Name"
+          },
+          "customer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Name"
+          },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "rules_changed"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason"
           }
         },
         "type": "object",
@@ -10038,7 +10105,9 @@
           "title",
           "amount_cents",
           "state",
-          "language"
+          "language",
+          "business_name",
+          "customer_name"
         ],
         "title": "PaymentLinkView"
       },
@@ -10649,7 +10718,8 @@
                   "refund_issued",
                   "charge_confirmed",
                   "callback_confirmed",
-                  "payment_confirmed"
+                  "payment_confirmed",
+                  "link_cancelled"
                 ]
               },
               {
@@ -12081,6 +12151,22 @@
               "disabled"
             ],
             "title": "Status"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "new",
+                  "changed",
+                  "delisted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
           }
         },
         "type": "object",

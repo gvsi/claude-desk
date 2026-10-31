@@ -8,7 +8,7 @@
  */
 import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
-import type { EvMessage, RenderedBlock, SessionState } from '../api/contracts.ts';
+import type { SessionState } from '../api/contracts.ts';
 import {
   Button,
   CHAT_ENDED_COPY,
@@ -16,7 +16,6 @@ import {
   Composer,
   ConceptFooter,
   EmptyState,
-  LinkCancelledCard,
   MarginReceipt,
   NEW_CHAT_LABEL,
   Notice,
@@ -61,6 +60,21 @@ export interface PublicChatProps {
   onSession?: (session: SessionState) => void;
   /** Links under "For AI agents" in the about column, on the public page itself. */
   aboutLinks?: { label: string; href: string }[];
+  /**
+   * One of "Try to break it"'s fixed ideas (`BREAK_IT_IDEAS`), which this browser's Today handed to
+   * the page (`takeBreakItHandoff`): typed into the composer once the chat can be written in, as
+   * plain text, then sent only by the visitor's own Send, as typed words are, under the same limit
+   * and checks. Read on mount only. Never words from a link: the page passes only an idea it looked
+   * up from the hand-off.
+   */
+  idea?: string;
+}
+
+/** Words to put in the composer once the chat can be used, and whether they take focus there. */
+interface Carried {
+  text: string;
+  /** `always`: they do. `if_free`: only when nothing else on the page has focus. */
+  focus: 'always' | 'if_free';
 }
 
 /** Cards that report something done: their executed receipt draws the check. */
@@ -71,43 +85,6 @@ function initialsOf(name: string): string {
   const first = words[0];
   const last = words.length > 1 ? words.at(-1) : undefined;
   return [first, last].map((word) => (word === undefined ? '' : (Array.from(word)[0] ?? ''))).join('');
-}
-
-/**
- * The kernel's card for a payment link a confirmed rule change cancelled, which the Desk sends as
- * its own message (author `desk`). Its template isn't one of the generated contract's
- * `ClauseTemplate`s yet (kernel payments, plan 01c), so it is named here; the design system's
- * `LinkCancelledCard` shows its line, the block's `title`, as written.
- */
-const LINK_CANCELLED_TEMPLATE: string = 'link_cancelled';
-
-function isLinkCancelled(block: RenderedBlock): boolean {
-  return block.kind === 'card' && block.template === LINK_CANCELLED_TEMPLATE;
-}
-
-/**
- * A delivered message from Claude or the Desk, its blocks in order: each cancelled link as the
- * design system's card for it, and every other run of blocks as one `ClaudeMessage`.
- */
-function DeliveredMessage({ ev, ownerName }: { ev: EvMessage; ownerName: string }) {
-  if (!ev.blocks.some(isLinkCancelled)) return <ClaudeMessage blocks={ev.blocks} language={ev.language} ownerName={ownerName} />;
-  const parts: ReactNode[] = [];
-  let run: RenderedBlock[] = [];
-  const endRun = () => {
-    if (run.length === 0) return;
-    parts.push(<ClaudeMessage key={`run-${parts.length}`} blocks={run} language={ev.language} ownerName={ownerName} />);
-    run = [];
-  };
-  ev.blocks.forEach((block, index) => {
-    if (!isLinkCancelled(block)) {
-      run.push(block);
-      return;
-    }
-    endRun();
-    parts.push(<LinkCancelledCard key={`cancelled-${index}`} line={block.title ?? block.text} language={ev.language} />);
-  });
-  endRun();
-  return parts.length === 1 ? parts[0] : <div className="cd-public-chat__message">{parts}</div>;
 }
 
 function failureLine(failure: SendFailure | undefined, language: CopyLanguage, copy: PublicCopy): string {
@@ -186,7 +163,7 @@ function ChatRowView({ row, ownerName, language, onResend, after = [] }: RowProp
       {ev.author === 'owner' ? (
         <PersonMessage name={ownerName} blocks={ev.blocks} language={ev.language} />
       ) : (
-        <DeliveredMessage ev={ev} ownerName={ownerName} />
+        <ClaudeMessage blocks={ev.blocks} language={ev.language} ownerName={ownerName} />
       )}
     </TranscriptRow>
   );
@@ -461,7 +438,7 @@ function PublicState({ embedded, language, children }: { embedded: boolean; lang
   );
 }
 
-export function PublicChat({ slug, embedded = false, previewDeskId, onSession, aboutLinks }: PublicChatProps) {
+export function PublicChat({ slug, embedded = false, previewDeskId, onSession, aboutLinks, idea }: PublicChatProps) {
   const chat = useVisitorChat(slug, previewDeskId);
   // Page chrome follows the browser; each message's cards follow the message's own language.
   const [language] = useState(browserLanguage);
@@ -508,14 +485,18 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
   }, [drawn, chat.state.rows, shown]);
 
-  // Words that didn't send when the chat ended wait in the new chat's composer once it can be used.
-  const carried = useRef<string | null>(null);
+  // Words wait in the composer once it can be used: the link's idea as the page opens, and words
+  // that didn't send when the chat ended, in the new chat's. Neither is sent without Send. Words
+  // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
+  // when nothing else has it, so a visitor who moved on while the chat opened stays where they are.
+  const carried = useRef<Carried | null>(idea === undefined ? null : { text: idea, focus: 'if_free' });
   useEffect(() => {
-    const text = carried.current;
+    const words = carried.current;
     const box = composerRef.current?.querySelector('textarea');
-    if (!ready || text === null || !box) return;
+    if (!ready || words === null || !box) return;
     carried.current = null;
-    fillComposer(box, text);
+    const free = document.activeElement === null || document.activeElement === document.body;
+    fillComposer(box, words.text, { focus: words.focus === 'always' || free });
   }, [ready]);
 
   if (chat.status === 'not_found') {
@@ -598,7 +579,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
 
   const startNewChat = () => {
     const unsent = unsentWhenEnded(state.rows);
-    carried.current = unsent.length > 0 ? unsent.join('\n') : null;
+    // Words that didn't send go back in the new chat's box; with none, an idea still waiting stays.
+    carried.current = unsent.length > 0 ? { text: unsent.join('\n'), focus: 'always' } : carried.current;
     chat.newChat();
   };
   const tryAgain = (

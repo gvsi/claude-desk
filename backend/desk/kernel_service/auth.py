@@ -1,14 +1,18 @@
-"""Who is calling: session tokens, owner tokens and the session-state checks.
+"""Who is calling: session tokens, owner tokens, agent signatures and the session-state checks.
 
 No call names its principal. A visitor sends `X-Session-Token`, which must hash to the
 `secret_hash` of the session the call names; the owner sends `X-Owner-Session`, which must hash
 to an open owner session of the copy the call touches. Tokens are 256-bit CSPRNG values, stored
-only as their sha256, and session IDs are 128-bit.
+only as their sha256, and session IDs are 128-bit. An agent session has no token: every call for
+it carries the agent's signature headers instead (`AGENT_HEADERS`), checked by
+`agents.authenticate` against the key the session was opened with. A call carries exactly one of
+the three credentials.
 
 Every refusal is an `AuthError`: the answer is a bare `KernelError{code}`, and the attempt goes
 on the ledger of the session or Desk the request named as an `auth` entry `{route, reason}` (the
-route template and a fixed reason code, never a token). A request that names no existing session
-or Desk has no ledger to go on, so it is logged as one `auth_unattributed` line instead.
+route template and a fixed reason code, never a token), or an `agent_auth` entry for an agent's
+signature, key, nonce or mandate (`agents.AgentAuthError`). A request that names no existing
+session or Desk has no ledger to go on, so it is logged as one `auth_unattributed` line instead.
 """
 
 import hashlib
@@ -35,13 +39,21 @@ log = logging.getLogger("desk.kernel_service")
 
 SESSION_HEADER = "X-Session-Token"
 OWNER_HEADER = "X-Owner-Session"
+# An agent's signature (`AgentAuth`) and the sha256 of the A2A body it signs, forwarded by the API.
+AGENT_KEY_HEADER, AGENT_TS_HEADER, AGENT_NONCE_HEADER, AGENT_SIG_HEADER, AGENT_BODY_HEADER = AGENT_HEADERS = (
+    "X-Agent-Key-Id", "X-Agent-Ts", "X-Agent-Nonce", "X-Agent-Sig", "X-Agent-Body-Sha256")
 IDLE_LIMIT = timedelta(hours=24)          # visitor and agent sessions close after this long idle
 
 REASONS = frozenset({
     "unknown_session", "bad_token", "wrong_copy", "closed", "stale_generation", "bad_owner_token",
-    "agent_auth_unavailable", "preview_unavailable", "wrong_session", "mode_owner", "mode_paused", "call_conflict",
+    "preview_unavailable", "wrong_session", "mode_owner", "mode_paused", "call_conflict",
     "unknown_decision", "unknown_handoff",
 })
+
+
+def agent_signed(request: Request) -> bool:
+    """Whether the call carries any agent signature header (all five are checked when it does)."""
+    return any(header in request.headers for header in AGENT_HEADERS)
 
 
 def new_token() -> str:
@@ -77,19 +89,25 @@ class OwnerCtx:
 
 
 class AuthError(KernelFailure):
-    """A refused credential or session state, ledgered on `named`'s Desk, or logged when `named` is None."""
+    """A refused credential or session state, ledgered on `named`'s Desk as a `kind` entry
+    `{route, reason, **extra}`, or logged when `named` is None."""
 
-    def __init__(self, status: int, code: str, reason: str, *, route: str, named: Named | None = None):
-        if reason not in REASONS:
-            raise ValueError(f"{reason!r} is not an auth reason")
-        persist = None if named is None else partial(_ledger_refusal, named=named, route=route, reason=reason)
+    kind = "auth"
+    reasons = REASONS
+
+    def __init__(self, status: int, code: str, reason: str, *, route: str, named: Named | None = None,
+                 extra: dict | None = None):
+        if reason not in self.reasons:
+            raise ValueError(f"{reason!r} is not an {self.kind} reason")
+        summary = {"route": route, "reason": reason, **(extra or {})}
+        persist = None if named is None else partial(_ledger_refusal, named=named, kind=self.kind, summary=summary)
         super().__init__(status, code, reason, persist=persist)
         self.route = route
         self.named = named
 
 
-async def _ledger_refusal(ctx: KernelCtx, *, named: Named, route: str, reason: str) -> None:
-    """The refusal's `auth` entry, in the fresh transaction `KernelFailure.persist` runs in."""
+async def _ledger_refusal(ctx: KernelCtx, *, named: Named, kind: str, summary: dict) -> None:
+    """The refusal's entry, in the fresh transaction `KernelFailure.persist` runs in."""
     copy = ctx.bind(named.copy_id)
     desk_id, session_id = named.desk_id, named.session_id
     if named.decision_id is not None:
@@ -100,11 +118,10 @@ async def _ledger_refusal(ctx: KernelCtx, *, named: Named, route: str, reason: s
         desk_id = (await ctx.db.execute(copy.scoped(
             select(SessionRow.desk_id).where(SessionRow.session_id == session_id)))).scalar_one_or_none()
     if desk_id is None:   # an owner session of another copy: it belongs to the copy and has no Desk ledger
-        log.warning("auth_unattributed route=%s reason=%s", route, reason)
+        log.warning("auth_unattributed route=%s reason=%s", summary["route"], summary["reason"])
         return
     await ledger.append(ctx, copy_id=named.copy_id, desk_id=desk_id,
-                        event=LedgerEvent(kind="auth", origin="kernel", session_id=session_id,
-                                          summary={"route": route, "reason": reason}))
+                        event=LedgerEvent(kind=kind, origin="kernel", session_id=session_id, summary=summary))
 
 
 async def named_session(ctx: KernelCtx, session_id: str | None, *, copy_id: str | None = None) -> Named | None:
@@ -118,24 +135,41 @@ async def named_session(ctx: KernelCtx, session_id: str | None, *, copy_id: str 
 
 async def caller(ctx: KernelCtx, request: Request, session_id: str | None, *,
                  copy_id: str | None = None) -> Literal["owner", "session"]:
-    """Which credential a call that takes either carries: the owner's or a session's. Neither, or
-    both, is 401, ledgered on the session the call names (`session_id`, of the copy `copy_id` when
-    the request's transaction has already read it there), as any refusal is."""
-    owner, session = OWNER_HEADER in request.headers, SESSION_HEADER in request.headers
-    if owner != session:
+    """Which credential a call that takes either carries: the owner's, or a session's (its token,
+    or an agent's signature). None, or more than one, is 401, ledgered on the session the call
+    names (`session_id`, of the copy `copy_id` when the request's transaction has already read it
+    there), as any refusal is: `auth` `bad_token`, or, for a call with no credential at all naming
+    an agent session, whose credential is its signature, `agent_auth` `unsigned`."""
+    owner, session, agent = OWNER_HEADER in request.headers, SESSION_HEADER in request.headers, agent_signed(request)
+    if owner + session + agent == 1:
         return "owner" if owner else "session"
-    raise AuthError(401, "auth", "bad_token", route=route_template(request),
-                    named=await named_session(ctx, session_id, copy_id=copy_id))
+    route = route_template(request)
+    named = await named_session(ctx, session_id, copy_id=copy_id)
+    if not (owner or session or agent) and named is not None and await _names_an_agent(ctx, named):
+        from desk.kernel_service import agents     # agents builds on this module
+
+        raise agents.AgentAuthError("unsigned", route=route, named=named)
+    raise AuthError(401, "auth", "bad_token", route=route, named=named)
+
+
+async def _names_an_agent(ctx: KernelCtx, named: Named) -> bool:
+    """Whether the session `named` names is an agent session, read in its copy."""
+    copy = ctx.bind(named.copy_id)
+    kind = (await ctx.db.execute(copy.scoped(select(SessionRow.kind).where(
+        SessionRow.session_id == named.session_id)))).scalar_one_or_none()
+    return kind == "agent"
 
 
 async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, generation: int | None = None,
                           desk_id: str | None = None, copy_id: str | None = None, seen: bool = True) -> SessionRow:
-    """The visitor or agent session `session_id`, once `X-Session-Token` proves it ("Session state
-    responses", first four rows in order). Binds the request's transaction to the session's copy
-    (`copy_id`: see `authenticate_session`). The session is seen now (`last_seen_at`), a write
-    the transaction's next statement sends, which locks the row until it commits; a route that
-    calls a model before it commits passes `seen=False` and writes it at its end instead
-    (`/check_reply`, in `reply_check.finalize`), so a take-over never waits for the model."""
+    """The visitor or agent session `session_id`, once its credential proves it ("Session state
+    responses", first four rows in order): a visitor's `X-Session-Token`, or for an agent session
+    the agent's signature, by the key the session was opened with, in a turn that hasn't ended
+    (`agents.authenticate`). Binds the request's transaction to the session's copy (`copy_id`: see
+    `authenticate_session`). The session is seen now (`last_seen_at`), a write the transaction's
+    next statement sends, which locks the row until it commits; a route that calls a model before
+    it commits passes `seen=False` and writes it at its end instead (`/check_reply`, in
+    `reply_check.finalize`), so a take-over never waits for the model."""
     row = await authenticate_session(ctx, request, session_id, desk_id=desk_id, copy_id=copy_id)
     require_open(ctx, request, row, generation=generation)
     if seen:
@@ -145,8 +179,10 @@ async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, 
 
 async def authenticate_session(ctx: KernelCtx, request: Request, session_id: str, *,
                                desk_id: str | None = None, copy_id: str | None = None) -> SessionRow:
-    """The first two session-state rows for the visitor or agent session `session_id`:
-    `X-Session-Token` proves it, and it belongs to `desk_id` when the call names one. Binds the
+    """The first two session-state rows for the visitor or agent session `session_id`: its
+    credential proves it (a visitor's `X-Session-Token`; for an agent session the agent's
+    signature, by the key the session was opened with, in a turn that hasn't ended,
+    `agents.authenticate`), and it belongs to `desk_id` when the call names one. Binds the
     request's transaction to the session's copy and returns the row as read, unlocked and with its
     state unchecked: `require_session` runs the open and generation checks on it, and
     `check_caller` (for `/decide`, after `lock_session`) runs them itself, so that from here on a
@@ -170,8 +206,13 @@ async def authenticate_session(ctx: KernelCtx, request: Request, session_id: str
         raise AuthError(401, "auth", "unknown_session", route=route)
     named = Named(copy_id=copy_id, desk_id=row.desk_id, session_id=row.session_id) if row.desk_id else None
     token = request.headers.get(SESSION_HEADER)
-    # owner sessions authenticate only with X-Owner-Session (require_owner)
-    if row.kind == "owner" or not token or not hmac.compare_digest(row.secret_hash or "", hash_token(token)):
+    if row.kind == "agent" and named is not None and not token and OWNER_HEADER not in request.headers:
+        from desk.kernel_service import agents     # agents builds on this module
+
+        await agents.authenticate(ctx, request, row, route=route, named=named)
+    # owner sessions authenticate only with X-Owner-Session (require_owner), agent sessions only by signature
+    elif (row.kind != "visitor" or not token or agent_signed(request)
+          or not hmac.compare_digest(row.secret_hash or "", hash_token(token))):
         raise AuthError(401, "auth", "bad_token", route=route, named=named)
     if desk_id is not None and desk_id != row.desk_id:
         raise AuthError(404, "not_found", "wrong_copy", route=route, named=named)
@@ -196,7 +237,7 @@ async def require_session_token(ctx: KernelCtx, request: Request, *, watch: bool
     done and answers nothing else passes (`POST /ledger/append`): no recheck may take a record back."""
     route = route_template(request)
     token = request.headers.get(SESSION_HEADER)
-    token_hash = hash_token(token) if token else None
+    token_hash = hash_token(token) if token and not agent_signed(request) else None
     copy_id = await repo.copy_of_session_token(ctx, token_hash) if token_hash else None
     if copy_id is None:
         raise AuthError(401, "auth", "bad_token", route=route)

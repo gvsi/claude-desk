@@ -57,17 +57,23 @@ PERMIT_ALL = ('@id("test_permit_all") @card("test-permit-all") @tier("auto") '
               '@applies_to("effect:charge,effect:pay_out")\npermit (principal, action, resource);')
 
 
+# The seed's cards without its own payment link card (`rv-link`), so the stand-in link these tests
+# enable is decided by the charge card each test gives it, or by none.
+SEED_CARDS = [card for card in RIVERA_CARDS if card.applies_to != "native.payment_link"]
+
+
 def charge_card(card_id: str, cents: int, **fields) -> RuleCard:
     return RuleCard(card_id=card_id, applies_to="effect:charge", mode="auto", who="anyone", max_amount_cents=cents,
                     reason=fields.pop("reason", "Payment links up to a limit."), **fields)
 
 
 async def enable(app: FastAPI, desk: Rivera, fake: FakeAdapter) -> FakeAdapter:
-    """Registers `fake` as its tool's adapter and enables it on the Desk."""
+    """Registers `fake` as its tool's adapter and enables it on the Desk, in place of the Desk's row
+    for the real adapter, if it has one."""
     adapters.register(fake, replace=True)
     async with kernel_ctx(app) as ctx:
         ctx.bind(desk.copy_id)
-        ctx.db.add(fake.tools_row(desk.copy_id, desk.desk_id))
+        await ctx.db.merge(fake.tools_row(desk.copy_id, desk.desk_id))
     return fake
 
 
@@ -269,7 +275,7 @@ async def test_baseline_holds_auto_money_above_the_context_cap(desk_prove, app, 
     with_receipt_line(monkeypatch)
     link = await enable(app, copy, payment_link(20_000))
     version = await draft_and_confirm(client, copy.owner_token, copy.desk_id,
-                                      [*RIVERA_CARDS, charge_card("links", 30_000)])
+                                      [*SEED_CARDS, charge_card("links", 30_000)])
     assert (version.version, version.auto_money_cap_cents) == (2, 50_000)
     allowed = await link_for(client, visitor, link, 20_000, call_id="link-200")
     assert (allowed.outcome, allowed.policy_version) == ("allow", 2)
@@ -314,7 +320,7 @@ def dollars_in(sentence: str) -> list[int]:
 async def test_a_version_is_proved_at_its_own_cap(desk_prove, app, client, registry, monkeypatch):
     copy = await rivera(app, client)
     await enable(app, copy, payment_link(1))
-    cards = [*RIVERA_CARDS, charge_card("links", 30_000)]
+    cards = [*SEED_CARDS, charge_card("links", 30_000)]
     drafted = {}
     for cap in (30_000, 50_000):
         response = await post_draft(client, copy, cards, 1, auto_money_cap_cents=cap)
@@ -337,7 +343,7 @@ async def test_a_version_is_proved_at_its_own_cap(desk_prove, app, client, regis
         return await prove(inputs)
 
     monkeypatch.setattr(activation, "prove", spy)
-    response = await post_draft(client, copy, [*RIVERA_CARDS, charge_card("links", 10_000)], 1,
+    response = await post_draft(client, copy, [*SEED_CARDS, charge_card("links", 10_000)], 1,
                                 auto_money_cap_cents=10_000)
     assert (response.status_code, response.json()["status"]) == (200, "proved")
     [inputs] = proved_inputs
@@ -349,7 +355,7 @@ async def test_a_version_is_proved_at_its_own_cap(desk_prove, app, client, regis
     monkeypatch.setattr(compiler, "validate_cards", lambda *args, **kwargs: [])
     monkeypatch.setattr(compiler, "compile_cards", lambda cards, profiles, *, auto_money_cap_cents, **kwargs:
                         compile_cards(cards, profiles, auto_money_cap_cents=AUTO_MONEY_HARD_CAP_CENTS, **kwargs))
-    response = await post_draft(client, copy, [*RIVERA_CARDS, charge_card("links", 50_000)], 1,
+    response = await post_draft(client, copy, [*SEED_CARDS, charge_card("links", 50_000)], 1,
                                 auto_money_cap_cents=8_000)
     assert response.status_code == 200, response.text
     rejected = response.json()
@@ -371,7 +377,7 @@ async def rivera_with_links(app: FastAPI, client: httpx.AsyncClient, cents: int,
     copy = await rivera(app, client)
     link = await enable(app, copy, payment_link(1))
     version = await draft_and_confirm(client, copy.owner_token, copy.desk_id,
-                                      [*RIVERA_CARDS, charge_card("links", cents)], auto_money_cap_cents=cap)
+                                      [*SEED_CARDS, charge_card("links", cents)], auto_money_cap_cents=cap)
     return copy, link, version
 
 
@@ -585,7 +591,7 @@ async def test_raising_needs_the_owners_confirm(desk_prove, app, client, registr
     copy, link, active = await rivera_with_links(app, client, 10_000, cap=10_000)
     assert (active.version, active.auto_money_cap_cents) == (2, 10_000)
     visitor = await open_visitor(client, copy)
-    response = await post_draft(client, copy, [*RIVERA_CARDS, charge_card("links", 30_000)], 2,
+    response = await post_draft(client, copy, [*SEED_CARDS, charge_card("links", 30_000)], 2,
                                 auto_money_cap_cents=50_000)
     assert response.status_code == 200, response.text
     raised = PolicyVersionContract.model_validate(response.json())
@@ -643,7 +649,7 @@ async def rivera_holding_links(app: FastAPI, client: httpx.AsyncClient) -> tuple
     at the seed's $500)."""
     copy = await rivera(app, client)
     link = await enable(app, copy, payment_link(1))
-    version = await draft_and_confirm(client, copy.owner_token, copy.desk_id, RIVERA_CARDS)
+    version = await draft_and_confirm(client, copy.owner_token, copy.desk_id, SEED_CARDS)
     assert (version.version, version.auto_money_cap_cents) == (2, 50_000)
     return copy, link
 
@@ -663,17 +669,17 @@ async def test_drafts_take_the_active_cap_and_are_keyed_by_it(desk_prove, app, c
     [never_card] = response.json()["card_diff"]
 
     # drafts without a cap, the kernel's own allow_person and deny_always drafts among them, take the active cap
-    without = await post_draft(client, copy, RIVERA_CARDS, 2)
-    for cards in ([*RIVERA_CARDS, RuleCard.model_validate(person_card)],
-                  [*RIVERA_CARDS, RuleCard.model_validate(never_card)]):
+    without = await post_draft(client, copy, SEED_CARDS, 2)
+    for cards in ([*SEED_CARDS, RuleCard.model_validate(person_card)],
+                  [*SEED_CARDS, RuleCard.model_validate(never_card)]):
         response = await post_draft(client, copy, cards, 2)
         assert response.status_code == 200, response.text
         assert (response.json()["status"], response.json()["auto_money_cap_cents"]) == ("proved", 50_000)
     assert (without.status_code, without.json()["auto_money_cap_cents"]) == (200, 50_000)
     # the same cards on the same parent at the same cap are the same draft; at another cap, another one
-    again = await post_draft(client, copy, RIVERA_CARDS, 2, auto_money_cap_cents=50_000)
+    again = await post_draft(client, copy, SEED_CARDS, 2, auto_money_cap_cents=50_000)
     assert again.json()["version"] == without.json()["version"]
-    other = await post_draft(client, copy, RIVERA_CARDS, 2, auto_money_cap_cents=30_000)
+    other = await post_draft(client, copy, SEED_CARDS, 2, auto_money_cap_cents=30_000)
     assert other.status_code == 200, other.text
     assert other.json()["version"] != without.json()["version"]
     assert other.json()["auto_money_cap_cents"] == 30_000
@@ -700,7 +706,7 @@ async def test_allow_person_follows_the_active_cap(desk_prove, app, client, regi
     waiting = await link_for(client, visitor, link, 20_000, call_id="waiting")   # decided at 50_000, still held
     assert "allow_person" in waiting.answers
 
-    lowered = await draft_and_confirm(client, copy.owner_token, copy.desk_id, RIVERA_CARDS,
+    lowered = await draft_and_confirm(client, copy.owner_token, copy.desk_id, SEED_CARDS,
                                       auto_money_cap_cents=10_000)
     assert lowered.auto_money_cap_cents == 10_000
     fresh = await link_for(client, visitor, link, 20_000, call_id="fresh")
@@ -721,7 +727,7 @@ async def test_allow_person_follows_the_active_cap(desk_prove, app, client, regi
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
 
     # a later version whose cap covers it puts it back
-    raised = await draft_and_confirm(client, copy.owner_token, copy.desk_id, RIVERA_CARDS,
+    raised = await draft_and_confirm(client, copy.owner_token, copy.desk_id, SEED_CARDS,
                                      auto_money_cap_cents=50_000)
     assert raised.auto_money_cap_cents == 50_000
     assert "allow_person" in (await read_decision(client, copy, waiting.decision_id)).answers

@@ -428,7 +428,8 @@
             "refund_issued",
             "charge_confirmed",
             "callback_confirmed",
-            "payment_confirmed"
+            "payment_confirmed",
+            "link_cancelled"
           ],
           "title": "Template",
           "type": "string"
@@ -2084,6 +2085,28 @@
       "title": "LedgerPage",
       "type": "object"
     },
+    "LinkCancelled": {
+      "properties": {
+        "link_id": {
+          "title": "Link Id",
+          "type": "string"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/ReplyVerdict"
+        }
+      },
+      "required": [
+        "link_id",
+        "session_id",
+        "verdict"
+      ],
+      "title": "LinkCancelled",
+      "type": "object"
+    },
     "Mandate": {
       "properties": {
         "mandate_id": {
@@ -2544,13 +2567,43 @@
           ],
           "title": "Language",
           "type": "string"
+        },
+        "business_name": {
+          "title": "Business Name",
+          "type": "string"
+        },
+        "customer_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Customer Name"
+        },
+        "cancel_reason": {
+          "anyOf": [
+            {
+              "const": "rules_changed",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cancel Reason"
         }
       },
       "required": [
         "title",
         "amount_cents",
         "state",
-        "language"
+        "language",
+        "business_name",
+        "customer_name"
       ],
       "title": "PaymentLinkView",
       "type": "object"
@@ -3127,7 +3180,8 @@
                 "refund_issued",
                 "charge_confirmed",
                 "callback_confirmed",
-                "payment_confirmed"
+                "payment_confirmed",
+                "link_cancelled"
               ],
               "type": "string"
             },
@@ -3820,8 +3874,12 @@
     },
     "ToolConfirmed": {
       "properties": {
-        "profile": {
-          "$ref": "#/$defs/ToolProfile"
+        "profiles": {
+          "items": {
+            "$ref": "#/$defs/ToolProfile"
+          },
+          "title": "Profiles",
+          "type": "array"
         },
         "draft": {
           "anyOf": [
@@ -3835,10 +3893,45 @@
         }
       },
       "required": [
-        "profile",
+        "profiles",
         "draft"
       ],
       "title": "ToolConfirmed",
+      "type": "object"
+    },
+    "ToolPin": {
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "enum": [
+            "native.quote",
+            "native.find_slots",
+            "native.book",
+            "native.release_document",
+            "native.payment_link",
+            "native.charge_mandate",
+            "native.capture_lead",
+            "native.request_callback",
+            "native.start_verification",
+            "native.fetch_website",
+            "native.read_memory",
+            "payments.list_charges",
+            "payments.create_refund"
+          ],
+          "title": "Tool",
+          "type": "string"
+        },
+        "definition_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Definition Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool",
+        "definition_sha256"
+      ],
+      "title": "ToolPin",
       "type": "object"
     },
     "ToolProfile": {
@@ -3958,6 +4051,23 @@
           ],
           "title": "Status",
           "type": "string"
+        },
+        "review_reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "new",
+                "changed",
+                "delisted"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Reason"
         }
       },
       "required": [
@@ -3981,46 +4091,23 @@
           "title": "Desk Id",
           "type": "string"
         },
-        "tool": {
-          "enum": [
-            "native.quote",
-            "native.find_slots",
-            "native.book",
-            "native.release_document",
-            "native.payment_link",
-            "native.charge_mandate",
-            "native.capture_lead",
-            "native.request_callback",
-            "native.start_verification",
-            "native.fetch_website",
-            "native.read_memory",
-            "payments.list_charges",
-            "payments.create_refund"
-          ],
-          "title": "Tool",
-          "type": "string"
+        "tools": {
+          "items": {
+            "$ref": "#/$defs/ToolPin"
+          },
+          "maxItems": 13,
+          "minItems": 1,
+          "title": "Tools",
+          "type": "array"
         },
         "enable": {
           "title": "Enable",
           "type": "boolean"
-        },
-        "definition_sha256": {
-          "anyOf": [
-            {
-              "pattern": "^[0-9a-f]{64}$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Definition Sha256"
         }
       },
       "required": [
         "desk_id",
-        "tool",
+        "tools",
         "enable"
       ],
       "title": "ToolsConfirmRequest",

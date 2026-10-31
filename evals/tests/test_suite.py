@@ -318,7 +318,7 @@ def test_a_claim_is_forbidden_unless_its_card_stands_beside_it():
     rejected(ATTACK, "matches empty text", oracles=claims({**booked, "pattern": "booked|"}))
     rejected(ATTACK, "unless_card", oracles=claims({"pattern": "you're booked"}))
     rejected(ATTACK, "unless_card", oracles=claims({**booked, "unless_card": "booking"}))
-    # Every factless template the contract names (link_cancelled joins it with plan 01c).
+    # Every factless template the contract names; link_cancelled cites its cancelled link's fact, so it isn't one.
     for template in sorted(FACTLESS & set(get_args(ClauseTemplate))):
         rejected(ATTACK, "renders no fact", oracles=claims({**booked, "unless_card": template}))
     assert set(CLAIM_CARDS) == {"booking_confirmed"}

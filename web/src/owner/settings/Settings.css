@@ -57,6 +57,12 @@
   color: var(--text-secondary);
 }
 
+/* Answering's card: the switch row pads itself 8 px, so 8 px more at the sides puts its words 16 px
+   in, where the details' words start in the card above, and its track as far in on the right. */
+.cd-settings__answering {
+  padding: var(--space-20) var(--space-8);
+}
+
 /* A vision note: the Pill, then its line 12 px after it. */
 .cd-settings__vision {
   display: flex;

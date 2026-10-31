@@ -1,9 +1,13 @@
 """Visitor-visible text the kernel writes itself, in English and Spanish.
 
 Status lines (`status`) are fixed templates, one per decision state plus the reply receipts
-(an owner's say has its own two: written by the owner, or not sent, which only the owner sees);
-a decision's status line is never a receipt (`DECISION_STATUS_KEYS`); they name the business's owner and nothing else, so they never carry an amount, a date or a
-limit. An action a visitor or agent asked for that ran says what was done, one line per tool
+(an owner's say has its own two: written by the owner, or not sent, which only the owner sees)
+and two variants: `tool_unavailable`, the line a `refused_at_execution` takes when a connected
+tool's server can't be reached, and `refused_over_mandate`, the line a refusal takes when the
+baseline's mandate rule alone refused an agent's charge above what its mandate has left; a
+decision's status line is never a receipt (`DECISION_STATUS_KEYS`); they name the business's
+owner and nothing else, so they never carry an amount, a date or a limit's value. An action a
+visitor or agent asked for that ran says what was done, one line per tool
 (`executed_status`), in place of the generic executed line, which only the owner's own setup
 actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
 messages and the Demo inbox's code entry, the one text that carries a code. A session reads them
@@ -14,14 +18,17 @@ into any visitor text; `owner_line` renders them in the owner's language (`OWNER
 
 Clause cards (`render_clause`) are the only visitor text that carries amounts and dates, and
 they are rendered by code from a fact, never from text a model wrote; the `owner_said` card holds
-the owner's own words, and only the kernel issues it. Each template is registered once
-(`register_template`) with the fact kinds it renders, the fact ID (or ID prefix) it reads, the
+the owner's own words, and only the kernel issues it, as it does `payment_confirmed` (a completed
+payment link) and `link_cancelled` (a link a rule change cancelled, its amount and what it was for
+read from that link's own `payment_link` fact, then the kernel's line). Each template is registered
+once (`register_template`) with the fact kinds it renders, the fact ID (or ID prefix) it reads, the
 fact statuses that count as current, and a renderer per language that returns the card's headline
 (`title`) and details (`lines`), plus a choice per open time on a booking options card.
 A card's `text` is the headline and then the details, one per line. A template that names no fact
-kinds (handoff, verify_prompt) renders without one. `Template.current` says whether a fact may
-still be shown (a status the template renders, not expired), and a fact with nothing to render,
-such as hours with no windows, raises `NothingToShow` rather than make an empty card.
+kinds (handoff, verify_prompt) renders without one. `Template.current` says
+whether a fact may still be shown (a status the template renders, not expired), and a fact with
+nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an empty
+card.
 
 A card that links somewhere (a document or payment link) registers `href_for`, which the reply
 check awaits once the cited fact has passed its checks, and passes to `render_clause` as the card's
@@ -76,6 +83,8 @@ if (any(set(lines) != OWNER_STATUS_KEYS for lines in OWNER_STATUS.values())
 if any(set(lines) != set(en.EXECUTED) for lines in EXECUTED.values()):
     # so a tool with a line has one in whatever language the session reads by the time it runs
     raise RuntimeError("every language has an executed line for the same tools")
+if set(es.AGENT_TOOLS) != set(en.AGENT_TOOLS) or len(es.AGENT_CARD) != len(en.AGENT_CARD):
+    raise RuntimeError("every language has the whole Agent Card and a label for every agent tool")
 
 
 def language(last_language: str | None) -> Language:
@@ -112,6 +121,22 @@ def owner_line(key: str) -> str:
     """The owner-only line `key` ("refused_desk_deleted", ...) in `OWNER_LANGUAGE`. Any other key,
     a status line's included, raises KeyError: there is no free-text fallback."""
     return OWNER_STATUS[OWNER_LANGUAGE][key]
+
+
+def agent_card(lang: str, *, business: str, owner: str, slug: str, tools: Collection[str]) -> list[RenderedBlock]:
+    """The Agent Card of a Desk in `lang`: prose blocks naming who answers (an AI, Claude, within
+    `owner`'s rules), what an agent can do there (the labels of `tools`, in the order the card
+    lists them), the endpoint and how to sign, and that agent keys aren't business credentials.
+    A tool without a label is left out rather than named; nothing carries an amount or a key. An
+    empty `business` or `owner` (a name the public page withholds) reads as fixed words ("this
+    business", "the owner"), never as a blank."""
+    module = en if lang == "en" else es
+    labels = [label for tool, label in module.AGENT_TOOLS.items() if tool in tools]
+    listed = module.listing(labels) if labels else module.AGENT_CARD_NO_TOOLS
+    business = business if business.strip() else module.AGENT_CARD_BUSINESS
+    owner = owner if owner.strip() else module.AGENT_CARD_OWNER
+    return [RenderedBlock(kind="prose", text=line.format(business=business, owner=owner, slug=slug, tools=listed))
+            for line in module.AGENT_CARD]
 
 
 def owner_preview(kind: str) -> str:
@@ -191,5 +216,16 @@ register_template("contact", {"charter"}, en.charter_text, es.charter_text, key=
 register_template("callback_confirmed", {"handoff"}, en.callback_confirmed, es.callback_confirmed, key="handoff:",
                   statuses=("committed",))
 register_template("owner_said", {"owner_statement"}, en.owner_said, es.owner_said, key="owner:")
+register_template("payment_confirmed", {"charge"}, en.payment_confirmed, es.payment_confirmed, key="charge:",
+                  statuses=("committed",))
+register_template("charges", {"charge"}, en.charges, es.charges, key="charge:", statuses=("committed",))
+register_template("refund_issued", {"refund"}, en.refund_issued, es.refund_issued, key="refund:",
+                  statuses=("committed",))
+register_template("charge_confirmed", {"charge"}, en.charge_confirmed, es.charge_confirmed, key="charge:",
+                  statuses=("committed",))
 register_template("handoff", (), en.handoff, es.handoff)
+# From the link's own fact, which its cancelling has expired. Only `payments.cancelled_links` renders it;
+# no status counts as current, so behind `kernel_only_template` a draft citing one is still `stale_fact`.
+register_template("link_cancelled", {"payment_link"}, en.link_cancelled, es.link_cancelled, key="payment_link:",
+                  statuses=())
 register_template("verify_prompt", (), en.verify_prompt, es.verify_prompt)

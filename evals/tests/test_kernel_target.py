@@ -384,8 +384,8 @@ async def test_proving_routes_get_the_longer_client_timeout(kernel: StandInKerne
                           auth=Auth.none(), expect=not_found)
         await target.call("POST /policy/{version}/probe", path={"version": 1}, body={"desk_id": "d-1", "probes": []},
                           auth=Auth.none(), expect=not_found)
-        await target.call("POST /tools/confirm", body={"desk_id": "d-1", "tool": "native.quote", "enable": True},
-                          auth=Auth.none(), expect=not_found)
+        await target.call("POST /tools/confirm", auth=Auth.none(), expect=not_found, body={
+            "desk_id": "d-1", "tools": [{"tool": "native.quote", "definition_sha256": "0" * 64}], "enable": True})
         await target.call("GET /whoami", auth=Auth.none(), expect=Expect(fields={"kind": "visitor"}))
     finally:
         await target.stop()

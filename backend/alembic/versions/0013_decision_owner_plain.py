@@ -12,13 +12,13 @@ through the owner's kernel reads. Nothing is updated in place, so any admin role
 superuser or not, and it runs again over a database that already has the column.
 
 Revision ID: 0013_decision_owner_plain
-Revises: 01b_1b_inbox_challenge
+Revises: 01c_5_mandate_reservations
 """
 
 from alembic import op
 
 revision = "0013_decision_owner_plain"
-down_revision = "01b_1b_inbox_challenge"
+down_revision = "01c_5_mandate_reservations"
 branch_labels = None
 depends_on = None
 
