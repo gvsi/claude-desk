@@ -465,8 +465,12 @@ describe('Conversations', () => {
     const words = 'On my way';
     // No poll lands, so the only reads of the chat are the ones sending makes.
     const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    // The page's first read is in before the count, so the take-over's read is the one awaited
+    // below, and none is still out to take a fault planted for a later read.
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    await expect.element(takeOver).toBeVisible();
     const reads = requests('conversation').length;
-    await screen.getByRole('button', { name: 'Take over' }).click();
+    await takeOver.click();
     const box = screen.getByRole('textbox', { name: 'Write to them' });
     await expect.element(box).toBeVisible();
     await expect.poll(() => requests('conversation').length).toBeGreaterThan(reads);
@@ -502,8 +506,12 @@ describe('Conversations', () => {
   it('words_wait_for_a_read_of_the_chat_after_one_fails', async () => {
     named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE), { pollScale: 100 });
+    // The page's first read is in before the count, so the take-over's read is the one awaited
+    // below, and none is still out to take a fault planted for a later read.
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    await expect.element(takeOver).toBeVisible();
     const reads = requests('conversation').length;
-    await screen.getByRole('button', { name: 'Take over' }).click();
+    await takeOver.click();
     const box = screen.getByRole('textbox', { name: 'Write to them' });
     await expect.element(box).toBeVisible();
     await expect.poll(() => requests('conversation').length).toBeGreaterThan(reads);
