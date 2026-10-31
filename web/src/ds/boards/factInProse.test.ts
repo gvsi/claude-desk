@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { LEXICON, factsInProse, type LexiconEntry } from './factInProse.ts';
+import { LEXICON, factsInProse, toJavaScript, type LexiconEntry } from './factInProse.ts';
 import { CLAUDE_ACCOUNT_TURNS, PHONE_REPLY, TEAM_REPLIES } from './vision.tsx';
 
 const LEXICON_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../backend/desk/kernel_service/lexicon');
@@ -58,6 +58,8 @@ describe('fact_in_prose', () => {
       ['I guarantee it.', 'lex.en.promise'],
       ['That one is free.', 'lex.en.promise'],
       ['Te damos un descuento.', 'lex.es.promise'],
+      ['It comes at no extra charge.', 'lex.en.promise'],
+      ['Sin recargos.', 'lex.es.promise'],
       ['Your appointment is confirmed.', 'lex.en.booking'],
       ['You’re all set.', 'lex.en.booking'],
       ['Booking confirmed.', 'lex.en.booking'],
@@ -74,6 +76,13 @@ describe('fact_in_prose', () => {
       expect(rules(text), text).toEqual([]);
     }
     expect(rules('Your appointment is confirmed.', true)).toEqual([]);
+  });
+
+  it('translates_word_classes_inside_brackets', () => {
+    // A kernel line with `\w` inside a class, as in `(?![\w-])`, compiles in JavaScript and keeps its meaning.
+    const regex = toJavaScript(String.raw`no[\s-]+(?!(?:matter|one|way|doubt)(?![\w-]))(?:[^\W\d_]+[\s-]+){0,2}(?:charges?|costs?)`);
+    expect(regex.test('at no extra cost')).toBe(true);
+    expect(regex.test('no matter the costs')).toBe(false);
   });
 
   it('folds_as_the_kernel_does', () => {
