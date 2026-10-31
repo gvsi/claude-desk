@@ -50,6 +50,7 @@ const PLAN_02: Record<RouteKey, string> = {
   draftRules: 'POST /api/owner/policy/{desk_id}/draft',
   draftPreset: 'POST /api/owner/policy/{desk_id}/preset',
   draftSuggestion: 'POST /api/owner/policy/{desk_id}/suggestions/{tool}',
+  draftMoneyCap: 'POST /api/owner/policy/{desk_id}/money_cap',
   confirmRules: 'POST /api/owner/policy/{desk_id}/confirm',
   confirmTool: 'POST /api/owner/policy/{desk_id}/tools/confirm',
   setupRules: 'POST /api/owner/policy/setup/{id}/rules',
@@ -118,6 +119,8 @@ describe('ROUTES', () => {
     expectTypeOf<RouteBody<'confirmTool'>>().toEqualTypeOf<{ tools: { tool: ToolName; definition_sha256: string }[]; enable: boolean }>();
     // A setup answer names the question it answers, so one sent twice can't answer the next (plan 02b Task 6).
     expectTypeOf<RouteBody<'setupAnswer'>>().toEqualTypeOf<{ question: QuestionKey; text: string }>();
+    // And draftMoneyCap's body, the payment limit a draft changes to (plan 02b).
+    expectTypeOf<RouteBody<'draftMoneyCap'>>().toEqualTypeOf<{ auto_money_cap_cents: number }>();
   });
 
   it('params_are_encoded', () => {

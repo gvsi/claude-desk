@@ -29,6 +29,7 @@ import type {
   Handoff,
   PolicyVersionOut,
   RulesDraft,
+  Suggestion,
   ToolConfirmEntry,
   ToolConfirmedOut,
   TranscriptItem,
@@ -110,7 +111,19 @@ export interface DeskRecord {
   lastVersion: number;
   /** The Desk's tools, as the kernel's tool rows have them. */
   tools: ToolProfile[];
+  /** Rules the owner's answers suggest, newest first; none until a test adds one. */
+  suggestions: Suggestion[];
 }
+
+/**
+ * Rules a test adds to a Desk's active version (`MockWorld.addActiveRules`), as if confirmed
+ * earlier: Dana Whitfield's own booking rule, which a preset removes like any other, and the demo
+ * agent's rule on every tool that charges money, which outranks each payment tool's own.
+ */
+export const EXTRA_RULES = {
+  danaBooking: rivera.personalBookingCard,
+  agentCharges: rivera.sharedChargeCard,
+} as const satisfies Record<string, RuleCard>;
 
 /** A rules draft as the kernel keeps one until the owner confirms it. */
 export interface DraftRecord {
@@ -135,7 +148,7 @@ function listedHash(tool: ToolProfile): string | null {
 }
 
 /** A card with every optional field at its default, so two cards compare by what they enforce. */
-function canonicalCard(card: RuleCard): string {
+export function canonicalCard(card: RuleCard): string {
   const full: Record<string, unknown> = {
     person_id: null,
     agent_key_id: null,
@@ -290,6 +303,7 @@ export class MockWorld {
       drafts: new Map(),
       lastVersion: policy.version,
       tools: riveraTools(),
+      suggestions: [],
     };
     this.desks.push(desk);
     return desk;
@@ -964,6 +978,11 @@ export class MockWorld {
       summary: { resumed: true, generation: session.state.generation },
     });
     return session.state;
+  }
+
+  /** Adds `cards` to the Desk's active rules, as if the owner had confirmed them earlier. */
+  addActiveRules(desk: DeskRecord, cards: readonly RuleCard[]): void {
+    desk.policy = { ...desk.policy, cards: [...desk.policy.cards, ...cards.map((card) => ({ ...card }))] };
   }
 
   /**

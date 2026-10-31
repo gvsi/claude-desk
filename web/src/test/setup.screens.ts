@@ -7,6 +7,11 @@
  * `/api/` path the mock doesn't serve, unless the test took it as expected with
  * `mockStore.takeUnhandled`.
  */
+// The app's styles in the app's order (main.tsx): the design system's tokens and base styles
+// first, then each component's own.
+import '../ds/tokens.css';
+import '../ds/base.css';
+
 import { afterEach, beforeAll, beforeEach, expect } from 'vitest';
 import { cleanup } from 'vitest-browser-react';
 
@@ -14,9 +19,6 @@ import { setPollScale, setRetryScale } from '../app/poll.ts';
 import { stampRequests, startTest, worker } from '../mocks/browser.ts';
 import { mockStore } from '../mocks/store.ts';
 import { resetBrowserLanguage } from './renderRoute.tsx';
-
-import '../ds/tokens.css';
-import '../ds/base.css';
 
 let started: Promise<unknown> | null = null;
 

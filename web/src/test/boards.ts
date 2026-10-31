@@ -6,7 +6,9 @@
 import { userEvent } from 'vitest/browser';
 
 import {
+  CONNECTORS_SPEC,
   SPEC,
+  expectConnectorSections,
   expectConversationType,
   expectFooter,
   expectOwnerFrame,
@@ -33,6 +35,9 @@ export interface OwnerBoardOptions {
 /** Where a conversation's reply cards sit: in Claude's messages. */
 const IN_A_MESSAGE = '.cd-claude-message';
 
+/** A connector's section on Rules: a card of rows that pad themselves, in the section look. */
+const CONNECTOR_SECTION = '.cd-connector-section';
+
 /** Where a rules change's cards sit: in the change review, which draws its two cards compact. */
 const IN_A_CHANGE_REVIEW = '.cd-change-review';
 
@@ -53,8 +58,9 @@ const ROWS_CARD = { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' } as con
  * In a conversation, the cards in Claude's messages are the chat's reply cards, in their own look
  * (`ReplyCard`, as the design system's conversation boards draw and check them), so the card look
  * is checked on every other card there, such as a held request's. On a rules change's review, the
- * change review's own two cards are checked at the compact padding `ChangeReview` gives them. A card
- * of rows has the card look with no padding of its own, since each of its rows pads itself.
+ * change review's own two cards are checked at the compact padding `ChangeReview` gives them; on
+ * the Rules page, each connector's section in the section look the connectors boards give it. A
+ * card of rows has the card look with no padding of its own, since each of its rows pads itself.
  */
 export async function expectOwnerBoard(
   root: HTMLElement,
@@ -77,6 +83,14 @@ export async function expectOwnerBoard(
     // compact, as `ChangeReview` draws them; every other card is in the card look.
     for (const card of root.querySelectorAll<HTMLElement>('.cd-card')) {
       expectComputed(card, card.closest(IN_A_CHANGE_REVIEW) === null ? SPEC.card : CHANGE_REVIEW_CARD);
+    }
+  } else if (root.querySelector(CONNECTOR_SECTION) !== null) {
+    // The Rules page (N-Conn-17): each connector's section is a card with no padding of its own,
+    // in the section look, its header and rows as the board draws them; every other card is in
+    // the card look.
+    expectConnectorSections(root);
+    for (const card of root.querySelectorAll<HTMLElement>('.cd-card')) {
+      expectComputed(card, card.querySelector(CONNECTOR_SECTION) === null ? SPEC.card : CONNECTORS_SPEC.section);
     }
   } else {
     const cards = [...root.querySelectorAll<HTMLElement>('.cd-card')];
