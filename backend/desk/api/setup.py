@@ -627,7 +627,7 @@ async def _commit(engine: AsyncEngine, owner: OwnerCtx, interview: Interview, se
         current = await _load(conn, owner.copy_id, interview.interview_id, lock=True)
         if _stored(current) != seen:
             raise ApiProblem(409, "conflict")
-        if not owner.business_tools_enabled:
+        if not interview.business_tools_enabled:
             _clear_configs(interview)
         await _save(conn, interview)
 
@@ -985,7 +985,7 @@ async def _desks_now(owner: OwnerCtx) -> OwnerCtx:
 
 
 async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartIn, *,
-                         cards: bool = False) -> SetupState | None:
+                         cards: bool = False, business_tools_enabled: bool = False) -> SetupState | None:
     """The interview a start with this key made in the copy, as it stands now; None when none holds the key. 409
     `conflict` when the key's start had another body, and 409 `key_spent` when it failed: its Desk was asked for and
     may exist, so the key can't start again. While the first is still starting, 409 `in_progress` at once, to be sent
@@ -1018,7 +1018,8 @@ async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartI
     if row["desk_id"] not in owner.desk_ids:          # made after this request read the copy's Desks
         owner = await _desks_now(owner)
     interview = await _read(engine, owner, row["interview_id"])
-    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards)
+    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
+                       business_tools_enabled=business_tools_enabled)
 
 
 async def _drop_abandoned(engine: AsyncEngine, copy_id: str, interview_id: str) -> bool:
@@ -1035,20 +1036,23 @@ async def _drop_abandoned(engine: AsyncEngine, copy_id: str, interview_id: str) 
 
 
 async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: SetupStartIn, *,
-                admit: Callable[[], Awaitable[None]], cards: bool = False) -> SetupState:
+                admit: Callable[[], Awaitable[None]], cards: bool = False,
+                business_tools_enabled: bool = False) -> SetupState:
     """Read the owner's description, make the Desk with Answering off, and ask for consent, once `admit` (the route's
     limits) lets the start through. A repeat of the client's key is answered before `admit` counts it; otherwise the
     interview's row is written first, under the key's lock, and the start's outcome saved to it, its failure too
     (module docstring). A request another process admitted meanwhile is answered as a repeat."""
     key = body.idempotency_key
     async with ADMISSIONS.admitting(owner.copy_id, key):
-        repeat = await repeated_start(owner, engine, body, cards=cards)
+        repeat = await repeated_start(owner, engine, body, cards=cards,
+                                      business_tools_enabled=business_tools_enabled)
         if repeat is not None:
             return repeat
         await admit()
         interview_id = await _claim(engine, owner.copy_id, key, start_sha256(body))
     if interview_id is None:                        # another process took the key since this one looked
-        repeat = await repeated_start(owner, engine, body, cards=cards)
+        repeat = await repeated_start(owner, engine, body, cards=cards,
+                                      business_tools_enabled=business_tools_enabled)
         if repeat is None:                          # and has let it go again: this one is to be sent again
             raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
         return repeat
@@ -1084,7 +1088,7 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
         await _settle(engine, update(INTERVIEWS).where(*keyed).values(
             desk_id=created_desk_id, start_error=_failure_record(error), updated_at=func.now()))
         raise
-    return setup_state(interview, slug, cards=cards, business_tools_enabled=owner.business_tools_enabled)
+    return setup_state(interview, slug, cards=cards, business_tools_enabled=business_tools_enabled)
 
 
 async def _asking_for_desk(owner: OwnerCtx, engine: AsyncEngine, keyed: tuple) -> None:
@@ -1128,22 +1132,26 @@ def _turn_abandoned(interview: Interview) -> bool:
             and (datetime.now(UTC) - interview.updated_at).total_seconds() > TURN_ABANDONED_S)
 
 
-async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs: TurnRuns, cards: bool = False) -> SetupState:
+async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs: TurnRuns, cards: bool = False,
+               business_tools_enabled: bool = False) -> SetupState:
     interview = await _recover_turn(owner, engine, interview_id, runs)
+    interview.business_tools_enabled = business_tools_enabled
     return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
-                       business_tools_enabled=owner.business_tools_enabled)
+                       business_tools_enabled=interview.business_tools_enabled)
 
 
 async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, proposal_id: str,
-                          decision: SetupProposalIn, *, cards: bool = False) -> SetupState:
+                          decision: SetupProposalIn, *, cards: bool = False,
+                          business_tools_enabled: bool = False) -> SetupState:
     """Replace a card's decision during questions, under the same guard as an answer turn."""
     with _turn(interview_id):
         interview = await _read(engine, owner, interview_id)
+        interview.business_tools_enabled = business_tools_enabled
         owner.desk(interview.desk_id)
         if interview.step != "questions" or interview.busy:
             raise ApiProblem(409, "conflict")
         seen = _stored(interview)
-        if not owner.business_tools_enabled:
+        if not interview.business_tools_enabled:
             _clear_configs(interview)
         card = next((entry.card for entry in interview.transcript
                      if entry.card is not None and entry.card.proposal_id == proposal_id), None)
@@ -1167,7 +1175,7 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
                 card.job.autonomy = decision.autonomy
         await _commit(engine, owner, interview, seen)
     return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
-                       business_tools_enabled=owner.business_tools_enabled)
+                       business_tools_enabled=interview.business_tools_enabled)
 
 
 
@@ -1964,7 +1972,7 @@ def finish(interview: Interview) -> None:
         if entry.card is not None and entry.card.state == "proposed":
             entry.card.state = "accepted"
     remaining = set(QUESTION_KEYS) - interview.covered
-    suggested = next((entry.suggested for entry in reversed(interview.transcript) if entry.suggested is not None), None)
+    suggested = interview.suggested
     if suggested is not None:
         topics = {"summary": "what_you_do", "business_name": "what_you_do", "owner_display_name": "what_you_do",
                   "hours": "hours_and_area", "service_area": "hours_and_area", "price_items": "quote_limit",
@@ -1997,6 +2005,22 @@ async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
     await _put_business_tools(owner, desk_id, accepted_jobs(interview))
 
 
+async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *,
+                           cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
+    """Finish questions with the current facts and safe defaults for every unanswered limit."""
+    with _turn(interview_id):
+        interview = await _read(engine, owner, interview_id)
+        interview.business_tools_enabled = business_tools_enabled
+        owner.desk(interview.desk_id)
+        if interview.step != "questions" or interview.busy:
+            raise ApiProblem(409, "conflict")
+        seen = _stored(interview)
+        interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
+        finish(interview)
+        await _commit(engine, owner, interview, seen)
+    await after_finish(owner, interview)
+    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
+                       business_tools_enabled=interview.business_tools_enabled)
 
 
 # Setup, part 2 (Task 7): the Desk's parts, rule cards, situations, the safety check and going live -----------------

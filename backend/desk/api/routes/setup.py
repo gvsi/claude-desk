@@ -97,7 +97,8 @@ async def start_setup(body: SetupStartIn, request: Request,
     async def admit() -> None:
         await _moving_on(request, ctx)
 
-    return await setup.start(ctx, state.database(), state.model, body, admit=admit, cards=cards)
+    return await setup.start(ctx, state.database(), state.model, body, admit=admit, cards=cards,
+                             business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 409, 422, 503))
@@ -105,7 +106,8 @@ async def setup_interview(interview_id: InterviewId, request: Request,
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """The setup interview as it stands, removing abandoned turn entries and reopening consent if needed."""
     state = runtime(request).started()
-    return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs, cards=cards)
+    return await setup.read(ctx, state.database(), interview_id, runs=state.turn_runs, cards=cards,
+                            business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.post("/{id}/consent", response_model=SetupState,
@@ -161,7 +163,8 @@ async def setup_proposal(interview_id: InterviewId, proposal_id: Annotated[str, 
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """Accept, rename or decline a setup proposal while questions are open; later decisions replace earlier ones."""
     state = await _moving_on(request, ctx, model=False)
-    return await setup.decide_proposal(ctx, state.database(), interview_id, proposal_id, body, cards=cards)
+    return await setup.decide_proposal(ctx, state.database(), interview_id, proposal_id, body, cards=cards,
+                                       business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.post("/{id}/suggestions", response_model=SetupState,
@@ -170,7 +173,8 @@ async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn,
                              ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """Use the current proposals and finish questions with safe defaults for unanswered limits."""
     state = await _moving_on(request, ctx, model=False)
-    return await setup.use_suggestions(ctx, state.database(), interview_id, cards=cards)
+    return await setup.use_suggestions(ctx, state.database(), interview_id, cards=cards,
+                                      business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.get("/{id}/tools", response_model=SetupTools, responses=error_responses(401, 404, 422, 503))

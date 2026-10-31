@@ -119,9 +119,6 @@ class Settings:
                 if _env(name) is not None:
                     raise RuntimeError(f"{name} is set; production holds no Bedrock credential")
         model_provider = _env("MODEL_PROVIDER") or cls.model_provider
-        business_tools = (_env("BUSINESS_TOOLS_ENABLED") or "0").lower()
-        if business_tools not in {"0", "1", "false", "true"}:
-            raise RuntimeError("BUSINESS_TOOLS_ENABLED must be 0, 1, false or true")
         return cls(
             desk_env=desk_env,
             api_database_url=database_url("API"),
@@ -134,6 +131,6 @@ class Settings:
             model_provider=model_provider,
             aws_region=(_env("AWS_REGION") or cls.aws_region) if model_provider == "bedrock" else cls.aws_region,
             bedrock_bearer_token=_env("BEDROCK_BEARER_TOKEN"),
-            business_tools_enabled=business_tools in {"1", "true"},
+            business_tools_enabled=(_env("BUSINESS_TOOLS_ENABLED") or "").lower() in {"1", "true"},
             setup_policy_claims_enabled=_env("SETUP_POLICY_CLAIMS_ENABLED") != "0",
         )
