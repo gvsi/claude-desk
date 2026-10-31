@@ -1,6 +1,6 @@
 /**
- * The client idempotency key the API takes on a start (`send_agent` and setup's start, #124), as the
- * mock checks it: 1 to 128 characters, none of them a control character, or no key at all.
+ * The client idempotency key the API takes on a start (`send_agent` and setup's start, plan 02b),
+ * as the mock checks it: 1 to 128 characters, none of them a control character, or no key at all.
  */
 const CONTROL = /[\x00-\x1f\x7f]/;
 

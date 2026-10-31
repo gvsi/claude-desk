@@ -1758,7 +1758,7 @@ describe("Today's windows", () => {
 
 describe('idempotency keys', () => {
   it('send_agent_repeat_answers_the_same_run', async () => {
-    // As the API does (#124): a repeat with the same key, task, session and Desk answers the run the
+    // As the API does (plan 02b): a repeat with the same key, task, session and Desk answers the run the
     // first started and starts nothing; the same key with another task is 409 `conflict`.
     await openChat();
     const send = (task: string, key?: unknown) => call('sendAgent', { params: { slug }, body: { task, ...(key === undefined ? {} : { idempotency_key: key }) } });
@@ -1780,7 +1780,7 @@ describe('idempotency keys', () => {
   });
 
   it('setup_start_repeat_answers_the_same_interview', async () => {
-    // As the API does (#124): a repeat with the same key and body answers the interview the first
+    // As the API does (plan 02b): a repeat with the same key and body answers the interview the first
     // made (201, as the first) and makes nothing; the same key with another body is 409 `conflict`.
     const body = { description: 'Rivera Plumbing. I fix leaks.', timezone: 'America/Los_Angeles' };
     const start = (key?: unknown, description = body.description) =>

@@ -662,7 +662,7 @@ export interface StartSetupBody {
   owner_display_name?: string;
   /**
    * One per "Start" click (1 to 128 characters, no control characters): a repeat with the same key
-   * and body answers the interview the first made instead of making another (plan 02b, #124).
+   * and body answers the interview the first made instead of making another (plan 02b).
    */
   idempotency_key?: string;
 }
@@ -693,7 +693,7 @@ export interface AgentTaskBody {
   task: string;
   /**
    * One per task click (1 to 128 characters, no control characters): a repeat with the same key,
-   * task, session and Desk answers the run the first started and starts nothing (plan 02b, #124).
+   * task, session and Desk answers the run the first started and starts nothing (plan 02b).
    */
   idempotency_key?: string;
 }

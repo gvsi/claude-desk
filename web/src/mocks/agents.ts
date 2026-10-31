@@ -216,7 +216,7 @@ function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task
 /** The built-in agent's runs in one copy, by id, each readable only by the session that launched it. */
 export class AgentRuns {
   private readonly runs = new Map<string, { run: DemoAgentRun; timer: ReturnType<typeof setTimeout> | null }>();
-  /** The client keys sends came with, each with the run it started and what the send was (#124). */
+  /** The client keys sends came with, each with the run it started and what the send was (plan 02b). */
   private readonly keys = new Map<string, { runId: string; task: DemoAgentTask; sessionId: string; slug: string }>();
 
   /**

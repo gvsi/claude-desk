@@ -585,7 +585,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
 }
 
 /**
- * The starts that came with a client key (#124), per copy: each start's body without the key, and
+ * The starts that came with a client key (plan 02b), per copy: each start's body without the key, and
  * what it made: its interview's id, null while it is still starting, or `spent` when it ended with
  * its Desk unknown, so the key can't start anything again. `pending` keeps a held start's words
  * until the test ends it.
@@ -640,7 +640,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (text === '' || text.length > DESCRIPTION_MAX) return INVALID;
     const { world } = sv;
     if (key === null) return created(stateOf(newInterview(world, text, timezone)));
-    // A repeat with the client's key answers what the first start made, and makes nothing (#124).
+    // A repeat with the client's key answers what the first start made, and makes nothing (plan 02b).
     const keys = setupKeysOf(world);
     const sent = JSON.stringify([description, timezone, body.owner_display_name ?? null]);
     const held = keys.starts.get(key);

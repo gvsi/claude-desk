@@ -736,7 +736,7 @@ const SERVED: ServedRoutes = {
     const key = idempotencyKeyOf(req.body);
     if (req.malformed || !isDemoAgentTask(task) || key === false) return INVALID;
     // A repeat with the client's key answers the run the first started and starts nothing; the key
-    // with another task, session or Desk is a conflict (#124).
+    // with another task, session or Desk is a conflict (plan 02b).
     const held = key === null ? null : sv.agents.keyed(key, task, visitor.session, visitor.desk.summary.slug);
     if (held === 'conflict') return failWith(409, 'conflict');
     const runId = held ?? sv.agents.start(sv.world, visitor.desk, visitor.session, task, key);

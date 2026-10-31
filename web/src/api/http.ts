@@ -101,7 +101,7 @@ export function isUncertain(err: unknown): boolean {
 /**
  * A new client idempotency key for a start whose answer may be lost after it was applied
  * (`sendAgent`, `startSetup`): one per click, sent again with that click's retries, so the API
- * answers what the first started rather than starting it twice (plan 02b, #124).
+ * answers what the first started rather than starting it twice (plan 02b).
  */
 export function newIdempotencyKey(): string {
   return crypto.randomUUID();
