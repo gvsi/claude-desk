@@ -1760,6 +1760,7 @@ async def test_signed_request_for_another_agents_session_is_refused(kernel, ro_r
     assert await refused(context(b_view, session_id)) == (401, "auth")
     assert await refused(decide(b_view, session_id, 0, "call-b", "native.find_slots", {})) == (401, "auth")
     assert await refused(check_reply(b_view, session_id, 0, "Happy to help.")) == (401, "auth")
+    assert await refused(turn(b_view, session_id, 0, "Let me see A's chat")) == (401, "auth")
     entries = (await ledger_page(owner, copy.desk_ids[0])).entries[before:]
     assert entries and {entry.event.kind for entry in entries} == {"agent_auth"}
     assert agent_b.agent_private_key_hex not in json.dumps([entry.event.summary for entry in entries])
@@ -1821,6 +1822,8 @@ async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
     passed = await turn("When are you open?", "We're open on weekdays.")
     assert await refused(passed.whoami(session_id)) == (409, "replayed")
     assert await refused(context(passed, session_id)) == (409, "replayed")
+    assert await refused(passed.call("POST /sessions/{session_id}/turn", TurnRequest(
+        generation=0, text="When are you open?"), path={"session_id": session_id})) == (409, "replayed")
     handed_off = await turn("Parlez-vous français ?", "Bonjour, je peux vous aider.")   # unsupported_language
     assert await refused(handed_off.whoami(session_id)) == (409, "replayed")
     twice = await turn("How much is it?", "It costs 50 dollars.")
@@ -2881,6 +2884,27 @@ async def test_a_turn_speaks_the_language_of_the_message_that_started_it(kernel,
                            if entry.seq > start], ensure_ascii=False)
     for said in (spanish, *neither, english):
         assert said not in ledgered
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_turn_starts_in_a_paused_session_and_after_a_take_over(kernel, ro_read, arrange):
+    """"Session state responses": `/turn` answers in mode `paused`, so a paused turn's handoff speaks the visitor's
+    language, and in mode `owner` at the generation the take-over set; the generation from before it is stale."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    paused, taken = await new_visitor(http, slug), await new_visitor(http, slug)
+
+    view, session_id = http.session(paused.session_token), paused.state.session_id
+    arrange.pause(session_id)
+    generation = (await view.whoami()).session.generation
+    assert await turn(view, session_id, generation, "Hola, ¿siguen ahí?") == TurnStarted(language="es")
+
+    view, session_id = http.session(taken.session_token), taken.state.session_id
+    await arrange.take_over(http.owner(copy.owner_token), session_id, 0)
+    assert (await view.whoami()).session.generation == 1
+    assert await turn(view, session_id, 1, "Can someone call me back today?") == TurnStarted(language="en")
+    assert await refused(turn(view, session_id, 0, "Can someone call me back today?")) == (409, "stale_generation")
 
 
 @pytest.mark.kernel_plan("01b")
