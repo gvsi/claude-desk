@@ -87,6 +87,22 @@ async function expectLimitTrail(screen: Awaited<ReturnType<typeof openDraft>>['s
   expect(trail.element().textContent).toBe('Rules/Change your payment limit');
 }
 
+/**
+ * A draft that has applied, as the review says once it is confirmed: the change is in place, with a
+ * link to the rules, and nothing to confirm or keep, nor anything that says it waits for the owner.
+ */
+async function expectConfirmed(screen: Awaited<ReturnType<typeof openDraft>>['screen']) {
+  await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('link', { name: 'See your rules' })).toHaveAttribute('href', `${DESK}/rules`);
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Review the change' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
+  expect(screen.getByRole('button', { name: 'Keep my rules' }).elements()).toHaveLength(0);
+  const text = screen.container.textContent ?? '';
+  expect(text).not.toContain('No rules change.');
+  expect(text).not.toContain('Nothing changes until you confirm.');
+  expect(text).not.toContain("isn't open anymore");
+}
+
 /** True when `first` comes before `second` in the page. */
 function before(first: Element | null, second: Element | null): boolean {
   if (first === null || second === null) return false;
@@ -178,6 +194,54 @@ describe('rule draft review', () => {
     expect(screen.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
     // Once it applied, nothing still says it waits for the owner.
     expect(screen.getByText("Here's exactly what changes on your Desk. Nothing changes until you confirm.", { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('confirmed_draft_reopens_confirmed', async () => {
+    // Today hands over an "always" answer's draft, and the owner confirms it.
+    const draft = mockStore.world.draft(desk(), [DANA_NEVER_REFUND]);
+    const state: AnswerDraftState = { cardDiff: [DANA_NEVER_REFUND], draft };
+    const { screen, router } = await openDraft(draft.version, state);
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
+
+    // Back, then Forward: the change is in place, so it says so, with nothing to confirm or keep.
+    await router.navigate(-1);
+    await expect.element(screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    await router.navigate(1);
+    await expectConfirmed(screen);
+    expect(requests('confirmRules')).toHaveLength(1);
+
+    // Opened again with no router state, as a new tab opens it: the same.
+    const reopened = await openDraft(draft.version);
+    await expectConfirmed(reopened.screen);
+    await expectScreenBasics(reopened.screen.container, { owner: true });
+  });
+
+  it('replaced_draft_reopens_confirmed', async () => {
+    // The owner confirms a draft, then a later one that replaces it.
+    const first = mockStore.world.draft(desk(), [DANA_NEVER_REFUND]);
+    const { screen, router } = await openDraft(first.version, { cardDiff: [DANA_NEVER_REFUND], draft: first } satisfies AnswerDraftState);
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
+    const quoteAsks = { ...rivera.ruleCards['rv-quote'], mode: 'ask' as const };
+    const later = mockStore.world.draft(desk(), [quoteAsks]);
+    await router.navigate(`${DESK}/rules/drafts/${later.version}`, { state: { cardDiff: [quoteAsks], draft: later } satisfies AnswerDraftState });
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
+    expect(desk().policy.version).toBe(later.version);
+
+    // Back to the first: it was confirmed and has been replaced since, so it reads confirmed too.
+    await router.navigate(-1);
+    await expect.poll(() => requests('ruleDraft').map((r) => r.path)).toEqual([apiPath('ruleDraft', { desk_id: RIVERA.deskId, version: String(first.version) })]);
+    await expectConfirmed(screen);
+    // Forward to the later one, in force.
+    await router.navigate(1);
+    await expectConfirmed(screen);
+    expect(requests('confirmRules').map((r) => r.body)).toEqual([{ version: first.version }, { version: later.version }]);
+
+    // Opened again with no router state, as a new tab opens it: the same.
+    const reopened = await openDraft(first.version);
+    await expectConfirmed(reopened.screen);
   });
 
   it('diff_shows_the_enforced_limit', async () => {
