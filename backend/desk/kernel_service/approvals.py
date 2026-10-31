@@ -138,8 +138,10 @@ async def _refused_at_execution(ctx: KernelCtx, row: DecisionRow, answer: Approv
     deleted Desk is `desk`), or `prepare` refused (`prepare`), both "rules changed"; or it would
     release private data into a session that no longer stands for its person
     (`execute.session_ended`, ledgered as `reason="session_ended"` with the part in `check`). The
-    visitor's status line is the state's own, never why their session ended. The approval is used up
-    all the same, nothing ran and no intent row was written."""
+    visitor's status line is the state's own, never why their session ended. A `status`, when given,
+    must be a decision's status line (`decide.status_line`): any other raises ValueError, which fails
+    the answer with nothing written. The approval is used up all the same, nothing ran and no intent
+    row was written."""
     await decide.set_state(ctx, row, "refused_at_execution", kind="approval", status=status, summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer,
         "state": "refused_at_execution", "reason": reason, "check": check})

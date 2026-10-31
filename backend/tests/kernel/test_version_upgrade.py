@@ -388,15 +388,20 @@ async def test_a_copy_whose_lookup_outlasts_the_budget_is_left_to_the_background
     await seed_from_an_earlier_kernel(app, copy)
     discover, calls, hung = activation.desks_to_bring_up, [], asyncio.Event()
 
+    async def listed(runtime):
+        return [copy.copy_id]                # the listing at once, so no runner's speed spends the budget first
+
     async def hanging_once(*args, **kwargs):
         calls.append(args[1])
         if len(calls) == 1:
             await hung.wait()                                    # never set: the lookup hangs until it's cut off
         return await discover(*args, **kwargs)
 
-    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.05)
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.5)
+    monkeypatch.setattr(activation, "copy_ids", listed)
     monkeypatch.setattr(activation, "desks_to_bring_up", hanging_once)
-    startup = await asyncio.wait_for(activation.rebuild_at_startup(app.state.kernel), timeout=5)
+    startup = await asyncio.wait_for(activation.rebuild_at_startup(app.state.kernel), timeout=5)  # a deadlock guard
+    assert calls == [copy.copy_id]                               # startup reached the lookup, which hung
     assert startup == activation.StartupRebuild(results={}, left=[], unscanned=[copy.copy_id])
     assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
     assert calls == [copy.copy_id, copy.copy_id]
@@ -742,6 +747,7 @@ async def test_a_desk_row_held_by_an_owner_write_holds_up_no_other_desk(app, cli
         assert await rules_alerts(app, other) == [WAITING_ALERT]      # the other Desk went on meanwhile
         assert await rules_alerts(app, held_copy) == []
         release.set()
+        await writer                     # the write has let go of the row before the next pass, however slow
 
     writer = asyncio.create_task(owner_write())
     await asyncio.wait_for(holding.wait(), timeout=5)
@@ -757,13 +763,14 @@ async def test_a_desk_row_held_by_an_owner_write_holds_up_no_other_desk(app, cli
 
 async def test_a_kernel_starts_within_its_budget_while_a_desk_row_is_held(app, client, frozen_clock, reviewer,
                                                                            monkeypatch):
-    # an owner's write holding a Desk's row at startup doesn't hold the kernel past its budget: the Desk is left
-    # to the background, which brings it up once the row is free
+    # an owner's write holding a Desk's row at startup doesn't hold the kernel past its budget: startup tries the
+    # Desk and leaves it to the background, which brings it up once the row is free
     from .helpers import kernel_ctx
     copy = await rivera(app, client)
     await seed_from_an_earlier_kernel(app, copy)
     await without_new_native_tools(app, copy)
-    holding, release = asyncio.Event(), asyncio.Event()
+    holding, release, served = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    bring_up, rebuild_at_startup, tried, startups = activation._bring_up, activation.rebuild_at_startup, [], []
 
     async def owner_write():
         async with kernel_ctx(app) as ctx:
@@ -772,18 +779,42 @@ async def test_a_kernel_starts_within_its_budget_while_a_desk_row_is_held(app, c
             holding.set()
             await release.wait()
 
+    async def listed(runtime):
+        return [copy.copy_id]                # discovery at once, so no runner's speed spends the budget first
+
+    async def found(runtime, copy_id, *args):
+        return [copy.desk_id]
+
+    async def trying(runtime, copy_id, desk_id, *, prove, lock_s):
+        if not prove:
+            tried.append(desk_id)                                # startup's bring-up, which waits on the held row
+        return await bring_up(runtime, copy_id, desk_id, prove=prove, lock_s=lock_s)
+
+    async def recorded(runtime):
+        startups.append(await rebuild_at_startup(runtime))
+        return startups[-1]
+
     async def waiting(seconds):
+        await served.wait()                                      # the row stays held until the kernel serves
         release.set()
+        monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 10.0)  # once the row goes, a slow runner still finishes
 
     writer = asyncio.create_task(owner_write())
     await asyncio.wait_for(holding.wait(), timeout=5)
-    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.3)
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 1.0)
     monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 0.3)
+    monkeypatch.setattr(activation, "copy_ids", listed)
+    monkeypatch.setattr(activation, "desks_to_bring_up", found)
+    monkeypatch.setattr(activation, "_bring_up", trying)
+    monkeypatch.setattr(activation, "rebuild_at_startup", recorded)
     monkeypatch.setattr(activation, "wait_to_retry", waiting)
-    async with asyncio.timeout(5):
+    async with asyncio.timeout(5):                               # a deadlock guard
         async with started_kernel(frozen_clock, reviewer) as (kernel, _):
             rebuilding = kernel.state.rebuilding
+            assert tried == [copy.desk_id]                       # startup reached the held row ...
+            assert [startup.left for startup in startups] == [[(copy.copy_id, copy.desk_id)]]   # ... and left the Desk
             assert rebuilding is not None and not rebuilding.done()
+            served.set()
             assert await rebuilding == {(copy.desk_id, 1): None}
     await writer
 

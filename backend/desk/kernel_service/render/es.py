@@ -1,5 +1,6 @@
 """Spanish: the visitor's status lines, executed receipts and other texts, key for key with
-`en.STATUS`, `en.EXECUTED` and `en.MESSAGES`, and the clause cards.
+`en.STATUS`, `en.EXECUTED` and `en.MESSAGES`, the owner-only lines (`en.OWNER_STATUS`), and the
+clause cards.
 
 Cards read datetimes in the business's time zone ("martes 3 de noviembre, 14:00"), money as
 `$1,234.56`, as in English, and percentages as "10 %".
@@ -28,8 +29,11 @@ STATUS: dict[str, str] = {
     "reply_handed_off": "Pasado a {owner} para responder",
     "owner_said": "Escrito por {owner}",
     "owner_say_blocked": "No se envió: incluía texto de un documento privado",
-    # Why an approved private release was refused, for the owner: unused until an owner-facing field carries
-    # it, since a decision's status line reaches the visitor, who mustn't read why their session ended.
+}
+
+# Owner-only (`en.OWNER_STATUS`): unused until an owner-facing field carries it, and kept out of
+# `STATUS`, since a decision's status line reaches the visitor, who mustn't read why their session ended.
+OWNER_STATUS: dict[str, str] = {
     "refused_contact_changed": "No se compartió: su sesión terminó cuando cambió su contacto",
     "refused_person_removed": "No se compartió: se quitó a esta persona de tus registros",
     "refused_session_closed": "No se compartió: su sesión terminó antes de tu respuesta",
