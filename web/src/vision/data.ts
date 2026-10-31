@@ -18,13 +18,8 @@ import type { DecisionState, PublicDesk } from '../api/contracts.ts';
 import { cardBlock, meridian, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import type { FactCardProps, NavCount, NavKey, PhoneTab, ReceiptSource, SidebarHrefs, StatusTone } from '../ds/index.ts';
 
-/** Where each vision page lives. The Vision article's picture cards lead to each. */
-export const VISION_PATHS = {
-  cityOffice: '/vision/city-office',
-  teamDesk: '/vision/team-desk',
-  claudeAccount: '/vision/claude-account',
-  phone: '/vision/phone',
-} as const;
+/** Where each vision page lives (`paths.ts`). The Vision article's picture cards lead to each. */
+export { VISION_PATHS } from './paths.ts';
 
 /**
  * Where every vision page's "Back to Vision" goes: the Vision article under About this prototype,

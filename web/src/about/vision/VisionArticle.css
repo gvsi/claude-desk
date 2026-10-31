@@ -12,6 +12,9 @@
   --va-line: rgba(28, 27, 25, 0.13);
   --va-link: #2d5b8a;
   --va-bar: rgba(244, 242, 236, 0.94);
+  /* Cards on the page, a shade lighter than the paper, and their edge while pointed at. */
+  --va-tile: #fbfaf7;
+  --va-line-strong: rgba(28, 27, 25, 0.28);
   /* The phones: a dark device holding a light, crisp app screen. */
   --va-device: #151513;
   --va-device-shadow: 0 1px 2px rgba(28, 27, 25, 0.18), 0 24px 48px -18px rgba(28, 27, 25, 0.32);
@@ -256,6 +259,95 @@
   margin-bottom: 4px;
   color: var(--va-ink);
   font-weight: 600;
+}
+
+/* The picture cards: "See each one up close", its lead, then a card for each idea, two by two at every width.
+   A card is one link: the top of the idea's phone on the band, scaled down and cut off, then its name and line. */
+
+.vision-article .va-cards {
+  padding-bottom: 40px;
+}
+
+.vision-article .va-cards__lead {
+  margin: 0 0 20px;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  line-height: 31px;
+  font-variation-settings: 'opsz' 20;
+  color: var(--va-ink-2);
+  text-wrap: pretty;
+}
+
+.vision-article .va-cards__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vision-article .va-cards__item {
+  display: flex;
+  min-width: 0;
+}
+
+.vision-article .va-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--va-line);
+  border-radius: 14px;
+  background: var(--va-tile);
+  color: var(--va-ink);
+  text-decoration: none;
+}
+
+.vision-article .va-card:hover {
+  border-color: var(--va-line-strong);
+}
+
+.vision-article .va-card:focus-visible {
+  outline: 2px solid var(--va-link);
+  outline-offset: 2px;
+}
+
+.vision-article .va-card__top {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  height: 150px;
+  padding-top: 16px;
+  overflow: hidden;
+  background: var(--va-band);
+}
+
+.vision-article .va-card__top .va-phone {
+  transform: scale(0.72);
+  transform-origin: top center;
+}
+
+.vision-article .va-card__words {
+  display: block;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--va-line);
+}
+
+.vision-article .va-card__name {
+  display: block;
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+}
+
+.vision-article .va-card__line {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--va-ink-2);
 }
 
 /* The end: the note that it's vision, the way back, and the footer line. */
@@ -621,6 +713,37 @@
   .vision-article .va-cap {
     max-width: 300px;
     margin: 0;
+  }
+
+  .vision-article .va-cards {
+    padding-bottom: 32px;
+  }
+
+  .vision-article .va-cards__lead {
+    font-size: 17px;
+    line-height: 28px;
+  }
+
+  .vision-article .va-cards__grid {
+    gap: 10px;
+  }
+
+  .vision-article .va-card__top {
+    height: 118px;
+    padding-top: 12px;
+  }
+
+  .vision-article .va-card__top .va-phone {
+    transform: scale(0.52);
+  }
+
+  .vision-article .va-card__words {
+    padding: 10px 12px 12px;
+  }
+
+  .vision-article .va-card__name {
+    font-size: 14px;
+    line-height: 19px;
   }
 
   .vision-article .va-end {

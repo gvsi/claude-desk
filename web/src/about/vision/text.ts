@@ -4,6 +4,7 @@
  * header says Claude, an AI, is answering; prices, dates, statuses, codes and documents sit in cards, never in
  * Claude's own words; and an outcome that was held or declined shows as a receipt under the message.
  */
+import { VISION_PATHS } from '../../vision/paths.ts';
 import { minutesToRead, wordCount } from '../readTime.ts';
 
 /** One thing drawn in a chat, top to bottom. */
@@ -229,6 +230,27 @@ export const SECTIONS: Section[] = [
   },
 ];
 
+/** A picture card: the top of an idea's phone, then the idea's name and one line, the whole card a link to its vision page. */
+export interface PictureCard {
+  screen: Screen;
+  name: string;
+  line: string;
+  /** The idea's vision page, drawn as it would work. */
+  href: string;
+}
+
+/** The section after "What stays the same": one card for each idea, in the article's order. */
+export const PICTURE_CARDS = {
+  heading: 'See each one up close',
+  lead: 'Each idea has its own page, drawn as it would work.',
+  cards: [
+    { screen: CITY, name: 'A city office that answers after hours', line: 'Meridian Bay Permits, after five', href: VISION_PATHS.cityOffice },
+    { screen: TEAM, name: 'A Desk for the team', line: 'Rivera Plumbing’s plumbers, from the van', href: VISION_PATHS.teamDesk },
+    { screen: ACCOUNT, name: 'Recognized, with your permission', line: 'Dana, signed in with her Claude account', href: VISION_PATHS.claudeAccount },
+    { screen: OWNER, name: 'In your pocket', line: 'Maria’s requests on her phone', href: VISION_PATHS.phone },
+  ] satisfies PictureCard[],
+} as const;
+
 /** The article around its sections: the meta line, the headline, the dek and its note, the opening, and the end. */
 export const ARTICLE = {
   kicker: 'Vision',
@@ -275,9 +297,13 @@ export function screenText(screen: Screen): string[] {
   return [screen.name, screen.sub, screen.ai, ...parts, screen.composer];
 }
 
-/** The article's own text, as a reader meets it: the headline, the dek and its note, then each section with its figure's caption. */
+/**
+ * The article's own text, as a reader meets it: the headline, the dek and its note, then each section with its
+ * figure's caption, then the picture cards' heading, lead and words (their phones' tops are decoration).
+ */
 export function articleText(): string[] {
   const { title, dek, note, intro } = ARTICLE;
+  const { heading, lead, cards } = PICTURE_CARDS;
   return [
     title,
     dek,
@@ -288,6 +314,9 @@ export function articleText(): string[] {
       ...passages.map((passage) => (typeof passage === 'string' ? passage : passage.quote)),
       ...(figure ? [figure.lead, figure.caption] : []),
     ]),
+    heading,
+    lead,
+    ...cards.flatMap(({ name, line }) => [name, line]),
   ];
 }
 

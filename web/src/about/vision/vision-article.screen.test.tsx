@@ -49,6 +49,16 @@ const FIGURES = [
   },
 ] as const;
 
+/** The picture cards after "What stays the same": each idea's name and line, word for word, and its vision page. */
+const CARDS_HEADING = 'See each one up close';
+const CARDS_LEAD = 'Each idea has its own page, drawn as it would work.';
+const CARDS = [
+  { name: 'A city office that answers after hours', line: 'Meridian Bay Permits, after five', href: '/vision/city-office' },
+  { name: 'A Desk for the team', line: 'Rivera Plumbing’s plumbers, from the van', href: '/vision/team-desk' },
+  { name: 'Recognized, with your permission', line: 'Dana, signed in with her Claude account', href: '/vision/claude-account' },
+  { name: 'In your pocket', line: 'Maria’s requests on her phone', href: '/vision/phone' },
+] as const;
+
 /**
  * The words a reader reads in `root`: its text, but what is hidden from everyone (`aria-hidden`) and the
  * elements `skip` names, each text node a run of its own so that two blocks never join into one word.
@@ -176,6 +186,63 @@ describe('The Vision article', () => {
       expect(message?.getAttribute('data-part'), flat(receipt)).toBe('claude');
       expect(receipt.getBoundingClientRect().top).toBeGreaterThanOrEqual(message?.getBoundingClientRect().bottom ?? Infinity);
     }
+  });
+
+  it('picture_cards_link_each_vision_page', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      const heading = screen.getByRole('heading', { level: 2, name: CARDS_HEADING, exact: true });
+      await expect.element(heading, { message: viewport }).toBeVisible();
+      const section = screen.getByRole('region', { name: CARDS_HEADING, exact: true });
+      await expect.element(section.getByText(CARDS_LEAD, { exact: true }), { message: viewport }).toBeVisible();
+
+      // After "What stays the same" and its last words, inside the article, before the end note.
+      const lastWords = screen.getByText(/^What changes is how much a Desk can handle before it has to ask\./).element();
+      const box = section.element().getBoundingClientRect();
+      expect(section.element().closest('article'), viewport).not.toBeNull();
+      expect(box.top, viewport).toBeGreaterThanOrEqual(lastWords.getBoundingClientRect().bottom);
+      expect(box.bottom, viewport).toBeLessThanOrEqual(screen.getByText(END_NOTE, { exact: true }).element().getBoundingClientRect().top);
+
+      // Four cards, each one link named by its idea and line, not by the phone drawn in it, to its vision page.
+      const links = section.getByRole('link').elements();
+      expect(links.map((link) => link.getAttribute('href')), viewport).toEqual(CARDS.map(({ href }) => href));
+      for (const [i, { name, line, href }] of CARDS.entries()) {
+        const where = `${name} at ${viewport}`;
+        const link = section.getByRole('link', { name: `${name} ${line}`, exact: true });
+        await expect.element(link, { message: where }).toHaveAttribute('href', href);
+        expect(link.element(), where).toBe(links[i]);
+        expect(link.element().getAttribute('target'), where).toBeNull();
+        // The top of the idea's phone, first in the card, is hidden from screen readers and labels nothing.
+        const top = link.element().firstElementChild;
+        expect(top?.getAttribute('aria-hidden'), where).toBe('true');
+        expect(top?.querySelector('.va-phone'), where).not.toBeNull();
+        expect(top?.querySelectorAll('[role], [aria-label]'), where).toHaveLength(0);
+        // On a phone a visitor or the team reads, the line saying Claude, an AI, is answering shows in the card.
+        const ai = FIGURES[i]?.ai;
+        if (ai) {
+          const aiLine = [...(top?.querySelectorAll('p') ?? [])].find((p) => flat(p) === ai);
+          expect(aiLine, where).toBeDefined();
+          expect(aiLine?.getBoundingClientRect().bottom ?? Infinity, where).toBeLessThanOrEqual(top?.getBoundingClientRect().bottom ?? -Infinity);
+        }
+      }
+
+      // Two by two at every width, the pairs side by side and level, in the article's column.
+      const [a, b, c, d] = links.map((link) => link.getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect, DOMRect];
+      expect([b.top, d.top], viewport).toEqual([a.top, c.top]);
+      expect([c.left, d.left], viewport).toEqual([a.left, b.left]);
+      expect(b.left, viewport).toBeGreaterThan(a.right);
+      expect(c.top, viewport).toBeGreaterThan(Math.max(a.bottom, b.bottom));
+      const column = screen.getByText(FIRST_WORDS).element().getBoundingClientRect();
+      expect(a.left, viewport).toBeGreaterThanOrEqual(column.left - 0.5);
+      expect(b.right, viewport).toBeLessThanOrEqual(column.right + 0.5);
+      expectNoHorizontalScroll();
+    }
+
+    // Followed, a card opens its vision page in the app.
+    const { screen, router } = await renderRoute(PATH);
+    await screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(CARDS[0].href);
+    await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
   });
 
   it('the_cover_band_is_decoration_hidden_on_phones', async () => {

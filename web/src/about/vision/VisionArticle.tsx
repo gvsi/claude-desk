@@ -5,10 +5,11 @@
  * prototype.
  *
  * The phone screens are pictures made of live text: each is read by its label, with its caption under it. The
- * cover band under the headline peeks at the same four screens and is decoration only. The page is static: its
- * words come from `text.ts`, nothing on it moves, and it makes no request.
+ * cover band under the headline peeks at the same four screens and is decoration only, as are their tops on the
+ * picture cards that end the article, each a link to its idea's vision page. The page is static: its words come
+ * from `text.ts`, nothing on it moves, and it makes no request.
  */
-import { Fragment } from 'react';
+import { Fragment, useId } from 'react';
 import { Link } from 'react-router';
 
 import { ConceptFooter } from '../../ds/index.ts';
@@ -17,6 +18,7 @@ import { prototypeHref } from '../prototypeHref.ts';
 import { useNoIndex } from '../useNoIndex.ts';
 import {
   ARTICLE,
+  PICTURE_CARDS,
   READ_MINUTES,
   SCREENS,
   SECTIONS,
@@ -154,8 +156,8 @@ function Owner({ screen }: { screen: OwnerScreen }) {
 }
 
 /**
- * A phone holding a screen. In the article it is a picture, read by its label; in the cover band, which is
- * hidden from screen readers, it is decoration with no label of its own.
+ * A phone holding a screen. In the article it is a picture, read by its label; in the cover band and at the top
+ * of a picture card, both hidden from screen readers, it is decoration with no label of its own.
  */
 function Phone({ screen, decorative = false }: { screen: Screen; decorative?: boolean }) {
   const picture = decorative ? {} : { role: 'img', 'aria-label': screen.label };
@@ -195,6 +197,37 @@ function SectionText({ heading, passages }: Pick<Section, 'heading' | 'passages'
         ),
       )}
     </div>
+  );
+}
+
+/**
+ * "See each one up close": a card for each idea, two by two at every width. Each card is one link to the idea's
+ * vision page, named by the idea and its line; the top of the idea's phone above them is decoration.
+ */
+function PictureCards() {
+  const headingId = useId();
+  const { heading, lead, cards } = PICTURE_CARDS;
+  return (
+    <section className="va-body va-cards" aria-labelledby={headingId}>
+      <h2 className="va-h2" id={headingId}>
+        {heading}
+      </h2>
+      <p className="va-cards__lead">{lead}</p>
+      <ul className="va-cards__grid">
+        {cards.map(({ screen, name, line, href }) => (
+          <li key={href} className="va-cards__item">
+            <Link className="va-card" to={href}>
+              <div className="va-card__top" aria-hidden="true">
+                <Phone screen={screen} decorative />
+              </div>
+              <span className="va-card__words">
+                <span className="va-card__name">{name}</span> <span className="va-card__line">{line}</span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -248,6 +281,7 @@ export function VisionArticle() {
               {figure ? <ArticleFigure figure={figure} /> : null}
             </Fragment>
           ))}
+          <PictureCards />
         </article>
       </main>
       <footer className="va-end">
