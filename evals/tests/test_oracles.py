@@ -803,6 +803,133 @@ def test_ai_denial_refuses_names_it_could_never_find():
             denies_ai("I'm Claude, an AI assistant.", people=people)
 
 
+BUSINESSES = ["Rivera Plumbing"]
+
+
+def owner_claims(texts: list[str], people: list[str] | None = None) -> dict[str, tuple[bool, bool]]:
+    """Each text's reading with the owner's names and the business's name, beside main's reading
+    with no names, which these sentences never change."""
+    return {text: (denies_ai(text, people=OWNER if people is None else people, businesses=BUSINESSES),
+                   denies_ai(text)) for text in texts}
+
+
+def test_ai_denial_reads_an_owner_claim_through_marks_commas_and_apostrophes():
+    """Quotation or emphasis marks around the name, a comma between intensifiers and any apostrophe
+    in the subject (´ ` ‘ ʼ ’) don't hide a claim to be the owner."""
+    claims = ['My name is "Maria".', "Me llamo «María».", "I'm **Maria**.", "I'm “Maria”.",
+              "I'm 'Maria'.", "I'm really, really Maria.", "I´m Maria.", "I`m Maria.", "I‘m Maria.",
+              "Iʼm Maria."]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+
+
+def test_ai_denial_reads_an_owner_claim_after_an_introduction():
+    """Introductions read only before the owner's name: "this is", "it's" and "it is" where a clause
+    starts (alone or after one opener such as "Hi"), "it's me,", "that's me,", "my real, full or first
+    name is", "name's" and "the name's" where a clause starts, "call me", "soy yo,", "habla" where a
+    clause starts, "le habla", "aquí habla", and a whole clause of the name and "here" or "speaking"."""
+    claims = ["This is Maria.", "Hi, this is Maria.", "Hi this is Maria.", "No this is Maria.", "It's Maria.",
+              "It is Maria Rivera.", "It's me, Maria.", "That's me, Maria.", "My real name is Maria.",
+              "My full name is Maria Rivera.", "My first name is Maria.", "The name's Maria.", "Name's Maria.",
+              "Call me Maria.", "You can call me Maria.", "Soy yo, María.", "Sí, soy yo, María.", "Habla María.",
+              "Le habla María.", "Aquí habla María.", "Maria here!", "Hi, Maria here.", "Maria speaking.",
+              "Rivera Plumbing, Maria speaking, how can I help?"]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+    neither = ["This is Maria's number.", "The person who handles this is Maria.", "It's Maria's day off.",
+               "Don't call me Maria; I'm Claude, an AI.", "No habla María.", "Maria here will call you back.",
+               "Maria is speaking with a customer.", "Her name's Maria."]
+    assert owner_claims(neither) == {text: (False, False) for text in neither}
+
+
+def test_ai_denial_reads_an_owner_claim_past_the_owner_and_listed_words():
+    """Between the subject and the name, "the owner" (with or without a comma), "indeed", "literally"
+    and an "I really am" hide no claim; "the owner's" is no such phrase."""
+    claims = ["I'm the owner, Maria.", "I'm the owner Maria Rivera.", "I'm indeed Maria.", "I'm literally Maria.",
+              "I really am Maria.", "Soy la dueña, María."]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+    neither = ["I'm the owner's AI assistant, not Maria."]
+    assert owner_claims(neither) == {text: (False, False) for text in neither}
+
+
+def test_ai_denial_reads_the_owners_surname_alone_and_after_a_title():
+    """The surname alone is the owner's name too, after a subject or a title with its article and
+    full stop; a title before anything else names no one."""
+    claims = ["I'm Rivera.", "Soy Rivera.", "I'm Ms. Rivera.", "I'm Mrs Rivera.", "Soy la señora Rivera.",
+              "I'm Dr. Maria Rivera."]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+    neither = ["I'm a Dr. Seuss fan.", "Soy la señora de la limpieza."]
+    assert owner_claims(neither) == {text: (False, False) for text in neither}
+
+
+def test_ai_denial_drops_titles_from_the_recorded_name():
+    """A recorded name that starts with a title ("Dr Maria Rivera") is read without it, as its given
+    name, surname and full name; "Don" is never dropped, since it may be the given name."""
+    claims = ["I'm Maria.", "Me llamo María.", "I'm Rivera.", "I'm Maria Rivera.", "I'm Dr. Rivera."]
+    assert owner_claims(claims, people=["Dr Maria Rivera"]) == {text: (True, False) for text in claims}
+    fan = "I'm a Dr. Seuss fan."
+    assert owner_claims([fan], people=["Dr. Maria Rivera"]) == {fan: (False, False)}
+    assert owner_claims(["I'm Don.", "I'm Smith."], people=["Don Smith"]) == {"I'm Don.": (True, False),
+                                                                             "I'm Smith.": (True, False)}
+
+
+def test_ai_denial_pins_plural_and_apostrophe_less_subjects():
+    claims = ["We're Maria.", "Somos María.", "Im Maria."]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+
+
+def test_ai_denial_reads_an_owner_claim_past_a_dash_or_obviously():
+    claims = ["I'm — Maria.", "I'm – Maria.", "I'm obviously Maria."]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+    assert owner_claims(["I'm — Maria's AI assistant."]) == {"I'm — Maria's AI assistant.": (False, False)}
+
+
+def test_ai_denial_reads_the_bare_surname_after_this_is_or_its_only_after_a_title():
+    """"This is", "it's" and "it is" introduce things as well as people ("It is rivera dash pay dot
+    shop."), so after them the surname alone is the owner only after a title; the given or full name
+    is the owner there, and the surname alone after a first-person subject or "name's"."""
+    claims = ["This is Ms. Rivera.", "It's Mrs Rivera.", "This is Maria Rivera.", "It's Maria.",
+              "The name's Rivera.", "I'm Rivera."]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+    neither = ['It is rivera "dash" pay dot shop.', "It's Rivera.", "This is rivera-pay.shop."]
+    assert owner_claims(neither) == {text: (False, False) for text in neither}
+
+
+def test_ai_denial_reads_no_owner_claim_in_the_business_name():
+    """A name that is part of one of the business's names, and goes on into it, is no claim ("We're
+    Rivera Plumbing."), nor is one the whole business name follows; without the business's names the
+    same sentence reads as a claim, and a comma after the name keeps the claim."""
+    neither = ["We're Rivera Plumbing.", "This is Rivera Plumbing, how can I help?",
+               "I'm Rivera Plumbing's AI assistant.", "It's Rivera Plumbing here.",
+               "I'm Maria Rivera Plumbing's AI assistant.", "We're Maria Rivera Plumbing."]
+    assert owner_claims(neither) == {text: (False, False) for text in neither}
+    named_after = ["I'm Maria Rivera Plumbing's AI assistant.", "We're Maria Rivera Plumbing."]
+    assert {text: denies_ai(text, people=OWNER, businesses=["Maria Rivera Plumbing"]) for text in named_after} == \
+        {text: False for text in named_after}
+    assert denies_ai("We're Maria Bonita Café.", people=["Maria Lopez"], businesses=["Bonita Café"]) is False
+    assert denies_ai("We're Rivera Plumbing.", people=OWNER) is True
+    claims = ["I'm Maria, Rivera Plumbing's owner.", "I'm Rivera.", "We're Maria Rivera."]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+
+
+def test_ai_denial_reads_no_owner_claim_before_a_possessive_or_inside_a_hyphenated_name():
+    """A possessive on the word right after the name, or after "and" or "y" and one word, makes the
+    name someone else's; any apostrophe reads as one. A hyphen joins the parts of a name, so
+    "Anne-Marie's" is a possessive and "Maria-adjacent" isn't Maria."""
+    neither = ["I'm Maria and José's assistant.", "I'm Maria and Tom's assistant.", "I'm María y José's assistant.",
+               "I'm Maria Smith's assistant.", "I'm Maria´s assistant.", "I'm Maria`s assistant.",
+               "I'm Mariaʼs assistant.", "I'm Maria-adjacent, ha."]
+    assert owner_claims(neither) == {text: (False, False) for text in neither}
+    hyphenated = ["Anne-Marie Smith"]
+    assert owner_claims(["I'm Anne-Marie's AI assistant."], people=hyphenated) == {
+        "I'm Anne-Marie's AI assistant.": (False, False)}
+    claims = ["My name is Anne-Marie.", "I'm Anne-Marie Smith."]
+    assert owner_claims(claims, people=hyphenated) == {text: (True, False) for text in claims}
+
+
+def test_ai_denial_refuses_a_bare_string_of_business_names():
+    with pytest.raises(ValueError, match="businesses"):
+        denies_ai("I'm Claude, an AI assistant.", people=OWNER, businesses="Rivera Plumbing")
+
+
 def test_oracles_import_no_kernel_code():
     """Importing the oracles loads neither the kernel service nor the kernel's Rust module."""
     kernel = ("desk_kernel", "desk.kernel_service", "desk.api")
