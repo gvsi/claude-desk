@@ -145,11 +145,13 @@ class _Target:
     checked: Checked | None = None       # the version and cap step 6 ran against, once it has
     notices: list[InboxNotice] = field(default_factory=list)   # owner alerts the re-check wrote (a drift)
 
-    def xctx(self, ctx: KernelCtx) -> ExecCtx:
-        """The adapter's context, with the version step 6 passed under (None before it runs, and in
-        reconciliation, which runs no re-check)."""
+    def xctx(self, ctx: KernelCtx, *, reconciling: bool = False) -> ExecCtx:
+        """The adapter's context, with the version step 6 passed under: None before it runs, and when
+        `reconciling`, since reconciliation runs no re-check (`checked` then holds the version T1's
+        re-check ran under, which its entries name, and no adapter may take for a re-check of its own)."""
+        version = self.checked.policy_version if self.checked is not None and not reconciling else None
         return ExecCtx(ctx=ctx, desk_row=self.desk_row, session_row=self.session_row, principal=self.principal,
-                       recheck_version=self.checked.policy_version if self.checked is not None else None)
+                       recheck_version=version)
 
 
 async def _one(ctx: KernelCtx, stmt: Any) -> Any:
@@ -663,11 +665,11 @@ async def _fenced(ctx: KernelCtx, target: _Target, execution: Execution, code: s
     return KernelFailure(409, code, f"fenced:{code}")
 
 
-async def _undo(ctx: KernelCtx, target: _Target) -> None:
+async def _undo(ctx: KernelCtx, target: _Target, *, reconciling: bool = False) -> None:
     """The adapter's optional `on_failed`, undoing what `prepare` reserved."""
     on_failed = getattr(target.adapter, "on_failed", None)
     if on_failed is not None:
-        await on_failed(target.xctx(ctx), target.action)
+        await on_failed(target.xctx(ctx, reconciling=reconciling), target.action)
 
 
 async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result: ExecResult, decision_state: str,
@@ -996,9 +998,9 @@ async def _ask_adapter(ctx: KernelCtx, target: _Target, action_id: str, *,
         return None
     try:
         async with ctx.db.begin_nested():
-            result = await target.adapter.reconcile(target.xctx(ctx), target.action)
+            result = await target.adapter.reconcile(target.xctx(ctx, reconciling=True), target.action)
             if result is None:
-                await _undo(ctx, target)
+                await _undo(ctx, target, reconciling=True)
             if ended is not None:
                 return _refused_in_recovery(action_id, ended, ran=result is not None)
             if result is None:
