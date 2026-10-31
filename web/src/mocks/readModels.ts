@@ -258,7 +258,7 @@ interface Activity {
   /** A visitor's or an agent's own words. */
   texts: Happened[];
   bookings: Booking[];
-  leads: (Happened & { leadId: string; displayName: string; note: string })[];
+  leads: (Happened & { leadId: string; displayName: string; note: string | null })[];
   /** Refusals at decide time, and Claude's replies the check stopped. */
   stopped: (Happened & { refId: string; line: string | null })[];
   holds: Happened[];

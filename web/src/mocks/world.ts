@@ -170,8 +170,8 @@ export interface LeadRecord {
   sessionId: string;
   /** As the visitor typed it. Untrusted. */
   displayName: string;
-  /** What they want and how to reach them, as typed. Untrusted. */
-  note: string;
+  /** What they want and how to reach them, as typed, or null when they left no note. Untrusted. */
+  note: string | null;
   createdAt: number;
   /** Replayed from the recorded history into this copy; a test adds such a lead. */
   replayed?: boolean;

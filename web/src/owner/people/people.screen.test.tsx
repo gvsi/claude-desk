@@ -53,7 +53,7 @@ function held(): { until: Promise<void>; release: () => void } {
 
 interface LeadFields {
   name: string;
-  note: string;
+  note: string | null;
   /** How long ago they came in. */
   minutesAgo: number;
   replayed?: boolean;
@@ -255,6 +255,21 @@ describe('customers', () => {
   });
 
   // Tab stops in the page: each person's row, then the recorded-history link, and no lead.
+  it('lead_without_a_note_is_one_line', async () => {
+    // A lead who left only their name: the name and the time, and no empty line under them.
+    addLead({ name: 'Lee Park', note: null, minutesAgo: 5 });
+    addLead(SAM);
+    const { screen } = await renderRoute(PEOPLE);
+    const leads = screen.getByRole('list', { name: 'Leads' });
+    await expect.element(leads.getByText('Lee Park', { exact: true })).toBeVisible();
+    const [lee, sam] = leads.getByRole('listitem').elements() as [HTMLElement, HTMLElement];
+    expect(lee.textContent).toBe('Lee ParkToday, 12:25 pm');
+    const note = lee.querySelector('.cd-lead-row__note');
+    expect(note === null || note.getBoundingClientRect().height === 0).toBe(true);
+    expect(lee.getBoundingClientRect().height).toBeLessThan(sam.getBoundingClientRect().height);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('people_match_their_board', async () => {
     addLead(SAM);
     addLead({ ...JORDAN, replayed: true });

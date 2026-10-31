@@ -129,10 +129,11 @@ export function PeoplePage() {
             <ul role="list" className="cd-people__rows" aria-labelledby={leadsId}>
               {leads.map((lead) => (
                 <li key={lead.lead_id}>
+                  {/* A lead may have left no note (or, though the kernel never writes one, no name): nothing is drawn for it. */}
                   <LeadRow
-                    name={lead.display_name}
+                    name={lead.display_name ?? ''}
                     time={formatWhen(lead.created_at, business.timezone, now)}
-                    note={lead.note}
+                    note={lead.note ?? ''}
                     recorded={lead.replayed === true}
                   />
                 </li>
