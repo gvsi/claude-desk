@@ -150,6 +150,19 @@ describe('knowledge', () => {
     await expect.element(field).toHaveValue('Parking is on the street.');
   });
 
+  it('knowledge_confirmed_add_cancels_the_first_list_read', async () => {
+    const first = held();
+    mockStore.inject({ route: 'knowledge', status: 200, body: [], until: first.until });
+    const { screen } = await renderRoute(KNOWLEDGE, { pollScale: 100 });
+    await expect.element(main(screen).getByText('Loading what I know', { exact: true })).toBeVisible();
+    await main(screen).getByRole('textbox', { name: 'A note' }).fill(NOTE);
+    await main(screen).getByRole('button', { name: 'Add a note' }).click();
+    await expect.element(switchOf(screen)).toBeVisible();
+    first.release();
+    await expect.poll(() => mockStore.requests.filter((r) => r.key === 'knowledge').length).toBe(2);
+    await expect.element(main(screen).getByRole('list', { name: 'What I know now' }).getByText(NOTE_TITLE, { exact: true })).toBeVisible();
+  });
+
   it('knowledge_note_then_public', async () => {
     const { screen } = await renderRoute(KNOWLEDGE);
     // Settings, on Knowledge, led by Claude's line.

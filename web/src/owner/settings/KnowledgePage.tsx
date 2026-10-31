@@ -137,7 +137,10 @@ export function KnowledgePage() {
   const deskId = desk.desk_id;
   const queryClient = useQueryClient();
   /** The list is read again after anything is added or changed. */
-  const listChanged = () => void queryClient.invalidateQueries({ queryKey: knowledgeKey(deskId) });
+  const listChanged = async () => {
+    await queryClient.cancelQueries({ queryKey: knowledgeKey(deskId) });
+    await queryClient.invalidateQueries({ queryKey: knowledgeKey(deskId) });
+  };
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<Busy | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -194,7 +197,7 @@ export function KnowledgePage() {
       setAdded(stored);
       if (kind === 'note') setNote((current) => (current.trim() === item.text ? '' : current));
       setSwitchLine(undefined);
-      listChanged();
+      await listChanged();
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
       if (!isUncertain(err)) {
@@ -266,7 +269,7 @@ export function KnowledgePage() {
         const stored = await post({ ...card, label: { ...card.label, readers: makePublic ? ['public'] : ['owner'] } });
         show(stored.label);
         setSwitchLine(lineFor(stored.label));
-        listChanged();
+        await listChanged();
       } catch (err) {
         if (err instanceof ApiError && err.kind === 'unauthorized') return;
         if (!isUncertain(err)) {
