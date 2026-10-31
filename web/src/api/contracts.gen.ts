@@ -341,6 +341,13 @@ export interface Clause {
     | "link_cancelled";
   fact_id?: string | null;
 }
+export interface ContextClock {
+  as_of_utc: string;
+  local_now: string;
+  local_date: string;
+  weekday: "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+  timezone: string;
+}
 export interface CopyCreated {
   copy_id: string;
   desk_ids: string[];
@@ -768,6 +775,7 @@ export interface ReviewThresholds {
   max_manipulation_bp: number;
 }
 export interface SessionContext {
+  clock: ContextClock;
   tools: ToolProfile[];
   tools_declared: ToolProfile[];
   facts: Fact[];

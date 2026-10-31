@@ -197,6 +197,7 @@ from desk.kernel_api import (
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
+    ContextClock,
     CreateCopyRequest,
     CreateDeskRequest,
     CreateSessionRequest,
@@ -2153,7 +2154,12 @@ class FakeKernelState:
                                           request.query_params.get("desk_id"))
         declared = {"owner": OWNER_TOOLS, "agent": AGENT_DECLARED}.get(session.kind, VISITOR_DECLARED)
         facts = [*self._catalog(desk), *(fact for fact in desk.facts.values() if self._current(fact))]
+        local = self.now.astimezone(ZoneInfo(desk.timezone))
         return SessionContext(
+            clock=ContextClock(as_of_utc=signed_time(self.now), local_now=local.isoformat(timespec="minutes"),
+                               local_date=local.date().isoformat(),
+                               weekday=("mon", "tue", "wed", "thu", "fri", "sat", "sun")[local.weekday()],
+                               timezone=desk.timezone),
             tools=[desk.tools[tool] for tool in self.tools_given(session, desk)],
             tools_declared=[desk.tools[tool] for tool in declared if tool in desk.tools],
             facts=[fact for fact in facts if self._readable(session, fact)],

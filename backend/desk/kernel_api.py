@@ -47,6 +47,7 @@ from desk.contracts import (
     SessionCreated,
     SessionMode,
     SessionState,
+    SignedTime,
     ToolCall,
     ToolName,
     ToolProfile,
@@ -269,7 +270,15 @@ class WhoAmI(BaseModel):                  # GET /whoami: the API's only source f
     desk_ids: list[str]
     session: SessionState | None
 
+class ContextClock(BaseModel):            # public kernel time, with no data label
+    as_of_utc: SignedTime
+    local_now: str                        # ISO 8601 with the business's offset, to the minute
+    local_date: str                       # YYYY-MM-DD in the business's time zone
+    weekday: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    timezone: str                        # the business's IANA time zone
+
 class SessionContext(BaseModel):          # GET /context/{session_id}; facts and knowledge filtered by labels
+    clock: ContextClock
     tools: list[ToolProfile]              # the profiles this session may call now
     tools_declared: list[ToolProfile]     # every profile a session of its kind could ever be given
     facts: list[Fact]
