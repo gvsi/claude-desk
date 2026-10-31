@@ -19,6 +19,9 @@ from desk.kernel_service.decisions import (SOFT_PROMISE_SCHEMA, SOFT_PROMISE_SYS
 
 from .fakes import FakeAnthropicClient, FakeDecisions, model_message
 from .test_adapters import visitor_of
+from .test_decide import open_visitor
+from .test_handoff_card import BLOCKED, BLOCKED_ES, CLEAN, HANDOFF_CARD, handoffs_of
+from .test_lead_tools import callback, handoff_done
 from .test_reply_check import assert_handed_off, checked, clause, own_booking, own_quote, reply_entries
 
 HAIKU = "claude-haiku-5-5"
@@ -246,3 +249,57 @@ async def test_soft_promise_is_skipped_for_card_only_replies(app, client, review
     assert reviewer.soft_inputs == []                                     # no prose, so nothing to promise
     [entry] = await reply_entries(app, copy)
     assert entry.event.summary["soft_promise"] is None
+
+
+# ---- An open handoff's card backs a later reply ------------------------------------------------------
+
+@pytest.mark.parametrize(("language", "blocked", "clean"), [
+    ("en", BLOCKED, CLEAN),
+    ("es", BLOCKED_ES, "Con gusto le ayudo."),
+], ids=["en", "es"])
+async def test_the_soft_promise_check_reads_an_open_handoffs_card(app, client, reviewer, language, blocked, clean):
+    """While the session has an open handoff, the check is shown the handoff card's text as one
+    of the reply's cards, in the reply's language, though the reply doesn't show it again: a
+    later "Maria Rivera will reply here" is backed. With none open, or once the owner has marked
+    it done, it isn't shown, and the same words are a promise no card backs."""
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, clean)
+    assert verdict.ok and reviewer.soft_inputs[-1].cards == []                   # none open
+
+    assert not (await checked(client, visitor, blocked)).ok                     # the card opens one
+    [handoff] = await handoffs_of(app, copy)
+    asked = len(reviewer.soft_inputs)
+    verdict = await checked(client, visitor, clean)
+    assert len(reviewer.soft_inputs) == asked + 1
+    seen = reviewer.soft_inputs[-1]
+    assert (seen.language, seen.prose, seen.cards) == (language, clean, [HANDOFF_CARD[language]])
+    assert verdict.ok and [(block.kind, block.text) for block in verdict.blocks] == [("prose", clean)]
+
+    # a reply that shows the card itself is shown it once
+    assert (await checked(client, visitor, clean, [clause("handoff")])).ok
+    assert reviewer.soft_inputs[-1].cards == [HANDOFF_CARD[language]]
+
+    assert (await handoff_done(client, handoff.handoff_id, copy.owner)).status_code == 200
+    assert (await checked(client, visitor, clean)).ok
+    assert reviewer.soft_inputs[-1].cards == []                                  # done: no longer shown
+
+
+async def test_an_open_call_back_request_backs_the_card_too(app, client, reviewer):
+    """A call-back request is the session's open handoff as well: the owner has the conversation in
+    Needs you, so the check reads the handoff card beside the reply's own cards."""
+    copy, visitor = await visitor_of(app, client)
+    [fact] = (await callback(client, visitor)).facts
+    verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact.fact_id)])
+    assert verdict.ok, verdict.violations
+    card = verdict.blocks[-1].text
+    assert reviewer.soft_inputs[-1].cards == [card, HANDOFF_CARD["en"]]
+    assert [block.template or block.kind for block in verdict.blocks] == ["prose", "callback_confirmed"]
+
+
+async def test_a_session_with_no_handoff_of_its_own_is_shown_no_card(app, client, reviewer):
+    """Another session's open handoff backs nothing in this one."""
+    copy, visitor = await visitor_of(app, client)
+    other = await open_visitor(client, copy)
+    assert not (await checked(client, other, BLOCKED)).ok
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == []

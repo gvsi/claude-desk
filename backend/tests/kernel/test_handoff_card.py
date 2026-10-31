@@ -7,7 +7,8 @@ kind `card`, no call-back window, a reason the kernel writes, and an owner alert
 naming only who is waiting. So the conversation lands in the owner's Needs you, and the card's
 promise has something behind it. One handoff is open at a time per session (a call-back request
 counts): a later card opens none and alerts nothing until the owner marks the open one done. An
-owner's say never opens one.
+owner's say never opens one. (While a handoff is open, the soft-promise check reads the card's
+text as one of the reply's cards: test_soft_promise.py.)
 
 Tests run on Rivera Plumbing copies as `POST /copies` seeds them (Friday 10:04 in Oakland), whose
 notification defaults alert the owner of a handoff at once.

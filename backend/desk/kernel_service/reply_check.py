@@ -35,7 +35,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
    (`soft.denies_ai`). No verdict (a timeout, an error, a refusal, an unparsable answer) blocks
-   too (`soft.unavailable`).
+   too (`soft.unavailable`). While the session has an open handoff of either kind
+   (`open_handoff_ids`), the handoff card's text is one of those cards, though the reply doesn't
+   show it again: the owner has the conversation, so a later "Maria Rivera will reply here" is
+   backed, as the card that opened it said.
 6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
    handoff clause, in the reply's language.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
@@ -562,7 +565,10 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     violations += refused
     usage = None
     if not violations and prose.strip():
-        found, usage = await soft_promises(ctx, language, prose, cards)
+        backing = list(cards)
+        if not any(card.template == "handoff" for card in cards) and await open_handoff_ids(ctx, session_row):
+            backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
+        found, usage = await soft_promises(ctx, language, prose, backing)
         violations += found
     if violations:
         blocks = [handoff(language, desk)]
@@ -575,10 +581,10 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 
 async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None]:
-    """Step 5: the soft-promise check on prose the scan passed and the cards rendered for it. A
-    `soft_promise` violation per flag set (`soft.promise`, `soft.denies_ai`), or `soft.unavailable`
-    when there is no verdict, each spanning the prose's start; and the call's usage, for the
-    ledger."""
+    """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
+    rendered for it, and an open handoff's card). A `soft_promise` violation per flag set
+    (`soft.promise`, `soft.denies_ai`), or `soft.unavailable` when there is no verdict, each
+    spanning the prose's start; and the call's usage, for the ledger."""
     verdict, usage = await ctx.decisions.soft_promise(
         SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards]))
     if verdict is None:
