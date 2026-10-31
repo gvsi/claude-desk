@@ -213,6 +213,31 @@ async def test_put_rejects_unsafe_titles_before_they_can_reach_a_signed_receipt(
     verify_signature(await public_key(client), receipt)
 
 
+async def test_intake_hold_and_setup_probe_name_the_configured_tool(app, client):
+    from .test_probe import probe, probed
+
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake(title='New client intake')])).status_code == 200
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [row] = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+            Tool.desk_id == copy.desk_id, Tool.tool == 'desk.new-enquiry')))
+        row.status, row.review_reason = 'enabled', None
+        version = (await activate_cards(ctx, copy.desk_id, [])).version
+    visitor = await open_visitor(client, copy)
+    args = {'name': 'Dana', 'answers': ['Consult']}
+    held = await decided(client, visitor, 'desk.new-enquiry', args)
+    assert held.outcome == 'hold'
+    assert held.reason_plain.startswith('A stranger asked to leave their details through “New client intake”. ')
+    known, unknown = await probed(client, copy, version, [
+        probe('desk.new-enquiry', args), probe('desk.missing', args)])
+    assert known.outcome == 'hold'
+    assert known.reason_plain.startswith('A stranger asks to leave their details through “New client intake”. ')
+    assert unknown.reason_plain.startswith("A stranger asks for something this Desk can't do. ")
+    missing = await decided(client, visitor, 'desk.missing', args, call_id='unknown-intake')
+    assert missing.reason_plain.startswith("A stranger asked for something this Desk can't do. ")
+
+
 @pytest.mark.parametrize('path', ['approved', 'allow', 'allowed_before_execute'])
 async def test_changed_config_after_authorization_never_executes(app, client, monkeypatch, path):
     from desk.kernel_service import execute

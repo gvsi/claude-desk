@@ -58,6 +58,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from desk.contracts import (
     ApprovalAnswer,
+    BusinessToolDef,
     Decision,
     InboxNotice,
     LedgerEntry,
@@ -669,12 +670,13 @@ def free_text(adapter: Adapter, args: BaseModel) -> dict[str, str]:
     return texts
 
 
-def _asked(subject: str, tool: str, action: NormalizedAction | None) -> str:
+def _asked(subject: str, tool: str, action: NormalizedAction | None, *,
+           business: BusinessToolDef | None = None) -> str:
     """"<subject> asked to <what>.", with the amount and discount the kernel computed
     (`explain.asked`, which setup probes share)."""
     if action is None:
-        return explain.asked(subject, "asked", tool, None, None)
-    return explain.asked(subject, "asked", tool, action.amount_cents, action.discount_bp)
+        return explain.asked(subject, "asked", tool, None, None, business=business)
+    return explain.asked(subject, "asked", tool, action.amount_cents, action.discount_bp, business=business)
 
 
 @dataclass
@@ -870,7 +872,8 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
     and no rule of the owner's decided it (`DEFAULT_ASK_PLAIN`). A decision not refused early
     takes its reasons from its evaluation and version: without them this raises, and the call ends
     with nothing stored."""
-    parts = [_asked(call.subject, call.req.call.tool, call.action)]
+    parts = [_asked(call.subject, call.req.call.tool, call.action,
+                    business=call.adapter.profile.business if call.adapter is not None else None)]
     if reason is not None:
         parts.append(REFUSED_PLAIN[reason])
     else:
