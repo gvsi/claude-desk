@@ -11,6 +11,7 @@ import { MarginReceipt } from '../MarginReceipt/MarginReceipt.tsx';
 import { receiptFromEvent } from '../MarginReceipt/receiptTone.ts';
 import { Transcript } from '../Transcript/Transcript.tsx';
 import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
+import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
 import { PublicShell, type PublicBrand } from './PublicShell.tsx';
 
@@ -191,6 +192,8 @@ export const Rivera: Story = {
     await expect([...ask.childNodes].map((node) => node.textContent)).toEqual(['Ask for Maria Rivera']);
     await userEvent.click(ask);
     await expect(args.onAskForOwner).toHaveBeenCalledTimes(1);
+    // A real page has no vision line, before or after asking.
+    await expect(canvasElement.querySelector('.cd-vision-inert-line')).toBeNull();
 
     // The conversation, then the composer and the footer under it.
     const log = within(main).getByRole('log', { name: 'Conversation with Rivera Plumbing' });
@@ -360,6 +363,44 @@ export const WithBanner: Story = {
     await expect(header.getBoundingClientRect().top).toBe(40);
     // The banner is inside the window's height, not added to it: the shell stays as tall as the window.
     await expect(Math.round(shell.getBoundingClientRect().height)).toBe(window.innerHeight);
+  },
+};
+
+/** On a vision page, which makes no requests: "Ask for {owner}" looks and focuses as ever, and asks for no one. */
+export const InertAsk: Story = {
+  args: { inertAsk: true },
+  parameters: {
+    canvas: 'N-R2-Vision-CityOffice-Resident',
+    canvasNote: 'The vision pages’ public chats (the city office and the Claude account): Ask for {owner} keeps its look and place, and pressing it sends nothing.',
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // inert_ask_sends_nothing: a click and a key press each leave the page as it was.
+    const main = canvas.getByRole('main');
+    const head = canvasElement.querySelector<HTMLElement>('.cd-public-shell__chat-head')!;
+    const ask = within(main).getByRole('button', { name: 'Ask for Maria Rivera' });
+    await expect(head).toContainElement(ask);
+    expectComputed(ask, { height: '32px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
+    // A polite live region waits under the chat's head, empty and taking no room until the first press.
+    const lines = [...canvasElement.querySelectorAll<HTMLElement>('.cd-vision-inert-line')];
+    await expect(lines).toHaveLength(1);
+    const status = lines[0] as HTMLElement;
+    await expect(status).toHaveAttribute('role', 'status');
+    await expect(status).toHaveTextContent(/^$/);
+    await expect(status.getBoundingClientRect().height).toBeLessThanOrEqual(1);
+    await expect(head).not.toContainElement(status);
+    await userEvent.click(ask);
+    await expect(ask).toHaveFocus();
+    await expect(args.onAskForOwner).not.toHaveBeenCalled();
+    // vision_inert_line_on_first_press: the first press fills it with the one line, in a secondary
+    // caption 8 px under the chat's head.
+    await expect(status).toHaveTextContent(VISION_INERT_LINE);
+    expectComputed(status, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    await expect(Math.round(status.getBoundingClientRect().top - head.getBoundingClientRect().bottom)).toBe(8);
+    // Enter on it sends nothing either, and a second press changes nothing: still the one line.
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onAskForOwner).not.toHaveBeenCalled();
+    await expect(ask).toHaveFocus();
+    await expect(canvas.getAllByText(VISION_INERT_LINE)).toEqual([status]);
   },
 };
 
