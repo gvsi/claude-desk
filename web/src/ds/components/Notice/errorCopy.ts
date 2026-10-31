@@ -27,6 +27,16 @@ export const AGENT_START_LOST_COPY = {
   es: 'Puede que el agente haya empezado, pero perdimos la respuesta. Si recargas y lo envías de nuevo, puede ejecutarse dos veces.',
 } as const satisfies CopyPair;
 
+/**
+ * The answer to starting an agent was lost, and starting it again is safe: the start is idempotent,
+ * so a retry that finds the agent already running shows it rather than running it twice. It takes
+ * `AGENT_START_LOST_COPY`'s place once the agents page's start is idempotent.
+ */
+export const AGENT_START_RETRY_COPY = {
+  en: "We lost the answer, so we don't know yet whether the agent started. Try again: if it did, you'll see it.",
+  es: 'Perdimos la respuesta, así que aún no sabemos si el agente empezó. Inténtalo de nuevo: si empezó, lo verás.',
+} as const satisfies CopyPair;
+
 /** The button beside `AGENT_START_LOST_COPY`, which reloads the page. */
 export const RELOAD_PAGE_LABEL = {
   en: 'Reload the page',
@@ -39,6 +49,22 @@ export const RELOAD_PAGE_LABEL = {
  * string rather than a `CopyPair`, which would need a Spanish line no screen shows.
  */
 export const SETUP_START_LOST_COPY = 'Setup may have started, but we lost the answer. If you reload and start again, you may get two drafts.';
+
+/**
+ * The answer to starting setup was lost, and starting again is safe: the start is idempotent, so a
+ * retry that finds the setup interview already started goes straight to it. It takes
+ * `SETUP_START_LOST_COPY`'s place once setup's start is idempotent. English only, as owner screens are.
+ */
+export const SETUP_START_RETRY_COPY = "We lost the answer, so we don't know yet whether setup started. Try again: if it did, you'll go straight to it.";
+
+/** Starting setup is still going after longer than usual: the owner can try again shortly. English only. */
+export const SETUP_START_SLOW_COPY = 'Setup is taking longer than usual to start. Try again in a moment.';
+
+/**
+ * Starting setup failed with nothing started, though a draft Desk from an earlier try may be in the
+ * owner's Desks. English only. Its wording isn't settled yet, so no screen uses it so far.
+ */
+export const SETUP_START_SPENT_COPY = "Setup didn't start. If a draft Desk shows in your Desks, open it from there. Otherwise, start again.";
 
 /** The demo has spent its model budget for now. */
 export const DEMO_BUDGET_COPY = {
