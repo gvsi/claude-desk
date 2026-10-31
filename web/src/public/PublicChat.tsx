@@ -548,7 +548,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (!ready) return [];
     return state.openHolds
       .filter((id) => {
-        const held = state.holds.get(id);
+        const held = state.latest.get(id);
         return held !== undefined && receipts.includes(held);
       })
       .map((id) => (
