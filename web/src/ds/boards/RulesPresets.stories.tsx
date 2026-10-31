@@ -38,6 +38,9 @@ const RIVERA_HUB: RulesHub = { summary: 'Version 7 of your rules, checked agains
 const REVIEW_LINE = 'Here’s exactly what changes on your Desk. Nothing changes until you confirm.';
 
 /** What the proofs found for the Ask me first preset, as the board words it. */
+/** The Ask me first review as the board lists it: Rivera's rules, with the board's illustrative shared rule after Payment link. */
+const ASK_FIRST_ROWS = rivera.askFirstReview.flatMap((row) => (row.key === 'rv-link' ? [row, rivera.sharedChargeReviewRow] : [row]));
+
 const ASK_FIRST_CHECKS = {
   status: 'checked',
   lines: ['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.'],
@@ -141,14 +144,14 @@ export const PresetReview: Story = {
       <BoardPage>
         <Trail items={['Rules', 'Ask me first']} />
         <PageHeader title="Ask me first" subtitle={REVIEW_LINE} />
-        <ChangeReview rows={rivera.askFirstReview} checks={ASK_FIRST_CHECKS} cancelsLinks onConfirm={fn()} onCancel={fn()} />
+        <ChangeReview rows={ASK_FIRST_ROWS} checks={ASK_FIRST_CHECKS} cancelsLinks onConfirm={fn()} onCancel={fn()} />
       </BoardPage>
     </RiveraFrame>
   ),
   parameters: {
     canvas: 'N-Conn-18-Preset-Review',
     canvasNote: [
-      'The rows are Rivera’s eight own rules and Dana Whitfield’s personal booking rule, which a preset replaces too and the board doesn’t draw; the board’s shared rule for Alex Kim’s assistant is the illustrative shared card, which isn’t in Rivera’s seed.',
+      'The rows add Dana Whitfield’s personal booking rule, which a preset replaces too and the board doesn’t draw; the shared rule for Alex Kim’s assistant is the board’s illustrative card, which isn’t in Rivera’s seed.',
       SIDEBAR_ROW_NOTE,
     ].join(' '),
   },
@@ -162,7 +165,14 @@ export const PresetReview: Story = {
     // Every row is a rule that goes: tagged "Changed", its Before beside the refused bar, the
     // default ask beside the handled bar.
     const tags = some(main, '.cd-change-review__tag');
-    await expect(tags.map((tag) => tag.textContent)).toEqual(Array(rivera.askFirstReview.length).fill('Changed'));
+    await expect(tags.map((tag) => tag.textContent)).toEqual(Array(ASK_FIRST_ROWS.length).fill('Changed'));
+    // The board's shared rule for Alex Kim's assistant, right after Payment link: its connector,
+    // then "Shared rule".
+    const rows = some(main, '.cd-change-review__row');
+    const titles = rows.map((row) => one(row, '.cd-change-review__title').textContent);
+    const shared = titles.indexOf('Payment link and Charge within a signed limit');
+    await expect(shared).toBe(titles.indexOf('Payment link') + 1);
+    await expect(one(rows[shared] as HTMLElement, '.cd-change-review__body > .cd-change-review__meta')).toHaveTextContent(/^Payments · Shared rule$/);
     const { width: _width, ...tagLook } = CONNECTORS_SPEC.changeTag;
     for (const tag of tags) expectComputed(tag, tagLook);
     for (const before of some(main, '.cd-change-review__side--before')) expectComputed(before, { borderLeftWidth: '2px', borderLeftColor: 'rgb(220, 130, 144)' });

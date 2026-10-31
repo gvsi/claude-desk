@@ -1710,6 +1710,24 @@ function presetReview(preset: readonly RuleCard[]): ChangeRowView[] {
 const askFirstReview = presetReview(presetSamples.ask_first);
 
 /**
+ * The board's shared rule in the Ask me first review (N-Conn-18-Preset-Review): Alex Kim's
+ * assistant's rule on every tool that charges money goes too, and both of its tools fall to the
+ * default ask. The card is illustrative and not in the seed, so `askFirstReview` leaves it out; the
+ * stories list this row after Payment link, where the board draws it. Both of its tools are
+ * Payments', so the row names Payments, then "Shared rule".
+ */
+const sharedChargeReviewRow: ChangeRowView = {
+  key: sharedChargeCard.card_id,
+  change: 'changed',
+  title: 'Payment link and Charge within a signed limit',
+  connector: connectorViews.payments,
+  shared: true,
+  before: cardSide('rv-agent-charges', sharedChargeCard),
+  after: defaultAsk,
+  changed: ['mode'],
+};
+
+/**
  * Choosing "Recommended rules": the payment link, the signed-limit charge and Refund go to the
  * preset's rules for every tool that charges money or sends it out, which ask. The bookings and
  * See charges fall to the default ask, since no card of the preset covers their whole scope:
@@ -2004,6 +2022,7 @@ export const rivera = {
   setupOutcomes,
   danaRules,
   askFirstReview,
+  sharedChargeReviewRow,
   recommendedReview,
   limitRaise,
   toolProfiles,

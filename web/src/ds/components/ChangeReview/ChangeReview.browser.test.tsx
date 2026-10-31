@@ -1,7 +1,7 @@
 /**
  * ChangeReview's confirm when the screen's `onConfirm` throws before it sends anything. The press
  * is released, as every send-once button's is, so the owner can confirm again rather than facing a
- * button that waits forever.
+ * button that waits forever. And a shared rule on a row with one side, which no story draws.
  */
 import { composeStories } from '@storybook/react-vite';
 import { act } from 'react';
@@ -9,6 +9,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { fn } from 'storybook/test';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
+import { rivera } from '../../fixtures';
+import type { ChangeRowView } from './ChangeReview.tsx';
 import * as stories from './ChangeReview.stories.tsx';
 
 declare global {
@@ -69,4 +71,37 @@ it('a_confirm_that_throws_releases_the_button', () => {
   } finally {
     window.removeEventListener('error', onError);
   }
+});
+
+/** The meta line under a row's title. */
+function rowMeta(): string | null | undefined {
+  return container.querySelector('.cd-change-review__row > .cd-change-review__body > .cd-change-review__meta')?.textContent;
+}
+
+it('a_removed_shared_rule_says_so_after_its_connector', () => {
+  const row = rivera.sharedChargeReviewRow;
+  if (row.before === null) throw new Error('The shared row has no Before');
+  const removed: ChangeRowView = { ...row, change: 'removed', before: { ...row.before, appliesTo: 'Every tool that charges money' }, after: null, changed: [] };
+  act(() => root.render(<TurnOnPayments rows={[removed]} />));
+  expect(rowMeta()).toBe("Payments · Shared rule · Every tool that charges money · Alex Kim's assistant · Up to $20");
+});
+
+it('a_shared_rule_on_tools_of_several_connectors_leads_with_shared_rule', () => {
+  // Documents and Stripe's tools touch private data: no one connector has them all, so none is named.
+  const added: ChangeRowView = {
+    key: 'rv-private-verified',
+    change: 'added',
+    title: 'Every tool that touches private data',
+    shared: true,
+    before: null,
+    after: {
+      appliesTo: 'Every tool that touches private data',
+      mode: 'auto',
+      reason: "Customers see their own records after confirming it's them.",
+      words: [{ field: 'who', text: "The record's owner, verified" }],
+    },
+    changed: [],
+  };
+  act(() => root.render(<TurnOnPayments rows={[added]} />));
+  expect(rowMeta()).toBe("Shared rule · Every tool that touches private data · The record's owner, verified");
 });
