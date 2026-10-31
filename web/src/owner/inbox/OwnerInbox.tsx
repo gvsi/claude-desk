@@ -25,7 +25,7 @@ import { Button, DemoInboxSheet, LoadingLine, Notice, SectionHeader, type DemoIn
 import { formatWhen } from '../../lib/format.ts';
 import { decisionQuery } from '../conversations/ownerReceipt.ts';
 import { requestPath } from '../today/requestLink.ts';
-import { FRESH_MS, OWNER_INBOX_KEY, ownerInboxQuery } from '../useDesks.ts';
+import { FRESH_MS, OWNER_INBOX_KEY, needsYouQuery, ownerInboxQuery } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 
 import './OwnerInbox.css';
@@ -103,8 +103,21 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
     const id = decisionIds[index];
     if (id !== undefined && data?.decision_id === id && data.action) deskOf.set(id, data.action.desk_id);
   });
+  // And each of those Desks' Needs you, Today's own read, read again as the sheet opens unless it
+  // was just read: an alert links only while its request is still held there, waiting for the
+  // owner. One answered since, here or anywhere, draws no link, since Today would have no card to
+  // open; nor does one whose Desk's list hasn't been read yet.
+  const heldDesks = [...new Set(deskOf.values())];
+  const lists = useQueries({ queries: heldDesks.map((id) => ({ ...needsYouQuery(id), staleTime: FRESH_MS, enabled: open })) });
+  const waiting = new Set<string>();
+  lists.forEach(({ data }, index) => {
+    for (const item of data ?? []) {
+      const id = item.decision?.decision_id;
+      if (id !== undefined && deskOf.get(id) === heldDesks[index]) waiting.add(id);
+    }
+  });
   const hrefFor = (decisionId: string | null | undefined): string | undefined => {
-    const deskId = decisionId ? deskOf.get(decisionId) : undefined;
+    const deskId = decisionId && waiting.has(decisionId) ? deskOf.get(decisionId) : undefined;
     return decisionId && deskId !== undefined ? requestPath(deskId, decisionId) : undefined;
   };
 
