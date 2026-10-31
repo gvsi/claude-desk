@@ -2,7 +2,9 @@
  * The scripted Desk: how Rivera Plumbing's Claude answers in the mock API. A visitor's message
  * picks the first rule with one of its words, as a word of its own, in the lowercased text (so
  * "offer" never reads as "off"), and that rule's steps run
- * 150 ms apart, each turn ending with `turn_end`. Cards, prose and status lines are the design
+ * 150 ms apart. Each turn starts as the API's turns do, with Claude writing before anything it
+ * does, and ends with `turn_end`; a session's turns run one at a time, as under the API's turn
+ * lock (served.ts `Server.runTurn`). Cards, prose and status lines are the design
  * system's Rivera fixtures and the kernel's visitor templates, in the turn's language. Nothing here
  * is a model; it stands in for the API's turn runner so screens can be built and tested.
  */
@@ -453,8 +455,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'discount',
     words: ['off', 'discount', 'descuento'],
     steps: [
-      (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
       writing,
+      (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
       // Claude's checked words say Maria decides; the held receipt under them says what waits.
       (ctx) => ctx.reply([proseBlock(HELD_PROSE[ctx.language])]),
     ],
@@ -463,9 +465,9 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'invoice',
     words: ['invoice', 'return', 'factura'],
     steps: [
+      writing,
       // The code goes to the contact on record, never to the visitor: the kernel decides that first.
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.startVerification)),
-      writing,
       (ctx) => ctx.reply([verifyFirstProse[ctx.language], blocks.verify_prompt[ctx.language]]),
       (ctx) =>
         ctx.startVerification({
@@ -480,13 +482,13 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'deposit',
     words: ['deposit', 'pay', 'pagar'],
     steps: [
+      writing,
       (ctx) => {
         const decision = ctx.decide(DECISIONS.paymentLink);
         // The checkout's title is the card's, as the kernel writes both from the one link.
         ctx.issueLink({ title: DEPOSIT_TITLE[ctx.language], amountCents: 2000 });
         return ctx.status('receipt', decision);
       },
-      writing,
       // The card points at the link this turn issued, by its own token.
       (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], href: `/pay/${ctx.latestLink()}` }]),
     ],
@@ -496,8 +498,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'booked',
     words: ['first one', 'la primera'],
     steps: [
-      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.book)),
       writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.book)),
       (ctx) => ctx.reply([bookedProse[ctx.language], bookedCard[ctx.language]]),
     ],
   },
@@ -505,8 +507,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'book',
     words: ['book', 'tuesday', 'reservar'],
     steps: [
-      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.slots)),
       writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.slots)),
       (ctx) => ctx.reply([blocks.booking_options[ctx.language]]),
     ],
   },
@@ -514,8 +516,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'price',
     words: ['price', 'cost', 'how much', 'cuánto', 'precio'],
     steps: [
-      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
       writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
       (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], blocks.quote[ctx.language]]),
     ],
   },
@@ -523,13 +525,13 @@ export const SCRIPT: readonly ScriptRule[] = [
     name: 'callback',
     words: ['call me', 'callback', 'llámame'],
     steps: [
+      writing,
       (ctx) => {
         const decision = ctx.decide(DECISIONS.callback);
         const tonight = ctx.text.toLowerCase().includes('tonight');
         ctx.openHandoff({ reason: CALLBACK_REASON, callbackWindow: tonight ? null : CALLBACK_WINDOW, lead: 'Dana Wells' });
         return ctx.status('receipt', decision);
       },
-      writing,
       (ctx) => {
         const tonight = ctx.text.toLowerCase().includes('tonight');
         return ctx.reply([callbackCards[tonight ? 'open' : 'window'][ctx.language]]);

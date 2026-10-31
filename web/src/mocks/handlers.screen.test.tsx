@@ -96,8 +96,8 @@ describe('mock API handlers', () => {
       await say('How much is drain clearing?');
       await vi.waitFor(() => expect(events.map(([, ev]) => ev.type)).toContain('turn_end'), { timeout: 3000 });
       expect(events.map(([seq, ev]) => [seq, ev.type])).toEqual([
-        [1, 'receipt'],
-        [2, 'writing'],
+        [1, 'writing'],
+        [2, 'receipt'],
         [3, 'message'],
         [4, 'turn_end'],
       ]);

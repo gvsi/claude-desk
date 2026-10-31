@@ -303,7 +303,8 @@ export class Server {
 
   /**
    * Queues `steps` after whatever the session's turn is doing, one event every `EVENT_GAP_MS`, then
-   * `turn_end`, at the session's generation now.
+   * `turn_end`, at the session's generation now. One queue per session is the API's turn lock: a
+   * turn queued behind another starts only after that one's `turn_end`.
    */
   runTurn(session: SessionRecord, steps: readonly Step[], language: Language, text: string): void {
     const sessionId = session.state.session_id;

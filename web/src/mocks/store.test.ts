@@ -23,7 +23,7 @@ import type {
 } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
-import { chatReducer, initialChatState } from '../public/chatReducer.ts';
+import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
@@ -214,9 +214,9 @@ describe('the scripted Desk', () => {
     expect(afterHold.needs_you_count).toBe(1);
     expect(afterHold.live.map((c) => c.session_id)).toEqual([session.session_id]);
 
-    expect(typesOf(events)).toEqual(['held', 'writing', 'message', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'held', 'message', 'turn_end']);
     expect(events.map(([seq]) => seq)).toEqual([1, 2, 3, 4]);
-    const [, held] = events[0] ?? [];
+    const [, held] = events[1] ?? [];
     expect(held).toMatchObject({ type: 'held', state: 'held', visitor_plain: 'Waiting for Maria Rivera to approve' });
     // Claude says, in checked words, that Maria decides and her answer will show up in the chat.
     const [, reply] = events[2] ?? [];
@@ -302,7 +302,7 @@ describe('the scripted Desk', () => {
     const { events } = await openChat();
     await send('Can I get 15% off?');
     await drain();
-    const [, held] = events[0] ?? [];
+    const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
 
     const answered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } });
@@ -313,7 +313,7 @@ describe('the scripted Desk', () => {
       card_diff: null,
     });
     // Nothing reaches the chat in the answer itself: the follow-up arrives on the stream.
-    expect(typesOf(events)).toEqual(['held', 'writing', 'message', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'held', 'message', 'turn_end']);
 
     await drain();
     expect(typesOf(events).slice(4)).toEqual(['resolved', 'writing', 'message', 'turn_end']);
@@ -404,11 +404,36 @@ describe('the scripted Desk', () => {
     expect(bookings.map((d) => d.decision.state)).toEqual(['executed', 'executed']);
   });
 
+  it('quick_messages_take_turns', async () => {
+    // A second message sent before Claude has answered the first: the visitor's chat, as the public
+    // page builds it from the two messages and the stream, has each reply's own check and its own
+    // action's receipt under it, never the next turn's.
+    const { events } = await openChat();
+    await send('How much is drain clearing?');
+    await send('Can I book Tuesday?');
+    await drain();
+    const chat = [
+      { type: 'sent', id: 'v1', text: 'How much is drain clearing?' } as const,
+      { type: 'sent', id: 'v2', text: 'Can I book Tuesday?' } as const,
+      ...events.map(([seq, ev]) => ({ type: 'event', seq, ev }) as const),
+    ].reduce<ChatState>(chatReducer, initialChatState());
+    const replies = chat.rows.flatMap((row) => (row.item.kind === 'message' ? [row.receipts.map((receipt) => receipt.plain)] : []));
+    expect(replies).toEqual([
+      [VISITOR_PLAIN.en.reply_checked, executedLine('native.quote', 'en', 'Maria Rivera')],
+      [VISITOR_PLAIN.en.reply_checked, executedLine('native.find_slots', 'en', 'Maria Rivera')],
+    ]);
+
+    // As the API's turn lock has it, the second turn waits for the first to end, and it starts as
+    // the API's turns do, with Claude writing before anything it does.
+    const turn = ['writing', 'receipt', 'message', 'turn_end'];
+    expect(typesOf(events)).toEqual([...turn, ...turn]);
+  });
+
   it('visitor_cancel_resolves_the_hold', async () => {
     const { events } = await openChat();
     await send('Can I get 15% off?');
     await drain();
-    const [, held] = events[0] ?? [];
+    const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
 
     // Only this browser's own session can cancel, and only a decision of that session.
@@ -542,7 +567,7 @@ describe('the scripted Desk', () => {
     // old copy's turn in flight never finishing.
     await send('How much is drain clearing?');
     await vi.advanceTimersByTimeAsync(EVENT_GAP_MS);
-    expect(replayed.at(-1)?.[1].type).toBe('receipt');
+    expect(replayed.at(-1)?.[1].type).toBe('writing');
     const heard = replayed.length;
     const fresh = await call('startOver');
     expect(fresh.status).toBe(200);
@@ -654,7 +679,7 @@ describe('taking over', () => {
     const { session, events } = await openChat();
     await send('Can I get 15% off?');
     await drain();
-    const [, held] = events[0] ?? [];
+    const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
 
     // Maria allows the hold, then joins the chat at once. The action ran when she answered, so the
@@ -991,7 +1016,7 @@ describe('deleting a Desk', () => {
     const { events } = await openChat();
     await send('How much is drain clearing?');
     await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 2);
-    expect(typesOf(events)).toEqual(['receipt', 'writing']);
+    expect(typesOf(events)).toEqual(['writing', 'receipt']);
     const seeded = mockStore.world.sessionsOf(deskId).filter((s) => s !== mockStore.visitorSession(slug));
     expect(seeded.length).toBeGreaterThan(0);
 
@@ -1004,7 +1029,7 @@ describe('deleting a Desk', () => {
     expect((await call('today', { params: { desk_id: deskId } })).status).toBe(404);
     // Each of its chats hears that its session ended, as a closed session ends a visitor's turn; the
     // turn in flight ends there and says nothing more, so the chat no longer shows Claude writing.
-    expect(typesOf(events)).toEqual(['receipt', 'writing', 'error', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'error', 'turn_end']);
     expect(events[2]?.[1]).toEqual({ type: 'error', code: 'session' });
     const chat = events.reduce((state, [seq, ev]) => chatReducer(state, { type: 'event', seq, ev }), initialChatState());
     expect(chat).toMatchObject({ writing: false, error: 'session' });
@@ -1013,7 +1038,7 @@ describe('deleting a Desk', () => {
     expect((await call('publicDesk', { params: { slug } })).status).toBe(404);
     expect((await call('sendMessage', { params: { slug }, body: { text: 'Hello?' } })).status).toBe(404);
     await drain();
-    expect(typesOf(events)).toEqual(['receipt', 'writing', 'error', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'error', 'turn_end']);
     expect((await call('publicDesk', { params: { slug: RIVERA.emergenciesSlug } })).status).toBe(200);
 
     // Deleting it again, or a Desk outside the copy, is not found; without the owner cookie, refused.
@@ -1198,7 +1223,7 @@ describe('planted faults', () => {
     expect(read.items.filter((item) => item.kind === 'visitor_text').map((item) => item.text)).toEqual([
       'How much is drain clearing?',
     ]);
-    expect(typesOf(events)).toEqual(['receipt', 'writing', 'message', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
 
     // Every request is recorded with its body and path, faulted or not.
     expect(mockStore.requests.filter((r) => r.key === 'setAnswering')).toEqual([
