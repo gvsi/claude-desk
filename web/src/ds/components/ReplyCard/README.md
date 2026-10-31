@@ -57,16 +57,6 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 - `booking_confirmed` and `payment_confirmed` draw a sage check once beside their label, at `motion-base`, short arm first as a hand writes one. Under reduced motion it is drawn from the start. Every other template has a 16 px line icon.
 - A template this build doesn't know shows its text in a plain card, with no label, icon or link.
 
-## A cancelled payment link (`LinkCancelledCard`)
-
-`LinkCancelledCard`, in this folder and exported from the package, is the card for a payment link a confirmed rule change cancelled. It sits with the reply cards and shares their frame and label line.
-
-- `line`: the kernel's one line for the cancelled link, the `title` of its rendered `link_cancelled` block, shown as written. The kernel renders it from the owner's display name, with no fact, in the session's language.
-- `language`: the event's language, or the public page's `?lang=`.
-- Its chrome is `CARD_CHROME.link_cancelled`: "Payment link cancelled" / "Enlace de pago cancelado", with the payment link's `card` icon. It has no test-payment note, since no money moved, and no link or button, since the link is gone.
-- The line is the card's headline, in `section` type, as `ReplyCard` shows a block's `title`.
-- It takes the line, not a `CardBlock`, from when `link_cancelled` wasn't a `ClauseTemplate` in the generated contract. The kernel payments contract (plan 01c) adds it, so `ReplyCard` shows the block itself; the public chat moves to it next.
-
 ## Why there's no date tile or price column
 
 Card data carries no separate amount or date. The kernel renders money and times into the title and lines in the visitor's language. A date tile or a price column would mean the design system parsing or formatting them, and nothing in it does. The card shows the kernel's strings as they are, so what the visitor reads is exactly what the reply check passed.

@@ -829,8 +829,8 @@ export class MockWorld {
    * The link is cancelled: by the visitor on the checkout, which the chat isn't told of; by its
    * Desk's delete, whose chat is closed; or by a change to the business's rules, as the kernel
    * cancels an open link the new rules no longer allow when the owner confirms them. That one says
-   * why on the checkout (`cancel_reason`), and its chat gets the kernel's `link_cancelled` line,
-   * author `desk`.
+   * why on the checkout (`cancel_reason`), and its chat gets the kernel's `link_cancelled` card,
+   * author `desk`, with the link's amount and title.
    */
   cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'desk_deleted' | 'rules_changed'): void {
     const session = this.sessions.get(link.sessionId);
@@ -843,7 +843,7 @@ export class MockWorld {
       ref_id: token,
       summary: { state: 'cancelled', by },
     });
-    if (by === 'rules_changed') this.fromTheDesk(session, [linkCancelledBlock(session.language)]);
+    if (by === 'rules_changed') this.fromTheDesk(session, [linkCancelledBlock(link.view, session.language)]);
   }
 
   /**

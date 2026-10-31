@@ -8,7 +8,7 @@
  */
 import { Component, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
-import type { EvMessage, RenderedBlock, SessionState } from '../api/contracts.ts';
+import type { SessionState } from '../api/contracts.ts';
 import {
   Button,
   CHAT_ENDED_COPY,
@@ -16,7 +16,6 @@ import {
   Composer,
   ConceptFooter,
   EmptyState,
-  LinkCancelledCard,
   MarginReceipt,
   NEW_CHAT_LABEL,
   Notice,
@@ -86,43 +85,6 @@ function initialsOf(name: string): string {
   const first = words[0];
   const last = words.length > 1 ? words.at(-1) : undefined;
   return [first, last].map((word) => (word === undefined ? '' : (Array.from(word)[0] ?? ''))).join('');
-}
-
-/**
- * The kernel's card for a payment link a confirmed rule change cancelled, which the Desk sends as
- * its own message (author `desk`). Its template isn't one of the generated contract's
- * `ClauseTemplate`s yet (kernel payments, plan 01c), so it is named here; the design system's
- * `LinkCancelledCard` shows its line, the block's `title`, as written.
- */
-const LINK_CANCELLED_TEMPLATE: string = 'link_cancelled';
-
-function isLinkCancelled(block: RenderedBlock): boolean {
-  return block.kind === 'card' && block.template === LINK_CANCELLED_TEMPLATE;
-}
-
-/**
- * A delivered message from Claude or the Desk, its blocks in order: each cancelled link as the
- * design system's card for it, and every other run of blocks as one `ClaudeMessage`.
- */
-function DeliveredMessage({ ev, ownerName }: { ev: EvMessage; ownerName: string }) {
-  if (!ev.blocks.some(isLinkCancelled)) return <ClaudeMessage blocks={ev.blocks} language={ev.language} ownerName={ownerName} />;
-  const parts: ReactNode[] = [];
-  let run: RenderedBlock[] = [];
-  const endRun = () => {
-    if (run.length === 0) return;
-    parts.push(<ClaudeMessage key={`run-${parts.length}`} blocks={run} language={ev.language} ownerName={ownerName} />);
-    run = [];
-  };
-  ev.blocks.forEach((block, index) => {
-    if (!isLinkCancelled(block)) {
-      run.push(block);
-      return;
-    }
-    endRun();
-    parts.push(<LinkCancelledCard key={`cancelled-${index}`} line={block.title ?? block.text} language={ev.language} />);
-  });
-  endRun();
-  return parts.length === 1 ? parts[0] : <div className="cd-public-chat__message">{parts}</div>;
 }
 
 function failureLine(failure: SendFailure | undefined, language: CopyLanguage, copy: PublicCopy): string {
@@ -201,7 +163,7 @@ function ChatRowView({ row, ownerName, language, onResend, after = [] }: RowProp
       {ev.author === 'owner' ? (
         <PersonMessage name={ownerName} blocks={ev.blocks} language={ev.language} />
       ) : (
-        <DeliveredMessage ev={ev} ownerName={ownerName} />
+        <ClaudeMessage blocks={ev.blocks} language={ev.language} ownerName={ownerName} />
       )}
     </TranscriptRow>
   );
