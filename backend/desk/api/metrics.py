@@ -116,6 +116,7 @@ class TurnMetric(BaseModel):
     total_ms: int
     outcome: Literal["done", "fenced", "session_ended", "kernel_unavailable", "handoff", "turn_over", "not_ai",
                      "internal"]
+    rebound: bool = False          # a thinking-binding 400 started a fresh context and the call was sent again
 
 
 def metric_row(metric: Any) -> tuple[str, dict]:

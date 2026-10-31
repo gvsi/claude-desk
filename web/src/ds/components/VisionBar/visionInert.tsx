@@ -1,3 +1,5 @@
+import { forwardRef } from 'react';
+
 import './visionInert.css';
 
 /**
@@ -15,12 +17,13 @@ export interface VisionInertLineProps {
 /**
  * The polite live region under an inert control on a vision page: there from the start, so its
  * change is announced, taking no room while empty, and filled with `VISION_INERT_LINE` on the
- * control's first press. Later presses change nothing, so nothing more is announced.
+ * control's first press. Later presses change nothing, so nothing more is announced. Its ref is the
+ * line, for a control that has to bring it into view.
  */
-export function VisionInertLine({ shown }: VisionInertLineProps) {
+export const VisionInertLine = forwardRef<HTMLParagraphElement, VisionInertLineProps>(function VisionInertLine({ shown }, ref) {
   return (
-    <p role="status" className="cd-vision-inert-line cd-type-caption">
+    <p ref={ref} role="status" className="cd-vision-inert-line cd-type-caption">
       {shown ? VISION_INERT_LINE : null}
     </p>
   );
-}
+});

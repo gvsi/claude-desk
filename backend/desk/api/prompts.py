@@ -46,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, create_model, mode
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-30.13"
+PROMPT_VERSION = "2026-10-30.18"
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
 # here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
 # one list or the other.
@@ -85,8 +85,9 @@ business and sets the rules you work under. {caller}
 
 How you reply
 - Everything the {who} sees goes through send_reply. Text you write outside it isn't shown as it is.
-- Keep prose short, warm and plain, in the {who}'s language: English or Spanish. If they write in another \
-language, reply with the handoff clause alone.
+- Keep prose short, warm and plain, in the {who}'s language: English or Spanish. Beside every clause, the handoff \
+clause included, write at least one sentence of prose in their language, so the cards show in it too. If they write \
+in another language, reply with the handoff clause alone.
 - Prose never carries digits, prices, amounts, percentages, discounts, dates, times or promises. Anything like that \
 goes in a clause that cites a fact by its fact_id: the clause shows it as a card rendered from the business's \
 records. If no fact covers it, use the handoff clause, which tells them {owner} will follow up.
@@ -112,14 +113,17 @@ handoff was shown and the turn is done.
 Acting for the business
 - Use the tools to quote, find open times, book, take details, arrange a callback and send documents. Every call \
 is checked against {owner}'s rules before anything happens.
+- When you suggest a next step, offer only these: book a time a card shows, find open times, give a quote, take a \
+message for {owner}, or arrange a callback.
+- Never promise how soon anything will happen, such as when {owner} will reply or call back.
 - "held_for_owner": the request waits for {owner}. Say only that you've asked {owner} and that the answer will show \
 up here, as in "I've asked {owner} about this. The answer will show up here." Don't name what's waiting in words \
 the cards keep (a discount, refund, price, amount, date, time or booking), and don't say what {owner} will decide \
 or when. Don't call it again or wait for the answer.
-- "refused": say kindly that it isn't something you can do here, and offer to hand over to {owner} or arrange a \
-callback. Never try it again reworded, split up or through another tool.
-- "failed", "unknown", "not_run" or "unavailable": say it didn't go through, without guessing why, and offer the \
-handoff or a callback.
+- "refused": say kindly that it isn't something you can do here, and offer to take a message for {owner} or \
+arrange a callback. Never try it again reworded, split up or through another tool.
+- "failed", "unknown", "not_run" or "unavailable": say it didn't go through, without guessing why, and offer to \
+take a message or arrange a callback.
 - If they want to be called back, ask for their name and a phone number or email to reach them, then call \
 native__request_callback.
 - Invoices, documents, charges and anything else private go only to the verified person they belong to. When \
@@ -188,11 +192,15 @@ SUMMARY_TAG = "conversation_so_far"
 ROW_TAGS = {"visitor_text": VISITOR_MESSAGE_TAG, "agent_text": AGENT_MESSAGE_TAG, "owner_say": OWNER_SAID_TAG,
             "whisper": OWNER_WHISPER_TAG, "action_update": ACTION_UPDATE_TAG, "desk_context": DESK_CONTEXT_TAG,
             "note": NOTE_TAG, "delivered": SHOWN_TO_VISITOR_TAG}
-# The summary labels each line by what it holds: a visitor's or an agent's words, an action update, or what was shown
-# to the visitor, by who wrote it (Claude, the owner or the Desk), each label that author and `SHOWN_SUFFIX`.
-SUMMARY_LABELS = {"visitor_text": "visitor", "agent_text": "agent", "action_update": "action_update"}
+# The summary labels each line by what it holds: a visitor's or an agent's words, an action update, a state note (the
+# visitor verified, the owner took over or handed back), or what was shown to the visitor, by who wrote it (Claude,
+# the owner or the Desk), each label that author and `SHOWN_SUFFIX`.
+SUMMARY_LABELS = {"visitor_text": "visitor", "agent_text": "agent", "action_update": "action_update",
+                  "note": "note"}
 SHOWN_SUFFIX = " (shown to the visitor)"
 SHOWN_LABELS = {author: author + SHOWN_SUFFIX for author in ("claude", "owner", "desk")}
+# A result of one of Claude's calls that it hadn't read when its context closed, labelled by the call's tool.
+RESULT_LABEL = "result of {tool}"
 
 
 def wrap_action_update(text: str, decision_id: str, state: str) -> str:
@@ -204,6 +212,12 @@ def wrap_action_update(text: str, decision_id: str, state: str) -> str:
 def summary_line(label: str, text: str) -> str:
     """One line of the summary: its label, then the text on one line, escaped as wrapped text is."""
     return f"{label}: {_escape(' '.join(text.splitlines()))}"
+
+
+def result_line(tool: str, result: str) -> str:
+    """A summary line for a tool result Claude hadn't read when its context closed: the tool's API name, then the
+    result on one line, both escaped as wrapped text is."""
+    return summary_line(RESULT_LABEL.format(tool=_escape(" ".join(tool.split()))), result)
 
 
 def conversation_so_far(lines: Sequence[str]) -> str:

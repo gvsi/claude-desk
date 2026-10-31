@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Chip } from '../Chip/Chip.tsx';
 import { VisionInertLine } from '../VisionBar/visionInert.tsx';
@@ -26,6 +26,13 @@ export interface SuggestionChipsProps {
 /** A row of at most three suggestion chips, each a thing to ask, handed to the screen when picked. */
 export function SuggestionChips({ label, suggestions, onPick, inertSuggestions = false }: SuggestionChipsProps) {
   const [inertPressed, setInertPressed] = useState(false);
+  const lineRef = useRef<HTMLParagraphElement>(null);
+  // The chips can end a scroll region, as they end the conversation on a public page, so the line
+  // the first pick shows under them could land out of view. Once it shows, it is brought into the
+  // nearest scroller's view; the focus stays on the chip.
+  useEffect(() => {
+    if (inertPressed) lineRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [inertPressed]);
   const pick = (suggestion: string) => {
     // A vision page's suggestions: the pick goes nowhere, and says so once.
     if (inertSuggestions) {
@@ -47,7 +54,7 @@ export function SuggestionChips({ label, suggestions, onPick, inertSuggestions =
   return (
     <>
       {group}
-      <VisionInertLine shown={inertPressed} />
+      <VisionInertLine ref={lineRef} shown={inertPressed} />
     </>
   );
 }

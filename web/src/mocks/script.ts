@@ -2,7 +2,9 @@
  * The scripted Desk: how Rivera Plumbing's Claude answers in the mock API. A visitor's message
  * picks the first rule with one of its words, as a word of its own, in the lowercased text (so
  * "offer" never reads as "off"), and that rule's steps run
- * 150 ms apart, each turn ending with `turn_end`. Cards, prose and status lines are the design
+ * 150 ms apart. Each turn starts as the API's turns do, with Claude writing before anything it
+ * does, and ends with `turn_end`; a session's turns run one at a time, as under the API's turn
+ * lock (served.ts `Server.runTurn`). Cards, prose and status lines are the design
  * system's Rivera fixtures and the kernel's visitor templates, in the turn's language. Nothing here
  * is a model; it stands in for the API's turn runner so screens can be built and tested.
  */
@@ -111,19 +113,40 @@ export function statusLine(language: Language, state: DecisionState, tool: ToolN
 
 const { blocks } = rivera;
 
-/** The held quote after Maria allows it: 15% off the $180.00 list price. */
-const discountedQuote: Record<Language, CardBlock> = {
-  en: cardBlock('quote', {
-    fact_id: 'quote:Q-1043',
-    title: '$153.00',
-    lines: ['Drain clearing', 'Includes 15% off $180.00', 'Good until Tuesday, November 3, 2:00 pm'],
-  }),
-  es: cardBlock('quote', {
-    fact_id: 'quote:Q-1043',
-    title: '$153.00',
-    lines: ['Drain clearing', 'Incluye 15 % de descuento sobre $180.00', 'Válido hasta martes 3 de noviembre, 14:00'],
-  }),
-};
+/** Money as the kernel's cards write it, in both languages: "$1,234.56". */
+function moneyText(cents: number): string {
+  const dollars = Math.floor(cents / 100).toLocaleString('en-US');
+  return `$${dollars}.${String(cents % 100).padStart(2, '0')}`;
+}
+
+/** Basis points as the kernel's cards write a percentage, with no trailing zeros: 1500 is "15", 1250 "12.5" ("12,5" in Spanish). */
+function percentText(bp: number, decimalMark: '.' | ','): string {
+  const whole = Math.floor(bp / 100);
+  const rest = bp % 100;
+  return rest === 0 ? String(whole) : `${whole}${decimalMark}${String(rest).padStart(2, '0')}`.replace(/0+$/, '');
+}
+
+/** A price after a discount, as the kernel works it out (the master plan's "Discounts"): the discount's cents round down. */
+function discountedCents(listCents: number, discountBp: number): number {
+  return listCents - Math.floor((listCents * discountBp) / 10_000);
+}
+
+/**
+ * The quote card for a drain clearing at a discount Maria allowed, as the kernel renders its quote
+ * fact: the price, the job, the discount off the list price (only when there is one) and how long
+ * the quote holds. At 15% it is the fixtures' card.
+ */
+function discountedQuote(language: Language, quote: { listCents: number; discountBp: number; amountCents: number }): CardBlock {
+  const { listCents, discountBp, amountCents } = quote;
+  const discount =
+    discountBp === 0
+      ? []
+      : language === 'es'
+        ? [`Incluye ${percentText(discountBp, ',')} % de descuento sobre ${moneyText(listCents)}`]
+        : [`Includes ${percentText(discountBp, '.')}% off ${moneyText(listCents)}`];
+  const expires = language === 'es' ? 'Válido hasta martes 3 de noviembre, 14:00' : 'Good until Tuesday, November 3, 2:00 pm';
+  return cardBlock('quote', { fact_id: 'quote:Q-1043', title: moneyText(amountCents), lines: ['Drain clearing', ...discount, expires] });
+}
 
 /** The callback window the script offers: Monday 8 to 9 am in the business's time zone. */
 export const CALLBACK_WINDOW = '2026-11-02T08:00:00-08:00/2026-11-02T09:00:00-08:00';
@@ -259,7 +282,10 @@ const heldFixture = rivera.decisions.held;
 const refundFixture = rivera.heldRefund;
 
 export const DECISIONS = {
-  /** The seeded hold: a visitor not on record wants the drain clearing at 15% off, past the quote card's limit. */
+  /**
+   * The seeded hold: a visitor not on record wants the drain clearing at 15% off, past the quote
+   * card's limit. Every held discount is built from it (`heldDiscount`).
+   */
   heldQuote: {
     tool: 'native.quote',
     effects: heldFixture.action?.effects ?? ['change'],
@@ -350,6 +376,49 @@ export const DECISIONS = {
   },
 } as const satisfies Record<string, DecisionSpec>;
 
+/** The discount a visitor gets held at when they ask for one without naming a percent: the fixtures' 15%. */
+const DEFAULT_DISCOUNT_BP = DECISIONS.heldQuote.discountBp;
+
+/**
+ * A percentage the visitor wrote: "10% off", "20 %", "12.5 %", "10 por ciento", "10 percent". The
+ * number stands on its own, not the tail of a longer one.
+ */
+const PERCENT = /(?<![\p{L}\p{N}.,])(\d+(?:[.,]\d+)?)\s*(?:%|por\s*ciento(?![\p{L}\p{N}])|percent(?![\p{L}\p{N}]))/iu;
+
+/** The most a discount can take off: all of it. */
+const WHOLE_PRICE_BP = 10_000;
+
+/**
+ * The discount the visitor asked for, in basis points: the first percentage in their words, as
+ * they wrote it (0% and over 100% included, which `matchRule` sends elsewhere), and the fixtures'
+ * 15% only when they wrote none. Untrusted text, read only for a number, as the kernel takes a
+ * requested discount (master plan, "Discounts").
+ */
+export function askedDiscountBp(text: string): number {
+  const match = PERCENT.exec(text);
+  return match === null ? DEFAULT_DISCOUNT_BP : Math.round(Number((match[1] ?? '').replace(',', '.')) * 100);
+}
+
+/**
+ * The held quote for a discount the visitor asked for: the percent they named (15% when none), the
+ * drain clearing's price at it, and Maria's line, in the fixtures' words, naming the verified
+ * person when the chat has one ("Dana Whitfield, verified with a code,"), else "A visitor not on
+ * record". At 15% from a visitor not on record it is the fixtures' seeded hold.
+ */
+export function heldDiscount(text: string, person: { name: string } | null): DecisionSpec {
+  const { listCents } = DECISIONS.heldQuote;
+  const discountBp = askedDiscountBp(text);
+  if (discountBp <= 0 || discountBp > WHOLE_PRICE_BP) throw new Error(`a held discount is above 0% and up to 100%, not ${discountBp} bp`);
+  const amountCents = discountedCents(listCents, discountBp);
+  const who = person === null ? 'A visitor not on record' : `${person.name}, verified with a code,`;
+  return {
+    ...DECISIONS.heldQuote,
+    discountBp,
+    amountCents,
+    reasonPlain: `${who} asked for a drain clearing quote at ${percentText(discountBp, '.')}% off, ${moneyText(amountCents)} instead of ${moneyText(listCents)}.`,
+  };
+}
+
 /** The effects that move money: a request with one is a money request. */
 const MONEY_EFFECTS: ReadonlySet<Effect> = new Set<Effect>(['charge', 'pay_out']);
 
@@ -380,6 +449,8 @@ export interface TurnContext {
   readonly language: Language;
   /** The visitor's words that started the turn (empty for a follow-up). Untrusted. */
   readonly text: string;
+  /** The verified person on record the chat is with, once the visitor confirmed it's them; else null. */
+  readonly person: { personId: string; name: string } | null;
   /** Records a decision with its ledger entries. */
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
@@ -427,6 +498,8 @@ export interface ScriptRule {
   name: RuleName;
   /** Lowercase words or phrases, any one of which, found whole, picks the rule. Empty for the last rule, which takes anything. */
   words: readonly string[];
+  /** The tools its turn calls, besides replying: whether the session has them decides whether it runs (`scriptedTurn`). */
+  tools: readonly ToolName[];
   steps: readonly Step[];
 }
 
@@ -445,16 +518,28 @@ export const DEMO_CODE = '482913';
  */
 export const PAYMENT_TOKEN = 'k7Hq2vX9';
 
+/**
+ * Who asks for a callback: Dana Whitfield, the person the copy has on record, with the phone number
+ * she typed, one of the fictional 555-01xx numbers (not the business's own, and not her contact on
+ * record, which only the kernel holds).
+ */
+const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: '(510) 555-0118' } as const;
+
 /** The callback request the script records, as the visitor typed it. */
-export const CALLBACK_REASON = 'Dana Wells · (503) 555-0142 · Leaking water heater';
+export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact} · Leaking water heater`;
+
+/** Claude hands the visitor to Maria: the kernel's handoff card, as asking for her gets. */
+const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
 
 export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'discount',
     words: ['off', 'discount', 'descuento'],
+    tools: ['native.quote'],
     steps: [
-      (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
       writing,
+      // The percent the visitor asked for, held past the quote card's limit for Maria.
+      (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
       // Claude's checked words say Maria decides; the held receipt under them says what waits.
       (ctx) => ctx.reply([proseBlock(HELD_PROSE[ctx.language])]),
     ],
@@ -462,10 +547,11 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'invoice',
     words: ['invoice', 'return', 'factura'],
+    tools: ['native.start_verification'],
     steps: [
+      writing,
       // The code goes to the contact on record, never to the visitor: the kernel decides that first.
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.startVerification)),
-      writing,
       (ctx) => ctx.reply([verifyFirstProse[ctx.language], blocks.verify_prompt[ctx.language]]),
       (ctx) =>
         ctx.startVerification({
@@ -479,14 +565,15 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'deposit',
     words: ['deposit', 'pay', 'pagar'],
+    tools: ['native.payment_link'],
     steps: [
+      writing,
       (ctx) => {
         const decision = ctx.decide(DECISIONS.paymentLink);
         // The checkout's title is the card's, as the kernel writes both from the one link.
         ctx.issueLink({ title: DEPOSIT_TITLE[ctx.language], amountCents: 2000 });
         return ctx.status('receipt', decision);
       },
-      writing,
       // The card points at the link this turn issued, by its own token.
       (ctx) => ctx.reply([{ ...blocks.payment_link[ctx.language], href: `/pay/${ctx.latestLink()}` }]),
     ],
@@ -495,41 +582,45 @@ export const SCRIPT: readonly ScriptRule[] = [
     // Picks a time already offered, so it comes before "book", which lists them.
     name: 'booked',
     words: ['first one', 'la primera'],
+    tools: ['native.book'],
     steps: [
-      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.book)),
       writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.book)),
       (ctx) => ctx.reply([bookedProse[ctx.language], bookedCard[ctx.language]]),
     ],
   },
   {
     name: 'book',
     words: ['book', 'tuesday', 'reservar'],
+    tools: ['native.find_slots'],
     steps: [
-      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.slots)),
       writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.slots)),
       (ctx) => ctx.reply([blocks.booking_options[ctx.language]]),
     ],
   },
   {
     name: 'price',
     words: ['price', 'cost', 'how much', 'cuánto', 'precio'],
+    tools: ['native.quote'],
     steps: [
-      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
       writing,
+      (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
       (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], blocks.quote[ctx.language]]),
     ],
   },
   {
     name: 'callback',
     words: ['call me', 'callback', 'llámame'],
+    tools: ['native.request_callback'],
     steps: [
+      writing,
       (ctx) => {
         const decision = ctx.decide(DECISIONS.callback);
         const tonight = ctx.text.toLowerCase().includes('tonight');
-        ctx.openHandoff({ reason: CALLBACK_REASON, callbackWindow: tonight ? null : CALLBACK_WINDOW, lead: 'Dana Wells' });
+        ctx.openHandoff({ reason: CALLBACK_REASON, callbackWindow: tonight ? null : CALLBACK_WINDOW, lead: CALLBACK_LEAD.name });
         return ctx.status('receipt', decision);
       },
-      writing,
       (ctx) => {
         const tonight = ctx.text.toLowerCase().includes('tonight');
         return ctx.reply([callbackCards[tonight ? 'open' : 'window'][ctx.language]]);
@@ -539,16 +630,19 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'talk',
     words: ['maria', 'talk to', 'hablar'],
-    steps: [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])],
+    tools: [],
+    steps: HANDOFF_STEPS,
   },
   {
     name: 'outage',
     words: ['outage'],
+    tools: [],
     steps: [writing, () => ({ type: 'error', code: 'kernel_unavailable' })],
   },
   {
     name: 'other',
     words: [],
+    tools: [],
     steps: [writing, (ctx) => ctx.reply([helpProse[ctx.language]])],
   },
 ];
@@ -577,6 +671,11 @@ export const AFTER_VERIFY: readonly Step[] = [
   (ctx) => ctx.reply([invoiceProse[ctx.language], blocks.document_link[ctx.language]]),
 ];
 
+/** Claude's turn once the visitor confirmed it's them (`AFTER_VERIFY`), as the session may run it (`stepsWithTools`). */
+export function afterVerify(allTools: boolean): readonly Step[] {
+  return stepsWithTools([DECISIONS.releaseInvoice.tool], AFTER_VERIFY, allTools);
+}
+
 /**
  * The seeded hold's turn, as the design system's fixtures have it (`rivera.conversations.visitor`):
  * the 15% quote is held, and Claude's draft named the discount in its own words, so the reply was
@@ -584,7 +683,7 @@ export const AFTER_VERIFY: readonly Step[] = [
  * Safety and the briefing show; a discount asked in a live chat gets the discount row's reply.
  */
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
-  (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
+  (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
   writing,
   (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
 ];
@@ -598,12 +697,49 @@ function hasWord(lower: string, word: string): boolean {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(lower);
 }
 
-/** The first rule with one of its words, whole, in the lowercased text, else the last rule. */
+/** The script's rule named `name`. */
+function ruleNamed(name: RuleName): ScriptRule {
+  const rule = SCRIPT.find((r) => r.name === name);
+  if (!rule) throw new Error(`the script has no ${name} rule`);
+  return rule;
+}
+
+/**
+ * The first rule with one of its words, whole, in the lowercased text, else the last rule. A
+ * discount asked at 0% is a question about the list price (the price rule), and one over 100% is
+ * no discount anyone can give (the last rule's plain answer).
+ */
 export function matchRule(text: string): ScriptRule {
   const lower = text.toLowerCase();
   const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
-  return rule;
+  if (rule.name !== 'discount') return rule;
+  const asked = askedDiscountBp(text);
+  if (asked === 0) return ruleNamed('price');
+  return asked > WHOLE_PRICE_BP ? ruleNamed('other') : rule;
+}
+
+/**
+ * The tools a visitor's or agent's session keeps while its Desk's Answering switch is off, besides
+ * replying (master plan, "Model-visible tools"): taking a lead and filing a callback. The owner's
+ * preview keeps every tool.
+ */
+export const TOOLS_WHILE_NOT_ANSWERING: ReadonlySet<ToolName> = new Set<ToolName>(['native.capture_lead', 'native.request_callback']);
+
+/**
+ * A turn that calls `tools`, as the session may run it: as written when the session has every tool
+ * (`allTools`: its Desk is answering, or it is the owner's preview) or needs only the ones it keeps
+ * while the Desk isn't; otherwise Claude hands the visitor to Maria, as the "talk" rule does, and
+ * nothing is decided.
+ */
+export function stepsWithTools(tools: readonly ToolName[], steps: readonly Step[], allTools: boolean): readonly Step[] {
+  return allTools || tools.every((tool) => TOOLS_WHILE_NOT_ANSWERING.has(tool)) ? steps : HANDOFF_STEPS;
+}
+
+/** The turn the visitor's words start: their rule's steps, as the session may run them. */
+export function scriptedTurn(text: string, allTools: boolean): readonly Step[] {
+  const rule = matchRule(text);
+  return stepsWithTools(rule.tools, rule.steps, allTools);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -626,7 +762,11 @@ export function afterAnswer(answer: ApprovalAnswer, decision: Decision): Step[] 
   if (decision.action?.tool === 'payments.create_refund') {
     return [resolved, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
   }
-  return [resolved, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote[ctx.language]])];
+  // The quote at the discount Maria allowed, the one the visitor asked for.
+  const listCents = decision.action?.list_cents ?? DECISIONS.heldQuote.listCents;
+  const discountBp = decision.action?.discount_bp ?? DEFAULT_DISCOUNT_BP;
+  const quote = { listCents, discountBp, amountCents: decision.action?.amount_cents ?? discountedCents(listCents, discountBp) };
+  return [resolved, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
 }
 
 /**

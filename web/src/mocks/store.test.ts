@@ -2,14 +2,20 @@
  * The mock API's store, driven the way its handlers drive it: the scripted Desk, held requests and
  * answers, Today, the event log a stream replays, the transcript, a start over and injected faults.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
+  ApprovalAnswerOut,
   BriefingList,
   ConversationSummary,
   CopyOut,
+  DemoAgentRun,
   NeedsYouItem,
   OwnerTranscript,
   PeopleOut,
@@ -23,8 +29,9 @@ import type {
 } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
-import { chatReducer, initialChatState } from '../public/chatReducer.ts';
-import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
+import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
+import { AGENT_TURN_GAP_MS } from './agents.ts';
+import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, askedDiscountBp, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
@@ -214,9 +221,9 @@ describe('the scripted Desk', () => {
     expect(afterHold.needs_you_count).toBe(1);
     expect(afterHold.live.map((c) => c.session_id)).toEqual([session.session_id]);
 
-    expect(typesOf(events)).toEqual(['held', 'writing', 'message', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'held', 'message', 'turn_end']);
     expect(events.map(([seq]) => seq)).toEqual([1, 2, 3, 4]);
-    const [, held] = events[0] ?? [];
+    const [, held] = events[1] ?? [];
     expect(held).toMatchObject({ type: 'held', state: 'held', visitor_plain: 'Waiting for Maria Rivera to approve' });
     // Claude says, in checked words, that Maria decides and her answer will show up in the chat.
     const [, reply] = events[2] ?? [];
@@ -302,7 +309,7 @@ describe('the scripted Desk', () => {
     const { events } = await openChat();
     await send('Can I get 15% off?');
     await drain();
-    const [, held] = events[0] ?? [];
+    const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
 
     const answered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } });
@@ -313,7 +320,7 @@ describe('the scripted Desk', () => {
       card_diff: null,
     });
     // Nothing reaches the chat in the answer itself: the follow-up arrives on the stream.
-    expect(typesOf(events)).toEqual(['held', 'writing', 'message', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'held', 'message', 'turn_end']);
 
     await drain();
     expect(typesOf(events).slice(4)).toEqual(['resolved', 'writing', 'message', 'turn_end']);
@@ -336,6 +343,153 @@ describe('the scripted Desk', () => {
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou.map((item) => item.decision?.decision_id)).not.toContain(decisionId);
     expect(needsYou).toHaveLength(1);
+  });
+
+  it('held_discount_is_the_one_asked_for', async () => {
+    // The held quote carries the percent the visitor named, with its price worked out from the
+    // $180.00 list price as the kernel does, and Maria's card says so; once she allows it, the
+    // visitor's quote card has that percent. A discount asked with no percent is the fixtures' 15%.
+    const { events } = await openChat();
+    const asked = [
+      'Can I get 10% off a drain clearing?',
+      '¿Me hacen un 20 por ciento de descuento?',
+      'Is 12.5 % off possible?',
+      'Is there a discount for seniors?',
+    ];
+    const held: { action: unknown; reason: string | undefined }[] = [];
+    const quotes: unknown[] = [];
+    for (const text of asked) {
+      const before = events.length;
+      await send(text);
+      await drain();
+      const status = events.slice(before).find(([, ev]) => ev.type === 'held')?.[1];
+      const decisionId = status?.type === 'held' ? status.decision_id : '';
+      const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+      const decision = needsYou.find((item) => item.decision?.decision_id === decisionId)?.decision;
+      held.push({ action: decision?.action, reason: decision?.reason_plain });
+      expect((await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } })).status, text).toBe(200);
+      await drain();
+      const followUp = events.slice(before).findLast(([, ev]) => ev.type === 'message')?.[1];
+      const card = followUp?.type === 'message' ? followUp.blocks.find((b) => b.template === 'quote') : undefined;
+      quotes.push([card?.title, card?.lines]);
+    }
+    expect(held).toEqual([
+      {
+        action: expect.objectContaining({ list_cents: 18_000, discount_bp: 1000, amount_cents: 16_200 }),
+        reason: 'A visitor not on record asked for a drain clearing quote at 10% off, $162.00 instead of $180.00.',
+      },
+      {
+        action: expect.objectContaining({ list_cents: 18_000, discount_bp: 2000, amount_cents: 14_400 }),
+        reason: 'A visitor not on record asked for a drain clearing quote at 20% off, $144.00 instead of $180.00.',
+      },
+      {
+        action: expect.objectContaining({ list_cents: 18_000, discount_bp: 1250, amount_cents: 15_750 }),
+        reason: 'A visitor not on record asked for a drain clearing quote at 12.5% off, $157.50 instead of $180.00.',
+      },
+      {
+        action: expect.objectContaining({ list_cents: 18_000, discount_bp: 1500, amount_cents: 15_300 }),
+        reason: rivera.decisions.held.reason_plain,
+      },
+    ]);
+    const fixtureQuote = rivera.events.resolvedTurn.flatMap((ev) => (ev.type === 'message' ? ev.blocks : [])).find((b) => b.template === 'quote');
+    expect(quotes).toEqual([
+      ['$162.00', ['Drain clearing', 'Includes 10% off $180.00', 'Good until Tuesday, November 3, 2:00 pm']],
+      ['$144.00', ['Drain clearing', 'Incluye 20 % de descuento sobre $180.00', 'Válido hasta martes 3 de noviembre, 14:00']],
+      ['$157.50', ['Drain clearing', 'Includes 12.5% off $180.00', 'Good until Tuesday, November 3, 2:00 pm']],
+      [fixtureQuote?.title, fixtureQuote?.lines],
+    ]);
+
+    // The first percentage standing on its own is the one asked for, whatever it is; 15% only when
+    // the words name none.
+    const read: [text: string, bp: number][] = [
+      ['20 % off?', 2000],
+      ['¿Un 10 por ciento de descuento?', 1000],
+      ['12,5 % de descuento', 1250],
+      ['10 percent off', 1000],
+      ['1000% off', 100_000],
+      ['0% off', 0],
+      ['Any discount?', 1500],
+    ];
+    for (const [text, bp] of read) expect(askedDiscountBp(text), text).toBe(bp);
+  });
+
+  it('discount_at_none_or_over_all_is_not_held', async () => {
+    // 0% off is a question about the list price: the list-price quote, with nothing held. Over 100%
+    // is no discount anyone can give: Claude's plain answer, with nothing decided.
+    expect(matchRule('Can I get 0% off?').name).toBe('price');
+    expect(matchRule('Can I get 1000% off?').name).toBe('other');
+    const { session, events } = await openChat();
+    const decided = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === session.session_id).map((d) => d.decision);
+
+    await send('Can I get 0% off?');
+    await drain();
+    const listPrice = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks.map((b) => [b.template, b.title]) : []));
+    expect(listPrice).toEqual([
+      [null, null],
+      ['quote', rivera.blocks.quote.en.title],
+    ]);
+    expect(decided().map((d) => [d.outcome, d.state, d.reason_plain])).toEqual([['allow', 'executed', DECISIONS.quote.reasonPlain]]);
+
+    const before = events.length;
+    await send('Can I get 1000% off?');
+    await drain();
+    expect(typesOf(events.slice(before))).toEqual(['writing', 'message', 'turn_end']);
+    const help = events.slice(before).flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks.map((b) => b.text) : []));
+    expect(help).toEqual(['Maria can tell you once she sees it. You can ask for her here anytime.']);
+    expect(decided()).toHaveLength(1);
+  });
+
+  it('verified_discount_names_the_person_and_drafts_its_percent', async () => {
+    // Dana confirms it's her, then asks for 20% off: Maria's card names her, and "Only for Dana
+    // Whitfield, always" drafts a rule for her at that percent and its price. Once that rule is
+    // active, the same card drafted again changes nothing, and another percent is a change the
+    // draft's review shows.
+    const { events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    const allowForDana = async (text: string) => {
+      const before = events.length;
+      await send(text);
+      await drain();
+      const status = events.slice(before).find(([, ev]) => ev.type === 'held')?.[1];
+      const decisionId = status?.type === 'held' ? status.decision_id : '';
+      const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+      const decision = needsYou.find((item) => item.decision?.decision_id === decisionId)?.decision;
+      const answered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_person' } });
+      expect(answered.status, text).toBe(200);
+      await drain();
+      return { decision, cards: (answered.body as ApprovalAnswerOut).card_diff ?? [] };
+    };
+    const review = async (cards: unknown[]) => {
+      const drafted = await call('draftRules', { params: { desk_id: deskId }, body: { add: cards } });
+      expect(drafted.status).toBe(200);
+      return drafted.body as RulesDraft;
+    };
+    const limits = (card: { max_discount_bp?: number; max_amount_cents?: number | null } | undefined) => [card?.max_discount_bp, card?.max_amount_cents];
+
+    const twenty = await allowForDana('Can I get 20% off?');
+    expect(twenty.decision).toMatchObject({
+      reason_plain: 'Dana Whitfield, verified with a code, asked for a drain clearing quote at 20% off, $144.00 instead of $180.00.',
+      answers: ['allow_once', 'deny_once', 'allow_person'],
+      action: { list_cents: 18_000, discount_bp: 2000, amount_cents: 14_400 },
+    });
+    expect(twenty.cards).toMatchObject([{ card_id: 'person-per-dana-native.quote', who: 'person', person_id: 'per-dana', mode: 'auto' }]);
+    const first = await review(twenty.cards);
+    expect(first.diff?.added.map((card) => [card.card_id, ...limits(card)])).toEqual([['person-per-dana-native.quote', 2000, 14_400]]);
+    expect((await call('confirmRules', { params: { desk_id: deskId }, body: { version: first.version } })).status).toBe(200);
+    expect((await review(twenty.cards)).diff).toEqual({ added: [], removed: [], changed: [] });
+
+    // 10% off is a higher price than her rule's $144.00, so it is held again.
+    const ten = await allowForDana('What about 10% off?');
+    expect(ten.decision?.reason_plain).toBe('Dana Whitfield, verified with a code, asked for a drain clearing quote at 10% off, $162.00 instead of $180.00.');
+    const lowered = await review(ten.cards);
+    expect(lowered.diff?.added).toEqual([]);
+    expect(lowered.diff?.removed).toEqual([]);
+    expect(lowered.diff?.changed.map(([before, after]) => [before.card_id, limits(before), limits(after)])).toEqual([
+      ['person-per-dana-native.quote', [2000, 14_400], [1000, 16_200]],
+    ]);
   });
 
   it('executed_receipts_say_what_ran', async () => {
@@ -404,11 +558,36 @@ describe('the scripted Desk', () => {
     expect(bookings.map((d) => d.decision.state)).toEqual(['executed', 'executed']);
   });
 
+  it('quick_messages_take_turns', async () => {
+    // A second message sent before Claude has answered the first: the visitor's chat, as the public
+    // page builds it from the two messages and the stream, has each reply's own check and its own
+    // action's receipt under it, never the next turn's.
+    const { events } = await openChat();
+    await send('How much is drain clearing?');
+    await send('Can I book Tuesday?');
+    await drain();
+    const chat = [
+      { type: 'sent', id: 'v1', text: 'How much is drain clearing?' } as const,
+      { type: 'sent', id: 'v2', text: 'Can I book Tuesday?' } as const,
+      ...events.map(([seq, ev]) => ({ type: 'event', seq, ev }) as const),
+    ].reduce<ChatState>(chatReducer, initialChatState());
+    const replies = chat.rows.flatMap((row) => (row.item.kind === 'message' ? [row.receipts.map((receipt) => receipt.plain)] : []));
+    expect(replies).toEqual([
+      [VISITOR_PLAIN.en.reply_checked, executedLine('native.quote', 'en', 'Maria Rivera')],
+      [VISITOR_PLAIN.en.reply_checked, executedLine('native.find_slots', 'en', 'Maria Rivera')],
+    ]);
+
+    // As the API's turn lock has it, the second turn waits for the first to end, and it starts as
+    // the API's turns do, with Claude writing before anything it does.
+    const turn = ['writing', 'receipt', 'message', 'turn_end'];
+    expect(typesOf(events)).toEqual([...turn, ...turn]);
+  });
+
   it('visitor_cancel_resolves_the_hold', async () => {
     const { events } = await openChat();
     await send('Can I get 15% off?');
     await drain();
-    const [, held] = events[0] ?? [];
+    const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
 
     // Only this browser's own session can cancel, and only a decision of that session.
@@ -487,6 +666,158 @@ describe('the scripted Desk', () => {
     expect(unknown.status).toBe(404);
   });
 
+  it('answering_off_leaves_only_callbacks_and_leads', async () => {
+    // With the Desk's Answering switch off, a visitor's or agent's turn may only reply, take a lead
+    // or file a callback (master plan, "Model-visible tools"): what needs another tool gets the
+    // handoff, as asking for Maria does, and decides nothing. The owner's preview keeps every tool.
+    const setAnswering = async (on: boolean) => {
+      expect((await call('setAnswering', { params: { desk_id: deskId }, body: { on } })).status).toBe(200);
+    };
+    const { session, events } = await openChat();
+    const turn = async (text: string) => {
+      const before = events.length;
+      await send(text);
+      await drain();
+      return events.slice(before).map(([, ev]) => ev);
+    };
+    const toolsDecided = (sessionId: string) =>
+      [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === sessionId).map((d) => d.decision.action?.tool);
+    const handoff = rivera.blocks.handoff.en;
+    const shown = (evs: SseEvent[]) => evs.flatMap((ev) => (ev.type === 'message' ? ev.blocks.map((b) => [b.kind, b.template, b.text]) : []));
+
+    await setAnswering(false);
+    const price = await turn('How much to clear a drain?');
+    expect(price.map((ev) => ev.type)).toEqual(['writing', 'message', 'turn_end']);
+    expect(shown(price)).toEqual([[handoff.kind, handoff.template, handoff.text]]);
+    for (const text of ['Can I get 10% off?', 'Can I book Tuesday?', 'Book the first one', 'How do I pay the deposit?', 'Can you send my invoice?']) {
+      expect(shown(await turn(text)), text).toEqual([[handoff.kind, handoff.template, handoff.text]]);
+    }
+    expect(toolsDecided(session.session_id)).toEqual([]);
+    expect(mockStore.world.inbox.filter((record) => record.sessionId === session.session_id)).toEqual([]);
+    expect([...mockStore.world.links.values()].filter((link) => link.sessionId === session.session_id)).toEqual([]);
+
+    // A callback still goes through, with its receipt and card.
+    const handoffs = mockStore.world.handoffs.size;
+    const callback = await turn('Can you call me back?');
+    expect(callback.map((ev) => ev.type)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(shown(callback).map(([, template]) => template)).toEqual(['callback_confirmed']);
+    expect(toolsDecided(session.session_id)).toEqual(['native.request_callback']);
+    expect(mockStore.world.handoffs.size).toBe(handoffs + 1);
+
+    // An agent sent from the chat gets the handoff too, and decides nothing.
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit' } });
+    expect(sent.status).toBe(202);
+    const runId = (sent.body as { run_id: string }).run_id;
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 6);
+    const run = (await call('agentRun', { params: { slug, run_id: runId } })).body as DemoAgentRun;
+    expect(run.state).toBe('done');
+    const desk = run.turns.filter((t) => t.author === 'desk');
+    expect(desk.map((t) => [t.blocks.map((b) => [b.kind, b.template, b.text]), t.receipts])).toEqual([[[[handoff.kind, handoff.template, handoff.text]], []]]);
+    const agentChat = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1);
+    expect(agentChat?.items.filter((item) => item.kind === 'agent_text').map((item) => item.text)).toEqual([
+      'Book the earliest visit for a leaking water heater for Alex Kim.',
+    ]);
+    expect(toolsDecided(agentChat?.state.session_id ?? '')).toEqual([]);
+
+    // Answering back on, the same question gets the quote.
+    await setAnswering(true);
+    const quoted = await turn('How much to clear a drain?');
+    expect(shown(quoted).map(([, template]) => template)).toEqual([null, 'quote']);
+    expect(toolsDecided(session.session_id)).toEqual(['native.request_callback', 'native.quote']);
+
+    // A code sent while the Desk answered, confirmed once Answering is off: the visitor is verified,
+    // but Claude's turn after it hands off instead of releasing the invoice.
+    await turn('Can you send my invoice?');
+    await setAnswering(false);
+    const before = events.length;
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    expect(shown(events.slice(before).map(([, ev]) => ev))).toEqual([[handoff.kind, handoff.template, handoff.text]]);
+    expect(toolsDecided(session.session_id)).toEqual(['native.request_callback', 'native.quote', 'native.start_verification']);
+
+    // Still off, the owner's preview of her Desk quotes: it keeps the visitor tools.
+    const preview = ((await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession).state;
+    const previewEvents: [number, SseEvent][] = [];
+    mockStore.listen(slug, 0, (seq, ev) => previewEvents.push([seq, ev]));
+    await send('How much to clear a drain?');
+    await drain();
+    expect(shown(previewEvents.map(([, ev]) => ev)).map(([, template]) => template)).toEqual([null, 'quote']);
+    expect(toolsDecided(preview.session_id)).toEqual(['native.quote']);
+  });
+
+  it('answering_is_read_when_a_turn_starts', async () => {
+    // As the API gives a turn its tools when the turn starts: a question waiting behind a turn in
+    // progress goes by Answering as it stands when its own turn begins, not when it was sent.
+    const setAnswering = async (on: boolean) => {
+      expect((await call('setAnswering', { params: { desk_id: deskId }, body: { on } })).status).toBe(200);
+    };
+    const { events } = await openChat();
+    const templatesFrom = (from: number) =>
+      events.slice(from).flatMap(([, ev]) => (ev.type === 'message' ? [ev.blocks.map((block) => block.template)] : []));
+
+    // Sent while the Desk answers, behind a turn that has started; Answering goes off before its turn starts.
+    await send('How much is drain clearing?');
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS);
+    await send('How much to clear a drain?');
+    await setAnswering(false);
+    await drain();
+    expect(templatesFrom(0)).toEqual([[null, 'quote'], ['handoff']]);
+
+    // The other way round: sent while it doesn't, and Answering is back on before its turn starts.
+    const before = events.length;
+    await send('Can you call me back?');
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS);
+    await send('How much to clear a drain?');
+    await setAnswering(true);
+    await drain();
+    expect(templatesFrom(before)).toEqual([['callback_confirmed'], [null, 'quote']]);
+  });
+
+  it('agent_run_reads_answering_at_each_request', async () => {
+    // The built-in agent's run goes by Answering as it stands at each of its requests: switched off
+    // after the agent's quote and before its payment, the payment gets the handoff and nothing is charged.
+    await openChat();
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'quote_and_deposit' } });
+    expect(sent.status).toBe(202);
+    const runId = (sent.body as { run_id: string }).run_id;
+    const read = async () => (await call('agentRun', { params: { slug, run_id: runId } })).body as DemoAgentRun;
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 2);
+    expect((await read()).turns.map((t) => t.author)).toEqual(['agent', 'desk']);
+    expect((await call('setAnswering', { params: { desk_id: deskId }, body: { on: false } })).status).toBe(200);
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 4);
+
+    const run = await read();
+    expect(run.state).toBe('done');
+    const desk = run.turns.filter((t) => t.author === 'desk');
+    expect(desk.map((t) => [t.blocks.map((b) => b.template), t.receipts.map((ev) => ev.state)])).toEqual([
+      [[null, 'quote'], ['executed']],
+      [['handoff'], []],
+    ]);
+    const agentChat = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1);
+    const decided = [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === agentChat?.state.session_id);
+    expect(decided.map((d) => d.decision.action?.tool)).toEqual(['native.quote']);
+  });
+
+  it('callback_comes_from_dana_on_record', async () => {
+    // The callback the script files is from Dana Whitfield, the one Dana the copy has on record, by
+    // the name the kernel's seed keeps for her, with a phone number she typed: one of the fictional
+    // 555-01xx numbers, and not the business's own.
+    const seedPy = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'kernel_service', 'seed.py'), 'utf8');
+    const dana = /SeedPerson\(([^)]*\bref="dana"[^)]*)\)/.exec(seedPy)?.[1] ?? '';
+    const name = /\bdisplay_name="([^"]+)"/.exec(dana)?.[1];
+    expect(name).toBe(rivera.people.dana.name);
+    const phone = '(510) 555-0118';
+    expect(phone).not.toBe(rivera.blocks.contact.en.title);
+
+    await openChat();
+    await send('Can you call me back?');
+    await drain();
+    const handoff = [...mockStore.world.handoffs.values()].at(-1)?.handoff;
+    expect(handoff?.reason).toBe(`${name} · ${phone} · Leaking water heater`);
+    const lead = mockStore.world.leads.at(-1);
+    expect([lead?.displayName, lead?.note]).toEqual([name, `${phone} · Leaking water heater`]);
+  });
+
   it('events_replay_after_seq', async () => {
     // No stream without this browser's session for the Desk, and none for a Desk that doesn't exist.
     expect(await call('events', { params: { slug } })).toEqual({ status: 401, body: { error: 'no_session' } });
@@ -542,7 +873,7 @@ describe('the scripted Desk', () => {
     // old copy's turn in flight never finishing.
     await send('How much is drain clearing?');
     await vi.advanceTimersByTimeAsync(EVENT_GAP_MS);
-    expect(replayed.at(-1)?.[1].type).toBe('receipt');
+    expect(replayed.at(-1)?.[1].type).toBe('writing');
     const heard = replayed.length;
     const fresh = await call('startOver');
     expect(fresh.status).toBe(200);
@@ -654,7 +985,7 @@ describe('taking over', () => {
     const { session, events } = await openChat();
     await send('Can I get 15% off?');
     await drain();
-    const [, held] = events[0] ?? [];
+    const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
 
     // Maria allows the hold, then joins the chat at once. The action ran when she answered, so the
@@ -991,7 +1322,7 @@ describe('deleting a Desk', () => {
     const { events } = await openChat();
     await send('How much is drain clearing?');
     await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 2);
-    expect(typesOf(events)).toEqual(['receipt', 'writing']);
+    expect(typesOf(events)).toEqual(['writing', 'receipt']);
     const seeded = mockStore.world.sessionsOf(deskId).filter((s) => s !== mockStore.visitorSession(slug));
     expect(seeded.length).toBeGreaterThan(0);
 
@@ -1004,7 +1335,7 @@ describe('deleting a Desk', () => {
     expect((await call('today', { params: { desk_id: deskId } })).status).toBe(404);
     // Each of its chats hears that its session ended, as a closed session ends a visitor's turn; the
     // turn in flight ends there and says nothing more, so the chat no longer shows Claude writing.
-    expect(typesOf(events)).toEqual(['receipt', 'writing', 'error', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'error', 'turn_end']);
     expect(events[2]?.[1]).toEqual({ type: 'error', code: 'session' });
     const chat = events.reduce((state, [seq, ev]) => chatReducer(state, { type: 'event', seq, ev }), initialChatState());
     expect(chat).toMatchObject({ writing: false, error: 'session' });
@@ -1013,7 +1344,7 @@ describe('deleting a Desk', () => {
     expect((await call('publicDesk', { params: { slug } })).status).toBe(404);
     expect((await call('sendMessage', { params: { slug }, body: { text: 'Hello?' } })).status).toBe(404);
     await drain();
-    expect(typesOf(events)).toEqual(['receipt', 'writing', 'error', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'receipt', 'error', 'turn_end']);
     expect((await call('publicDesk', { params: { slug: RIVERA.emergenciesSlug } })).status).toBe(200);
 
     // Deleting it again, or a Desk outside the copy, is not found; without the owner cookie, refused.
@@ -1187,7 +1518,8 @@ describe('planted faults', () => {
     expect((await again).status).toBe(429);
     expect((await call('today', { params: { desk_id: deskId } })).status).toBe(200);
 
-    // `afterCommit`: the message is kept and Claude answers it, but its answer is lost.
+    // `afterCommit`: the message is kept and Claude answers it, but its answer is lost. (Answering
+    // is off from above, so Claude's answer is the handoff, with no quote.)
     const { events } = await openChat();
     mockStore.inject({ route: 'sendMessage', status: 'network', afterCommit: true });
     expect(await mockStore.dispatch('sendMessage', { params: { slug }, body: { text: 'How much is drain clearing?' } })).toEqual({
@@ -1198,7 +1530,7 @@ describe('planted faults', () => {
     expect(read.items.filter((item) => item.kind === 'visitor_text').map((item) => item.text)).toEqual([
       'How much is drain clearing?',
     ]);
-    expect(typesOf(events)).toEqual(['receipt', 'writing', 'message', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'message', 'turn_end']);
 
     // Every request is recorded with its body and path, faulted or not.
     expect(mockStore.requests.filter((r) => r.key === 'setAnswering')).toEqual([
@@ -1336,8 +1668,8 @@ describe("Today's windows", () => {
     expect(withLead.briefing).toMatchObject({ leads: 1, total: 4 });
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
-      display_name: 'Dana Wells',
-      line: '(503) 555-0142 · Leaking water heater',
+      display_name: 'Dana Whitfield',
+      line: '(510) 555-0118 · Leaking water heater',
     });
     await openChat();
     await vi.advanceTimersByTimeAsync(60_000);

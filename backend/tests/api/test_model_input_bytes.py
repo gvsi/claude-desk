@@ -24,7 +24,7 @@ from desk.api.store import (
     start_fresh_context,
 )
 from desk.api.triage import _last_said
-from tests.api.test_store import TOOLS, canonical, tool_result, tool_use
+from tests.api.test_store import SYSTEM, TOOLS, canonical, tool_result, tool_use
 
 RECORDING = Path(__file__).parent / "fixtures" / "model_input.json"
 # Text that tries to close its wrapper, open another, break an attribute or start a line of its own.
@@ -40,7 +40,7 @@ def _matches_recording(name: str, built: object) -> None:
 
 
 async def test_a_conversations_model_input_matches_its_recording(api_conn, ids):
-    await start_fresh_context(api_conn, ids, TOOLS)
+    await start_fresh_context(api_conn, ids, TOOLS, system=SYSTEM)
     await append_message(api_conn, ids, "desk_context",
                          text='{"facts":[{"fact_id":"f-1","text":"Drain clearing ' + FORGED + '"}],"knowledge":[]}')
     for kind in ("visitor_text", "agent_text", "whisper"):
@@ -67,7 +67,7 @@ async def test_a_conversations_model_input_matches_its_recording(api_conn, ids):
     second = await prepare_model_input(api_conn, ids.session_id)
 
     await append_assistant(api_conn, ids, [{"type": "text", "text": "Done."}], generation=0)
-    await start_fresh_context(api_conn, ids, TOOLS)         # the summary of everything above, and the facts again
+    await start_fresh_context(api_conn, ids, TOOLS, system=SYSTEM)   # the summary of everything above, the facts again
     await append_message(api_conn, ids, "visitor_text", text="Thanks.")
     third = await prepare_model_input(api_conn, ids.session_id)
 
