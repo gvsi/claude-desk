@@ -1076,10 +1076,11 @@ describe("Today's Demo inbox", () => {
 
   /**
    * Every timer the page starts from now on at the Demo inbox's poll interval, for as long as the
-   * page keeps it: `started()` lists them, oldest first, and `due()` runs each one still kept at
-   * once, as if all came due at that moment, and returns the ones it ran.
+   * page keeps it: `started()` lists them, oldest first, `kept()` the ones it keeps now, and
+   * `due()` runs each one still kept (or each of `only` still kept) at once, as if all came due at
+   * that moment, and returns the ones it ran.
    */
-  function inboxPacedPolls(): { started: () => number[]; due: () => number[] } {
+  function inboxPacedPolls(): { started: () => number[]; kept: () => number[]; due: (only?: number[]) => number[] } {
     // The page's timers as the browser has them (the Node typings say otherwise).
     const timers = window as unknown as { setInterval: (run: () => void, ms?: number) => number; clearInterval: (id?: number) => void };
     const started: number[] = [];
@@ -1104,8 +1105,9 @@ describe("Today's Demo inbox", () => {
     });
     return {
       started: () => [...started],
-      due: () => {
-        const due = [...running];
+      kept: () => [...running.keys()],
+      due: (only) => {
+        const due = [...running].filter(([id]) => only === undefined || only.includes(id));
         for (const [, run] of due) run();
         return due.map(([id]) => id);
       },
@@ -1524,6 +1526,48 @@ describe("Today's Demo inbox", () => {
     await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(1));
     expect(answeredAt).toBeGreaterThan(0);
     expect((sent[0] ?? 0) - answeredAt).toBeGreaterThanOrEqual(pollMs('inbox') - 2);
+  });
+
+  it('inbox_poll_counts_from_an_answer_as_it_comes', async () => {
+    // A read that answers just as the poll comes due, here one on the owner's return to the tab,
+    // starts the count again as it answers, before Today has drawn it: the poll that was running
+    // then sends nothing. No poll lands by itself here, so the test brings it due.
+    const polls = inboxPacedPolls();
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    const answered = nextInboxAnswer();
+    await open.click();
+    await expect.element(screen.getByRole('dialog', { name: 'Demo inbox' })).toBeVisible();
+    await answered;
+
+    // The reads sent from the moment the poll comes due.
+    let counting = false;
+    let sentSince = 0;
+    const send = window.fetch;
+    const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
+      if (counting && url.pathname === ROUTES.ownerInbox.path) sentSince += 1;
+      return send(input, init);
+    });
+    onTestFinished(() => sending.mockRestore());
+    // As the read on her return answers, the polls running before it come due: after the answer
+    // reaches the inbox's read, before Today hears of it.
+    let cameDue = false;
+    const stop = observeRequests((outcome) => {
+      if (outcome.key !== 'ownerInbox' || cameDue) return;
+      cameDue = true;
+      const running = polls.kept();
+      setTimeout(() => {
+        counting = true;
+        polls.due(running);
+      }, 0);
+    });
+    onTestFinished(stop);
+    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    await vi.waitFor(() => expect(counting).toBe(true));
+    await nextFrames();
+    expect(sentSince, 'Demo inbox reads sent as the poll came due, just after an answer').toBe(0);
   });
 
   it('inbox_reads_nothing_from_the_moment_it_closes', async () => {

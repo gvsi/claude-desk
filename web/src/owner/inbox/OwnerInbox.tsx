@@ -16,7 +16,7 @@
  * inside the sheet while it is open, where the page behind is out of reach, so the entries read
  * before never pass for current.
  */
-import { focusManager, useQueries, useQuery } from '@tanstack/react-query';
+import { focusManager, hashKey, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { request } from '../../api/http.ts';
@@ -61,22 +61,36 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   const failure = useReadFailure(inbox);
 
   // Read again as the sheet opens, so it shows what is there now.
-  const { refetch, dataUpdatedAt, errorUpdatedAt } = inbox;
+  const { refetch } = inbox;
   useEffect(() => {
     if (open) void refetch();
   }, [open, refetch]);
 
-  // Then every few seconds while it stays open and the tab is in view, counted again from each read's
-  // answer, as React Query's `refetchInterval` counts. The poll is the sheet's own: `refetchInterval`
+  // Then every few seconds while it stays open and the tab is in view, counted again from each change
+  // to the read (it going out, its answer, read or failed), as React Query's `refetchInterval` counts.
+  // The count starts again as the change happens, from the query cache, not once Today has drawn it,
+  // so a poll can't come due just after an answer. The poll is the sheet's own: `refetchInterval`
   // would stop only once Today had drawn the close, and a poll that came due in between would read.
+  const queryClient = useQueryClient();
   useEffect(() => {
     if (!open) return undefined;
-    const poll = window.setInterval(() => {
-      if (openNow.current && focusManager.isFocused()) void refetch({ cancelRefetch: false });
-    }, pollMs('inbox'));
-    return () => window.clearInterval(poll);
-    // Each answer, read or failed, starts the count again.
-  }, [open, refetch, dataUpdatedAt, errorUpdatedAt]);
+    let poll: number | undefined;
+    const startCount = () => {
+      window.clearInterval(poll);
+      poll = window.setInterval(() => {
+        if (openNow.current && focusManager.isFocused()) void refetch({ cancelRefetch: false });
+      }, pollMs('inbox'));
+    };
+    startCount();
+    const inboxHash = hashKey(OWNER_INBOX_KEY);
+    const stopHearing = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === 'updated' && event.query.queryHash === inboxHash) startCount();
+    });
+    return () => {
+      stopHearing();
+      window.clearInterval(poll);
+    };
+  }, [open, refetch, queryClient]);
 
   // The held requests the alerts name, each read for its Desk while the sheet is open. A read that
   // hasn't answered, failed, or names no action draws no link.
