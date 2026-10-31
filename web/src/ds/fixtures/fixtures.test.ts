@@ -272,12 +272,22 @@ function claimProblems(text: string): string[] {
 }
 
 // Cards whose text is a statement: the charter's hours, contact and policies, the kernel's
-// handoff, verification and callback commitments, and the owner's own words. Fixture prose
-// restates no card's statement, so the stories show prose that adds nothing the cards don't
-// already carry.
+// handoff, verification, callback and cancelled-link statements, and the owner's own words.
+// Fixture prose restates no card's statement, so the stories show prose that adds nothing the
+// cards don't already carry.
 const STATEMENT_TEMPLATES: readonly ClauseTemplate[] = [
-  'hours', 'contact', 'policy', 'handoff', 'verify_prompt', 'callback_confirmed', 'owner_said',
+  'hours', 'contact', 'policy', 'handoff', 'verify_prompt', 'callback_confirmed', 'owner_said', 'link_cancelled',
 ];
+
+/**
+ * The statement a statement card makes. A cancelled link's card first names the link from its
+ * fact, its amount and then what it was for, which prose may name as it may a payment link's
+ * title; only its last line is the kernel's statement.
+ */
+function statementOf(block: RenderedBlock): string {
+  if (block.template === 'link_cancelled') return block.lines?.at(-1) ?? block.text;
+  return block.text;
+}
 
 // The signed line an executed receipt shows a visitor, per tool: what ran and whose records it
 // used, never a bare "Done". `{owner}` is the owner's display name.
@@ -341,7 +351,7 @@ const statementSentences = [
   ...new Set(
     cardBlocks
       .filter((block) => STATEMENT_TEMPLATES.includes(block.template as ClauseTemplate))
-      .flatMap((block) => block.text.split(/(?<=[.!?])\s+|\n/u))
+      .flatMap((block) => statementOf(block).split(/(?<=[.!?])\s+|\n/u))
       .map(wordsOf)
       .filter((sentence) => sentence !== ''),
   ),
@@ -645,6 +655,15 @@ describe('fixtures', () => {
   test('fixture_prose_restates_no_card_statement', () => {
     // The oracle catches a charter policy repeated in prose, so a clean result means something.
     expect(restatedStatements('Thanks. Maria texts before she arrives.')).toEqual(['maria texts before she arrives']);
+    // It catches the kernel's cancelled-link line repeated in prose, in both languages, but not
+    // prose naming the link, as a payment link's own title may be named.
+    expect(restatedStatements("Sorry. This payment link was cancelled because Maria Rivera's rules changed.")).toEqual([
+      "this payment link was cancelled because maria rivera's rules changed",
+    ]);
+    expect(restatedStatements('Lo siento. Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera.')).toEqual([
+      'este enlace de pago se canceló porque cambiaron las reglas de maria rivera',
+    ]);
+    expect(restatedStatements("To hold the visit, here's a link for the service call deposit.")).toEqual([]);
     expect(statementSentences.length).toBeGreaterThan(10);
 
     for (const block of proseBlocks) {
