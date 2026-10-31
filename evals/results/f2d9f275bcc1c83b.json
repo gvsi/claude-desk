@@ -1,13 +1,13 @@
 {
  "schema": 1,
- "inputs": "07b6d4110569ca77",
+ "inputs": "f2d9f275bcc1c83b",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
    "backend/desk/api/model.py"
   ],
   [
-   "ad1acc96db6f4e702a11ca1edcf54d591ca1d964",
+   "cf2dffe3fce51c28ee30e88464354c7b4dd305af",
    "backend/desk/api/prompts.py"
   ],
   [
@@ -79,9 +79,9 @@
    "kernel"
   ]
  ],
- "git_sha": "22276ec50460d362332ad1a945278ae701946549",
- "created_at": "2026-10-31T19:15:43.705993Z",
- "pass_id": "20261031-191543-a80387",
+ "git_sha": "b32adc815370660b396a512de2a1216d9b48d47c",
+ "created_at": "2026-10-31T20:06:46.398720Z",
+ "pass_id": "20261031-200646-c1b050",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
