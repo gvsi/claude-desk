@@ -8,6 +8,7 @@ import type { ToolName } from '../../api/contracts.ts';
 import type { ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import type { ConnectorIconName } from '../../ds/index.ts';
+import { TOOL_LABELS } from '../../mocks/script.ts';
 import { riveraTools } from '../../mocks/seed.ts';
 import { CONNECTORS, TOOL_NAMES, TOOL_RESOURCES, connectorByKey, connectorOf, connectorOn, hasRecordOwner, toolNoun, toolState } from './catalog.ts';
 
@@ -143,6 +144,14 @@ describe('the connector catalog', () => {
     // A tool the catalog doesn't know has none.
     expect(toolNoun('calendar.free_busy')).toBeNull();
     expect(toolNoun('toString')).toBeNull();
+  });
+
+  it('ask_claude_knows_each_held_noun', () => {
+    // Each noun Rules asks about a hold by is the word the mock's Ask Claude knows that tool by, so
+    // it can tell which hold "Why was this {noun} held?" means.
+    const named = (Object.keys(EVERY_TOOL) as ToolName[]).filter((tool) => toolNoun(tool) !== null);
+    expect(named.length).toBeGreaterThan(0);
+    for (const tool of named) expect(TOOL_LABELS[tool], tool).toBe(toolNoun(tool));
   });
 
   it('record_owners_only_where_the_kernel_resolves_one', () => {

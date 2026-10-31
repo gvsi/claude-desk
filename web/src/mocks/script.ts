@@ -853,7 +853,7 @@ const DEFAULT_ASK_REASON = 'Not covered by a rule yet, so it asks you.';
  * words (`TOOL_LABELS` in `backend/desk/api/rules.py`), but "identity check" for a verification,
  * as the owner app and Rules' question about a hold name it.
  */
-const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
+export const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
   'native.quote': 'quote',
   'native.find_slots': 'open times',
   'native.book': 'booking',

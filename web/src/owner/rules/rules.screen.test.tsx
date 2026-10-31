@@ -3,9 +3,10 @@
  * the page, the presets and the payment limit, each change through its proved review, and the
  * house rules.
  */
+import { onlineManager } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import type { RouteObject } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 
 import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
@@ -909,6 +910,24 @@ describe("Ask Claude's question about a hold", () => {
 
     // Once a read works again, the quote, still held, is asked about again.
     reads.recover();
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
+  });
+
+  it('hold_question_goes_while_needs_you_waits_for_the_network', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+
+    // Offline, the next poll waits for the network: what was read before may be out of date, so
+    // no chip asks about it, and the others stay.
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).not.toBeInTheDocument();
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+
+    // Online again, the read goes out and the quote, still held, is asked about again.
+    onlineManager.setOnline(true);
     await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
   });
