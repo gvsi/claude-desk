@@ -1495,6 +1495,25 @@ describe('Today', () => {
     expect(since.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(column.getBoundingClientRect().top);
   });
 
+  it('dismissing_before_the_refresh_finishes_keeps_focus_in_needs_you', async () => {
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const read = holdReads(needsYouPath);
+    onTestFinished(read.release);
+    await allowTheSeededRequest(screen);
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    const needs = region(screen, 'Needs you');
+
+    // Dismiss before the answer's refresh lands: the cached hold reappears, so the section stays.
+    await dismissFromTheKeyboard(screen);
+    await expect.element(needs.getByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
+    await expect.element(heldCard(screen, SEEDED_REASON).getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    expect(document.activeElement).toBe(needs.element());
+
+    read.release();
+    await expect.element(needs).not.toBeInTheDocument();
+  });
+
   it('dismissing_an_answer_with_a_request_still_held_focuses_needs_you', async () => {
     // Another request still waits, so Needs you stays, and focus goes to it, as it always has.
     mockStore.world.addHeldRefund();

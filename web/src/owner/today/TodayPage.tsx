@@ -125,11 +125,27 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   }, []);
   // Focus brings the card into view too. A request with no card here is left alone.
   const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
-  // Where focus goes on to when dismissing Needs you's last request takes Needs you away: the
-  // section after it, Live now when a chat is live, else Since last night, where the page stands.
+  // Decide from the committed sections, since dismissing before the answer's refresh lands can
+  // expose a cached hold and keep Needs you mounted. Only move on once that section is gone.
+  const needsYouSection = useRef<HTMLElement>(null);
   const liveNow = useRef<HTMLElement>(null);
   const sinceLastNight = useRef<HTMLElement>(null);
-  const focusAfterNeedsYou = useCallback(() => (liveNow.current ?? sinceLastNight.current)?.focus({ preventScroll: true }), []);
+  const dismissedFocus = useRef<{ next: string | undefined } | null>(null);
+  const dismissAnswer = (id: string, next: string | undefined) => {
+    dismissedFocus.current = { next };
+    answers.dismiss(id);
+  };
+  useLayoutEffect(() => {
+    const dismissed = dismissedFocus.current;
+    if (dismissed === null) return;
+    dismissedFocus.current = null;
+    if (needsYouSection.current !== null) {
+      const card = dismissed.next === undefined ? undefined : answeredFocus.cardFor(dismissed.next);
+      (card ?? needsYouSection.current).focus();
+    } else {
+      (liveNow.current ?? sinceLastNight.current)?.focus({ preventScroll: true });
+    }
+  });
   const focusFirstHeld = () => {
     if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
   };
@@ -239,7 +255,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
             registerCard={registerCard}
             answeredFocus={answeredFocus}
             readFailure={readFailure}
-            focusNextSection={focusAfterNeedsYou}
+            sectionRef={needsYouSection}
+            onDismiss={dismissAnswer}
           />
         ) : null}
         {live.length > 0 ? <LiveNow live={live} sectionRef={liveNow} /> : null}
