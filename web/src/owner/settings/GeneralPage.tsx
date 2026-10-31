@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
 import type { BusinessOut } from '../../api/views.ts';
 import { Button, Card, DetailList, Dialog, Notice, SectionHeader, Switch, type DetailItem } from '../../ds/index.ts';
-import { formatHours } from '../../lib/format.ts';
+import { hoursParts } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { desksQuery, findDesk, invalidateCopy, todayPath } from '../useDesks.ts';
 
@@ -57,7 +57,9 @@ export function GeneralPage() {
     { label: 'Customers see you as', value: business.owner_display_name },
     { label: 'Time zone', value: timeZoneWords(business.timezone) },
   ];
-  if (desk.hours.length > 0) details.push({ label: 'Hours', value: desk.hours.map(formatHours).join('; ') });
+  // In the signed board's words: "Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm".
+  const hours = desk.hours.map(hoursParts).map(({ days, times }) => `${days} ${times}`);
+  if (hours.length > 0) details.push({ label: 'Hours', value: hours.join(', ') });
 
   /** The Desk is gone: the business's next Desk's Today, or setup for a new one; then the copy is read again. */
   const leave = async (businesses: readonly BusinessOut[] = [business]) => {

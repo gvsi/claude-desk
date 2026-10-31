@@ -10,8 +10,7 @@ import type { RenderResult } from 'vitest-browser-react';
 
 import { SPEC, expectFooterAtFoot, one } from '../../ds/boards/spec.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
-import { formatHours } from '../../lib/format.ts';
-import { RIVERA, RIVERA_HOURS } from '../../mocks/seed.ts';
+import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
@@ -121,9 +120,9 @@ describe('Settings', () => {
       ['This Desk', 'Main line'],
       ['Customers see you as', 'Maria Rivera'],
       ['Time zone', 'Pacific Time (Los Angeles)'],
-      ['Hours', RIVERA_HOURS.map(formatHours).join('; ')],
+      // In the signed board's words, pinned here rather than worked out from the formatter.
+      ['Hours', 'Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm'],
     ]);
-    expect(values.at(-1)).toBe('Mon to Fri, 8:00 am to 6:00 pm; Sat, 9:00 am to 1:00 pm');
     // Read-only: nothing in them can be changed here.
     expect(business.getByRole('button').elements()).toEqual([]);
     expect(business.getByRole('link').elements()).toEqual([]);
@@ -132,7 +131,7 @@ describe('Settings', () => {
     const emergencies = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/settings/general`, { seed: 'rivera_two_desks' });
     const other = main(emergencies.screen).getByRole('region', { name: 'Your business' });
     await expect.element(other.getByText('Emergencies', { exact: true })).toBeVisible();
-    await expect.element(other.getByText('Every day, all day', { exact: true })).toBeVisible();
+    await expect.element(other.getByText('Every day all day', { exact: true })).toBeVisible();
   });
 
   it('answering_is_one_switch', async () => {
