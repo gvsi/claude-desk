@@ -509,13 +509,17 @@ async def _move(ctx: KernelCtx, link: PaymentLink, state: str, *, cancel_reason:
                 version: int | None = None) -> None:
     """The link to `state` in the caller's transaction, unledgered: its fact expired, with why and by
     which version, when given; an agent link's reservation released once it is `expired` or
-    `cancelled`, and kept while it is `unknown`."""
+    `cancelled`, and kept while it is `unknown`. A link that ends `paid` keeps no cancellation an
+    activation gave it while its outcome was unknown: the provider paid it, and the `payment` entries
+    keep that activation's reason and version."""
     link.state = state
     link.updated_at = ctx.clock.now()
     if cancel_reason is not None:
         link.cancel_reason = cancel_reason
     if version is not None:
         link.cancelled_by_version = version
+    if state == "paid":
+        link.cancel_reason, link.cancelled_by_version = None, None
     fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == link.desk_id, FactRow.fact_id == f"{LINK_FACT}{link.link_id}")))).one_or_none()
     if fact is not None:

@@ -731,8 +731,10 @@ async def test_mandate_expiry_waits_for_a_started_completion(desk_prove, app, cl
     await delay(mockpay, setup.desk, "complete", 0)
     await charged(setup.desk, f"{link.action_id}:charge")
     assert (await view(client, link.token)).state == "paid"
-    state, _, held = await link_state(app, setup, link)
-    assert (state, held) == ("paid", (2_000, "committed"))
+    # paid, it keeps none of the activation's cancellation, whose reason and version its entries keep
+    assert await link_state(app, setup, link) == ("paid", None, (2_000, "committed"))
+    [row] = await rows_of(app, copy_id, select(PaymentLink).where(PaymentLink.link_id == link.link_id))
+    assert row.cancelled_by_version is None
     assert spend_of(copy_id, mandate_id) == (2_000, 0)
     assert [key for key, *_ in charges(setup.desk)] == [f"{link.action_id}:charge"]
 
