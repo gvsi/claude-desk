@@ -37,7 +37,7 @@ const TITLE = 'Safety';
 type SafetyView = 'attempts' | 'entries';
 
 const VIEWS = [
-  { value: 'attempts', label: 'Attempts' },
+  { value: 'attempts', label: 'Stopped' },
   { value: 'entries', label: 'Every entry' },
 ] as const satisfies readonly { value: SafetyView; label: string }[];
 
@@ -120,8 +120,8 @@ function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   if (current && week.stopped === 0 && !anythingStoppedIn(attempts, week)) {
     empty = (
       <EmptyState
-        title="Nothing stopped this week"
-        body="When someone tries to get around your rules, you'll see here what they tried and what stopped it. Try it yourself from your public page."
+        title={null}
+        body="When a request is turned down or a reply is stopped, you'll see here what was asked and why. Try it yourself from your public page."
         action={
           <Button variant="secondary" href={customerLink(slug, deskId)} external>
             Open your public page
@@ -158,7 +158,7 @@ const FILTERS: readonly string[] = [ALL, ...CATEGORY_LABELS, NOT_SORTED];
 /** The filters over the attempts: one chosen at a time, "All" until the owner picks another. */
 function Filters({ chosen, onChoose }: { chosen: string; onChoose: (filter: string) => void }) {
   return (
-    <div className="cd-attempts__filters" role="group" aria-label="Show attempts">
+    <div className="cd-attempts__filters" role="group" aria-label="Show by kind">
       {FILTERS.map((filter) => (
         <Chip key={filter} selected={filter === chosen} onClick={() => onChoose(filter)}>
           {filter}
@@ -199,7 +199,7 @@ interface AttemptsViewProps {
  * was turned down when the API gave a cause: the one the address names, else the newest. With
  * none, the list is left out: the empty state above already says nothing was stopped. A failed
  * read is said above, beside the headline (`Headline`), over the attempts read before, and
- * with nothing read yet it takes the place of "Reading the attempts".
+ * with nothing read yet it takes the place of "Reading what was stopped".
  */
 function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewProps) {
   const safety = useAttempts(deskId);
@@ -225,7 +225,7 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
   if (safety.data === undefined) {
     return failure !== null ? null : (
       <p className="cd-safety__loading cd-type-meta" role="status">
-        Reading the attempts
+        Reading what was stopped
       </p>
     );
   }
@@ -237,9 +237,9 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
       <div className="cd-attempts">
         <Filters chosen={filter} onChoose={setFilter} />
         {shown.length === 0 ? (
-          <p className="cd-safety__hint cd-type-meta">No attempts of this kind. Choose All to see every attempt.</p>
+          <p className="cd-safety__hint cd-type-meta">Nothing of this kind. Choose All to see the rest.</p>
         ) : (
-          <ul className="cd-attempts__list" aria-label="Attempts, newest first">
+          <ul className="cd-attempts__list" aria-label="Stopped, newest first">
             {shown.map((a) => (
               // The row's link opens the attempt through the page's in-app links; this only notes the pick.
               <li key={a.ref_id} onClick={() => setPicked({ refId: a.ref_id })}>
@@ -263,7 +263,7 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
             <AttemptDetail key={open.ref_id} attempt={open} page={page} devKey={devKey} deskId={deskId} timezone={timezone} />
           </div>
         ) : refId !== undefined ? (
-          <EmptyState title="This attempt isn't in the list" body="It may be from an earlier copy of this Desk. Choose one from the list to see how it was stopped." />
+          <EmptyState title="This one isn't in the list" body="It may be from an earlier copy of this Desk. Choose one from the list to see how it was stopped." />
         ) : null}
       </div>
     </div>
