@@ -15,8 +15,10 @@ notification defaults alert the owner of a handoff at once.
 """
 
 import asyncio
+from datetime import datetime
 
 import pytest
+import sqlalchemy.exc
 from fastapi import FastAPI
 from sqlalchemy import select
 
@@ -26,10 +28,11 @@ from desk.db.models import Fact, Handoff, LedgerEntry
 from desk.kernel_service import ledger
 from desk.kernel_service.decisions import SoftPromiseVerdict
 
-from .helpers import ledger_rows, rows_of
-from .test_adapters import Rivera, rivera, visitor_of
-from .test_decide import Visitor, open_visitor, set_mode, set_session
-from .test_lead_tools import callback, handoff_done
+from .helpers import kernel_ctx, ledger_rows, rows_of
+from .test_adapters import Rivera, rivera, run, visitor_of
+from .test_decide import Visitor, decided, open_visitor, set_mode, set_session
+from .test_execute import executed
+from .test_lead_tools import CALLBACK, TZ, alert_now, callback, handoff_done, owner_alerts
 from .test_owner_messages import sent
 from .test_release_document import DANA, confirmed
 from .test_reply_check import assert_handed_off, checked, clause, post_check, reply_entries
@@ -414,3 +417,69 @@ async def test_the_owners_own_preview_opens_no_handoff(app, client):
     # an ordinary visitor's card still opens one
     assert_handed_off(await checked(client, await open_visitor(client, copy), BLOCKED))
     assert len(await handoffs_of(app, copy)) == 1
+
+
+# ---- One open handoff per session, a call-back's included ----------------------------------------------
+
+SAM = "Sam Lee · (510) 555-0100 · The water heater is leaking"     # the call-back's reason, as CALLBACK writes it
+
+
+async def test_a_call_back_request_takes_over_the_open_card_handoff(app, client):
+    """A call-back request in a conversation the card already handed to the owner makes that
+    handoff the call-back's, in the call-back's own transaction: kind `callback`, its reason, its
+    window and fact, and its action, so the session keeps one open handoff and the owner one item.
+    The card's alert isn't repeated; the call-back alerts as call-backs do."""
+    copy, visitor = await visitor_of(app, client)                 # Friday 10:04 in Oakland: 11:00 to 12:00
+    await alert_now(app, copy, "callback")
+    assert_handed_off(await checked(client, visitor, BLOCKED))
+    [card] = await handoffs_of(app, copy)
+    decision = await decided(client, visitor, "native.request_callback", CALLBACK)
+    result = await executed(client, visitor, decision)
+
+    [handoff] = await handoffs_of(app, copy)
+    assert handoff.handoff_id == card.handoff_id == result.model_view["handoff_id"]
+    assert (handoff.kind, handoff.status, handoff.action_id, handoff.reason) == (
+        "callback", "open", decision.action.action_id, SAM)
+    assert (handoff.window_start, handoff.window_end) == (datetime(2026, 10, 30, 11, tzinfo=TZ),
+                                                          datetime(2026, 10, 30, 12, tzinfo=TZ))
+    assert api_rows(copy.copy_id, "SELECT handoff_id, kind, callback_window, status FROM kernel_ro.handoffs") == [
+        (card.handoff_id, "callback", "2026-10-30T11:00:00-07:00/2026-10-30T12:00:00-07:00", "open")]
+    [fact] = result.facts
+    assert (fact.fact_id, fact.kind, fact.status) == (f"handoff:{card.handoff_id}", "handoff", "committed")
+    assert len(await handoff_alerts(app, copy)) == 1                         # the card's, not repeated
+    assert len([alert for alert in await owner_alerts(client, copy) if "Sam Lee" in alert.body]) == 1
+    reconciled = await run(app, copy.copy_id, decision, "reconcile")       # found by its action, as any call-back
+    assert (reconciled.facts, reconciled.model_view) == (result.facts, result.model_view)
+    verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact.fact_id)])
+    assert verdict.ok, verdict.violations
+
+
+async def test_a_second_call_back_request_takes_over_the_first(app, client, frozen_clock):
+    """A second call-back request while the first is open makes that handoff the second's: its
+    reason, window, action and fact, the fact keeping its ID, so the visitor's card shows the time
+    now promised. Each call-back alerts as call-backs do."""
+    copy, visitor = await visitor_of(app, client)
+    await alert_now(app, copy, "callback")
+    first = await callback(client, visitor)                       # 10:04: 11:00 to 12:00
+    frozen_clock.advance(3600)                                    # 11:04: 12:00 to 13:00
+    decision = await decided(client, visitor, "native.request_callback", {**CALLBACK, "contact": "(510) 555-0199"},
+                             call_id="call-2")
+    second = await executed(client, visitor, decision)
+
+    [handoff] = await handoffs_of(app, copy)
+    assert handoff.handoff_id == first.model_view["handoff_id"] == second.model_view["handoff_id"]
+    assert (handoff.kind, handoff.action_id, handoff.reason) == (
+        "callback", decision.action.action_id, "Sam Lee · (510) 555-0199 · The water heater is leaking")
+    noon, one = datetime(2026, 10, 30, 12, tzinfo=TZ), datetime(2026, 10, 30, 13, tzinfo=TZ)
+    assert (handoff.window_start, handoff.window_end) == (noon, one)
+    [fact] = await rows_of(app, copy.copy_id, select(Fact).where(Fact.kind == "handoff"))
+    assert (fact.fact_id, fact.status, fact.action_id, fact.expires_at) == (
+        first.facts[0].fact_id, "committed", decision.action.action_id, one)
+    assert [f.fact_id for f in second.facts] == [fact.fact_id]
+    assert len([alert for alert in await owner_alerts(client, copy) if "Sam Lee" in alert.body]) == 2
+    with pytest.raises(sqlalchemy.exc.IntegrityError):            # and the table holds one open handoff per session
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            ctx.db.add(Handoff(handoff_id="handoff-extra", copy_id=copy.copy_id, desk_id=copy.desk_id,
+                               session_id=visitor.session_id, reason=CARD_REASON, status="open", kind="card",
+                               action_id="handoff-extra"))

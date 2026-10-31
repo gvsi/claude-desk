@@ -21,9 +21,10 @@ from desk.kernel_service.decisions import (SOFT_PROMISE_SCHEMA, SOFT_PROMISE_SYS
 from .fakes import FakeAnthropicClient, FakeDecisions, model_message
 from .helpers import connections_of, ledger_rows, until_waiting
 from .test_adapters import visitor_of
-from .test_decide import open_visitor
+from .test_decide import decided, open_visitor
+from .test_execute import executed
 from .test_handoff_card import BLOCKED, BLOCKED_ES, CLEAN, HANDOFF_CARD, handoffs_of
-from .test_lead_tools import callback, handoff_done
+from .test_lead_tools import CALLBACK, callback, handoff_done
 from .test_reply_check import assert_handed_off, checked, clause, own_booking, own_quote, reply_entries
 
 HAIKU = "claude-haiku-5-5"
@@ -392,3 +393,35 @@ async def test_the_handoff_a_reply_leans_on_is_held_until_it_is_recorded(app, cl
     assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(first.handoff_id, "done")]
     kinds = [(entry.event.kind, entry.event.summary.get("part")) for entry in await ledger_rows(app, copy)]
     assert kinds[-2:] == [("reply", None), ("desk_data", "handoffs")]       # the verdict first, then the mark
+
+
+async def test_a_card_a_call_back_takes_over_while_the_model_reads_backs_nothing(app, client, reviewer):
+    """A call-back request may run while the model reads a reply that leans on the open card
+    handoff, and make that handoff the call-back's. A call-back backs nothing, so the reply fails
+    as the check would have failed it without the card, and its handoff card opens no second
+    handoff: the call-back is the session's open one."""
+    copy, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, BLOCKED)).ok                     # the card opens one
+    [card] = await handoffs_of(app, copy)
+    asked, answer = asyncio.Event(), asyncio.Event()
+    soft_promise = reviewer.soft_promise
+
+    async def slow_model(data):
+        asked.set()
+        await answer.wait()
+        return await soft_promise(data)
+
+    reviewer.soft_promise = slow_model
+    checking = asyncio.create_task(checked(client, visitor, REPLY_HERE))
+    try:
+        await asyncio.wait_for(asked.wait(), 5)
+        decision = await decided(client, visitor, "native.request_callback", CALLBACK)
+        assert (await asyncio.wait_for(executed(client, visitor, decision), 5)).state == "succeeded"
+    finally:
+        answer.set()
+    verdict = await asyncio.wait_for(checking, 5)
+
+    assert [(v.kind, v.rule_id) for v in verdict.violations] == [("soft_promise", "soft.handoff_closed")]
+    assert_handed_off(verdict)
+    [handoff] = await handoffs_of(app, copy)
+    assert (handoff.handoff_id, handoff.kind, handoff.status) == (card.handoff_id, "callback", "open")

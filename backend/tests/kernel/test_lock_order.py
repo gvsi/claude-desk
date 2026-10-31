@@ -41,7 +41,7 @@ from .test_compiler import card
 from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode, set_session
 from .test_desk_writes import slot_body, updated
 from .test_execute import Crash, crash, executed, fake_quote_desk, post_execute, read, store_intent
-from .test_lead_tools import callback, handoff_done
+from .test_lead_tools import CALLBACK, callback, handoff_done
 from .test_link_completion import PASS as LINK_PASS
 from .test_link_completion import RV_LINK_100, charged, completed, rivera_cards, rv_link
 from .test_mandates import CHARGE, asked, rivera_agent
@@ -520,6 +520,20 @@ async def test_deleting_a_desk_runs_in_the_lock_order(app, client):
     assert log.transactions == [["sessions", "verification_challenges", "payment_links", "document_links", "facts",
                                  "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))
+
+
+async def test_a_call_back_taking_over_a_card_handoff_runs_in_the_lock_order(app, client):
+    _, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    allowed = await decided(client, visitor, "native.request_callback", CALLBACK)
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    assert log.transactions == [
+        ["sessions", "decisions", "executions"],                    # T1: the intent
+        # T2, holding the session row FOR UPDATE (one open handoff per session): the open handoff, made the
+        # call-back's, then its fact, then the outcome
+        ["sessions", "decisions", "executions", "handoffs", "facts", "ledger_heads"],
+    ]
 
 
 async def test_closing_a_handoff_runs_in_the_lock_order(app, client):
