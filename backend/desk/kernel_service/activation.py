@@ -362,6 +362,8 @@ def profiles_sha256(profiles: Iterable[ToolProfile]) -> str:
         if profile.tool in by_tool:
             raise ValueError(f"{profile.tool} is enabled twice")
         by_tool[profile.tool] = profile.model_dump(mode="json", exclude=set(adapters.UNHASHED_PROFILE_FIELDS))
+        if profile.business is None:
+            by_tool[profile.tool].pop("business", None)
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(by_tool)).encode()).hexdigest()
 
 
@@ -1172,7 +1174,9 @@ def _hashes(profiles: Sequence[ToolProfile], schema: Mapping[str, Any], auto_mon
 async def draft_profiles(ctx: KernelCtx, desk_id: str, enables: Sequence[ToolPin] = ()) -> list[ToolProfile]:
     """The profiles a version of the Desk enabling `enables` is proved over: its enabled tools'
     plus each tool `enables` turns on, pinned at its hash."""
-    return mcp_pins.enabled_with(await desks.enabled_profiles(ctx, desk_id), enables)
+    rows = await mcp_pins._rows(ctx, desk_id, [pin.tool for pin in enables], lock=False)
+    return mcp_pins.enabled_with(await desks.enabled_profiles(ctx, desk_id), enables,
+                                 {tool: row.profile for tool, row in rows.items()})
 
 
 async def current_hashes(ctx: KernelCtx, desk_id: str, auto_money_cap_cents: int, *,
@@ -1994,8 +1998,9 @@ async def _probe_tools(ctx: KernelCtx, row: PolicyVersionRow) -> dict[str, _Prob
              for tool, tool_row in (await decide.enabled_tools(ctx, row.desk_id)).items()}
     if row.status not in ("active", "superseded"):
         for pin in row.enables or ():
-            if pin.tool in adapters.ADAPTERS:    # a tool no adapter runs is never given
-                profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256)
+            adapter = await adapters.resolve(ctx, row.desk_id, pin.tool)
+            if adapter is not None:    # a tool no adapter runs is never given
+                profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256, adapter.profile)
                 tools[pin.tool] = _ProbeTool(profile, adapters.profile_sha256(profile))
     return tools
 
@@ -2069,7 +2074,7 @@ class _Prober:
             return self._result(probe, "refuse", [], False,
                                 [asked(), PROBE_OUTCOME_PLAIN["refuse"], PROBE_REFUSED_PLAIN[code]])
 
-        adapter = adapters.ADAPTERS.get(tool) if tool in decide.TOOL_NAMES else None
+        adapter = await adapters.resolve(self.ctx, self.desk_row.desk_id, tool)
         if adapter is None:
             return refused("unknown_tool")
         if tool not in decide.tools_given(principal, session_row, self.desk_row, self.tools):

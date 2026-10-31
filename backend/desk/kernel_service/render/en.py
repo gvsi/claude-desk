@@ -49,6 +49,7 @@ OWNER_STATUS: dict[str, str] = {
 # visitor or another agent sees instead of the generic "executed" line. Like the status lines they
 # name the owner and nothing else, so they never carry an amount, a time or a date.
 EXECUTED: dict[str, str] = {
+    "intake": "{title}: details saved for {owner}",
     "native.quote": "Quoted from {owner}'s price list",
     "native.find_slots": "Times read from {owner}'s calendar",
     "native.book": "Booked on {owner}'s calendar",
