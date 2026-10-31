@@ -12,7 +12,7 @@ import { cleanup, type RenderResult } from 'vitest-browser-react';
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { newIdempotencyKey, observeRequests } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
-import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, SetupState, ThisWeek, Today } from '../../api/views.ts';
+import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, RefusalCause, SetupState, ThisWeek, Today } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
@@ -37,6 +37,7 @@ import {
   nextFrames,
 } from '../../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
+import { CAUSE_COPY } from '../safety/copy.ts';
 import { needsYouKey } from '../useDesks.ts';
 import { COPIED_FOR_MS } from './TodayPage.tsx';
 
@@ -270,12 +271,13 @@ function minutesAgo(minutes: number): string {
 }
 
 const REFUSAL: BriefingItem = {
-  kind: 'blocked',
+  kind: 'turned_down',
   at: minutesAgo(30),
   session_id: 'ses-agent-1',
   display_name: null,
   ref_id: 'dec-refused-1',
-  line: 'An agent tried to book without a signed limit. Nothing was booked.',
+  line: "Alex Kim's assistant tried to charge $250.00 in one go, over its signed limit of $20 a charge.",
+  cause: 'agent_limit',
 };
 const BOOKING: BriefingItem = {
   kind: 'booking',
@@ -284,6 +286,7 @@ const BOOKING: BriefingItem = {
   display_name: 'Dana Whitfield',
   ref_id: 'dec-dana-book',
   line: 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.',
+  cause: null,
 };
 const ANSWER: BriefingItem = {
   kind: 'answer',
@@ -292,6 +295,7 @@ const ANSWER: BriefingItem = {
   display_name: 'Dana Whitfield',
   ref_id: 'ses-dana-verified',
   line: null,
+  cause: null,
 };
 
 const ZERO_DAYS = ['2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29'].map((date) => ({
@@ -879,18 +883,23 @@ describe('Today', () => {
   });
 
   it('briefing_shows_one_row_per_kind', async () => {
-    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { blocked: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } } }));
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { turned_down: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } } }));
     const { screen } = await renderRoute(TODAY);
     const since = region(screen, 'Since last night');
-    await expect.element(since.getByText(REFUSAL.line ?? '', { exact: true })).toBeVisible();
+    // A refused request is turned down, beside a hollow dot, and says why by its cause's own label
+    // rather than the kernel's line. It opens on Safety.
+    const why = CAUSE_COPY.agent_limit;
+    await expect.element(since.getByText(why, { exact: true })).toBeVisible();
     const rows = since.getByRole('listitem');
     expect(rows.elements()).toHaveLength(3);
     const now = new Date();
-    const [blocked, booked, answered] = rows.elements();
+    const [turnedDown, booked, answered] = rows.elements();
 
-    expect(blocked?.textContent).toContain('Blocked');
-    expect(blocked?.textContent).toContain(formatWhen(REFUSAL.at, LA, now));
-    const refusal = since.getByRole('link', { name: new RegExp(REFUSAL.line ?? '') });
+    expect(turnedDown?.querySelector('.cd-briefing-row__kind')?.textContent).toBe('Turned down');
+    expect(turnedDown?.querySelector('.cd-briefing-row__kind .cd-status-dot')?.className).toBe('cd-status-dot cd-status-dot--info');
+    expect(turnedDown?.textContent).toContain(formatWhen(REFUSAL.at, LA, now));
+    expect(turnedDown?.textContent).not.toContain(REFUSAL.line);
+    const refusal = since.getByRole('link', { name: new RegExp(why) });
     await expect.element(refusal).toHaveAttribute('href', `${DESK}/safety/dec-refused-1`);
 
     expect(booked?.textContent).toContain('Booked');
@@ -912,29 +921,58 @@ describe('Today', () => {
     // All three are on the card already, so there is no "See all" to open.
     expect(since.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
 
-    // A blocked reply has no line of its own, and a night with no booking leaves its row out.
+    // Three things, but no booking among the newest, so two rows: "See all 3" opens the third.
+    mockStore.reset('rivera');
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { turned_down: REFUSAL, booking: null, lead_or_answer: ANSWER } } }));
+    const third = await renderRoute(TODAY);
+    const two = region(third.screen, 'Since last night');
+    await expect.element(two.getByText(why, { exact: true })).toBeVisible();
+    expect(two.getByText('Booked').elements()).toHaveLength(0);
+    expect(two.getByRole('listitem').elements()).toHaveLength(2);
+    await expect.element(two.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
+  });
+
+  it('a_turned_down_request_without_a_cause_shows_the_kernels_line_or_none', async () => {
+    // A refusal the API can't place comes with no cause, and a cause this build has no words for
+    // reads the same: the row gives the kernel's line, when there is one, and opens on Safety.
+    const showsTheLine = async (turnedDown: BriefingItem) => {
+      mockStore.reset('rivera');
+      await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 1, newest: { turned_down: turnedDown, booking: null, lead_or_answer: null } } }));
+      const { screen } = await renderRoute(TODAY);
+      const since = region(screen, 'Since last night');
+      await expect.element(since.getByText(REFUSAL.line ?? '', { exact: true })).toBeVisible();
+      expect(since.getByText(CAUSE_COPY.agent_limit).elements()).toHaveLength(0);
+      await expect.element(since.getByRole('link', { name: /Turned down/ })).toHaveAttribute('href', `${DESK}/safety/dec-refused-1`);
+    };
+    await showsTheLine({ ...REFUSAL, cause: null });
+    await showsTheLine({ ...REFUSAL, cause: 'a_cause_added_later' as unknown as RefusalCause });
+
+    // With no line either, the row says only that it was turned down.
     mockStore.reset('rivera');
     await injectToday((t) => ({
       ...t,
-      briefing: { ...t.briefing, total: 2, newest: { blocked: { ...REFUSAL, ref_id: '41', line: null }, booking: null, lead_or_answer: ANSWER } },
+      briefing: { ...t.briefing, total: 1, newest: { turned_down: { ...REFUSAL, cause: null, line: null }, booking: null, lead_or_answer: null } },
     }));
-    const again = await renderRoute(TODAY);
-    const night = region(again.screen, 'Since last night');
-    await expect.element(night.getByText('A reply was stopped before it was shown.', { exact: true })).toBeVisible();
-    const kinds = night.getByRole('listitem').elements().map((row) => (row.textContent?.includes('Blocked') ? 'Blocked' : 'Answered'));
-    expect(kinds).toEqual(['Blocked', 'Answered']);
-    expect(night.getByText('Booked').elements()).toHaveLength(0);
-    await expect.element(night.getByRole('link', { name: /A reply was stopped/ })).toHaveAttribute('href', `${DESK}/safety/41`);
-    expect(night.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
+    const { screen } = await renderRoute(TODAY);
+    const row = region(screen, 'Since last night').getByRole('listitem');
+    await expect.element(row).toBeVisible();
+    expect(row.element().querySelector('.cd-briefing-row__kind')?.textContent).toBe('Turned down');
+    expect(row.element().querySelector('.cd-briefing-row__line')).toBeNull();
+    expect(row.element().querySelector('a')?.getAttribute('href')).toBe(`${DESK}/safety/dec-refused-1`);
+  });
 
-    // Three things, but no booking among the newest, so two rows: "See all 3" opens the third.
-    mockStore.reset('rivera');
-    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { blocked: REFUSAL, booking: null, lead_or_answer: ANSWER } } }));
-    const third = await renderRoute(TODAY);
-    const two = region(third.screen, 'Since last night');
-    await expect.element(two.getByText(REFUSAL.line ?? '', { exact: true })).toBeVisible();
-    expect(two.getByRole('listitem').elements()).toHaveLength(2);
-    await expect.element(two.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
+  it('a_newest_row_the_api_leaves_out_is_skipped', async () => {
+    // An API from before turned-down requests sends `blocked` where `turned_down` now is. The key this
+    // build doesn't read and the one that's missing make no row; the rows it can name still show, and
+    // "See all 3" opens the rest.
+    const older = { blocked: { ...REFUSAL, kind: 'blocked' }, booking: BOOKING, lead_or_answer: ANSWER } as unknown as Today['briefing']['newest'];
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: older } }));
+    const { screen } = await renderRoute(TODAY);
+    const since = region(screen, 'Since last night');
+    await expect.element(since.getByText('Claude answered Dana Whitfield.')).toBeVisible();
+    const rows = since.getByRole('listitem').elements();
+    expect(rows.map((row) => row.querySelector('.cd-briefing-row__kind')?.textContent)).toEqual(['Booked', 'Answered']);
+    await expect.element(since.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
   });
 
   it('see_all_opens_the_full_briefing', async () => {
@@ -942,13 +980,13 @@ describe('Today', () => {
       { ...REFUSAL, at: minutesAgo(10) },
       { ...ANSWER, at: minutesAgo(20), ref_id: 'ses-a', session_id: 'ses-a', display_name: null },
       { ...BOOKING, at: minutesAgo(30) },
-      { kind: 'lead', at: minutesAgo(40), session_id: 'ses-b', display_name: 'Dana Whitfield', ref_id: 'lead-1', line: '(510) 555-0118 · Leaking water heater' },
+      { kind: 'lead', at: minutesAgo(40), session_id: 'ses-b', display_name: 'Dana Whitfield', ref_id: 'lead-1', line: '(510) 555-0118 · Leaking water heater', cause: null },
       { ...REFUSAL, at: minutesAgo(50), ref_id: 'dec-refused-2' },
       { ...ANSWER, at: minutesAgo(60), ref_id: 'ses-c', session_id: 'ses-c', display_name: null },
     ];
     await injectToday((t) => ({
       ...t,
-      briefing: { ...t.briefing, total: 6, newest: { blocked: items[0] ?? null, booking: items[2] ?? null, lead_or_answer: items[1] ?? null } },
+      briefing: { ...t.briefing, total: 6, newest: { turned_down: items[0] ?? null, booking: items[2] ?? null, lead_or_answer: items[1] ?? null } },
     }));
     const list: BriefingList = { since: '2026-10-28T18:00:00-07:00', items };
     mockStore.inject({ route: 'briefing', status: 200, times: 10_000, body: list });
@@ -1089,22 +1127,27 @@ describe('Today', () => {
   });
 
   it('turned_down_counts_refused_requests_only', async () => {
-    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody asked for:
-    // "Since last night" shows it as blocked, and the last 7 days turned no request down.
+    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody tried: it
+    // stays on Safety, so "Since last night" turns nothing down and the last 7 days turned no request down.
     const { screen } = await renderRoute(TODAY);
     const block = region(screen, 'Last 7 days');
     const night = region(screen, 'Since last night');
-    await expect.element(night.getByText('A reply was stopped before it was shown.', { exact: true })).toBeVisible();
+    await expect.element(night.getByText('Booked', { exact: true })).toBeVisible();
+    expect(night.getByText('Turned down', { exact: true }).elements()).toHaveLength(0);
     await expect.element(block.getByText('Nothing turned down in the last 7 days.', { exact: true })).toBeVisible();
 
     // The built-in agent tries to charge over its signed limit, which the kernel refuses: that one
-    // counts, in the singular.
-    const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
+    // counts, and "Since last night" turns it down, says why by its cause's label, and opens it on Safety.
+    const refusals = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').map((d) => d.decision);
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
-    await expect.poll(refused, { timeout: 5_000 }).toBe(1);
+    await expect.poll(() => refusals().length, { timeout: 5_000 }).toBe(1);
     await expect.element(block.getByText('1 request', { exact: true })).toBeVisible();
     expect(block.getByText('Nothing turned down in the last 7 days.').elements()).toHaveLength(0);
+    const turnedDown = night.getByRole('link', { name: /Turned down/ });
+    await expect.element(turnedDown).toHaveAttribute('href', `${DESK}/safety/${encodeURIComponent(refusals()[0]?.decision_id ?? '')}`);
+    await expect.element(turnedDown.getByText(CAUSE_COPY.agent_limit, { exact: true })).toBeVisible();
+    expect(turnedDown.element().textContent).not.toContain(refusals()[0]?.reason_plain);
   });
 
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {

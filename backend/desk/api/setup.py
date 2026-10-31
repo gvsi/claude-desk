@@ -24,16 +24,9 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   repeat waits for the first's admission and is never counted; another process's repeat meets the unique index
   instead. A row written before the key was required may hold none (the column stays nullable); it is read and
   moved on like any other.
-- **Consent** (`consent`): after admission, a held background task stores the owner's answer at once, then searches
+- **Consent** (`consent`): the shared turn runner stores the owner's answer at once, then searches
   their Claude memory (`native.read_memory`) and reads the named website (`native.fetch_website`) on yes. On no it
-  skips both. Busy means a stored transcript entry carries a pending run ID on the owner's consent answer.
-  `_after_consent` appends the consultant opening and first fact question; the labels and reply are saved together. The request waits up to
-  `CONSENT_WAIT_S` after the busy commit, then answers 202 with the stored busy interview. Cancelling the request
-  leaves the run working on its own connections. A repeat while busy returns that state without
-  another run or count on the limits. Failure, timeout or shutdown removes only entries marked by that run and
-  reopens consent when its answer followed Claude's consent question.
-  GET and consent also recover a run older than `CONSENT_ABANDONED_S` when this process holds no run for it; a live
-  run has the shorter `CONSENT_RUN_TIMEOUT_S` deadline, so deploy overlap doesn't reopen another process's live run.
+  skips both. `_after_consent` appends the consultant opening and first fact question; the labels and reply are saved together.
   No memory or website read ever runs after no, and a website the owner names later is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
@@ -48,6 +41,19 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   flag, since an empty list leaves them as they are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`.
+
+`run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
+admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
+request waits for this commit, then up to `TURN_WAIT_S` (25 seconds): 200 with the landed state, an error if the task
+fails in time, or 202 with the stored busy state. Cancelling the request leaves the task working on its own
+connections. Any turn while busy returns that state without running or counting on the limits.
+The task commits its changes and clears or removes staged entries together within `TURN_RUN_TIMEOUT_S` (100
+seconds). An optional `after` hook runs outside that deadline, with no transaction open and its own
+`TURN_AFTER_TIMEOUT_S` bound (30 seconds); its failures are logged by type only and return the landed state.
+Failure, deadline or shutdown before the final commit removes only entries marked by that run. Shutdown after
+the final commit ends the task without rollback. Removing a pending answer immediately
+after Claude's consent question also reopens consent. GET and every turn recover all pending entries older than
+`TURN_ABANDONED_S` (120 seconds) when this process holds no run for the interview.
 
 Each setup tool call is an owner call on the new Desk (`run_setup_tool`): the tool must be in the owner's `/context`,
 then `/decide`, and `/execute` only on an allow. A read that is held, refused or fails doesn't stop setup: its inline
@@ -91,6 +97,7 @@ import unicodedata
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
+from functools import partial
 from time import monotonic
 from typing import Literal, TypeVar, cast, get_args
 from urllib.parse import urlsplit
@@ -104,7 +111,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.sql import Executable
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.consent_runs import ConsentRuns
+from desk.api.turn_runs import TurnRuns
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.idempotency import Admissions, body_sha256
 from desk.api.kernel_client import DEFAULT_TIMEOUT_S, KernelFailed, KernelUnavailable
@@ -264,10 +271,11 @@ TURN_MAX_TOKENS = 4096
 SETUP_TIMEOUT_S = 60.0
 UNDERSTAND_TIMEOUT_S = 90.0
 UNDERSTAND_MAX_TOKENS = 4096
-CONSENT_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
-CONSENT_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
-CONSENT_ROLLBACK_TIMEOUT_S = 10  # cleanup also ends before another process may recover the row
-CONSENT_ABANDONED_S = 120       # recover only when this process holds no run
+TURN_WAIT_S = 25             # the request's wait; the run keeps going after a 202 or a disconnect
+TURN_RUN_TIMEOUT_S = 100     # below abandonment, including during a deploy's overlap
+TURN_AFTER_TIMEOUT_S = 30    # post-commit work cannot fail or undo the landed turn
+TURN_ROLLBACK_TIMEOUT_S = 10  # cleanup also ends before another process may recover the row
+TURN_ABANDONED_S = 120       # recover only when this process holds no run
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
 ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)
@@ -947,22 +955,22 @@ async def _settle(engine: AsyncEngine, statement: Executable) -> None:
         logger.warning("a keyed setup start's row couldn't be settled (%s)", type(failed).__name__)
 
 
-async def _recover_consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: str,
-                           runs: ConsentRuns) -> Interview:
+async def _recover_turn(owner: OwnerCtx, engine: AsyncEngine, interview_id: str,
+                        runs: TurnRuns) -> Interview:
     interview = await _read(engine, owner, interview_id)
-    if interview.busy and not runs.holds(interview_id) and _consent_abandoned(interview):
-        await _rollback_consent(owner, engine, interview_id, None, abandoned=True)
+    if interview.busy and not runs.holds(interview_id) and _turn_abandoned(interview):
+        await _rollback_turn(owner, engine, interview_id, None, abandoned=True)
         interview = await _read(engine, owner, interview_id)
     return interview
 
 
-def _consent_abandoned(interview: Interview) -> bool:
+def _turn_abandoned(interview: Interview) -> bool:
     return (interview.updated_at is not None
-            and (datetime.now(UTC) - interview.updated_at).total_seconds() > CONSENT_ABANDONED_S)
+            and (datetime.now(UTC) - interview.updated_at).total_seconds() > TURN_ABANDONED_S)
 
 
-async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs: ConsentRuns, cards: bool = False) -> SetupState:
-    interview = await _recover_consent(owner, engine, interview_id, runs)
+async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs: TurnRuns, cards: bool = False) -> SetupState:
+    interview = await _recover_turn(owner, engine, interview_id, runs)
     return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards)
 
 
@@ -976,12 +984,24 @@ def _limit_choices(interview: Interview, key: QuestionKey) -> list[Choice]:
         if key in LIMIT_CHOICES else []
 
 
+def _run_id(interview: Interview) -> str | None:
+    return next((entry.pending for entry in interview.transcript if entry.pending is not None), None)
+
+
+def _history(interview: Interview, run_id: str | None = None) -> list[Entry]:
+    """The run's staged answer is current input, never part of its own transcript history."""
+    run_id = run_id or _run_id(interview)
+    return [entry for entry in interview.transcript if run_id is None or entry.pending != run_id]
+
+
 def _understanding_message(interview: Interview, entries: list[Entry]) -> dict:
     """The description and consented homework, each inside its information wrapper."""
     parts = [SETUP_UNDERSTAND_HEAD.format(business_type=interview.business_type),
              SETUP_CLIENT_CARDS[interview.shows_cards],
-             wrap(OWNER_DESCRIPTION_TAG, interview.transcript[0].text)]
+             wrap(OWNER_DESCRIPTION_TAG, _history(interview)[0].text)]
     for entry in entries:
+        if entry.pending is not None and entry.pending == _run_id(interview):
+            continue
         if entry.read == "memory" and entry.content:
             parts.append(wrap(MEMORY_TAG, entry.content))
         elif entry.read == "website" and entry.content:
@@ -1034,28 +1054,31 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
                                      question=answer.next_topic, choices=_normalize_choices(answer.choices)))
 
 
-def _setup_plan(interview: Interview) -> dict:
-    shown = {entry.card.proposal_id for entry in interview.transcript if entry.card}
+def _setup_plan(interview: Interview, *, run_id: str | None = None) -> dict:
+    transcript = _history(interview, run_id)
+    shown = {entry.card.proposal_id: entry.card for entry in transcript if entry.card}
+    planned = [shown.get(card.proposal_id, card) for entry in transcript for card in entry.planned]
+    dropped = {proposal_id for entry in transcript for proposal_id in entry.dropped}
     items = []
-    for card in interview.planned:
+    for card in planned:
         status = (card.state if card.state != "proposed" else
-                  "dropped" if card.proposal_id in interview.dropped else
+                  "dropped" if card.proposal_id in dropped else
                   "shown" if card.proposal_id in shown else "planned")
         if card.state == "changed":
             status = f"changed (replaced by {card.superseded_by})"
         payload = (card.job.model_dump(include={"title", "why", "how", "autonomy"}) if card.job else
                    card.connector.model_dump(include={"app", "label", "why"}))
         items.append({"id": card.proposal_id, "kind": card.kind, **payload, "status": status})
-    return {"understanding": next((entry.text for entry in interview.transcript if entry.suggested is not None), ""),
+    return {"understanding": next((entry.text for entry in transcript if entry.suggested is not None), ""),
             "items": items}
 
 
-async def _rollback_consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, run_id: str | None, *,
-                             abandoned: bool = False) -> None:
+async def _rollback_turn(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, run_id: str | None, *,
+                         abandoned: bool = False) -> None:
     """Remove only this run's pending entries, or every pending entry when the row is abandoned."""
     async with engine.connect() as conn, conn.begin():
         current = await _load(conn, owner.copy_id, interview_id, lock=True)
-        if not current.busy or (abandoned and not _consent_abandoned(current)):
+        if not current.busy or (abandoned and not _turn_abandoned(current)):
             return
         kept = []
         for index, entry in enumerate(current.transcript):
@@ -1071,19 +1094,31 @@ async def _rollback_consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: 
         await _save(conn, current)
 
 
-async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
-                  runs: ConsentRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
-                  cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
-    """Hand the turn guard to a background task immediately after admission. It stores consent, then runs the
-    reads and Claude's first question. Wait for the busy commit without cancelling the run if the request ends,
-    then up to `CONSENT_WAIT_S` for the final interview; while still running, return its stored busy state."""
-    interview = await _recover_consent(owner, engine, interview_id, runs)
+async def run_turn(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, *,
+                   runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
+                   check: Callable[[Interview], None], stage: Callable[[Interview], list[Entry]],
+                   turn: Callable[[OwnerCtx, Interview, list[Entry]], Awaitable[None]],
+                   keep_staged: bool = True,
+                   after: Callable[[OwnerCtx, Interview], Awaitable[None]] | None = None,
+                   render: Callable[[Interview, str], SetupState] = setup_state) -> SetupState:
+    """Store staged entries, run a detached owner turn, and return its landed or busy state.
+
+    `stage` only produces entries; consent alone may also set `interview.consent`. Every other change (answers,
+    card state, step) belongs in `turn`, so rollback needs no in-memory undo and works after a process dies.
+    Hand the guard to the task immediately after admission, without an await in between. Request cancellation
+    never cancels the run; wait for its busy commit, then up to `TURN_WAIT_S` for its final state.
+    `keep_staged=False` removes temporary markers on success. The run deadline covers detached connection
+    acquisition through the final commit.
+    `after` keeps the guard, without a transaction open, under its own `TURN_AFTER_TIMEOUT_S` bound; its failure
+    is logged by type only and returns the landed state. Shutdown cancellation after commit propagates without
+    rolling back the turn.
+    """
+    interview = await _recover_turn(owner, engine, interview_id, runs)
     desk_id = owner.desk(interview.desk_id)
     if interview.busy:
-        return setup_state(interview, await _slug(owner, desk_id), cards=cards)
-    if interview.consent is not None or interview.step != "questions":
-        raise ApiProblem(409, "conflict")
+        return render(interview, await _slug(owner, desk_id))
     seen = _stored(interview)
+    check(interview)
     guard = contextlib.ExitStack()
     guard.enter_context(_turn(interview_id))
     busy_stored = asyncio.Event()
@@ -1093,43 +1128,52 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         nonlocal pending
         run_id = secrets.token_hex(8)
         busy = None
+        committed = False
         try:
-            async with asyncio.timeout(CONSENT_RUN_TIMEOUT_S):
-                async with detached(owner, engine, ro_schema) as ctx:
+            async with contextlib.AsyncExitStack() as stack:
+                async with asyncio.timeout(TURN_RUN_TIMEOUT_S):
+                    ctx = await stack.enter_async_context(detached(owner, engine, ro_schema))
                     slug = await _slug(ctx, desk_id)
-                    interview.consent = allow
-                    interview.transcript.append(Entry(role="owner", text=CONSENT_ANSWERS[allow],
-                                                      pending=run_id, cards=cards))
+                    staged = stage(interview)
+                    for entry in staged:
+                        entry.pending = run_id
+                    interview.transcript += staged
                     busy = _stored(interview)
                     try:
                         await _commit(engine, ctx, interview, seen)
                     except ApiProblem:
                         busy = None          # rejected before storing; another run's snapshot is never ours
                         raise
-                    pending = setup_state(interview, slug, cards=cards)
+                    pending = render(interview, slug)
                     busy_stored.set()
-                    entries = []
-                    if allow:
-                        entries.append(await _read_memory(ctx, desk_id))
-                        site = website_url(interview.transcript[0].website)
-                        if site is not None:
-                            entries.append(await _read_website(ctx, desk_id, *site))
-                    interview.transcript += entries
-                    interview.business_tools_enabled = business_tools_enabled
-                    await _after_consent(ctx, engine, model, interview, entries)
-                    for entry in interview.transcript:
-                        if entry.pending == run_id:
+                    await turn(ctx, interview, staged)
+                    if keep_staged:
+                        for entry in staged:
                             entry.pending = None
+                    else:
+                        interview.transcript = [entry for entry in interview.transcript if entry.pending != run_id]
                     await _commit(engine, ctx, interview, busy)
-                    return setup_state(interview, slug, cards=cards)
+                    committed = True
+                if after is not None:
+                    try:
+                        async with asyncio.timeout(TURN_AFTER_TIMEOUT_S):
+                            await after(ctx, interview)
+                    except Exception as failed:
+                        logger.warning("setup turn after failed (%s)", type(failed).__name__)
+                return render(interview, slug)
         except BaseException as failed:
-            logger.warning("setup consent failed (%s)", type(failed).__name__)
+            if committed:
+                if isinstance(failed, asyncio.CancelledError):
+                    raise
+                logger.warning("setup turn after failed (%s)", type(failed).__name__)
+                return render(interview, slug)
+            logger.warning("setup turn failed (%s)", type(failed).__name__)
             if busy is not None:
                 try:
-                    async with asyncio.timeout(CONSENT_ROLLBACK_TIMEOUT_S):
-                        await _rollback_consent(owner, engine, interview_id, run_id)
+                    async with asyncio.timeout(TURN_ROLLBACK_TIMEOUT_S):
+                        await _rollback_turn(owner, engine, interview_id, run_id)
                 except Exception as rollback_failed:
-                    logger.warning("setup consent couldn't be reopened (%s)", type(rollback_failed).__name__)
+                    logger.warning("setup turn couldn't be reopened (%s)", type(rollback_failed).__name__)
             if isinstance(failed, TimeoutError):
                 raise ApiProblem(503, "model_unavailable") from None
             raise
@@ -1153,32 +1197,61 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
     await asyncio.shield(busy_stored.wait())
     if pending is None:
         return await asyncio.shield(task)
-    done, _ = await asyncio.wait({task}, timeout=CONSENT_WAIT_S)
+    done, _ = await asyncio.wait({task}, timeout=TURN_WAIT_S)
     if done:
         return task.result()
     return pending
 
 
-def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
+async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
+                  runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
+                  cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
+    """Run consent and its reads through the shared turn runner; no reads run after no."""
+    def check(interview: Interview) -> None:
+        if interview.consent is not None or interview.step != "questions":
+            raise ApiProblem(409, "conflict")
+
+    def stage(interview: Interview) -> list[Entry]:
+        interview.consent = allow
+        return [Entry(role="owner", text=CONSENT_ANSWERS[allow], cards=cards)]
+
+    async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        entries = []
+        if allow:
+            entries.append(await _read_memory(ctx, interview.desk_id))
+            site = website_url(interview.transcript[0].website)
+            if site is not None:
+                entries.append(await _read_website(ctx, interview.desk_id, *site))
+        interview.transcript += entries
+        interview.business_tools_enabled = business_tools_enabled
+        await _after_consent(ctx, engine, model, interview, entries)
+
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=stage, turn=turn, render=partial(setup_state, cards=cards))
+
+
+def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: str | None = None) -> dict:
     """The answer turn's one message: a fact's actual question is wrapped; a limit keeps its fixed head. A limit
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
     even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
     turn includes earlier owner answers and Claude replies only after this question's last ask, never tool labels
     or their content. On a limit question these replies were made under the same isolation; earlier questions'
-    replies, which may repeat memory or website text, never enter the exchange."""
+    replies, which may repeat memory or website text, never enter the exchange. The run's staged entries never
+    enter history: its current answer appears only in `owner_answer`."""
+    transcript = _history(interview, run_id)
     limit_turn = key in LIMIT_QUESTIONS.values()
     so_far = interview.answers.model_dump_json(exclude_defaults=True)
     if limit_turn:
         so_far = interview.answers.model_dump_json(include=set(LIMIT_QUESTIONS), exclude_defaults=True)
-    asked = next((entry.text for entry in reversed(interview.transcript) if entry.question == key), "")
+    asked = next((entry.text for entry in reversed(transcript) if entry.question == key), "")
     parts = ([setup_turn_head(interview.business_type, key)] if limit_turn else
              [SETUP_NEXT_HEAD.format(business_type=interview.business_type,
                                      covered=", ".join(key for key in QUESTION_KEYS if key in interview.covered),
                                      uncovered=", ".join(key for key in QUESTION_KEYS if key not in interview.covered)),
               wrap(QUESTION_ASKED_TAG, asked)])
     parts.append(wrap(ANSWERS_SO_FAR_TAG, so_far))
-    reads = [] if limit_turn else interview.transcript
+    reads = [] if limit_turn else transcript
     for entry in reads:
         if entry.read == "memory" and entry.content:
             parts.append(wrap(MEMORY_TAG, entry.content))
@@ -1186,11 +1259,11 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
             parts.append(wrap_website(entry.content, entry.website or ""))
     if not limit_turn:
         parts.append(SETUP_CLIENT_CARDS[interview.shows_cards])
-        parts.append(wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)))
-    start = next((index + 1 for index in range(len(interview.transcript) - 1, -1, -1)
-                  if interview.transcript[index].question == key), len(interview.transcript))
+        parts.append(wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview, run_id=run_id), ensure_ascii=False)))
+    start = next((index + 1 for index in range(len(transcript) - 1, -1, -1)
+                  if transcript[index].question == key), len(transcript))
     lines = [summary_line(SETUP_EXCHANGE_LABELS[entry.role], entry.text)
-             for entry in interview.transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS and entry.card is None]
+             for entry in transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS and entry.card is None]
     if lines:
         parts.append(this_question_so_far(lines))
     parts.append(wrap(OWNER_ANSWER_TAG, text))
@@ -1317,6 +1390,13 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         parts.append(wrap(OWNER_DECISION_TAG, decision))
     if text is not None:
         parts.append(wrap(OWNER_ANSWER_TAG, text))
+    else:
+        # A limit answer also reaches its next-step and closing calls once, outside all history and plan data.
+        current = next((entry.text for entry in interview.transcript
+                        if entry.pending == _run_id(interview) and entry.pending is not None
+                        and entry.role == "owner" and entry.text), None)
+        if current is not None:
+            parts.append(wrap(OWNER_ANSWER_TAG, current))
     system = SETUP_CARD_ANSWER_SYSTEM if text is not None else SETUP_NEXT_SYSTEM
     output = SetupCardAnswer if text is not None else SetupNextStep
     try:
@@ -1354,7 +1434,8 @@ async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
     replies = replies if replies is not None else _TurnReplies()
     replies.track(reply)
     await _advance_ask(owner, engine, model, interview, source, reply, replies, closing_call=closing_call)
-    replies.before(interview.question)
+    asked = interview.latest_ask
+    replies.before(asked.question if interview.step == "questions" and asked is not None else None)
 
 
 async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
@@ -1461,31 +1542,32 @@ async def card_turn(owner, engine, model, interview: Interview, proposal_id: str
 
 
 async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, question: QuestionKey | None,
-                 text: str, *, card: str | None = None, cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
-    """One answer turn on the question waiting (module docstring); 409 `conflict`, before any model call, when none
-    is, the answer names another (an answer sent twice finds the next question waiting) or one is running already.
-    The model call, the website read and the kernel's rename run with no lock held."""
-    interview = await _read(engine, owner, interview_id)
-    desk_id = owner.desk(interview.desk_id)
-    interview.business_tools_enabled = business_tools_enabled
-    key = interview.question
-    if card is not None:
-        if question is not None or card != interview.pending_card:
+                 text: str, *, runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
+                 card: str | None = None, cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
+    """Run a question or typed card answer through the shared turn runner; busy repeats do no work."""
+    if (question is None) == (card is None):
+        raise ApiProblem(422, "invalid_request")
+
+    def check(interview: Interview) -> None:
+        if card is not None:
+            if card != interview.pending_card:
+                raise ApiProblem(409, "conflict")
+        elif interview.question is None or interview.question != question:
             raise ApiProblem(409, "conflict")
-        seen = _stored(interview)
-        with _turn(interview_id):
-            interview.transcript.append(Entry(role="owner", text=text))
-            await card_turn(owner, engine, model, interview, card, text=text)
-            await _commit(engine, owner, interview, seen)
-            if interview.step == "tools":
-                await after_finish(owner, interview)
-        return setup_state(interview, await _slug(owner, desk_id), cards=cards)
-    if key is None or key != question:
-        raise ApiProblem(409, "conflict")
-    seen = _stored(interview)
-    with _turn(interview_id):
-        turn = await structured(model, recorder(engine, owner), SETUP_TURN_SYSTEM,
-                                [_turn_message(interview, key, text)], SETUP_TURNS[key], TURN_MAX_TOKENS)
+
+    def stage(interview: Interview) -> list[Entry]:
+        return [Entry(role="owner", text=text)]
+
+    async def run(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        interview.business_tools_enabled = business_tools_enabled
+        if card is not None:
+            await card_turn(ctx, engine, model, interview, card, text=text)
+            return
+        key = question
+        desk_id = interview.desk_id
+        said, = staged
+        turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
+                                [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
         patch = turn.patch()
         if key in LIMIT_CHOICES:
             choice = next((choice for choice in LIMIT_CHOICES[key](interview.business_type)
@@ -1493,8 +1575,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             if choice is not None:
                 patch = SetupPatch.model_validate({**patch.model_dump(), **choice.values})
                 turn.step_done = True
-        said = Entry(role="owner", text=text)
-        entries = [said]
+        entries = []
         reply = Entry(role="claude", text=turn.reply.strip(),
                       choices=_limit_choices(interview, key) if not turn.step_done else [])
         if reply.text or reply.choices:
@@ -1502,33 +1583,37 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         site = website_url(turn.website)
         if site is not None and site[0] not in interview.tried_websites():
             if interview.consent:
-                entries.append(await _read_website(owner, desk_id, *site))
+                entries.append(await _read_website(ctx, desk_id, *site))
             else:
                 said.website = site[0]                   # kept as text: nothing is read without consent
-        await _rename(owner, desk_id, patch)
+        await _rename(ctx, desk_id, patch)
         interview.answers = merged(interview.answers, patch, key)
         interview.transcript += entries
         if turn.step_done:
             interview.cover([key])
             replies = _TurnReplies()
             replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
-            following = await _next_step(owner, engine, model, interview) if key in LIMIT_CHOICES else turn
+            following = await _next_step(ctx, engine, model, interview) if key in LIMIT_CHOICES else turn
             next_reply = reply
             if key in LIMIT_CHOICES:
                 next_reply = Entry(role="claude", text=following.reply.strip() if following else "")
                 interview.transcript.append(next_reply)
             elif not any(entry is reply for entry in interview.transcript):
                 interview.transcript.append(reply)
-            await _advance(owner, engine, model, interview, following, next_reply,
+            await _advance(ctx, engine, model, interview, following, next_reply,
                            closing_call=key in LIMIT_CHOICES, replies=replies)
         elif key not in LIMIT_CHOICES:
             if not any(entry is reply for entry in interview.transcript):
                 interview.transcript.append(reply)
             _record_plan(interview, turn, reply)
-        await _commit(engine, owner, interview, seen)
+
+    async def after(ctx: OwnerCtx, interview: Interview) -> None:
         if interview.step == "tools":
-            await after_finish(owner, interview)
-    return setup_state(interview, await _slug(owner, desk_id), cards=cards)
+            await after_finish(ctx, interview)
+
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=stage, turn=run, after=after,
+                          render=partial(setup_state, cards=cards))
 
 
 # Finish ------------------------------------------------------------------------------------------------------

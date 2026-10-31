@@ -2055,7 +2055,7 @@ async def lockable(engine, interview_id: str) -> None:
                            {"id": interview_id})
 
 
-async def test_an_answer_waiting_on_claude_locks_nothing_and_a_duplicate_is_refused_at_once(
+async def test_an_answer_waiting_on_claude_locks_nothing_and_a_duplicate_answers_busy_at_once(
         app, browser, fake, kernel_http, model, engine, db):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
@@ -2071,10 +2071,10 @@ async def test_an_answer_waiting_on_claude_locks_nothing_and_a_duplicate_is_refu
         # While Claude answers, the row isn't locked and no transaction of the API's stays open.
         await lockable(engine, interview_id)
         assert idle_in_transaction(db) == 0
-        # The same answer sent again meanwhile is refused at once, before any model call.
+        # The same answer sent again meanwhile gets the stored busy state, before any model call.
         asked = len(model.requests)
         again = await asyncio.wait_for(owner.browser.post(path, json=body), 2)
-        assert (again.status_code, again.json()) == (409, {"error": "conflict"})
+        assert again.status_code == 202 and again.json()["busy"] is True
         assert len(model.requests) == asked
     finally:
         release.set()
@@ -2136,6 +2136,8 @@ async def test_an_answer_saves_nothing_when_the_interview_changed_meanwhile(app,
                                {"id": interview_id, "changed": json.dumps({"service_area": "Berkeley"})})
             await conn.commit()
         changed = await stored(engine, interview_id)
+        # The runner rolls back only its staged answer, preserving the competing process's patch.
+        changed["transcript"] = [entry for entry in changed["transcript"] if "pending" not in entry]
     finally:
         release.set()
     reply = await asyncio.wait_for(first, 5)
@@ -3135,6 +3137,44 @@ async def test_typing_yes_accepts_the_pending_card(app, browser, kernel_http, mo
     assert "<owner_decision>" in message and "<setup_plan>" in message and proposal_id in message
 
 
+async def test_a_typed_card_answer_is_read_once(app, browser, kernel_http, model, engine):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    text = "Please explain the repair request job."
+    model.add(card_answer("none"))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                        json={"card": proposal_id, "text": text})
+    assert response.status_code == 200, response.text
+    message = turn_text(model)
+    assert message.count(text) == 1
+    assert f"<owner_answer>{text}</owner_answer>" in message
+    row = await stored(engine, interview_id)
+    assert sum(entry["role"] == "owner" and entry["text"] == text for entry in row["transcript"]) == 1
+    assert all("pending" not in entry for entry in row["transcript"])
+
+
+async def test_an_answer_that_leads_to_the_next_step_is_read_once(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    # A limit turn always calls the separate next-step model after extracting its isolated patch.
+    async with engine.begin() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, interview_id)
+        interview.transcript.append(desk_setup._ask(interview, "quote_limit"))
+        await desk_setup._save(conn, interview)
+    text = "Please ask me before quoting an amount."
+    before = len(model.requests)
+    response = await answer(owner, model, interview_id, text)
+    assert response.status_code == 200, response.text
+    requests = model.requests[before:]
+    assert len(requests) == 2
+    for request in requests:
+        message = request.messages[0]["content"][0]["text"]
+        assert message.count(text) == 1
+        assert f"<owner_answer>{text}</owner_answer>" in message
+        assert "<this_question_so_far>" not in message
+
+
 async def test_typing_a_question_keeps_the_card_waiting(app, browser, kernel_http, model, engine):
     owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
     before = await stored(engine, interview_id)
@@ -3313,8 +3353,9 @@ async def test_an_empty_closing_plan_gets_one_retry(app, browser, kernel_http, m
     assert sum(entry.text == second_plan for entry in interview.transcript) == bool(second_plan)
 
 
-async def test_typed_card_answers_share_the_turn_guard(app, browser, kernel_http, model, engine):
+async def test_typed_card_answers_share_the_turn_guard(app, browser, kernel_http, model, engine, monkeypatch):
     owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    asked, _ = held_limits(app, monkeypatch)
     release = asyncio.Event()
     waiting = gated(card_answer("accept"), release)
     model.add(waiting)
@@ -3325,11 +3366,17 @@ async def test_typed_card_answers_share_the_turn_guard(app, browser, kernel_http
         await asyncio.wait_for(waiting.entered.wait(), timeout=5)
         calls = len(model.requests)
         second = await owner.browser.post(path, json=body)
-        assert second.status_code == 409 and len(model.requests) == calls
+        assert second.status_code == 202 and len(model.requests) == calls
+        assert second.json()["busy"] is True
+        assert second.json() == (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()
+        assert second.json()["messages"][-1] == {"role": "owner", "text": "Yes", "card": None, "choices": []}
+        assert asked.count("setup_turn") == 1
     finally:
         release.set()
         response = await first
     assert response.status_code == 200, response.text
+    row = await stored(engine, interview_id)
+    assert sum(entry["role"] == "owner" and entry["text"] == "Yes" for entry in row["transcript"]) == 1
     replay = await owner.browser.post(path, json=body)
     assert replay.status_code == 409 and len(model.requests) == calls
 

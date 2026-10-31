@@ -2724,7 +2724,7 @@
     "/api/owner/setup/{id}": {
       "get": {
         "summary": "Setup Interview",
-        "description": "The setup interview as it stands, reopening consent when its run was abandoned.",
+        "description": "The setup interview as it stands, removing abandoned turn entries and reopening consent if needed.",
         "operationId": "owner_setup_interview",
         "parameters": [
           {
@@ -2815,7 +2815,7 @@
     "/api/owner/setup/{id}/consent": {
       "post": {
         "summary": "Setup Consent",
-        "description": "Start a background run that stores consent, then reads Claude memory and the named website through the\nkernel on yes, or skips both on no. Claude's first question and the read labels land together. Wait for the\nbusy commit; answers 200 when finished within the following wait, otherwise 202 with consent still pending.\nCancelling the request leaves the run working. A repeat while busy answers 202 without starting or\ncounting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent.",
+        "description": "Use the shared turn runner to store consent, then read Claude memory and the named website through the\nkernel on yes, or skip both on no. Claude's first question and the read labels land together. Wait for the\nbusy commit; answer 200 when finished within 25 seconds, otherwise 202 `SetupState` with `busy: true`.\nCancelling the request leaves the run working. A repeat while busy answers 202 without starting or\ncounting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent.",
         "operationId": "owner_setup_consent",
         "parameters": [
           {
@@ -2936,7 +2936,7 @@
     "/api/owner/setup/{id}/answer": {
       "post": {
         "summary": "Setup Answer",
-        "description": "The owner's answer to the question waiting, which the answer names (409 `conflict` when none is waiting or\nanother is, so an answer sent twice answers once): Claude replies, the answers are updated and, once the question\nis covered, the next one is asked. 503 `model_unavailable` when Claude couldn't answer, with nothing stored, so the\nsame answer can be sent again.",
+        "description": "Use the shared turn runner for the owner's answer to the question waiting, which the answer names\n(409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Claude replies,\nupdates the answers and asks the next question once this one is covered. Wait for the busy commit, then up to\n25 seconds: 200 with the landed state or 202 `SetupState` with `busy: true`. Any turn while busy answers 202\nwithout running or counting on the limits. Cancelling the request leaves the turn working. Failure or\nabandonment removes the staged answer and leaves the same question waiting, so the owner can retry.\n503 `model_unavailable` when Claude couldn't answer or the run deadline expires.",
         "operationId": "owner_setup_answer",
         "parameters": [
           {
@@ -2980,6 +2980,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "401": {
             "content": {
@@ -12110,7 +12120,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether a consent run is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
       },
       "SetupTools": {
         "properties": {
