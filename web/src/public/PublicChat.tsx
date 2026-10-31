@@ -485,6 +485,15 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
   }, [drawn, chat.state.rows, shown]);
 
+  // The verify card whose form the visitor closed with "I can't get the code" while the owner was in
+  // the chat, by its row's key. It stays closed only while she is in the chat: the form comes back
+  // under its card in the same render that says she is out, and stays open if she joins again.
+  const [verifyClosed, setVerifyClosed] = useState<string | null>(null);
+  const ownerHere = chat.ownerInChat;
+  useEffect(() => {
+    if (!ownerHere) setVerifyClosed(null);
+  }, [ownerHere]);
+
   // Words wait in the composer once it can be used: the link's idea as the page opens, and words
   // that didn't send when the chat ended, in the new chat's. Neither is sent without Send. Words
   // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
@@ -562,8 +571,16 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // written in and the visitor hasn't confirmed it's them, then the verified line.
   const verified = chat.session?.verified === true;
   const verifyRow = latestVerifyRow(state.rows);
+  // "I can't get the code" asks for the owner. While she is in the chat she is already here, so it
+  // asks for nobody: it closes that card's form, sends nothing, and the visitor's place moves to the
+  // composer, without scrolling the conversation. The form comes back once she is out of the chat,
+  // and a later verify card brings it back under that card.
+  const closeVerify = () => {
+    setVerifyClosed(verifyRow);
+    composerRef.current?.querySelector('textarea')?.focus({ preventScroll: true });
+  };
   const verifyUnder = (row: ChatRow): ReactNode[] =>
-    verifyRow !== null && rowKey(row) === verifyRow && (verified || ready)
+    verifyRow !== null && rowKey(row) === verifyRow && (verified || (ready && !(ownerHere && verifyClosed === verifyRow)))
       ? [
           <VerifyInline
             key="verify"
@@ -572,7 +589,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
             assurance={chat.session?.assurance ?? 'none'}
             language={language}
             onSubmit={chat.verify}
-            onAskForOwner={askForOwner}
+            onAskForOwner={chat.ownerInChat ? closeVerify : askForOwner}
           />,
         ]
       : [];
@@ -637,6 +654,10 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         language={language}
         openStatus={openStatus}
         onAskForOwner={askForOwner}
+        // While the owner has taken the chat over, the head says so in the disclosure's place, still
+        // naming Claude as an AI, and Ask goes. The visitor chat's own value, from the kernel's
+        // session mode, as it is: nothing on the page decides it.
+        ownerInChat={chat.ownerInChat}
         about={desk.charter}
         aboutLinks={aboutLinks}
         footer={!embedded}

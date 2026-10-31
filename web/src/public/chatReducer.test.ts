@@ -4,11 +4,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { EvMessage, EvOwnerJoined, EvOwnerTyping, SseEvent, StatusEvent } from '../api/contracts.ts';
+import { EV_ERROR_CODES, type EvMessage, type EvOwnerJoined, type EvOwnerTyping, type SessionState, type SseEvent, type StatusEvent } from '../api/contracts.ts';
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { chatReducer, initialChatState, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
+import { chatReducer, initialChatState, lowerOnly, ownerInChatNow, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
 
 /** The fixtures' quote turn: the action's receipt, writing, the checked reply, the turn's end. */
 const [quoteReceipt, , quoteMessage] = rivera.events.quoteTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
@@ -509,6 +509,65 @@ describe('chatReducer', () => {
     expect(lines(reloaded)).toEqual([['n2', 'owner_left']]);
     expect(shown(reloaded)).toEqual(shown(live));
     expect(flags(reloaded)).toEqual(flags(live));
+  });
+
+  it('owner_in_chat_is_the_sessions_mode', () => {
+    const inOwnersHands: SessionState = { ...rivera.sessions.public, mode: 'owner' };
+    const open = initialChatState();
+    const now = (session: SessionState | null, state: ChatState = open) => ownerInChatNow({ session, state, ready: true, modeKnown: true });
+    // The kernel's mode is the only source: the owner's, and nothing else, says she is in the chat.
+    expect(now(inOwnersHands)).toBe(true);
+    expect(now(rivera.sessions.public)).toBe(false);
+    expect(now({ ...inOwnersHands, mode: 'paused' })).toBe(false);
+    // No session yet, or a mode the page doesn't know.
+    expect(now(null)).toBe(false);
+    expect(now({ ...inOwnersHands, mode: 'owner_soon' as SessionState['mode'] })).toBe(false);
+    // The chat's own lines never turn it on: a join last with the session in Claude's hands.
+    expect(now(rivera.sessions.public, run(events([ownerJoined])))).toBe(false);
+    expect(now(inOwnersHands, run(events([quoteMessage])))).toBe(true);
+  });
+
+  it('owner_in_chat_fails_safe_to_false', () => {
+    const inOwnersHands: SessionState = { ...rivera.sessions.public, mode: 'owner' };
+    const joined = run(events([ownerJoined]));
+    const now = (state: ChatState, facts: { ready?: boolean; modeKnown?: boolean } = {}) =>
+      ownerInChatNow({ session: inOwnersHands, state, ready: facts.ready ?? true, modeKnown: facts.modeKnown ?? true });
+    expect(now(joined)).toBe(true);
+    // The chat isn't ready (loading, or it couldn't load), or it doesn't know the mode now: it lost
+    // track of the stream, and nothing has confirmed the mode since.
+    expect(now(joined, { ready: false })).toBe(false);
+    expect(now(joined, { modeKnown: false })).toBe(false);
+    // Any error on the stream, the chat ending included, and a send that found it ended (a 401).
+    for (const code of EV_ERROR_CODES) expect(now(run(events([{ type: 'error', code }], 2), joined)), code).toBe(false);
+    expect(now(run([{ type: 'ended' }], joined))).toBe(false);
+
+    // The stream drops or closes: until it has caught up again, the chat can't know she's still there.
+    const dropped = run([{ type: 'connection', connection: 'reconnecting' }], joined);
+    expect(now(dropped)).toBe(false);
+    expect(now(run([{ type: 'connection', connection: 'closed' }], joined))).toBe(false);
+    const reopened = run([{ type: 'connection', connection: 'open' }], dropped);
+    expect(now(reopened)).toBe(false);
+    expect(now(run([{ type: 'caught_up' }], reopened))).toBe(true);
+    // The page coming back to the chat catches up the same way.
+    const back = run([{ type: 'catching_up' }], joined);
+    expect(now(back)).toBe(false);
+    expect(now(run([{ type: 'caught_up' }], back))).toBe(true);
+  });
+
+  it('an_answer_after_the_chat_loaded_only_lowers_the_mode', () => {
+    // An answer after the chat has loaded (a verify, a read of the session) may lower the mode to
+    // Claude's or a pause, never raise it to the owner's.
+    expect(lowerOnly('ai', 'owner')).toBe('ai');
+    expect(lowerOnly('paused', 'owner')).toBe('paused');
+    expect(lowerOnly(null, 'owner')).toBe('ai');
+    expect(lowerOnly('owner', 'owner')).toBe('owner');
+    expect(lowerOnly('owner', 'ai')).toBe('ai');
+    expect(lowerOnly('owner', 'paused')).toBe('paused');
+    expect(lowerOnly(null, 'ai')).toBe('ai');
+    // A read older than the stream's latest change of mode says nothing of it: the mode stays.
+    expect(lowerOnly('owner', null)).toBe('owner');
+    expect(lowerOnly('ai', null)).toBe('ai');
+    expect(lowerOnly(null, null)).toBe('ai');
   });
 });
 
