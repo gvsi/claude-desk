@@ -120,7 +120,6 @@ function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   if (current && week.stopped === 0 && !anythingStoppedIn(attempts, week)) {
     empty = (
       <EmptyState
-        title={null}
         body="When a request is turned down or a reply is stopped, you'll see here what was asked and why. Try it yourself from your public page."
         action={
           <Button variant="secondary" href={customerLink(slug, deskId)} external>
