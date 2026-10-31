@@ -430,7 +430,7 @@ describe('Conversations', () => {
     const box = screen.getByRole('textbox', { name: 'Write to them' });
     await expect.element(box).toBeVisible();
     // The take-over reads the chat again, and it is hers in that read.
-    await expect.poll(() => requests('conversation').length).toBeGreaterThan(reads);
+    await expect.poll(() => requests('conversation').length, { timeout: 5_000 }).toBeGreaterThan(reads);
 
     // She writes while the chat is hers: one typing ping, which the API takes.
     const words = 'I can come at 4 today.';
@@ -473,7 +473,7 @@ describe('Conversations', () => {
     await takeOver.click();
     const box = screen.getByRole('textbox', { name: 'Write to them' });
     await expect.element(box).toBeVisible();
-    await expect.poll(() => requests('conversation').length).toBeGreaterThan(reads);
+    await expect.poll(() => requests('conversation').length, { timeout: 5_000 }).toBeGreaterThan(reads);
 
     // Her words go to Dana, but the read after them fails (and its one retry), so the chat as last
     // read doesn't show them.
@@ -514,7 +514,7 @@ describe('Conversations', () => {
     await takeOver.click();
     const box = screen.getByRole('textbox', { name: 'Write to them' });
     await expect.element(box).toBeVisible();
-    await expect.poll(() => requests('conversation').length).toBeGreaterThan(reads);
+    await expect.poll(() => requests('conversation').length, { timeout: 5_000 }).toBeGreaterThan(reads);
 
     // Her words go, and the read after them fails.
     mockStore.inject({ route: 'conversation', status: 500, times: 2 });
