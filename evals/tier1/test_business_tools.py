@@ -82,6 +82,20 @@ async def test_business_description_instructions_reach_claude_only_as_quoted_dat
 
 
 @pytest.mark.requires("01c-setup")
+async def test_intake_arguments_cannot_select_a_block_config_or_question_count(k: KernelHarness, records):
+    desk = await golden_desk(k)
+    await enable_intake(k, records, desk)
+    visitor = await open_caller(k, desk, 'visitor')
+    args = {'name': 'Dana', 'answers': ['Consult']}
+    await decide(k, visitor, TOOL, args, expect=Expect(fields={'outcome': 'hold', 'action.tool': TOOL}))
+    for extra in ({'block': 'purpose_payment'}, {'config': {'block': 'urgent'}}, {'answers': ['One', 'Two']}):
+        await decide(k, visitor, TOOL, {**args, **extra},
+                     expect=Expect(fields={'outcome': 'refuse', 'action': None}))
+    if k.is_real:
+        assert not await records.leads(desk.copy.copy_id)
+
+
+@pytest.mark.requires("01c-setup")
 @pytest.mark.parametrize("other_scope", ["desk", "copy"])
 async def test_business_tools_are_refused_outside_their_own_desk(k: KernelHarness, records, other_scope):
     from evals.tier1.test_01c_kernel import NEW_DESK
