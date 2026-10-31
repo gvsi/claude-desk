@@ -33,6 +33,134 @@ PASSES = '{"promises_beyond_cards": false, "denies_being_ai": false}'
 QUOTE_CARD = "$180.00\nDrain clearing\nGood until Monday, November 2, 9:04 am"
 
 
+async def cancellation_during_signing(app, client, reviewer, monkeypatch, *, prose, cancel_first):
+    """The public cancellation route races the verdict's final card read on another connection."""
+    from sqlalchemy import event, select
+    from desk.db.models import Fact as FactRow
+    from desk.kernel_service import reply_check
+    from .helpers import kernel_ctx
+    from .test_handoff_card import quote_and_payment
+    from .test_payment_links import links_of
+    from .test_reply_check import public_key, verify_verdict
+
+    copy, visitor = await visitor_of(app, client)
+    clauses = (await quote_and_payment(client, reviewer, visitor))[1:]
+    [link] = await links_of(app, copy)
+    paused, resume, committed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    recheck = reply_check.recheck_cards
+
+    async def pause(ctx, session_row, blocks):
+        event.listen(ctx.db.sync_session, "after_commit", lambda session: committed.set(), once=True)
+        if cancel_first:
+            paused.set()
+            await resume.wait()
+        result = await recheck(ctx, session_row, blocks)
+        if not cancel_first:
+            assert [b.template for b in result[0] if b.kind == "card"] == ["payment_link"]
+            paused.set()
+            await resume.wait()
+        return result
+
+    monkeypatch.setattr(reply_check, "recheck_cards", pause)
+    cancellation_after_commit = False
+
+    async def cancel():
+        nonlocal cancellation_after_commit
+        response = await client.post(f"/payment_links/{link.token}/cancel", json={})
+        cancellation_after_commit = committed.is_set()
+        return response
+
+    checking = asyncio.create_task(checked(client, visitor, prose, clauses))
+    cancelling = None
+    try:
+        await asyncio.wait_for(paused.wait(), 5)
+        with connections_of(app) as pids:
+            cancelling = asyncio.create_task(cancel())
+            await until_waiting(app, cancelling, pids, table="kernel.facts")
+        cancellation_waited = not cancelling.done()
+        if cancel_first:
+            assert not cancellation_waited
+        if not cancellation_waited:
+            cancelled = await cancelling
+            assert cancelled.status_code == 200, cancelled.text
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+                FactRow.fact_id == clauses[0]["fact_id"])))).one()
+            assert fact.status == ("available" if cancellation_waited else "expired")
+    finally:
+        resume.set()
+        # Finish both requests even when an assertion fails, before the fixture truncates tables.
+        verdict = await asyncio.wait_for(checking, 5)
+        if cancelling is not None:
+            cancelled = await asyncio.wait_for(cancelling, 5)
+    assert cancelled.status_code == 200, cancelled.text
+    assert committed.is_set()
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+    if cancellation_waited:
+        assert cancellation_after_commit
+        passing = prose == "Here is your quote."
+        assert [b.template for b in verdict.blocks] == ([None, "payment_link"] if passing else ["payment_link"])
+        assert verdict.ok == passing
+        assert await handoffs_of(app, copy) == []
+    else:
+        assert_handed_off(verdict)
+        assert len(await handoffs_of(app, copy)) == 1
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.fact_id == clauses[0]["fact_id"])))).one()
+        assert fact.status == "expired"
+
+
+@pytest.mark.parametrize("cancel_first", [False, True], ids=["after-recheck", "before-recheck"])
+async def test_blocked_reply_card_stays_current_through_signing(app, client, reviewer, monkeypatch, cancel_first):
+    await cancellation_during_signing(app, client, reviewer, monkeypatch,
+                                      prose="Here is $20.", cancel_first=cancel_first)
+
+
+@pytest.mark.parametrize("cancel_first", [False, True], ids=["after-recheck", "before-recheck"])
+async def test_passing_reply_card_stays_current_through_signing(app, client, reviewer, monkeypatch, cancel_first):
+    await cancellation_during_signing(app, client, reviewer, monkeypatch,
+                                      prose="Here is your quote.", cancel_first=cancel_first)
+
+
+@pytest.mark.parametrize("wait_for", ["facts", "ledger_heads"])
+@pytest.mark.parametrize("prose", ["Here is your quote.", "Here is $20."], ids=["passing", "blocked"])
+async def test_card_expiring_while_waiting_for_finalize_lock_is_dropped(app, client, frozen_clock, prose, wait_for):
+    from datetime import timedelta
+    from sqlalchemy import select
+    from desk.db.models import Fact as FactRow, LedgerHead
+    from .helpers import kernel_ctx
+    from .test_reply_check import public_key, verify_verdict
+
+    copy, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.fact_id == quote.fact_id)))).one()
+        fact.expires_at = frozen_clock.now() + timedelta(seconds=1)
+    checking = None
+    try:
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            locked = (select(FactRow).where(FactRow.fact_id == quote.fact_id) if wait_for == "facts" else
+                      select(LedgerHead).where(LedgerHead.desk_id == copy.desk_id))
+            await ctx.db.execute(ctx.repo.scoped(locked.with_for_update()))
+            with connections_of(app) as pids:
+                checking = asyncio.create_task(checked(client, visitor, prose, [clause("quote", quote.fact_id)]))
+                await until_waiting(app, checking, pids, table=f"kernel.{wait_for}")
+            assert not checking.done()
+            frozen_clock.advance(1)
+    finally:
+        if checking is not None:
+            verdict = await asyncio.wait_for(checking, 5)
+    assert_handed_off(verdict)
+    assert len(await handoffs_of(app, copy)) == 1
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
 @pytest.mark.parametrize("flagged", [False, True], ids=["passing", "blocked"])
 @pytest.mark.parametrize("change", ["remove", "contact", "person", "assurance"])
 async def test_person_removed_while_soft_check_sleeps_loses_private_card(app, client, reviewer, flagged, change,

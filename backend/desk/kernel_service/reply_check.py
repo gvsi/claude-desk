@@ -91,7 +91,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
-from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Person
+from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
@@ -577,16 +577,23 @@ async def recheck_cards(ctx: KernelCtx, session_row: SessionRow,
     """Re-read card entitlements and currency after holding the session row, before signing.
 
     The explicit lock also covers a repeated check whose frozen last-seen value caused no UPDATE.
-    Fact rows are refreshed in one query, rather than using the earlier ORM identity-map values.
+    Open handoffs are held before facts, including for a possible last-card fallback. Fact rows
+    are refreshed FOR SHARE in fact ID order, rather than using earlier ORM identity-map values:
+    a withdrawal either commits first or waits until this verdict's transaction commits.
     No model call runs under this lock; the draft's generation remains unchanged for its signature.
     """
     cards = [block for block in blocks if block.kind == "card" and block.fact_id is not None]
     if not cards:
         return list(blocks), []
     current = await _lock_session(ctx, session_row)
+    await open_handoff_ids(ctx, session_row, lock=True)
     rows = {row.fact_id: row for row in await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
         FactRow.desk_id == session_row.desk_id, FactRow.fact_id.in_([card.fact_id for card in cards]))
-        .execution_options(populate_existing=True)))}
+        .order_by(FactRow.fact_id).with_for_update(read=True).execution_options(populate_existing=True)))}
+    # Every Desk already has a head. Take the final lock before checking expiry too: waiting for
+    # the reply's append must not let a card age out between its currency check and signing.
+    (await ctx.db.execute(ctx.repo.scoped(select(LedgerHead.desk_id).where(
+        LedgerHead.desk_id == session_row.desk_id).with_for_update()))).scalar_one()
     readers, now = labels.session_readers(current), ctx.clock.now()
     kept, refused = [], []
     for block in blocks:
@@ -731,14 +738,18 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
 
     Cards on passing and blocked drafts are rechecked under the session lock before signing:
     closed_at, person and assurance are read afresh, then all cited facts' readers, status and
-    expiry in one query. A blocked draft drops cards that no longer pass. A passing draft whose
-    backing card was withdrawn fails with that clause's refusal, so none of its prose is shown.
+    expiry in one ordered FOR SHARE query, held through the signature and commit. Open handoffs
+    are locked before facts so a last-card refusal can fall back without reversing the lock order.
+    Currency is checked after taking the ledger head too, so expiry is current after every lock
+    wait. A blocked draft drops cards that no longer pass. A passing draft whose backing card
+    was withdrawn fails with that clause's refusal, so none of its prose is shown.
 
     When the verdict of Claude's draft shows the handoff card and the visitor will see it, the
-    session's owner handoff is opened next, before the ledger head (`open_card_handoff`), and
-    ledgered just before the verdict: a reply that passed citing the handoff clause always; a
-    blocked draft when it is `final`, or when one of its violations is outside the kinds a rewrite
-    can fix (`desk.rewrites.REWRITABLE`), since the API then hands off at once. A first attempt
+    session's owner handoff is opened next (`open_card_handoff`) and ledgered just before the
+    verdict, reusing any locks the card recheck already holds: a reply that passed citing the
+    handoff clause always; a blocked draft when it is `final`, or when one of its violations is
+    outside the kinds a rewrite can fix (`desk.rewrites.REWRITABLE`), since the API then hands off
+    at once. A first attempt
     (`final` false) blocked only for rewritable kinds is never shown, since the API asks Claude
     for a rewrite, so it opens none, and its verdict, still signed and ledgered, carries no blocks:
     the kernel never signs a showable handoff card that no handoff backs, and the API's rewrite
@@ -876,7 +887,8 @@ async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | No
     takes, read as columns, so the row the request read keeps the generation the verdict is signed
     at), then the session's open handoffs `FOR SHARE`, then the ledger head. Two checks of one
     session, a call-back's execution (which holds the session row `FOR UPDATE`) and the owner's
-    mark of done (which holds the handoff `FOR UPDATE`) each come wholly before or after it.
+    mark of done (which holds the handoff `FOR UPDATE`) each come wholly before or after it. A
+    last-card fallback reuses these locks from `recheck_cards`; its new handoff has a fresh key.
 
     It opens none when a take-over or hand-back has moved the session to another generation since
     the request read it (`deliver()` drops the verdict, so the visitor never sees the card); while

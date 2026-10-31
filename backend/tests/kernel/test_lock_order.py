@@ -398,7 +398,8 @@ async def test_a_reply_with_rechecked_cards_keeps_the_lock_order(app, client, pr
     with lock_log(app) as log:
         verdict = await checked(client, visitor, prose, [clause("quote", quote.fact_id)])
     assert [b.template for b in verdict.blocks if b.kind == "card"] == ["quote"]
-    assert log.transactions == [["sessions", "ledger_heads"]]
+    # Handoffs are held before facts even if the refresh later drops the last card.
+    assert log.transactions == [["sessions", "handoffs", "facts", "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))
 
 
