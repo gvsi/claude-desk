@@ -387,17 +387,15 @@ async def test_unsigned_agent_calls_are_refused(app, client, frozen_clock):
         "POST /check_reply": lambda headers: client.post("/check_reply", headers=headers, json={
             "draft": {"session_id": session_id, "generation": 0, "prose": "I can help with that.", "clauses": []}}),
     }
-    # no credential, and a visitor's token naming the agent's session: an agent session has no token
+    # no credential, and a visitor's token naming the agent's session: an agent session has no token,
+    # so a call naming it with no credential at all is an agent call with no signature (`agent_auth`)
     for headers in ({}, visitor.headers):
         for route, call in calls.items():
             response = await call(headers)
             assert (response.status_code, response.json()) == (401, {"code": "auth"}), (route, headers)
     entries = (await ledger_rows(app, copy))[before:]
     assert [(e.event.kind, e.event.session_id, e.event.summary) for e in entries] == [
-        ("auth", session_id, {"route": "GET /context/{session_id}", "reason": "bad_token"}),
-        ("auth", session_id, {"route": "POST /decide", "reason": "bad_token"}),
-        ("auth", session_id, {"route": "POST /execute", "reason": "bad_token"}),
-        ("agent_auth", session_id, {"route": "POST /check_reply", "reason": "unsigned"}),
+        ("agent_auth", session_id, {"route": route, "reason": "unsigned"}) for route in calls
     ] + [("auth", session_id, {"route": route, "reason": "bad_token"}) for route in calls]
     # nothing ran: one decision, not executed, and no reply checked
     assert [row.decision_id for row in await rows_of(app, copy.copy_id, select(DecisionRow).where(

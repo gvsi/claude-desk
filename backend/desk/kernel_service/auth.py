@@ -138,12 +138,26 @@ async def caller(ctx: KernelCtx, request: Request, session_id: str | None, *,
     """Which credential a call that takes either carries: the owner's, or a session's (its token,
     or an agent's signature). None, or more than one, is 401, ledgered on the session the call
     names (`session_id`, of the copy `copy_id` when the request's transaction has already read it
-    there), as any refusal is."""
+    there), as any refusal is: `auth` `bad_token`, or, for a call with no credential at all naming
+    an agent session, whose credential is its signature, `agent_auth` `unsigned`."""
     owner, session, agent = OWNER_HEADER in request.headers, SESSION_HEADER in request.headers, agent_signed(request)
     if owner + session + agent == 1:
         return "owner" if owner else "session"
-    raise AuthError(401, "auth", "bad_token", route=route_template(request),
-                    named=await named_session(ctx, session_id, copy_id=copy_id))
+    route = route_template(request)
+    named = await named_session(ctx, session_id, copy_id=copy_id)
+    if not (owner or session or agent) and named is not None and await _names_an_agent(ctx, named):
+        from desk.kernel_service import agents     # agents builds on this module
+
+        raise agents.AgentAuthError("unsigned", route=route, named=named)
+    raise AuthError(401, "auth", "bad_token", route=route, named=named)
+
+
+async def _names_an_agent(ctx: KernelCtx, named: Named) -> bool:
+    """Whether the session `named` names is an agent session, read in its copy."""
+    copy = ctx.bind(named.copy_id)
+    kind = (await ctx.db.execute(copy.scoped(select(SessionRow.kind).where(
+        SessionRow.session_id == named.session_id)))).scalar_one_or_none()
+    return kind == "agent"
 
 
 async def require_session(ctx: KernelCtx, request: Request, session_id: str, *, generation: int | None = None,
