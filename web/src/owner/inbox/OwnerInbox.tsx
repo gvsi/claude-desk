@@ -7,29 +7,28 @@
  * is the whole copy's, so while the sheet is open each such request is read for the Desk it was
  * held on, and its alert links only once that read has answered.
  *
- * The copy's inbox is read once as Today opens, so the button counts what is there and the sheet
- * opens onto entries already read, never onto an inbox that only looks empty. It is read again as
- * the sheet opens and every few seconds while it is open, and sends no new read from the moment it
- * closes (a read already out finishes, with its one retry). While that first read is out, the
- * button's place says the inbox is opening; if it fails, the inbox's title says it couldn't be
- * opened, with "Try again". A later read that fails says the same under the sheet's button, and
- * inside the sheet while it is open, where the page behind is out of reach, so the entries read
- * before never pass for current.
+ * The copy's inbox is read with Today's other reads, as Today opens or just before, so the button
+ * counts what is there and the sheet opens onto entries already read, never onto an inbox that only
+ * looks empty. It is read again as the sheet opens and every few seconds while it is open, and
+ * sends no new read from the moment it closes (a read already out finishes, with its one retry). If
+ * Today opens while that first read is still out (it ran long), the button's place says the inbox
+ * is opening; if it failed, Today opens on it, without sending it again, and the inbox's title says
+ * it couldn't be opened, with "Try again". A later read that fails says the same under the sheet's
+ * button, and inside the sheet while it is open, where the page behind is out of reach, so the
+ * entries read before never pass for current.
  */
 import { focusManager, hashKey, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
 
-import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
 import { Button, DemoInboxSheet, LoadingLine, Notice, SectionHeader, type DemoInboxItem } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { decisionQuery } from '../conversations/ownerReceipt.ts';
 import { requestPath } from '../today/requestLink.ts';
+import { FRESH_MS, OWNER_INBOX_KEY, ownerInboxQuery } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 
 import './OwnerInbox.css';
-
-export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 
 export interface OwnerInboxProps {
   /** The business's IANA time zone: each entry's time is on its clock. */
@@ -52,11 +51,14 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
     onOpenChange?.(next);
   };
   const inbox = useQuery({
-    queryKey: OWNER_INBOX_KEY,
-    queryFn: () => request('ownerInbox'),
-    // Once as Today opens; after that, only while the sheet is open.
-    refetchOnWindowFocus: () => openNow.current,
-    refetchOnReconnect: () => openNow.current,
+    ...ownerInboxQuery(),
+    // Today's opening reads it first (`useTodayOpening`); this reads it again only while the sheet is
+    // open, where a return to the tab or the network reads however fresh the last read is.
+    staleTime: FRESH_MS,
+    // Today opens on what its first read found, a failure included, as it does with its other reads.
+    retryOnMount: false,
+    refetchOnWindowFocus: () => (openNow.current ? 'always' : false),
+    refetchOnReconnect: () => (openNow.current ? 'always' : false),
   });
   const failure = useReadFailure(inbox);
 
