@@ -1340,6 +1340,90 @@ describe('setup', () => {
     expect(requests('setupConsent')).toHaveLength(1);
   });
 
+  it('consent_polling_stops_when_navigation_moves_before_the_destination_draws', async () => {
+    const state = await startInterview(null);
+    holdNextConsent(mockStore.world, state.interview_id);
+    await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
+    const firstVisit = holdFirstVisit();
+    onTestFinished(firstVisit.draw);
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { routes: firstVisit.routes, strict: true });
+    const writing = screen.getByText('Claude is writing', { exact: true });
+    await expect.element(writing).toBeVisible();
+    const sends = vi.spyOn(window, 'fetch');
+    onTestFinished(() => sends.mockRestore());
+    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    await router.navigate('/');
+    expect(router.state.location.pathname).toBe('/');
+    expect(writing.elements(), 'setup stays mounted while the destination suspends').toHaveLength(1);
+    const leftAt = reads();
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 2200));
+    expect(writing.elements(), 'setup has not unmounted yet').toHaveLength(1);
+    expect(reads(), 'no interview read after the router moved away').toBe(leftAt);
+    firstVisit.draw();
+    await expect.element(writing).not.toBeInTheDocument();
+  });
+
+  it('consent_try_again_sends_no_read_after_navigation_even_before_unmount', async () => {
+    const state = await startInterview(null);
+    holdNextConsent(mockStore.world, state.interview_id);
+    const firstVisit = holdFirstVisit();
+    onTestFinished(firstVisit.draw);
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { routes: firstVisit.routes });
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await until(() => {
+      vi.advanceTimersByTime(0);
+      expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
+    });
+    await vi.advanceTimersByTimeAsync(90000);
+    await until(() => {
+      vi.advanceTimersByTime(0);
+      expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain(UNREACHABLE_COPY.en);
+    });
+    vi.useRealTimers();
+    const sends = vi.spyOn(window, 'fetch');
+    onTestFinished(() => sends.mockRestore());
+    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    await router.navigate('/');
+    expect(router.state.location.pathname).toBe('/');
+    const retry = screen.getByRole('button', { name: 'Try again' });
+    expect(retry.elements(), 'the abandoned setup is still mounted').toHaveLength(1);
+    const leftAt = reads();
+    await retry.click();
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 100));
+    expect(reads()).toBe(leftAt);
+    expect(router.state.location.pathname).toBe('/');
+    firstVisit.draw();
+    await expect.element(retry).not.toBeInTheDocument();
+  });
+
+  it('consent_polling_resumes_if_the_owner_goes_back_before_the_destination_draws', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
+    const firstVisit = holdFirstVisit();
+    onTestFinished(firstVisit.draw);
+    const path = `/app/setup/${state.interview_id}`;
+    const { screen, router } = await renderRoute(path, { routes: firstVisit.routes, strict: true });
+    const writing = screen.getByText('Claude is writing', { exact: true });
+    await expect.element(writing).toBeVisible();
+    const before = writing.element();
+    const sends = vi.spyOn(window, 'fetch');
+    onTestFinished(() => sends.mockRestore());
+    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    await router.navigate('/');
+    expect(router.state.location.pathname).toBe('/');
+    const leftAt = reads();
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe(path);
+    expect(writing.element(), 'the same setup stayed mounted').toBe(before);
+    await expect.poll(reads, { timeout: 5000 }).toBeGreaterThan(leftAt);
+    finish('landed');
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    expect(router.state.location.pathname).toBe(path);
+  });
+
   it('leaving_setup_mid_run_stops_interview_reads', async () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);

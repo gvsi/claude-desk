@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { UNSAFE_DataRouterContext, useLocation } from 'react-router';
 
 import type { SetupState } from '../api/views.ts';
 
@@ -7,29 +8,51 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
   const working = state.step === 'questions' && state.busy === true;
   const [gaveUp, setGaveUp] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [visit, setVisit] = useState(0);
   const leaving = useRef<AbortController | null>(null);
   const retryRead = useRef(false);
+  const router = useContext(UNSAFE_DataRouterContext)?.router;
+  const { pathname } = useLocation();
   useEffect(() => {
-    const controller = new AbortController();
+    let controller = new AbortController();
     leaving.current = controller;
-    return () => controller.abort();
-  }, [state.interview_id]);
+    // Like StartStep, stop as soon as the router moves, before a suspended destination draws.
+    const stop = router?.subscribe((state) => {
+      if (state.location.pathname !== pathname) {
+        controller.abort();
+        return;
+      }
+      if (!controller.signal.aborted) return;
+      // Back before unmount: this visit can read again, without reviving work from the old visit.
+      controller = new AbortController();
+      leaving.current = controller;
+      retryRead.current = false;
+      setRetrying(false);
+      setVisit((now) => now + 1);
+    });
+    return () => {
+      stop?.();
+      controller.abort();
+    };
+  }, [state.interview_id, router, pathname]);
 
   useEffect(() => {
     if (!working) {
       setGaveUp(false);
       return;
     }
-    if (gaveUp) return;
+    const signal = leaving.current?.signal;
+    if (gaveUp || signal === undefined || signal.aborted) return;
     const controller = new AbortController();
     let reading = false;
     // Registered before the interval so the deadline wins over a tick at exactly 90 s.
     const deadline = setTimeout(() => {
+      if (controller.signal.aborted || signal.aborted) return;
       stop();
       setGaveUp(true);
     }, 90000);
     const timer = setInterval(() => {
-      if (controller.signal.aborted || reading) return;
+      if (controller.signal.aborted || signal.aborted || reading) return;
       reading = true;
       void reread()
         .then((next) => {
@@ -48,8 +71,12 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
       clearInterval(timer);
       clearTimeout(deadline);
     }
-    return stop;
-  }, [state.interview_id, working, gaveUp, reread]);
+    signal.addEventListener('abort', stop);
+    return () => {
+      signal.removeEventListener('abort', stop);
+      stop();
+    };
+  }, [state.interview_id, working, gaveUp, reread, visit]);
 
   /** Read first: a failed read keeps the notice; a still-busy interview gets a fresh 90 s. */
   const retry = useCallback(async () => {
@@ -64,8 +91,10 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
     } catch {
       // The interview is still unknown: keep the notice and read again only on another press.
     } finally {
-      retryRead.current = false;
-      if (!signal.aborted) setRetrying(false);
+      if (!signal.aborted) {
+        retryRead.current = false;
+        setRetrying(false);
+      }
     }
   }, [gaveUp, reread]);
 

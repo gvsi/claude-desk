@@ -1,5 +1,6 @@
 import { StrictMode, act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import type { SetupState } from '../api/views.ts';
@@ -22,7 +23,11 @@ function Probe({ state }: { state: SetupState }) {
 function show(state: SetupState) {
   act(() => {
     root ??= createRoot(document.createElement('div'));
-    root.render(createElement(StrictMode, null, createElement(Probe, { state })));
+    root.render(createElement(
+      StrictMode,
+      null,
+      createElement(MemoryRouter, { initialEntries: ['/app/setup/s1'] }, createElement(Probe, { state })),
+    ));
   });
 }
 
