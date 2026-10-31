@@ -442,6 +442,61 @@ describe('fixtures', () => {
     for (const language of ['en', 'es'] as const) expect(card(language).text).not.toMatch(/B-77|Booking|Reserva/);
   });
 
+  test('link_cancelled_card_has_the_kernels_shape', () => {
+    // The kernel renders a cancelled link's card from that link's own payment_link fact: its total
+    // as the title, then its title claim and a line naming the owner (render/en.py and es.py
+    // `link_cancelled`), in this order.
+    const renderer = (language: string) => {
+      const source = readFileSync(path.join(BACKEND, 'kernel_service', 'render', `${language}.py`), 'utf8');
+      const body = /^def link_cancelled\(fact: Fact \| None, desk: DeskInfo\) -> Card:\n(?:(?: {4}.*)?\n)+/m.exec(source)?.[0];
+      if (!body) throw new Error(`render/${language}.py no longer defines link_cancelled`);
+      return body;
+    };
+    const fragments = {
+      en: [
+        `f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "`,
+        '"Ask again if you still want to pay."',
+      ],
+      es: [
+        'f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "',
+        '"Pídelo de nuevo si todavía quieres pagar."',
+      ],
+    };
+    for (const language of ['en', 'es'] as const) {
+      const body = renderer(language);
+      const order = ['return Card(title=money(claims(fact)["total"]), lines=(', 'title_claim(fact),', ...fragments[language]];
+      for (const fragment of order) expect(body, language).toContain(fragment);
+      const at = order.map((fragment) => body.indexOf(fragment));
+      expect(at, language).toEqual([...at].sort((a, b) => a - b));
+    }
+
+    // The deposit link is for the seed's deposit item, whose one title the owner wrote and the
+    // kernel shows unchanged in both languages, at $20.00 (render/cards.py `money`).
+    const seed = readFileSync(path.join(BACKEND, 'kernel_service', 'seed.py'), 'utf8');
+    expect(seed).toContain('PriceItem(item_id="deposit", title="Service call deposit", unit_cents=2000)');
+    const owner = rivera.business.ownerName;
+    const line = {
+      en: `This payment link was cancelled because ${owner}'s rules changed. Ask again if you still want to pay.`,
+      es: `Este enlace de pago se canceló porque cambiaron las reglas de ${owner}. Pídelo de nuevo si todavía quieres pagar.`,
+    };
+    for (const language of ['en', 'es'] as const) {
+      // It cites the same fact as the deposit's payment link card, which reads `{title}, {total}`.
+      const link = rivera.blocks.payment_link[language];
+      expect(link.fact_id, language).toBe('payment_link:L-3301');
+      expect(link.title, language).toBe('Service call deposit, $20.00');
+      expect(rivera.blocks.link_cancelled[language], language).toEqual({
+        kind: 'card',
+        template: 'link_cancelled',
+        text: ['$20.00', 'Service call deposit', line[language]].join('\n'),
+        fact_id: 'payment_link:L-3301',
+        title: '$20.00',
+        lines: ['Service call deposit', line[language]],
+        href: null,
+        options: [],
+      });
+    }
+  });
+
   test('card_amounts_print_cents_as_the_kernel_does', () => {
     // The kernel formats every amount with cents ("$20.00", "$1,234.56": render/cards.py `money`), so
     // no fixture card's title or lines, in the catalog or in a conversation, shows a bare "$20".
