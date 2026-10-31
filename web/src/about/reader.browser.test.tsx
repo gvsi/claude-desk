@@ -5,7 +5,7 @@
  * page's code.
  */
 import axe from 'axe-core';
-import { useLayoutEffect } from 'react';
+import { StrictMode, useLayoutEffect } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -116,6 +116,49 @@ function readText(el: Element): string {
     return [...node.childNodes].map(walk).join(' ');
   };
   return flat(walk(el));
+}
+
+/** How far the section's heading is from its place below the pinned bar. */
+function offsetOf(anchor: string): number {
+  const heading = document.getElementById(anchor);
+  if (!heading) throw new Error(`no section #${anchor}`);
+  return heading.getBoundingClientRect().top - parseFloat(getComputedStyle(heading).scrollMarginTop);
+}
+
+/** Turns the browser's scroll anchoring off for the test, so nothing but the page puts the window back. */
+function withoutScrollAnchoring(): void {
+  // Chromium on Linux keeps anchoring unless the body is opted out too.
+  for (const element of [document.documentElement, document.body]) element.style.overflowAnchor = 'none';
+  onTestFinished(() => {
+    for (const element of [document.documentElement, document.body]) element.style.overflowAnchor = '';
+  });
+}
+
+/** Makes the reading type's web font still loading, as on a cold load, and returns what finishes loading it. */
+function typeStillLoading(): () => void {
+  let loaded = () => {};
+  const ready = new Promise<void>((resolve) => {
+    loaded = resolve;
+  });
+  const fonts = { status: 'loading', ready } as unknown as FontFaceSet;
+  Object.defineProperty(document, 'fonts', { configurable: true, get: () => fonts });
+  onTestFinished(() => {
+    delete (document as { fonts?: FontFaceSet }).fonts;
+  });
+  return loaded;
+}
+
+/** Grows the page above the sections, as the font's swap does. */
+function swapType(): void {
+  const grown = document.createElement('div');
+  grown.style.height = '29px';
+  (document.querySelector('[data-hero]') as HTMLElement).append(grown);
+  onTestFinished(() => grown.remove());
+}
+
+/** Two frames: long enough for what the page heard to have been acted on. */
+async function twoFrames(): Promise<void> {
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
 
 describe('ReaderPage', () => {
@@ -576,6 +619,107 @@ describe('ReaderPage', () => {
         await expect.poll(() => window.scrollY, { message: next }).toBe(0);
       }
     }
+    await screen.unmount();
+  });
+
+  it('an_address_keeps_its_section_while_the_type_loads', async () => {
+    // On a cold load the reading type's web font swaps in after the page has opened at the address's section, and
+    // moves the page under the window. Once the type has loaded the section is back at its place, unless the reader
+    // has moved on first or the document has gone. Scroll anchoring is off, so nothing else puts the window back.
+    withoutScrollAnchoring();
+    const title = () => flat(document.querySelector('h1')?.textContent);
+
+    let loaded = () => {};
+    for (const size of [DESKTOP, PHONE]) {
+      loaded = typeStillLoading();
+      const screen = await renderReader('prediction', { size, hash: '#characteristics' });
+      await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+      swapType();
+      expect(offsetOf('characteristics'), `the swap moved the page at ${size.width}`).toBeGreaterThan(20);
+      loaded();
+      await expect
+        .poll(() => Math.abs(offsetOf('characteristics')), { message: `once the type has loaded at ${size.width}` })
+        .toBeLessThanOrEqual(1);
+      await screen.unmount();
+    }
+
+    /** Scrolls the window as a reader does, through to the scroll event the page hears, and returns where it is. */
+    const scrollOn = async () => {
+      const scrolled = new Promise((resolve) => window.addEventListener('scroll', resolve, { once: true }));
+      window.scrollTo(0, window.scrollY + 300);
+      await scrolled;
+      return Math.round(window.scrollY);
+    };
+
+    // A reader who has moved on before the type loads is left where they are, whatever they moved with.
+    for (const kind of ['wheel', 'touchmove', 'pointerdown', 'keydown', 'popstate']) {
+      loaded = typeStillLoading();
+      const again = await renderReader('prediction', { hash: '#characteristics' });
+      await expect.poll(() => Math.abs(offsetOf('characteristics')), { message: kind }).toBeLessThanOrEqual(1);
+      window.dispatchEvent(new Event(kind));
+      const where = await scrollOn();
+      swapType();
+      loaded();
+      await twoFrames();
+      expect(Math.round(window.scrollY), `where the reader is after a ${kind}`).toBe(where);
+      await again.unmount();
+    }
+
+    // Back returns to the reader's place and keeps no section, though the address names one.
+    loaded = typeStillLoading();
+    const back = await renderReader('prediction', { hash: '#characteristics' });
+    await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+    window.dispatchEvent(new Event('wheel'));
+    const place = await scrollOn();
+    at.navigate?.('/about/proposal');
+    await expect.poll(title).toBe('Product proposal');
+    at.navigate?.(-1);
+    await expect.poll(title).toBe('Capability prediction');
+    await expect.poll(() => Math.round(window.scrollY), { message: 'Back returns to the place' }).toBe(place);
+    swapType();
+    loaded();
+    await twoFrames();
+    expect(Math.round(window.scrollY), 'the place Back returned to').toBe(place);
+    await back.unmount();
+
+    // Once the document has gone, its section isn't kept: the other document opens at its top and stays there. The
+    // other document's "v1" is drawn in the very heading that was "Limitations", at the same place in its document.
+    loaded = typeStillLoading();
+    const third = await renderReader('prediction', { hash: '#limitations' });
+    await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
+    const heading = document.getElementById('limitations');
+    at.navigate?.('/about/proposal');
+    await expect.poll(title).toBe('Product proposal');
+    expect(document.getElementById('v1'), 'the same heading element').toBe(heading);
+    await expect.poll(() => window.scrollY).toBe(0);
+    swapType();
+    loaded();
+    await twoFrames();
+    expect(window.scrollY, 'the other document stays at its top').toBe(0);
+    await third.unmount();
+  });
+
+  it('an_address_keeps_its_section_under_strict_mode', async () => {
+    // The app renders under React's StrictMode, which in development runs the page's effects twice for one opening:
+    // the section is still kept while the type loads.
+    withoutScrollAnchoring();
+    const loaded = typeStillLoading();
+    await page.viewport(DESKTOP.width, DESKTOP.height);
+    const screen = await render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/about/prediction#characteristics']}>
+          <Routes>
+            <Route path="/about/prediction" element={<ReaderPage id="prediction" />} />
+          </Routes>
+          <LocationProbe />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+    swapType();
+    expect(offsetOf('characteristics'), 'the swap moved the page').toBeGreaterThan(20);
+    loaded();
+    await expect.poll(() => Math.abs(offsetOf('characteristics')), { message: 'once the type has loaded' }).toBeLessThanOrEqual(1);
     await screen.unmount();
   });
 

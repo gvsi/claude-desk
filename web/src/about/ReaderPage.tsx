@@ -76,13 +76,41 @@ interface Reading {
 /** By router, which the app makes once per window, so each window, and each test's router, starts afresh. */
 const READING = new WeakMap<object, Reading>();
 
+/** What the reader does that means they have moved on from where the page put them, Back and Forward included. */
+const READER_ACTIONS = ['wheel', 'touchmove', 'pointerdown', 'keydown', 'popstate'] as const;
+
+/**
+ * Keeps the window at the section an address opened until the reading type's web font has loaded, and returns what
+ * cancels it. On a cold load the font swaps in after the page has opened there and moves the page under the window,
+ * and the browser's scroll anchoring holds the window to some other element than the heading (about 2 px off on the
+ * prediction). Once the type has loaded, the heading is followed once more, unless the reader has acted first.
+ */
+function keepSectionWhileTypeLoads(heading: HTMLElement): () => void {
+  const { fonts } = document;
+  if (!fonts || fonts.status !== 'loading') return () => {};
+  let done = false;
+  const stop = () => {
+    done = true;
+    for (const kind of READER_ACTIONS) window.removeEventListener(kind, stop);
+  };
+  for (const kind of READER_ACTIONS) window.addEventListener(kind, stop, { passive: true });
+  void fonts.ready.then(() => {
+    if (done || !heading.isConnected) return;
+    stop();
+    const margin = parseFloat(getComputedStyle(heading).scrollMarginTop) || 0;
+    if (Math.abs(heading.getBoundingClientRect().top - margin) > 1) heading.scrollIntoView();
+  });
+  return stop;
+}
+
 /**
  * Where the window goes when a document draws. Opened by a link or in place of the current page, it starts at
  * its top, or at the section its address names, whose anchor exists only once the page has drawn. Back and
  * Forward return to where the reader last was in that document: the browser's own restoring races the router's
  * drawing of the page, and loses when the page it leaves is shorter. The router counts the address a window
  * loads as a move back, so its first page opens as the address says. This runs only when a document draws, not
- * on every hash: the contents list's links move within the page by themselves.
+ * on every hash: the contents list's links move within the page by themselves. A section the address opened is kept
+ * in place while the reading type loads, until the document goes.
  */
 function useReadingPlace(id: AboutId, hash: string) {
   // The router's navigator: one object for as long as the router lives.
@@ -95,16 +123,25 @@ function useReadingPlace(id: AboutId, hash: string) {
   useLayoutEffect(() => {
     own.current = window.location.pathname;
   }, [pathname]);
+  // How this document opened, decided once for it: React's StrictMode runs the effect below twice for one opening,
+  // and the second run must open it the same way, not take the first run's drawing for a move back.
+  const opening = useRef<{ id: AboutId; back: boolean } | null>(null);
   useLayoutEffect(() => {
     const reading = READING.get(navigator) ?? { drawn: false, places: {} };
     READING.set(navigator, reading);
-    if (navigationType === 'POP' && reading.drawn) {
+    if (opening.current?.id !== id) opening.current = { id, back: navigationType === 'POP' && reading.drawn };
+    let stopKeeping = () => {};
+    if (opening.current.back) {
       window.scrollTo(0, reading.places[id] ?? 0);
     } else {
       const anchor = sectionAnchor(hash);
       const section = anchor ? document.getElementById(anchor) : null;
-      if (section) section.scrollIntoView();
-      else window.scrollTo(0, 0);
+      if (section) {
+        section.scrollIntoView();
+        stopKeeping = keepSectionWhileTypeLoads(section);
+      } else {
+        window.scrollTo(0, 0);
+      }
     }
     reading.drawn = true;
     // Back changes the window's address, and the browser restores the next page's place, before the router
@@ -114,7 +151,10 @@ function useReadingPlace(id: AboutId, hash: string) {
     };
     remember();
     window.addEventListener('scroll', remember, { passive: true });
-    return () => window.removeEventListener('scroll', remember);
+    return () => {
+      window.removeEventListener('scroll', remember);
+      stopKeeping();
+    };
   }, [id]);
 }
 
