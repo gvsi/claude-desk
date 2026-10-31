@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from desk.contracts import DemoAgentIssued, Mandate
 from evals.client import AnswerUnreadable, ApiCallFailed, DeskClient, StreamEvent
 from evals.oracles import find_markers
+from evals.pricing import cost_usd
 from evals.records import SessionWork
 from evals.tests.artifacts import (
     DANA,
@@ -40,6 +41,8 @@ from evals.tests.artifacts import (
     legit,
     prose,
 )
+from evals.tests.test_usage_and_latency import HAIKU, call_usage
+from evals.tier2.passes import PassProviders, priced_spend
 from evals.tier2.prompts import Observation
 from evals.tier2.runner import RunOutcome, run_scenario
 from evals.tier2.simulator import ServedTurn, SimulatorRun, VisitorTurn
@@ -1252,17 +1255,77 @@ async def test_desk_side_model_mismatch_is_a_config_error():
     assert "conversation" in outcome.error.detail and "claude-sonnet-5-5" in outcome.error.detail
 
     run = chat(scenario, 1)
-    run.event("review", ref_id="d-x", decision_id="d-x", model="claude-haiku-5-5", status="ok", input_tokens=10,
-              output_tokens=5, latency_ms=300)
+    run.event("review", ref_id="d-x", decision_id="d-x", **call_usage(HAIKU, input_tokens=10, cached=0, output=5,
+                                                                      ms=300))
     desk = Desk(run)
     outcome = await drive(scenario, desk, Visitor(desk))
     assert (outcome.error.kind, outcome.verdict) == ("config_mismatch", None)
     assert "review" in outcome.error.detail
 
+    run = chat(scenario, 1)
+    checked_reply(run, call_usage("claude-sonnet-5-5", input_tokens=900, cached=0, output=40))   # configured Haiku
+    desk = Desk(run)
+    outcome = await drive(scenario, desk, Visitor(desk))
+    assert (outcome.error.kind, outcome.verdict) == ("config_mismatch", None)
+    assert "the kernel's reply check was served by claude-sonnet-5-5" in outcome.error.detail
+
     desk = Desk(chat(scenario, 1), model="us.anthropic.claude-opus-5-5")   # Bedrock's name for the same model
     outcome = await drive(scenario, desk, Visitor(desk))
     assert outcome.error is None, outcome.error
     assert outcome.artifact.served_models["api"] == [OPUS]
+
+
+def checked_reply(run: Run, soft_promise: Any) -> int:
+    """A `reply` ledger entry as the kernel writes it, its soft-promise call (or null) nested under
+    `soft_promise`; returns its seq."""
+    message_id = f"m-checked-{len(run.ledger) + 1}"
+    return run.event("reply", ref_id=message_id, message_id=message_id, author="claude", ok=True, language="en",
+                     violations=[], rule_ids=[], fact_ids=[], soft_promise=soft_promise)
+
+
+async def test_the_kernels_soft_promise_calls_count_in_the_runs_usage_and_spend():
+    """A checked reply's soft-promise call, nested under its `reply` entry, is in the run's usage, priced
+    in its spend at the Claude API's list prices and listed under `kernel_checks`; a reply whose check made
+    no call (`soft_promise: null`) adds nothing."""
+    scenario = attack(max_turns=1)
+    run = chat(scenario, 1)
+    soft = call_usage(HAIKU, input_tokens=900, cached=0, output=40, ms=420)
+    seq = checked_reply(run, soft)
+    checked_reply(run, None)
+    desk = Desk(run)
+    outcome = await drive(scenario, desk, Visitor(desk))
+    assert outcome.error is None, outcome.error
+    kernel = [row for row in outcome.artifact.usage if row["part"] == "kernel_checks"]
+    assert [(row["kind"], row["seq"], row["model"], row["input_tokens"], row["cached_tokens"],
+             row["cache_write_tokens"], row["output_tokens"]) for row in kernel] == [
+        ("reply", seq, HAIKU, 900, 0, 0, 40)]
+    assert outcome.artifact.served_models["kernel_checks"] == [HAIKU]
+    api = [row for row in outcome.artifact.usage if row["part"] == "api"]
+    spend = priced_spend(outcome, PassProviders(api="anthropic", simulator="anthropic", kernel_checks="anthropic"))
+    assert spend.desk_usd == pytest.approx(sum(cost_usd(row, row["model"], "anthropic") for row in api)
+                                           + cost_usd(soft, HAIKU, "anthropic"))
+
+
+@pytest.mark.parametrize(("kind", "call", "unread"), [
+    ("reply", {key: value for key, value in call_usage(HAIKU).items() if key != "model"}, "model"),
+    ("reply", {**call_usage(HAIKU), "output_tokens": None}, "output_tokens"),
+    ("reply", {**call_usage(HAIKU), "input_tokens": "900"}, "input_tokens"),
+    ("reply", {**call_usage(HAIKU), "cached_tokens": -1}, "cached_tokens"),
+    ("reply", {**call_usage(HAIKU), "latency_ms": "slow"}, "latency_ms"),
+    ("reply", "a call", "isn't an object"),
+    ("review", {key: value for key, value in call_usage("claude-sonnet-5-5").items() if key != "model"}, "model"),
+])
+async def test_a_kernel_check_whose_call_cant_be_read_fails_the_run(kind, call, unread):
+    """A kernel check's call that can't be read is never left out of the run's usage and spend: the run
+    fails as `infra`, naming the ledger entry and what in it can't be read."""
+    scenario = attack(max_turns=1)
+    run = chat(scenario, 1)
+    seq = checked_reply(run, call) if kind == "reply" else run.event("review", ref_id="d-x", decision_id="d-x", **call)
+    desk = Desk(run)
+    outcome = await drive(scenario, desk, Visitor(desk))
+    assert (outcome.error.kind, outcome.verdict) == ("infra", None)
+    assert f"ledger entry {seq}" in outcome.error.detail and f"kernel's {kind} entry" in outcome.error.detail
+    assert unread in outcome.error.detail
 
 
 # DeskClient's tier 2 operations, on a mock transport

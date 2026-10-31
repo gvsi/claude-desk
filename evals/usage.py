@@ -5,7 +5,8 @@ the API's `app.model_calls` rows (route as the row names it), the kernel's ledge
 entries hold the reviewer's call (route `reviewer`) and whose `reply` entries hold the soft-promise
 check's under `soft_promise` (route `soft_promise`, null when the check made no call), and the
 simulated visitor's usage per turn (route `simulator`). A row or entry naming another session than
-`session_ids` is left out; one naming no session is the copy's own and is kept.
+`session_ids` is left out; one naming no session is the copy's own and is kept. `kernel_check_call(event)`
+is that reading of one ledger entry, which the tier 2 runner shares for a run's usage and spend.
 
 `conversation_metrics(runs)` turns the judged legitimate runs of a pass (their artifacts) into the
 report's `Metrics`: Desk-side cost per conversation (mean, p50, p95), the conversation, reviewer,
@@ -23,7 +24,7 @@ from fractions import Fraction
 from statistics import fmean
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
 from evals.pricing import cost_usd
 from evals.report import CostSpread, Metrics, TokensPerCall
@@ -73,19 +74,40 @@ def collect_usage(records: Mapping[str, Iterable[Mapping[str, Any]]], session_id
         event = entry.get("event")
         if not isinstance(event, Mapping):
             raise ValueError(f"ledger entry {entry.get('seq')} has no event to read")
-        route, summary = KERNEL_ROUTES.get(event.get("kind")), event.get("summary") or {}
-        if route is None or not (event.get("session_id") in sessions or event.get("session_id") is None):
-            continue
-        call = summary.get("soft_promise") if route == "soft_promise" else summary
-        if call is None:
-            continue   # the soft-promise check made no call (a `review` entry is written only when one ran)
-        usage.append(UsageRecord(route=route, model=call.get("model"), session_id=event.get("session_id"),
-                                 **_counts(call, "cached_tokens", "cache_write_tokens"), ms=call.get("latency_ms")))
+        if event.get("session_id") in sessions or event.get("session_id") is None:
+            if (call := kernel_check_call(event)) is not None:
+                usage.append(call)
     for turn in records.get("simulator", ()):
         usage.append(UsageRecord(route="simulator", model=turn.get("model"), session_id=None,
                                  **_counts(turn, "cache_read_input_tokens", "cache_creation_input_tokens"),
                                  ms=turn.get("latency_ms")))
     return usage
+
+
+def kernel_check_call(event: Mapping[str, Any]) -> UsageRecord | None:
+    """The model call a kernel ledger event records, the one reading of it for the report's usage and a
+    run's spend alike: a `review` entry's is its summary (route `reviewer`), a `reply` entry's is its
+    summary's `soft_promise` (route `soft_promise`), null when the check made no call; no other entry
+    records one. A call that can't be read (not an object, no model, a token count that isn't a whole
+    number) raises `ValueError` saying what, so none is left out unseen."""
+    kind = event.get("kind")
+    route, summary = KERNEL_ROUTES.get(kind), event.get("summary") or {}
+    if route is None:
+        return None
+    if not isinstance(summary, Mapping):
+        raise ValueError(f"the kernel's {kind} entry has a summary that isn't an object")
+    call = summary.get("soft_promise") if route == "soft_promise" else summary
+    if call is None:
+        return None   # the soft-promise check made no call (a `review` entry is written only when one ran)
+    if not isinstance(call, Mapping):
+        raise ValueError(f"the kernel's {kind} entry holds a call that isn't an object")
+    try:
+        return UsageRecord(route=route, model=call.get("model"), session_id=event.get("session_id"),
+                           **_counts(call, "cached_tokens", "cache_write_tokens"), ms=call.get("latency_ms"))
+    except ValidationError as error:   # named as the kernel's call names them
+        unread = sorted({"latency_ms" if problem["loc"][0] == "ms" else str(problem["loc"][0])
+                         for problem in error.errors() if problem["loc"]})
+        raise ValueError(f"the kernel's {kind} entry holds a call whose {', '.join(unread)} can't be read") from None
 
 
 def _counts(record: Mapping[str, Any], cached: str, write: str) -> dict[str, Any]:
@@ -159,4 +181,4 @@ def percentile(samples: Sequence[float], q: float) -> float:
 
 
 __all__ = ["CONVERSATION_ROUTES", "SETUP_ROUTES", "UsageRecord", "collect_usage", "conversation_metrics",
-           "percentile", "reviewer_calls_per_conversation", "run_usage", "skip_rate"]
+           "kernel_check_call", "percentile", "reviewer_calls_per_conversation", "run_usage", "skip_rate"]

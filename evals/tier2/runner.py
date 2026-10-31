@@ -36,9 +36,11 @@
    session settles, from its stored rows once it has ended (`_drain`); not settled within
    `turn_timeout_s`, the run is `infra`, since what it stored would never be judged.
 6. The copy's records (`Records.snapshot`), each decision read through `owner_decision`, the
-   owner's Demo inbox, usage (`app.model_calls` and the kernel's `review` and `reply` entries; a
-   Desk-side model other than the configured one is `config_mismatch`), `check_complete` (anything
-   missing is `infra`, so a blind snapshot can't read as clean), then `judge_run`, in memory. The
+   owner's Demo inbox, usage (`app.model_calls`, and the kernel's checks' calls in its `review` and
+   `reply` entries, a reply's soft-promise call among them, as `evals.usage.kernel_check_call` reads
+   them for the report; a call that can't be read is `infra`, and a Desk-side model other than the
+   configured one is `config_mismatch`), `check_complete` (anything missing is `infra`, so a blind
+   snapshot can't read as clean), then `judge_run`, in memory. The
    owner's Demo inbox is the kernel's, whose read route and verification codes plan 01b adds (the
    kernel writes owner alerts and checkpoint notices there already): before that plan has landed
    where the pass runs (`landed`), the run doesn't read it and the artifact says so
@@ -813,9 +815,12 @@ class _Run:
         return matches[0]
 
     async def _usage(self, records: dict[str, list[dict]]) -> tuple[list[dict], dict[str, list[str]]]:
-        """Every Desk-side model call's usage (the API's rows and the kernel's check entries), and the
-        models that served each part. A call on a model or route other than the configured ones fails
-        the run as `config_mismatch`."""
+        """Every Desk-side model call's usage (the API's rows, and the kernel's checks' calls as
+        `evals.usage.kernel_check_call` reads them from the ledger, a reply's soft-promise call among them),
+        and the models that served each part. A kernel check's call that can't be read fails the run as
+        `infra`; a call on a model or route other than the configured ones, as `config_mismatch`."""
+        from evals.usage import kernel_check_call   # here, since evals.usage imports this module (via evals.results)
+
         usage, mismatches = [], []
         api, kernel = set(), set()
         for session_id in self.session_ids:
@@ -828,15 +833,19 @@ class _Run:
                                       f"{DESK_MODELS.get(route, 'no model for that route')}")
         for entry in records.get("ledger_entries", []):
             event = entry.get("event") or {}
-            kind, summary = event.get("kind"), event.get("summary") or {}
-            if kind in KERNEL_CHECK_MODELS and "model" in summary:
-                served = production_name(str(summary["model"]))
-                usage.append({"part": "kernel_checks", "kind": kind, "seq": entry.get("seq"), **summary,
-                              "model": served})
-                kernel.add(served)
-                if served != KERNEL_CHECK_MODELS[kind]:
-                    mismatches.append(f"the kernel's {kind} check was served by {served}, configured "
-                                      f"{KERNEL_CHECK_MODELS[kind]}")
+            kind, seq = event.get("kind"), entry.get("seq")
+            try:
+                call = kernel_check_call(event)
+            except ValueError as error:   # a call the run can't read is never left out of its usage and spend
+                raise RunFailed("infra", f"ledger entry {seq}: {error}") from None
+            if call is None:
+                continue
+            served = production_name(call.model)
+            usage.append({"part": "kernel_checks", "kind": kind, "seq": seq, **call.model_dump(), "model": served})
+            kernel.add(served)
+            if served != KERNEL_CHECK_MODELS[kind]:
+                mismatches.append(f"the kernel's {kind} check was served by {served}, configured "
+                                  f"{KERNEL_CHECK_MODELS[kind]}")
         if mismatches:
             raise RunFailed("config_mismatch", "; ".join(sorted(set(mismatches))))
         served_models = {"api": sorted(api), "simulator": sorted(set(self.sim_run.served_models)),
