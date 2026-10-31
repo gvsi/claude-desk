@@ -25,8 +25,9 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   instead. A row written before the key was required may hold none (the column stays nullable); it is read and
   moved on like any other.
 - **Consent** (`consent`): stored once. On yes, the owner's Claude memory is searched (`native.read_memory`), then
-  the website read (`native.fetch_website`) when the description named one; then the first question. On no, no
-  memory or website read ever runs for the interview, and a website the owner names later is kept as text.
+  the website read (`native.fetch_website`) when the description named one. Claude says how it understands the
+  business, proposes jobs and apps, and asks its first fact question. On no, this opening reads the description
+  alone: no memory or website read ever runs, and a website the owner names later is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
   answered in that question's own model (`SETUP_TURNS`). The exchange starts after this question's last ask. Its
@@ -46,8 +47,9 @@ then `/decide`, and `/execute` only on an allow. A read that is held, refused or
 label says it couldn't. What a read returned is kept in the transcript (for later turns, as untrusted text), never
 shown to the owner beyond its label, and reaches the model only inside a wrapper (`prompts.wrap`).
 
-Model calls use route `setup` on `claude-opus-5-5` at low effort, each bounded by `SETUP_TIMEOUT_S` (the SDK's
-retries included) and recorded right after it returns. An answer that doesn't fit its model gets one retry with the
+Model calls use route `setup` on `claude-opus-5-5` at low effort, each bounded by `SETUP_TIMEOUT_S`, except the
+understanding call at medium effort with `UNDERSTAND_TIMEOUT_S`. The SDK's retries are included, and each call is
+recorded right after it returns. An answer that doesn't fit its model gets one retry with the
 errors; then the request is 503 `model_unavailable` and nothing of it is stored. An answer that stopped before it
 finished (`max_tokens`, say), or a call that ran out of time, is 503 at once, whatever its text.
 
@@ -111,10 +113,12 @@ from desk.api.model import (
 from desk.api.prompts import (
     ANSWERS_SO_FAR_TAG,
     ANSWERS_TAG,
+    CAPABILITIES,
     CARD_DRAFT_SYSTEM,
     CARD_ERROR_LINE,
     CARD_ERRORS,
     CARDS_REFUSED,
+    CONNECTOR_LABELS,
     DRAFT_RETRY,
     LIMIT_QUESTIONS,
     LIMIT_TURN_FACTS,
@@ -125,18 +129,23 @@ from desk.api.prompts import (
     PRICES_TAG,
     QUESTION_KEYS,
     RULES_TAG,
-    SETUP_RETRY,
     SETUP_EXCHANGE_LABELS,
+    SETUP_PLAN_TAG,
+    SETUP_RETRY,
     SETUP_START_SYSTEM,
     SETUP_TURN_SYSTEM,
     SETUP_TURNS,
+    SETUP_UNDERSTAND_HEAD,
+    SETUP_UNDERSTAND_SYSTEM,
     SITUATIONS_HEAD,
     SITUATIONS_SYSTEM,
     TOOLS_TAG,
     BusinessType,
     Choice,
+    ConnectorProposal,
     DraftedRules,
     DraftedSituations,
+    JobProposal,
     PlannedOutcome,
     PriceAnswer,
     ProposalCard,
@@ -145,8 +154,11 @@ from desk.api.prompts import (
     SetupAnswers,
     SetupPatch,
     SetupStart,
+    SetupUnderstanding,
     SituationDraft,
+    SuggestedFacts,
     card_draft_head,
+    new_proposal_id,
     question_text,
     setup_turn_head,
     summary_line,
@@ -227,6 +239,8 @@ TURN_MAX_TOKENS = 4096
 # The most one structured setup call may take, the SDK's retries included (and each of its tries): a stalled call ends
 # as 503 `model_unavailable` instead of holding the owner's request. A rules chat has its own (`rules.CHAT_TIMEOUT_S`).
 SETUP_TIMEOUT_S = 60.0
+UNDERSTAND_TIMEOUT_S = 90.0
+UNDERSTAND_MAX_TOKENS = 4096
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
 ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)
@@ -337,6 +351,7 @@ class Entry(BaseModel):
     choices: list[Choice] = []
     card: ProposalCard | None = None
     covered: list[QuestionKey] = []
+    suggested: SuggestedFacts | None = None
 
 
 @dataclass
@@ -351,6 +366,7 @@ class Interview:
     transcript: list[Entry]
     draft_cards: list[RuleCard] = field(default_factory=list)   # setup's own cards for its rules draft, once drafted
     draft_version: int | None = None                            # the kernel's version of the last rules draft
+    business_tools_enabled: bool = False   # runtime setting, never stored in the interview row
 
     @property
     def question(self) -> QuestionKey | None:
@@ -362,6 +378,10 @@ class Interview:
 
     def tried_websites(self) -> set[str]:
         return {entry.website for entry in self.transcript if entry.read == "website" and entry.website}
+
+    @property
+    def suggested(self) -> SuggestedFacts | None:
+        return next((entry.suggested for entry in self.transcript if entry.suggested is not None), None)
 
     @property
     def covered(self) -> set[QuestionKey]:
@@ -825,25 +845,91 @@ def _ask(interview: Interview, key: QuestionKey) -> Entry:
     return Entry(role="claude", text=question_text(key, interview.business_type), question=key)
 
 
-async def consent(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, allow: bool, *,
-                  cards: bool = False) -> SetupState:
-    """Store the owner's consent, once; on yes, search their memory and read the website the description named.
-    Then the first question. The reads run with no lock held (module docstring)."""
+def _understanding_message(interview: Interview, entries: list[Entry]) -> dict:
+    """The description and consented homework, each inside its information wrapper."""
+    parts = [SETUP_UNDERSTAND_HEAD.format(business_type=interview.business_type),
+             wrap(OWNER_DESCRIPTION_TAG, interview.transcript[0].text)]
+    for entry in entries:
+        if entry.read == "memory" and entry.content:
+            parts.append(wrap(MEMORY_TAG, entry.content))
+        elif entry.read == "website" and entry.content:
+            parts.append(wrap_website(entry.content, entry.website or ""))
+    return _user("\n\n".join(parts))
+
+
+def _normalize_choices(choices: list[Choice]) -> list[Choice]:
+    """Two to four choices, with at most the first marked recommendation moved to the front."""
+    choices = choices[:4]
+    if len(choices) < 2:
+        return []
+    recommended = next((index for index, choice in enumerate(choices) if choice.recommended), None)
+    normalized = [choice.model_copy(update={"recommended": index == recommended})
+                  for index, choice in enumerate(choices)]
+    if recommended is not None:
+        normalized.insert(0, normalized.pop(recommended))
+    return normalized
+
+
+async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
+                         entries: list[Entry]) -> None:
+    """Append the consultant opening and its first fact question; the caller owns persistence."""
+    try:
+        answer = await ask_model(model, recorder(engine, owner), SETUP_UNDERSTAND_SYSTEM,
+                                 [_understanding_message(interview, entries)], SetupUnderstanding,
+                                 max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=UNDERSTAND_TIMEOUT_S)
+    except ApiProblem as failed:
+        if failed.status != 503 or failed.error != "model_unavailable":
+            raise
+        answer = None
+    if answer is None:
+        logger.warning("the setup understanding was unavailable; asking the first question")
+        interview.transcript.append(_ask(interview, "what_you_do"))
+        return
+    interview.transcript.append(Entry(role="claude", text=answer.reply.strip(), suggested=answer.suggested))
+    for draft in answer.jobs:
+        fields = draft.model_dump(mode="json")
+        if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
+            fields["config"]["amount_cents"] = None
+        if not interview.business_tools_enabled:
+            fields["config"] = None
+        job = JobProposal(**fields, can_do_today=CAPABILITIES[draft.job])
+        interview.transcript.append(Entry(role="claude", text="", card=ProposalCard(
+            proposal_id=new_proposal_id(), kind="job", state="proposed", job=job, connector=None)))
+    seen = set()
+    for draft in answer.connectors:
+        if draft.app in seen:
+            continue
+        seen.add(draft.app)
+        connector = ConnectorProposal(app=draft.app, label=CONNECTOR_LABELS[draft.app], why=draft.why,
+                                      connectable=draft.app == "stripe")
+        interview.transcript.append(Entry(role="claude", text="", card=ProposalCard(
+            proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None, connector=connector)))
+    interview.transcript.append(Entry(role="claude", text=answer.question.strip() or
+                                     question_text(answer.next_topic, interview.business_type),
+                                     question=answer.next_topic, choices=_normalize_choices(answer.choices)))
+
+
+async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, allow: bool, *,
+                  cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
+    """Store consent once, read the allowed homework, then append the consultant opening and first fact question.
+    The reads and the model call run with no lock held (module docstring)."""
     interview = await _read(engine, owner, interview_id)
     desk_id = owner.desk(interview.desk_id)
     if interview.consent is not None or interview.step != "questions":
         raise ApiProblem(409, "conflict")
     seen = _stored(interview)
+    interview.business_tools_enabled = business_tools_enabled
     with _turn(interview_id):
-        entries = [Entry(role="owner", text=CONSENT_ANSWERS[allow])]
+        entries = []
         if allow:
             entries.append(await _read_memory(owner, desk_id))
             site = website_url(interview.transcript[0].website)
             if site is not None:
                 entries.append(await _read_website(owner, desk_id, *site))
         interview.consent = allow
+        interview.transcript.append(Entry(role="owner", text=CONSENT_ANSWERS[allow]))
         interview.transcript += entries
-        interview.transcript.append(_ask(interview, QUESTION_KEYS[0]))
+        await _after_consent(owner, engine, model, interview, entries)
         await _commit(engine, owner, interview, seen)
     return setup_state(interview, await _slug(owner, desk_id), cards=cards)
 
@@ -867,10 +953,21 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
             parts.append(wrap(MEMORY_TAG, entry.content))
         elif entry.read == "website" and entry.content:
             parts.append(wrap_website(entry.content, entry.website or ""))
+    if not limit_turn and interview.suggested is not None:
+        understanding = next(entry for entry in interview.transcript if entry.suggested is not None)
+        plan = {"understanding": understanding.text, "jobs": [], "connectors": []}
+        for entry in interview.transcript:
+            card = entry.card
+            if card is not None and card.job is not None:
+                plan["jobs"].append({**card.job.model_dump(include={"title", "why", "how", "autonomy"}),
+                                     "state": card.state})
+            elif card is not None and card.connector is not None:
+                plan["connectors"].append({**card.connector.model_dump(include={"label", "why"}), "state": card.state})
+        parts.append(wrap(SETUP_PLAN_TAG, json.dumps(plan, ensure_ascii=False)))
     start = next((index + 1 for index in range(len(interview.transcript) - 1, -1, -1)
                   if interview.transcript[index].question == key), len(interview.transcript))
     lines = [summary_line(SETUP_EXCHANGE_LABELS[entry.role], entry.text)
-             for entry in interview.transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS]
+             for entry in interview.transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS and entry.card is None]
     if lines:
         parts.append(this_question_so_far(lines))
     parts.append(wrap(OWNER_ANSWER_TAG, text))

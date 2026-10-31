@@ -124,7 +124,7 @@ async def ready(app, browser, kernel_http, model: ScriptedModel, *, business_typ
     a patched field's value (None leaves it unanswered)."""
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type=business_type)
-    await consent(owner, state["interview_id"], False)
+    await consent(owner, state["interview_id"], False, model)
     for key in QUESTION_KEYS:
         patch = {name: changes.get(name, value) for name, value in PATCHES[key].items()}
         reply = await answer(owner, model, state["interview_id"], f"About {key}.",

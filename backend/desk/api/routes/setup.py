@@ -111,7 +111,8 @@ async def setup_consent(interview_id: InterviewId, body: SetupConsentIn, request
     after). On yes, both are read through the kernel as the owner's setup tools, each shown as a label; on no,
     neither ever is. Then the first question."""
     state = await _moving_on(request, ctx)
-    return await setup.consent(ctx, state.database(), interview_id, body.allow, cards=cards)
+    return await setup.consent(ctx, state.database(), state.model, interview_id, body.allow, cards=cards,
+                               business_tools_enabled=state.settings.business_tools_enabled)
 
 
 @router.post("/{id}/answer", response_model=SetupState,
