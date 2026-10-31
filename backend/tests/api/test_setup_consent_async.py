@@ -12,7 +12,7 @@ from tests.api.test_setup_questions import (  # noqa: F401 — fixtures shared w
 
 
 async def test_consent_answers_200_with_the_first_question_when_the_reads_finish_in_time(
-        app, browser, fake, kernel_http, model):
+        app, browser, fake, kernel_http, model, db):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
     assert state["busy"] is False
@@ -24,6 +24,9 @@ async def test_consent_answers_200_with_the_first_question_when_the_reads_finish
         "Searched your Claude memory", "Read rivera-plumbing.example"]
     assert [message["role"] for message in landed["messages"]] == [
         "claude", "owner", "tool_label", "tool_label", "claude"]
+    (transcript,) = db.execute("SELECT transcript FROM app.setup_interviews WHERE interview_id = %s",
+                               (state["interview_id"],)).fetchone()
+    assert all("pending" not in entry for entry in transcript)
 
 
 async def test_an_empty_answer_reply_is_not_busy_or_recovered_as_consent(
@@ -144,7 +147,7 @@ def abandoned(db, interview_id, age):
 
     (transcript,) = db.execute("SELECT transcript FROM app.setup_interviews WHERE interview_id = %s",
                                (interview_id,)).fetchone()
-    transcript.append({"role": "owner", "text": setup.CONSENT_ANSWERS[True]})
+    transcript.append({"role": "owner", "text": setup.CONSENT_ANSWERS[True], "pending": "abandoned-consent"})
     db.execute("UPDATE app.setup_interviews SET consent = true, transcript = %s,"
                " updated_at = now() - make_interval(secs => %s) WHERE interview_id = %s",
                (Jsonb(transcript), age, interview_id))
@@ -173,6 +176,43 @@ async def test_an_abandoned_run_is_rolled_back_on_get_and_on_consent(
         assert fresh.status_code == 200, fresh.text
         assert fresh.json()["busy"] is False and fresh.json()["consent"] is False
         assert fresh.json()["question"] == setup.QUESTION_KEYS[0]
+
+
+@pytest.mark.parametrize("consent_pending", [True, False])
+async def test_abandoned_recovery_removes_every_marker_and_preserves_unmarked_entries(
+        app, browser, fake, kernel_http, model, db, consent_pending):
+    from psycopg.types.json import Jsonb
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    (transcript,) = db.execute("SELECT transcript FROM app.setup_interviews WHERE interview_id = %s",
+                               (interview_id,)).fetchone()
+    consent_answer = {"role": "owner", "text": setup.CONSENT_ANSWERS[True]}
+    if consent_pending:
+        consent_answer["pending"] = "consent-run"
+    transcript.extend([
+        consent_answer,
+        {"role": "claude", "text": "What do you do?", "question": "what_you_do"},
+        {"role": "owner", "text": "A pending answer", "pending": "first-run"},
+        {"role": "owner", "text": "Another pending answer", "pending": "second-run"},
+        {"role": "owner", "text": "An ordinary answer"},
+    ])
+    expected = [entry for entry in transcript if "pending" not in entry]
+    db.execute("UPDATE app.setup_interviews SET consent = true, transcript = %s,"
+               " updated_at = now() - make_interval(secs => %s) WHERE interview_id = %s",
+               (Jsonb(transcript), setup.CONSENT_ABANDONED_S - 10, interview_id))
+    # Only the explicit markers make this busy, even with an ordinary answer at the end.
+    assert (await owner.browser.get(path)).json()["busy"] is True
+    db.execute("UPDATE app.setup_interviews SET updated_at = now() - make_interval(secs => %s)"
+               " WHERE interview_id = %s", (setup.CONSENT_ABANDONED_S + 10, interview_id))
+    recovered = (await owner.browser.get(path)).json()
+    consent, transcript = db.execute("SELECT consent, transcript FROM app.setup_interviews WHERE interview_id = %s",
+                                     (interview_id,)).fetchone()
+    assert transcript == expected
+    assert consent is (None if consent_pending else True)
+    assert recovered["busy"] is False
 
 
 async def test_answer_is_409_while_busy(app, browser, fake, kernel_http, model, monkeypatch):
@@ -311,6 +351,9 @@ async def test_a_run_neither_lands_nor_rolls_back_over_a_changed_interview(
     task = app.state.runtime.consent_runs._tasks[state["interview_id"]]
     (transcript,) = db.execute("SELECT transcript FROM app.setup_interviews WHERE interview_id = %s",
                                (state["interview_id"],)).fetchone()
+    # A completed turn clears the pending marker in the same write as Claude's reply.
+    for entry in transcript:
+        entry.pop("pending", None)
     transcript.append({"role": "claude", "text": "Saved by another process", "question": "what_you_do"})
     db.execute("UPDATE app.setup_interviews SET transcript = %s, updated_at = now() WHERE interview_id = %s",
                (Jsonb(transcript), state["interview_id"]))
@@ -467,6 +510,93 @@ async def test_a_rejected_busy_commit_answers_its_error_without_running_or_rolli
     assert commits == [interview_id] and fake.called("POST /execute") == []
     assert (await owner.browser.get(path)).json() == state
     assert interview_id not in setup._RUNNING and not app.state.runtime.consent_runs.holds(interview_id)
+
+
+async def test_a_failed_busy_commit_preserves_another_runs_identical_consent(
+        app, browser, fake, kernel_http, model, monkeypatch, db):
+    from psycopg.types.json import Jsonb
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    commit = setup._commit
+    other = None
+
+    async def connection_failure(engine, ctx, interview, seen):
+        nonlocal other
+        other = setup._stored(interview)
+        assert other["transcript"][-1]["pending"]
+        assert other["transcript"][-1]["pending"] != "other-consent-run"
+        other["transcript"][-1]["pending"] = "other-consent-run"
+        connect = type(engine).connect
+
+        def unavailable(self):
+            if self is not engine:
+                return connect(self)
+            monkeypatch.setattr(type(engine), "connect", connect)
+            # Another process stores identical consent before this run obtains a connection.
+            db.execute("UPDATE app.setup_interviews SET consent = true, transcript = %s,"
+                       " updated_at = now() WHERE interview_id = %s", (Jsonb(other["transcript"]), interview_id))
+            raise OSError("connection unavailable")
+
+        monkeypatch.setattr(type(engine), "connect", unavailable)
+        await commit(engine, ctx, interview, seen)
+
+    async def unexpected(*args):
+        pytest.fail("a failed busy commit must not start the consent work")
+
+    monkeypatch.setattr(setup, "_commit", connection_failure)
+    monkeypatch.setattr(setup, "_after_consent", unexpected)
+    with pytest.raises(OSError, match="connection unavailable"):
+        await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": True}), 5)
+    consent, transcript = db.execute("SELECT consent, transcript FROM app.setup_interviews WHERE interview_id = %s",
+                                     (interview_id,)).fetchone()
+    assert consent is True and transcript == other["transcript"]
+    current = (await owner.browser.get(path)).json()
+    assert current["busy"] is True and current["consent"] is True
+    assert current["messages"][-1] == {"role": "owner", "text": setup.CONSENT_ANSWERS[True]}
+    assert fake.called("POST /execute") == []
+    assert interview_id not in setup._RUNNING and not app.state.runtime.consent_runs.holds(interview_id)
+
+
+@pytest.mark.parametrize("consent_pending", [True, False])
+async def test_a_failed_run_removes_only_its_markers_from_a_changed_transcript(
+        app, browser, fake, kernel_http, model, monkeypatch, db, consent_pending):
+    from psycopg.types.json import Jsonb
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    kept = []
+
+    async def changed(ctx, engine, model, interview, entries):
+        (transcript,) = db.execute("SELECT transcript FROM app.setup_interviews WHERE interview_id = %s",
+                                   (interview_id,)).fetchone()
+        run_id = transcript[-1]["pending"]
+        if not consent_pending:
+            transcript[-1]["pending"] = "other-run"
+        transcript.extend([
+            {"role": "claude", "text": "What do you do?", "question": "what_you_do"},
+            {"role": "owner", "text": "Another pending answer", "pending": run_id},
+            {"role": "owner", "text": "Other run's answer", "pending": "other-run"},
+            {"role": "claude", "text": "Saved by another process"},
+        ])
+        kept.extend(entry for entry in transcript if entry.get("pending") != run_id)
+        db.execute("UPDATE app.setup_interviews SET transcript = %s, updated_at = now() WHERE interview_id = %s",
+                   (Jsonb(transcript), interview_id))
+        raise ApiProblem(503, "model_unavailable")
+
+    monkeypatch.setattr(setup, "_after_consent", changed)
+    reply = await owner.browser.post(path + "/consent", json={"allow": True})
+    assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+    consent, transcript = db.execute("SELECT consent, transcript FROM app.setup_interviews WHERE interview_id = %s",
+                                     (interview_id,)).fetchone()
+    assert transcript == kept
+    assert consent is (None if consent_pending else True)
+    current = (await owner.browser.get(path)).json()
+    assert current["busy"] is True and current["messages"][-1]["text"] == "Saved by another process"
 
 
 async def test_two_fresh_consents_store_only_one_owner_answer(
