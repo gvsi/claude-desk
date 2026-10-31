@@ -3376,24 +3376,24 @@ class FakeKernelState:
 
         desk = self._owners_desk(request, request.path_params["id"])
 
-        def refuse() -> None:
-            self.append(desk, "business_tools", {"tools": []})
+        def refuse(reason: str) -> None:
+            self.append(desk, "business_tools", {"tools": [], "refused": reason})
             raise Refusal(422, "invalid")
 
         try:
             batch = BusinessToolsRequest.model_validate(body)
         except ValidationError:
-            refuse()
+            refuse("business_tools_invalid")
         if len({tool.tool for tool in batch.tools}) != len(batch.tools):
-            refuse()
+            refuse("business_tools_duplicate")
         if not all(storable(text) for text in config_texts(batch.model_dump(mode="json"))):
-            refuse()
+            refuse("business_tools_text")
         text = batch.model_dump_json()
         if "\x00" in text or any(document.canary in text for each in self.desks.values()
                                   if each.copy_id == desk.copy_id for document in each.documents.values()):
-            refuse()
+            refuse("business_tools_canary")
         if public_promise_fields(public_fields(batch)):
-            refuse()
+            refuse("public_promise")
         # Build the entire batch before changing any row.
         profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
                     for tool in batch.tools]
