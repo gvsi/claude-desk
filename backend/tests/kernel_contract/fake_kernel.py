@@ -22,12 +22,16 @@ contract test, before the task that first uses them.
   `set_mode`. `POST /owner/messages` takes a say or a whisper in any mode: a say is looked at for document canaries
   only, and a clean one is an `owner_statement` fact and one `owner_said` card of the text verbatim, signed at the
   session's generation; a whisper is ledgered with its length alone.
-- The handoff card's owner handoff (#96): a verdict of Claude's that shows the handoff card, in place of a blocked
-  draft (a paused session's included) or because the draft cited it, opens a `handoffs` row of kind `card` for the
-  session (open, no call-back window, the kernel's reason) unless the session has an open handoff of either kind,
-  alerts the owner (event kind `handoff`, when the Desk's preferences alert it at once; no decision) with who is
-  waiting, and ledgers it `desk_data` on the session. An owner's say opens none, nor does a replayed night's
-  blocked draft. A call-back request's handoff is kind `callback`; `POST /handoffs/{id}/done` closes either.
+- The handoff card's owner handoff (#96): a verdict of Claude's that shows the handoff card and that the session
+  will see opens a `handoffs` row of kind `card` for the session (open, no call-back window, the kernel's reason):
+  a reply that passed citing the card, or a blocked draft when its check is `final` (`CheckReplyRequest.final`) or
+  any violation is outside `desk.rewrites.REWRITABLE` (a non-final draft blocked only for those is the API's to
+  rewrite, never shown). It opens none for the owner's preview session, while the session has a held request
+  awaiting the owner, or while it has an open handoff of either kind (one per session); otherwise it alerts the
+  owner (event kind `handoff`, when the Desk's preferences alert it at once; no decision) with who is waiting, and
+  ledgers it `desk_data` on the session. An owner's say opens none, nor does a replayed night's blocked draft. A
+  call-back request takes over the session's open handoff, the card's or an earlier call-back's, as kind
+  `callback` under the same id; `POST /handoffs/{id}/done` closes either kind. A reply entry records `final`.
 - The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
   asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
   every ledger entry it writes appended now and marked `summary.replayed` with its moment and the recording, and the
@@ -231,6 +235,7 @@ from desk.kernel_api import (
     WhoAmI,
 )
 from desk.presets import PRESETS
+from desk.rewrites import REWRITABLE
 from tests.kernel_contract.ro_tables import FakeRO
 
 IDLE_LIMIT = timedelta(hours=24)        # a visitor or agent session closes after this long idle
@@ -2594,7 +2599,8 @@ class FakeKernelState:
                                             "created_at": self.now})
             view = {"lead_id": lead_id, "saved": True}
         elif tool == "native.request_callback":
-            handoff_id = new_id("handoff")
+            # one open handoff per session: a call-back takes over the open one, the card's or an earlier call-back's
+            handoff_id = self._open_handoff(session) or new_id("handoff")
             self.handoffs[handoff_id] = {
                 "handoff_id": handoff_id, **ids, "session_id": session.session_id,
                 "reason": f"{args['name']} · {args['contact']} · {args['reason']}", "callback_window": None,
@@ -2749,16 +2755,17 @@ class FakeKernelState:
         self._check_generation(session, draft.generation)
         if session.mode == "owner":
             raise Refusal(409, "mode_owner")
-        verdict = self._check_draft(session, desk, draft)
+        verdict = self._check_draft(session, desk, draft, final=body.final)
         if session.kind == "agent":
             self._end_agent_turn(request, verdict)
         return verdict
 
-    def _check_draft(self, session: Session, desk: Desk, draft: ReplyDraft) -> ReplyVerdict:
+    def _check_draft(self, session: Session, desk: Desk, draft: ReplyDraft, *, final: bool = True) -> ReplyVerdict:
         language = session.last_language or "en"
         if session.mode == "paused":
             return self._verdict(session, desk, language, [],
-                                 [Violation(kind="session_paused", span="", rule_id="session.paused")], [])
+                                 [Violation(kind="session_paused", span="", rule_id="session.paused")], [],
+                                 final=final)
         detected = detect_language(draft.prose)
         violations = []
         if detected == "other":
@@ -2778,7 +2785,7 @@ class FakeKernelState:
                 cards.append(card)
         prose = [RenderedBlock(kind="prose", text=draft.prose)] if draft.prose else []
         return self._verdict(session, desk, language, prose + cards, violations,
-                             [clause.fact_id for clause in draft.clauses if clause.fact_id])
+                             [clause.fact_id for clause in draft.clauses if clause.fact_id], final=final)
 
     def _canaries(self, copy_id: str) -> dict[str, str]:
         """The canary of each document of the copy, on any of its Desks, by document ID in ID order (the kernel's
@@ -2865,25 +2872,28 @@ class FakeKernelState:
 
     def _verdict(self, session: Session, desk: Desk, language: str, blocks: list[RenderedBlock],
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
-                 message_id: str | None = None) -> ReplyVerdict:
+                 message_id: str | None = None, final: bool = True) -> ReplyVerdict:
         """Step 7: the handoff alone unless ok, ledgered as `reply` with its author, signed over the six fields. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
-        handoff. A verdict of Claude's that shows the handoff card, in place of a blocked draft or because the draft
-        cited it, first opens the session's owner handoff (`_open_card_handoff`)."""
+        handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
+        the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
+        owner handoff (`_open_card_handoff`); the reply entry records `final`."""
         ok = not violations
         if not ok and author == "owner":
             blocks = []
         elif not ok:
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
             blocks = [RenderedBlock(kind="card", template="handoff", text=text, title=text)]
+        shown = ok or final or any(violation.kind not in REWRITABLE for violation in violations)
         # a replayed night holds only finished things and no Demo inbox entry (Plan 01d): its blocked drafts open none
-        if author == "claude" and self._replaying is None and any(block.template == "handoff" for block in blocks):
+        if (author == "claude" and shown and self._replaying is None
+                and any(block.template == "handoff" for block in blocks)):
             self._open_card_handoff(session, desk)
         message_id = message_id or new_id("msg")
         entry = self.append(desk, "reply", {
             "message_id": message_id, "author": author, "ok": ok, "language": language,
             "violations": [violation.kind for violation in violations],
-            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids},
+            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids, "final": final},
             session_id=session.session_id, ref_id=message_id)
         plain = ("owner_said" if ok else "owner_say_blocked") if author == "owner" else (
             "checked" if ok else "handed_off")
@@ -2898,11 +2908,16 @@ class FakeKernelState:
 
     def _open_card_handoff(self, session: Session, desk: Desk) -> str | None:
         """The owner's handoff for a verdict that shows the handoff card (#96), as the kernel's
-        `reply_check.open_card_handoff`: none while the session has an open handoff of either kind (an earlier card's
-        or a call-back request); else one of kind `card`, open, with no call-back window and the kernel's reason, its
+        `reply_check.open_card_handoff`: none for the owner's preview session, while the session has a held request
+        awaiting the owner (one not answered, cancelled or expired), or while it has an open handoff of either kind
+        (an earlier card's or a call-back request); else one of kind `card`, open, with no call-back window and the
+        kernel's reason, its
         owner alert (`handoff`, only when the Desk's preferences alert it at once; no decision) naming only who is
         waiting, and `desk_data {part: "handoffs", refs, kind: "card"}` on the session. Returns its ID, or None."""
-        if any(row["session_id"] == session.session_id and row["status"] == "open" for row in self.handoffs.values()):
+        if session.preview or self._open_handoff(session) is not None:
+            return None
+        if any(record.decision.session_id == session.session_id and record.decision.state == "held"
+               and record.decision.expires_at > self.now for record in self.decisions.values()):
             return None
         handoff_id = new_id("handoff")
         self.handoffs[handoff_id] = {
@@ -2919,6 +2934,11 @@ class FakeKernelState:
         self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "kind": "card"},
                     session_id=session.session_id)
         return handoff_id
+
+    def _open_handoff(self, session: Session) -> str | None:
+        """The ID of the session's open handoff, of either kind; a session holds at most one."""
+        return next((handoff_id for handoff_id, row in self.handoffs.items()
+                     if row["session_id"] == session.session_id and row["status"] == "open"), None)
 
     def owner_message(self, request: Request, body: OwnerMessageRequest) -> OwnerMessageResult:
         """The owner's say or whisper into an open visitor or agent session of their copy, in any mode (Plan 01b):

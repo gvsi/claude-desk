@@ -1288,6 +1288,100 @@ async def test_the_handoff_card_opens_one_owner_handoff_per_session(kernel, ro_r
     assert len(await alerts()) == 2
 
 
+BLOCKED_PROSE = "It comes to $89 for the visit."           # a number in prose: a kind a rewrite fixes
+OTHER_LANGUAGE = "Bonjour, je peux vous aider."             # unsupported_language: no rewrite fixes it
+
+
+async def checked(http: KernelHttp, created: SessionCreated, prose: str, *, final: bool) -> ReplyVerdict:
+    draft = ReplyDraft(session_id=created.state.session_id, generation=0, prose=prose)
+    return await http.session(created.session_token).call("POST /check_reply",
+                                                          CheckReplyRequest(draft=draft, final=final))
+
+
+def session_handoffs(ro_read, ro_schema: str, copy: CopyCreated, session_id: str) -> list[tuple]:
+    """The session's handoffs as the owner's reads see them: (handoff ID, kind, status)."""
+    return [tuple(row.values()) for row in ro_read(
+        ro_schema, copy.copy_id, "SELECT handoff_id, kind, status FROM {ro}.handoffs WHERE session_id = %s"
+                                 " ORDER BY handoff_id", (session_id,))]
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_only_a_handoff_card_the_session_sees_opens_an_owner_handoff(kernel, ro_read):
+    """The API checks a first draft it could still rewrite with `final` false (`CheckReplyRequest.final`). Blocked only
+    for kinds a rewrite fixes (`desk.rewrites`), it is never shown, so the kernel opens no owner handoff and alerts
+    nothing; the same draft checked as final opens one, and so does a non-final draft blocked for a kind no rewrite
+    fixes. Each reply entry records `final`. While the session has a held request awaiting the owner, whose own alert
+    and item the owner has, a final block opens none; once the owner has answered it, the next one does."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    seeded = {entry.entry_id for entry in await owner.call("GET /demo_inbox")}
+
+    async def handed_to_you() -> int:
+        return sum(entry.body == HANDED_TO_YOU for entry in await owner.call("GET /demo_inbox")
+                   if entry.entry_id not in seeded)
+
+    async def recorded_final(verdict: ReplyVerdict) -> bool:
+        (entry,) = [entry for entry in (await ledger_page(owner, desk_id)).entries if entry.seq == verdict.ledger_seq]
+        assert entry.event.kind == "reply"
+        return entry.event.summary["final"]
+
+    visitor = await new_visitor(http, slug)
+    rewritable = await checked(http, visitor, BLOCKED_PROSE, final=False)
+    assert not rewritable.ok and {violation.kind for violation in rewritable.violations} == {"number_in_prose"}
+    assert session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id) == []
+    assert await handed_to_you() == 0 and await recorded_final(rewritable) is False
+    shown = await checked(http, visitor, BLOCKED_PROSE, final=True)
+    assert not shown.ok and await recorded_final(shown) is True
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)] == ["card"]
+    assert await handed_to_you() == 1
+
+    stranger = await new_visitor(http, slug)
+    french = await checked(http, stranger, OTHER_LANGUAGE, final=False)
+    assert "unsupported_language" in {violation.kind for violation in french.violations}
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, stranger.state.session_id)] == ["card"]
+    assert await handed_to_you() == 2
+
+    asking = await new_visitor(http, slug)
+    held = await decide(http.session(asking.session_token), asking.state.session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held"
+    assert not (await checked(http, asking, BLOCKED_PROSE, final=True)).ok
+    assert session_handoffs(ro_read, ro_schema, copy, asking.state.session_id) == []
+    assert await handed_to_you() == 2                          # the owner has the held request's alert and item
+    await answer(owner, held.decision_id, "deny_once")
+    assert not (await checked(http, asking, BLOCKED_PROSE, final=True)).ok
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, asking.state.session_id)] == ["card"]
+    assert await handed_to_you() == 3
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_call_back_request_takes_over_the_sessions_card_handoff(kernel, ro_read):
+    """A session holds one open handoff: a call-back request after the handoff card makes the card's handoff the
+    call-back's, under the same ID, so the owner keeps one item for the conversation. The owner's own preview of the
+    Desk opens none."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    visitor = await new_visitor(http, slug)
+    assert not (await checked(http, visitor, BLOCKED_PROSE, final=True)).ok
+    ((card_id, kind, status),) = session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)
+    assert (kind, status) == ("card", "open")
+
+    view = http.session(visitor.session_token)
+    callback = await decide(view, visitor.state.session_id, 0, "call-1", "native.request_callback",
+                            {"name": "Dana Wells", "contact": "(503) 555-0142", "reason": "Leaking water heater"})
+    assert callback.state == "allowed" and (await execute(view, callback, 0)).state == "succeeded"
+    assert session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id) == [(card_id, "callback", "open")]
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT reason FROM {ro}.handoffs WHERE handoff_id = %s", (card_id,))
+    assert row["reason"] == "Dana Wells · (503) 555-0142 · Leaking water heater"
+
+    previewing = await http.owner(copy.owner_token).call(
+        "POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor", preview=True))
+    assert not (await checked(http, previewing, BLOCKED_PROSE, final=True)).ok
+    assert session_handoffs(ro_read, ro_schema, copy, previewing.state.session_id) == []
+
+
 @pytest.mark.kernel_plan("01b")
 async def test_owner_demo_inbox_is_the_copys(kernel, ro_read):
     """The owner's Demo inbox holds the copy's entries: a hold alerts the owner there, under the entry its notice
