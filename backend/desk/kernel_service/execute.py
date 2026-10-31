@@ -34,7 +34,9 @@ Reconciliation (`reconcile_orphans`) settles an intent no execution is running (
 `ORPHAN_AFTER`, and its rows not locked) and an `unknown` action by asking the adapter what
 happened (`reconcile`, by `action_id`), on every read of the decision and at startup. Nothing is
 retried blindly. Its entries name the version and cap the execution row recorded in T1, never the
-ones active when it runs.
+ones active when it runs. What it settles is a record of what already happened, like a T2 or T3
+commit, so each action it settles commits at once, before a read goes on: no recheck of the read's
+session takes it back.
 
 Claude sees an execution only through its `model_view`: kept to the adapter's `model_view_keys`,
 and emptied when a fact the session can't read was dropped or a value carries a document canary,
@@ -676,21 +678,25 @@ def _orphaned(cutoff: datetime) -> Any:
 async def refresh_decision(ctx: KernelCtx, decision_row: DecisionRow) -> DecisionRow:
     """A decision as a read settles it: its orphaned execution reconciled, then lazy expiry, then a
     held money decision's answers recomputed at the active version's money cap
-    (`decide.refresh_answers`; "Decision lifecycle"), in the caller's transaction. Returns the
-    current row."""
+    (`decide.refresh_answers`; "Decision lifecycle"), in the caller's transaction, except that a
+    reconciliation commits at once (`reconcile_orphans`). That commit ends the caller's locks, so
+    the decision is then read again `FOR UPDATE`, as the caller may have held it, and the rest goes
+    on in a new transaction under it. Returns the current row."""
     decision_id, action_id = decision_row.decision_id, decision_row.action_id
     if action_id is not None and decision_row.state in ("allowed", "approved", "unknown"):
         if await reconcile_orphans(ctx, at_startup=False, action_id=action_id):
             decision_row = await _one(ctx, select(DecisionRow).where(DecisionRow.decision_id == decision_id)
-                                      .execution_options(populate_existing=True))
+                                      .with_for_update().execution_options(populate_existing=True))
     return await decide.refresh_answers(ctx, await decide.expire_if_due(ctx, decision_row))
 
 
 async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str | None = None) -> list[str]:
     """Reconciles the orphaned executions of the copy `ctx` is bound to (`action_id`: that action's
-    alone) and returns the actions it settled or moved to `unknown`. On a read (`at_startup`
-    False) everything happens in the caller's transaction; at startup each action commits on its
-    own, and one that fails is logged and left for the next read."""
+    alone) and returns the actions it settled or moved to `unknown`. Each action it settles commits
+    at once with a plain commit, which runs none of the request's rechecks: it records what already
+    happened, so a read refused afterwards (its session closed meanwhile, say) leaves it standing,
+    and the reconciliation is never redone. On a read (`at_startup` False) a failure is raised and
+    the caller's transaction rolls back; at startup it is logged and left for the next read."""
     cutoff = ctx.clock.now() - ORPHAN_AFTER
     stmt = select(Execution.action_id, Execution.decision_id).where(_orphaned(cutoff))
     if action_id is not None:
@@ -700,9 +706,10 @@ async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str 
     reconciled = []
     for candidate, decision_id in candidates:
         try:
-            if await _reconcile(ctx, candidate, decision_id, cutoff):
+            settled = await _reconcile(ctx, candidate, decision_id, cutoff)
+            if settled:
                 reconciled.append(candidate)
-            if at_startup:
+            if settled or at_startup:
                 await ctx.db.commit()
         except Exception as exc:
             if not at_startup:

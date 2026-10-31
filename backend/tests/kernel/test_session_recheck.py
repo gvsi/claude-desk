@@ -19,8 +19,8 @@ what a request answers runs the rechecks.
 
 No recheck takes back the record of something that already happened. An execution's T2 checks its
 session before the adapter acts, under the session row it holds, and commits what the adapter did
-as it decided; the API's own ledger entries commit as sent. The session's next read answers its
-close.
+as it decided; a reconciliation a read runs commits before the read goes on; the API's own ledger
+entries commit as sent. The session's next read answers its close.
 """
 
 import ast
@@ -35,7 +35,7 @@ from sqlalchemy import select
 
 from desk import kernel_service
 from desk.contracts import Decision, ExecResult
-from desk.db.models import ActorSession, Execution, Person, Quote
+from desk.db.models import ActorSession, Desk, Execution, Person, Quote
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_api import KERNEL_ROUTES
 from desk.kernel_service import adapters, auth, context, execute, ledger
@@ -46,7 +46,7 @@ from .test_approvals import held_quote, post_cancel
 from .test_context import get_context
 from .test_decide import Visitor, decided, post_decide, set_session
 from .test_desk_writes import updated, upload
-from .test_execute import post_execute
+from .test_execute import committed, fake_quote_desk, leave_an_intent, post_execute
 from .test_ledger_read import append_api
 from .test_release_document import BOB, DANA, confirmed
 from .test_reply_check import post_check
@@ -259,7 +259,8 @@ PLAIN_COMMITS = {
     ("execute.py", "_fenced"): "a fence's record, then 409",
     ("execute.py", "_settle_failed"): "T3: a failed result, which holds nothing read",
     ("execute.py", "_settle_unknown"): "T3: an unknown result, which holds nothing read",
-    ("execute.py", "reconcile_orphans"): "startup reconciliation, outside any request",
+    ("execute.py", "reconcile_orphans"): "a reconciliation, a record of what already happened: at startup, "
+                                          "outside any request, or on a read, which then answers under them",
     ("repo.py", "kernel_transaction"): "runs them first whenever the transaction read anything",
     ("repo.py", "commit"): "KernelCtx.commit, which runs them first",
 }
@@ -405,6 +406,36 @@ async def test_an_execution_that_ran_is_recorded_whatever_happens_to_its_session
     assert [summary["state"] for summary in executed] == ["executed"]
     after = await get_context(client, dana.session_id, dana.headers)
     assert (after.status_code, after.json()) == (409, {"code": "closed"})
+
+
+async def test_a_reconciliation_stands_when_the_read_that_settled_it_is_refused(app, client, registry, frozen_clock,
+                                                                                 monkeypatch):
+    """A read settles an orphaned execution before it answers (`execute.refresh_decision`), asking
+    the adapter what happened. That records what already happened, so it commits at once, as an
+    execution's settling commit does: its Desk deleted while the read goes on, the read is 409
+    `closed`, and the reconciliation stands."""
+    quote, rows, visitor, allowed = await fake_quote_desk(app, client)
+    await leave_an_intent(app, client, monkeypatch, "stored", visitor, allowed, rows.copy_id)
+    frozen_clock.advance(31)                                    # no execution is running it now
+    paused, go_on = asyncio.Event(), asyncio.Event()
+    monkeypatch.setattr(execute, "reconcile_orphans", paused_after(execute.reconcile_orphans, paused, go_on))
+    reading = asyncio.create_task(client.get(f"/decisions/{allowed.decision_id}", headers=visitor.headers))
+    await asyncio.wait_for(paused.wait(), timeout=5)
+    # the Desk is deleted while the read goes on, straight to its row: the route would wait for the session row
+    # the read holds from authentication (its `last_seen_at`)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        [desk] = await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == rows.desk_id)))
+        desk.deleted_at = ctx.clock.now()
+    go_on.set()
+    response = await asyncio.wait_for(reading, timeout=5)
+
+    assert (response.status_code, response.json()) == (409, {"code": "closed"}), response.text[:300]
+    assert quote.calls[-2:] == ["reconcile", "on_failed"]
+    assert await committed(app, rows.copy_id, allowed.action.action_id) == ("failed", "failed")
+    base = {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id}
+    assert [entry.event.summary for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"] == [
+        {**base, "state": "unknown", "orphaned": True}, {**base, "state": "failed", "reconciled": True}]
 
 
 async def test_a_record_commits_whatever_happens_to_its_session(app, client, monkeypatch, frozen_clock):

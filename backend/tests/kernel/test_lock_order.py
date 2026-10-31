@@ -174,7 +174,9 @@ async def test_reconciliation_runs_in_the_lock_order(app, client, registry, froz
             assert (await read(client, rows.owner, allowed)).state == "failed"
         else:
             assert await execute.reconcile_at_startup(app.state.kernel) == [allowed.action.action_id]
-    assert log.transactions == [["decisions", "executions", "ledger_heads"]]
+    # each commits at once; a read then goes on holding the decision again, in a transaction of its own
+    reread = [["decisions"]] if how == "read" else []
+    assert log.transactions == [["decisions", "executions", "ledger_heads"], *reread]
 
 
 async def hold_the_active_version(xctx: ExecCtx, action: NormalizedAction) -> None:
@@ -208,8 +210,9 @@ async def test_reconciliation_runs_the_adapter_before_it_ledgers(app, client, re
     frozen_clock.advance(31)
     with lock_log(app) as log:
         assert (await read(client, rows.owner, allowed)).state == state
-    # the rows the adapter's hooks lock come before the ledger head, like any step's
-    assert log.transactions == [["decisions", "executions", "policy_versions", "ledger_heads"]]
+    # the rows the adapter's hooks lock come before the ledger head, like any step's; the reconciliation commits at
+    # once, and the read goes on in a new transaction holding the decision again, as a caller that held it would
+    assert log.transactions == [["decisions", "executions", "policy_versions", "ledger_heads"], ["decisions"]]
     base = {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id}
     outcome = [] if state == "unknown" else [{**base, "state": state, "reconciled": True}]
     assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [

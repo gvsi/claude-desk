@@ -106,8 +106,10 @@ repeated execution's stored result), and when the request's transaction ends hav
 since its last commit. A commit that records what an adapter did runs none: a rollback can't undo
 an act on the world, so an execution's T2 asks the same of its session (`auth.session_stands`)
 before the adapter runs, under the session row it holds until that commit, and records what ran
-whatever happens to the session after; the session's next read answers that. The API's own ledger
-entries (`POST /ledger/append`) are records too, and their session isn't watched.
+whatever happens to the session after; the session's next read answers that. A reconciliation a
+read of a decision runs (`execute.refresh_decision`) records what already happened as well, and
+commits before the read goes on. The API's own ledger entries (`POST /ledger/append`) are records
+too, and their session isn't watched.
 
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record
