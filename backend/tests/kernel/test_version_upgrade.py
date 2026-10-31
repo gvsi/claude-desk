@@ -135,8 +135,10 @@ async def test_a_kernel_core_version_decides_after_the_upgrade(app, client, regi
     assert "auto_money_cap_cents" in rebuilt.schema_json
     assert rebuilt.proof is not None and activation.proved(rebuilt.proof)
     assert sorted(card.card_id for card in rebuilt.cards if not card.is_default) == owner_cards
-    # the Desk was given the native tools registered since, and the one no card for anyone covers asks by default
-    assert [card.card_id for card in rebuilt.cards if card.is_default] == ["default:native.release_document"]
+    # the Desk was given the native tools registered since, and those no card for anyone covers ask by default:
+    # the document release, and the payments plan's mandate charge
+    assert [card.card_id for card in rebuilt.cards if card.is_default] == [
+        "default:native.charge_mandate", "default:native.release_document"]
     policy = await entries_of(client, copy, "policy")
     assert policy[-1] == {"version": 2, "status": "active", "rebuilt": True, "auto_money_cap_cents": KERNEL_CORE_CAP,
                           "cedar_sha256": rebuilt.cedar_sha256,
@@ -238,7 +240,8 @@ async def test_a_desk_from_before_new_native_tools_gets_them_at_startup(app, cli
     # every native tool, so the tools come first; a Desk whose version is current gets them all the same
     current, upgraded = await rivera(app, client), await rivera(app, client)
     made_now = tool_columns(await rows_of(app, current.copy_id, select(Tool).where(Tool.desk_id == current.desk_id)))
-    assert set(NEW_NATIVE_TOOLS) <= set(made_now) == {p.tool for p in adapters.registered_profiles(source="native")}
+    native_now = {tool for tool, columns in made_now.items() if columns["source"] == "native"}   # beside its MCP tools
+    assert set(NEW_NATIVE_TOOLS) <= native_now == {p.tool for p in adapters.registered_profiles(source="native")}
     for copy in (current, upgraded):
         await without_new_native_tools(app, copy)
     await seed_from_an_earlier_kernel(app, upgraded)
