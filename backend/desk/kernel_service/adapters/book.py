@@ -24,7 +24,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_service import demo_inbox, labels, render
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import (AdapterFailure, AdapterRefusal, AdapterResult, ExecCtx, Normalized,
-                                               NormalizeCtx, business_timezone)
+                                               NormalizeCtx, business_timezone, quoted)
 from desk.kernel_service.repo import KernelCtx, new_id
 
 ONE_BOOKING_PER_SLOT = "bookings_one_confirmed_per_slot"    # the database's unique index on confirmed bookings
@@ -109,6 +109,10 @@ class BookAdapter:
     model_view_keys = frozenset({"fact_id", "booking_id", "status"})
     releases_private_data = False         # the booking the session made, labelled for the session too
 
+    def appointment(self) -> tuple[str, int] | None:
+        """Optional display metadata supplied by trusted adapter code, never visitor args."""
+        return None
+
     async def normalize(self, nctx: NormalizeCtx, args: BookArgs) -> Normalized:
         slot = await find_slot(nctx.ctx, nctx.desk_row.desk_id, args.slot_id)
         if slot is None or slot.starts_at <= nctx.ctx.clock.now():
@@ -132,12 +136,18 @@ class BookAdapter:
                             Claim(key="minutes", kind="text", value=str(slot.minutes)),
                             Claim(key="booking", kind="ref", value=booking.booking_id)],
                     label=label)
+        appointment = self.appointment()
+        if appointment is not None:
+            appointment_type, minutes = appointment
+            fact.claims.extend([Claim(key="appointment_type", kind="text", value=appointment_type),
+                                Claim(key="appointment_minutes", kind="text", value=str(minutes))])
         ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=xctx.session_row.session_id,
                                    action_id=action.action_id))
         await ctx.db.flush()
         who = await _who(ctx, xctx.principal, label.record_owner)
+        booked_type = f"{quoted(appointment[0])} " if appointment is not None else ""
         await demo_inbox.alert_owner(ctx, action.desk_id, "booking", render.owner_preview("booking"),
-                                     f"{who} booked {owner_when(slot.starts_at, slot.minutes, tz)}.")
+                                     f"{who} booked {booked_type}{owner_when(slot.starts_at, slot.minutes, tz)}.")
         return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, booking.booking_id))
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
