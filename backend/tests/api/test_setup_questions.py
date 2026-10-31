@@ -3652,10 +3652,11 @@ async def test_a_client_without_cards_never_gets_a_card_ask(app, browser, kernel
     assert response.status_code == 200, response.text
     assert response.json()["step"] == "tools"
     row = await stored(engine, interview_id)
-    assert not any(entry.get("card") for entry in row["transcript"])
+    assert not any(message.get("card") for message in response.json()["messages"])
+    assert all(entry["card"]["state"] != "proposed" for entry in row["transcript"] if entry.get("card"))
     async with engine.connect() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, interview_id)
-    assert not interview.shows_cards and interview.unshown
+    assert not interview.shows_cards and not interview.unshown
     assert proposal_id in model.requests[-1].messages[0]["content"][0]["text"]
 
 
@@ -3948,6 +3949,7 @@ async def test_typing_a_question_keeps_the_card_waiting(app, browser, kernel_htt
 
 async def test_typed_text_cant_accept_an_unpriced_payment(app, browser, kernel_http, model, engine):
     from desk.api.prompts import JobProposal, PurposePaymentConfig
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
     owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
     async with engine.begin() as conn:
         interview = await desk_setup._load(conn, owner.copy_id, interview_id)

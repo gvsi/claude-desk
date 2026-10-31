@@ -1141,10 +1141,41 @@ async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs:
                        business_tools_enabled=interview.business_tools_enabled)
 
 
-async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, proposal_id: str,
-                          decision: SetupProposalIn, *, cards: bool = False,
+def apply_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn) -> None:
+    """Validate an answer and change only the waiting card, without I/O or transcript additions."""
+    card = next((entry.card for entry in reversed(interview.transcript)
+                 if entry.card is not None and entry.card.proposal_id == proposal_id), None)
+    if card is None and not any(item.proposal_id == proposal_id for item in interview.planned):
+        raise ApiProblem(404, "not_found")
+    if interview.pending_card != proposal_id:
+        raise ApiProblem(409, "conflict")
+    # Revalidate even model_construct/assignment input before mutating any part of the card.
+    try:
+        decision = SetupProposalIn.model_validate(decision.model_dump(exclude_unset=True))
+    except ValidationError:
+        raise ApiProblem(422, "invalid") from None
+    if card.job is None and (decision.title is not None or decision.autonomy is not None):
+        raise ApiProblem(422, "invalid")
+    config = card.job.config if card.job is not None else None
+    if decision.amount_cents is not None and not isinstance(config, PurposePaymentConfig):
+        raise ApiProblem(422, "invalid")
+    if (decision.accept and isinstance(config, PurposePaymentConfig)
+            and decision.amount_cents is None and config.amount_cents is None):
+        raise ApiProblem(422, "amount_required")
+    card.state = "accepted" if decision.accept else "declined"
+    if decision.amount_cents is not None:
+        config.amount_cents = decision.amount_cents
+    if card.job is not None:
+        if decision.title is not None:
+            card.job.title = decision.title
+        if decision.autonomy is not None:
+            card.job.autonomy = decision.autonomy
+
+
+async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
+                          interview_id: str, proposal_id: str, decision: SetupProposalIn, *, cards: bool = False,
                           business_tools_enabled: bool = False) -> SetupState:
-    """Replace a card's decision during questions, under the same guard as an answer turn."""
+    """Answer the pending card, then save Claude's reply and its next ask as one guarded turn."""
     with _turn(interview_id):
         interview = await _read(engine, owner, interview_id)
         interview.business_tools_enabled = business_tools_enabled
@@ -1154,29 +1185,14 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
         seen = _stored(interview)
         if not interview.business_tools_enabled:
             _clear_configs(interview)
-        entry = next((entry for entry in interview.transcript
-                      if entry.card is not None and entry.card.proposal_id == proposal_id), None)
-        if entry is None:
-            raise ApiProblem(404, "not_found")
-        card = entry.card
-        if card.job is None and (decision.title is not None or decision.autonomy is not None):
-            raise ApiProblem(422, "invalid")
-        config = card.job.config if card.job is not None else None
-        if decision.amount_cents is not None and not isinstance(config, PurposePaymentConfig):
-            raise ApiProblem(422, "invalid")
-        if decision.accept and isinstance(config, PurposePaymentConfig):
-            if decision.amount_cents is not None:
-                config.amount_cents = decision.amount_cents
-            if config.amount_cents is None:
-                raise ApiProblem(422, "amount_required")
+        apply_decision(interview, proposal_id, decision)
+        entry = next(entry for entry in reversed(interview.transcript)
+                     if entry.card is not None and entry.card.proposal_id == proposal_id)
         entry.owner_decided = True
-        card.state = "accepted" if decision.accept else "declined"
-        if card.job is not None:
-            if decision.title is not None:
-                card.job.title = decision.title
-            if decision.autonomy is not None:
-                card.job.autonomy = decision.autonomy
+        await card_turn(owner, engine, model, interview, proposal_id)
         await _commit(engine, owner, interview, seen)
+    if interview.step == "tools":
+        await after_finish(owner, interview)
     return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
                        business_tools_enabled=interview.business_tools_enabled)
 
@@ -1792,14 +1808,13 @@ def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCar
 
 
 def _decide_typed(interview: Interview, proposal_id: str, accept: bool) -> bool:
-    """Decide only the waiting card, preserving its payload and the original planned item."""
-    if interview.pending_card != proposal_id:
-        return False
-    card = interview.latest_ask.card
-    if accept and card.job and card.job.config and card.job.config.block == "purpose_payment" and \
-            card.job.config.amount_cents is None:
-        return False
-    card.state = "accepted" if accept else "declined"
+    """Use the same validation as a card click; an unpriced payment still needs its amount."""
+    try:
+        apply_decision(interview, proposal_id, SetupProposalIn(accept=accept))
+    except ApiProblem as failed:
+        if failed.error == "amount_required":
+            return False
+        raise
     return True
 
 
@@ -1937,8 +1952,17 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
 # Finish ------------------------------------------------------------------------------------------------------
 
 def settle_plan(interview: Interview) -> None:
-    # Leave changed cards and their superseded_by links intact; settle only their replacements.
-    pass
+    """Settle the remaining plan and emit each never-shown card once, without I/O."""
+    pending = interview.pending_card
+    for card in interview.unshown:
+        config = card.job.config if card.job is not None else None
+        card.state = "declined" if isinstance(config, PurposePaymentConfig) and config.amount_cents is None else "accepted"
+        interview.transcript.append(Entry(role="claude", text="", card=card.model_copy(deep=True)))
+    if pending is not None:
+        card = next(entry.card for entry in reversed(interview.transcript)
+                    if entry.card is not None and entry.card.proposal_id == pending)
+        config = card.job.config if card.job is not None else None
+        card.state = "declined" if isinstance(config, PurposePaymentConfig) and config.amount_cents is None else "accepted"
 
 
 async def close_setup(owner, engine, model, interview: Interview) -> None:
@@ -1965,8 +1989,7 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
 
 
 def accepted_jobs(interview: Interview) -> list[JobProposal]:
-    return [entry.card.job for entry in interview.transcript
-            if entry.card is not None and entry.card.state == "accepted" and entry.card.job is not None]
+    return [card.job for card in interview.planned if card.state == "accepted" and card.job is not None]
 
 
 def owner_job_answers(interview: Interview) -> list[dict[str, object]]:
@@ -1985,12 +2008,7 @@ def owner_job_answers(interview: Interview) -> list[dict[str, object]]:
 
 
 def finish(interview: Interview) -> None:
-    """Accept remaining proposals and cover unanswered topics at their safe defaults, without I/O."""
-    for entry in interview.transcript:
-        if entry.card is not None and entry.card.state == "proposed":
-            config = entry.card.job.config if entry.card.job is not None else None
-            unpriced = isinstance(config, PurposePaymentConfig) and config.amount_cents is None
-            entry.card.state = "declined" if unpriced else "accepted"
+    """Project the settled plan and cover unanswered topics at safe defaults, without I/O."""
     remaining = set(QUESTION_KEYS) - interview.covered
     suggested = interview.suggested
     if suggested is not None:
@@ -2025,9 +2043,8 @@ async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list
 async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
     """Apply the finished proposals after the setup commit, without a turn guard or database lock."""
     desk_id = owner.desk(interview.desk_id)
-    for entry in interview.transcript:
-        card = entry.card
-        if (card is not None and card.state == "accepted" and card.connector is not None
+    for card in interview.planned:
+        if (card.state == "accepted" and card.connector is not None
                 and card.connector.connectable and card.connector.app == "stripe"):
             try:
                 await connect_payments(owner, desk_id)
@@ -2040,7 +2057,7 @@ async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
         logger.warning("a setup business tools write failed (%s)", type(failed).__name__)
 
 
-async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *,
+async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, *,
                            cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
     """Finish questions with the current facts and safe defaults for every unanswered limit."""
     with _turn(interview_id):
@@ -2050,8 +2067,8 @@ async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
         if interview.step != "questions" or interview.consent is None or interview.busy:
             raise ApiProblem(409, "conflict")
         seen = _stored(interview)
-        interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
-        finish(interview)
+        interview.transcript.append(Entry(role="owner", text="Use your suggestions"))
+        await close_setup(owner, engine, model, interview)
         await _commit(engine, owner, interview, seen)
     await after_finish(owner, interview)
     return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,

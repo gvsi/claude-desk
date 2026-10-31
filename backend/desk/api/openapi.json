@@ -3057,7 +3057,7 @@
     "/api/owner/setup/{id}/proposals/{proposal_id}": {
       "post": {
         "summary": "Setup Proposal",
-        "description": "Accept, rename or decline a setup proposal while questions are open; later decisions replace earlier ones.",
+        "description": "Answer the waiting proposal and receive Claude's reply and next ask.",
         "operationId": "owner_setup_proposal",
         "parameters": [
           {

@@ -161,9 +161,9 @@ async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: 
 async def setup_proposal(interview_id: InterviewId, proposal_id: Annotated[str, Path(max_length=64)],
                           body: SetupProposalIn, request: Request,
                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
-    """Accept, rename or decline a setup proposal while questions are open; later decisions replace earlier ones."""
-    state = await _moving_on(request, ctx, model=False)
-    return await setup.decide_proposal(ctx, state.database(), interview_id, proposal_id, body, cards=cards,
+    """Answer the waiting proposal and receive Claude's reply and next ask."""
+    state = await _moving_on(request, ctx)
+    return await setup.decide_proposal(ctx, state.database(), state.model, interview_id, proposal_id, body, cards=cards,
                                        business_tools_enabled=state.settings.business_tools_enabled)
 
 
@@ -172,8 +172,8 @@ async def setup_proposal(interview_id: InterviewId, proposal_id: Annotated[str, 
 async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn, request: Request,
                              ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
     """Use the current proposals and finish questions with safe defaults for unanswered limits."""
-    state = await _moving_on(request, ctx, model=False)
-    return await setup.use_suggestions(ctx, state.database(), interview_id, cards=cards,
+    state = await _moving_on(request, ctx)
+    return await setup.use_suggestions(ctx, state.database(), state.model, interview_id, cards=cards,
                                       business_tools_enabled=state.settings.business_tools_enabled)
 
 

@@ -10,7 +10,7 @@ from sqlalchemy import text as sql
 from desk.api import setup
 from desk.api.prompts import ConnectorProposal, JobProposal, SetupAnswers
 from tests.api.test_setup_questions import (
-    app, model, begin, consent, interview_with, new_owner, stored,
+    app, model, begin, consent, interview_with, new_owner, stored, next_step, next_ask, card_answer,
 )
 
 
@@ -51,20 +51,56 @@ def test_an_unknown_job_kind_or_block_is_never_shown():
 
 
 @pytest.fixture
-async def proposals(app, browser, kernel_http, model, engine):
+async def proposals(app, browser, kernel_http, model, engine, monkeypatch):
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     interview_id = state["interview_id"]
-    await consent(owner, interview_id, False, model)
+    await consent(owner, interview_id, False, model, cards=True)
     payment = job("payment", title="Pay a retainer", config={
         "block": "purpose_payment", "purpose": "Retainer", "amount_cents": 999_999})
     entries = setup.proposal_entries([job(), payment], [stripe()], business_tools_enabled=True)
-    transcript = (await stored(engine, interview_id))["transcript"] + [entry.model_dump(mode="json") for entry in entries]
+    transcript = (await stored(engine, interview_id))["transcript"] + [
+        setup.Entry(role="claude", text="The setup plan", planned=[entry.card for entry in entries]).model_dump(mode="json"),
+        entries[0].model_dump(mode="json")]
+    # Existing validation tests need ordinary consultant replies, while scripts still control specific turns.
+    call = model.call
+    async def planned_reply(request):
+        if not model.script and request.output_schema is setup.SetupNextStep:
+            text = request.messages[0]["content"][0]["text"]
+            plan = json.loads(html.unescape(text.split("<setup_plan>")[1].split("</setup_plan>")[0]))
+            following = next((item for item in plan["items"] if item["status"] == "planned"), None)
+            selector = ({"kind": following["kind"], following["kind"]: following["id"]}
+                        if following else next_ask("what_you_do"))
+            model.add(next_step("what_you_do", next=selector, reply="Got it.", question="Next?",
+                                plan="Your Desk will take customer requests."))
+        return await call(request)
+    monkeypatch.setattr(model, "call", planned_reply)
     async with engine.begin() as conn:
         await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
                                " WHERE interview_id = :id"), {"transcript": json.dumps(transcript), "id": interview_id})
     return owner, state, [entry.card.proposal_id for entry in entries]
+
+
+async def show_card(engine, interview_id, proposal_id=None, *, question=False):
+    row = await stored(engine, interview_id)
+    transcript = row["transcript"]
+    if question:
+        entry = setup.Entry(role="claude", text="What do you do?", question="what_you_do")
+    else:
+        card = next(card for entry in transcript for card in entry.get("planned", [])
+                    if card["proposal_id"] == proposal_id)
+        entry = setup.Entry(role="claude", text="", card=card)
+    transcript.append(entry.model_dump(mode="json"))
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(transcript), "id": interview_id})
+
+
+def plan_state(entries, *, answers=None):
+    return interview_with(answers or SetupAnswers(summary="Tax advice"), [
+        setup.Entry(role="claude", text="Understanding", planned=[entry.card for entry in entries]),
+        *entries[:1]])
 
 
 def shown(response):
@@ -80,10 +116,7 @@ async def test_accepting_and_renaming_a_job(proposals):
     assert card["state"] == "accepted"
     assert card["job"]["title"] == "Free 20-minute intro call"
     assert card["job"]["autonomy"] == "auto"
-    card = shown(await owner.browser.post(path, json={"accept": False}))[0]
-    assert card["state"] == "declined"
-    card = shown(await owner.browser.post(path, json={"accept": True, "title": "Book a consult"}))[0]
-    assert card["state"] == "accepted" and card["job"]["title"] == "Book a consult"
+    assert (await owner.browser.post(path, json={"accept": False})).status_code == 409
 
 
 @pytest.mark.parametrize("change", [{"title": "Changed"}, {"amount_cents": 10}, {"autonomy": "auto"},
@@ -99,18 +132,18 @@ async def test_title_or_amount_without_accept_is_422(proposals, engine, change):
 
 async def test_a_purpose_payment_needs_an_amount_to_accept(proposals, engine):
     owner, state, ids = proposals
+    await show_card(engine, state["interview_id"], ids[1])
     path = f"/api/owner/setup/{state['interview_id']}/proposals/{ids[1]}?cards=1"
     before = await stored(engine, state["interview_id"])
     payment = next(entry["card"]["job"] for entry in before["transcript"]
-                   if entry.get("card", {}).get("proposal_id") == ids[1])
+                   if (entry.get("card") or {}).get("proposal_id") == ids[1])
     assert payment["config"]["amount_cents"] is None
     reply = await owner.browser.post(path, json={"accept": True})
     assert reply.status_code == 422 and reply.json()["error"] == "amount_required", reply.text
     assert await stored(engine, state["interview_id"]) == before
     reply = await owner.browser.post(path, json={"accept": True, "amount_cents": 25_000})
     assert shown(reply)[1]["job"]["config"]["amount_cents"] == 25_000
-    assert shown(await owner.browser.post(path, json={"accept": False}))[1]["state"] == "declined"
-    assert shown(await owner.browser.post(path, json={"accept": True}))[1]["job"]["config"]["amount_cents"] == 25_000
+    assert (await owner.browser.post(path, json={"accept": False})).status_code == 409
     assert (await stored(engine, state["interview_id"]))["answers"]["auto_money_cap_cents"] == 0
 
 
@@ -123,9 +156,13 @@ async def test_status_and_documents_are_never_available_today(proposals, engine)
         await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
                                " WHERE interview_id = :id"), {"transcript": json.dumps(transcript), "id": state["interview_id"]})
     for entry in entries:
+        async with engine.begin() as conn:
+            row = await stored(engine, state["interview_id"])
+            await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                               {"transcript": json.dumps(row["transcript"] + [entry.model_dump(mode="json")]), "id": state["interview_id"]})
         path = f"/api/owner/setup/{state['interview_id']}/proposals/{entry.card.proposal_id}?cards=1"
         reply = await owner.browser.post(path, json={"accept": True, "autonomy": "auto"})
-        assert shown(reply)[-1]["job"]["can_do_today"] is False
+        assert next(card for card in shown(reply) if card["proposal_id"] == entry.card.proposal_id)["job"]["can_do_today"] is False
         reply = await owner.browser.post(path, json={"accept": True, "can_do_today": True})
         assert reply.status_code == 422
 
@@ -152,7 +189,9 @@ async def test_config_is_cleared_while_business_tools_are_off(proposals, app, en
 def test_finish_accepts_still_proposed_cards_and_keeps_declines():
     entries = setup.proposal_entries([job(), job("answer", config=None)], [stripe()])
     entries[1].card.state = "declined"
-    state = interview_with(SetupAnswers(summary="Tax advice", quote_auto_max_cents=3000, refunds="never"), entries)
+    state = plan_state(entries, answers=SetupAnswers(summary="Tax advice", quote_auto_max_cents=3000, refunds="never"))
+    entries[0].card.state = "accepted"
+    setup.settle_plan(state)
     setup.finish(state)
     assert [entry.card.state for entry in entries] == ["accepted", "declined", "accepted"]
     assert state.step == "tools"
@@ -161,6 +200,7 @@ def test_finish_accepts_still_proposed_cards_and_keeps_declines():
     assert state.answers.quote_auto_max_cents == 3000
     assert state.answers.refunds == "never"
     before = setup._stored(state)
+    setup.settle_plan(state)
     setup.finish(state)
     assert setup._stored(state) == before
 
@@ -168,12 +208,14 @@ def test_finish_accepts_still_proposed_cards_and_keeps_declines():
 def test_finish_writes_how_we_help():
     entries = setup.proposal_entries([job(), job("answer", title="Answer questions", config=None)], [])
     entries[1].card.state = "declined"
-    state = interview_with(SetupAnswers(summary="Tax advice"), entries)
+    state = plan_state(entries)
+    setup.settle_plan(state)
     setup.finish(state)
     assert state.answers.how_we_help == "Book an intro: Book a free slot"
     titles = [str(index) + "T" * 59 for index in range(5)]
     entries = setup.proposal_entries([job(title=title, how="H" * 300) for title in titles], [])
-    state = interview_with(SetupAnswers(summary="Tax advice"), entries)
+    state = plan_state(entries)
+    setup.settle_plan(state)
     setup.finish(state)
     lines = state.answers.how_we_help.splitlines()
     assert len(lines) == 5
@@ -187,6 +229,7 @@ async def test_use_your_suggestions_finishes_with_every_limit_asking(proposals, 
 
     owner, state, ids = proposals
     interview_id = state["interview_id"]
+    await show_card(engine, interview_id, question=True)
     reply = await answer(owner, model, interview_id, "Tax advice for local businesses")
     assert reply.status_code == 200, reply.text
     suggested = setup.SuggestedFacts(service_area="Oakland", hours=[], public_contact="hello@example.test",
@@ -205,7 +248,7 @@ async def test_use_your_suggestions_finishes_with_every_limit_asking(proposals, 
     assert reply.json()["messages"][-1]["text"] == setup.QUESTIONS_DONE
     saved = (await stored(engine, interview_id))["answers"]
     for field in ("quote_auto_max_cents", "discount_auto_max_bp", "payment_link_auto_max_cents", "refunds"):
-        assert saved[field] is None
+        assert saved[field] == ("ask" if field == "refunds" else None)
     assert saved["documents"] == "ask" and saved["auto_money_cap_cents"] == 0
     assert saved["service_area"] == "Oakland" and saved["public_contact"] == "hello@example.test"
     assert saved["summary"] == record["answers"]["summary"]
@@ -257,7 +300,7 @@ async def test_cards_are_left_out_without_cards_1(proposals):
     owner, state, ids = proposals
     path = f"/api/owner/setup/{state['interview_id']}"
     assert shown(await owner.browser.get(path)) == []
-    assert len(shown(await owner.browser.get(path + "?cards=1"))) == 3
+    assert len(shown(await owner.browser.get(path + "?cards=1"))) == 1
     reply = await owner.browser.post(path + f"/proposals/{ids[0]}", json={"accept": True})
     assert shown(reply) == []
     reply = await owner.browser.post(path + "/suggestions", json={})
@@ -320,6 +363,7 @@ async def test_accepted_autonomy_is_drafting_data_and_never_a_money_limit(monkey
 ])
 async def test_changes_must_fit_the_card_and_keep_code_owned_fields(proposals, engine, index, change):
     owner, state, ids = proposals
+    await show_card(engine, state["interview_id"], ids[index])
     before = await stored(engine, state["interview_id"])
     reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/proposals/{ids[index]}",
                                      json={"accept": True, **change})
@@ -347,6 +391,7 @@ async def test_a_card_click_does_not_invalidate_the_running_answer(proposals, mo
 
     owner, state, ids = proposals
     path = f"/api/owner/setup/{state['interview_id']}"
+    await show_card(engine, state["interview_id"], question=True)
     release = asyncio.Event()
     slow = gated(turn(summary="Tax advice"), release)
     model.add(slow)
@@ -365,11 +410,17 @@ async def test_a_card_click_does_not_invalidate_the_running_answer(proposals, mo
 
 
 async def test_the_last_answer_uses_the_same_finish_and_post_commit_work(proposals, model, engine, monkeypatch):
-    from tests.api.test_setup_questions import answer, answered_up_to
+    from tests.api.test_setup_questions import answer
 
     owner, state, ids = proposals
     interview_id = state["interview_id"]
-    await answered_up_to(owner, model, interview_id, setup.QUESTION_KEYS[-1])
+    row = await stored(engine, interview_id)
+    row["transcript"][-1]["card"]["state"] = "accepted"
+    row["transcript"].append(setup.Entry(role="claude", text="After hours?", question=setup.QUESTION_KEYS[-1],
+                                          covered=list(setup.QUESTION_KEYS[:-1])).model_dump(mode="json"))
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": interview_id})
     calls = []
 
     async def put(ctx, desk_id, jobs):
@@ -381,8 +432,11 @@ async def test_the_last_answer_uses_the_same_finish_and_post_commit_work(proposa
 
     monkeypatch.setattr(setup, "_put_business_tools", put)
     path = f"/api/owner/setup/{interview_id}"
-    assert (await owner.browser.post(path + f"/proposals/{ids[1]}", json={"accept": False})).status_code == 200
     reply = await answer(owner, model, interview_id, "Take a message")
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "questions" and reply.json()["pending_card"] == ids[1]
+    assert calls == []
+    reply = await owner.browser.post(path + "/suggestions", json={})
     assert reply.status_code == 200, reply.text
     assert reply.json()["step"] == "tools" and reply.json()["messages"][-1]["text"] == setup.QUESTIONS_DONE
     cards = shown(await owner.browser.get(path + "?cards=1"))
@@ -414,7 +468,6 @@ async def test_rules_drafting_receives_only_owner_decided_jobs(proposals, model,
     path = f"/api/owner/setup/{state['interview_id']}"
     if owner_decided:
         assert (await owner.browser.post(path + f"/proposals/{ids[0]}", json={"accept": True, "autonomy": "auto"})).status_code == 200
-    assert (await owner.browser.post(path + f"/proposals/{ids[1]}", json={"accept": False})).status_code == 200
     assert (await owner.browser.post(path + "/suggestions", json={})).status_code == 200
     model.add(drafted(), drafted())
     reply = await settled(owner, f"/api/owner/policy/setup/{state['interview_id']}/rules")
@@ -436,7 +489,7 @@ async def test_finish_connects_only_accepted_connectable_apps(monkeypatch, app_k
     entries = setup.proposal_entries([], [connector])
     entries[0].card.state = "declined" if declined else "accepted"
     assert entries[0].card.connector.connectable is (app_key == "stripe")
-    state = interview_with(SetupAnswers(summary="Tax advice"), entries)
+    state = plan_state(entries)
     calls, connects = [], []
 
     async def connect(*args):
@@ -447,6 +500,7 @@ async def test_finish_connects_only_accepted_connectable_apps(monkeypatch, app_k
 
     monkeypatch.setattr(setup, "connect_payments", connect)
     monkeypatch.setattr(setup, "_put_business_tools", put)
+    setup.settle_plan(state)
     setup.finish(state)
     await setup.after_finish(SimpleNamespace(desk=lambda desk_id: desk_id), state)
     assert connects == []
@@ -459,6 +513,7 @@ async def test_suggestions_keep_owner_facts_given_on_another_topic(proposals, mo
 
     owner, state, ids = proposals
     interview_id = state["interview_id"]
+    await show_card(engine, interview_id, question=True)
     reply = await answer(owner, model, interview_id, "We work in Berkeley and charge $80 hourly.",
                          turn(service_area="Berkeley", price_items=[{"title": "Hourly", "unit_cents": 8000}]))
     assert reply.status_code == 200, reply.text
@@ -483,7 +538,8 @@ async def test_suggestions_keep_owner_facts_given_on_another_topic(proposals, mo
 def test_how_we_help_omits_jobs_unavailable_today(kind):
     entries = setup.proposal_entries([job(kind, title="Unavailable job", config=None), job()], [])
     entries[0].card.state = "accepted"
-    state = interview_with(SetupAnswers(summary="Tax advice"), entries)
+    state = plan_state(entries)
+    setup.settle_plan(state)
     setup.finish(state)
     assert state.answers.how_we_help == "Book an intro: Book a free slot"
 
@@ -493,7 +549,8 @@ def test_finish_declines_an_unpriced_purpose_payment():
         "block": "purpose_payment", "purpose": "Retainer", "amount_cents": 5000})
     entries = setup.proposal_entries([payment, job()], [], business_tools_enabled=True)
     assert entries[0].card.job.config.amount_cents is None
-    state = interview_with(SetupAnswers(summary="Tax advice"), entries)
+    state = plan_state(entries)
+    setup.settle_plan(state)
     setup.finish(state)
     assert entries[0].card.state == "declined"
     assert [accepted.title for accepted in setup.accepted_jobs(state)] == ["Book an intro"]
@@ -531,6 +588,7 @@ async def test_answer_holds_the_turn_before_reading(proposals, model, engine, mo
 
     owner, state, ids = proposals
     path = f"/api/owner/setup/{state['interview_id']}"
+    await show_card(engine, state["interview_id"], question=True)
     read = setup._read
     read_reached, release = asyncio.Event(), asyncio.Event()
 
@@ -562,7 +620,7 @@ async def test_duplicate_stripe_cards_connect_once(monkeypatch, fail):
     from types import SimpleNamespace
 
     entries = setup.proposal_entries([], [stripe(), stripe()])
-    state = interview_with(SetupAnswers(summary="Tax advice"), entries)
+    state = plan_state(entries)
     connects, writes = [], []
 
     async def connect(owner, desk_id):
@@ -576,6 +634,7 @@ async def test_duplicate_stripe_cards_connect_once(monkeypatch, fail):
 
     monkeypatch.setattr(setup, "connect_payments", connect)
     monkeypatch.setattr(setup, "_put_business_tools", put)
+    setup.settle_plan(state)
     setup.finish(state)
     await setup.after_finish(SimpleNamespace(desk=lambda desk_id: desk_id), state)
     assert connects == [state.desk_id]
@@ -598,3 +657,223 @@ async def test_a_failed_business_tool_write_keeps_saved_setup(proposals, engine,
     assert observed == [("tools", False)]
     assert (await stored(engine, interview_id))["step"] == "tools"
     assert "a setup business tools write failed (RuntimeError)" in caplog.text
+
+
+def test_apply_decision_changes_only_the_pending_card_and_is_shared_with_typed_answers():
+    entries = setup.proposal_entries([job(), job('payment', config={
+        'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': None})], [], business_tools_enabled=True)
+    state = interview_with(SetupAnswers(summary="Tax advice"), [setup.Entry(role='claude', text='', planned=[e.card.model_copy(deep=True) for e in entries]), entries[0]])
+    before = setup._stored(state)
+    setup.apply_decision(state, entries[0].card.proposal_id, setup.SetupProposalIn(accept=True, title='  New title  '))
+    after = setup._stored(state)
+    expected = json.loads(json.dumps(before))
+    expected['transcript'][-1]['card']['state'] = 'accepted'
+    expected['transcript'][-1]['card']['job']['title'] = 'New title'
+    assert after == expected
+    state.transcript.append(entries[1])
+    assert setup._decide_typed(state, entries[1].card.proposal_id, True) is False
+    assert entries[1].card.state == 'proposed'
+    assert setup._decide_typed(state, entries[1].card.proposal_id, False) is True
+    assert entries[1].card.state == 'declined'
+
+
+def test_settle_plan_is_idempotent_and_emits_each_leftover_card_once():
+    entries = setup.proposal_entries([job(), job('payment', config={
+        'block': 'purpose_payment', 'purpose': 'Retainer', 'amount_cents': None}), job('answer', config=None)],
+        [stripe()], business_tools_enabled=True)
+    planned = [entry.card.model_copy(deep=True) for entry in entries]
+    state = interview_with(SetupAnswers(summary='Tax advice'), [
+        setup.Entry(role='claude', text='Understanding', planned=planned), entries[0]])
+    state.transcript[0].dropped = [planned[2].proposal_id]
+    setup.settle_plan(state)
+    assert [card.state for card in state.planned] == ['accepted', 'declined', 'proposed', 'accepted']
+    shown = [entry.card for entry in state.transcript if entry.card]
+    assert [card.proposal_id for card in shown] == [planned[i].proposal_id for i in (0, 1, 3)]
+    assert [card.state for card in shown] == ['accepted', 'declined', 'accepted']
+    assert shown[1] is not planned[1]
+    assert not state.pending_card and not state.unshown
+    before = setup._stored(state)
+    setup.settle_plan(state)
+    assert setup._stored(state) == before
+
+
+def test_finish_reads_shown_and_unshown_items():
+    entries = setup.proposal_entries([job(title='Shown'), job('answer', title='Unshown', config=None),
+                                     job(title='Still waiting')], [])
+    entries[0].card.state = entries[1].card.state = 'accepted'
+    state = interview_with(SetupAnswers(summary='Tax advice'), [
+        setup.Entry(role='claude', text='Understanding', planned=[entry.card.model_copy(deep=True) for entry in entries]),
+        entries[0], entries[2]])
+    setup.finish(state)
+    assert state.answers.how_we_help == 'Shown: Book a free slot\nUnshown: Book a free slot'
+    assert entries[2].card.state == 'proposed'
+    before = setup._stored(state)
+    setup.finish(state)
+    assert setup._stored(state) == before
+
+
+def test_a_decision_on_a_card_that_isnt_pending_is_409():
+    entries = setup.proposal_entries([job(), job('answer', config=None)], [])
+    state = interview_with(SetupAnswers(summary='Tax advice'), [
+        setup.Entry(role='claude', text='Understanding', planned=[entry.card.model_copy(deep=True) for entry in entries]),
+        entries[0]])
+    before = setup._stored(state)
+    with pytest.raises(setup.ApiProblem) as refused:
+        setup.apply_decision(state, entries[1].card.proposal_id, setup.SetupProposalIn(accept=True))
+    assert (refused.value.status, refused.value.error) == (409, 'conflict')
+    assert setup._stored(state) == before
+    setup.apply_decision(state, entries[0].card.proposal_id, setup.SetupProposalIn(accept=True))
+    with pytest.raises(setup.ApiProblem) as refused:
+        setup.apply_decision(state, entries[0].card.proposal_id, setup.SetupProposalIn(accept=False))
+    assert (refused.value.status, refused.value.error) == (409, 'conflict')
+
+
+async def test_use_your_suggestions_accepts_the_unshown_planned_jobs(proposals, model, engine):
+    owner, state, ids = proposals
+    interview_id = state['interview_id']
+    before = (await stored(engine, interview_id))['transcript']
+    model.add(next_step('what_you_do', next={'kind': 'done'}, reply='', plan='The closing plan.'))
+    reply = await owner.browser.post(f'/api/owner/setup/{interview_id}/suggestions?cards=1', json={})
+    assert reply.status_code == 200, reply.text
+    transcript = (await stored(engine, interview_id))['transcript']
+    tail = transcript[len(before):]
+    assert tail[0]['role'] == 'owner' and tail[0]['text'] == 'Use your suggestions'
+    assert [entry['card']['proposal_id'] for entry in tail[1:3]] == ids[1:]
+    assert [entry['card']['state'] for entry in tail[1:3]] == ['declined', 'accepted']
+    assert tail[3]['text'] == 'The closing plan.'
+    assert tail[4]['text'] == setup.QUESTIONS_DONE
+    assert len(tail) == 5
+    assert shown(reply)[0]['state'] == 'accepted'
+    saved = (await stored(engine, interview_id))['answers']
+    assert all(saved[key] is None for key in ('quote_auto_max_cents', 'discount_auto_max_bp', 'payment_link_auto_max_cents'))
+    assert saved['refunds'] == saved['documents'] == 'ask'
+    assert saved['auto_money_cap_cents'] == 0
+    assert setup.owner_job_answers(interview_with(SetupAnswers.model_validate(saved),
+            [setup.Entry.model_validate(entry) for entry in transcript])) == []
+
+
+async def test_a_decision_changes_the_card_and_claude_asks_the_next_thing(proposals, model, engine):
+    owner, state, ids = proposals
+    interview_id = state['interview_id']
+    before = (await stored(engine, interview_id))['transcript']
+    model.add(next_step('what_you_do', next={'kind': 'job', 'job': ids[1]},
+                        reply='An intro call makes sense.', question='Take a retainer?'))
+    reply = await owner.browser.post(f'/api/owner/setup/{interview_id}/proposals/{ids[0]}?cards=1', json={'accept': True})
+    assert reply.status_code == 200, reply.text
+    transcript = (await stored(engine, interview_id))['transcript']
+    assert transcript[len(before)-1]['card']['state'] == 'accepted'
+    assert [entry['text'] for entry in transcript[len(before):]] == [
+        'An intro call makes sense.', 'Take a retainer?', '']
+    assert transcript[-1]['card']['proposal_id'] == ids[1]
+    assert sum(entry['role'] == 'owner' for entry in transcript) == sum(entry['role'] == 'owner' for entry in before)
+    assert not any('decided' in entry for entry in transcript)
+    assert reply.json()['pending_card'] == ids[1] and reply.json()['question'] is None
+    assert reply.json()['messages'][-1]['card'] == transcript[-1]['card']
+    text = model.requests[-1].messages[0]['content'][0]['text']
+    assert '<owner_decision>' in text and 'accepted' in text and ids[0] in text
+    known_unshown = await owner.browser.post(f'/api/owner/setup/{interview_id}/proposals/{ids[2]}', json={'accept': True})
+    assert known_unshown.status_code == 409
+
+
+def test_pending_card_hides_the_question():
+    entries = setup.proposal_entries([job()], [])
+    state = interview_with(SetupAnswers(summary='Tax advice'), [setup.Entry(role='owner', text='Tax advice'),
+        setup.Entry(role='claude', text='Question', question='what_you_do'), entries[0]])
+    result = setup.setup_state(state, 'tax-advice', cards=True)
+    assert state.pending_card == entries[0].card.proposal_id == result.pending_card
+    assert state.question is None and result.question is None
+
+
+async def test_a_closing_card_turn_emits_leftover_cards_before_the_plan(proposals, model, engine):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    row = await stored(engine, interview_id)
+    # An old client can resume a stored pending card while showing future jobs as words.
+    for entry in row["transcript"]:
+        if entry.get("cards") is True:
+            entry["cards"] = False
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": interview_id})
+    model.add(next_step("what_you_do", next={"kind": "done"}, skip=list(setup.QUESTION_KEYS), reply="That works."),
+              next_step("what_you_do", next={"kind": "done"}, reply="", plan="The closing plan."))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/proposals/{ids[0]}?cards=1", json={"accept": True})
+    assert reply.status_code == 200, reply.text
+    tail = (await stored(engine, interview_id))["transcript"][len(row["transcript"]):]
+    assert [entry["text"] for entry in tail] == ["That works.", "", "", "The closing plan.", setup.QUESTIONS_DONE]
+    assert [entry["card"]["proposal_id"] for entry in tail[1:3]] == ids[1:]
+    assert [entry["card"]["state"] for entry in tail[1:3]] == ["declined", "accepted"]
+    assert reply.json()["step"] == "tools" and reply.json()["pending_card"] is None
+
+
+@pytest.mark.parametrize("typed", [False, True])
+async def test_a_decision_that_closes_setup_runs_after_finish_after_the_commit(proposals, model, engine, monkeypatch, typed):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    # Close from the last shown card with the remaining planned items already decided.
+    row = await stored(engine, interview_id)
+    for entry in row["transcript"]:
+        for card in entry.get("planned", []):
+            if card["proposal_id"] != ids[0]:
+                card["state"] = "declined"
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": interview_id})
+    calls = []
+    async def after(owner_ctx, interview):
+        saved = await stored(engine, interview_id)
+        assert saved["step"] == interview.step == "tools"
+        assert saved["transcript"][-1]["text"] == setup.QUESTIONS_DONE
+        assert interview_id not in setup._RUNNING
+        calls.append(interview_id)
+    monkeypatch.setattr(setup, "after_finish", after)
+    first = (card_answer("accept", next={"kind": "done"}, skip=list(setup.QUESTION_KEYS)) if typed else
+             next_step("what_you_do", next={"kind": "done"}, skip=list(setup.QUESTION_KEYS)))
+    model.add(first, next_step("what_you_do", next={"kind": "done"}, plan="The closing plan."))
+    endpoint, body = ("answer", {"card": ids[0], "text": "Yes"}) if typed else (f"proposals/{ids[0]}", {"accept": True})
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}", json=body)
+    assert reply.status_code == 200, reply.text
+    assert calls == [interview_id]
+
+
+async def test_drafting_gets_only_jobs_decided_on_a_shown_card(proposals, model, engine):
+    from tests.api.test_setup_rules import drafted, settled
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    extra = setup.proposal_entries([job("answer", title="Answer tax questions", config=None)], [])[0].card
+    row = await stored(engine, interview_id)
+    row["transcript"].append(setup.Entry(role="claude", text="More possibilities", planned=[extra]).model_dump(mode="json"))
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": interview_id})
+    model.add(next_step("what_you_do", next={"kind": "job", "job": extra.proposal_id}, question="Answer questions?"))
+    path = f"/api/owner/setup/{interview_id}"
+    assert (await owner.browser.post(path + f"/proposals/{ids[0]}", json={"accept": True, "autonomy": "auto"})).status_code == 200
+    assert (await owner.browser.post(path + "/suggestions", json={})).status_code == 200
+    row = await stored(engine, interview_id)
+    emitted = [entry for entry in row["transcript"] if entry.get("card")]
+    assert next(entry["card"] for entry in emitted if entry["card"]["proposal_id"] == extra.proposal_id)["state"] == "accepted"
+    assert not any(entry.get("owner_decided") for entry in emitted if entry["card"]["proposal_id"] != ids[0])
+    model.add(drafted(), drafted())
+    reply = await settled(owner, f"/api/owner/policy/setup/{interview_id}/rules")
+    assert reply.status_code == 200, reply.text
+    request = next(request for request in model.requests if request.route == setup.CARD_DRAFT_ROUTE)
+    text = request.messages[0]["content"][0]["text"]
+    answers = json.loads(html.unescape(text.split("<answers>")[1].split("</answers>")[0]))
+    assert answers["accepted_jobs"] == [{"job": "schedule", "title": "Book an intro", "autonomy": "auto"}]
+    assert "Answer tax questions" not in text and "Meet new clients" not in text and "Book a free slot" not in text
+
+
+async def test_disabling_business_tools_clears_hidden_plan_configs_before_a_later_enable(proposals, app, model, engine):
+    owner, state, ids = proposals
+    interview_id = state['interview_id']
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=False)
+    reply = await owner.browser.post(f'/api/owner/setup/{interview_id}/proposals/{ids[0]}?cards=1', json={'accept': True})
+    assert reply.status_code == 200, reply.text
+    saved = await stored(engine, interview_id)
+    planned = [card for entry in saved['transcript'] for card in entry.get('planned', [])]
+    assert all(card['job']['config'] is None for card in planned if card['job'])
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    reply = await owner.browser.post(f'/api/owner/setup/{interview_id}/suggestions?cards=1', json={})
+    assert reply.status_code == 200, reply.text
+    assert all(card['job']['config'] is None for card in shown(reply) if card['job'])
