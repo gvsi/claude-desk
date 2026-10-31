@@ -73,19 +73,35 @@ it('a_confirm_that_throws_releases_the_button', () => {
   }
 });
 
+/** The meta line under a row's title. */
+function rowMeta(): string | null | undefined {
+  return container.querySelector('.cd-change-review__row > .cd-change-review__body > .cd-change-review__meta')?.textContent;
+}
+
 it('a_removed_shared_rule_says_so_after_its_connector', () => {
-  const card = rivera.sharedChargeCard;
-  const removed: ChangeRowView = {
-    key: card.card_id,
-    change: 'removed',
-    title: 'Payment link and Charge within a signed limit',
-    connector: rivera.connectors.views.payments,
+  const row = rivera.sharedChargeReviewRow;
+  if (row.before === null) throw new Error('The shared row has no Before');
+  const removed: ChangeRowView = { ...row, change: 'removed', before: { ...row.before, appliesTo: 'Every tool that charges money' }, after: null, changed: [] };
+  act(() => root.render(<TurnOnPayments rows={[removed]} />));
+  expect(rowMeta()).toBe("Payments · Shared rule · Every tool that charges money · Alex Kim's assistant · Up to $20");
+});
+
+it('a_shared_rule_on_tools_of_several_connectors_leads_with_shared_rule', () => {
+  // Documents and Stripe's tools touch private data: no one connector has them all, so none is named.
+  const added: ChangeRowView = {
+    key: 'rv-private-verified',
+    change: 'added',
+    title: 'Every tool that touches private data',
     shared: true,
-    before: { mode: card.mode, limit: rivera.ruleLimits['rv-agent-charges'], reason: card.reason, words: rivera.ruleWords['rv-agent-charges'] },
-    after: null,
+    before: null,
+    after: {
+      appliesTo: 'Every tool that touches private data',
+      mode: 'auto',
+      reason: "Customers see their own records after confirming it's them.",
+      words: [{ field: 'who', text: "The record's owner, verified" }],
+    },
     changed: [],
   };
-  act(() => root.render(<TurnOnPayments rows={[removed]} />));
-  const meta = container.querySelector('.cd-change-review__row > .cd-change-review__body > .cd-change-review__meta');
-  expect(meta?.textContent).toBe("Payments · Shared rule · Alex Kim's assistant · Up to $20");
+  act(() => root.render(<TurnOnPayments rows={[added]} />));
+  expect(rowMeta()).toBe("Shared rule · Every tool that touches private data · The record's owner, verified");
 });

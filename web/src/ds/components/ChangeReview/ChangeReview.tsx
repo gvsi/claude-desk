@@ -30,7 +30,12 @@ export interface ChangeRowView {
   /** The tool the rule is about: "Payment link". */
   title: string;
   connector?: ConnectorView;
-  /** The rule is shared by several tools, such as every tool that charges money: the meta line says "Shared rule" after the connector. */
+  /**
+   * The rule is on a group of tools, such as every tool that charges money: the meta line says
+   * "Shared rule" after `connector`, the one connector all those tools share, or first when they
+   * have none in common. Unset when the rule moves between one tool and a group: the sides'
+   * `appliesTo` show that move.
+   */
   shared?: boolean;
   before: ChangeSide | null;
   after: ChangeSide | null;

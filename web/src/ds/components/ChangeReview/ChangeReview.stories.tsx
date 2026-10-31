@@ -609,33 +609,8 @@ const ASK_FIRST_CHECKS = {
   lines: ['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.'],
 } as const satisfies ChangeReviewProps['checks'];
 
-/** The default ask a rule falls to when nothing in the draft governs its tool. */
-const DEFAULT_ASK = 'Not covered by a rule you set, so I ask you.';
-
-const sharedCharge = rivera.sharedChargeCard;
-
-/**
- * The board's shared rule: Alex Kim's assistant pays up to $20 on every tool that charges money.
- * It is an illustrative card, not in Rivera's seed, so the story lists it after Payment link, where
- * the board draws it. Ask me first drops it too, and both of its tools fall to the default ask.
- */
-const sharedChargeRow: ChangeRowView = {
-  key: sharedCharge.card_id,
-  change: 'changed',
-  title: 'Payment link and Charge within a signed limit',
-  connector: rivera.connectors.views.payments,
-  shared: true,
-  before: {
-    mode: sharedCharge.mode,
-    limit: rivera.ruleLimits['rv-agent-charges'],
-    reason: sharedCharge.reason,
-    words: rivera.ruleWords['rv-agent-charges'],
-  },
-  after: { mode: 'ask', reason: DEFAULT_ASK, words: [{ field: 'who', text: 'Anyone' }] },
-  changed: ['mode'],
-};
-
-const askFirstRows = rivera.askFirstReview.flatMap((row) => (row.key === 'rv-link' ? [row, sharedChargeRow] : [row]));
+/** The Ask me first review with the board's illustrative shared rule after Payment link, where the board draws it. */
+const askFirstRows = rivera.askFirstReview.flatMap((row) => (row.key === 'rv-link' ? [row, rivera.sharedChargeReviewRow] : [row]));
 
 /** A row's After side, found by its title among the rows. */
 function afterSide(rows: HTMLElement[], index: number): HTMLElement {
@@ -758,6 +733,9 @@ export const PersonalRuleReplaced: Story = {
     await expect(tags(row?.parentElement as HTMLElement)).toEqual(['Removed']);
   },
 };
+
+/** The default ask a rule falls to when nothing in the draft governs its tool. */
+const DEFAULT_ASK = 'Not covered by a rule you set, so I ask you.';
 
 export const RecommendedRules: Story = {
   args: { rows: rivera.recommendedReview, checks: ASK_FIRST_CHECKS, confirmLabel: undefined, cancelLabel: undefined, cancelsLinks: true },
