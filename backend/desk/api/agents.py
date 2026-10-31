@@ -21,6 +21,14 @@ What the launcher's panel reads (`DemoAgentRun`): each exchange as the agent's t
 agent's words go to the Desk but never back to the panel, so no text the kernel didn't check reaches the visitor),
 then the Desk's, with the blocks and signed statuses the kernel checked. Runs live in this process's memory
 (`DemoAgents`): the 50 newest, for an hour, each readable by its launching session alone.
+
+A send with the client's idempotency key (one per click) claims the key in the copy before the kernel mints the agent
+(`DemoAgents.claim`, which checks and takes it with no await between, so of two requests racing in the process one
+takes it): a repeat answers the run the first started and starts nothing; one for another task is `KeyReused`; and a
+run whose agent couldn't be minted stays `failed`. Keys live in memory beside the runs, in a map of their own (the
+1000 newest, each for its run's hour), so a key outlives a run record the 50-run bound dropped: its repeat answers the
+same run ID, whose poll is then 404, and never starts a second run. Like the runs, keys are this process's alone: a
+process restart, or a repeat routed to the other task during a deploy's overlap, forgets them.
 """
 
 import asyncio
@@ -60,6 +68,7 @@ ROUTE = "visiting_agent"
 MAX_EXCHANGES = 6               # model calls a run, and so A2A requests
 MAX_TOKENS = 1024               # one short message as JSON
 MAX_RUNS = 50
+MAX_KEYS = 1000                 # the idempotency keys kept, the newest, each for its run's hour
 RUN_LIFE = timedelta(hours=1)
 A2A_TIMEOUT_S = 120.0           # an answer waits for the Desk's turn: up to 30 s for the session's lock, then the turn
 
@@ -69,6 +78,10 @@ Spent = Callable[[], Awaitable[bool]]
 
 class RunFailed(Exception):
     """The run can't go on; the message says why without any of the Desk's or the model's text."""
+
+
+class KeyReused(Exception):
+    """The idempotency key's first request in the copy had another body."""
 
 
 # Signing ------------------------------------------------------------------------------------------------------
@@ -212,16 +225,54 @@ class DemoAgents:
         self._model, self._a2a, self._engine, self._clock = model, a2a, engine, clock
         self._production = production
         self._runs: dict[str, tuple[DemoAgentRun, datetime]] = {}      # oldest first
+        # (copy, idempotency key) -> the run it started, its request's hash and when it was claimed; oldest first
+        self._keys: dict[tuple[str, str], tuple[str, str, datetime]] = {}
         self._tasks: set[asyncio.Task] = set()
 
-    def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids) -> str:
-        """Start a run of the issued agent on `task` for the launcher's session; its run ID. The issued key goes to
-        the run's coroutine alone."""
+    def _new_run(self, task: DemoTask, slug: str, launcher: Ids) -> DemoAgentRun:
+        """A new `running` run's record for the launcher's session, kept from now."""
         now = self._clock()
         self._forget(now, room=1)
         run = DemoAgentRun(run_id="run-" + secrets.token_hex(16), launcher_session_id=launcher.session_id, slug=slug,
                            task=task, state="running", turns=[])
         self._runs[run.run_id] = (run, now)
+        return run
+
+    def keyed(self, copy_id: str, key: str, request_sha256: str) -> str | None:
+        """The ID of the run a request with this key started in the copy within the hour, or None; `KeyReused` when
+        that request's body hashed otherwise."""
+        self._forget_keys(self._clock())
+        found = self._keys.get((copy_id, key))
+        if found is None:
+            return None
+        run_id, claimed_sha256, _ = found
+        if claimed_sha256 != request_sha256:
+            raise KeyReused
+        return run_id
+
+    def claim(self, copy_id: str, key: str, request_sha256: str, task: DemoTask, slug: str,
+              launcher: Ids) -> tuple[str, DemoAgentRun | None]:
+        """Take the key in the copy for a new `running` run, checked and taken with no await between: the run's ID
+        and its record, which the caller then `launch`es or `fail`s. When the copy already holds the key, the ID of
+        the run it started and None (`KeyReused` for another body)."""
+        held = self.keyed(copy_id, key, request_sha256)
+        if held is not None:
+            return held, None
+        run = self._new_run(task, slug, launcher)
+        self._forget_keys(self._clock(), room=1)
+        self._keys[(copy_id, key)] = (run.run_id, request_sha256, self._clock())
+        return run.run_id, run
+
+    def fail(self, run: DemoAgentRun, reason: str) -> None:
+        """End a claimed run that couldn't start (its agent wasn't minted) `failed`."""
+        _fail(run, reason)
+
+    def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids,
+               run: DemoAgentRun | None = None) -> str:
+        """Start a run of the issued agent on `task` for the launcher's session, in `run`'s record when a claim made
+        it, else a new one; its run ID. The issued key goes to the run's coroutine alone."""
+        if run is None:
+            run = self._new_run(task, slug, launcher)
 
         async def record(response: ModelResponse) -> None:
             async with self._engine.connect() as conn:
@@ -254,6 +305,14 @@ class DemoAgents:
                 del self._runs[run_id]
         while self._runs and len(self._runs) + room > MAX_RUNS:
             del self._runs[next(iter(self._runs))]
+
+    def _forget_keys(self, now: datetime, room: int = 0) -> None:
+        """Drop the keys claimed over an hour ago, then the oldest until `room` more fit."""
+        for held, (_, _, claimed) in list(self._keys.items()):
+            if now - claimed >= RUN_LIFE:
+                del self._keys[held]
+        while self._keys and len(self._keys) + room > MAX_KEYS:
+            del self._keys[next(iter(self._keys))]
 
     async def drain(self) -> None:
         """Wait until no run is going in this process."""

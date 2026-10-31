@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import func, select
 from sse_starlette import EventSourceResponse
 
+from desk.api.agents import DemoAgents, KeyReused
 from desk.api.cookies import VISITOR_COOKIE, set_visitor_cookie
 from desk.api.deliver import Status, deliver
 from desk.api.deps import (
@@ -36,6 +37,7 @@ from desk.api.deps import (
     visitor_context,
     visitor_ctx,
 )
+from desk.api.idempotency import IdempotencyKey, body_sha256
 from desk.api.jobs import defer_translation
 from desk.api.prompts import NOTES, DemoTask
 from desk.api.schemas import (
@@ -382,20 +384,56 @@ class SendAgentIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     task: DemoTask
+    idempotency_key: IdempotencyKey | None = None       # one per click (`send_agent`)
+
+
+def _keyed(agents: DemoAgents, ctx: VisitorCtx, body: SendAgentIn, slug: str, *,
+           claim: bool) -> tuple[str | None, DemoAgentRun | None]:
+    """The run the body's key started in the copy, and with `claim`, a new run's record when the copy doesn't hold the
+    key yet (taken with no await between the check and the claim); 409 `conflict` when the key's request had another
+    body."""
+    key, sha = body.idempotency_key, body_sha256(body.model_dump(mode="json", exclude={"idempotency_key"}))
+    try:
+        if not claim:
+            return agents.keyed(ctx.ids.copy_id, key, sha), None
+        return agents.claim(ctx.ids.copy_id, key, sha, body.task, slug, ctx.ids)
+    except KeyReused:
+        raise ApiProblem(409, "conflict") from None
 
 
 @router.post("/desks/{slug}/send_agent", status_code=202, response_model=AgentRunStarted,
-             responses=error_responses(401, 404, 422, 429, 503))
+             responses=error_responses(401, 404, 409, 422, 429, 503))
 async def send_agent(slug: str, body: SendAgentIn, request: Request,
                      ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> AgentRunStarted:
     """Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this
     process and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered
-    here. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent."""
+    here. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.
+
+    With an `idempotency_key` (one per click), a repeat in the copy within the hour answers the run the first started
+    (its ID; poll it for its state) and starts nothing, without counting on the limit; one with another task is 409
+    `conflict`. The key is claimed once the limit and the budget let the request through, before the kernel mints the
+    agent, so a request they refuse claims nothing; a run whose agent couldn't be minted stays `failed`, and a new
+    click sends a new key. Keys live in this process's memory, like the runs. Without a key, each request starts its
+    own run."""
     state = runtime(request).started()
+    if body.idempotency_key is not None:
+        run_id, _ = _keyed(state.agents, ctx, body, slug, claim=False)
+        if run_id is not None:
+            return AgentRunStarted(run_id=run_id)
     await state.limiter.enforce("demo_agent", ctx.ids.copy_id, ledger=ctx.ledger())
     await require_model_budget(request)
-    issued = await _mint_agent(ctx)
-    return AgentRunStarted(run_id=state.agents.launch(issued, body.task, slug, ctx.ids))
+    claimed = None
+    if body.idempotency_key is not None:
+        run_id, claimed = _keyed(state.agents, ctx, body, slug, claim=True)
+        if claimed is None:                             # another request took the key meanwhile
+            return AgentRunStarted(run_id=run_id)
+    try:
+        issued = await _mint_agent(ctx)
+    except BaseException:
+        if claimed is not None:
+            state.agents.fail(claimed, "the agent couldn't be minted")
+        raise
+    return AgentRunStarted(run_id=state.agents.launch(issued, body.task, slug, ctx.ids, run=claimed))
 
 
 @router.get("/desks/{slug}/send_agent/{run_id}", response_model=DemoAgentRun,

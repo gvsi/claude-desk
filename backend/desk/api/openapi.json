@@ -4055,7 +4055,7 @@
     "/api/public/desks/{slug}/send_agent": {
       "post": {
         "summary": "Send Agent",
-        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.",
+        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nWith an `idempotency_key` (one per click), a repeat in the copy within the hour answers the run the first started\n(its ID; poll it for its state) and starts nothing, without counting on the limit; one with another task is 409\n`conflict`. The key is claimed once the limit and the budget let the request through, before the kernel mints the\nagent, so a request they refuse claims nothing; a run whose agent couldn't be minted stays `failed`, and a new\nclick sends a new key. Keys live in this process's memory, like the runs. Without a key, each request starts its\nown run.",
         "operationId": "public_send_agent",
         "parameters": [
           {
@@ -4108,6 +4108,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -11069,6 +11079,20 @@
               "push_the_limit"
             ],
             "title": "Task"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
           }
         },
         "additionalProperties": false,
