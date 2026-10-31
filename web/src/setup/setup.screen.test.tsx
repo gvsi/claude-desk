@@ -11,14 +11,15 @@ import type { RenderResult } from 'vitest-browser-react';
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
-import { OUTCOME_GROUP_WORDS, SETUP_START_LOST_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { OUTCOME_GROUP_WORDS, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
-import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer } from '../mocks/setup.ts';
+import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextStart } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
+import { setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
 const DESCRIPTION =
@@ -70,6 +71,9 @@ async function interviewAtPreview(description = DESCRIPTION): Promise<SetupState
   await mockStore.dispatch('setupConfirm', { params: { id: state.interview_id } });
   return state;
 }
+
+/** The idempotency key of each start the page sent, in order. */
+const startKeys = () => requests('startSetup').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
 
 /** Where `key`'s first request sits in the request log, or -1. */
 const firstAt = (key: RouteKey) => mockStore.requests.findIndex((r) => r.key === key);
@@ -140,10 +144,12 @@ describe('setup', () => {
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
     await screen.getByRole('button', { name: 'Start' }).click();
 
-    // The description and the browser's own time zone, once.
+    // The description and the browser's own time zone, once, with the press's idempotency key.
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).toBeVisible();
-    expect(requests('startSetup').map((r) => r.body)).toEqual([{ description: DESCRIPTION, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }]);
+    expect(requests('startSetup').map((r) => r.body)).toEqual([
+      { description: DESCRIPTION, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, idempotency_key: expect.any(String) },
+    ]);
     const state = [...mockStore.world.desks].reverse()[0];
     expect(state?.summary.answering).toBe(false);
     expect(router.state.location.pathname).toMatch(/^\/app\/setup\/setup-\d+$/);
@@ -169,32 +175,113 @@ describe('setup', () => {
     expect(setup.body.consent).toBe(true);
   });
 
-  it('lost_start_is_unknown_and_a_refused_one_can_be_tried_again', async () => {
-    // A clear refusal: its line, and "Start" works again.
+  it('refused_start_lets_a_new_key_through', async () => {
+    // A clear refusal (a 422, a 409 `conflict` on the key) started nothing: its line, "Start" works
+    // again, and the next press is a new start with a new key.
     const { screen } = await renderRoute('/app/setup');
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
-    mockStore.inject({ route: 'startSetup', status: 422, body: { error: 'invalid' } });
-    await screen.getByRole('button', { name: 'Start' }).click();
-    const refused = ownerErrorCopy(new ApiError('unprocessable', { route: 'startSetup', method: 'POST', status: 422, code: 'invalid' }));
-    await expect.element(screen.getByText(refused, { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+    for (const refusal of [
+      { status: 422, body: { error: 'invalid' }, kind: 'unprocessable' as const },
+      { status: 409, body: { error: 'conflict' }, kind: 'conflict' as const },
+    ]) {
+      mockStore.inject({ route: 'startSetup', status: refusal.status, body: refusal.body });
+      await screen.getByRole('button', { name: 'Start' }).click();
+      const line = ownerErrorCopy(new ApiError(refusal.kind, { route: 'startSetup', method: 'POST', status: refusal.status, code: refusal.body.error }));
+      await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
+      await expect.element(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    }
     await screen.getByRole('button', { name: 'Start' }).click();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
-    expect(requests('startSetup')).toHaveLength(2);
+    const keys = startKeys();
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(3);
 
+    // The API says the key can't start anything again (409 `key_spent`: the first start ended with
+    // its Desk unknown): setup didn't start, "Start" works again, and it sends a new key.
+    const spent = (await renderRoute('/app/setup')).screen;
+    await spent.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    const end = holdNextStart(mockStore.world);
+    await spent.getByRole('button', { name: 'Start' }).click();
+    await expect.element(spent.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
+    end('spent');
+    await spent.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(spent.getByText(setupStartSpentLine(), { exact: true })).toBeVisible();
+    expect(spent.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    await expect.element(spent.getByRole('button', { name: 'Start' })).toBeEnabled();
+    await spent.getByRole('button', { name: 'Start' }).click();
+    await expect.element(spent.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    const spentKeys = startKeys().slice(3);
+    expect(spentKeys).toHaveLength(3);
+    expect(spentKeys[1]).toBe(spentKeys[0]);
+    expect(spentKeys[2]).not.toBe(spentKeys[0]);
+  });
+
+  it('lost_start_is_tried_again_with_its_key', async () => {
     // A start whose answer was lost (no answer, a timeout or a 5xx) may have made a Desk: it is
-    // never called not done, and "Start" stays off on that page, so it can't make a second one.
-    for (const lost of [{ status: 503 as const }, { status: 'network' as const, afterCommit: true }]) {
+    // never called not done, "Start" stays off, and "Try again" sends the same start with the same
+    // key, which goes on to the interview the first made, or makes it now: one Desk either way.
+    const lost = [{ status: 503 as const }, { status: 'network' as const, afterCommit: true }, { status: 'network' as const }];
+    for (const fault of lost) {
       const page = (await renderRoute('/app/setup')).screen;
       const mark = mockStore.requests.length;
+      const desks = mockStore.world.desks.length;
       await page.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
-      mockStore.inject({ route: 'startSetup', ...lost });
+      mockStore.inject({ route: 'startSetup', ...fault });
       await page.getByRole('button', { name: 'Start' }).click();
-      await expect.element(page.getByText(SETUP_START_LOST_COPY, { exact: true })).toBeVisible();
+      await expect.element(page.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
       await expect.element(page.getByRole('button', { name: 'Start' })).toBeDisabled();
       expect(requests('startSetup', mark)).toHaveLength(1);
-      expect(page.getByText(refused, { exact: true }).elements()).toHaveLength(0);
+
+      await page.getByRole('button', { name: 'Try again' }).click();
+      await expect.element(page.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+      const sent = requests('startSetup', mark).map((r) => r.body as Record<string, unknown>);
+      expect(sent, JSON.stringify(fault)).toHaveLength(2);
+      expect(sent[1]).toEqual(sent[0]);
+      expect(sent[0]).toMatchObject({ description: DESCRIPTION, idempotency_key: expect.stringMatching(/^[^\x00-\x1f\x7f]{1,128}$/) });
+      expect(mockStore.world.desks.length, JSON.stringify(fault)).toBe(desks + 1);
     }
+  });
+
+  it('start_under_way_is_sent_again_with_its_key', async () => {
+    // The API answers that a start with this key is still under way (409 `in_progress`): the page
+    // waits its `retry_after` (2 s when it names none; scaled here with the polls) and sends the
+    // same start again, with the same key, until the interview comes.
+    mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress', retry_after: 2 } });
+    mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress' } });
+    const { screen } = await renderRoute('/app/setup');
+    const desks = mockStore.world.desks.length;
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    const sent = requests('startSetup').map((r) => r.body);
+    expect(sent).toHaveLength(3);
+    expect(new Set(sent.map((body) => JSON.stringify(body))).size).toBe(1);
+    expect(mockStore.world.desks.length).toBe(desks + 1);
+  });
+
+  it('start_under_way_after_its_retries_says_it_is_taking_longer', async () => {
+    // A start that runs long: its own answer is lost, "Try again" finds it under way, and after
+    // three more tries the page says it's taking longer, with "Try again" and "Start" still off.
+    // Once it has made the Desk, "Try again" goes on to its interview: one Desk, one key.
+    const { screen } = await renderRoute('/app/setup');
+    const desks = mockStore.world.desks.length;
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    const end = holdNextStart(mockStore.world);
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.element(screen.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(screen.getByText(setupStartSlowLine(), { exact: true })).toBeVisible();
+    expect(screen.getByText(setupStartLostLine()).elements()).toHaveLength(0);
+    await expect.element(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    expect(requests('startSetup')).toHaveLength(5);
+
+    end('made');
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    expect(new Set(startKeys()).size).toBe(1);
+    expect(startKeys()).toHaveLength(6);
+    expect(mockStore.world.desks.length).toBe(desks + 1);
   });
 
   it('interview_outside_the_copy_is_not_found', async () => {

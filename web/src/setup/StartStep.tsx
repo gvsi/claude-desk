@@ -1,13 +1,20 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 
-import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
-import { Button, Notice, PageHeader, SETUP_START_LOST_COPY, TextField } from '../ds/index.ts';
-import { SETUP_COPY } from './copy.ts';
+import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../api/http.ts';
+import type { StartSetupBody } from '../api/views.ts';
+import { retryAfterMs } from '../app/poll.ts';
+import { Button, Notice, PageHeader, TextField } from '../ds/index.ts';
+import { SETUP_COPY, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 
 /** Plan 02's limit on the business's description. */
 const DESCRIPTION_MAX = 1500;
+
+/** How many more times a start the API says is under way (409 `in_progress`) is sent before the page says so. */
+const UNDER_WAY_RETRIES = 3;
+/** The wait before sending it again when the answer names no `retry_after`: the API's 2 s. */
+const UNDER_WAY_WAIT_S = 2;
 
 /** The browser's own time zone, by its IANA name, which the business's times are kept in. */
 function browserTimeZone(): string {
@@ -18,9 +25,43 @@ function browserTimeZone(): string {
   }
 }
 
+/** Resolves after `ms`, or at once when `signal` aborts. */
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done);
+  });
+}
+
+/** One press of "Start": its body and its idempotency key, sent again as they are by each retry. */
+interface Attempt {
+  body: StartSetupBody;
+  key: string;
+}
+
+/**
+ * A start the page can't yet call done or not done: its answer was `lost` (no answer, a timeout or
+ * a 5xx), or the API still said it was `under_way` after the page's own retries.
+ */
+interface Unresolved {
+  attempt: Attempt;
+  why: 'lost' | 'under_way';
+}
+
 /**
  * "Tell me about your business": a few sentences in the owner's own words, from which the API
  * takes the business's name and the owner's, and makes the new Desk with Answering off.
+ *
+ * Each press of "Start" sends a new idempotency key, and its retries send it again, so the API
+ * answers the interview that press made rather than making a second Desk. A start the API says is
+ * under way is sent again after its `retry_after`, a few times. One whose outcome is still unknown
+ * keeps "Start" off and offers "Try again", the same start with the same key; a clear refusal shows
+ * its line, and the next press is a new start with a new key.
  */
 export function StartStep() {
   const navigate = useNavigate();
@@ -29,33 +70,63 @@ export function StartStep() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [empty, setEmpty] = useState(false);
-  /**
-   * A start whose answer was lost may have made a Desk, and the API can't yet say which (its
-   * idempotency key is to come), so "Start" stays off on this page rather than make a second one.
-   */
-  const [lost, setLost] = useState(false);
+  const [unresolved, setUnresolved] = useState<Unresolved | null>(null);
+  // Aborted when the page goes away, which ends a wait between tries and stops anything after it.
+  const leaving = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    leaving.current = controller;
+    return () => controller.abort();
+  }, []);
   const copy = SETUP_COPY.start;
+
+  const send = async (attempt: Attempt) => {
+    const signal = leaving.current?.signal;
+    if (signal === undefined) return;
+    setPending(true);
+    setError(null);
+    setUnresolved(null);
+    for (let retries = 0; ; retries += 1) {
+      try {
+        const state = await request('startSetup', { body: { ...attempt.body, idempotency_key: attempt.key } });
+        queryClient.setQueryData(['setup', state.interview_id], state);
+        void navigate(`/app/setup/${encodeURIComponent(state.interview_id)}`);
+        return;
+      } catch (err) {
+        if (signal.aborted) return;
+        // The session ended: the app goes back to the start, and there is nothing to say here.
+        if (err instanceof ApiError && err.kind === 'unauthorized') return;
+        const underWay = err instanceof ApiError && err.code === 'in_progress';
+        if (underWay && retries < UNDER_WAY_RETRIES) {
+          await wait(retryAfterMs(err.retryAfter ?? UNDER_WAY_WAIT_S), signal);
+          if (signal.aborted) return;
+          continue;
+        }
+        setPending(false);
+        if (underWay) setUnresolved({ attempt, why: 'under_way' });
+        else if (isUncertain(err)) setUnresolved({ attempt, why: 'lost' });
+        // The key can't start anything again: setup didn't start, and the next press is a new start.
+        else if (err instanceof ApiError && err.code === 'key_spent') setError(setupStartSpentLine());
+        else setError(ownerErrorCopy(err));
+        return;
+      }
+    }
+  };
 
   const start = async (event: FormEvent) => {
     event.preventDefault();
     const text = description.trim();
-    if (pending || lost) return;
+    if (pending || unresolved !== null) return;
     setEmpty(text === '');
     if (text === '') return;
-    setPending(true);
-    setError(null);
-    try {
-      const state = await request('startSetup', { body: { description: text, timezone: browserTimeZone() } });
-      queryClient.setQueryData(['setup', state.interview_id], state);
-      void navigate(`/app/setup/${encodeURIComponent(state.interview_id)}`);
-    } catch (err) {
-      // The session ended: the app goes back to the start, and there is nothing to say here.
-      if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      if (isUncertain(err)) setLost(true);
-      else setError(ownerErrorCopy(err));
-      setPending(false);
-    }
+    await send({ body: { description: text, timezone: browserTimeZone() }, key: newIdempotencyKey() });
   };
+
+  const tryAgain = unresolved === null ? null : (
+    <Button variant="secondary" onClick={() => void send(unresolved.attempt)}>
+      {SETUP_COPY.questions.tryAgain}
+    </Button>
+  );
 
   return (
     <form className="cd-setup-step" noValidate onSubmit={(event) => void start(event)}>
@@ -73,9 +144,13 @@ export function StartStep() {
         {...(empty ? { error: copy.empty } : {})}
       />
       {error === null ? null : <Notice tone="error">{error}</Notice>}
-      {lost ? <Notice tone="error">{SETUP_START_LOST_COPY}</Notice> : null}
+      {unresolved === null ? null : (
+        <Notice tone="error" action={tryAgain}>
+          {unresolved.why === 'lost' ? setupStartLostLine() : setupStartSlowLine()}
+        </Notice>
+      )}
       <div className="cd-setup-step__actions">
-        {lost ? (
+        {unresolved !== null ? (
           <Button variant="primary" size="main" type="submit" disabled>
             {copy.action}
           </Button>
