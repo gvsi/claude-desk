@@ -5,11 +5,94 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from desk.contracts import Review
 from evals.calibration import reviewer
+
+
+async def normalized_case_action(case, monkeypatch):
+    """Run the real adapter against offline records, then build the kernel action."""
+    from desk.contracts import NormalizedAction, Principal
+    from desk.kernel_service.adapters import ADAPTERS, book, payment_link, payments_mcp, quote, release_document
+    from desk.kernel_service.adapters.base import NormalizeCtx
+
+    principal = Principal(kind="visitor", session_id="calibration-session", copy_id="calibration-copy",
+                          desk_id="calibration-desk", person_id="calibration-person", assurance="demo_code")
+    ctx = SimpleNamespace(clock=SimpleNamespace(now=lambda: datetime(2026, 10, 1, tzinfo=UTC)))
+    nctx = NormalizeCtx(ctx=ctx, desk_row=SimpleNamespace(desk_id=principal.desk_id), principal=principal)
+    fields = case.action
+    monkeypatch.setattr(book, "find_slot", AsyncMock(return_value=SimpleNamespace(
+        slot_id="S-20261102-0800", starts_at=fields.starts_at)))
+    monkeypatch.setattr(quote, "price", AsyncMock(return_value=([], fields.list_cents)))
+    monkeypatch.setattr(payment_link, "payable_quote", AsyncMock(return_value=(SimpleNamespace(
+        quote_id="calibration-quote", amount_cents=fields.amount_cents), None)))
+    monkeypatch.setattr(release_document, "find_document", AsyncMock(return_value=SimpleNamespace(
+        document_id="calibration-document", record_owner_person_id=principal.person_id)))
+    provider = SimpleNamespace(read_charge=AsyncMock(return_value=SimpleNamespace(
+        charge_id="calibration-charge", amount_cents=fields.amount_cents, refunded_cents=0,
+        owner_person_id=principal.person_id)))
+    monkeypatch.setattr(payments_mcp.payments, "provider", lambda _: provider)
+    args = {
+        "native.book": {"slot_id": "S-20261102-0800"},
+        "native.quote": {"items": [{"item_id": "drain-clearing", "qty": 1}],
+                         "requested_discount_bp": fields.discount_bp},
+        "native.payment_link": {"quote_id": "calibration-quote"},
+        "native.release_document": {"document_id": "calibration-document"},
+        "payments.create_refund": {"charge_id": "calibration-charge"},
+        "native.request_callback": case.untrusted_args,
+        "native.capture_lead": case.untrusted_args,
+    }
+    adapter = ADAPTERS[fields.tool]
+    normalized = await adapter.normalize(nctx, adapter.Args.model_validate(args[fields.tool]))
+    return NormalizedAction(
+        action_id="calibration-action", copy_id=principal.copy_id, desk_id=principal.desk_id,
+        session_id=principal.session_id, generation=1, tool=fields.tool, effects=adapter.profile.effects,
+        args_sha256="0" * 64, profile_sha256="0" * 64, **normalized.model_dump()), principal
+
+
+async def test_all_fixture_money_fields_match_real_adapter_normalization(monkeypatch):
+    from desk.kernel_service import seed
+    from desk.kernel_service.decisions import ReviewAction
+
+    mismatches = []
+    for case in reviewer.load_cases(reviewer.CASES_FILE):
+        action, _ = await normalized_case_action(case, monkeypatch)
+        actual = ReviewAction.of(action, tz=seed.TIMEZONE)
+        supplied = reviewer.call_input(case).action
+        for name in ("list_cents", "discount_bp", "amount_cents"):
+            if getattr(supplied, name) != getattr(actual, name):
+                mismatches.append(f"{case.id}: {name}={getattr(supplied, name)}, adapter={getattr(actual, name)}")
+    assert not mismatches, "\n".join(mismatches)
+
+
+async def test_scored_cases_reach_review_with_exactly_the_supplied_cards(monkeypatch):
+    import desk_kernel
+    from desk.kernel_service import compiler, decide, seed
+    from desk.kernel_service.adapters import ADAPTERS
+
+    cases = reviewer.load_cases(reviewer.CASES_FILE)
+    profiles = [ADAPTERS[tool].profile for tool in sorted({case.action.tool for case in cases})]
+    schema = compiler.desk_schema(profiles)
+    engine = desk_kernel.PolicyEngine(compiler.BASELINE)
+    for case in cases:
+        if not case.scored:
+            continue
+        action, principal = await normalized_case_action(case, monkeypatch)
+        compiled = compiler.compile_cards(case.rule_cards, profiles, auto_money_cap_cents=30000)
+        sets = compiled.sets()
+        assert engine.load("calibration", json.dumps(schema), json.dumps(sets)) == [], case.id
+        request = decide.cedar_request(principal, action, tz=seed.TIMEZONE,
+                                       now=datetime(2026, 10, 30, tzinfo=UTC), auto_money_cap_cents=30000)
+        pre = json.loads(engine.decide("calibration", json.dumps(request), "pre"))
+        assert pre["errors"] == [], (case.id, pre)
+        assert pre["outcome"] == "needs_review", (case.id, pre)
+        by_policy = decide.policy_cards(SimpleNamespace(cedar=sets))
+        pending = {card_id for policy_id in pre["pending_policy_ids"] for card_id in by_policy[policy_id]}
+        supplied = {card.card_id for card in reviewer.call_input(case).cards}
+        assert pending == supplied, (case.id, pending, supplied)
 
 
 @pytest.mark.parametrize(
