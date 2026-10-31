@@ -1,6 +1,7 @@
-"""Consent stores the owner's answer before its reads run in the background."""
+"""Setup's shared turn runner stores pending entries before consent, answers or card work runs."""
 
 import asyncio
+import contextlib
 
 import pytest
 
@@ -9,6 +10,279 @@ from desk.api.deps import ApiProblem
 from tests.api.test_setup_questions import (  # noqa: F401 — fixtures shared with setup's question tests
     WEBSITE, app, begin, held_limits, model, new_owner,
 )
+
+
+async def test_a_slow_answer_answers_202_busy_and_lands_later(
+        app, browser, fake, kernel_http, model, monkeypatch, db):
+    from tests.api.fakes import gated
+    from tests.api.test_setup_questions import consent, turn
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    waiting = await consent(owner, interview_id, False)
+    before = db.execute("SELECT answers FROM app.setup_interviews WHERE interview_id = %s", (interview_id,)).fetchone()
+    release = asyncio.Event()
+    model.add(gated(turn(summary="Water heater repairs."), release))
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0.01, raising=False)
+    try:
+        reply = await asyncio.wait_for(owner.browser.post(path + "/answer", json={
+            "question": waiting["question"], "text": "We repair water heaters."}), 0.5)
+        assert reply.status_code == 202, reply.text
+        busy = reply.json()
+        assert busy["busy"] is True and busy["question"] is None
+        assert busy["messages"][-1] == {"role": "owner", "text": "We repair water heaters."}
+        current = db.execute("SELECT answers FROM app.setup_interviews WHERE interview_id = %s",
+                             (interview_id,)).fetchone()
+        assert current == before
+        assert (await owner.browser.get(path)).json() == busy
+    finally:
+        release.set()
+    await app.state.runtime.turn_runs.wait(interview_id)
+    landed = (await owner.browser.get(path)).json()
+    assert landed["busy"] is False and landed["question"] == setup.QUESTION_KEYS[1]
+    (answers,) = db.execute("SELECT answers FROM app.setup_interviews WHERE interview_id = %s", (interview_id,)).fetchone()
+    assert answers["summary"] == "Water heater repairs."
+
+
+@pytest.mark.parametrize("slow", [False, True])
+async def test_a_failed_answer_turn_rolls_back_to_the_question_waiting(
+        app, browser, fake, kernel_http, model, monkeypatch, db, slow):
+    from tests.api.test_setup_questions import answer, consent, turn
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    waiting = await consent(owner, interview_id, False)
+    before = db.execute("SELECT answers, transcript, step FROM app.setup_interviews WHERE interview_id = %s",
+                        (interview_id,)).fetchone()
+    release = asyncio.Event()
+    rename = setup._rename
+
+    async def failing(*args):
+        await release.wait()
+        raise ApiProblem(503, "model_unavailable")
+
+    monkeypatch.setattr(setup, "_rename", failing)
+    if slow:
+        monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    else:
+        release.set()
+    reply = await answer(owner, model, interview_id, "We repair water heaters.",
+                         turn(summary="Water heater repairs."))
+    if slow:
+        assert reply.status_code == 202
+        task = app.state.runtime.turn_runs._tasks[interview_id]
+        release.set()
+        with pytest.raises(ApiProblem):
+            await task
+    else:
+        assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+    assert (await owner.browser.get(path)).json() == waiting
+    assert db.execute("SELECT answers, transcript, step FROM app.setup_interviews WHERE interview_id = %s",
+                      (interview_id,)).fetchone() == before
+    monkeypatch.setattr(setup, "_rename", rename)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 25)
+    retry = await answer(owner, model, interview_id, "We repair water heaters.")
+    assert retry.status_code == 200 and retry.json()["busy"] is False
+    assert retry.json()["question"] == setup.QUESTION_KEYS[1]
+
+
+@pytest.mark.parametrize("recover_on", ["get", "answer"])
+async def test_an_abandoned_answer_turn_is_rolled_back_on_get(
+        app, browser, fake, kernel_http, model, db, recover_on):
+    from psycopg.types.json import Jsonb
+    from tests.api.test_setup_questions import answer, consent
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    waiting = await consent(owner, interview_id, False)
+    before = db.execute("SELECT answers, transcript, step FROM app.setup_interviews WHERE interview_id = %s",
+                        (interview_id,)).fetchone()
+    transcript = before[1] + [{"role": "owner", "text": "An abandoned answer", "pending": "dead-run"}]
+    db.execute("UPDATE app.setup_interviews SET transcript = %s,"
+               " updated_at = now() - make_interval(secs => %s) WHERE interview_id = %s",
+               (Jsonb(transcript), setup.TURN_ABANDONED_S + 10, interview_id))
+    if recover_on == "get":
+        assert (await owner.browser.get(path)).json() == waiting
+        assert db.execute("SELECT answers, transcript, step FROM app.setup_interviews WHERE interview_id = %s",
+                          (interview_id,)).fetchone() == before
+    else:
+        retry = await answer(owner, model, interview_id, "Plumbing", question=waiting["question"])
+        assert retry.status_code == 200 and retry.json()["busy"] is False
+        assert all(message["text"] != "An abandoned answer" for message in retry.json()["messages"])
+        assert retry.json()["question"] == setup.QUESTION_KEYS[1]
+
+
+@pytest.mark.parametrize("fail", [False, True])
+async def test_a_marker_stage_leaves_no_entry_after_commit(
+        app, browser, fake, kernel_http, model, monkeypatch, db, fail):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    before = db.execute("SELECT answers, transcript, step FROM app.setup_interviews WHERE interview_id = %s",
+                        (interview_id,)).fetchone()
+    marked = []
+
+    async def turn(ctx, interview, staged):
+        assert len(staged) == 1 and staged[0].text == "" and staged[0].pending
+        marked.append(staged[0].pending)
+        stored = await setup._read(app.state.runtime.database(), ctx, interview_id)
+        assert stored.busy and stored.transcript[-1].pending == staged[0].pending
+        if fail:
+            interview.step = "tools"
+            interview.answers = interview.answers.model_copy(update={"summary": "Must not be saved"})
+            raise ApiProblem(503, "model_unavailable")
+
+    async def marker(ctx, engine, model, interview_id, allow, **kwargs):
+        return await setup.run_turn(ctx, engine, model, interview_id, **kwargs,
+                                    check=lambda interview: None,
+                                    stage=lambda interview: [setup.Entry(role="owner", text="")],
+                                    turn=turn, keep_staged=False)
+
+    monkeypatch.setattr(setup, "consent", marker)
+    reply = await owner.browser.post(path + "/consent", json={"allow": False})
+    assert reply.status_code == (503 if fail else 200)
+    assert marked
+    assert (await owner.browser.get(path)).json() == state
+    assert db.execute("SELECT answers, transcript, step FROM app.setup_interviews WHERE interview_id = %s",
+                      (interview_id,)).fetchone() == before
+
+
+@pytest.mark.parametrize("slow", [False, True])
+@pytest.mark.parametrize("fail", [False, True])
+async def test_after_runs_after_the_commit_and_its_failure_is_logged(
+        app, browser, fake, kernel_http, model, monkeypatch, caplog, slow, fail):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    release, entered, after_ran = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    renders = []
+
+    async def turn(ctx, interview, staged):
+        entered.set()
+        await release.wait()
+        interview.step = "tools"
+        interview.transcript.append(setup.Entry(role="claude", text="Committed turn"))
+
+    async def after(ctx, interview):
+        assert not ctx.ro.conn.in_transaction()
+        stored = await setup._read(app.state.runtime.database(), ctx, interview_id)
+        assert setup._stored(stored) == setup._stored(interview)
+        assert stored.step == "tools" and not stored.busy
+        after_ran.set()
+        if fail:
+            raise RuntimeError("private-after-data")
+
+    def render(interview, slug):
+        renders.append(interview.busy)
+        return setup.setup_state(interview, slug)
+
+    async def custom(ctx, engine, model, interview_id, allow, **kwargs):
+        return await setup.run_turn(ctx, engine, model, interview_id, **kwargs,
+                                    check=lambda interview: None,
+                                    stage=lambda interview: [setup.Entry(role="owner", text="")],
+                                    turn=turn, keep_staged=False, after=after, render=render)
+
+    monkeypatch.setattr(setup, "consent", custom)
+    if slow:
+        monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+    else:
+        release.set()
+    try:
+        reply = await owner.browser.post(path + "/consent", json={"allow": False})
+        assert reply.status_code == (202 if slow else 200)
+        if slow:
+            await asyncio.wait_for(entered.wait(), 5)
+            assert not after_ran.is_set()
+            release.set()
+            await app.state.runtime.turn_runs.wait(interview_id)
+        assert after_ran.is_set()
+        landed = (await owner.browser.get(path)).json()
+        assert landed["step"] == "tools" and landed["busy"] is False
+        assert landed["messages"][-1]["text"] == "Committed turn"
+        if not slow:
+            assert reply.json() == landed
+        assert renders == [True, False]
+        if fail:
+            assert "setup turn after failed (RuntimeError)" in caplog.text
+        assert "private-after-data" not in caplog.text
+    finally:
+        release.set()
+
+
+@pytest.mark.parametrize(("end", "slow"), [("timeout", False), ("timeout", True), ("shutdown", True)])
+async def test_after_timeout_or_shutdown_preserves_the_landed_state(
+        app, browser, fake, kernel_http, model, monkeypatch, caplog, db, end, slow):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    entered = asyncio.Event()
+    rollbacks = []
+    rollback = setup._rollback_turn
+
+    async def track_rollback(*args, **kwargs):
+        rollbacks.append(True)
+        await rollback(*args, **kwargs)
+
+    async def turn(ctx, interview, staged):
+        interview.step = "tools"
+        interview.answers = interview.answers.model_copy(update={"summary": "Committed answer"})
+        interview.transcript.append(setup.Entry(role="claude", text="Committed turn"))
+
+    async def after(ctx, interview):
+        assert interview_id in setup._RUNNING
+        stored = await setup._read(app.state.runtime.database(), ctx, interview_id)
+        assert setup._stored(stored) == setup._stored(interview)
+        entered.set()
+        await asyncio.Event().wait()
+
+    async def custom(ctx, engine, model, interview_id, allow, **kwargs):
+        return await setup.run_turn(ctx, engine, model, interview_id, **kwargs,
+                                    check=lambda interview: None,
+                                    stage=lambda interview: [setup.Entry(role="owner", text="")],
+                                    turn=turn, keep_staged=False, after=after)
+
+    monkeypatch.setattr(setup, "consent", custom)
+    monkeypatch.setattr(setup, "_rollback_turn", track_rollback)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0 if slow else 25)
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(setup, "TURN_AFTER_TIMEOUT_S", 0.4, raising=False)
+    reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": False}), 5)
+    assert reply.status_code == (202 if slow else 200), reply.text
+    if slow:
+        assert reply.json()["busy"] is True
+        await asyncio.wait_for(entered.wait(), 5)
+        assert app.state.runtime.turn_runs.holds(interview_id)
+        assert (await owner.browser.get(path)).json()["step"] == "tools"
+        if end == "shutdown":
+            task = app.state.runtime.turn_runs._tasks[interview_id]
+            await app.state.runtime.turn_runs.close()
+            assert task.cancelled()
+        else:
+            await asyncio.wait_for(app.state.runtime.turn_runs.wait(interview_id), 5)
+    assert entered.is_set()
+    landed = (await owner.browser.get(path)).json()
+    assert landed["step"] == "tools" and landed["busy"] is False
+    assert landed["messages"][-1]["text"] == "Committed turn"
+    if not slow:
+        assert reply.json() == landed
+    answers, transcript = db.execute("SELECT answers, transcript FROM app.setup_interviews WHERE interview_id = %s",
+                                     (interview_id,)).fetchone()
+    assert answers["summary"] == "Committed answer"
+    assert all("pending" not in entry and entry["text"] != "" for entry in transcript)
+    assert rollbacks == []
+    assert interview_id not in setup._RUNNING
+    assert not app.state.runtime.turn_runs.holds(interview_id)
+    assert [(record.msg, record.args) for record in caplog.records if record.name == setup.logger.name] == (
+        [("setup turn after failed (%s)", ("TimeoutError",))] if end == "timeout" else [])
 
 
 async def test_consent_answers_200_with_the_first_question_when_the_reads_finish_in_time(
@@ -29,7 +303,7 @@ async def test_consent_answers_200_with_the_first_question_when_the_reads_finish
     assert all("pending" not in entry for entry in transcript)
 
 
-async def test_an_empty_answer_reply_is_not_busy_or_recovered_as_consent(
+async def test_an_empty_model_reply_never_leaves_the_interview_busy(
         app, browser, fake, kernel_http, model, db):
     from tests.api.test_setup_questions import answer, turn
 
@@ -45,7 +319,7 @@ async def test_an_empty_answer_reply_is_not_busy_or_recovered_as_consent(
     assert answered["messages"][-1] == {"role": "owner", "text": "We repair water heaters."}
     assert answered["busy"] is False
     db.execute("UPDATE app.setup_interviews SET updated_at = now() - make_interval(secs => %s)"
-               " WHERE interview_id = %s", (setup.CONSENT_ABANDONED_S + 10, interview_id))
+               " WHERE interview_id = %s", (setup.TURN_ABANDONED_S + 10, interview_id))
     before = db.execute("SELECT * FROM app.setup_interviews WHERE interview_id = %s", (interview_id,)).fetchone()
     assert (await owner.browser.get(path)).json() == answered
     assert db.execute("SELECT * FROM app.setup_interviews WHERE interview_id = %s", (interview_id,)).fetchone() == before
@@ -65,12 +339,12 @@ async def test_a_failed_run_rolls_consent_back(app, browser, fake, kernel_http, 
         await release.wait()
         raise RuntimeError("private-owner-data")
 
-    monkeypatch.setattr(setup, "CONSENT_WAIT_S", 0)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
     monkeypatch.setattr(setup, "_after_consent", failing)
     reply = await owner.browser.post(path + "/consent", json={"allow": True})
     assert reply.status_code == 202
     await asyncio.wait_for(entered.wait(), 5)
-    task = app.state.runtime.consent_runs._tasks[state["interview_id"]]
+    task = app.state.runtime.turn_runs._tasks[state["interview_id"]]
     release.set()
     with pytest.raises(RuntimeError):
         await task
@@ -78,7 +352,7 @@ async def test_a_failed_run_rolls_consent_back(app, browser, fake, kernel_http, 
     assert rolled_back == state
     assert "private-owner-data" not in caplog.text
     monkeypatch.setattr(setup, "_after_consent", after)
-    monkeypatch.setattr(setup, "CONSENT_WAIT_S", 25)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 25)
     again = await owner.browser.post(path + "/consent", json={"allow": True})
     assert again.status_code == 200 and again.json()["busy"] is False
 
@@ -88,7 +362,7 @@ async def test_a_repeat_while_busy_answers_202_without_a_second_run(
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     asked, _ = held_limits(app, monkeypatch)
-    monkeypatch.setattr(setup, "CONSENT_WAIT_S", 0)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
     release = fake.gate("POST /execute")
     path = f"/api/owner/setup/{state['interview_id']}/consent"
     try:
@@ -100,7 +374,7 @@ async def test_a_repeat_while_busy_answers_202_without_a_second_run(
         assert asked.count("setup_turn") == 1
     finally:
         release.set()
-        await app.state.runtime.consent_runs.wait(state["interview_id"])
+        await app.state.runtime.turn_runs.wait(state["interview_id"])
     assert len(fake.called("POST /execute")) == 1
 
 
@@ -108,7 +382,7 @@ async def test_a_slow_consent_answers_202_busy_and_lands_later(
         app, browser, fake, kernel_http, model, monkeypatch):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
-    monkeypatch.setattr(setup, "CONSENT_WAIT_S", 0.01, raising=False)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0.01, raising=False)
     release = fake.gate("POST /execute")
     path = f"/api/owner/setup/{state['interview_id']}"
     try:
@@ -120,7 +394,7 @@ async def test_a_slow_consent_answers_202_busy_and_lands_later(
         assert (await owner.browser.get(path)).json() == busy
     finally:
         release.set()
-    await app.state.runtime.consent_runs.wait(state["interview_id"])
+    await app.state.runtime.turn_runs.wait(state["interview_id"])
     landed = (await owner.browser.get(path)).json()
     assert landed["busy"] is False and landed["question"] == setup.QUESTION_KEYS[0]
     assert [message["role"] for message in landed["messages"]] == [
@@ -160,7 +434,7 @@ async def test_an_abandoned_run_is_rolled_back_on_get_and_on_consent(
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     path = f"/api/owner/setup/{interview_id}"
-    abandoned(db, interview_id, setup.CONSENT_ABANDONED_S - 10)
+    abandoned(db, interview_id, setup.TURN_ABANDONED_S - 10)
     # A run in another process gets its full deadline before this process may recover it.
     young = (await owner.browser.get(path)).json()
     assert young["busy"] is True
@@ -168,7 +442,7 @@ async def test_an_abandoned_run_is_rolled_back_on_get_and_on_consent(
     assert (repeat.status_code, repeat.json()) == (202, young)
     assert fake.called("POST /execute") == []
     db.execute("UPDATE app.setup_interviews SET updated_at = now() - make_interval(secs => %s)"
-               " WHERE interview_id = %s", (setup.CONSENT_ABANDONED_S + 10, interview_id))
+               " WHERE interview_id = %s", (setup.TURN_ABANDONED_S + 10, interview_id))
     if on == "get":
         assert (await owner.browser.get(path)).json() == state
     else:
@@ -202,11 +476,11 @@ async def test_abandoned_recovery_removes_every_marker_and_preserves_unmarked_en
     expected = [entry for entry in transcript if "pending" not in entry]
     db.execute("UPDATE app.setup_interviews SET consent = true, transcript = %s,"
                " updated_at = now() - make_interval(secs => %s) WHERE interview_id = %s",
-               (Jsonb(transcript), setup.CONSENT_ABANDONED_S - 10, interview_id))
+               (Jsonb(transcript), setup.TURN_ABANDONED_S - 10, interview_id))
     # Only the explicit markers make this busy, even with an ordinary answer at the end.
     assert (await owner.browser.get(path)).json()["busy"] is True
     db.execute("UPDATE app.setup_interviews SET updated_at = now() - make_interval(secs => %s)"
-               " WHERE interview_id = %s", (setup.CONSENT_ABANDONED_S + 10, interview_id))
+               " WHERE interview_id = %s", (setup.TURN_ABANDONED_S + 10, interview_id))
     recovered = (await owner.browser.get(path)).json()
     consent, transcript = db.execute("SELECT consent, transcript FROM app.setup_interviews WHERE interview_id = %s",
                                      (interview_id,)).fetchone()
@@ -215,22 +489,27 @@ async def test_abandoned_recovery_removes_every_marker_and_preserves_unmarked_en
     assert recovered["busy"] is False
 
 
-async def test_answer_is_409_while_busy(app, browser, fake, kernel_http, model, monkeypatch):
+async def test_any_turn_while_busy_answers_202_without_running(app, browser, fake, kernel_http, model, monkeypatch):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
+    asked, _ = held_limits(app, monkeypatch)
     path = f"/api/owner/setup/{state['interview_id']}"
     release = fake.gate("POST /execute")
-    monkeypatch.setattr(setup, "CONSENT_WAIT_S", 0)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
     try:
-        assert (await owner.browser.post(path + "/consent", json={"allow": True})).status_code == 202
+        pending = await owner.browser.post(path + "/consent", json={"allow": True})
+        assert pending.status_code == 202
         calls = len(model.requests)
         reply = await owner.browser.post(path + "/answer", json={"question": "what_you_do", "text": "Plumbing"})
-        assert (reply.status_code, reply.json()) == (409, {"error": "conflict"})
+        assert (reply.status_code, reply.json()) == (202, pending.json())
+        repeat = await owner.browser.post(path + "/consent", json={"allow": False})
+        assert (repeat.status_code, repeat.json()) == (202, pending.json())
         assert len(model.requests) == calls
+        assert asked.count("setup_turn") == 1
         assert (await owner.browser.get(path)).json()["busy"] is True
     finally:
         release.set()
-        await app.state.runtime.consent_runs.wait(state["interview_id"])
+        await app.state.runtime.turn_runs.wait(state["interview_id"])
 
 
 async def test_declined_consent_reads_nothing_and_still_asks(
@@ -254,9 +533,53 @@ async def test_declined_consent_reads_nothing_and_still_asks(
     assert fake.called("POST /decide") == [] and fake.called("POST /execute") == []
 
 
-@pytest.mark.parametrize("end", ["deadline", "shutdown"])
+async def test_a_stalled_detached_entry_is_bounded_by_the_run_deadline(
+        app, browser, fake, kernel_http, model, monkeypatch, db):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    before = db.execute("SELECT * FROM app.setup_interviews WHERE interview_id = %s", (interview_id,)).fetchone()
+    entered, exited = asyncio.Event(), asyncio.Event()
+    detached = setup.detached
+    runs = app.state.runtime.turn_runs
+
+    @contextlib.asynccontextmanager
+    async def stalled(owner, engine, ro_schema):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            exited.set()
+        yield owner
+
+    monkeypatch.setattr(setup, "detached", stalled)
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.2)
+    request = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": False}))
+    try:
+        await asyncio.wait_for(entered.wait(), 5)
+        assert interview_id in setup._RUNNING and runs.holds(interview_id)
+        reply = await asyncio.wait_for(asyncio.shield(request), 1)
+        assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+        assert exited.is_set()
+        assert interview_id not in setup._RUNNING and not runs.holds(interview_id)
+        assert (await owner.browser.get(path)).json() == state
+        assert db.execute("SELECT * FROM app.setup_interviews WHERE interview_id = %s",
+                          (interview_id,)).fetchone() == before
+    finally:
+        await runs.close()
+        await asyncio.gather(request, return_exceptions=True)
+
+    monkeypatch.setattr(setup, "detached", detached)
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 100)
+    retry = await owner.browser.post(path + "/consent", json={"allow": False})
+    assert retry.status_code == 200 and retry.json()["busy"] is False
+    assert retry.json()["question"] == setup.QUESTION_KEYS[0]
+
+
+@pytest.mark.parametrize(("end", "slow"), [("deadline", False), ("deadline", True), ("shutdown", True)])
 async def test_a_run_deadline_or_shutdown_reopens_consent(
-        app, browser, fake, kernel_http, model, monkeypatch, end, caplog):
+        app, browser, fake, kernel_http, model, monkeypatch, end, slow, caplog):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
     path = f"/api/owner/setup/{state['interview_id']}"
@@ -267,30 +590,35 @@ async def test_a_run_deadline_or_shutdown_reopens_consent(
         await release.wait()
 
     monkeypatch.setattr(setup, "_after_consent", waiting)
-    monkeypatch.setattr(setup, "CONSENT_WAIT_S", 0)
-    monkeypatch.setattr(setup, "CONSENT_RUN_TIMEOUT_S", 0.2 if end == "deadline" else 100)
-    assert (await owner.browser.post(path + "/consent", json={"allow": True})).status_code == 202
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0 if slow else 25)
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.2 if end == "deadline" else 100)
+    reply = await owner.browser.post(path + "/consent", json={"allow": True})
+    assert reply.status_code == (202 if slow else 503)
     await asyncio.wait_for(entered.wait(), 5)
-    task = app.state.runtime.consent_runs._tasks[state["interview_id"]]
-    if end == "shutdown":
-        await app.state.runtime.consent_runs.close()
-        assert task.cancelled()
-        assert "CancelledError" in caplog.text
+    if slow:
+        task = app.state.runtime.turn_runs._tasks[state["interview_id"]]
+        if end == "shutdown":
+            await app.state.runtime.turn_runs.close()
+            assert task.cancelled()
+            assert "CancelledError" in caplog.text
+        else:
+            with pytest.raises(ApiProblem) as failed:
+                await asyncio.wait_for(asyncio.shield(task), 5)
+            assert (failed.value.status, failed.value.error) == (503, "model_unavailable")
+            assert "TimeoutError" in caplog.text
     else:
-        with pytest.raises(ApiProblem) as failed:
-            await asyncio.wait_for(asyncio.shield(task), 5)
-        assert (failed.value.status, failed.value.error) == (503, "model_unavailable")
+        assert reply.json() == {"error": "model_unavailable"}
         assert "TimeoutError" in caplog.text
     assert (await owner.browser.get(path)).json() == state
     assert state["interview_id"] not in setup._RUNNING
-    assert not app.state.runtime.consent_runs.holds(state["interview_id"])
+    assert not app.state.runtime.turn_runs.holds(state["interview_id"])
 
 
 async def test_a_wait_that_expires_returns_the_busy_snapshot_even_if_the_run_lands_just_after(
         app, browser, fake, kernel_http, model, monkeypatch):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
-    runs = app.state.runtime.consent_runs
+    runs = app.state.runtime.turn_runs
     read = setup._read
 
     async def after_the_run(engine, owner, interview_id):
@@ -300,7 +628,7 @@ async def test_a_wait_that_expires_returns_the_busy_snapshot_even_if_the_run_lan
         return await read(engine, owner, interview_id)
 
     monkeypatch.setattr(setup, "_read", after_the_run)
-    monkeypatch.setattr(setup, "CONSENT_WAIT_S", 0)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
     reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/consent", json={"allow": False})
     assert reply.status_code == 202 and reply.json()["busy"] is True
     await runs.wait(state["interview_id"])
@@ -312,18 +640,18 @@ async def test_a_held_run_is_not_recovered_even_when_its_row_is_old(
     state = await begin(owner, model)
     path = f"/api/owner/setup/{state['interview_id']}"
     release = fake.gate("POST /execute")
-    monkeypatch.setattr(setup, "CONSENT_WAIT_S", 0)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
     try:
         reply = await owner.browser.post(path + "/consent", json={"allow": True})
         assert reply.status_code == 202
         db.execute("UPDATE app.setup_interviews SET updated_at = now() - make_interval(secs => %s)"
-                   " WHERE interview_id = %s", (setup.CONSENT_ABANDONED_S + 10, state["interview_id"]))
+                   " WHERE interview_id = %s", (setup.TURN_ABANDONED_S + 10, state["interview_id"]))
         assert (await owner.browser.get(path)).json() == reply.json()
         repeat = await owner.browser.post(path + "/consent", json={"allow": False})
         assert (repeat.status_code, repeat.json()) == (202, reply.json())
     finally:
         release.set()
-        await app.state.runtime.consent_runs.wait(state["interview_id"])
+        await app.state.runtime.turn_runs.wait(state["interview_id"])
 
 
 @pytest.mark.parametrize("fail", [False, True])
@@ -344,11 +672,11 @@ async def test_a_run_neither_lands_nor_rolls_back_over_a_changed_interview(
             raise ApiProblem(503, "model_unavailable")
         await after(owner, engine, model, interview, entries)
 
-    monkeypatch.setattr(setup, "CONSENT_WAIT_S", 0)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
     monkeypatch.setattr(setup, "_after_consent", changed)
     assert (await owner.browser.post(path + "/consent", json={"allow": True})).status_code == 202
     await asyncio.wait_for(entered.wait(), 5)
-    task = app.state.runtime.consent_runs._tasks[state["interview_id"]]
+    task = app.state.runtime.turn_runs._tasks[state["interview_id"]]
     (transcript,) = db.execute("SELECT transcript FROM app.setup_interviews WHERE interview_id = %s",
                                (state["interview_id"],)).fetchone()
     # A completed turn clears the pending marker in the same write as Claude's reply.
@@ -395,7 +723,7 @@ async def test_a_cancelled_request_leaves_the_run_on_its_own_connection(
         assert all(message["role"] != "tool_label" for message in busy["messages"])
     finally:
         release.set()
-        await app.state.runtime.consent_runs.wait(state["interview_id"])
+        await app.state.runtime.turn_runs.wait(state["interview_id"])
     landed = (await owner.browser.get(path)).json()
     assert landed["busy"] is False and landed["question"] == setup.QUESTION_KEYS[0]
 
@@ -410,7 +738,7 @@ async def test_cancelling_the_request_right_after_admission_still_finishes_conse
     path = f"/api/owner/setup/{interview_id}"
     moving_on, after = routes._moving_on, setup._after_consent
     entered, release = asyncio.Event(), asyncio.Event()
-    runs = app.state.runtime.consent_runs
+    runs = app.state.runtime.turn_runs
 
     async def cancel_after_admission(*args):
         await moving_on(*args)
@@ -449,7 +777,7 @@ async def test_cancelling_the_request_during_the_busy_commit_cannot_strand_conse
     path = f"/api/owner/setup/{interview_id}"
     commit, after = setup._commit, setup._after_consent
     committed, release = asyncio.Event(), asyncio.Event()
-    runs = app.state.runtime.consent_runs
+    runs = app.state.runtime.turn_runs
 
     async def finishing_commit(engine, ctx, interview, seen):
         await commit(engine, ctx, interview, seen)
@@ -504,12 +832,12 @@ async def test_a_rejected_busy_commit_answers_its_error_without_running_or_rolli
 
     monkeypatch.setattr(setup, "_commit", conflicting)
     monkeypatch.setattr(setup, "_after_consent", unexpected)
-    monkeypatch.setattr(setup, "_rollback_consent", unexpected)
+    monkeypatch.setattr(setup, "_rollback_turn", unexpected)
     reply = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": True}), 5)
     assert (reply.status_code, reply.json()) == (409, {"error": "conflict"})
     assert commits == [interview_id] and fake.called("POST /execute") == []
     assert (await owner.browser.get(path)).json() == state
-    assert interview_id not in setup._RUNNING and not app.state.runtime.consent_runs.holds(interview_id)
+    assert interview_id not in setup._RUNNING and not app.state.runtime.turn_runs.holds(interview_id)
 
 
 async def test_a_failed_busy_commit_preserves_another_runs_identical_consent(
@@ -557,7 +885,7 @@ async def test_a_failed_busy_commit_preserves_another_runs_identical_consent(
     assert current["busy"] is True and current["consent"] is True
     assert current["messages"][-1] == {"role": "owner", "text": setup.CONSENT_ANSWERS[True]}
     assert fake.called("POST /execute") == []
-    assert interview_id not in setup._RUNNING and not app.state.runtime.consent_runs.holds(interview_id)
+    assert interview_id not in setup._RUNNING and not app.state.runtime.turn_runs.holds(interview_id)
 
 
 @pytest.mark.parametrize("consent_pending", [True, False])
@@ -627,8 +955,8 @@ async def test_a_competing_consent_cannot_take_the_guard_during_handoff(
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     path = f"/api/owner/setup/{interview_id}"
-    runs = app.state.runtime.consent_runs
-    recover, start, after = setup._recover_consent, runs.start, setup._after_consent
+    runs = app.state.runtime.turn_runs
+    recover, start, after = setup._recover_turn, runs.start, setup._after_consent
     loaded, handoff = asyncio.Event(), asyncio.Event()
     asked, (first_admission, second_admission) = held_limits(app, monkeypatch, hold=2)
     first_admission.set()
@@ -650,7 +978,7 @@ async def test_a_competing_consent_cannot_take_the_guard_during_handoff(
         executions.append(interview_id)
         await after(*args)
 
-    monkeypatch.setattr(setup, "_recover_consent", stale_snapshot)
+    monkeypatch.setattr(setup, "_recover_turn", stale_snapshot)
     monkeypatch.setattr(runs, "start", handing_off)
     monkeypatch.setattr(setup, "_after_consent", counted)
     competing = asyncio.create_task(owner.browser.post(path + "/consent", json={"allow": False}))
@@ -683,14 +1011,14 @@ async def test_a_stalled_rollback_does_not_outlive_the_abandonment_window(
         await release.wait()
 
     monkeypatch.setattr(setup, "_after_consent", failing)
-    monkeypatch.setattr(setup, "_rollback_consent", stalled)
-    monkeypatch.setattr(setup, "CONSENT_ROLLBACK_TIMEOUT_S", 0.01, raising=False)
+    monkeypatch.setattr(setup, "_rollback_turn", stalled)
+    monkeypatch.setattr(setup, "TURN_ROLLBACK_TIMEOUT_S", 0.01, raising=False)
     try:
         reply = await asyncio.wait_for(owner.browser.post(
             f"/api/owner/setup/{state['interview_id']}/consent", json={"allow": False}), 0.5)
         assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
         assert "couldn't be reopened (TimeoutError)" in caplog.text
-        assert not app.state.runtime.consent_runs.holds(state["interview_id"])
+        assert not app.state.runtime.turn_runs.holds(state["interview_id"])
     finally:
         release.set()
-        await asyncio.gather(app.state.runtime.consent_runs.wait(state["interview_id"]), return_exceptions=True)
+        await asyncio.gather(app.state.runtime.turn_runs.wait(state["interview_id"]), return_exceptions=True)

@@ -244,7 +244,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
                                 production=settings.production)
             stack.push_async_callback(agents.close)        # before its client, the runner and the pools
             stack.push_async_callback(state.proving.close)  # no proving work outlives the pools it runs on
-            stack.push_async_callback(state.consent_runs.close)
+            stack.push_async_callback(state.turn_runs.close)
             await stack.enter_async_context(jobs.open_async())
             worker = asyncio.create_task(run_worker(jobs, JobEnv(engine=engine, ro_schema=settings.kernel_ro_schema,
                                                                  clock=state.clock, model=state.model,
