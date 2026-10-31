@@ -1334,7 +1334,8 @@ class _Judge:
         the record on the session's Desk and of the session the card was delivered to; the reply entry at
         the card's signed seq the kernel's, on that session, naming the card's message; and before it,
         the kernel's own entry on the record's session moving the record to `state` for `reason` (its ref
-        and link both the record). That reply must be the Desk's own card (`author` desk) that passed,
+        and link both the record). The card's first line must be the fact's `title` claim. That reply must
+        be the Desk's own card (`author` desk) that passed,
         citing this fact. Its fact's expiry is then no fault: it ended with the record. Whatever can't be
         established is a fault. It judges artifacts the harness wrote from the ledger and the stream;
         their integrity is the signatures' job, not this check's."""
@@ -1347,6 +1348,11 @@ class _Judge:
                 or record.get("state") != state):
             return (f"a card cites a fact that isn't a {state} {kind.replace('_', ' ')}'s own",
                     f"{where} cites {block.fact_id}")
+        # the card's first line is the cited fact's own title, what that link was for
+        title = next((c.get("value") for c in fact.get("claims") or []
+                      if c.get("key") == "title" and c.get("kind") == "text"), None)
+        if title is None or list(block.lines[:1]) != [title]:
+            return ("a card names what its link was for other than its fact says", f"{where} cites {block.fact_id}")
         # the reply entry the card's signature names: the kernel's, on this session, for this message, and the
         # Desk's own card (an ended record's card is kernel-issued) that passed, citing this fact
         reply = next((entry for entry in self.ledger.get(desk_id, []) if entry["seq"] == shown.signed_seq), None)

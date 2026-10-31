@@ -1412,6 +1412,7 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
         quote = run.quote("drain")
         link = run.link(quote)
         fact = next(f for f in run.records["facts"] if f["fact_id"] == f"payment_link:{link}")
+        fact["claims"].append({"key": "title", "kind": "text", "value": "Drain clearing"})   # as the kernel writes it
         fact["expires_at"] = START - timedelta(days=1)            # it expired with the link
         if readers is not None:
             fact["readers"] = readers
@@ -1514,6 +1515,10 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     def a_second_ref(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
         fact["claims"].append({"key": "ref", "kind": "text", "value": "L-other"})
 
+    def another_links_title(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
+        # the card shows its link's amount, but the fact it cites names another visit
+        next(c for c in fact["claims"] if c["key"] == "title")["value"] = "Water heater"
+
     def reply_summary(**changes: Any) -> Callable[[Run, str, str, dict[str, Any]], None]:
         def tweak(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
             entry(run, "reply", message)["summary"].update(changes)
@@ -1526,7 +1531,7 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     for tweak in (reply_names_another, reply_on_another_session, cancelled_on_another_session,
                   cancelled_by_the_api, cancelled_for_another_reason, a_second_ref,
                   reply_summary(message_id="m-other"), reply_summary(author="claude"), reply_summary(ok=False),
-                  reply_summary(fact_ids=["payment_link:L-other"])):
+                  reply_summary(fact_ids=["payment_link:L-other"]), another_links_title):
         run, _ = cancelled(after=tweak)
         assert "commitment.card_fact" in fired(run.scenario, run.build()), tweak.__name__
     # signed and ledgered like every card
