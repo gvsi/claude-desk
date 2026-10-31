@@ -1,11 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useLayoutEffect, useRef, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
 import type { EvMessage, PublicDesk, SseEvent, StatusEvent } from '../../../api/contracts.ts';
 import { contrastRatio } from '../../contrast.ts';
 import { rivera, type TranscriptTurn } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { FollowTheChat } from '../../test/followTheChat.tsx';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { Composer } from '../Composer/Composer.tsx';
 import { MarginReceipt } from '../MarginReceipt/MarginReceipt.tsx';
@@ -798,7 +799,10 @@ const OWNER_IN_CHAT = {
   es: 'Maria Rivera está en este chat. Claude, una IA, está en pausa hasta que Maria Rivera le devuelva el chat.',
 };
 
-/** The line the page writes in the chat as the owner joins, in the visitor's language, as the web app words it. */
+/**
+ * The line the page writes in the chat as the owner joins, in the visitor's language: a stand-in for
+ * `joined` in web/src/public/copy.ts, which the design system doesn't import.
+ */
 const JOINED = { en: (name: string) => `${name} joined the chat`, es: (name: string) => `${name} se unió al chat` };
 
 /**
@@ -825,22 +829,10 @@ const TAKE_OVER: Record<'en' | 'es', TranscriptTurn[]> = {
 };
 
 /**
- * The end of the conversation, kept just above the composer as the public chat page keeps it: on a
- * phone the about column opens the scroll region, and the newest messages are below it.
- */
-function FollowTheChat() {
-  const end = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const region = end.current?.closest<HTMLElement>('.cd-public-shell__scroll');
-    if (region) region.scrollTop = region.scrollHeight;
-  });
-  return <div ref={end} />;
-}
-
-/**
  * The take-over's rows, as the public page draws them: the visitor's words, Claude's and Maria's
  * messages with their receipts under them, and the line that says Maria joined; the chat's end is
- * kept above the composer.
+ * kept above the composer. Not the boards' `TurnRows`: that is for the `Boards/*` stories only, and
+ * writes the joined line in English only.
  */
 function TakeOverConversation({ language }: { language: 'en' | 'es' }) {
   const rows: ReactNode[] = [];
@@ -918,7 +910,7 @@ async function expectOwnerInChat(root: HTMLElement, language: 'en' | 'es'): Prom
 }
 
 const ownerInChatNote =
-  'The chat head of take-over option A: while Maria is in the chat it says so and that Claude, an AI, is paused until she hands it back, and Ask for Maria isn’t shown. Built from the signed option, not yet compared with its render. The conversation is the fixture’s take-over, its end kept above the composer as the page keeps it, and the about column shows the charter’s cards.';
+  'The chat head of take-over option A: while Maria is in the chat it says so and that Claude, an AI, is paused until she hands it back, and Ask for Maria isn’t shown. Built from the signed option; its render and the by-eye comparison are tracked in issue #230. The conversation is the fixture’s take-over, its end kept above the composer as the page keeps it, and the about column shows the charter’s cards.';
 
 export const OwnerInChat: Story = {
   args: { ownerInChat: true, openStatus: OPEN_EN, children: <TakeOverConversation language="en" /> },

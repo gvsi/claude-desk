@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useLayoutEffect, useRef } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
 import type { EvMessage, SseEvent } from '../../api/contracts.ts';
@@ -9,6 +8,7 @@ import { Transcript } from '../components/Transcript/Transcript.tsx';
 import type { TranscriptTurn } from '../fixtures/index.ts';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
+import { FollowTheChat } from '../test/followTheChat.tsx';
 import { OPEN_NOW, TurnRows, brandOf } from './parts.tsx';
 import { SPEC, expectConversationType, expectFooter, expectReceiptsUnderMessages, expectTabOrder, one } from './spec.ts';
 
@@ -27,19 +27,6 @@ const TURNS: TranscriptTurn[] = [
   { kind: 'event', event: handoff },
   ...rivera.events.takeOver.flatMap((event): TranscriptTurn[] => (event.type === 'owner_left' ? [] : [{ kind: 'event', event }])),
 ];
-
-/**
- * The end of the conversation, kept just above the composer as the public chat page keeps it: on a
- * phone the about column opens the scroll region, and the newest messages are below it.
- */
-function FollowTheChat() {
-  const end = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const region = end.current?.closest<HTMLElement>('.cd-public-shell__scroll');
-    if (region) region.scrollTop = region.scrollHeight;
-  });
-  return <div ref={end} />;
-}
 
 /** Dana's public page while Maria is in the chat. */
 function PublicTakeOver() {
@@ -69,7 +56,7 @@ const meta = {
     layout: 'fullscreen',
     canvasNote: [
       'Take-over option A, signed on 2026-10-30: while Maria is in the chat, the chat head says so and that Claude, an AI, is paused until she hands it back, on the disclosure’s line, and Ask for Maria isn’t shown.',
-      'Built from the signed option; not yet compared with its render.',
+      'Built from the signed option; its render and the by-eye comparison are tracked in issue #230.',
       'The conversation is the Rivera fixture’s: Dana asks for Maria, the kernel’s handoff card with its receipt, then the take-over’s events (Maria joins, and her words under her name), with its end kept above the composer as the page keeps it; the about column shows the charter’s cards, and the header the kernel’s open status.',
     ].join(' '),
   },
