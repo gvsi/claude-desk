@@ -325,6 +325,7 @@ export function ClaudeAccountChat() {
       ownerName={owner}
       language="en"
       onAskForOwner={fn()}
+      inertAsk
       about={CLAUDE_ACCOUNT_ABOUT}
       composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} inertSend />}
     >
@@ -593,6 +594,7 @@ export function CityOfficeChat() {
       language="en"
       openStatus={CITY_DESK.open_status}
       onAskForOwner={fn()}
+      inertAsk
       about={CITY_DESK.charter}
       composer={
         <Composer variant="visitor" label="Message Meridian Bay Permits" placeholder="Message Meridian Bay Permits" maxLength={2000} onSend={fn()} inertSend />
@@ -630,9 +632,9 @@ export function CityOfficeChat() {
           <CityReply text={t.staffDecides} />
         </TranscriptRow>
       </Transcript>
-      {/* A vision page makes no requests: a suggestion goes nowhere. */}
+      {/* A vision page makes no requests: a suggestion goes nowhere, and its first pick says so. */}
       <div className="board-vision-city__suggestions">
-        <SuggestionChips label="Try asking" suggestions={CITY_SUGGESTIONS} onPick={fn()} />
+        <SuggestionChips label="Try asking" suggestions={CITY_SUGGESTIONS} onPick={fn()} inertSuggestions />
       </div>
     </PublicShell>
   );

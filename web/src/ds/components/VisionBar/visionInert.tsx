@@ -2,7 +2,8 @@ import './visionInert.css';
 
 /**
  * What an inert control on a vision page says on its first press: the composer's Send, a held
- * request's answers and a document card's Download. English only, as the vision pages are.
+ * request's answers, a document card's Download, a suggestion and "Ask for {owner}". English only,
+ * as the vision pages are.
  */
 export const VISION_INERT_LINE = 'This is a vision page, so nothing is sent.';
 
