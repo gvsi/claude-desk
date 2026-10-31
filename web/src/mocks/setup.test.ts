@@ -268,31 +268,25 @@ describe('a description in Spanish', () => {
 describe("setup's examples", () => {
   it('each_example_gives_its_business_owner_slug_and_line', async () => {
     // The start step's examples, in English and in Spanish, read as an owner's own description: the
-    // business's name from its first sentence, the owner greeted by the first name they give, a
+    // business's name from its description, the owner greeted by the first name they give, a
     // slug from the business's name, and the work as the line on its public page.
     const expected = {
       en: [
-        ['Okafor Plumbing', 'Daniel', 'okafor-plumbing-setup1', 'People often send me a photo of the problem before I come out.'],
-        [
-          "Rosa's Bakery",
-          'Rosa',
-          'rosa-s-bakery-setup1',
-          'Most orders are for birthdays and weddings, and people tell me the size, the flavors and the design they have in mind.',
-        ],
-        ['Nguyen Tax Services', 'Linh', 'nguyen-tax-services-setup1', 'People send me their documents online or bring them to my office.'],
+        ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Most clients book ahead; we take a deposit for color appointments and charge for late cancellations. We’re open Tuesday to Saturday.'],
+        ['Rivera Plumbing', 'Maria', 'rivera-plumbing-setup1', null],
+        ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', 'People ask about open units and viewings, tenants report maintenance problems, and I collect application fees and deposits.'],
+        ['Chen & Co.', 'Linda', 'chen-co-setup1', 'New clients start with a free 20-minute consult, and we price each engagement after it.'],
       ],
       es: [
-        ['Plomería Okafor', 'Daniel', 'plomeria-okafor-setup1', 'La gente suele mandarme una foto del problema antes de que vaya.'],
-        [
-          'Panadería Rosa',
-          'Rosa',
-          'panaderia-rosa-setup1',
-          'Casi todos los pedidos son para cumpleaños y bodas, y la gente me dice el tamaño, los sabores y el diseño que tiene en mente.',
-        ],
-        ['Impuestos Nguyen', 'Linh', 'impuestos-nguyen-setup1', 'La gente me manda sus documentos por internet o los trae a mi oficina.'],
+        ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.'],
+        ['Rivera Plumbing', 'Maria', 'rivera-plumbing-setup1', null],
+        ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', 'La gente pregunta por unidades disponibles y visitas, los inquilinos reportan problemas de mantenimiento, y yo cobro las cuotas de solicitud y los depósitos.'],
+        ['Chen & Co.', 'Linda', 'chen-co-setup1', 'Los clientes nuevos empiezan con una consulta gratis de 20 minutos, y cotizamos cada trabajo después de ella.'],
       ],
     } as const;
     for (const language of ['en', 'es'] as const) {
+      // Each language starts its own copy: the translated starters share the same business names.
+      mockStore.reset('rivera');
       const examples = START_EXAMPLES[language].examples;
       expect(examples).toHaveLength(expected[language].length);
       for (const [at, { chip, description }] of examples.entries()) {

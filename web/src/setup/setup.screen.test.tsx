@@ -42,19 +42,7 @@ const DESCRIPTION =
 
 /** The line over the start step's examples, and its chips, in the signed board's words. */
 const EXAMPLES_LINE = 'Or start from an example. You can change every word.';
-const EXAMPLE_CHIPS = ['A plumber in Oakland', 'A bakery that takes custom orders', 'A tax preparer'];
-
-/**
- * What only the business's facts may state, in English and Spanish: an amount, a price, quote or
- * deposit, a date or hold, a promise or deal, and a day or month. Setup's examples are words for the
- * owner to change, so they state none of it.
- */
-const STATES_A_FACT: readonly RegExp[] = [
-  /[\d$%€]/,
-  /\b(?:prices?|cost|charges?|quotes?|deposits?|dates?|hold|rates?|precios?|cuesta|cobro|depósitos?|anticipo|fechas?|apartar)\b/i,
-  /\b(?:free|discounts?|deals?|guarantee[ds]?|promise[ds]?|same[- ]day|today|tomorrow|gratis|descuentos?|ofertas?|garantiz\w*|prometo|hoy|mañana)\b/i,
-  /\b(?:(?:mon|tues|wednes|thurs|fri|satur|sun)days?|january|february|march|april|may|june|july|august|september|october|november|december|lunes|martes|miércoles|jueves|viernes|sábados?|domingos?|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i,
-];
+const EXAMPLE_CHIPS = ['A hair salon in Oakland', 'A plumber in Oakland', 'Apartments in Sacramento', 'A CPA firm in San Jose'];
 
 /** The requests a route got, by key, from the `from`th request on. */
 const requests = (key: RouteKey, from = 0) => mockStore.requests.slice(from).filter((r) => r.key === key);
@@ -644,8 +632,8 @@ describe('setup', () => {
     expect(document.title).toBe('Claude Desk');
   });
 
-  it('start_offers_three_examples_under_the_box', async () => {
-    // Under the box and its hint: a line, then three examples to start from, each a chip, then "Start".
+  it('start_offers_four_examples_under_the_box', async () => {
+    // Under the box and its hint: a line, then four examples to start from, each a chip, then "Start".
     const { screen } = await renderRoute('/app/setup');
     const line = screen.getByText(EXAMPLES_LINE, { exact: true });
     await expect.element(line).toBeVisible();
@@ -665,7 +653,7 @@ describe('setup', () => {
     expect(line.element().classList.contains('cd-type-meta')).toBe(true);
   });
 
-  it('an_example_fills_the_box_and_starts_nothing', async () => {
+  it('each_of_four_examples_fills_the_box_and_starts_nothing', async () => {
     // A chip puts its example in the box, the owner's first name in it as the hint asks, and gives
     // the box focus with the caret at its start, where the business's name is to change. A word
     // missing from the box is no longer asked for. Nothing is sent before "Start".
@@ -677,7 +665,7 @@ describe('setup', () => {
       const example = START_EXAMPLES.en.examples[at];
       await screen.getByRole('button', { name: chip }).click();
       await expect.element(box).toHaveValue(example?.description);
-      expect(example?.description, chip).toMatch(/\bI'm [A-Z][a-z]+, and I /);
+      expect(example?.description, chip).toMatch(/^I’m [A-Z][a-z]+ [A-Z][a-z]+\./);
       await expect.element(box).toHaveFocus();
       const field = box.element() as HTMLTextAreaElement;
       expect([field.selectionStart, field.selectionEnd, field.scrollTop], chip).toEqual([0, 0, 0]);
@@ -692,19 +680,19 @@ describe('setup', () => {
     // what "Start" sends is the text as the owner left it.
     const { screen } = await renderRoute('/app/setup');
     const box = screen.getByRole('textbox', { name: 'Your business' });
-    await screen.getByRole('button', { name: 'A bakery that takes custom orders' }).click();
+    await screen.getByRole('button', { name: 'A plumber in Oakland' }).click();
     await expect.element(box).toHaveFocus();
-    await userEvent.keyboard('Sweet ');
-    const edited = `Sweet ${START_EXAMPLES.en.examples[1]?.description ?? ''}`;
+    await userEvent.keyboard('I run Sweet Rivera Plumbing. ');
+    const edited = `I run Sweet Rivera Plumbing. ${START_EXAMPLES.en.examples[1]?.description ?? ''}`;
     await expect.element(box).toHaveValue(edited);
     await screen.getByRole('button', { name: 'Start' }).click();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     expect(requests('startSetup').map((r) => (r.body as { description: string }).description)).toEqual([edited]);
-    await expect.element(screen.getByText("Sweet Rosa's Bakery", { exact: true }).first()).toBeVisible();
+    await expect.element(screen.getByText('Sweet Rivera Plumbing', { exact: true }).first()).toBeVisible();
   });
 
   it('examples_wrap_at_phone_width', async () => {
-    // At 390 px the three chips don't fit one line: they wrap inside the column, each on one line of
+    // At 390 px the four chips don't fit one line: they wrap inside the column, each on one line of
     // its own words, and nothing scrolls sideways, before a pick or after one.
     const { screen } = await renderRoute('/app/setup', { viewport: 'phone' });
     await expect.element(screen.getByText(EXAMPLES_LINE, { exact: true })).toBeVisible();
@@ -725,32 +713,112 @@ describe('setup', () => {
     expectNoHorizontalScroll();
   });
 
-  it('examples_are_kept_in_spanish_and_state_nothing', () => {
-    // Setup reads English, as the whole owner app does, and has no language of its own yet. Its
-    // examples are kept in Spanish too, the same three businesses in the same order, for when it has one.
-    expect(SETUP_LANGUAGE).toBe('en');
-    const { en, es } = START_EXAMPLES;
-    expect(es.line).toBe('O empieza con un ejemplo. Puedes cambiar cada palabra.');
-    expect(es.label).toBe('Ejemplos');
-    expect(es.examples.map((example) => example.chip)).toEqual([
-      'Un plomero en Oakland',
-      'Una panadería que acepta pedidos personalizados',
-      'Una preparadora de impuestos',
-    ]);
-    const owners = (descriptions: readonly string[], introduction: RegExp) => descriptions.map((text) => introduction.exec(text)?.[1]);
-    const enOwners = owners(en.examples.map((example) => example.description), /\bI'm ([A-Z][a-z]+), and I /);
-    expect(enOwners).toEqual(['Daniel', 'Rosa', 'Linh']);
-    expect(owners(es.examples.map((example) => example.description), /\bSoy ([A-Z][a-z]+) y /)).toEqual(enOwners);
-
-    // Words for the owner to change, never facts: no amounts, prices, days, dates, deposits, discounts
-    // or promises, in two or three sentences. The board's draft bakery sentence is what they avoid.
-    const states = (text: string) => STATES_A_FACT.filter((pattern) => pattern.test(text)).map(String);
-    expect(states('People ask for prices, order cakes for a date and pay a deposit to hold it.')).not.toEqual([]);
-    for (const { chip, description } of [...en.examples, ...es.examples]) {
-      expect(description.split(/(?<=\.)\s+/).length, chip).toBeGreaterThanOrEqual(2);
-      expect(description.split(/(?<=\.)\s+/).length, chip).toBeLessThanOrEqual(3);
-      expect(states(description), chip).toEqual([]);
+  it('the_start_box_fits_its_text_between_four_and_ten_lines', async () => {
+    const { screen } = await renderRoute('/app/setup', { viewport: 'phone' });
+    const box = screen.getByRole('textbox', { name: 'Your business' });
+    const field = box.element() as HTMLTextAreaElement;
+    const style = getComputedStyle(field);
+    const floor = 4 * parseFloat(style.lineHeight) + parseFloat(token('--space-20'));
+    const cap = 10 * parseFloat(style.lineHeight) + parseFloat(token('--space-20'));
+    expect(style.getPropertyValue('field-sizing')).toBe('content');
+    expect(style.resize).toBe('vertical');
+    expect(field.getBoundingClientRect().height).toBe(floor);
+    for (const chip of EXAMPLE_CHIPS) {
+      await screen.getByRole('button', { name: chip }).click();
+      expect(field.getBoundingClientRect().height, chip).toBeGreaterThanOrEqual(floor);
+      expect(field.scrollHeight, chip).toBeLessThanOrEqual(field.clientHeight);
+      expectNoHorizontalScroll();
     }
+    await screen.getByRole('button', { name: 'A hair salon in Oakland' }).click();
+    expect(field.getBoundingClientRect().height).toBeGreaterThan(floor);
+    await box.fill('A short description.');
+    expect(field.getBoundingClientRect().height).toBe(floor);
+    await box.fill(Array.from({ length: 12 }, () => 'A line of the owner’s description.').join('\n'));
+    expect(field.getBoundingClientRect().height).toBe(cap);
+    expect(field.scrollHeight).toBeGreaterThan(field.clientHeight);
+    expect(field.style.height).toBe('');
+  });
+
+  it('the_start_box_grows_after_picks_and_input_without_field_sizing', async () => {
+    const supports = vi.spyOn(CSS, 'supports').mockReturnValue(false);
+    onTestFinished(() => supports.mockRestore());
+    const { screen } = await renderRoute('/app/setup', { viewport: 'phone' });
+    const box = screen.getByRole('textbox', { name: 'Your business' });
+    const field = box.element() as HTMLTextAreaElement;
+    // Emulate a browser that ignores field-sizing, not just its feature query.
+    field.style.setProperty('field-sizing', 'fixed');
+    const style = getComputedStyle(field);
+    const floor = parseFloat(style.minHeight);
+    const cap = parseFloat(style.maxHeight);
+    const salon = screen.getByRole('button', { name: 'A hair salon in Oakland' });
+    await salon.click();
+    expect(field.style.height).toBe(`${field.scrollHeight + 2}px`);
+    expect(field.getBoundingClientRect().height).toBeGreaterThan(floor);
+    // Picking the same starter again also resets a manually resized box.
+    field.style.height = `${cap}px`;
+    await salon.click();
+    expect(field.style.height).toBe(`${field.scrollHeight + 2}px`);
+    expect(field.getBoundingClientRect().height).toBeLessThan(cap);
+    await box.fill(Array.from({ length: 12 }, () => 'A line of the owner’s description.').join('\n'));
+    expect(field.style.height).toBe(`${field.scrollHeight + 2}px`);
+    expect(field.getBoundingClientRect().height).toBe(cap);
+    expect(field.scrollHeight).toBeGreaterThan(field.clientHeight);
+    await box.fill('A short description.');
+    // With rows=4 and fixed sizing, the intrinsic four rows include the two border pixels.
+    expect(field.getBoundingClientRect().height).toBe(floor + 2);
+    expect(field.style.height).toBe(`${field.scrollHeight + 2}px`);
+    expect(style.resize).toBe('vertical');
+    expectNoHorizontalScroll();
+  });
+
+  it('examples_match_the_four_signed_starters_in_both_languages', () => {
+    expect(SETUP_LANGUAGE).toBe('en');
+    expect(START_EXAMPLES).toEqual({
+      en: {
+        line: 'Or start from an example. You can change every word.',
+        label: 'Examples',
+        examples: [
+          {
+            chip: 'A hair salon in Oakland',
+            description: 'I’m Priya Shah. Juniper Hair Studio is a four-chair salon in Oakland doing cuts, color and balayage. Most clients book ahead; we take a deposit for color appointments and charge for late cancellations. We’re open Tuesday to Saturday.',
+          },
+          {
+            chip: 'A plumber in Oakland',
+            description: 'I’m Maria Rivera. Rivera Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
+          },
+          {
+            chip: 'Apartments in Sacramento',
+            description: 'I’m Sam Okafor. Maple Street Rentals manages 14 apartments in two buildings in Sacramento. People ask about open units and viewings, tenants report maintenance problems, and I collect application fees and deposits.',
+          },
+          {
+            chip: 'A CPA firm in San Jose',
+            description: 'I’m Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.',
+          },
+        ],
+      },
+      es: {
+        line: 'O empieza con un ejemplo. Puedes cambiar cada palabra.',
+        label: 'Ejemplos',
+        examples: [
+          {
+            chip: 'Una peluquería en Oakland',
+            description: 'Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland: hacemos cortes, color y balayage. Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.',
+          },
+          {
+            chip: 'Una plomera en Oakland',
+            description: 'Soy Maria Rivera. Rivera Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
+          },
+          {
+            chip: 'Departamentos en Sacramento',
+            description: 'Soy Sam Okafor. Maple Street Rentals administra 14 departamentos en dos edificios de Sacramento. La gente pregunta por unidades disponibles y visitas, los inquilinos reportan problemas de mantenimiento, y yo cobro las cuotas de solicitud y los depósitos.',
+          },
+          {
+            chip: 'Un despacho contable en San José',
+            description: 'Soy Linda Chen. Chen & Co. es un despacho contable de dos personas en San José que prepara declaraciones de impuestos y lleva la contabilidad de personas y pequeños negocios. Los clientes nuevos empiezan con una consulta gratis de 20 minutos, y cotizamos cada trabajo después de ella.',
+          },
+        ],
+      },
+    });
   });
 
   it('an_example_fades_into_the_box', async () => {
@@ -770,7 +838,7 @@ describe('setup', () => {
       ends += 1;
     });
     expect(getComputedStyle(field).animationName).toBe('none');
-    for (const [at, chip] of ['A plumber in Oakland', 'A plumber in Oakland', 'A tax preparer'].entries()) {
+    for (const [at, chip] of ['A plumber in Oakland', 'A plumber in Oakland', 'Apartments in Sacramento'].entries()) {
       await screen.getByRole('button', { name: chip }).click();
       await expect.poll(() => ends, { timeout: 2_000 }).toBe(at + 1);
     }
@@ -784,7 +852,7 @@ describe('setup', () => {
       await cdp().send('Emulation.setEmulatedMedia', { features: [] });
     });
     expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
-    await screen.getByRole('button', { name: 'A bakery that takes custom orders' }).click();
+    await screen.getByRole('button', { name: 'A plumber in Oakland' }).click();
     await expect.element(screen.getByRole('textbox', { name: 'Your business' })).toHaveValue(START_EXAMPLES.en.examples[1]?.description);
     expect(getComputedStyle(field).animationName).toBe('none');
     expect(field.getAnimations()).toEqual([]);
@@ -797,7 +865,7 @@ describe('setup', () => {
     const box = screen.getByRole('textbox', { name: 'Your business' });
     const field = () => box.element() as HTMLTextAreaElement;
     const plumber = screen.getByRole('button', { name: 'A plumber in Oakland' });
-    const example = START_EXAMPLES.en.examples[0]?.description ?? '';
+    const example = START_EXAMPLES.en.examples[1]?.description ?? '';
     await plumber.click();
     await expect.element(box).toHaveFocus();
     field().setSelectionRange(example.length, example.length);
@@ -825,7 +893,7 @@ describe('setup', () => {
     await box.click();
     await userEvent.keyboard(typed);
     await expect.element(box).toHaveValue(typed);
-    await screen.getByRole('button', { name: 'A tax preparer' }).click();
+    await screen.getByRole('button', { name: 'Apartments in Sacramento' }).click();
     await expect.element(box).toHaveValue(START_EXAMPLES.en.examples[2]?.description);
     await expect.element(box).toHaveFocus();
     expect(document.execCommand('undo')).toBe(true);
