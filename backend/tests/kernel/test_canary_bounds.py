@@ -6,7 +6,8 @@ it reads the text; one with many reads the text once for all of them, however ma
 Desk holds at most 50 documents and 200 knowledge items, and a knowledge item found clean isn't
 read again for a visitor's context until the copy's canaries change, so a full copy still gives a
 visitor their context within half a second on a laptop; a slower machine's budget is scaled by a
-calibration the run takes of its own speed. Tests run on Rivera Plumbing copies as `POST /copies`
+calibration the run takes of its own speed, at most three times, and a run slower than that fails
+as too slow to judge. Tests run on Rivera Plumbing copies as `POST /copies`
 seeds them (Friday 10:04 in Oakland).
 """
 
@@ -17,6 +18,7 @@ import unicodedata
 from collections import OrderedDict
 from collections.abc import Mapping
 
+import pytest
 from fastapi import FastAPI
 from sqlalchemy import select, text
 
@@ -254,6 +256,10 @@ CONTEXT_BUDGET = 0.5                      # seconds for one `/context` call, on 
 # own budget. Its quickest of five took CALIBRATION_ON_A_LAPTOP on the laptop the budget was set on; a run that
 # takes longer (a busy CI runner) has the budget scaled by as much, and a quicker one keeps it as it is.
 CALIBRATION_ON_A_LAPTOP = 0.030
+# The most the budget is scaled: three times, as much as a loaded laptop's round trips were seen to slow (a cold read
+# took 0.59 s while they ran three times slower than when quiet). A run slower than that fails as too slow to judge:
+# past it, a budget wide enough to pass would also pass a `/context` call several times slower than it should be.
+MAX_CALIBRATION_SCALE = 3.0
 CALIBRATION_TEXT = "lorem ipsum dolor sit amet, consectetur 0177 " * 9_600
 CALIBRATION_NEEDLES = [re.compile(re.escape(f"amet{n:02d}x")) for n in range(16)]
 
@@ -262,7 +268,8 @@ async def calibrated_budget(app: FastAPI) -> float:
     """`CONTEXT_BUDGET`, scaled by how much longer than on the laptop this run takes, at its quickest
     of five, to make 20 round trips on one of the kernel engine's connections, then fold
     `CALIBRATION_TEXT`, turn its words around and look for 16 needles it doesn't hold; never less
-    than the budget itself."""
+    than the budget itself, nor more than `MAX_CALIBRATION_SCALE` times it: a run slower than that
+    fails as too slow to judge."""
     async def once() -> float:
         started = time.perf_counter()
         async with app.state.kernel.engine.connect() as conn:
@@ -274,7 +281,11 @@ async def calibrated_budget(app: FastAPI) -> float:
         return time.perf_counter() - started
 
     quickest = min([await once() for _ in range(5)])
-    return CONTEXT_BUDGET * max(1.0, quickest / CALIBRATION_ON_A_LAPTOP)
+    scale = quickest / CALIBRATION_ON_A_LAPTOP
+    if scale > MAX_CALIBRATION_SCALE:
+        pytest.fail(f"calibration too slow to judge: {quickest:.3f} s, {scale:.1f} times the laptop's"
+                    f" {CALIBRATION_ON_A_LAPTOP} s, past the {MAX_CALIBRATION_SCALE:.0f} times the budget may scale")
+    return CONTEXT_BUDGET * max(1.0, scale)
 
 
 async def test_a_full_copy_reads_its_context_within_budget(app, client, monkeypatch):
@@ -305,3 +316,28 @@ async def test_a_full_copy_reads_its_context_within_budget(app, client, monkeypa
     budget = await calibrated_budget(app)
     assert min([await timed(restarted=True) for _ in range(3)]) < budget
     assert min([await timed(restarted=False) for _ in range(3)]) < budget
+
+
+@pytest.mark.parametrize(("each_run", "budget"), [
+    (0.020, CONTEXT_BUDGET),                  # quicker than the laptop: the budget as it is
+    (0.060, 2 * CONTEXT_BUDGET),              # twice as slow: twice the budget
+    (0.087, 2.9 * CONTEXT_BUDGET),            # just under three times as slow, near the most it scales
+    (0.091, None),                            # past three times as slow: too slow to judge
+    (3.000, None),                            # a hundred times slower would have allowed a 50 s budget
+])
+async def test_the_calibration_scales_the_budget_at_most_three_times(app, monkeypatch, each_run, budget):
+    """The calibration widens the budget with the run's own speed, up to three times; a run slower
+    than that fails as too slow to judge, rather than letting a slow `/context` pass under a budget
+    wide enough to hide it."""
+    clock = [0.0]
+
+    def ticking() -> float:                   # each calibration run takes `each_run` seconds
+        clock[0] += each_run
+        return clock[0]
+
+    monkeypatch.setattr(time, "perf_counter", ticking)
+    if budget is None:
+        with pytest.raises(pytest.fail.Exception, match="calibration too slow to judge"):
+            await calibrated_budget(app)
+    else:
+        assert await calibrated_budget(app) == pytest.approx(budget)
