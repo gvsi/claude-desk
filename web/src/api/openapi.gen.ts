@@ -179,6 +179,10 @@ export interface BusinessOut {
   timezone: string;
   desks: DeskSummary[];
 }
+/**
+ * One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back
+ * into it; null once the Desk went live, and for a Desk made outside setup.
+ */
 export interface DeskSummary {
   desk_id: string;
   slug: string;
@@ -186,6 +190,16 @@ export interface DeskSummary {
   business_name: string;
   hours: HoursWindow[];
   answering: boolean;
+  setup: DeskSetup | null;
+}
+/**
+ * A Desk's setup interview that hasn't gone live: its ID (`GET /api/owner/setup/{id}`) and the step it is at.
+ * Setup finishes when the Desk goes live (step `live`); a Desk whose rules are confirmed but that isn't live yet
+ * (`preview`) is still unfinished, since going live is setup's last step.
+ */
+export interface DeskSetup {
+  interview_id: string;
+  step: "questions" | "tools" | "rules" | "situations" | "safety_check" | "preview" | "live";
 }
 /**
  * 202: the held request is withdrawn; its outcome arrives on the event stream as `resolved`.

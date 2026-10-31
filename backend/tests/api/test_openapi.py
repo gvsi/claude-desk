@@ -47,6 +47,9 @@ def test_every_route_has_typed_responses():
     assert set(schemas["AlreadyResolved"]["properties"]) == {"error", "decision"}
     assert set(schemas["PaymentConflict"]["properties"]) == {"error", "code", "state", "cancel_reason"}
     assert {"state", "cancel_reason"} <= set(schemas["PaymentConflict"]["required"])   # the checkout reads both
+    # Each Desk the owner's lists name carries its unfinished setup interview, or null, always sent (#233).
+    assert "setup" in schemas["DeskSummary"]["required"]
+    assert schemas["DeskSetup"]["required"] == ["interview_id", "step"] == list(schemas["DeskSetup"]["properties"])
     assert schemas["A2AError"]["properties"]["disclosure"] == {"const": "ai", "title": "Disclosure", "type": "string"}
     assert schemas["A2AResponse"]["properties"]["disclosure"]["const"] == "ai"
 

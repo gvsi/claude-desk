@@ -39,6 +39,7 @@ from desk.api.schemas import (
     BusinessOut,
     ConversationSummary,
     CopyOut,
+    DeskSetup,
     DeskSummary,
     GenerationIn,
     Lead,
@@ -86,23 +87,25 @@ class CopyRequest(BaseModel):
     passcode: Annotated[str, StringConstraints(min_length=1, max_length=200)]
 
 
-async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict]]:
-    """The copy's Desks in the order they were made, and their businesses by ID, from its kernel_ro rows."""
+async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup]]:
+    """The copy's Desks in the order they were made and their businesses by ID, from its kernel_ro rows, and the
+    unfinished setup interviews by Desk ID, from the API's own rows."""
     desks = [row for row in await ctx.ro.desks() if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
-    return desks, businesses
+    return desks, businesses, await owner_reads.unfinished_setups(ctx)
 
 
-def _summary(desk: dict, business: dict) -> DeskSummary:
+def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup]) -> DeskSummary:
     return DeskSummary(desk_id=desk["desk_id"], slug=desk["slug"], name=desk["name"], business_name=business["name"],
-                       hours=desk["hours"], answering=desk["answering"])
+                       hours=desk["hours"], answering=desk["answering"], setup=setups.get(desk["desk_id"]))
 
 
 async def copy_out(ctx: OwnerCtx) -> CopyOut:
-    """The copy's Desks, from its kernel_ro rows, in the order they were made."""
-    desks, businesses = await _desks(ctx)
-    return CopyOut(copy_id=ctx.copy_id, desks=[_summary(desk, businesses[desk["business_id"]]) for desk in desks])
+    """The copy's Desks, from its kernel_ro rows, in the order they were made, each with its unfinished setup."""
+    desks, businesses, setups = await _desks(ctx)
+    return CopyOut(copy_id=ctx.copy_id,
+                   desks=[_summary(desk, businesses[desk["business_id"]], setups) for desk in desks])
 
 
 # A replayed visitor's words, by the kind of session they were said in; and the record each event kind carries
@@ -226,8 +229,9 @@ async def me(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> CopyOut:
 
 @router.get("/desks", response_model=list[BusinessOut], responses=error_responses(401, 503))
 async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOut]:
-    """The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher."""
-    found, businesses = await _desks(ctx)
+    """The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher. Each Desk
+    names its setup interview while that isn't finished."""
+    found, businesses, setups = await _desks(ctx)
     listed: dict[str, BusinessOut] = {}
     for desk in found:
         business = businesses[desk["business_id"]]
@@ -235,7 +239,7 @@ async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOu
             listed[business["business_id"]] = BusinessOut(
                 business_id=business["business_id"], name=business["name"],
                 owner_display_name=business["owner_display_name"], timezone=business["timezone"], desks=[])
-        listed[business["business_id"]].desks.append(_summary(desk, business))
+        listed[business["business_id"]].desks.append(_summary(desk, business, setups))
     return list(listed.values())
 
 
