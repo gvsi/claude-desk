@@ -39,6 +39,8 @@ const RATE_LIMITED = 'That’s a lot of tries. Wait a while, then try again.';
 const UNREACHABLE = 'We couldn’t reach the demo. Try again in a moment.';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
+/** Safety's every-entry view: the signed record, long enough to scroll at the desktop size too. */
+const SAFETY_ENTRIES = `/app/${RIVERA.deskId}/safety?view=entries`;
 /** Rivera's public page, a route that loads with the app. */
 const PUBLIC_PAGE = `/d/${RIVERA.slug}`;
 
@@ -54,6 +56,29 @@ function introDialog(screen: RenderResult) {
 async function startTheDemo(screen: RenderResult, passcode = 'demo'): Promise<void> {
   await screen.getByLabelText('Passcode').fill(passcode);
   await screen.getByRole('button', { name: 'Start the demo' }).click();
+}
+
+/**
+ * Scrolls the page's column to its foot, past `control`, and brings focus back to it from the
+ * keyboard (Shift+Tab from the stop after it, in the browser's own order). It must come back below
+ * the reviewer bar, where a pointer at its middle reaches it and not the bar.
+ */
+async function expectFocusComesBackBelowTheBar(control: HTMLElement): Promise<void> {
+  const column = document.querySelector('main');
+  const bar = [...document.querySelectorAll('[role="note"]')].find((note) => note.textContent?.includes('This is a concept prototype.'));
+  if (!column || !bar) throw new Error('the owner frame draws the reviewer bar and the page column');
+  control.focus({ preventScroll: true });
+  await userEvent.tab();
+  expect(document.activeElement).not.toBe(control);
+  column.scrollTop = column.scrollHeight;
+  expect(control.getBoundingClientRect().bottom, 'scrolled out of sight').toBeLessThanOrEqual(column.getBoundingClientRect().top);
+
+  await userEvent.tab({ shift: true });
+  expect(document.activeElement).toBe(control);
+  const box = control.getBoundingClientRect();
+  expect(box.top).toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  expect(control.contains(hit), 'a pointer at its middle reaches it').toBe(true);
 }
 
 // The last Desk and the hidden list live in this browser's storage, which outlives a test.
@@ -801,6 +826,36 @@ describe('OwnerLayout', () => {
       expect(screen.getByRole('alert').elements()).toHaveLength(0);
     }
     expect(requests('startOver')).toHaveLength(2);
+  });
+
+  it.each(['desktop', 'phone'] as const)('focus_comes_back_below_the_reviewer_bar_%s', async (viewport) => {
+    // The reviewer bar sits above the page's scrolling column, never over it: a control near the
+    // top that the page has scrolled past comes back into sight below the bar when the keyboard
+    // reaches it (WCAG 2.2, 2.4.11 Focus Not Obscured), on Today and on Safety's record.
+    const pages = [
+      {
+        path: TODAY,
+        controls: (screen: RenderResult) => [
+          screen.getByRole('button', { name: 'Copy your Desk link' }),
+          screen.getByRole('button', { name: 'Hide this list' }),
+          screen.getByRole('button', { name: 'Show me ideas' }),
+        ],
+      },
+      {
+        path: SAFETY_ENTRIES,
+        controls: (screen: RenderResult) => [
+          screen.getByRole('link', { name: '1 held for you' }),
+          screen.getByRole('radiogroup', { name: 'What to show' }).getByRole('radio', { name: 'Every entry', exact: true }),
+        ],
+      },
+    ];
+    for (const { path, controls } of pages) {
+      const { screen } = await renderRoute(path, { viewport });
+      for (const control of controls(screen)) {
+        await expect.element(control).toBeVisible();
+        await expectFocusComesBackBelowTheBar(control.element() as HTMLElement);
+      }
+    }
   });
 });
 
