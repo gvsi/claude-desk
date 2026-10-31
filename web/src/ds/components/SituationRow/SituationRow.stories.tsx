@@ -47,17 +47,21 @@ export const Situations: Story = {
     const tones = rows.map((row) => row.querySelector('.cd-situation-row__outcome .cd-status-dot')?.className.replace('cd-status-dot cd-status-dot--', ''));
     await expect(tones).toEqual(['handled', 'held', 'handled', 'handled', 'refused']);
 
-    // Each row: a hairline over it, padded 14 px top and bottom; the situation and who it is on the
+    // Hairlines only between rows, padded 14 px top and bottom; the situation and who it is on the
     // left, the outcome and the kernel's reason in a 300 px column at the right, both from the top.
     const [first] = rows as [HTMLElement];
-    expectComputed(first, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '14px', paddingBottom: '14px' });
+    for (const [index, row] of rows.entries()) {
+      expectComputed(row, { borderTopWidth: index === 0 ? '0px' : '1px' });
+      if (index > 0) expectComputed(row, { borderTopColor: 'rgba(250, 249, 245, 0.12)' });
+    }
+    expectComputed(first, { paddingTop: '14px', paddingBottom: '14px' });
     const title = within(first).getByText(SITUATIONS[0]!.title);
     expectComputed(title, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
     expectComputed(within(first).getByText('A visitor, not verified'), { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
     const outcome = first.querySelector<HTMLElement>('.cd-situation-row__outcome')!;
     expectComputed(outcome, { fontSize: '13px', lineHeight: '18px', color: PRIMARY });
     expectComputed(within(first).getByText('Books weekday visits in your hours.'), { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
-    await expect(first.getBoundingClientRect().height).toBe(69);
+    await expect(first.getBoundingClientRect().height).toBe(68);
     const right = first.querySelector<HTMLElement>('.cd-situation-row__result')!;
     await expect(right.getBoundingClientRect().width).toBe(300);
     await expect(Math.round(right.getBoundingClientRect().right)).toBe(Math.round(first.getBoundingClientRect().right));

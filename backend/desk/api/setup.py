@@ -28,7 +28,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   the website read (`native.fetch_website`) when the description named one; then the first question. On no, no
   memory or website read ever runs for the interview, and a website the owner names later is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
-  and the wrapped memory, website and owner's answer, answered in that question's own model (`SETUP_TURNS`). Its
+  and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
+  answered in that question's own model (`SETUP_TURNS`). The exchange starts after this question's last ask. Its
   patch merges into the answers. Each limit (the quote, discount and payment link limits, the documents rule, the
   money cap and the refunds rule, which is the money question's: refunds are money going out) is a field only of its
   own question's model, whose message leaves the memory and website out, and code drops it from any other turn's
@@ -125,6 +126,7 @@ from desk.api.prompts import (
     QUESTION_KEYS,
     RULES_TAG,
     SETUP_RETRY,
+    SETUP_EXCHANGE_LABELS,
     SETUP_START_SYSTEM,
     SETUP_TURN_SYSTEM,
     SETUP_TURNS,
@@ -145,6 +147,8 @@ from desk.api.prompts import (
     card_draft_head,
     question_text,
     setup_turn_head,
+    summary_line,
+    this_question_so_far,
     wrap,
     wrap_website,
 )
@@ -823,7 +827,10 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
     """The answer turn's one message: the fixed head, then everything untrusted inside its wrapper. A limit question's
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
-    even the price list the quote question's prices merge into, whose titles may be website or memory text."""
+    even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
+    turn includes earlier owner answers and Claude replies only after this question's last ask, never tool labels
+    or their content. On a limit question these replies were made under the same isolation; earlier questions'
+    replies, which may repeat memory or website text, never enter the exchange."""
     limit_turn = key in LIMIT_QUESTIONS.values()
     so_far = interview.answers.model_dump_json(exclude_defaults=True)
     if limit_turn:
@@ -835,6 +842,12 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
             parts.append(wrap(MEMORY_TAG, entry.content))
         elif entry.read == "website" and entry.content:
             parts.append(wrap_website(entry.content, entry.website or ""))
+    start = next((index + 1 for index in range(len(interview.transcript) - 1, -1, -1)
+                  if interview.transcript[index].question == key), len(interview.transcript))
+    lines = [summary_line(SETUP_EXCHANGE_LABELS[entry.role], entry.text)
+             for entry in interview.transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS]
+    if lines:
+        parts.append(this_question_so_far(lines))
     parts.append(wrap(OWNER_ANSWER_TAG, text))
     return _user("\n\n".join(parts))
 

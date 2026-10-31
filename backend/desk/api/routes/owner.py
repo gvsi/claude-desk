@@ -427,8 +427,9 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
 
 @router.get("/desks/{desk_id}/safety", response_model=list[Attempt], responses=error_responses(401, 404, 422, 503))
 async def safety(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[Attempt]:
-    """The attempts the checkpoint stopped on the Desk, newest first: refused requests and replies of Claude's it
-    blocked (the "stopped" Today counts)."""
+    """The Desk's refused requests and Claude's stopped drafts, newest first. Today and Safety count refused requests
+    only (owner decision, 2026-10-31). Each refusal's nullable `cause` comes from its decision's `policy_ids` and
+    its ledger decide summary's `reason`/`check` and the session's verified state; drafts have no cause."""
     return await owner_reads.attempts(ctx, ctx.desk(desk_id))
 
 

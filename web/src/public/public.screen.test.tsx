@@ -1933,7 +1933,8 @@ describe('public chat page', () => {
     await expect.element(about.getByRole('article', { name: 'Hours' })).toBeVisible();
     const charter = rivera.publicDesk.en.charter;
     const cards = [...about.element().querySelectorAll('article')];
-    expect(cards.map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Contact', 'Policy', 'Policy', 'Policy']);
+    // The service area's policy card says what it is; the Desk's other policies stay "Policy".
+    expect(cards.map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Contact', 'Service area', 'Policy', 'Policy']);
     // The kernel's words, verbatim: each card's title, then its lines.
     expect(cards.map((card) => [...card.querySelectorAll('.cd-reply-card__data p')].map((p) => p.textContent))).toEqual(
       charter.map((block) => [block.title, ...(block.lines ?? [])]),

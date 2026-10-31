@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { UNSAFE_DataRouterContext, useLocation, useNavigate } from 'react-router';
 
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../api/http.ts';
 import type { StartSetupBody } from '../api/views.ts';
@@ -60,8 +60,15 @@ export function StartStep() {
   const [error, setError] = useState<string | null>(null);
   const [empty, setEmpty] = useState(false);
   const [unresolved, setUnresolved] = useState<Unresolved | null>(null);
-  // Aborted when the page goes away, which ends a wait between tries and stops anything after it.
+  // Aborted when the owner leaves the page, which ends a wait between tries and stops anything after
+  // it: the moment the router moves elsewhere, which is before React takes the page away (the router
+  // draws a navigation in a transition, so the page stays on screen until the next one has drawn).
   const leaving = useRef<AbortController | null>(null);
+  // The start being sent, until the page settles it. One the owner left stays, unsettled, for the
+  // page to offer again if they come back before it has gone.
+  const sending = useRef<Attempt | null>(null);
+  const router = useContext(UNSAFE_DataRouterContext)?.router;
+  const { pathname } = useLocation();
   // Where focus goes when "Try again" goes with its line.
   const titleRef = useRef<HTMLHeadingElement>(null);
   // The box, which takes focus once an example is put in it.
@@ -69,10 +76,30 @@ export function StartStep() {
   // Each example put in the box, counted, so the box takes focus after each, the same one again too.
   const [picks, setPicks] = useState(0);
   useEffect(() => {
-    const controller = new AbortController();
+    let controller = new AbortController();
     leaving.current = controller;
-    return () => controller.abort();
-  }, []);
+    const stop = router?.subscribe((state) => {
+      if (state.location.pathname !== pathname) {
+        controller.abort();
+        return;
+      }
+      if (!controller.signal.aborted) return;
+      // The owner is back (with Back, say) before the page went. What is sent from now on stops when
+      // they leave again, and a start they left, its outcome unknown here, is theirs to try again
+      // with its key, which makes no second Desk.
+      controller = new AbortController();
+      leaving.current = controller;
+      const left = sending.current;
+      sending.current = null;
+      if (left === null) return;
+      setPending(false);
+      setUnresolved({ attempt: left, why: 'lost' });
+    });
+    return () => {
+      stop?.();
+      controller.abort();
+    };
+  }, [router, pathname]);
   useLayoutEffect(() => {
     const box = boxRef.current;
     if (picks === 0 || box === null) return;
@@ -110,10 +137,21 @@ export function StartStep() {
 
   const send = async (attempt: Attempt) => {
     const signal = leaving.current?.signal;
-    if (signal === undefined) return;
+    // Nothing is sent once the owner has left, even while this page is still on screen.
+    if (signal === undefined || signal.aborted) return;
+    sending.current = attempt;
     setPending(true);
     setError(null);
     setUnresolved(null);
+    try {
+      await sendUntilSettled(attempt, signal);
+    } finally {
+      // A start the owner left isn't settled.
+      if (!signal.aborted) sending.current = null;
+    }
+  };
+
+  const sendUntilSettled = async (attempt: Attempt, signal: AbortSignal) => {
     for (let retries = 0; ; retries += 1) {
       try {
         const state = await request('startSetup', { body: { ...attempt.body, idempotency_key: attempt.key } });

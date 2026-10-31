@@ -2,9 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { useRef } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
+import { expectBalancedLines } from '../../test/expectBalancedLines.ts';
 import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
-import { lineWords } from '../../test/lineWords.ts';
 import { Button } from '../Button/Button.tsx';
 import { PresetMenu } from '../PresetMenu/PresetMenu.tsx';
 import { PageHeaderSkeleton as HeaderShapes } from './PageHeaderSkeleton.tsx';
@@ -180,12 +180,8 @@ const setupColumn: NonNullable<Story['decorators']> = [
  * number of lines it would take anyway.
  */
 async function expectBalancedTitle(title: HTMLElement, lines: number): Promise<void> {
-  expectComputed(title, { textWrapStyle: 'balance' });
-  const words = lineWords(title);
-  await expect(words.flat().join(' ')).toBe(`${LONG_NAME} is live`);
-  await expect(words, 'the title keeps its lines').toHaveLength(lines);
+  await expectBalancedLines(title, `${LONG_NAME} is live`, lines);
   await expect(title.getBoundingClientRect().height).toBe(lines * 32);
-  await expect(words.at(-1)?.length ?? 0, `the last line holds more than one word: ${JSON.stringify(words)}`).toBeGreaterThan(1);
 }
 
 export const LongTitle: Story = {

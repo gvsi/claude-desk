@@ -462,11 +462,17 @@ class ReplayedEvent(BaseModel):           # one moment of the recorded night as 
     verdict: ReplyVerdict | None          # reply: a full signed ReplyVerdict
     decision: Decision | None             # receipt: a full signed Decision, in its final state
 
+class SeededChat(BaseModel):
+    session_id: str
+    visitor_line: str                     # the visitor's own words (untrusted text)
+    decision: Decision                   # the signed held decision
+
 class CopyCreated(BaseModel):             # POST /copies; the owner token is the copy credential
     copy_id: str
     desk_ids: list[str]
     owner_session: SessionState
     owner_token: str                      # 256-bit CSPRNG, stored hashed, sent as X-Owner-Session
+    seeded_chat: SeededChat | None = None  # None when the copy seeds no held request
     replayed_messages: list[ReplayedEvent] = []   # in shown order; empty without a replay
     replay_id: str | None = None          # the recording id the replayed kernel rows carry; None without a replay
 

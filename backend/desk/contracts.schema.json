@@ -473,6 +473,17 @@
           "title": "Owner Token",
           "type": "string"
         },
+        "seeded_chat": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SeededChat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "replayed_messages": {
           "default": [],
           "items": {
@@ -3664,6 +3675,28 @@
         "contact"
       ],
       "title": "SeedPerson",
+      "type": "object"
+    },
+    "SeededChat": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "visitor_line": {
+          "title": "Visitor Line",
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        }
+      },
+      "required": [
+        "session_id",
+        "visitor_line",
+        "decision"
+      ],
+      "title": "SeededChat",
       "type": "object"
     },
     "SessionContext": {

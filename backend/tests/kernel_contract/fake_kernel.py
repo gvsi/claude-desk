@@ -28,6 +28,10 @@ contract test, before the task that first uses them.
   copy's answer carrying the events in shown order (`replayed_messages`, kept in `replayed_nights` too) and its
   `replay_id`. With none recorded a copy that asks is live; `without_seeded_night()` makes any request that
   carries `replay_night`, true or false, 422 `invalid`, as a kernel whose request model lacks the field answers it.
+- The turn's language (GitHub issue #121): `POST /sessions/{session_id}/turn` takes a turn's newest visitor or agent
+  message (at most 2,000 characters, else 422 `invalid`) and keeps the language `detect_language` finds in it as the
+  session's `last_language`, which the turn's status lines and verdicts then speak; the one on record stays when it
+  finds neither English nor Spanish. The text is read for that alone, never kept, mirrored or ledgered.
 - Verification (Plan 01b): `/verify/start` sends a fresh code only to a contact on record (a Demo inbox entry
   and its code-free notice) and answers every contact with one message; `/verify/check` takes the session's live
   challenge's code within ten minutes and five attempts, else 422 `invalid`; a session reads only the code entries
@@ -162,6 +166,7 @@ from desk.contracts import (
     RuleCard,
     SeedDocument,
     SeedPerson,
+    SeededChat,
     SessionCreated,
     SessionState,
     ToolCall,
@@ -173,6 +178,7 @@ from desk.contracts import (
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
+    TURN_TEXT_CHARS,
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
@@ -211,6 +217,8 @@ from desk.kernel_api import (
     SessionContext,
     ToolsConnectRequest,
     ToolsSimulateChangeRequest,
+    TurnRequest,
+    TurnStarted,
     VerifyCheckRequest,
     VerifyStarted,
     VerifyStartRequest,
@@ -230,6 +238,14 @@ class Refusal(Exception):
     def __init__(self, status: int, code: str):
         super().__init__(f"{status} {code}")
         self.status, self.code = status, code
+
+
+class AdapterCheckRefused(Exception):
+    """A normalization refusal whose fixed adapter check is ledgered by decide."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
 
 
 def sha256_hex(value: str | bytes) -> str:
@@ -1668,15 +1684,17 @@ class FakeKernelState:
             raise Refusal(401, "auth")
         return session
 
-    def session_call(self, request: Request, session_id: str, desk_id: str | None = None) -> tuple[Session, Desk]:
+    def session_call(self, request: Request, session_id: str, desk_id: str | None = None, *,
+                     seen: bool = True) -> tuple[Session, Desk]:
         """The first three "Session state responses" rows for a call naming `session_id`: the session token must
         hash to it, or an agent's signature authenticate it (401); an owner names its own session and a `desk_id` of
-        its copy (else 404); closed is 409."""
+        its copy (else 404); closed is 409. Without `seen` the call doesn't count as the session's activity
+        (`_check_open`)."""
         if self._signed_by_agent(request):
             session = self._agent(request, session_id)
             if desk_id is not None:
                 raise Refusal(422, "invalid")   # desk_id is for owner sessions only
-            self._check_open(session)
+            self._check_open(session, seen=seen)
             return session, self.desks[session.desk_id]
         if request.headers.get("x-owner-session") is not None:
             copy, owner = self.owner_of(request)
@@ -1692,7 +1710,7 @@ class FakeKernelState:
             raise Refusal(401, "auth")
         if desk_id is not None:
             raise Refusal(422, "invalid")       # desk_id is for owner sessions only
-        self._check_open(session)
+        self._check_open(session, seen=seen)
         return session, self.desks[session.desk_id]
 
     # Agents ----------------------------------------------------------------------------------------
@@ -1856,16 +1874,18 @@ class FakeKernelState:
         remaining = self._remaining(session)
         return remaining is not None and action.amount_cents is not None and action.amount_cents <= remaining
 
-    def _check_open(self, session: Session) -> None:
+    def _check_open(self, session: Session, *, seen: bool = True) -> None:
         """The session is open (a visitor's or an agent's closes after 24 hours idle), else 409 `closed`, ledgered
-        `auth` on its Desk."""
+        `auth` on its Desk; then, with `seen`, it was active now. The turn route passes `seen=False`, as the kernel's
+        does: starting a turn keeps no idle conversation open."""
         if session.closed_at is None and session.kind != "owner" and self.now - session.last_seen > IDLE_LIMIT:
             session.closed_at = session.last_seen + IDLE_LIMIT
             self._put_session(session)
         if session.closed_at is not None:
             raise self._refused(self.desks.get(session.desk_id or ""), 409, "closed", "closed",
                                 session_id=session.session_id)
-        session.last_seen = self.now
+        if seen:
+            session.last_seen = self.now
 
     @staticmethod
     def _check_generation(session: Session, generation: int) -> None:
@@ -1895,12 +1915,15 @@ class FakeKernelState:
         owner, owner_token = self._new_session(copy_id, None, "owner", verified=True, assurance="owner_session")
         copy = Copy(copy_id=copy_id, owner_session_id=owner.session_id, desk_ids=[desk.desk_id])
         self.copies[copy_id] = copy
-        self._seed_held_request(desk)
+        held = self._seed_held_request(desk)
+        seeded_chat = SeededChat(session_id=held.session_id,
+                                 visitor_line="Could you do the drain clearing at 15% off?", decision=held)
         events, replay_id = self._replay(desk) if body.replay_night and self._night else ([], None)
         if replay_id is not None:
             self.replayed_nights[copy_id] = (replay_id, events)
         return CopyCreated(copy_id=copy_id, desk_ids=copy.desk_ids, owner_session=owner.state(),
-                           owner_token=owner_token, replayed_messages=events, replay_id=replay_id)
+                           owner_token=owner_token, seeded_chat=seeded_chat,
+                           replayed_messages=events, replay_id=replay_id)
 
     # The recorded night (Plan 01d) ----------------------------------------------------------------------------
 
@@ -2066,6 +2089,23 @@ class FakeKernelState:
         return WhoAmI(kind=session.kind, copy_id=copy.copy_id, desk_id=session.desk_id,
                       desk_ids=[session.desk_id], session=session.state())
 
+    def turn(self, request: Request, body: TurnRequest) -> TurnStarted:
+        """A turn starts (GitHub issue #121): the language `detect_language` finds in its newest visitor or agent
+        message becomes the session's, or the one on record stays when it finds neither English nor Spanish (English
+        for a session with none). The text is read for that alone, never kept, mirrored or ledgered, and a repeat
+        detects again and changes nothing else, not even the session's activity (`seen=False`). Over the contract's
+        `TURN_TEXT_CHARS` is 422 `invalid`, then the session checks: 401, 404, 409 `closed`, a stale generation 409
+        `stale_generation`."""
+        if len(body.text) > TURN_TEXT_CHARS:
+            raise Refusal(422, "invalid")
+        session, _ = self.session_call(request, request.path_params["session_id"], body.desk_id, seen=False)
+        self._check_generation(session, body.generation)
+        detected = detect_language(body.text)
+        if detected in ("en", "es") and detected != session.last_language:
+            session.last_language = detected
+            self._put_session(session)
+        return TurnStarted(language=session.last_language or "en")
+
     # Decisions -----------------------------------------------------------------------------------
 
     def tools_given(self, session: Session, desk: Desk) -> tuple[str, ...]:
@@ -2128,7 +2168,11 @@ class FakeKernelState:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="not_given")
         if not matches(desk.tools[call.tool].input_schema, call.args):
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="invalid_args")
-        action = self._normalize(session, desk, call)
+        try:
+            action = self._normalize(session, desk, call)
+        except AdapterCheckRefused as refusal:
+            return self._new_decision(session, desk, call, digest, None, "refuse", [],
+                                      why="adapter_refused", check=refusal.code)
         if action is None:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused")
         outcome, card_ids, baseline = self._rule(session, desk, action)
@@ -2141,27 +2185,27 @@ class FakeKernelState:
 
     def _normalize(self, session: Session, desk: Desk, call: ToolCall) -> NormalizedAction | None:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
-        args; None refuses."""
+        args; a known adapter refusal carries its check code, otherwise None refuses."""
         tool, args = call.tool, call.args
         resource = ResourceRef(kind="desk", id=desk.desk_id, owner_person_id=None)
         list_cents = discount_bp = amount_cents = recipient = starts_at = None
         if tool == "native.quote":
             if any(item["item_id"] not in desk.prices for item in args["items"]):
-                return None
+                raise AdapterCheckRefused("unknown_item")
             list_cents = sum(desk.prices[item["item_id"]].unit_cents * item["qty"] for item in args["items"])
             if list_cents > 1_000_000:
-                return None
+                raise AdapterCheckRefused("over_limit")
             discount_bp = args.get("requested_discount_bp", 0)
             amount_cents = list_cents - list_cents * discount_bp // 10_000
         elif tool == "native.book":
             slot = desk.slots.get(args["slot_id"])
             if slot is None or slot.starts_at <= self.now:
-                return None
+                raise AdapterCheckRefused("no_such_slot")
             resource, starts_at = ResourceRef(kind="slot", id=slot.slot_id, owner_person_id=None), slot.starts_at
         elif tool == "native.release_document":
             document = desk.documents.get(args["document_id"])
             if document is None:
-                return None
+                raise AdapterCheckRefused("no_such_document")
             resource = ResourceRef(kind="document", id=document.document_id,
                                    owner_person_id=document.record_owner_person_id)
             recipient = "verified_contact"
@@ -2180,7 +2224,8 @@ class FakeKernelState:
             resource = ResourceRef(kind="quote", id=quote["quote_id"], owner_person_id=None)
             amount_cents = quote["amount_cents"]
         elif tool == "payments.create_refund":
-            return None                         # charges to refund arrive with Plan 01c
+            # The fake has no provider charge records to resolve during refund normalization.
+            raise AdapterCheckRefused("no_such_charge")
         profile = desk.tools[tool]
         return NormalizedAction(
             action_id=new_id("act"), copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
@@ -2224,7 +2269,8 @@ class FakeKernelState:
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,
                       action: NormalizedAction | None, outcome: str, card_ids: list[str], *,
-                      why: str | None = None, scripted: bool = False, baseline: str | None = None) -> Decision:
+                      why: str | None = None, check: str | None = None, scripted: bool = False,
+                      baseline: str | None = None) -> Decision:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
@@ -2232,6 +2278,8 @@ class FakeKernelState:
                    "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version, "reviewed": False}
         if why is not None:
             summary["reason"] = why
+        if check is not None:
+            summary["check"] = check
         entry = self.append(desk, "decide", summary, session_id=session.session_id, ref_id=decision_id)
         expires_at = self.now + {"allow": ALLOW_FOR, "hold": HOLD_FOR, "refuse": timedelta(0)}[outcome]
         answers, inbox = [], []
@@ -3705,6 +3753,7 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /sessions": "create_session",
     "POST /sessions/{id}/mode": "session_mode",
     "GET /whoami": "whoami",
+    "POST /sessions/{session_id}/turn": "turn",
     "GET /context/{session_id}?desk_id=": "context",
     "POST /decide": "decide",
     "GET /decisions/by_call?session_id=&generation=&call_id=": "decision_by_call",

@@ -43,6 +43,7 @@ from desk.api.schemas import (
     NeedsYouItem,
     NeedsYouSession,
     RecordedHistory,
+    RefusalCause,
     Reports,
     ThisWeek,
     Today,
@@ -239,6 +240,99 @@ class Stopped(Timed):
     card_ids: tuple[str, ...] = ()
     origin: Literal["kernel", "api"] = "kernel"
     ledger_seq: int = 0
+    cause: RefusalCause | None = None
+
+
+REFUSAL_REASONS: dict[str, RefusalCause] = {
+    "paused": "paused", "unknown_tool": "tool_not_available", "not_given": "tool_not_available",
+    "invalid_args": "incomplete_request", "no_active_version": "no_rules",
+    "version_unloadable": "rules_unchecked", "version_outdated": "rules_unchecked",
+    "evaluation_error": "rules_unchecked",
+}
+REFUSAL_CHECKS: dict[str, RefusalCause] = {
+    "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
+    "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
+    "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
+    "no_such_document": "no_such_document",
+}
+# In precedence order, after any owner never card. The private-data cause depends on session verification.
+BASELINE_CAUSES: dict[str, RefusalCause] = {
+    "B.same_copy": "other_copy", "B.private_data_record_owner": "not_verified",
+    "B.recipient_owner_or_verified_contact": "recipient", "B.no_agent_pay_out": "agent_pay_out",
+    "B.agent_charge_within_mandate": "agent_limit", "B.money_has_amount": "no_amount",
+}
+
+
+def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCause | None:
+    """A refused decision's cause, from its row and the already-read kernel-built `decide` entry.
+
+    Exact codes only; never inspect or echo owner/visitor prose. Early `reason` wins, including an unknown one.
+    For evaluated refusals, take the first match in the policy precedence below, regardless of the IDs' row order.
+    Unknown codes/IDs and a missing, malformed or mismatched entry have no label. A valid entry has a `decide`
+    event with matching `ref_id` and `session_id`, a dict summary with outcome `refuse`, and a matching summary
+    decision ID when present. Early refusals omit the summary decision ID, so the event reference is required.
+    The web holds the labels.
+
+    Source                                           Cause                 Signed label
+    reason: paused                                   paused                The chat was paused
+    reason: unknown_tool, not_given                  tool_not_available    Not a tool this chat can use
+    reason: invalid_args                             incomplete_request    The request wasn't in a form I can use
+    reason: no_active_version                        no_rules              No rules turned on yet
+    reason: version_unloadable, version_outdated,
+            evaluation_error                         rules_unchecked       Your rules couldn't be checked, so I said no
+    reason: adapter_refused, by check:
+      no_such_slot                                   no_such_slot          That time isn't open
+      unknown_item                                   unknown_item          Not on the price list
+      over_limit                                     over_quote_ceiling    Over the $10,000 quote ceiling
+      no_such_quote, quote_paid, quote_paying         quote_unpayable       That quote can't be paid now
+      no_such_charge                                 no_such_charge        Couldn't find that payment
+      not_refundable                                 not_refundable        That payment can't be refunded
+      no_such_document                               no_such_document      No such document
+      not_verified, no_mandate, mandate_exhausted,
+      not_an_agent_with_a_mandate (unreachable)       null                  (no label)
+    policy precedence:
+      F.never.*                                      owner_rule            Your rule says no
+      B.same_copy                                    other_copy            Not a record on this Desk
+      B.private_data_record_owner, unverified        not_verified          Not verified yet
+      B.private_data_record_owner, verified          not_their_record      Only for the person it belongs to
+      B.recipient_owner_or_verified_contact          recipient             Only to you or a contact on record
+      B.no_agent_pay_out                             agent_pay_out         Agents can't send money out
+      B.agent_charge_within_mandate                  agent_limit           Outside the agent's spending limit
+      B.money_has_amount                             no_amount             Not a valid amount
+    no reason, empty policy_ids and card_ids         no_rule               No rule covers this yet
+    anything else                                    null                  (no label)
+    """
+    if entry is None:
+        return None
+    event = entry.get("event")
+    if not isinstance(event, dict) or event.get("kind") != "decide":
+        return None
+    if event.get("ref_id") != row["decision_id"] or event.get("session_id") != row["session_id"]:
+        return None
+    summary = event.get("summary")
+    if not isinstance(summary, dict) or summary.get("outcome") != "refuse":
+        return None
+    if "decision_id" in summary and summary["decision_id"] != row["decision_id"]:
+        return None
+    if any(key in summary and not isinstance(summary[key], str) for key in ("reason", "check")):
+        return None
+    if "reason" in summary:
+        if summary["reason"] == "adapter_refused":
+            return REFUSAL_CHECKS.get(summary.get("check"))
+        return REFUSAL_REASONS.get(summary["reason"])
+    policies = row["policy_ids"]
+    if any(policy.startswith("F.never.") for policy in policies):
+        return "owner_rule"
+    for policy, cause in BASELINE_CAUSES.items():
+        if policy in policies:
+            # tools_given gives private-data tools only after verification; an unverified caller gets
+            # not_given before evaluation. Verification binds a person once and never clears/rebinds them,
+            # so a historical private-data refusal cannot predate that binding. Reading verified in the same
+            # snapshot as the decision is safe: this verified person's refusal means another person's record.
+            if policy == "B.private_data_record_owner" and verified:
+                return "not_their_record"
+            return cause
+    return None if policies or row["card_ids"] else "no_rule"
 
 
 def reply_violations(summary: dict) -> list[tuple[str, str | None]]:
@@ -289,17 +383,21 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
         if row["outcome"] != "refuse" or row["session_id"] not in sessions:
             continue
         entry = entries.get(row["ledger_seq"])
-        origin = (entry["event"] or {}).get("origin", "kernel") if entry else "kernel"
+        event = entry.get("event") if entry else None
+        origin = event.get("origin", "kernel") if isinstance(event, dict) else "kernel"
         found.append(Stopped(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"],
                              line=row["reason_plain"], replayed=decision_replayed(row, entry), kind="refused",
                              reason_plain=row["reason_plain"], card_ids=tuple(row["card_ids"] or ()), origin=origin,
-                             ledger_seq=row["ledger_seq"]))
+                             ledger_seq=row["ledger_seq"],
+                             cause=refusal_cause(row, entry, verified=sessions[row["session_id"]]["verified"])))
     for entry in ledger:
-        event = entry["event"] or {}
-        summary = event.get("summary") or {}
-        violations = reply_violations(summary)
+        event = entry.get("event")
+        if not isinstance(event, dict) or not isinstance(event.get("summary"), dict):
+            continue
+        summary = event["summary"]
         if event.get("kind") != "reply" or summary.get("author") != "claude" or event.get("session_id") not in sessions:
             continue
+        violations = reply_violations(summary)
         if not [kind for kind, _ in violations if kind != "session_paused"]:
             continue
         found.append(Stopped(at=entry_time(entry), session_id=event.get("session_id"), ref_id=str(entry["seq"]),
@@ -679,17 +777,26 @@ async def today(ctx: OwnerCtx, desk_id: str, now: datetime) -> Today:
 
 
 async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
-    """The Desk's stopped attempts (Today's "Stopped"), newest first, each with its AI-written triage once one is
-    written (Plan 02b, Task 10), else None."""
+    """The Desk's refused requests and Claude's stopped drafts, newest first, each with its AI-written triage once
+    written (Plan 02b, Task 10), else None. Only refusals count in Today; their nullable `cause` maps the decision's
+    `policy_ids`, its already-read ledger decide summary's `reason`/`check` and the session's verified state
+    through `refusal_cause`.
+    Sessions, decisions and ledger entries share one snapshot so a newly verified session's refusal cannot be
+    labelled with an older verification state. No kernel call runs while the snapshot is open."""
+    conn = ctx.ro.conn
+    await conn.commit()
+    await conn.execution_options(isolation_level="REPEATABLE READ")   # reset when the connection is pooled again
     sessions = {row["session_id"]: row for row in await ctx.ro.rows("sessions", desk_id=desk_id)}
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     triage = await triaged(ctx.ro.conn, ctx.copy_id, desk_id=desk_id)
+    await conn.commit()
     found = sorted(_stopped_attempts(decisions, ledger, sessions), key=lambda attempt: attempt.ref_id, reverse=True)
     found.sort(key=lambda attempt: attempt.at, reverse=True)
     return [Attempt(ref_id=attempt.ref_id, kind=attempt.kind, reason_plain=attempt.reason_plain,
                     card_ids=list(attempt.card_ids), origin=attempt.origin, created_at=attempt.at,
-                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq) for attempt in found]
+                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq,
+                    cause=attempt.cause) for attempt in found]
 
 
 # The Desk list (#233) -----------------------------------------------------------------------------------------
