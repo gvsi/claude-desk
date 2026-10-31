@@ -449,6 +449,11 @@ export interface SetupState {
   messages: SetupMessage[];
   /** Whether the owner let Claude read their memory and website; null until asked. */
   consent: boolean | null;
+  /**
+   * Derived from the stored transcript: Claude is working on the owner's last message with no
+   * reply yet. Absent means false on older APIs.
+   */
+  busy?: boolean;
   /** The question waiting for an answer; null before consent and after the last one. */
   question: QuestionKey | null;
 }

@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { RouteKey } from '../api/routes.ts';
 import type { BusinessOut, CopyOut, SetupState } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
-import { SETUP_QUESTIONS, setupPublicDesk } from './setup.ts';
+import { SETUP_QUESTIONS, holdNextConsent, setupPublicDesk } from './setup.ts';
 import { mockStore } from './store.ts';
 
 interface Started {
@@ -37,6 +37,41 @@ async function started(description: string): Promise<Started> {
 
 beforeEach(() => {
   mockStore.reset('rivera');
+});
+
+it('async_consent_repeats_202_then_lands_on_a_read_without_a_second_turn', async () => {
+  const started = await mockStore.dispatch('startSetup', { body: { description: 'Rivera Plumbing.', timezone: 'UTC', idempotency_key: 'async-consent' } });
+  if ('network' in started) throw new Error('start failed');
+  const state = started.body as SetupState;
+  expect(state.busy).toBe(false);
+  const finish = holdNextConsent(mockStore.world, state.interview_id);
+  const params = { id: state.interview_id };
+  const pending = await mockStore.dispatch('setupConsent', { params, body: { allow: true } });
+  expect(pending).toMatchObject({ status: 202, body: { consent: true, question: null, busy: true } });
+  const again = await mockStore.dispatch('setupConsent', { params, body: { allow: false } });
+  expect(again).toEqual(pending);
+  finish('landed');
+  const landed = await mockStore.dispatch('setup', { params });
+  expect(landed).toMatchObject({ status: 200, body: { consent: true, question: 'what_you_do', busy: false } });
+  if ('network' in landed) throw new Error('read failed');
+  expect((landed.body as SetupState).messages.filter((m) => m.role === 'owner')).toHaveLength(1);
+  expect(await mockStore.dispatch('setupConsent', { params, body: { allow: true } })).toMatchObject({ status: 409 });
+});
+
+it('failed_async_consent_restores_the_consent_question_and_can_be_answered_again', async () => {
+  const started = await mockStore.dispatch('startSetup', { body: { description: 'Rivera Plumbing.', timezone: 'UTC', idempotency_key: 'failed-consent' } });
+  if ('network' in started) throw new Error('start failed');
+  const state = started.body as SetupState;
+  const params = { id: state.interview_id };
+  const finish = holdNextConsent(mockStore.world, state.interview_id);
+  await mockStore.dispatch('setupConsent', { params, body: { allow: false } });
+  finish('failed');
+  expect(await mockStore.dispatch('setup', { params })).toMatchObject({
+    status: 200, body: { busy: false, consent: null, question: null, messages: state.messages },
+  });
+  expect(await mockStore.dispatch('setupConsent', { params, body: { allow: false } })).toMatchObject({
+    status: 200, body: { busy: false, consent: false, question: 'what_you_do' },
+  });
 });
 
 describe("the business's name, from the description", () => {
