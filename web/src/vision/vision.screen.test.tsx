@@ -152,8 +152,9 @@ const CITY = {
   ],
   suggestions: ['Book an inspection', 'Pay the fee', 'Talk to staff'],
   /**
-   * The page's height at the board's window, as the story measures it: the board's 1485 px, plus
-   * 18 px for the shell's own AI disclosure's second line, less 6 px for each of the two fact cards.
+   * The page's height unrolled at the board's width, as the story measures it: the board's 1485 px,
+   * plus 18 px for the shell's own AI disclosure's second line, less 6 px for each of the two fact
+   * cards.
    */
   pageHeight: 1485 + 18 - 2 * 6,
 } as const;
@@ -326,6 +327,12 @@ describe('Vision pages', () => {
       await wait(300);
       await expect.element(composer).toHaveValue('Thanks again');
       expect(screen.getByText(VISION_INERT_LINE, { exact: true }).elements(), path).toHaveLength(1);
+      if (VISITOR_PAGES.includes(path)) {
+        // On a public page the composer grows by the line and the conversation gives the room up, so
+        // the page stays the window's height and the line shows inside it, as the story checks.
+        expect(document.documentElement.scrollHeight, path).toBe(window.innerHeight);
+        expect(bottom(line.element()), path).toBeLessThanOrEqual(window.innerHeight);
+      }
       if (path === PHONE) {
         // On the visitor's phone, 8 px under the composer, in a caption's type, as the story draws it.
         const box = composer.element().closest('.cd-composer__box') as HTMLElement;
@@ -337,7 +344,8 @@ describe('Vision pages', () => {
     }
 
     // "Ask for …" on each public page: a press asks for no one, adds no message and keeps the focus,
-    // and the first says why, once, 8 px under the chat's head, in a line that is announced.
+    // and the first says why, once, in a line that is announced, on a row of its own in the chat's
+    // pinned head: 8 px under the title and Ask, above the head's hairline.
     for (const [path, business, asked] of [
       [CLAUDE_ACCOUNT, 'Rivera Plumbing', 'Maria Rivera'],
       [CITY_OFFICE, 'Meridian Bay Permits', 'Permit Center staff'],
@@ -354,7 +362,10 @@ describe('Vision pages', () => {
       const line = screen.getByText(VISION_INERT_LINE, { exact: true });
       await expect.element(line).toBeVisible();
       expect(line.element().getAttribute('role'), path).toBe('status');
-      expect(round(top(line.element()) - bottom(head)), path).toBe(8);
+      expect(line.element().parentElement, path).toBe(head);
+      const rowBottom = Math.max(bottom(one(head, '.cd-public-shell__chat-title')), bottom(ask.element()));
+      expect(round(top(line.element()) - rowBottom), path).toBe(8);
+      expect(bottom(line.element()), path).toBeLessThanOrEqual(bottom(head));
       await ask.click();
       await wait(300);
       expect(screen.getByText(VISION_INERT_LINE, { exact: true }).elements(), path).toHaveLength(1);
@@ -368,6 +379,7 @@ describe('Vision pages', () => {
     // nowhere, not even to a place on the page. The first says why, once, 8 px under the chips, in a
     // line that is announced.
     const city = await renderRoute(CITY_OFFICE);
+    expect([window.innerWidth, window.innerHeight]).toEqual([1440, 900]);
     const log = city.screen.getByRole('log', { name: 'Conversation with Meridian Bay Permits' });
     await expect.element(log).toBeVisible();
     const bubbles = some(log.element() as HTMLElement, '.cd-visitor-message__bubble').length;
@@ -377,13 +389,29 @@ describe('Vision pages', () => {
     const chips = group.getByRole('button');
     expect(chips.elements()).toHaveLength(3);
     expect(city.screen.getByText(VISION_INERT_LINE, { exact: true }).elements()).toHaveLength(0);
+    // The chips end the conversation's scroll region, right above the pinned composer. With the
+    // conversation scrolled to its end, as a visitor reading it would have it, the first pick keeps
+    // the focus on its chip and brings the line into the region's view: fully inside it, clear of
+    // the composer and under nothing, as the story checks.
+    const scroller = one(city.screen.container, '.cd-public-shell__scroll');
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    scroller.scrollTop = scroller.scrollHeight;
     const [firstChip, ...otherChips] = chips.elements() as HTMLElement[];
-    firstChip?.click();
+    await userEvent.click(firstChip as HTMLElement);
     const chipsLine = city.screen.getByText(VISION_INERT_LINE, { exact: true });
     await expect.element(chipsLine).toBeVisible();
+    await expect.element(firstChip as HTMLElement).toHaveFocus();
     expect(chipsLine.element().getAttribute('role')).toBe('status');
     expect(chipsLine.element().previousElementSibling).toBe(group.element());
     expect(round(top(chipsLine.element()) - bottom(group.element()))).toBe(8);
+    const lineBox = chipsLine.element().getBoundingClientRect();
+    const view = scroller.getBoundingClientRect();
+    expect(lineBox.height).toBeGreaterThan(1);
+    expect(lineBox.top).toBeGreaterThanOrEqual(view.top);
+    expect(lineBox.bottom).toBeLessThanOrEqual(view.bottom);
+    expect(lineBox.bottom).toBeLessThanOrEqual(top(one(city.screen.container, '.cd-public-shell__composer')));
+    const hit = document.elementFromPoint(lineBox.left + lineBox.width / 2, lineBox.top + lineBox.height / 2);
+    expect(hit !== null && chipsLine.element().contains(hit), 'nothing covers the line').toBe(true);
     for (const chip of otherChips) {
       chip.click();
       await wait(100);
@@ -473,14 +501,17 @@ describe('Vision pages against their boards', () => {
     expect(header.textContent).toContain('City of Meridian Bay, Permit Center');
     expect(one(header, '.cd-public-shell__open-status').textContent).toContain('Open now, until 4:30 pm');
 
-    // The page runs past the window, as the board draws it: the shell is the page, nothing outside
-    // it. Screen tests load no web fonts, so the footer's "Powered by" line can be a pixel taller
-    // than in the story, which loads them; every part above it measures as the story's.
+    // The page is the window's height, as every public page is: the header, the AI disclosure and
+    // the composer stay in view, and only the conversation scrolls. Unrolled, the page is the one the
+    // board draws: the window's height and what the conversation's scroll region holds past it.
+    // Screen tests load no web fonts, so the footer's "Powered by" line can be a pixel taller than in
+    // the story, which loads them, and the region a pixel shorter. Every part above the footer
+    // measures as the story's: the conversation, unrolled, ends at 1382 px in both.
     const shellHeight = round(one(root, '.cd-public-shell').getBoundingClientRect().height);
-    expect(document.documentElement.scrollHeight).toBe(shellHeight);
-    expect(shellHeight).toBeGreaterThan(window.innerHeight);
-    expect(Math.abs(shellHeight - CITY.pageHeight)).toBeLessThanOrEqual(1);
-    expect(round(bottom(one(root, '.cd-public-shell__conversation')))).toBe(1382);
+    expect([shellHeight, document.documentElement.scrollHeight]).toEqual([982, 982]);
+    const scroller = one(root, '.cd-public-shell__scroll');
+    expect(Math.abs(shellHeight + scroller.scrollHeight - scroller.clientHeight - CITY.pageHeight)).toBeLessThanOrEqual(1);
+    expect(round(top(scroller) + scroller.scrollHeight)).toBe(1382);
     expectNoHorizontalScroll();
 
     // The AI disclosure under the chat's title, once, and the staff to ask for.
@@ -708,14 +739,13 @@ describe('Vision pages against their boards', () => {
     expect(document.title).toBe('Rivera Plumbing');
 
     // The public page right under the bar: the brand header, the chat and the about column. The bar
-    // is inside the shell, so the page is the shell, at least the window's height, with nothing
-    // added outside it.
+    // is inside the shell, so the page is the shell, the window's height, with nothing added
+    // outside it.
     const header = screen.getByRole('banner').element();
     expect(top(header)).toBe(bottom(bar));
     expectComputed(header, { height: '76px' });
     const shellHeight = round(one(root, '.cd-public-shell').getBoundingClientRect().height);
-    expect(shellHeight).toBeGreaterThanOrEqual(window.innerHeight);
-    expect(document.documentElement.scrollHeight).toBe(shellHeight);
+    expect([shellHeight, document.documentElement.scrollHeight]).toEqual([window.innerHeight, window.innerHeight]);
 
     // The AI disclosure under the chat's title, as on every public page.
     const disclosure = [...main(screen).element().querySelectorAll('p')].filter((line) => line.textContent === DISCLOSURE);
@@ -780,15 +810,19 @@ describe('Vision pages against their boards', () => {
     ]);
 
     // At the story's width, the page is 994 px tall with Dana's last visit in it, so it fits the
-    // story's 1512 by 994 window exactly. The shell is at least the window's height, so its own
-    // height is measured in a shorter window first.
+    // story's 1512 by 994 window exactly. The shell is the window's height, so the page's own height
+    // is measured unrolled in a shorter window first: there the conversation scrolls by what the
+    // window lacks. In the story's window, the shell is the page and nothing scrolls.
     await browserPage.viewport(1512, 900);
     await expect.poll(() => window.innerHeight).toBe(900);
-    expect(round(one(root, '.cd-public-shell').getBoundingClientRect().height)).toBe(994);
+    const shell = one(root, '.cd-public-shell');
+    const scroller = one(root, '.cd-public-shell__scroll');
+    expect(round(shell.getBoundingClientRect().height)).toBe(900);
+    expect(round(shell.getBoundingClientRect().height) + scroller.scrollHeight - scroller.clientHeight).toBe(994);
     await browserPage.viewport(1512, 994);
     await expect.poll(() => window.innerHeight).toBe(994);
-    expect(round(one(root, '.cd-public-shell').getBoundingClientRect().height)).toBe(994);
-    expect(document.documentElement.scrollHeight).toBe(994);
+    expect([round(shell.getBoundingClientRect().height), document.documentElement.scrollHeight]).toEqual([994, 994]);
+    expect(scroller.scrollHeight).toBe(scroller.clientHeight);
 
     // Nothing here is live: the download's click goes nowhere, not even to a page of the app or a
     // place on this one, and nothing is asked of the API.
