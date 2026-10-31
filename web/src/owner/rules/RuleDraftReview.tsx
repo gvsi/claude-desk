@@ -19,6 +19,7 @@ import {
   type RulesLinkProps,
 } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -42,6 +43,7 @@ export function peopleQuery(deskId: string) {
 /** A read the review makes once and keeps while it is open: a later read would change nothing it shows. */
 const READ_ONCE = { staleTime: 60_000, refetchOnWindowFocus: false } as const;
 
+const REVIEW_TITLE = 'Review the change';
 const SUBTITLE = "Here's exactly what changes on your Desk. Nothing changes until you confirm.";
 const UPDATED = 'Your rules are updated.';
 const CHANGED_SINCE = 'Your rules changed since this was drafted. Ask for the change again.';
@@ -121,7 +123,9 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
   const tools = rules.data?.tools;
   const rows = useMemo(() => changeRows(draft, people.data ?? null, tools ?? []), [draft, people.data, tools]);
   const turningOn = draft.turnedOn.length > 0;
-  const heading = title ?? (onlyTheLimit(draft) ? 'Change your payment limit' : 'Review the change');
+  const heading = title ?? (onlyTheLimit(draft) ? 'Change your payment limit' : REVIEW_TITLE);
+  // On its own page the tab names the review as its title does; inside another page, that page's stays.
+  useDocumentTitle(inline ? null : inApp(heading));
   // Where the trail starts, and where keeping the rules goes when there is nothing to go back to: a
   // turn-on's Connectors page once those pages are built (`connectorPageHref`), else Rules.
   const connectors = turningOn ? connectorPageHref(deskId, 'connectors') : undefined;
@@ -293,10 +297,16 @@ export function RuleDraftPage() {
     return read.data === undefined ? null : { draft: draftFromDiff(read.data, active) };
   }, [handed, active, read.data]);
 
-  if (built !== null) return <RuleDraftReview key={built.draft.version} deskId={deskId} draft={built.draft} {...(built.title === undefined ? {} : { title: built.title })} />;
-
   const notOpen = version === null || (read.error instanceof ApiError && read.error.kind === 'not_found');
   const failed = read.isError ? read.error : rules.isError ? rules.error : null;
+  // A built review names the tab itself. Without one, the tab follows the title this page shows; while
+  // the draft is read, the page shows none (a change to the payment limit alone has its own), so the
+  // tab names Rules, the page the review is under.
+  const shownTitle = notOpen || failed !== null ? REVIEW_TITLE : 'Rules';
+  useDocumentTitle(built === null ? inApp(shownTitle) : null);
+
+  if (built !== null) return <RuleDraftReview key={built.draft.version} deskId={deskId} draft={built.draft} {...(built.title === undefined ? {} : { title: built.title })} />;
+
   let body;
   if (notOpen) {
     body = (
@@ -334,8 +344,8 @@ export function RuleDraftPage() {
   return (
     <div className="cd-rule-draft" onClick={followInAppLinks(navigate)}>
       <div className="cd-rule-draft__header">
-        <Breadcrumb items={[{ label: 'Rules', href: rulesPath(deskId) }, { label: 'Review the change' }]} linkComponent={RouterLink} />
-        <PageHeader title="Review the change" subtitle={SUBTITLE} />
+        <Breadcrumb items={[{ label: 'Rules', href: rulesPath(deskId) }, { label: REVIEW_TITLE }]} linkComponent={RouterLink} />
+        <PageHeader title={REVIEW_TITLE} subtitle={SUBTITLE} />
       </div>
       {body}
     </div>

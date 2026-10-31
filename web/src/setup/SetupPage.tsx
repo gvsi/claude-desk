@@ -6,6 +6,7 @@ import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import type { SetupState, SetupStep } from '../api/views.ts';
 import { Button, ConceptFooter, LoadingLine, Mark, Notice, Steps, Wordmark } from '../ds/index.ts';
+import { inApp, useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../owner/inAppLinks.ts';
 import { desksQuery, findDesk } from '../owner/useDesks.ts';
 import { SETUP_COPY, STEP_INDEX, STEP_NAMES } from './copy.ts';
@@ -62,6 +63,8 @@ interface SetupShellProps {
 function SetupShell({ business, step, exitTo, wide = false, children }: SetupShellProps) {
   const navigate = useNavigate();
   const compact = useSyncExternalStore(subscribeCompactBar, isCompactBar, () => false);
+  // Setup's name, as its steps are labelled, at every step; the preview's public page leaves it be.
+  useDocumentTitle(inApp(SETUP_COPY.stepsLabel));
   return (
     <div className="cd-setup" onClick={followInAppLinks(navigate)}>
       <header className="cd-setup__bar">

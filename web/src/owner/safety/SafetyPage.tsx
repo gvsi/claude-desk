@@ -7,6 +7,7 @@ import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
 import { AttemptRow, Button, ChainStatus, Chip, EmptyState, Notice, PageHeader, SegmentedControl, StatusDot } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -17,6 +18,8 @@ import { CATEGORY_LABELS, NOT_SORTED, attemptTime, categoryLabel, originCopy, st
 import { RecordList } from './RecordList.tsx';
 
 import './Safety.css';
+
+const TITLE = 'Safety';
 
 type SafetyView = 'attempts' | 'entries';
 
@@ -241,6 +244,8 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
  */
 export function SafetyPage() {
   const { business, desk } = useOwnerDesk();
+  // With an attempt open beside the list too.
+  useDocumentTitle(inApp(TITLE));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const { refId } = useParams();
@@ -264,7 +269,7 @@ export function SafetyPage() {
 
   return (
     <div className="cd-safety" onClick={followInAppLinks(navigate)}>
-      <PageHeader title="Safety" actions={<HeldForYou deskId={deskId} />} />
+      <PageHeader title={TITLE} actions={<HeldForYou deskId={deskId} />} />
       <Headline deskId={deskId} slug={desk.slug} />
       <div className="cd-safety__bar">
         {/* A failed read of the record says so first, beside the check it last made, which the

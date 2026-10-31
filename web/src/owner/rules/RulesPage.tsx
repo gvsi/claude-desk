@@ -23,6 +23,7 @@ import {
   type NoticeTone,
   type RulesLinkProps,
 } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -35,6 +36,8 @@ import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.
 import { moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
 import './RulesPage.css';
+
+const TITLE = 'Rules';
 
 /** What the owner can ask Claude for on Rules, in her words (the presets board's, with the owner's later words). */
 const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600', "Why was Dana's refund held?"] as const;
@@ -85,6 +88,7 @@ interface LimitField {
  */
 export function RulesPage() {
   const { desk } = useOwnerDesk();
+  useDocumentTitle(inApp(TITLE));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const { ask } = useAskClaude();
@@ -218,7 +222,7 @@ export function RulesPage() {
     <div className="cd-rules" onClick={followInAppLinks(navigate)}>
       <div className="cd-rules__header">
         <PageHeader
-          title="Rules"
+          title={TITLE}
           subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
           actions={<PresetMenu onPick={(preset) => void pickPreset(preset)} pending={presetPending} />}
           actionsBelowOnPhone

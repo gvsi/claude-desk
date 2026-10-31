@@ -27,6 +27,7 @@ import {
   type CopyLanguage,
 } from '../../ds/index.ts';
 import { browserLanguage } from '../../lib/language.ts';
+import { useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { brandFrom } from '../brand.ts';
 import { PUBLIC_COPY } from '../copy.ts';
 import { useDocumentLanguage } from '../useDocumentLanguage.ts';
@@ -90,6 +91,8 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
   const { brand } = brandFrom(desk);
   const business = desk.business_name;
   const skills = desk.agent_card.filter((block) => block.text.trim() !== '');
+  // The tab carries the page's title, in its language. Before the Desk shows, the app's name stays.
+  useDocumentTitle(`${business} ${copy.forAgents}`);
   const { hash } = useLocation();
   // One session for both actions, so a key and a run opened together belong to the same chat.
   const session = useAgentSession(slug);

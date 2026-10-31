@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 
 import { ownerErrorCopy, request } from '../../api/http.ts';
 import { Button, Card, Notice, PageHeader, TextLink } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { todayPath } from '../useDesks.ts';
@@ -10,12 +11,15 @@ import { BriefingRows, QuietNight } from './SinceLastNight.tsx';
 
 import './Today.css';
 
+const TITLE = 'Since last night';
+
 /**
  * `/app/:deskId/today/briefing`: everything since last night, newest first, read once when the
  * page opens. Today's short form shows one row of each kind and links here.
  */
 export function BriefingPage() {
   const { desk } = useOwnerDesk();
+  useDocumentTitle(inApp(TITLE));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const briefing = useQuery({
@@ -53,7 +57,7 @@ export function BriefingPage() {
   const quiet = briefing.data !== undefined && briefing.data.items.length === 0;
   return (
     <div className="cd-briefing-page" onClick={followInAppLinks(navigate)}>
-      <PageHeader title="Since last night" />
+      <PageHeader title={TITLE} />
       <Card>{body}</Card>
       {quiet ? null : <div className="cd-briefing-page__back cd-type-meta">{back}</div>}
     </div>

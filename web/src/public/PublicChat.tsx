@@ -36,6 +36,7 @@ import {
 } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
+import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { brandFrom } from './brand.ts';
 import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
@@ -482,18 +483,10 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (chat.session !== null) onSession?.(chat.session);
   }, [chat.session, onSession]);
 
-  // On its own page the tab names the business, as the kernel serves it; the app's name comes back
-  // when the page closes. Inside an owner screen the tab is the owner's. A layout effect, as every page that
-  // names the tab uses, so each hands the title back in the commit that leaves it.
-  const tabTitle = embedded ? null : (desk?.business_name ?? null);
-  useLayoutEffect(() => {
-    if (tabTitle === null) return undefined;
-    const before = document.title;
-    document.title = tabTitle;
-    return () => {
-      document.title = before;
-    };
-  }, [tabTitle]);
+  // On its own page the tab names the business, as the header does and the kernel serves it; the
+  // app's name comes back when the page closes. Inside an owner screen (setup's preview) the tab is
+  // that screen's.
+  useDocumentTitle(embedded ? null : (desk?.business_name ?? null));
 
   // A cancel that went through takes its button away: the visitor's place moves to the composer,
   // unless they have already moved on to something else.

@@ -710,6 +710,47 @@ describe('OwnerLayout', () => {
     expect(one.screen.getByRole('button', { name: /^Switch Desk/ }).elements()).toHaveLength(0);
   });
 
+  it('owner_pages_name_the_tab', async () => {
+    // Each page names the tab with its own heading, or the sidebar's row where its heading is a
+    // greeting, then the app's name; Settings' sections share their page's heading.
+    document.title = 'Claude Desk';
+    const base = `/app/${RIVERA.deskId}`;
+    const pages: [path: string, heading: string | RegExp, title: string][] = [
+      ['today', /, Maria$/, 'Today'],
+      ['today/briefing', 'Since last night', 'Since last night'],
+      ['conversations', 'Conversations', 'Conversations'],
+      ['people', 'Customers', 'Customers'],
+      ['rules', 'Rules', 'Rules'],
+      ['rules/all', 'All rules', 'All rules'],
+      ['safety', 'Safety', 'Safety'],
+      ['share', 'Share', 'Share'],
+      ['settings/general', 'Settings', 'Settings'],
+      ['settings/notifications', 'Settings', 'Settings'],
+      ['settings/billing', 'Settings', 'Settings'],
+    ];
+    for (const [path, heading, title] of pages) {
+      const { screen } = await renderRoute(`${base}/${path}`);
+      await expect.element(screen.getByRole('heading', { level: 1, name: heading }), { message: path }).toBeVisible();
+      expect(document.title, path).toBe(`${title} · Claude Desk`);
+    }
+
+    // Moving between pages, the tab follows, Back included, and the router's own move announces it.
+    const { screen, router } = await renderRoute(`${base}/today`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    expect(document.title).toBe('Today · Claude Desk');
+    await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    expect(document.title).toBe('Rules · Claude Desk');
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    expect(document.title).toBe('Today · Claude Desk');
+
+    // A page that names nothing, such as the not-found screen, shows the app's own name.
+    await router.navigate('/no/such/page');
+    await expect.element(screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+  });
+
   it('owner_shell_links_the_about_pages', async () => {
     const ABOUT = [
       ['Capability prediction', '/about/prediction'],

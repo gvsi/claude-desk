@@ -13,6 +13,7 @@ import type { ConversationSummary } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, TextLink } from '../../ds/index.ts';
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -22,6 +23,8 @@ import { ConversationDetail } from './ConversationDetail.tsx';
 import { conversationPath, conversationStatus, whoLabel, type ConversationArrival } from './status.ts';
 
 import './Conversations.css';
+
+const TITLE = 'Conversations';
 
 /** A Desk's conversations, newest first. Query keys start with the route key. */
 export const conversationsKey = (deskId: string) => ['conversations', deskId] as const;
@@ -62,6 +65,8 @@ export function ConversationsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const titleId = useId();
+  // The list's title names the tab, with a conversation open beside it or on its own too.
+  useDocumentTitle(inApp(TITLE));
 
   const list = useQuery({
     queryKey: conversationsKey(deskId),
@@ -123,7 +128,7 @@ export function ConversationsPage() {
     >
       <nav className="cd-conversations__list" aria-labelledby={titleId}>
         <h1 id={titleId} className="cd-conversations__title cd-type-page-title">
-          Conversations
+          {TITLE}
         </h1>
         {replayed ? (
           <p className="cd-conversations__caption">
