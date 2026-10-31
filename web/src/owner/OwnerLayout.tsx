@@ -1,6 +1,18 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { Link, Outlet, useLocation, useMatches, useNavigate, useNavigationType, useOutletContext, useParams } from 'react-router';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from 'react';
+import { Link, Outlet, useLocation, useMatches, useNavigate, useNavigationType, useParams } from 'react-router';
 
 import { ABOUT_LINKS } from '../about/links.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
@@ -59,9 +71,21 @@ interface ShownDesk {
   desk: DeskSummary;
 }
 
+const DeskContext = createContext<OwnerDeskContext | null>(null);
+
+/**
+ * Gives the pages under it the business and Desk they are drawn for: the owner's frame around every
+ * page of a Desk, or anything else that draws one of its pages.
+ */
+export function OwnerDeskProvider({ value, children }: { value: OwnerDeskContext; children: ReactNode }) {
+  return <DeskContext.Provider value={value}>{children}</DeskContext.Provider>;
+}
+
 /** The business and Desk the owner is on, for a page under `/app/:deskId`. */
 export function useOwnerDesk(): OwnerDeskContext {
-  return useOutletContext<OwnerDeskContext>();
+  const value = useContext(DeskContext);
+  if (value === null) throw new Error('useOwnerDesk: this page is drawn outside a Desk');
+  return value;
 }
 
 const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'rules', 'safety', 'share', 'settings'];
@@ -353,7 +377,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
           </div>
         ) : null}
         <AskClaudeProvider value={askClaude.value}>
-          <Outlet context={{ business, desk, setAnswering, holdDesk, reachPlace } satisfies OwnerDeskContext} />
+          <OwnerDeskProvider value={{ business, desk, setAnswering, holdDesk, reachPlace }}>
+            <Outlet />
+          </OwnerDeskProvider>
         </AskClaudeProvider>
         {fill ? null : (
           <footer className="cd-owner-layout__footer">
