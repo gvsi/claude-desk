@@ -1498,6 +1498,36 @@ describe('public chat page', () => {
     await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)), { timeout: 3_000 });
   });
 
+  it('claude_writing_or_any_message_not_hers_ends_the_owner_line', async () => {
+    const [, , reply] = rivera.events.quoteTurn as [SseEvent, SseEvent, EvMessage, SseEvent];
+    for (const sign of ['Claude writing', 'a message of Claude’s', 'a message of the Desk’s'] as const) {
+      const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+      await ready(screen);
+      const chat = mockStore.visitorSession(RIVERA.slug);
+      if (!chat) throw new Error('this browser has a chat');
+      mockStore.world.takeOver(chat);
+      await vi.waitFor(() => expect(chatHead(), sign).toEqual(withOwner(HEAD.en)));
+
+      // The kernel hands the chat back to Claude, but her leave never reaches the stream. What comes
+      // next says it all the same: Claude writing, or a message that isn't hers (past the model's
+      // budget, the loop hands off with a message and no writing first).
+      chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
+      const messages = shownMessages().length;
+      if (sign === 'Claude writing') {
+        mockStore.emit(RIVERA.slug, { type: 'writing' });
+        await vi.waitFor(() => expect(chatHead(), sign).toEqual(withClaude(HEAD.en)));
+        // Before any reply lands.
+        expect(screen.getByText('Claude is writing').elements(), sign).toHaveLength(1);
+        expect(shownMessages(), sign).toHaveLength(messages);
+      } else {
+        const author = sign === 'a message of Claude’s' ? 'claude' : 'desk';
+        mockStore.emit(RIVERA.slug, { ...reply, message_id: `msg-not-hers-${author}`, author });
+        await vi.waitFor(() => expect(shownMessages(), sign).toHaveLength(messages + 1));
+        expect(chatHead(), sign).toEqual(withClaude(HEAD.en));
+      }
+    }
+  });
+
   it('the_head_goes_back_to_claude_when_the_chat_ends', async () => {
     const takenOver = async () => {
       const chat = mockStore.visitorSession(RIVERA.slug);

@@ -449,11 +449,14 @@ class VisitorChat {
   /**
    * The session's mode as the stream changes it, at `seq`: the owner's take-over (`owner_joined`) is
    * the one event that puts the chat in her hands, and confirms it after the chat lost track of the
-   * stream. Her hand-back (`owner_left`) puts it in Claude's, and so does Claude starting to write,
-   * which it does only in its own hands, so a hand-back whose leave never came still ends hers.
+   * stream. Her hand-back (`owner_left`) puts it in Claude's, and so does anything that comes only
+   * while the chat is in Claude's hands: Claude starting to write, or a message that isn't hers
+   * (past the model's budget, the loop hands off with a message and no writing first). So a
+   * hand-back whose leave never came still ends hers.
    */
   private followMode(seq: number, ev: SseEvent): void {
-    const mode: SessionMode | null = ev.type === 'owner_joined' ? 'owner' : ev.type === 'owner_left' || ev.type === 'writing' ? 'ai' : null;
+    const notHers = ev.type === 'owner_left' || ev.type === 'writing' || (ev.type === 'message' && ev.author !== 'owner');
+    const mode: SessionMode | null = ev.type === 'owner_joined' ? 'owner' : notHers ? 'ai' : null;
     const { session } = this.snapshot;
     if (mode === null || session === null) return;
     this.modeSeq = seq;
