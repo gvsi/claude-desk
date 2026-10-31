@@ -390,6 +390,12 @@ STATUS_TEXT = {
            "executed": "Hecho", "failed": "No se pudo completar", "unknown": "Todavía lo estamos confirmando",
            "refused_at_execution": "Las reglas cambiaron, así que no se hizo"},
 }
+# Owner-only refusal lines for the fake's two refusal paths: a changed policy and exhausted mandate.
+# The owner has no language setting yet, so these stay English whatever the session's language.
+OWNER_REFUSAL_TEXT = {
+    "rules_changed": "Your rules changed before this ran, so it wasn't done.",
+    "fallback": "This couldn't run when you answered, so it wasn't done.",
+}
 # What a visitor's or an agent's executed action did, by tool (the kernel's `render.en.EXECUTED` and
 # `render.es.EXECUTED`, Plans 01b and 01c), in place of the generic executed line.
 EXECUTED_TEXT = {
@@ -2109,7 +2115,7 @@ class FakeKernelState:
             record = self.decisions[known]
             if record.call_sha256 != digest:
                 raise Refusal(409, "conflict")
-            return self._refresh(record)
+            return self._refresh(record).model_copy(update={"owner_plain": None})
         if session.mode == "paused":
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="paused")
         if call.tool not in TOOL_NAMES:
@@ -2317,8 +2323,12 @@ class FakeKernelState:
                             session_id=decision.session_id, ref_id=decision.decision_id)
         line = status_line(state, tool=record.tool, session_kind=session.kind, language=session.last_language,
                            owner=desk.owner_display_name)
+        owner_plain = None
+        if state == "refused_at_execution":
+            owner_plain = OWNER_REFUSAL_TEXT[
+                "rules_changed" if summary.get("reason") == "rules_changed" else "fallback"]
         record.decision = self._signed(decision.model_copy(update={
-            "state": state, "visitor_plain": line,
+            "state": state, "visitor_plain": line, "owner_plain": owner_plain,
             "ledger_seq": entry.seq, "answers": decision.answers if state == "held" else []}))
         self._put_decision(record)
         return record.decision
@@ -2375,7 +2385,7 @@ class FakeKernelState:
                 raise Refusal(404, "not_found")
             return self._refresh(record)
         _, record = self._own_decision(request, None, decision_id)
-        return self._refresh(record)
+        return self._refresh(record).model_copy(update={"owner_plain": None})
 
     def execute(self, request: Request, body: ExecuteRequest) -> ExecResult:
         session, record = self._own_decision(request, body.session_id, body.decision_id)
@@ -2633,7 +2643,7 @@ class FakeKernelState:
                 action.tool == "native.charge_mandate" and not self._room_for(session, action))):
             # the re-check at execution (step 6): the rules in force no longer let the owner approve it
             self._transition(record, "refused_at_execution", kind="approval", answer=body.answer,
-                             approval_id=approval_id, reason="rules changed")
+                             approval_id=approval_id, reason="rules_changed", check="policy")
         elif body.answer in ("allow_once", "allow_person"):
             self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
             execution = self._run(record, session)
@@ -3562,7 +3572,7 @@ class FakeKernelState:
         known = self._by_call.get((session_id, generation, self._query(request, "call_id")))
         if known is None:
             raise Refusal(404, "not_found")
-        return self._refresh(self.decisions[known])
+        return self._refresh(self.decisions[known]).model_copy(update={"owner_plain": None})
 
 
 def first_bad_seq(entries: list[LedgerEntry]) -> int | None:

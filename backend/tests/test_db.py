@@ -1112,8 +1112,12 @@ def test_a_decision_from_before_the_owner_plain_revision_has_no_owner_line(admin
         assert "owner_plain" not in columns(admin, "kernel_ro", "decisions")
         revision.upgrade()                                # the revision runs again over what it added
         assert columns(admin, "kernel", "decisions").count("owner_plain") == 1
-    with pytest.raises(psycopg.errors.InsufficientPrivilege):
-        api.execute("SELECT owner_plain FROM kernel.decisions LIMIT 0")
+    readable = columns(api, "kernel_ro", "decisions")
+    assert "owner_plain" not in readable
+    assert set(readable) == set(KERNEL_RO_COLUMNS["decisions"])
+    api.execute("SELECT " + ", ".join(KERNEL_RO_COLUMNS["decisions"]) + " FROM kernel_ro.decisions LIMIT 0")
+    with pytest.raises(psycopg.errors.InsufficientPrivilege, match="permission denied"):
+        api.execute("SELECT kernel.decisions.owner_plain FROM kernel.decisions LIMIT 0")
 
 
 def assert_refused_before_the_database(session: Session, row: Base) -> None:
