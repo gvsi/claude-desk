@@ -9,11 +9,13 @@ import { useParams, useSearchParams } from 'react-router';
 import { browserLanguage } from '../lib/language.ts';
 import { AGENTS_COPY } from './agents/copy.ts';
 import { PublicChat } from './PublicChat.tsx';
+import { useDocumentLanguage } from './useDocumentLanguage.ts';
 
 export function PublicPage() {
   const { slug = '' } = useParams();
   const [params] = useSearchParams();
   const [language] = useState(browserLanguage);
+  useDocumentLanguage(language);
   const preview = params.get('preview') ?? '';
   const agents = `/d/${encodeURIComponent(slug)}/agents`;
   const copy = AGENTS_COPY[language];

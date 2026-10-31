@@ -4,7 +4,9 @@
  * panel sends it (`sendAgent`) and reads its run each second (`agentRun`) until the run is done,
  * failed or gone. The tasks are offered before a run, under the limit, and again at the end of one
  * that ended; while a run is unresolved, and after a start whose answer was lost, none is, so the
- * agent is never sent twice by mistake.
+ * agent is never sent twice by mistake. A task picked moves focus to the panel's title, since the
+ * task's button goes with the others, so the next Tab goes on from the panel rather than from the
+ * top of the page. Opening the page moves no focus: a run only ever starts from a pick.
  *
  * The panel's card holds the run and so the Desk's reply cards: it is the one `Card` that
  * `holdsCards`, which only this file may use.
@@ -177,6 +179,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   // The run the visitor sends plays in view: it comes into view when they press a task, and its
   // newest step stays there while they are at its end.
   const runInView = useRunInView();
+  const titleRef = useRef<HTMLHeadingElement>(null);
   // The current run's reads; aborted by a new run, a new chat and the page going away, which ends
   // its waits and stops it applying anything.
   const reading = useRef<AbortController | null>(null);
@@ -239,6 +242,10 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   const pick = (label: string) => {
     const task = DEMO_TASKS.find((t) => DEMO_TASK_COPY[language][t] === label);
     if (task === undefined) return;
+    // The tasks go while the agent works, the one pressed with them: its focus moves to the title
+    // before it goes, so it doesn't fall to the page. The focus doesn't scroll the page: bringing
+    // the run into view is `runInView`'s, and a scroll here would cut its smooth one short.
+    titleRef.current?.focus({ preventScroll: true });
     runInView.follow();
     void send(task);
   };
@@ -298,7 +305,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
 
   return (
     <Card as="section" label={copy.sendTitle} padding={16} holdsCards>
-      <AgentsCardContent title={copy.sendTitle} lead={lead} id={SEND_ID}>
+      <AgentsCardContent title={copy.sendTitle} lead={lead} id={SEND_ID} titleRef={titleRef}>
         {/* The signed limit shows in every state, as board 05 draws it during a run. */}
         <SignedLimitPanel {...copy.limit} language={language} />
         {chipsAtEnd ? null : chips}

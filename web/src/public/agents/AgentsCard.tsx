@@ -4,7 +4,7 @@
  * panel's card holds the Desk's reply cards, which only that panel's own `Card` may do, so it draws
  * that `Card` itself around the same inside (`AgentsCardContent`).
  */
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 
 import { Card } from '../../ds/index.ts';
 
@@ -28,11 +28,16 @@ export function AgentsCard({ title, lead, id, children }: AgentsCardProps) {
   );
 }
 
+export interface AgentsCardContentProps extends AgentsCardProps {
+  /** The title, for a script to move focus to: it then takes focus (`tabIndex={-1}`), never a Tab stop. */
+  titleRef?: Ref<HTMLHeadingElement>;
+}
+
 /** What an agents card holds: its title, the line under it, then its body. */
-export function AgentsCardContent({ title, lead, id, children }: AgentsCardProps) {
+export function AgentsCardContent({ title, lead, id, titleRef, children }: AgentsCardContentProps) {
   return (
     <>
-      <h2 id={id} className="cd-agents-card__title cd-type-section">
+      <h2 ref={titleRef} id={id} className="cd-agents-card__title cd-type-section" tabIndex={titleRef === undefined ? undefined : -1}>
         {title}
       </h2>
       {lead === undefined ? null : <p className="cd-agents-card__lead cd-type-meta">{lead}</p>}

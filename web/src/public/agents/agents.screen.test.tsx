@@ -9,7 +9,7 @@ import { http } from 'msw';
 import { StrictMode } from 'react';
 import { createMemoryRouter } from 'react-router';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { cdp, page } from 'vitest/browser';
+import { cdp, page, userEvent } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
 import type { EvReceipt, PublicDesk } from '../../api/contracts.ts';
@@ -311,6 +311,19 @@ describe('agents page', () => {
     await expectScreenBasics(gone.screen.container, { owner: false });
   });
 
+  it('agents_document_language_follows_the_page', async () => {
+    // The document's language, as index.html sets it (the test browser's page has its own).
+    document.documentElement.lang = 'en';
+    // A Spanish browser: the whole document is Spanish while the page is open, from its first line.
+    const es = await renderRoute(PAGE, { language: 'es-MX' });
+    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing para agentes de IA' })).toBeVisible();
+    expect(document.documentElement.lang).toBe('es');
+    // Leaving the page hands the document its language back.
+    await es.router.navigate('/no/such/page');
+    await expect.element(es.screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.documentElement.lang).toBe('en');
+  });
+
   it('agent_page_opens_a_session_first', async () => {
     // The mock, like the API, refuses to send an agent for a browser with no chat.
     mockStore.reset('rivera');
@@ -605,6 +618,38 @@ describe('agents page', () => {
     await runToItsEnd();
     expect(behaviors().length).toBeGreaterThan(0);
     expect(new Set(behaviors())).toEqual(new Set(['instant']));
+  });
+
+  it('sending_by_keyboard_keeps_the_place', async () => {
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    const title = panel.getByRole('heading', { level: 2, name: 'Send an agent' });
+    const task = panel.getByRole('button', { name: 'Book the earliest visit' });
+    await expect.element(task).toBeVisible();
+    // Opening the page moves no focus.
+    expect(document.activeElement).toBe(document.body);
+
+    // Enter on a task: the tasks go while the agent works, and focus moves to the panel's title
+    // rather than falling to the page.
+    task.element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(title).toHaveFocus();
+    expect(title.element().matches(':focus-visible')).toBe(true);
+    // It stays there through the run, and the next Tab goes on from the panel, not from the top of the page.
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    await expect.element(title).toHaveFocus();
+    await userEvent.keyboard('{Tab}');
+    expect(follows(title.element(), document.activeElement)).toBe(true);
+    expect(panel.element().contains(document.activeElement)).toBe(true);
+    // The run's log still reads each turn out as it comes.
+    await expect.element(panel.getByRole('log')).toHaveAttribute('aria-live', 'polite');
+
+    // A task clicked moves focus the same way, with no focus ring for the pointer to see.
+    const clicked = await renderRoute(PAGE);
+    const clickedTitle = clicked.screen.getByRole('heading', { level: 2, name: 'Send an agent' });
+    await clicked.screen.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(clickedTitle).toHaveFocus();
+    expect(clickedTitle.element().matches(':focus-visible')).toBe(false);
   });
 
   it('agent_turn_text_is_never_shown', async () => {

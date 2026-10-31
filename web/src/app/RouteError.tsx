@@ -4,6 +4,7 @@ import { useRouteError } from 'react-router';
 import { Button, Notice, UNREACHABLE_COPY } from '../ds/index.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { PUBLIC_COPY } from '../public/copy.ts';
+import { useDocumentLanguage } from '../public/useDocumentLanguage.ts';
 import { NotFound, OutsideTheCopy } from './NotFound.tsx';
 import { StandalonePage } from './StandalonePage.tsx';
 
@@ -20,8 +21,12 @@ export interface RouteErrorProps {
  */
 export function RouteError({ visitor = false }: RouteErrorProps) {
   const titleId = useId();
-  if (useRouteError() instanceof OutsideTheCopy) return <NotFound />;
-  const language = visitor ? browserLanguage() : 'en';
+  const outsideTheCopy = useRouteError() instanceof OutsideTheCopy;
+  // The not-found screen is English. A visitor's error line is in their language, and while it
+  // shows, the whole document is too, as the page would have made it.
+  const language = visitor && !outsideTheCopy ? browserLanguage() : 'en';
+  useDocumentLanguage(language);
+  if (outsideTheCopy) return <NotFound />;
   return (
     <StandalonePage labelledBy={titleId} lang={visitor ? language : undefined}>
       <h1 id={titleId} className="cd-sr-only">
