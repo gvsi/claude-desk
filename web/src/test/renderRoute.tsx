@@ -10,7 +10,7 @@ import { page } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
 import { App } from '../app/App.tsx';
-import { setPollScale } from '../app/poll.ts';
+import { setPollScale, setRetryScale } from '../app/poll.ts';
 import { routes } from '../app/routes.tsx';
 import type { MockSeed } from '../mocks/seed.ts';
 import { mockStore, type ResetOptions } from '../mocks/store.ts';
@@ -46,6 +46,8 @@ export interface RenderRouteOptions {
    * one, such as 100, so no poll lands while it counts.
    */
   pollScale?: number;
+  /** A failed read's retry delay at this fraction of real time (default 1); 0 retries at once. */
+  retryScale?: number;
 }
 
 export interface RenderedRoute {
@@ -73,6 +75,7 @@ export async function renderRoute(path: string, opts: RenderRouteOptions = {}): 
   resetBrowserLanguage();
   if (opts.language !== undefined) setBrowserLanguage(opts.language);
   setPollScale(opts.pollScale ?? 0.05);
+  setRetryScale(opts.retryScale ?? 1);
   if (opts.seed !== undefined) {
     const { name, signedIn = true } = typeof opts.seed === 'string' ? { name: opts.seed } : opts.seed;
     mockStore.nextEpoch();

@@ -1,9 +1,10 @@
 /**
  * What every screen test checks on a screen's default state: one concept footer word for word,
- * clean copy, zero axe violations at WCAG 2.2 AA, and on owner screens no technical words.
+ * clean copy, zero axe violations at WCAG 2.2 AA, and on owner screens no technical words. From
+ * that check on, the screen stays at rest until the test ends: nothing animates or transitions.
  */
 import axe from 'axe-core';
-import { expect } from 'vitest';
+import { expect, onTestFinished } from 'vitest';
 
 import { CONCEPT_FOOTER_TEXT, assertCleanCopy } from '../ds/test/copy.ts';
 
@@ -63,11 +64,52 @@ export interface ScreenBasicsOptions {
   owner: boolean;
 }
 
+/**
+ * Waits for every animation on the page that ends (rows fading in one by one), so contrast is
+ * checked on what settles, not mid-fade. Animations that loop (a spinner, the writing dots) are left.
+ */
+async function animationsSettled(root: HTMLElement): Promise<void> {
+  const ending = root.ownerDocument
+    .getAnimations()
+    .filter((animation) => animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime ?? Infinity));
+  await Promise.all(ending.map((animation) => animation.finished.catch(() => undefined)));
+}
+
+/** The id of the style that holds the screen at rest. */
+const AT_REST_ID = 'screen-test-at-rest';
+
+/**
+ * Puts the screen at rest for axe and keeps it there until the test ends: whatever is moving (a
+ * reply landing, a line fading in) finishes at once, and nothing starts moving after, as under
+ * reduced motion, so axe reads each line as it settles, even a reply that lands while axe is
+ * reading. Lifting the hold would play every animation again and could catch a row at its first
+ * frame, so it stays; screen tests don't check motion after their basics.
+ */
+function holdAtRest(): void {
+  for (const animation of document.getAnimations()) {
+    try {
+      animation.finish();
+    } catch {
+      // One that never ends (a writing line's dots) can't finish: the hold below stops it.
+    }
+  }
+  if (document.getElementById(AT_REST_ID) !== null) return;
+  const still = document.createElement('style');
+  still.id = AT_REST_ID;
+  still.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }';
+  document.head.append(still);
+  onTestFinished(() => {
+    still.remove();
+  });
+}
+
 export async function expectScreenBasics(root: HTMLElement, { owner }: ScreenBasicsOptions): Promise<void> {
+  await animationsSettled(root);
   const footers = root.querySelectorAll('[data-ds="concept-footer"]');
   expect(footers, 'one concept footer').toHaveLength(1);
   expect(footers[0]?.textContent?.replace(/\s+/g, ' ').trim()).toBe(CONCEPT_FOOTER_TEXT);
   assertCleanCopy(root);
+  holdAtRest();
   const violations = await axeViolations(root);
   if (violations.length > 0) throw new Error(`axe found ${violations.length} violations:\n${violations.map((v) => `- ${v}`).join('\n')}`);
   if (owner) assertNoJargon(root);

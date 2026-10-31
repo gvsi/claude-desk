@@ -2,7 +2,9 @@
  * The visitor's chats, one per Desk slug, kept for as long as the app runs, so a chat survives its
  * page being unmounted and mounted again. Each chat loads in order (the public Desk, the session,
  * the stored conversation, then the event stream from the last seq it holds), sends what the
- * visitor writes and cancels held requests.
+ * visitor writes and cancels held requests. A stream that picks up after a gap (the page coming
+ * back, a drop) sends what the chat missed first, which draws still: the chat has caught up once
+ * the stream has been quiet for `CAUGHT_UP_AFTER_MS`.
  *
  * Nothing here takes identity from the page: the API's HttpOnly cookie names the visitor's session,
  * and a 401 from any visitor route means that session is gone. A request whose answer is lost may
@@ -37,6 +39,13 @@ export type VerifyStatus = 'idle' | 'checking' | 'failed' | 'unreachable';
 
 /** How long the chat waits before each reopen of a stream the server closed; after the last, it gives up. */
 export const REOPEN_DELAYS_MS = [2_000, 5_000, 10_000] as const;
+
+/**
+ * How long a stream that opened after a gap (the page coming back, a drop) stays quiet before the
+ * chat has caught up. On opening, the server first sends everything after the chat's last seq, all
+ * at once; what it sends after this long with nothing new arrives live.
+ */
+export const CAUGHT_UP_AFTER_MS = 500;
 
 /**
  * Every event a visitor's stream carries. The stream drops a type it isn't given, so the list is
@@ -81,6 +90,8 @@ export interface VisitorChatActions {
   cancel: (decisionId: string) => void;
   /** Sends a demo code to the verify route: the kernel checks it, and Claude never sees it. */
   verify: (code: string) => void;
+  /** The page has drawn the rows that arrived live: they are live no more, so a remount draws them still. */
+  shown: () => void;
 }
 
 export type VisitorChatView = VisitorChatSnapshot & VisitorChatActions;
@@ -186,6 +197,8 @@ class VisitorChat {
   private nextId = 0;
   /** Ends the owner's typing when its time runs out. */
   private ownerTypingTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Says the chat has caught up once the stream it is catching up on has been quiet long enough. */
+  private caughtUpTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly slug: string,
@@ -217,8 +230,14 @@ class VisitorChat {
   attach(): void {
     this.users += 1;
     if (this.users !== 1) return;
-    if (this.loaded) this.startStream();
-    else void this.load();
+    if (!this.loaded) {
+      void this.load();
+      return;
+    }
+    // Back on the page: the stream picks up after the last seq the chat holds, so what came
+    // meanwhile arrives first, and draws still.
+    this.dispatch({ type: 'catching_up' });
+    this.startStream();
   }
 
   detach(): void {
@@ -236,6 +255,26 @@ class VisitorChat {
     this.stopStream = null;
     if (this.reopenTimer !== null) clearTimeout(this.reopenTimer);
     this.reopenTimer = null;
+    this.clearCaughtUpTimer();
+  }
+
+  /**
+   * While the chat is catching up on an open stream, it has caught up once the stream has sent
+   * nothing new for `CAUGHT_UP_AFTER_MS`: what the server held back comes first, all at once.
+   */
+  private awaitCaughtUp(): void {
+    this.clearCaughtUpTimer();
+    if (!this.snapshot.state.catchingUp) return;
+    const epoch = this.epoch;
+    this.caughtUpTimer = setTimeout(() => {
+      this.caughtUpTimer = null;
+      if (epoch === this.epoch) this.dispatch({ type: 'caught_up' });
+    }, CAUGHT_UP_AFTER_MS);
+  }
+
+  private clearCaughtUpTimer(): void {
+    if (this.caughtUpTimer !== null) clearTimeout(this.caughtUpTimer);
+    this.caughtUpTimer = null;
   }
 
   /** The Desk (once), then the session and its conversation, then the stream. */
@@ -295,6 +334,8 @@ class VisitorChat {
    * nothing, and a later one restarts the timer.
    */
   private onEvent(seq: number, ev: SseEvent): void {
+    // Still catching up: the stream isn't quiet yet.
+    if (this.caughtUpTimer !== null) this.awaitCaughtUp();
     if (ev.type !== 'owner_typing') {
       this.dispatch({ type: 'event', seq, ev });
       return;
@@ -327,16 +368,21 @@ class VisitorChat {
   private onStreamState(state: StreamState, epoch: number): void {
     if (state === 'closed') {
       this.stopStream = null;
+      this.clearCaughtUpTimer();
       void this.afterClose(epoch);
       return;
     }
     this.dispatch({ type: 'connection', connection: state });
-    if (state === 'open') {
-      this.reopens = 0;
-      // The server answers again: a good moment to settle any message whose answer was lost.
-      this.checkRetries = 0;
-      void this.checkLost(this.generation);
+    if (state !== 'open') {
+      // Dropped: the browser opens it again from the last seq, and the chat catches up then.
+      this.clearCaughtUpTimer();
+      return;
     }
+    this.awaitCaughtUp();
+    this.reopens = 0;
+    // The server answers again: a good moment to settle any message whose answer was lost.
+    this.checkRetries = 0;
+    void this.checkLost(this.generation);
   }
 
   /**
@@ -410,6 +456,10 @@ class VisitorChat {
     const id = `${LOCAL_ID}${this.nextId}`;
     this.dispatch({ type: 'sent', id, text });
     void this.post(id, text);
+  };
+
+  readonly shown = (): void => {
+    if (this.snapshot.state.rows.some((row) => row.live === true)) this.dispatch({ type: 'shown' });
   };
 
   readonly resend = (id: string): void => {
@@ -633,6 +683,7 @@ export function useVisitorChat(slug: string, previewDeskId?: string): VisitorCha
       newChat: chat.newChat,
       cancel: chat.cancel,
       verify: chat.verify,
+      shown: chat.shown,
     }),
     [snapshot, chat],
   );

@@ -11,6 +11,7 @@ The app runs on FakeKernel with a scripted model.
 """
 
 import asyncio
+import contextlib
 import html
 import json
 import logging
@@ -41,10 +42,12 @@ from desk.api.prompts import (
     SetupStart,
     question_text,
 )
+from desk.api.ratelimit import RateLimited
+from desk.api.schemas import SetupStartIn
 from desk.api.setup import owner_name
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest
-from tests.api.fakes import ScriptedModel, gated, response
+from tests.api.fakes import ScriptedModel, gated, response, unavailable
 from tests.api.fakes import text as text_block
 from tests.kernel_contract.fake_kernel import OWNER_NAME, fake_kernel_app
 
@@ -185,8 +188,7 @@ async def test_desk_is_created_before_any_setup_tool_call(app, browser, fake, ke
     state = await begin(owner, model, website=WEBSITE)
 
     assert state["step"] == "questions" and state["slug"].startswith("rivera-plumbing-")
-    assert [message["role"] for message in state["messages"]] == ["owner", "claude"]
-    assert state["messages"][0]["text"] == DESCRIPTION
+    assert [message["role"] for message in state["messages"]] == ["claude"]
     (created,) = fake.called("POST /desks")
     assert created.headers["x-owner-session"] == owner.token
     assert created.body["business"] == {"name": "Rivera Plumbing", "owner_display_name": "Maria Rivera",
@@ -205,6 +207,24 @@ async def test_desk_is_created_before_any_setup_tool_call(app, browser, fake, ke
     routes = [call.route for call in fake.calls]
     first_tool = min(index for index, route in enumerate(routes) if route in SETUP_TOOL_ROUTES)
     assert routes.index("POST /desks") < routes.index("PUT /desks/{id}/answering") < first_tool
+
+
+async def test_setups_messages_leave_out_the_owners_description(app, browser, fake, kernel_http, model, engine):
+    # The owner isn't shown their own opening words back: the conversation opens with Claude's consent question. The
+    # description stays first in the stored transcript, which later turns read.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, website=WEBSITE)
+    assert state["messages"] == [{"role": "claude", "text": desk_setup.CONSENT_QUESTION}]
+    interview_id = state["interview_id"]
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["messages"] == state["messages"]
+    transcript = (await stored(engine, interview_id))["transcript"]
+    assert transcript[0] == {"role": "owner", "text": DESCRIPTION, "website": WEBSITE}
+
+    consented = await consent(owner, interview_id, False)
+    assert [message["text"] for message in consented["messages"]][:2] == [desk_setup.CONSENT_QUESTION,
+                                                                         "No, I'll type it"]
+    assert DESCRIPTION not in [message["text"] for message in consented["messages"]]
+    assert (await stored(engine, interview_id))["transcript"][0] == transcript[0]
 
 
 async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, kernel_http, model, engine, caplog):
@@ -275,7 +295,7 @@ async def test_setup_tools_use_the_owner_session_and_desk(app, browser, fake, ke
     desk = fake.desks[other["desk_id"]]
     desk.tools["native.fetch_website"] = desk.tools["native.fetch_website"].model_copy(update={"status": "disabled"})
     consented = await consent(owner, other["interview_id"], True)
-    assert consented["messages"][4] == {"role": "tool_label", "text": "Couldn't read rivera-plumbing.example"}
+    assert consented["messages"][3] == {"role": "tool_label", "text": "Couldn't read rivera-plumbing.example"}
     proposed = [call.body["call"]["tool"] for call in fake.called("POST /decide")
                 if call.body["desk_id"] == other["desk_id"]]
     assert proposed == ["native.read_memory"]
@@ -287,13 +307,13 @@ async def test_declined_consent_reads_nothing(app, browser, fake, kernel_http, m
     declined = await consent(owner, state["interview_id"], False)
 
     assert declined["consent"] is False and declined["question"] == "what_you_do"
-    assert [(message["role"], message["text"]) for message in declined["messages"][2:]] == [
+    assert [(message["role"], message["text"]) for message in declined["messages"][1:]] == [
         ("owner", "No, I'll type it"), ("claude", question_text("what_you_do", "trade"))]
     # a website named later is kept as the owner typed it, and nothing is read
     answered = await answer(owner, model, state["interview_id"], "Plumbing. Our new site is elsewhere.example",
                             turn(website="https://elsewhere.example"))
     assert answered.status_code == 200, answered.text
-    assert answered.json()["messages"][4]["text"] == "Plumbing. Our new site is elsewhere.example"
+    assert answered.json()["messages"][3]["text"] == "Plumbing. Our new site is elsewhere.example"
     text = turn_text(model)
     assert "<memory>" not in text and "<website" not in text
     # consent is given once: it can't be turned into a yes later
@@ -308,7 +328,7 @@ async def test_tool_labels_are_inline_messages(app, browser, fake, kernel_http, 
     consented = await consent(owner, state["interview_id"], True)
 
     assert consented["consent"] is True and consented["question"] == "what_you_do"
-    assert [(message["role"], message["text"]) for message in consented["messages"][2:]] == [
+    assert [(message["role"], message["text"]) for message in consented["messages"][1:]] == [
         ("owner", "Yes, use it"), ("tool_label", "Searched your Claude memory"),
         ("tool_label", "Read rivera-plumbing.example"), ("claude", question_text("what_you_do", "trade"))]
     read = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")
@@ -324,7 +344,7 @@ async def test_refused_fetch_does_not_block_setup(app, browser, fake, kernel_htt
     fake.script("native.read_memory", "hold")                           # held: it never runs without the owner
     state = await begin(owner, model, website=WEBSITE)
     consented = await consent(owner, state["interview_id"], True)
-    assert [(message["role"], message["text"]) for message in consented["messages"][3:]] == [
+    assert [(message["role"], message["text"]) for message in consented["messages"][2:]] == [
         ("tool_label", "Couldn't search your Claude memory"), ("tool_label", "Couldn't read rivera-plumbing.example"),
         ("claude", question_text("what_you_do", "trade"))]
     assert not fake.called("POST /execute")
@@ -1032,7 +1052,7 @@ async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_is_re
         release.set()
     reply = await first
     assert reply.status_code == 200, reply.text
-    assert [message["text"] for message in reply.json()["messages"][2:4]] == ["Yes, use it",
+    assert [message["text"] for message in reply.json()["messages"][1:3]] == ["Yes, use it",
                                                                              "Searched your Claude memory"]
 
 
@@ -1102,3 +1122,347 @@ async def test_a_stalled_model_call_ends_as_unavailable_with_nothing_stored(app,
     # The same answer sent again runs: the stalled one left nothing behind.
     reply = await answer(owner, model, interview_id, "Plumbing.")
     assert reply.status_code == 200 and reply.json()["question"] == "hours_and_area"
+
+
+# Idempotency keys ---------------------------------------------------------------------------------------------------
+
+KEY = "start-0c6f2e4a-9b1d-4f7e-8a35-2d9c41b7e6a0"
+
+
+async def start_keyed(owner: Owner, key: str | None = KEY, *, description: str = DESCRIPTION,
+                      **fields) -> httpx.Response:
+    """Start setup with the description and, unless `key` is None, the client's idempotency key."""
+    body = {"description": description, "timezone": TIMEZONE, **fields}
+    if key is not None:
+        body["idempotency_key"] = key
+    return await owner.browser.post("/api/owner/setup", json=body)
+
+
+async def interviews(engine) -> list[tuple[str, str | None]]:
+    async with engine.connect() as conn:
+        found = await conn.execute(sql("SELECT interview_id, desk_id FROM app.setup_interviews ORDER BY created_at"))
+        return [tuple(row) for row in found]
+
+
+async def test_a_repeated_key_starts_one_interview_and_one_desk(app, browser, fake, kernel_http, model, engine):
+    # The first answer was lost (a timeout, say) and the start is sent again with its key: the repeat answers the
+    # interview the first made, as it stands now, with no second model call or Desk.
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started())
+    first = await start_keyed(owner)
+    assert first.status_code == 201, first.text
+    repeat = await start_keyed(owner)
+    assert (repeat.status_code, repeat.json()) == (201, first.json())
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    state = first.json()
+    assert await interviews(engine) == [(state["interview_id"], state["desk_id"])]
+
+    moved_on = await consent(owner, state["interview_id"], False)
+    repeat = await start_keyed(owner)
+    assert (repeat.status_code, repeat.json()) == (201, moved_on)
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+
+
+@pytest.mark.parametrize("keys", [("start-a", "start-b"), (None, None)], ids=["two keys", "no key"])
+async def test_two_keys_or_none_start_two_interviews(app, browser, fake, kernel_http, model, engine, keys):
+    # Two clicks send two keys, and each starts its own interview and Desk. Without a key, as before keys, every start
+    # makes its own: pinned, so making the key required later is a deliberate change.
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started(), started())
+    first, second = [await start_keyed(owner, key) for key in keys]
+    assert (first.status_code, second.status_code) == (201, 201), (first.text, second.text)
+    assert first.json()["interview_id"] != second.json()["interview_id"]
+    assert first.json()["desk_id"] != second.json()["desk_id"]
+    assert len(fake.called("POST /desks")) == 2 and len(model.requests) == 2
+    assert len(await interviews(engine)) == 2
+
+
+async def test_the_same_key_in_another_copy_is_its_own_interview(app, browser, fake, kernel_http, model, engine):
+    one, other = await new_owner(app, browser, kernel_http), await new_owner(app, browser, kernel_http)
+    model.add(started(), started())
+    first, second = await start_keyed(one), await start_keyed(other)
+    assert (first.status_code, second.status_code) == (201, 201), (first.text, second.text)
+    assert first.json()["interview_id"] != second.json()["interview_id"]
+    assert len(fake.called("POST /desks")) == 2
+    # Each copy's repeat answers its own interview, and neither reads the other's.
+    assert (await start_keyed(one)).json() == first.json() and (await start_keyed(other)).json() == second.json()
+    assert (await other.browser.get(f"/api/owner/setup/{first.json()['interview_id']}")).status_code == 404
+    assert len(fake.called("POST /desks")) == 2 and len(model.requests) == 2
+
+
+async def test_the_same_key_with_another_body_is_a_conflict(app, browser, fake, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started())
+    first = await start_keyed(owner)
+    assert first.status_code == 201, first.text
+    for changed in ({"description": "Rivera Plumbing, now in Berkeley too."}, {"timezone": "America/New_York"},
+                    {"owner_display_name": "Maria"}):
+        refused = await start_keyed(owner, **{"description": DESCRIPTION, **changed})
+        assert (refused.status_code, refused.json()) == (409, {"error": "conflict"}), changed
+    # The key's own body still answers its interview; nothing else was made or asked.
+    assert (await start_keyed(owner)).json() == first.json()
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    assert len(await interviews(engine)) == 1
+
+
+@pytest.mark.parametrize("fail", ["unavailable", "unfit"])
+async def test_a_start_that_failed_before_the_desk_was_asked_for_frees_its_key(app, browser, fake, kernel_http, model,
+                                                                              engine, fail):
+    # Claude couldn't answer (or answered twice with what doesn't fit), so the kernel was never asked for a Desk: the
+    # start answers its error and leaves no row, and the same request sent again starts afresh.
+    owner = await new_owner(app, browser, kernel_http)
+    if fail == "unavailable":
+        model.add(unavailable())
+    else:
+        model.add(response(text_block("Rivera Plumbing.")), response(text_block("Rivera Plumbing.")))
+    first = await start_keyed(owner)
+    assert (first.status_code, first.json()) == (503, {"error": "model_unavailable"})
+    assert await interviews(engine) == [] and fake.called("POST /desks") == []
+    model.add(started())
+    again = await start_keyed(owner)
+    assert again.status_code == 201, again.text
+    assert len(fake.called("POST /desks")) == 1
+    assert (await start_keyed(owner)).json() == again.json()
+
+
+@pytest.mark.parametrize(("fail", "answered"), [
+    ("422", (422, {"error": "kernel", "code": "invalid"})),
+    ("500", (503, {"error": "kernel", "code": "internal"})),
+    ("timeout", (503, {"error": "kernel", "code": "kernel_unavailable"})),
+], ids=["kernel refused", "kernel 500", "kernel timeout"])
+async def test_a_start_that_failed_once_the_desk_was_asked_for_answers_its_failure_again(app, browser, fake,
+                                                                                       kernel_http, model, engine,
+                                                                                       fail, answered):
+    # The kernel was asked for the Desk, which may exist even when the answer was an error: the key keeps the outcome.
+    # A repeat answers the same failure and makes nothing, not even a model call; a new click sends a new key.
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started())
+    fake.fail("POST /desks", fail, times=1)
+    first = await start_keyed(owner)
+    assert (first.status_code, first.json()) == answered
+    repeat = await start_keyed(owner)
+    assert (repeat.status_code, repeat.json()) == answered
+    assert (len(model.requests), len(fake.called("POST /desks"))) == (1, 1)
+    ((interview_id, desk_id),) = await interviews(engine)
+    assert desk_id is None
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).status_code == 404
+
+    model.add(started())
+    fresh = await start_keyed(owner, "start-again")
+    assert fresh.status_code == 201, fresh.text
+    assert len(fake.called("POST /desks")) == 2
+
+
+async def test_a_repeat_while_the_first_is_starting_answers_in_progress_at_once(app, browser, fake, kernel_http, model,
+                                                                               engine):
+    # The first start is still waiting on Claude when its repeat arrives: the key's row is already written, so the
+    # repeat answers 409 `in_progress` at once, holding nothing while it waits, and makes nothing. Sent again once the
+    # first is done, it answers the same setup interview, with one model call and one Desk between them.
+    owner = await new_owner(app, browser, kernel_http)
+    release = asyncio.Event()
+    model.add(gate := gated(started(), release))
+    first = asyncio.create_task(start_keyed(owner))
+    await asyncio.wait_for(gate.entered.wait(), 5)
+    ((interview_id, desk_id),) = await interviews(engine)
+    assert desk_id is None                                  # written before Claude answers or the kernel is called
+    for _ in range(2):
+        busy = await asyncio.wait_for(start_keyed(owner), 3)
+        assert (busy.status_code, busy.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    release.set()
+    first = await asyncio.wait_for(first, 10)
+    assert first.status_code == 201 and first.json()["interview_id"] == interview_id, first.text
+    assert (await start_keyed(owner)).json() == first.json()
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+
+
+def held_limits(app: FastAPI, monkeypatch, *, hold: int = 0) -> tuple[list[str], list[asyncio.Event]]:
+    """The names of the limits the app is asked to count from now on, in order, whether or not they refuse; and,
+    for each of the first `hold` `setup_turn` checks, an event it waits for, set by the test to let it through."""
+    limiter = app.state.runtime.limiter
+    enforce, asked, holds = limiter.enforce, [], [asyncio.Event() for _ in range(hold)]
+
+    async def counting(name, key, **options):
+        asked.append(name)
+        if name == "setup_turn" and asked.count(name) <= hold:
+            await holds[asked.count(name) - 1].wait()
+        return await enforce(name, key, **options)
+
+    monkeypatch.setattr(limiter, "enforce", counting)
+    return asked, holds
+
+
+async def until(condition, timeout: float = 5) -> None:
+    async with asyncio.timeout(timeout):
+        while not condition():
+            await asyncio.sleep(0.01)
+
+
+async def test_a_repeat_during_the_first_ones_admission_waits_for_it_and_is_never_charged(app, browser, fake,
+                                                                                        kernel_http, model, engine,
+                                                                                        monkeypatch):
+    # The first start is still being admitted (held inside the setup turn limit's check) when its repeat arrives. The
+    # repeat waits for that admission, then finds the key's row and answers 409 `in_progress`; it is never counted.
+    owner = await new_owner(app, browser, kernel_http)
+    asked, (admitted,) = held_limits(app, monkeypatch, hold=1)
+    release = asyncio.Event()
+    model.add(gate := gated(started(), release))
+    first = asyncio.create_task(start_keyed(owner))
+    await until(lambda: asked.count("setup_turn") == 1)
+    repeat = asyncio.create_task(start_keyed(owner))
+    await until(lambda: desk_setup.ADMISSIONS.users() == 2)        # the first holds the key's lock, the repeat waits
+    assert not repeat.done()
+    admitted.set()
+    await asyncio.wait_for(gate.entered.wait(), 5)
+    repeat = await asyncio.wait_for(repeat, 5)
+    assert (repeat.status_code, repeat.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    release.set()
+    first = await asyncio.wait_for(first, 10)
+    assert first.status_code == 201, first.text
+    assert asked.count("setup_turn") == 1
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    assert len(desk_setup.ADMISSIONS) == 0                           # each key's lock goes once nothing holds it
+
+
+async def test_a_start_abandoned_mid_way_frees_its_key_once_it_is_older_than_any_start(app, browser, fake, kernel_http,
+                                                                                       model, engine, db):
+    # A start whose request stopped (its process did, say) left its row with the key, no Desk and no failure. Until
+    # the row is older than the longest a start can take, a repeat answers 409 `in_progress`; after that, the row is
+    # abandoned, and a repeat deletes it and starts afresh.
+    owner = await new_owner(app, browser, kernel_http)
+    sha = desk_setup.start_sha256(SetupStartIn(description=DESCRIPTION, timezone=TIMEZONE, idempotency_key=KEY))
+    db.execute("INSERT INTO app.setup_interviews (interview_id, copy_id, idempotency_key, request_sha256)"
+               " VALUES ('setup-abandoned', %s, %s, %s)", (owner.copy_id, KEY, sha))
+    busy = await start_keyed(owner)
+    assert (busy.status_code, busy.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    db.execute("UPDATE app.setup_interviews SET created_at = now() - make_interval(secs => %s)"
+               " WHERE interview_id = 'setup-abandoned'", (desk_setup.START_ABANDONED_S - 5,))
+    busy = await start_keyed(owner)
+    assert (busy.status_code, busy.json()) == (409, {"error": "in_progress", "retry_after": 2})
+
+    db.execute("UPDATE app.setup_interviews SET created_at = now() - make_interval(secs => %s)"
+               " WHERE interview_id = 'setup-abandoned'", (desk_setup.START_ABANDONED_S + 5,))
+    model.add(started())
+    fresh = await start_keyed(owner)
+    assert fresh.status_code == 201, fresh.text
+    assert await interviews(engine) == [(fresh.json()["interview_id"], fresh.json()["desk_id"])]
+    assert (await start_keyed(owner)).json() == fresh.json()
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+
+
+async def test_a_start_that_asked_for_its_desk_is_never_taken_over(app, browser, fake, kernel_http, model, engine, db,
+                                                                   monkeypatch):
+    # The kernel made the Desk, but its answer was lost and the start never settled its row (its process stopped, or
+    # the last write failed): the row has no Desk and no failure. It did record that the Desk was asked for, so no
+    # age makes it abandoned: the Desk may exist, a repeat answers 409 `in_progress` however old the row is, and only
+    # a new key starts again.
+    owner = await new_owner(app, browser, kernel_http)
+
+    async def unsettled(engine, statement) -> None:
+        return None
+
+    with monkeypatch.context() as patch:
+        patch.setattr(desk_setup, "_settle", unsettled)
+        fake.drop_response("POST /desks")
+        model.add(started())
+        first = await start_keyed(owner)
+    assert first.status_code == 503, first.text
+    assert len(fake.called("POST /desks")) == 1
+    db.execute("UPDATE app.setup_interviews SET created_at = now() - make_interval(secs => %s)",
+               (desk_setup.START_ABANDONED_S + 5,))
+    repeat = await start_keyed(owner)
+    assert (repeat.status_code, repeat.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    ((desk_id, start_error, asked),) = db.execute("SELECT desk_id, start_error, desk_requested_at IS NOT NULL"
+                                                  " FROM app.setup_interviews").fetchall()
+    assert (desk_id, start_error, asked) == (None, None, True)
+
+    model.add(started())
+    fresh = await start_keyed(owner, "start-again")
+    assert fresh.status_code == 201, fresh.text
+
+
+async def test_a_start_whose_row_went_meanwhile_asks_for_no_desk(app, browser, fake, kernel_http, model, db):
+    # While Claude reads the description, the start's row goes (a repeat took it over, say): the start finds no row to
+    # record its Desk request on, so it asks the kernel for no Desk and answers 409 `in_progress`.
+    owner = await new_owner(app, browser, kernel_http)
+    release = asyncio.Event()
+    model.add(gate := gated(started(), release))
+    first = asyncio.create_task(start_keyed(owner))
+    await asyncio.wait_for(gate.entered.wait(), 5)
+    db.execute("DELETE FROM app.setup_interviews WHERE copy_id = %s", (owner.copy_id,))
+    release.set()
+    first = await asyncio.wait_for(first, 5)
+    assert (first.status_code, first.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    assert fake.called("POST /desks") == []
+
+
+class EachOnItsOwn:
+    """Admission with no lock in this process, as two processes each admit a request on their own."""
+
+    def admitting(self, copy_id: str, key: str) -> contextlib.nullcontext:
+        return contextlib.nullcontext()
+
+
+async def test_two_processes_racing_one_key_make_one_interview(app, browser, fake, kernel_http, model, engine,
+                                                               monkeypatch):
+    # Two starts with one key, each admitted on its own (two processes), both find no row and both pass the limit. The
+    # unique index on (copy, key) lets one claim the key; the other answers the setup interview that one made, with
+    # one model call and one Desk between them.
+    monkeypatch.setattr(desk_setup, "ADMISSIONS", EachOnItsOwn())
+    owner = await new_owner(app, browser, kernel_http)
+    asked, (one, two) = held_limits(app, monkeypatch, hold=2)
+    model.add(started())
+    racing = {asyncio.create_task(start_keyed(owner)), asyncio.create_task(start_keyed(owner))}
+    await until(lambda: asked.count("setup_turn") == 2)         # both looked, found no row and are being counted
+    one.set()
+    done, pending = await asyncio.wait(racing, timeout=10, return_when=asyncio.FIRST_COMPLETED)
+    (winner,) = done
+    assert winner.result().status_code == 201, winner.result().text
+    two.set()
+    loser = await asyncio.wait_for(pending.pop(), 10)
+    assert (loser.status_code, loser.json()) == (201, winner.result().json())
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    assert len(await interviews(engine)) == 1
+
+
+async def test_a_repeat_never_counts_on_the_setup_turn_limit(app, browser, fake, kernel_http, model, monkeypatch):
+    owner = await new_owner(app, browser, kernel_http)
+    asked, _ = held_limits(app, monkeypatch)
+    model.add(started())
+    first = await start_keyed(owner)
+    assert first.status_code == 201, first.text
+    for _ in range(3):
+        assert (await start_keyed(owner)).json() == first.json()
+    assert asked.count("setup_turn") == 1
+
+
+async def test_a_start_the_limit_refuses_leaves_no_row(app, browser, fake, kernel_http, model, engine, monkeypatch):
+    # Refused before its key is claimed: no row, no model call, no Desk, and the same key goes through once the limit
+    # lets it.
+    owner = await new_owner(app, browser, kernel_http)
+    limiter = app.state.runtime.limiter
+    enforce = limiter.enforce
+
+    async def refusing(name, key, **options):
+        if name == "setup_turn":
+            raise RateLimited(60)
+        return await enforce(name, key, **options)
+
+    monkeypatch.setattr(limiter, "enforce", refusing)
+    refused = await start_keyed(owner)
+    assert (refused.status_code, refused.json()) == (429, {"error": "rate_limited", "retry_after": 60})
+    assert await interviews(engine) == [] and fake.called("POST /desks") == [] and model.requests == []
+    monkeypatch.setattr(limiter, "enforce", enforce)
+    model.add(started())
+    assert (await start_keyed(owner)).status_code == 201
+
+
+@pytest.mark.parametrize("key", ["", "k" * 129, "start\x00a", "start\na"], ids=["empty", "129", "NUL", "newline"])
+async def test_a_key_is_1_to_128_characters_with_no_control_character(app, browser, fake, kernel_http, model, engine,
+                                                                       key):
+    owner = await new_owner(app, browser, kernel_http)
+    refused = await start_keyed(owner, key)
+    assert (refused.status_code, refused.json()) == (422, {"error": "invalid"})
+    assert fake.called("POST /desks") == [] and model.requests == [] and await interviews(engine) == []
+    model.add(started())
+    assert (await start_keyed(owner, "k" * 128)).status_code == 201

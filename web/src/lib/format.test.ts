@@ -3,6 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import type { HoursWindow } from '../api/contracts.ts';
 import type { ConversationSummary } from '../api/views.ts';
 import {
   aboveMoneyCapCopy,
@@ -11,11 +12,13 @@ import {
   formatCents,
   formatClock,
   formatDay,
+  formatHours,
   formatListTime,
   formatMoneyExact,
   formatStarted,
   formatWhen,
   greetingFor,
+  hoursParts,
   presenceLine,
   relativeWait,
 } from './format.ts';
@@ -176,5 +179,61 @@ describe('format', () => {
     expect(aboveMoneyCapCopy(50_000)).toBe("That's above your limit of $500. Raise the limit first.");
     expect(aboveMoneyCapCopy(4050)).toBe("That's above your limit of $40.50. Raise the limit first.");
     expect(aboveMoneyCapCopy(0)).toBe("You haven't set a limit for taking money without asking. Set one first.");
+  });
+
+  it('hours_parts_name_the_days_and_the_times', () => {
+    const parts = (days: string[], start = '08:00:00', end = '18:00:00') => hoursParts({ days, start, end } as HoursWindow);
+    const WEEKDAYS = ['mon', 'tue', 'wed', 'thu', 'fri'];
+
+    // The boards' words: the days as the owner says them, then the times.
+    expect(parts(WEEKDAYS)).toEqual({ days: 'Weekdays', times: '8:00 am to 6:00 pm', allDay: false });
+    expect(parts(['sat'], '09:00:00', '13:00:00')).toEqual({ days: 'Saturdays', times: '9:00 am to 1:00 pm', allDay: false });
+    expect(parts(['sun']).days).toBe('Sundays');
+    expect(parts(['sun', 'sat']).days).toBe('Weekends');
+    expect(parts([...WEEKDAYS, 'sat', 'sun']).days).toBe('Every day');
+    // Other sets: each day by its plural name, in the week's order, Monday first.
+    expect(parts(['fri', 'mon', 'wed']).days).toBe('Mondays, Wednesdays and Fridays');
+    expect(parts(['tue', 'thu']).days).toBe('Tuesdays and Thursdays');
+    expect(parts(['mon']).days).toBe('Mondays');
+    // Three days or more in a row read as a range; weekdays and weekends keep their names.
+    expect(parts(['mon', 'tue', 'wed', 'thu']).days).toBe('Monday to Thursday');
+    expect(parts(['fri', 'sat', 'sun']).days).toBe('Friday to Sunday');
+    expect(parts([...WEEKDAYS, 'sat']).days).toBe('Weekdays and Saturdays');
+    expect(parts([...WEEKDAYS, 'sun']).days).toBe('Weekdays and Sundays');
+    expect(parts(['mon', 'sat', 'sun']).days).toBe('Mondays and weekends');
+
+    // A day's end at 00:00 is midnight; midnight to midnight is all day.
+    expect(parts(WEEKDAYS, '08:00:00', '00:00:00').times).toBe('8:00 am to midnight');
+    expect(parts(WEEKDAYS, '00:00:00', '00:00:00').times).toBe('all day');
+    expect(parts(WEEKDAYS, '12:00:00', '12:30:00').times).toBe('12:00 pm to 12:30 pm');
+    expect(parts(WEEKDAYS, '07:05:00', '23:59:00').times).toBe('7:05 am to 11:59 pm');
+    // A time that can't be read is shown as it came.
+    expect(parts(WEEKDAYS, '25:00:00', '18:00:00').times).toBe('25:00:00 to 6:00 pm');
+
+    // Settings joins several windows with no comma after the days.
+    const opening = [parts(WEEKDAYS), parts(['sat'], '09:00:00', '13:00:00')].map(({ days, times }) => `${days} ${times}`).join(', ');
+    expect(opening).toBe('Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm');
+  });
+
+  it('hours_parts_say_when_a_window_is_all_day', () => {
+    const parts = (start: string, end: string) => hoursParts({ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start, end } as HoursWindow);
+    // Midnight to midnight, and only that, is all day, so a caller needn't read the words.
+    expect(parts('00:00:00', '00:00:00')).toEqual({ days: 'Weekdays', times: 'all day', allDay: true });
+    expect(parts('00:00', '00:00')).toMatchObject({ allDay: true });
+    expect(parts('08:00:00', '00:00:00')).toMatchObject({ times: '8:00 am to midnight', allDay: false });
+    expect(parts('00:00:00', '18:00:00')).toMatchObject({ times: 'midnight to 6:00 pm', allDay: false });
+    expect(parts('00:00:00', '23:59:00')).toMatchObject({ allDay: false });
+    // A time is midnight only when its seconds are zero too; otherwise it reads as a clock time.
+    expect(parts('00:00:00', '00:00:30')).toEqual({ days: 'Weekdays', times: 'midnight to 12:00 am', allDay: false });
+    expect(parts('00:00:30', '00:00:00')).toEqual({ days: 'Weekdays', times: '12:00 am to midnight', allDay: false });
+    // A time that can't be read is never all day.
+    expect(parts('24:00:00', '00:00:00')).toMatchObject({ times: '24:00:00 to midnight', allDay: false });
+  });
+
+  it('format_hours_joins_its_parts', () => {
+    const hours = (days: string[], start: string, end: string) => formatHours({ days, start, end } as HoursWindow);
+    expect(hours(['mon', 'tue', 'wed', 'thu', 'fri'], '08:00:00', '18:00:00')).toBe('Weekdays, 8:00 am to 6:00 pm');
+    expect(hours(['sat'], '09:00:00', '13:00:00')).toBe('Saturdays, 9:00 am to 1:00 pm');
+    expect(hours(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], '00:00:00', '00:00:00')).toBe('Every day, all day');
   });
 });

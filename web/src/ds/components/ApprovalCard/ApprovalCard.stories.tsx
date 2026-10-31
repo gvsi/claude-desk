@@ -315,6 +315,8 @@ export const TwoPlainButtons: Story = {
     await expect(canvas.queryByRole('menu')).toBeNull();
     for (const words of ['saves a rule', 'save a rule', "You'll see", 'Or save a rule']) await expect(card).not.toHaveTextContent(words);
     await expect(group).not.toHaveAttribute('aria-busy');
+    // A real card has no vision line.
+    await expect(canvasElement.querySelector('.cd-vision-inert-line')).toBeNull();
   },
 };
 

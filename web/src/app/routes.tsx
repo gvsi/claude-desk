@@ -5,11 +5,18 @@ import { ABOUT_PAGES, type AboutId } from '../about/links.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { ConversationsPage } from '../owner/conversations/ConversationsPage.tsx';
 import { OwnerLayout } from '../owner/OwnerLayout.tsx';
+import { PeoplePage } from '../owner/people/PeoplePage.tsx';
+import { PersonDetail } from '../owner/people/PersonDetail.tsx';
+import { RuleDraftPage } from '../owner/rules/RuleDraftReview.tsx';
 import { SafetyPage } from '../owner/safety/SafetyPage.tsx';
+import { FIRST_SETTINGS_SECTION, SETTINGS_SECTIONS, SettingsLayout } from '../owner/settings/SettingsLayout.tsx';
+import { SharePage } from '../owner/share/SharePage.tsx';
 import { BriefingPage } from '../owner/today/BriefingPage.tsx';
 import { TodayPage } from '../owner/today/TodayPage.tsx';
+import { AgentCardPage } from '../public/agents/AgentCardPage.tsx';
 import { CheckoutPage } from '../public/checkout/CheckoutPage.tsx';
 import { PublicPage } from '../public/PublicPage.tsx';
+import { SetupPage } from '../setup/SetupPage.tsx';
 import { CityOfficePage } from '../vision/CityOfficePage.tsx';
 import { ClaudeAccountPage } from '../vision/ClaudeAccountPage.tsx';
 import { VISION_PATHS } from '../vision/data.ts';
@@ -49,6 +56,8 @@ function aboutRoute(id: AboutId): RouteObject {
  */
 export const routes: RouteObject[] = [
   { path: '/', element: <Arrival />, errorElement: <RouteError /> },
+  // Setup, before the owner's Desk routes so "setup" is never read as a Desk.
+  { path: '/app/setup/:setupId?', element: <SetupPage />, errorElement: <RouteError /> },
   {
     path: '/app/:deskId',
     element: <OwnerLayout />,
@@ -64,9 +73,25 @@ export const routes: RouteObject[] = [
       // One route for the list and an attempt open beside it, so the page stays as it is (its filter
       // included) while the owner moves between attempts.
       { path: 'safety/:refId?', element: <SafetyPage /> },
+      { path: 'people', element: <PeoplePage /> },
+      { path: 'people/:personId', element: <PersonDetail /> },
+      { path: 'share', element: <SharePage /> },
+      // A card draft's review, from router state or read again by its version after a reload.
+      { path: 'rules/drafts/:version', element: <RuleDraftPage /> },
+      // Settings opens on its first section. A path under it that names no section (Integrations,
+      // which Connectors replaced) matches nothing here, so it is the not-found screen.
+      {
+        path: 'settings',
+        element: <SettingsLayout />,
+        children: [
+          { index: true, element: <Navigate to={FIRST_SETTINGS_SECTION} replace /> },
+          ...SETTINGS_SECTIONS.map(({ path, element }) => ({ path, element })),
+        ],
+      },
     ],
   },
   { path: '/d/:slug', element: <PublicPage />, errorElement: <RouteError visitor /> },
+  { path: '/d/:slug/agents', element: <AgentCardPage />, errorElement: <RouteError visitor /> },
   { path: '/pay/:token', element: <CheckoutPage />, errorElement: <RouteError visitor /> },
   // The vision pages: static pictures of where a Desk is going, each under the vision bar. They read
   // nothing, so they open the same for anyone with the link.

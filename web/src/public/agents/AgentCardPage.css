@@ -1,0 +1,103 @@
+/* The agents page, as the agents boards draw it: the brand header, then one column 32 px under it
+   with the way back to the chat, the page's title and the AI disclosure 16 px apart, the cards 16 px
+   apart, and the concept footer at the window's foot. The column is the boards' 760 px
+   (`size-agents-column`). Below 768 px the gutters are 16 px. */
+
+.cd-agents-page {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: 100dvh;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.cd-agents-page__main {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: calc(var(--size-agents-column) + 2 * var(--space-40));
+  margin: 0 auto;
+  padding: var(--space-32) var(--space-40) var(--space-20);
+}
+
+/* Before the Desk shows: the disclosure and the page's one line, 14 px apart, the footer under them. */
+.cd-agents-page__main--state {
+  gap: var(--space-14);
+}
+
+.cd-agents-page__back {
+  margin: 0;
+}
+
+.cd-agents-page__head {
+  display: grid;
+  gap: var(--space-16);
+  margin-top: var(--space-16);
+}
+
+.cd-agents-page__cards {
+  display: grid;
+  gap: var(--space-16);
+  min-width: 0;
+  margin-top: var(--space-16);
+}
+
+.cd-agents-page__main > .cd-concept-footer {
+  margin-top: auto;
+  padding-top: var(--space-16);
+}
+
+.cd-agents-card__title {
+  margin: 0;
+}
+
+.cd-agents-card__lead {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-agents-card__body {
+  display: grid;
+  gap: var(--space-10);
+  min-width: 0;
+  margin-top: var(--space-10);
+}
+
+/* The end of the send panel's run, after the card's body: empty, so it takes no room. While a run
+   plays the window stops 18 px under it, the card's 16 px padding and its 1 px border with a pixel
+   to spare, so the card's foot shows. */
+.cd-agents-card__run-end {
+  scroll-margin-bottom: var(--space-18);
+}
+
+.cd-agents-page__list {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0 0 0 calc(var(--space-16) + var(--space-2));
+  overflow-wrap: anywhere;
+}
+
+.cd-agents-page__list--quiet,
+.cd-agents-page__quiet {
+  color: var(--text-secondary);
+}
+
+.cd-agents-page__quiet {
+  margin: 0;
+}
+
+.cd-agents-page__label {
+  margin: var(--space-4) 0 0;
+}
+
+@media (max-width: 767.98px) {
+  .cd-agents-page__main {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+}

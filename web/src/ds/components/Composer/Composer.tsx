@@ -1,6 +1,8 @@
 import { useId, useLayoutEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 
+import { Button } from '../Button/Button.tsx';
 import { IconButton } from '../IconButton/IconButton.tsx';
+import { Notice } from '../Notice/Notice.tsx';
 import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 
 import './Composer.css';
@@ -32,11 +34,35 @@ export interface ComposerProps {
   /** Adds "Speak instead". */
   onSpeak?: () => void;
   /**
+   * What was sent couldn't be answered: the screen's `line` over the composer's box, which keeps
+   * `text`, the words as sent, beside "Try again" (`onRetry`). Nothing can be typed until it clears.
+   */
+  failed?: ComposerFailed;
+  /**
    * Vision pages only, which make no requests: typing works and Send keeps its look, but Send and
-   * Enter do nothing. `onSend` is never called and the text stays.
+   * Enter do nothing. `onSend` is never called and the text stays. While `failed` is set, the failed
+   * box shows instead and no vision line is drawn.
    */
   inertSend?: boolean;
 }
+
+/** A send that failed, kept in the composer until the screen tries again. */
+export interface ComposerFailed {
+  /** The words that were sent, as `onSend` got them. */
+  text: string;
+  /** What happened and what to do, in the screen's words: "I couldn't answer just now. Your answer is still here; try again." */
+  line: string;
+  /** The button's words, "Try again" by default; a screen in another language passes its own ("Intentar de nuevo"). */
+  retryLabel?: string;
+  /**
+   * The button: the screen sends `text` again, passing `disabled` while that send is in flight,
+   * and clears `failed` once it goes through.
+   */
+  onRetry: () => void;
+}
+
+/** The failed state's button, unless the screen names it. */
+const RETRY_LABEL = 'Try again';
 
 const SEND_LABEL = {
   owner: 'Send',
@@ -65,14 +91,26 @@ export function Composer({
   onSend,
   onAttach,
   onSpeak,
+  failed,
   inertSend = false,
 }: ComposerProps) {
   const id = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const failedBoxRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const [value, setValue] = useState('');
   // On a vision page: whether Send has been pressed, so its line shows from then on.
   const [inertPressed, setInertPressed] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const isFailed = failed !== undefined;
+  const shownFailed = useRef(isFailed);
+  const ownFocusAtSwap = useRef(false);
+  // A failed send takes the text box's place, and trying again gives it back, removing the control
+  // that had focus. Note, as the swap renders and while the old control is still on the page,
+  // whether one of the composer's own controls has focus; nothing drawn depends on it.
+  if (shownFailed.current !== isFailed && typeof document !== 'undefined') {
+    ownFocusAtSwap.current = rootRef.current?.contains(document.activeElement) ?? false;
+  }
 
   const text = value.trim();
   const canSend = !disabled && text !== '';
@@ -88,7 +126,20 @@ export function Composer({
     if (!input) return;
     input.style.height = 'auto';
     input.style.height = `${input.scrollHeight}px`;
-  }, [value]);
+  }, [value, isFailed]);
+
+  // After the swap, focus follows to the control in the removed one's place ("Try again", or the
+  // text box) only when the composer's own control had it. Focus the owner left elsewhere, on
+  // another control or on the page itself, stays there, and a composer that opens failed takes none.
+  useLayoutEffect(() => {
+    if (shownFailed.current === isFailed) return;
+    shownFailed.current = isFailed;
+    const follow = ownFocusAtSwap.current;
+    ownFocusAtSwap.current = false;
+    if (!follow) return;
+    if (isFailed) failedBoxRef.current?.querySelector<HTMLElement>('button')?.focus();
+    else inputRef.current?.focus();
+  }, [isFailed]);
 
   const send = () => {
     if (!canSend) return;
@@ -169,9 +220,26 @@ export function Composer({
     </label>
   );
 
+  if (failed) {
+    return (
+      <div ref={rootRef} className="cd-composer cd-composer--failed">
+        <Notice tone="error">{failed.line}</Notice>
+        <div ref={failedBoxRef} role="group" aria-label={label} className="cd-composer__box cd-composer__box--failed">
+          <span className="cd-composer__kept cd-type-body" data-copy="user">
+            {failed.text}
+          </span>
+          {/* While the screen sends again (`disabled`), it waits: focus stays, and nothing is called. */}
+          <Button variant="primary" waiting={disabled} onClick={() => failed.onRetry()}>
+            {failed.retryLabel ?? RETRY_LABEL}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (variant === 'owner') {
     return (
-      <div className="cd-composer cd-composer--owner">
+      <div ref={rootRef} className="cd-composer cd-composer--owner">
         <div className="cd-composer__box cd-composer__box--stacked">
           {labelElement}
           {input}
@@ -189,7 +257,7 @@ export function Composer({
   }
 
   return (
-    <div className={`cd-composer cd-composer--${variant}`}>
+    <div ref={rootRef} className={`cd-composer cd-composer--${variant}`}>
       <div className="cd-composer__box cd-composer__box--inline">
         {labelElement}
         {attach}

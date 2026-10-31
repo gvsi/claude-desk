@@ -191,7 +191,8 @@
   overflow: hidden;
 }
 
-.board-vision-phone__screen p {
+/* The business's name over the greeting; the components in the screen keep their own spacing. */
+.board-vision-phone__business {
   margin: 0;
 }
 

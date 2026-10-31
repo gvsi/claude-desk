@@ -1,15 +1,21 @@
 /**
  * The vision boards' copy of the kernel's reply check on prose (`scan_prose` in
  * `backend/desk/kernel_service/reply_check.py`), so a board story fails where the kernel would block
- * Claude's words or a receipt. It holds:
+ * Claude's words. The kernel scans only a reply's prose: a real receipt is the kernel's own fixed
+ * line (`render.status`), never scanned. A vision page's receipts are free text written for the
+ * page, so the vision stories hold them to the same check themselves (`expectNoFactsInProse`).
+ * It holds:
  * - the always-on scans: any Unicode numeral, any currency sign, and the percent signs;
  * - both lexicons, `lexicon/en.txt` and `lexicon/es.txt`, entry for entry with their categories
  *   (`LEXICON`; `factInProse.test.ts` fails if either side has an entry the other lacks), matched
  *   as the kernel matches them: case-insensitively, as whole words, on text folded as it folds it;
  * - the booking rule: a booking claim passes with a condition straight before it
  *   (`BOOKING_CONDITION`), inside such a claim, or anywhere in a message that carries its booking card.
- * It reads one folding of the text. The kernel also reads letters drawn like Latin ones, bare
- * strokes as l or I, and a spaced acute accent as an apostrophe, which the boards' copy never needs.
+ * What it doesn't read, which the kernel does (issue #142 tracks closing these): letters and digits
+ * drawn like Latin ones (`lexicon/lookalikes.txt`) and bare strokes read as l or I; the acute accent
+ * NFKC writes as a space, read as an apostrophe; the ignorable code points and Hangul fillers
+ * `shown()` drops or blanks beyond format and control characters; words mixing scripts
+ * (`mixed_script`); and canaries.
  */
 
 /** A lexicon line's category, as the kernel names them. */

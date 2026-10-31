@@ -1,8 +1,8 @@
 import { useId } from 'react';
 
 import { Button } from '../Button/Button.tsx';
-import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
-import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorName.tsx';
+import type { ConnectorView } from '../ConnectorName/ConnectorName.tsx';
+import { ConnectorSummary } from '../ConnectorName/ConnectorSummary.tsx';
 import { useModalDialog } from '../Dialog/useModalDialog.ts';
 import { IconButton } from '../IconButton/IconButton.tsx';
 
@@ -98,13 +98,7 @@ function PickerGroup({ id, heading, items, verb, onChoose }: PickerGroupProps) {
       <ul role="list" className="cd-connector-picker__items" aria-labelledby={id}>
         {items.map(({ connector, state }) => (
           <li key={connector.id} className="cd-connector-picker__item">
-            <ConnectorIcon icon={connector.icon} size="section" />
-            <span className="cd-connector-picker__text">
-              <span className="cd-connector-picker__name cd-type-body">
-                <ConnectorName connector={connector} size="inline" />
-              </span>{' '}
-              <span className="cd-connector-picker__description cd-type-meta">{connector.description}</span>
-            </span>
+            <ConnectorSummary connector={connector} />
             {state === 'available' ? (
               <span className="cd-connector-picker__action">
                 {/* Named "Add Payments", "Connect Stripe", so each button says which connector it adds. */}

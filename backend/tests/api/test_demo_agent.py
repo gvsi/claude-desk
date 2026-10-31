@@ -10,6 +10,7 @@ in-process transport (`Loopback`), and the model is scripted per route (`ByRoute
 steps, and the Desk's conversation turns on the agent's session.
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -22,14 +23,16 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text
 
-from desk.api.agents import DemoAgents, a2a_client
+from desk.api.agents import MAX_KEYS, MAX_RUNS, DemoAgents, HeldKey, a2a_client
 from desk.api.main import create_app
 from desk.api.metrics import record_model_call
 from desk.api.model import ModelRequest, ModelResponse, build_kwargs
 from desk.api.prompts import VISITING_AGENT_SYSTEM, AgentStep, agent_task
 from desk.api.routes import public
 from desk.api.schemas import DemoAgentRun
-from desk.contracts import DemoAgentIssued
+from desk.api.setup import default_notifications
+from desk.contracts import BusinessSeed, DemoAgentIssued, DeskSeed
+from desk.kernel_api import CreateCopyRequest, CreateDeskRequest
 from tests.api.fakes import JOB_ROUTES, ScriptedModel, response, tool_use, unavailable
 from tests.api.fakes import text as text_block
 from tests.api.test_copies import production_settings, usage_row
@@ -554,3 +557,312 @@ async def test_agent_stops_once_the_daily_model_budget_is_spent(app, browser, fa
         refused = await client.post(f"/api/public/desks/{slug}/send_agent", json={"task": "book_visit"})
         assert (refused.status_code, refused.json()) == (503, {"error": "demo_budget"})
         assert len(fake.called("POST /agents/demo")) == minted and len(agent_model.requests) == 1
+
+
+# Idempotency keys -------------------------------------------------------------------------------------------------
+
+KEY = "agent-5d2b8f61-0c4e-4a9b-b7d3-91e6f0a2c845"
+
+
+async def send_keyed(client: httpx.AsyncClient, slug: str, task: str = "book_visit",
+                     key: str | None = KEY) -> httpx.Response:
+    """Send the built-in agent on `task` with the client's idempotency key (none when `key` is None)."""
+    body = {"task": task} if key is None else {"task": task, "idempotency_key": key}
+    return await client.post(f"/api/public/desks/{slug}/send_agent", json=body)
+
+
+async def test_a_repeated_key_starts_one_run_and_mints_one_agent(app, browser, fake, kernel_http, agent_model,
+                                                                 engine):
+    # The first answer was lost and the click's request is sent again: the repeat answers the run the first started,
+    # and the kernel mints no second agent.
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    agent_model.add(step("", done=True))
+    first = await send_keyed(client, slug)
+    assert first.status_code == 202, first.text
+    await app.state.runtime.agents.drain()
+    repeat = await send_keyed(client, slug)
+    assert (repeat.status_code, repeat.json()) == (202, first.json())
+    assert len(fake.called("POST /agents/demo")) == 1 and len(agent_model.requests) == 1
+    run = (await read_run(client, slug, first.json()["run_id"])).json()
+    assert run["state"] == "done"
+
+
+@pytest.mark.parametrize("keys", [("agent-a", "agent-b"), (None, None)], ids=["two keys", "no key"])
+async def test_two_keys_or_none_start_two_runs(app, browser, fake, kernel_http, agent_model, keys):
+    # Two clicks send two keys, and each starts its own run. Without a key, as before keys, every request starts its
+    # own: pinned, so making the key required later is a deliberate change.
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    agent_model.add(step("", done=True), step("", done=True))
+    first, second = [await send_keyed(client, slug, key=key) for key in keys]
+    assert (first.status_code, second.status_code) == (202, 202), (first.text, second.text)
+    assert first.json()["run_id"] != second.json()["run_id"]
+    await app.state.runtime.agents.drain()
+    assert len(fake.called("POST /agents/demo")) == 2 and len(agent_model.requests) == 2
+
+
+async def test_the_same_key_in_another_copy_is_its_own_run(app, browser, fake, kernel_http, agent_model):
+    slug, other_slug = await new_slug(kernel_http, fake), await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    elsewhere, _, _ = await open_session(app, browser, other_slug, ip="198.51.100.43")
+    agent_model.add(step("", done=True), step("", done=True))
+    first, second = await send_keyed(client, slug), await send_keyed(elsewhere, other_slug)
+    assert (first.status_code, second.status_code) == (202, 202), (first.text, second.text)
+    assert first.json()["run_id"] != second.json()["run_id"]
+    await app.state.runtime.agents.drain()
+    # Each copy's repeat answers its own run.
+    assert (await send_keyed(client, slug)).json() == first.json()
+    assert (await send_keyed(elsewhere, other_slug)).json() == second.json()
+    assert len(fake.called("POST /agents/demo")) == 2 and len(agent_model.requests) == 2
+
+
+async def two_desks_of_a_copy(kernel_http, fake) -> tuple[str, str]:
+    """The slugs of a fresh Rivera copy's Desk and of a second Desk its owner makes in the same copy."""
+    copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    made = await kernel_http.owner(copy.owner_token).call("POST /desks", CreateDeskRequest(
+        business=BusinessSeed(name="Rivera Plumbing", owner_display_name="Maria Rivera",
+                              timezone="America/Los_Angeles"),
+        desk=DeskSeed(name="Emergency line", charter=[], hours=[], price_items=[], calendar_slots=[], people=[],
+                      documents=[], notifications=default_notifications("trade"))))
+    return fake.desks[copy.desk_ids[0]].slug, made.slug
+
+
+async def test_a_key_answers_only_the_session_and_desk_that_sent_it(app, browser, fake, kernel_http, agent_model):
+    # The key holds the session that sent it and the Desk it went to: the same key from another session of the copy
+    # is 409 and starts nothing, and so is a send to the copy's other Desk, which has a session of its own.
+    slug, other_slug = await two_desks_of_a_copy(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    agent_model.add(step("", done=True))
+    first = await send_keyed(client, slug)
+    assert first.status_code == 202, first.text
+    neighbour, _, _ = await open_session(app, browser, slug, ip="198.51.100.44")
+    assert (await client.post(f"/api/public/desks/{other_slug}/sessions")).status_code == 200
+    for sender, sent_to in ((neighbour, slug), (client, other_slug)):
+        refused = await send_keyed(sender, sent_to)
+        assert (refused.status_code, refused.json()) == (409, {"error": "conflict"}), sent_to
+    await app.state.runtime.agents.drain()
+    assert (await send_keyed(client, slug)).json() == first.json()
+    assert len(fake.called("POST /agents/demo")) == 1 and len(agent_model.requests) == 1
+
+
+async def test_a_repeat_while_the_first_is_minting_answers_the_same_run(app, browser, fake, kernel_http, agent_model,
+                                                                        monkeypatch):
+    # The first request has claimed the key and waits on the kernel to mint the agent when its repeat arrives: the
+    # repeat answers the same run at once, and the kernel mints one agent.
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    mint, minting, release = public._mint_agent, asyncio.Event(), asyncio.Event()
+
+    async def gated_mint(ctx) -> DemoAgentIssued:
+        minting.set()
+        await release.wait()
+        return await mint(ctx)
+
+    monkeypatch.setattr(public, "_mint_agent", gated_mint)
+    agent_model.add(step("", done=True))
+    first = asyncio.create_task(send_keyed(client, slug))
+    await asyncio.wait_for(minting.wait(), 5)
+    repeat = await asyncio.wait_for(send_keyed(client, slug), 5)
+    assert repeat.status_code == 202, repeat.text
+    running = (await read_run(client, slug, repeat.json()["run_id"])).json()
+    assert (running["state"], running["turns"]) == ("running", [])
+    release.set()
+    first = await asyncio.wait_for(first, 5)
+    assert (first.status_code, first.json()) == (202, repeat.json())
+    await app.state.runtime.agents.drain()
+    assert len(fake.called("POST /agents/demo")) == 1 and len(agent_model.requests) == 1
+    assert (await read_run(client, slug, first.json()["run_id"])).json()["state"] == "done"
+
+
+async def test_a_repeat_during_the_first_ones_admission_waits_for_it_and_is_never_charged(app, browser, fake,
+                                                                                        kernel_http, agent_model,
+                                                                                        monkeypatch):
+    # The first request is still being admitted (here, held inside the limit's check) when its repeat arrives. The
+    # repeat waits for that admission, finds the claim and answers the same run, never counted on the limit itself.
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    limiter = app.state.runtime.limiter
+    enforce, asked, entered, release = limiter.enforce, [], asyncio.Event(), asyncio.Event()
+
+    async def held(name, key, **options):
+        asked.append(name)
+        if name == "demo_agent":
+            entered.set()
+            await release.wait()
+        return await enforce(name, key, **options)
+
+    monkeypatch.setattr(limiter, "enforce", held)
+    agent_model.add(step("", done=True))
+    first = asyncio.create_task(send_keyed(client, slug))
+    await asyncio.wait_for(entered.wait(), 5)
+    repeat = asyncio.create_task(send_keyed(client, slug))
+    admissions = app.state.runtime.agents.admissions
+    async with asyncio.timeout(5):                                  # the first holds the key's lock, the repeat waits
+        while admissions.users() < 2:
+            await asyncio.sleep(0.01)
+    assert not repeat.done()
+    release.set()
+    first, repeat = await asyncio.wait_for(asyncio.gather(first, repeat), 5)
+    assert (first.status_code, repeat.status_code) == (202, 202), (first.text, repeat.text)
+    assert repeat.json() == first.json()
+    await app.state.runtime.agents.drain()
+    assert asked.count("demo_agent") == 1
+    assert len(fake.called("POST /agents/demo")) == 1 and len(agent_model.requests) == 1
+    assert len(app.state.runtime.agents.admissions) == 0                # each key's lock goes once nothing holds it
+
+
+async def test_the_same_key_for_another_task_is_a_conflict(app, browser, fake, kernel_http, agent_model):
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    agent_model.add(step("", done=True))
+    first = await send_keyed(client, slug, "book_visit")
+    assert first.status_code == 202, first.text
+    refused = await send_keyed(client, slug, "quote_and_deposit")
+    assert (refused.status_code, refused.json()) == (409, {"error": "conflict"})
+    await app.state.runtime.agents.drain()
+    # The key's own task still answers its run; nothing else was minted or run.
+    assert (await send_keyed(client, slug, "book_visit")).json() == first.json()
+    assert len(fake.called("POST /agents/demo")) == 1 and len(agent_model.requests) == 1
+
+
+async def test_a_refused_mint_frees_the_key_and_a_run_that_started_keeps_it(app, browser, fake, kernel_http,
+                                                                             agent_model):
+    # The kernel refused to mint the agent (a 4xx), so nothing was made: the send answers its error and frees its key,
+    # and the same request sent again starts a run. Once a run started, the key keeps it however it ends: here its
+    # model can't answer, the run fails, and a repeat answers that failed run and mints nothing.
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    fake.fail("POST /agents/demo", "422", times=1)
+    first = await send_keyed(client, slug)
+    assert (first.status_code, first.json()) == (422, {"error": "kernel", "code": "invalid"})
+    agent_model.add(unavailable())
+    again = await send_keyed(client, slug)
+    assert again.status_code == 202, again.text
+    await app.state.runtime.agents.drain()
+    run = (await read_run(client, slug, again.json()["run_id"])).json()
+    assert (run["state"], run["turns"]) == ("failed", [])
+    repeat = await send_keyed(client, slug)
+    assert (repeat.status_code, repeat.json()) == (202, again.json())
+    assert len(fake.called("POST /agents/demo")) == 2 and len(agent_model.requests) == 1
+
+
+@pytest.mark.parametrize(("fail", "answered"), [
+    ("lost", (503, {"error": "kernel", "code": "kernel_unavailable"})),
+    ("timeout", (503, {"error": "kernel", "code": "kernel_unavailable"})),
+    ("500", (503, {"error": "kernel", "code": "internal"})),
+], ids=["answer lost", "timeout", "kernel 500"])
+async def test_a_mint_that_may_have_happened_keeps_the_key(app, browser, fake, kernel_http, agent_model, fail,
+                                                           answered):
+    # No definite refusal came back: the kernel may have minted the agent and its mandate (here, with "lost", it did
+    # and the answer was lost on the way). The key keeps the failed run, and a repeat answers it and mints nothing.
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    if fail == "lost":
+        fake.drop_response("POST /agents/demo")
+    else:
+        fake.fail("POST /agents/demo", fail, times=1)
+    first = await send_keyed(client, slug)
+    assert (first.status_code, first.json()) == answered
+    repeat = await send_keyed(client, slug)
+    assert repeat.status_code == 202, repeat.text
+    run = (await read_run(client, slug, repeat.json()["run_id"])).json()
+    assert (run["state"], run["turns"]) == ("failed", [])
+    assert (await send_keyed(client, slug)).json() == repeat.json()
+    assert len(fake.called("POST /agents/demo")) == 1 and agent_model.requests == []
+    assert len(fake.minted) == (1 if fail == "lost" else 0)
+
+
+async def test_repeats_never_count_on_the_limit_and_a_refused_request_claims_nothing(app, browser, fake, kernel_http,
+                                                                                    agent_model):
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    agent_model.add(*(step("", done=True) for _ in range(5)))
+    first = await send_keyed(client, slug, key="agent-1")
+    for _ in range(6):
+        assert (await send_keyed(client, slug, key="agent-1")).json() == first.json()
+    for n in range(2, 6):                               # five demo agents a copy an hour, the repeats not among them
+        assert (await send_keyed(client, slug, key=f"agent-{n}")).status_code == 202
+    # The limit refuses the sixth before its key is claimed: its repeat is refused the same way, with no run behind it.
+    for _ in range(2):
+        refused = await send_keyed(client, slug, key="agent-6")
+        assert (refused.status_code, refused.json()["error"]) == (429, "rate_limited")
+    await app.state.runtime.agents.drain()
+    assert len(fake.called("POST /agents/demo")) == 5 and len(agent_model.requests) == 5
+
+
+def asked_limits(app: FastAPI, monkeypatch) -> list[str]:
+    """The names of the limits the app is asked to count from now on, in order, whether or not they refuse."""
+    limiter = app.state.runtime.limiter
+    enforce, asked = limiter.enforce, []
+
+    async def counting(name, key, **options):
+        asked.append(name)
+        return await enforce(name, key, **options)
+
+    monkeypatch.setattr(limiter, "enforce", counting)
+    return asked
+
+
+async def test_keys_are_kept_for_an_hour_in_a_bounded_map_of_their_own(app, browser, fake, kernel_http, agent_model,
+                                                                       clock, monkeypatch):
+    assert (MAX_KEYS, MAX_RUNS) == (1000, 50)
+    slug = await new_slug(kernel_http, fake)
+    client, _, opened = await open_session(app, browser, slug)
+    agents = app.state.runtime.agents
+    asked = asked_limits(app, monkeypatch)
+    agent_model.add(*(step("", done=True) for _ in range(3)))
+    first = await send_keyed(client, slug)
+    run_id = first.json()["run_id"]
+    await agents.drain()
+
+    # The 50-run bound drops the run's record, and the key outlives it: a repeat answers the same ID, whose poll is
+    # now 404, and starts no second run.
+    for n in range(MAX_RUNS):
+        filler = DemoAgentRun(run_id=f"run-filler-{n}", launcher_session_id=opened["state"]["session_id"], slug=slug,
+                              task="book_visit", state="done", turns=[])
+        agents._runs[filler.run_id] = (filler, clock())
+    assert (await read_run(client, slug, run_id)).status_code == 404
+    assert (await send_keyed(client, slug)).json() == first.json()
+    assert len(fake.called("POST /agents/demo")) == 1
+
+    # The key map holds every key for its run's hour, 1000 at most, and drops none of them early. Full, it refuses a
+    # new key with 429 until the oldest key's hour ends, before the limit counts it, and each held key's repeat still
+    # answers its run.
+    clock.advance(600)
+    for n in range(MAX_KEYS - 1):
+        agents._keys[("copy-filler", f"key-{n}")] = HeldKey(run_id="run-filler", request_sha256="0" * 64,
+                                                             session_id="session-filler", slug=slug,
+                                                             claimed_at=clock())
+    refused = await send_keyed(client, slug, key="agent-newest")
+    assert (refused.status_code, refused.json()) == (429, {"error": "rate_limited", "retry_after": 3000})
+    assert refused.headers["retry-after"] == "3000"
+    assert len(agents._keys) == MAX_KEYS and asked.count("demo_agent") == 1
+    assert (await send_keyed(client, slug)).json() == first.json()
+    assert len(fake.called("POST /agents/demo")) == 1
+
+    # Once the oldest key's hour ends, it goes, and the new key fits. The forgotten key is a new one now: refused while
+    # the map is full again, then starting a run of its own.
+    clock.advance(3000)
+    newest = await send_keyed(client, slug, key="agent-newest")
+    assert newest.status_code == 202, newest.text
+    full = await send_keyed(client, slug)
+    assert (full.status_code, full.json()) == (429, {"error": "rate_limited", "retry_after": 600})
+    clock.advance(600)
+    again = await send_keyed(client, slug)
+    assert again.status_code == 202 and again.json() not in (first.json(), newest.json())
+    assert len(fake.called("POST /agents/demo")) == 3
+    await agents.drain()
+
+
+@pytest.mark.parametrize("key", ["", "k" * 129, "agent\x00a", "agent\na"], ids=["empty", "129", "NUL", "newline"])
+async def test_a_key_is_1_to_128_characters_with_no_control_character(app, browser, fake, kernel_http, agent_model,
+                                                                       key):
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    refused = await send_keyed(client, slug, key=key)
+    assert (refused.status_code, refused.json()) == (422, {"error": "invalid"})
+    assert fake.called("POST /agents/demo") == []
+    agent_model.add(step("", done=True))
+    assert (await send_keyed(client, slug, key="k" * 128)).status_code == 202
+    await app.state.runtime.agents.drain()

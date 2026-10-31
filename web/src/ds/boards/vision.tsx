@@ -386,7 +386,7 @@ function OwnerPhone() {
     <PhoneFrame caption="Today, for the owner">
       <div className="board-vision-phone__screen">
         <div>
-          <p className="board-quiet cd-type-caption">{rivera.business.name}</p>
+          <p className="board-vision-phone__business board-quiet cd-type-caption">{rivera.business.name}</p>
           <h2 className="cd-type-greeting board-vision-phone__greeting">Good morning, Maria</h2>
         </div>
         {/* A vision page sends nothing: the answers keep their look and do nothing. */}

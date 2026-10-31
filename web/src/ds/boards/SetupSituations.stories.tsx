@@ -30,12 +30,10 @@ function SetupSituations() {
           </li>
         ))}
       </ul>
+      {/* "Looks right" is the step's only answer (owner ruling, 2026-10-30). */}
       <div className="board-setup__actions">
         <Button variant="primary" size="main" onClick={fn()}>
           Looks right
-        </Button>
-        <Button variant="secondary" size="main" onClick={fn()}>
-          Change a rule
         </Button>
       </div>
     </SetupFrame>
@@ -51,9 +49,10 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-R2-Setup-09-Situations',
     canvasNote: [
-      'Built against the board in review; sign-off pending.',
+      'Signed on 2026-10-30.',
       'The setup interview’s situations step: each situation is a SituationRow, with the outcome in words beside its dot, the second look, and “Not what we planned” beside a thin held bar.',
-      'The step list in the bar (“Questions, Tools, Rules, Safety check, Live”) is Steps, which comes with the Connectors and rules change, so the bar has a gap where it goes; the bar, the column and the buttons are page layout the web app (plan 04) owns.',
+      'By the owner’s ruling of 2026-10-30, “Looks right” is the only answer: the board’s “Change a rule” is removed, as on the board updated on the canvas.',
+      'The step list in the bar (“Questions, Tools, Rules, Safety check, Live”) is left out of the setup frame, so the bar has a gap where it goes; the bar, the column and the button are page layout the web app (plan 04) owns.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -87,18 +86,16 @@ export const Board: Story = {
     await expect(Math.round(one(rows[0]!, '.cd-situation-row__result').getBoundingClientRect().left)).toBe(799);
     await expect(rows.filter((row) => row.querySelector('.cd-situation-row__flag'))).toEqual([rows[4]]);
 
-    // The answers 20 px under the card: Looks right, the one primary, then Change a rule.
+    // The answer 20 px under the card: Looks right, the one primary and the only answer (owner
+    // ruling, 2026-10-30: there is no "Change a rule" on this step).
     const looksRight = canvas.getByRole('button', { name: 'Looks right' });
     expectComputed(looksRight, SPEC.primary);
+    await expect(canvas.queryByRole('button', { name: 'Change a rule' })).toBeNull();
     await expect(Math.round(looksRight.getBoundingClientRect().top - box.bottom)).toBe(20);
     await expectFooter(canvasElement);
     await expectFooterAtFoot(canvasElement);
 
-    // focus_order_is_logical: Save and exit, then the two answers.
-    await expectTabOrder(userEvent, [
-      canvas.getByRole('button', { name: 'Save and exit' }),
-      looksRight,
-      canvas.getByRole('button', { name: 'Change a rule' }),
-    ]);
+    // focus_order_is_logical: Save and exit, then the answer.
+    await expectTabOrder(userEvent, [canvas.getByRole('button', { name: 'Save and exit' }), looksRight]);
   },
 };

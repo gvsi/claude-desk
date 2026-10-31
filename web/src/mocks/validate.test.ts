@@ -7,11 +7,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SessionState } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { ApprovalAnswerOut, HealthOut, NeedsYouItem, OwnerTranscript, VisitorSession, VisitorTranscript } from '../api/views.ts';
+import type {
+  ApprovalAnswerOut,
+  HealthOut,
+  NeedsYouItem,
+  OwnerTranscript,
+  RulesDraft,
+  RulesView,
+  ToolConfirmedOut,
+  VisitorSession,
+  VisitorTranscript,
+} from '../api/views.ts';
 import { EVENT_GAP_MS, SCRIPT, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, type MockRequestInit } from './store.ts';
-import { validateContract } from './validate.ts';
+import { PENDING_FIELDS, validateContract } from './validate.ts';
+import schema from '../../../backend/desk/contracts.schema.json';
 
 /** Text for every row of the script, in English and Spanish where the row reads Spanish. */
 const SAMPLES: Record<RuleName, string[]> = {
@@ -43,6 +54,21 @@ afterEach(() => {
 });
 
 describe('mock payloads', () => {
+  it('pending_fields_wait_for_the_contracts', () => {
+    // A field typed by hand ahead of the contracts is checked against its own shape until the
+    // contracts have it, and then its entry goes.
+    const defs = schema.$defs as Record<string, { properties?: Record<string, unknown> }>;
+    for (const [model, fields] of Object.entries(PENDING_FIELDS)) {
+      for (const field of Object.keys(fields)) expect(Object.keys(defs[model]?.properties ?? {}), `${model}.${field} is in the contracts now`).not.toContain(field);
+    }
+    const version = mockStore.world.desks[0]?.policy;
+    expect(version?.auto_money_cap_cents).toBe(50_000);
+    expect(validateContract('PolicyVersion', version)).toEqual([]);
+    expect(validateContract('PolicyVersion', { ...version, auto_money_cap_cents: -1 })).not.toEqual([]);
+    expect(validateContract('PolicyVersion', { ...version, auto_money_cap_cents: 1_000_001 })).not.toEqual([]);
+    expect(validateContract('PolicyVersion', { ...version, auto_money_cap_cents: '500' })).not.toEqual([]);
+  });
+
   it('mock_payloads_match_contracts', async () => {
     // The check can fail: a missing field, a field the contract doesn't have, an unknown model.
     expect(validateContract('EvWriting', { type: 'writing' })).toEqual([]);
@@ -61,6 +87,7 @@ describe('mock payloads', () => {
     const slug = RIVERA.slug;
     const opened = (await body('openSession', { params: { slug } })) as VisitorSession;
     checks.push(['SessionState', opened.state]);
+    checks.push(['DemoAgentIssued', await body('agentKey', { params: { slug } })]);
     for (const text of Object.values(SAMPLES).flat()) {
       await body('sendMessage', { params: { slug }, body: { text } });
       await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 6);
@@ -123,9 +150,22 @@ describe('mock payloads', () => {
     }
     checks.push(['Health', ((await body('health')) as HealthOut).kernel]);
 
+    // Rules: the active version, a draft's cards and check, its confirm, and a connector turned off and back on.
+    const owner = { params: { desk_id: RIVERA.deskId } };
+    const rules = (await body('rules', owner)) as RulesView;
+    checks.push(['PolicyVersion', rules.active]);
+    const drafted = (await body('draftRules', { ...owner, body: { add: [{ ...rules.active.cards[0], mode: 'ask' }] } })) as RulesDraft;
+    checks.push(['ProofReport', drafted.proof], ...drafted.cards.map((card): [string, unknown] => ['RuleCard', card]));
+    checks.push(['PolicyVersion', await body('confirmRules', { ...owner, body: { version: drafted.version } })]);
+    const stripe = rules.tools.filter((row) => row.source === 'mcp').map((row) => ({ tool: row.tool, definition_sha256: row.definition_sha256 }));
+    checks.push(['ToolConfirmed', await body('confirmTool', { ...owner, body: { tools: stripe, enable: false } })]);
+    const turnedOn = (await body('confirmTool', { ...owner, body: { tools: stripe, enable: true } })) as ToolConfirmedOut;
+    expect(turnedOn.draft).not.toBeNull();
+    checks.push(['ToolConfirmed', turnedOn]);
+
     // Every model the plan names was produced, and the script's events reach every event type it uses.
     const models = new Set(checks.map(([model]) => model));
-    for (const model of ['SseEvent', 'Decision', 'SessionState', 'LedgerPage', 'Health', 'PublicDesk', 'RuleCard', 'PolicyVersion']) {
+    for (const model of ['SseEvent', 'Decision', 'SessionState', 'LedgerPage', 'Health', 'PublicDesk', 'RuleCard', 'PolicyVersion', 'ProofReport', 'ToolConfirmed']) {
       expect(models, model).toContain(model);
     }
     const types = new Set(checks.filter(([model]) => model === 'SseEvent').map(([, ev]) => (ev as { type: string }).type));

@@ -17,24 +17,27 @@ if (payments === undefined) throw new Error('No Payments section');
  * shows what was typed. Every callback is still reported.
  */
 function Controlled(props: MoneyLimitProps) {
-  const [editing, setEditing] = useState(props.editing);
-  const [value, setValue] = useState(props.value);
+  const [editing, setEditing] = useState(props.editing ?? false);
+  const [value, setValue] = useState(props.value ?? '');
+  // A limit with nothing to change has no field to hold.
+  if (props.onEdit === undefined) return <MoneyLimit {...props} />;
+  const { onEdit, onCancel, onChange } = props;
   return (
     <MoneyLimit
       {...props}
       editing={editing}
       value={value}
       onEdit={() => {
-        props.onEdit();
+        onEdit();
         setEditing(true);
       }}
       onCancel={() => {
-        props.onCancel();
+        onCancel();
         setEditing(false);
         setValue('');
       }}
       onChange={(next) => {
-        props.onChange(next);
+        onChange(next);
         setValue(next);
       }}
     />
@@ -168,21 +171,22 @@ export const Unset: Story = {
 };
 
 export const Prominent: Story = {
-  args: { prominent: true },
-  render: (args) => (
+  render: () => (
     <div style={{ maxWidth: 720 }}>
-      <Controlled {...args} />
+      <MoneyLimit line={line} prominent />
     </div>
   ),
   parameters: {
     canvas: 'none',
     canvasNote:
-      "Drawn on N-R2-Setup-08-Rules, built against boards in review; sign-off pending. Above the setup interview's rules, where the limit leads them, its line is in weight 520.",
+      "Drawn on N-R2-Setup-08-Rules. Above the setup interview's rules, where the limit leads them, its line is in weight 520, and by the owner's ruling of 2026-10-30 it has no “Change” there.",
   },
   play: async ({ canvas }) => {
-    // prominent_line_leads: the line at 520 in the primary ink; "Change" is unchanged.
+    // prominent_line_leads: the line at 520 in the primary ink.
     expectComputed(canvas.getByText(line), { fontWeight: '520', fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
-    await expect(canvas.getByRole('button', { name: 'Change' })).toHaveAccessibleDescription(line);
+    // read_only_limit_has_no_change: with no `onEdit`, the limit is only read, and nothing is there to press.
+    await expect(canvas.queryAllByRole('button')).toEqual([]);
+    await expect(canvas.queryByRole('textbox')).toBeNull();
   },
 };
 
