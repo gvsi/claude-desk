@@ -1736,6 +1736,8 @@ describe('public chat page', () => {
     const blocked = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('Blocked.', 'SecurityError');
     });
+    // Storage reads again for the next test, even if this one fails before its own restore.
+    onTestFinished(() => blocked.mockRestore());
     const { screen } = await renderRoute(`${PAGE}?try=${token}`);
     await ready(screen);
     await frames(10);
