@@ -71,6 +71,7 @@ never prose.
 
 import hashlib
 import json
+import logging
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
@@ -79,17 +80,19 @@ from pathlib import Path
 import desk_kernel
 from fastapi import APIRouter, Request
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Person
+from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
 from desk.kernel_service import agents, auth, context, demo_inbox, labels, lang, ledger, render
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
-from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template, storable
+from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 from desk.kernel_service.sessions import verified
 from desk.rewrites import REWRITABLE
 
@@ -98,6 +101,7 @@ SPAN_CHARS = 40
 KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed", "link_cancelled"})   # only the kernel issues these
 NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one number: "1.234,56", "10:30"
 NO_CANARIES = labels.NO_CANARIES
+logger = logging.getLogger(__name__)
 HANDOFF_CLOSED = "soft.handoff_closed"   # a reply passed on an open handoff's card, and the handoff was done by the end
 
 # ---- Prose ----------------------------------------------------------------------------------------
@@ -745,6 +749,27 @@ async def handoff_still_open(ctx: KernelCtx, session_row: SessionRow) -> bool:
     return bool(await open_handoff_ids(ctx, session_row, lock=True, cards_only=True))
 
 
+async def _awaiting_holds(ctx: KernelCtx, session_row: SessionRow) -> list[str]:
+    """The IDs of the session's held decisions the owner hasn't answered and that haven't expired,
+    read without a lock (a read waits for nothing, so it keeps the lock order)."""
+    return list(await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow.decision_id).where(
+        DecisionRow.session_id == session_row.session_id, DecisionRow.state == "held",
+        DecisionRow.expires_at > ctx.clock.now()))))
+
+
+async def awaits_the_owner(ctx: KernelCtx, session_row: SessionRow) -> bool:
+    """Whether the session has a held request awaiting the owner: one neither answered, cancelled
+    nor past its expiry, which a read would expire. A read that fails counts as none, in a savepoint
+    of its own, so the transaction goes on: skipping the handoff only spares the owner a second
+    alert, so not knowing fails toward telling the owner."""
+    try:
+        async with ctx.db.begin_nested():
+            return bool(await _awaiting_holds(ctx, session_row))
+    except SQLAlchemyError as error:
+        log_error(logger, error, "held_decisions_unread")
+        return False
+
+
 async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:
     """Who is waiting, as the owner's records name them: a verified person's display name, else
     "A visitor" (an agent's key has no name of its own)."""
@@ -768,9 +793,12 @@ async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | No
     mark of done (which holds the handoff `FOR UPDATE`) each come wholly before or after it.
 
     It opens none when a take-over or hand-back has moved the session to another generation since
-    the request read it (`deliver()` drops the verdict, so the visitor never sees the card), or
-    when the session already has an open handoff of either kind (an earlier card, or a call-back
-    request): one at a time, so a conversation of blocked drafts alerts the owner once. Otherwise
+    the request read it (`deliver()` drops the verdict, so the visitor never sees the card); while
+    the session has a held request awaiting the owner, whose alert and item the owner already has
+    for the conversation (`awaits_the_owner`, the owner's decision of 2026-10-31), so the owner sees
+    one item and gets one alert; or when the session already has an open handoff of either kind (an
+    earlier card, or a call-back request): one at a time, so a conversation of blocked drafts alerts
+    the owner once. Otherwise
     it inserts one of kind `card`: open, no call-back window and no fact (it promises no call
     back), the kernel's reason (`CARD_REASON`), and as `action_id` its own ID, which no action's
     can equal; alerts the owner (`handoff`, under the Desk's notification preferences, with no
@@ -780,6 +808,8 @@ async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | No
     a new one; a session closing changes nothing of it."""
     current = await _lock_session(ctx, session_row)
     if current.generation != session_row.generation:
+        return None
+    if await awaits_the_owner(ctx, session_row):
         return None
     if await open_handoff_ids(ctx, session_row, lock=True):
         return None

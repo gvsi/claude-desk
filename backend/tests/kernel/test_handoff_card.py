@@ -25,17 +25,18 @@ from sqlalchemy import select
 from desk.contracts import DemoInboxEntry, ReplyVerdict, SessionCreated
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Fact, Handoff, LedgerEntry
-from desk.kernel_service import ledger
+from desk.kernel_service import ledger, reply_check
 from desk.kernel_service.decisions import SoftPromiseVerdict
 
 from .helpers import kernel_ctx, ledger_rows, rows_of
-from .test_adapters import Rivera, rivera, run, visitor_of
+from .test_adapters import Rivera, quote_args, rivera, run, visitor_of
+from .test_approvals import answered, post_cancel
 from .test_decide import Visitor, decided, open_visitor, set_mode, set_session
 from .test_execute import executed
 from .test_lead_tools import CALLBACK, TZ, alert_now, callback, handoff_done, owner_alerts
 from .test_owner_messages import sent
 from .test_release_document import DANA, confirmed
-from .test_reply_check import assert_handed_off, checked, clause, post_check, reply_entries
+from .test_reply_check import assert_handed_off, checked, clause, keep_alive_until, post_check, reply_entries
 from .test_verification import api_rows
 
 CARD_REASON = "The Desk handed this to you."
@@ -483,3 +484,52 @@ async def test_a_second_call_back_request_takes_over_the_first(app, client, froz
             ctx.db.add(Handoff(handoff_id="handoff-extra", copy_id=copy.copy_id, desk_id=copy.desk_id,
                                session_id=visitor.session_id, reason=CARD_REASON, status="open", kind="card",
                                action_id="handoff-extra"))
+
+
+# ---- A held request awaiting the owner (the owner's decision of 2026-10-31) ---------------------------
+
+async def held_quote(client, visitor):
+    """The visitor's quote at 15% off, which `rv-quote` (no discount) holds for the owner."""
+    held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=1500),
+                         call_id="call-held")
+    assert (held.outcome, held.state) == ("hold", "held"), held.reason_plain
+    return held
+
+
+@pytest.mark.parametrize("ends", ["denied", "cancelled", "expired"])
+async def test_a_held_request_awaiting_the_owner_is_the_conversations_item(app, client, frozen_clock, ends):
+    """While the session has a held request awaiting the owner, the owner already has that
+    request's alert and item for the conversation: a card shown meanwhile opens no handoff and
+    sends no alert, so the owner sees one item and gets one alert. Once the hold has an end
+    (the owner's answer, the visitor's cancel, or its expiry), the next card opens one as usual."""
+    copy, visitor = await visitor_of(app, client)
+    held = await held_quote(client, visitor)
+    assert_handed_off(await checked(client, visitor, BLOCKED))
+    assert (await checked(client, visitor, "", [clause("handoff")])).ok          # nor a card Claude cites
+    assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
+    assert handoff_entries(await ledger_rows(app, copy)) == []
+
+    if ends == "denied":
+        await answered(client, copy.owner, held.decision_id, "deny_once")
+    elif ends == "cancelled":
+        assert (await post_cancel(client, visitor, held.decision_id)).status_code == 200
+    else:
+        await keep_alive_until(client, frozen_clock, visitor, 24)            # past its day, never read since
+    assert_handed_off(await checked(client, visitor, BLOCKED))
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
+    assert len(await handoff_alerts(app, copy)) == 1
+
+
+async def test_a_hold_that_cant_be_read_opens_the_handoff_as_usual(app, client, monkeypatch):
+    """The skip only spares the owner a second alert, so a read of the session's holds that fails
+    opens the handoff and alerts as usual: it fails toward telling the owner."""
+    copy, visitor = await visitor_of(app, client)
+    await held_quote(client, visitor)
+
+    async def unreadable(ctx, session_row):
+        raise sqlalchemy.exc.OperationalError("SELECT", {}, RuntimeError("the read failed"))
+
+    monkeypatch.setattr(reply_check, "_awaiting_holds", unreadable)
+    assert_handed_off(await checked(client, visitor, BLOCKED))
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
+    assert len(await handoff_alerts(app, copy)) == 1
