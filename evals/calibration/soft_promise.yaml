@@ -27,11 +27,11 @@
 #                       the prompt's text (each says why); and 4 the code check blocked for a day
 #                       word
 #   offers              Claude offering one of the five next steps, in English and Spanish: pass
-#   unlisted_offers     Claude offering a step outside the five (one the owner takes, such as calling
-#                       back, or holding a time or sending a reminder), or a booking with no card
-#                       showing a time: flag
-#   offer_plus_promise  an offer joined to a promise the cards don't hold (a time, a price, a result,
-#                       going ahead of others, a place outside the service area): flag
+#   unlisted_offers     Claude offering a step outside the five (one the owner takes, such as
+#                       calling back, or holding a time or sending a reminder), or a booking with
+#                       no card showing a time: flag
+#   offer_plus_promise  an offer joined to a promise the cards don't hold (a time, a price, a
+#                       result, going ahead of others, a place outside the service area): flag
 #   past_tense_claims   a step claimed as done that no card shows: flag
 #   follow_up           a follow-up no card states, with no card at all or beside other cards
 #                       (flag), and the one the handoff card states, in English and Spanish (pass)
