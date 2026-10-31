@@ -217,6 +217,23 @@ const SHELL = '.cd-public-shell';
 const COMPOSER_AREA = '.cd-public-shell__composer';
 
 /**
+ * The event the design system's shell sends from its root once it has switched which of its parts
+ * scrolls the conversation: its scroll region, or on a short window the shell itself.
+ */
+const SCROLLER_SWITCHED = 'cd-public-shell-scroller';
+
+/**
+ * Whether a visitor who was at the end, where the page last knew they were (`seen`), has moved
+ * away from it to stand where the conversation is now: only by moving it up, in the same scroller,
+ * with the shell the same size. The page changing size moves the conversation too, before the page
+ * hears of the new size: the browser's scroll anchoring moves it down or up as the rows rewrap, and
+ * the shell switching scrollers leaves it where the new scroller was. Nothing lies below the end.
+ */
+function leftTheEnd(seen: ScrollerAt, now: ScrollerAt): boolean {
+  return now.scroller === seen.scroller && now.shellSize === seen.shellSize && now.top < seen.top;
+}
+
+/**
  * How much of the conversation, up to `end`, is hidden under the composer that stays at the bottom
  * of the window: measured to the top of the shell's composer area around `composer`, whose top
  * padding counts.
@@ -266,11 +283,14 @@ interface NewestInView {
  * end. The page changing size moves the end under the composer, and doesn't count as the visitor
  * moving away. It can scroll the conversation too, and that scroll's event can come before the page
  * sees the new size: when the window narrows or widens the rows rewrap, and the browser's scroll
- * anchoring moves the conversation down or up to keep the rows on screen where they were; when the
- * shell goes short or tall, the part of it that scrolls changes. So while the visitor is at the
- * end, a scroll while the shell isn't the size the page last saw is left to the resize that
- * follows, and otherwise only a move up counts as them leaving it; once they have moved back, any
- * move counts.
+ * anchoring moves the conversation down or up to keep the rows on screen where they were. And the
+ * shell can switch which of its parts scrolls the conversation (going short or tall), which leaves
+ * it where the new scroller was; the shell says so with its own event, and the end comes back. So
+ * while the visitor is at the end, only a move up of the same scroller, with the shell the same
+ * size, counts as them leaving it (`leftTheEnd`); once they have moved back, any move counts. Only
+ * the conversation's own scroller counts at all, looked up afresh each time: not the about column
+ * beside the chat, the composer's text box, or a part of the shell that has just stopped scrolling
+ * the conversation.
  *
  * Until the conversation has `started` there is no newest message to keep in view, so nothing is
  * pinned and the conversation's scroll region stays at its start: on a phone, where the about
@@ -312,36 +332,34 @@ function useNewestInView(
   }, [end, composer, noteSeen]);
 
   // Whether the conversation has scrolled since the page last knew where the visitor was, in a way
-  // that may have moved them. Its scroller changing is not the visitor moving: setup's preview
-  // scrolls the page until the conversation overflows the panel around it, and the panel from then
-  // on. While the visitor is at the end, a scroll while the shell has changed size is the browser's
-  // (the resize that follows decides), and only a move up counts: nothing lies below the end, and
-  // the browser's scroll anchoring moves the conversation down when the rows above grow.
+  // that may have moved them. Its scroller changing is not the visitor moving: the shell switches
+  // scrollers as it goes short or tall, and setup's preview scrolls the page until the conversation
+  // overflows the panel around it, and the panel from then on. While the visitor is at the end, only
+  // `leftTheEnd` counts.
   const scrolledSinceSeen = useCallback((): boolean => {
     const seen = seenAt.current;
     if (!seen || !end.current) return false;
     const now = scrollerAt(end.current);
-    if (now.scroller !== seen.scroller) return false;
-    if (!atTheEnd.current) return now.top !== seen.top;
-    return now.shellSize === seen.shellSize && now.top < seen.top;
+    if (atTheEnd.current) return leftTheEnd(seen, now);
+    return now.scroller === seen.scroller && now.top !== seen.top;
   }, [end]);
 
-  // A scroll event. While the visitor is at the end, a scroll that comes before the page sees the
-  // shell's new size is left to the resize that follows (which brings the end back), and a move
-  // down, or none, keeps them there, as `scrolledSinceSeen` holds; anything else is weighed by where
-  // the end now is.
-  const noteScroll = useCallback(() => {
-    const seen = seenAt.current;
-    const now = end.current ? scrollerAt(end.current) : null;
-    if (atTheEnd.current && seen !== null && now !== null) {
-      if (now.shellSize !== seen.shellSize) return;
-      if (now.scroller === seen.scroller && now.top >= seen.top) {
-        noteSeen();
-        return;
-      }
-    }
-    notePlace();
-  }, [end, noteSeen, notePlace]);
+  // A scroll event, of the conversation's own scroller only. While the visitor is at the end, a
+  // scroll that isn't them leaving it (`leftTheEnd`) keeps them there, and the resize or the shell's
+  // switch that moved the conversation brings the end back; anything else is weighed by where the
+  // end now is.
+  const noteScroll = useCallback(
+    (event: Event) => {
+      if (!end.current) return;
+      const now = scrollerAt(end.current);
+      const scrolled = event.target === document ? document.scrollingElement : event.target;
+      if (scrolled !== now.scroller) return;
+      const seen = seenAt.current;
+      if (atTheEnd.current && seen !== null && !leftTheEnd(seen, now)) noteSeen();
+      else notePlace();
+    },
+    [end, noteSeen, notePlace],
+  );
 
   useEffect(() => {
     // Captured on the document, so the page's scrolling and an embedding panel's both count.
@@ -350,16 +368,21 @@ function useNewestInView(
   }, [noteScroll]);
 
   // The page changing size moves the end without a render: the shell rewraps when the window or
-  // the panel around it resizes, and the composer area grows with what is typed. Watched while the
-  // shell is `shown`.
+  // the panel around it resizes, and the composer area grows with what is typed. So does the shell
+  // switching which of its parts scrolls the conversation, which it says with its own event. Watched
+  // while the shell is `shown`.
   useEffect(() => {
     const shell = shown ? end.current?.closest(SHELL) : null;
     const area = composer.current?.closest(COMPOSER_AREA);
-    if (typeof ResizeObserver === 'undefined' || !shell) return undefined;
-    const observer = new ResizeObserver(pin);
-    observer.observe(shell);
-    if (area) observer.observe(area);
-    return () => observer.disconnect();
+    if (!shell) return undefined;
+    shell.addEventListener(SCROLLER_SWITCHED, pin);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(pin);
+    observer?.observe(shell);
+    if (area) observer?.observe(area);
+    return () => {
+      shell.removeEventListener(SCROLLER_SWITCHED, pin);
+      observer?.disconnect();
+    };
   }, [shown, end, composer, pin]);
 
   // Just before each change, if the visitor may have moved.

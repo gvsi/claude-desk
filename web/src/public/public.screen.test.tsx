@@ -751,6 +751,59 @@ describe('public chat page', () => {
     }
   }, 60_000);
 
+  it('reload_on_a_short_window_opens_at_the_newest_turn', async () => {
+    // A long chat reopened on a phone on its side (568x320) or with its keyboard open (360x380):
+    // it opens at its newest turn, just above the composer, with the AI disclosure and the composer
+    // on screen and uncovered.
+    const conversation = () => document.querySelector('[role="log"]')?.textContent ?? '';
+    for (const size of [
+      { width: 360, height: 380 },
+      { width: 568, height: 320 },
+    ]) {
+      const where = `${size.width}x${size.height}, reopened`;
+      const first = await renderRoute(PAGE, { viewport: size, seed: 'rivera' });
+      await ready(first.screen);
+      for (const text of LONG_CHAT) await say(first.screen, text);
+      const before = conversation();
+
+      const second = await renderRoute(PAGE, { viewport: size });
+      await ready(second.screen);
+      await vi.waitFor(() => expect(conversation()).toBe(before));
+      expect(document.querySelectorAll('.cd-transcript-row'), where).toHaveLength(2 * LONG_CHAT.length);
+      await vi.waitFor(() => expectEndAboveTheComposer(second.screen), { timeout: 1_000 });
+      expectDisclosureAndComposerUncovered(second.screen, where);
+    }
+  }, 60_000);
+
+  it('newest_row_follows_the_shell_switching_its_scroller', async () => {
+    // The shell changes which of its parts scrolls the conversation (going short or tall, a phone's
+    // keyboard opening, a draft growing) and says so with its own event once it has. The switch can
+    // leave the conversation anywhere, with nothing rendered or resized for the page to see: a
+    // visitor who was at the end stays at the end, and one who had read back up stays where they
+    // were. The test moves the conversation and sends the shell's event itself, so it holds whether
+    // or not the shell switched.
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
+    await ready(screen);
+    for (const text of LONG_CHAT.slice(0, 4)) await say(screen, text);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    const shell = document.querySelector('.cd-public-shell');
+    if (!shell) throw new Error('no shell');
+    const switched = () => shell.dispatchEvent(new CustomEvent(SCROLLER_SWITCHED, { bubbles: true, detail: { scroller: chatScroller() } }));
+
+    // At the end: the switch leaves the conversation at its start, and the shell's event follows.
+    chatScroller().scrollTo({ top: 0, behavior: 'instant' });
+    switched();
+    await sleep(200);
+    expectEndAboveTheComposer(screen);
+
+    // Read back up, then a switch: the visitor stays where they moved to.
+    chatScroller().scrollTo({ top: 0, behavior: 'instant' });
+    await sleep(200);
+    switched();
+    await sleep(200);
+    expect(chatScroller().scrollTop).toBe(0);
+  });
+
   it('newest_row_follows_a_phone_turned_smaller', async () => {
     const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
     await ready(screen);
@@ -1359,6 +1412,9 @@ const LONG_CHAT = [
   'Can I get 15% off if I pay cash?',
   'Hello there',
 ] as const;
+
+/** The event the design system's shell sends from its root once it has switched which part of it scrolls. */
+const SCROLLER_SWITCHED = 'cd-public-shell-scroller';
 
 /** The AI disclosure, as the page shows it in English. */
 const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";

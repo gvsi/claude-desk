@@ -28,7 +28,8 @@ export interface SeedOption extends ResetOptions {
 }
 
 export interface RenderRouteOptions {
-  viewport?: Viewport;
+  /** The desktop or phone viewport by name, or a window of its own size, such as a phone on its side. */
+  viewport?: Viewport | { width: number; height: number };
   /** The browser's first language, as `navigator.languages[0]` reports it ("es-MX"). */
   language?: string;
   /**
@@ -68,7 +69,7 @@ export function resetBrowserLanguage(): void {
 
 export async function renderRoute(path: string, opts: RenderRouteOptions = {}): Promise<RenderedRoute> {
   await cleanup();
-  const { width, height } = VIEWPORTS[opts.viewport ?? 'desktop'];
+  const { width, height } = typeof opts.viewport === 'object' ? opts.viewport : VIEWPORTS[opts.viewport ?? 'desktop'];
   await page.viewport(width, height);
   resetBrowserLanguage();
   if (opts.language !== undefined) setBrowserLanguage(opts.language);
