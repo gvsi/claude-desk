@@ -2623,7 +2623,7 @@
     "/api/owner/setup": {
       "post": {
         "summary": "Start Setup",
-        "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.",
+        "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.\n\nWith an `idempotency_key` (one per click), a repeat in the copy answers the interview the first made, as it stands\nnow, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409\n`conflict`; a repeat of a start that failed answers its failure again (a new click sends a new key); and a repeat\nsent while the first is still starting waits for it, up to 25 s, then answers 409 `in_progress`, to be sent again.\nWithout a key, each start makes its own interview and Desk.",
         "operationId": "owner_start_setup",
         "requestBody": {
           "content": {
@@ -2648,6 +2648,16 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -11216,6 +11226,20 @@
               }
             ],
             "title": "Owner Display Name"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
           }
         },
         "additionalProperties": false,
@@ -11225,7 +11249,7 @@
           "timezone"
         ],
         "title": "SetupStartIn",
-        "description": "`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)\nand, if they give it, the name customers should see for them, which wins over one taken from the words. A name\nthe owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,\nspaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked."
+        "description": "`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)\nand, if they give it, the name customers should see for them, which wins over one taken from the words. A name\nthe owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,\nspaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. An optional `idempotency_key`, one\nper click, makes a repeat answer the interview the first made instead of making another."
       },
       "SetupState": {
         "properties": {

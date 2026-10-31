@@ -22,6 +22,7 @@ from pydantic import (
     model_validator,
 )
 
+from desk.api.idempotency import IdempotencyKey
 from desk.api.prompts import (
     CARD_ID_MAX_LENGTH,
     CARD_REASON_MAX_LENGTH,
@@ -523,7 +524,8 @@ class SetupStartIn(BaseModel):
     """`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
     and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
     the owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,
-    spaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked."""
+    spaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. An optional `idempotency_key`, one
+    per click, makes a repeat answer the interview the first made instead of making another."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -531,6 +533,7 @@ class SetupStartIn(BaseModel):
     timezone: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     owner_display_name: Annotated[str, StringConstraints(strip_whitespace=True,
                                                          pattern=OWNER_NAME_PATTERN)] | None = None
+    idempotency_key: IdempotencyKey | None = None
 
     @field_validator("timezone")
     @classmethod

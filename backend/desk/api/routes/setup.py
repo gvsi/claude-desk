@@ -12,8 +12,6 @@ joins work already running counts once) and, on a route that calls the model, an
 production once today's model budget is spent. What each step does is in `desk.api.setup`.
 """
 
-import hashlib
-import json
 from collections.abc import Awaitable, Callable
 from time import monotonic
 from typing import Annotated, Any
@@ -24,6 +22,7 @@ from pydantic import BaseModel
 
 from desk.api import proving, setup
 from desk.api.deps import OwnerCtx, Runtime, owner_ctx, public_origin, require_model_budget, runtime
+from desk.api.idempotency import body_sha256
 from desk.api.schemas import (
     ApiError,
     ProvingPending,
@@ -61,13 +60,23 @@ async def _moving_on(request: Request, ctx: OwnerCtx, *, model: bool = True) -> 
     return state
 
 
-@router.post("", status_code=201, response_model=SetupState, responses=error_responses(401, 422, 429, 503))
+@router.post("", status_code=201, response_model=SetupState, responses=error_responses(401, 409, 422, 429, 503))
 async def start_setup(body: SetupStartIn, request: Request,
                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
     """Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with
     Answering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives
     here is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude
-    couldn't answer, with nothing made."""
+    couldn't answer, with nothing made.
+
+    With an `idempotency_key` (one per click), a repeat in the copy answers the interview the first made, as it stands
+    now, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409
+    `conflict`; a repeat of a start that failed answers its failure again (a new click sends a new key); and a repeat
+    sent while the first is still starting waits for it, up to 25 s, then answers 409 `in_progress`, to be sent again.
+    Without a key, each start makes its own interview and Desk."""
+    if body.idempotency_key is not None:
+        repeat = await setup.repeated_start(ctx, runtime(request).started().database(), body)
+        if repeat is not None:
+            return repeat
     state = await _moving_on(request, ctx)
     return await setup.start(ctx, state.database(), state.model, body)
 
@@ -124,16 +133,6 @@ async def setup_connect_tools(interview_id: InterviewId, request: Request,
 Work = Callable[[OwnerCtx, Runtime], Awaitable[Any]]
 PROVING_RESPONSES: dict[int | str, dict[str, Any]] = {202: {"model": ProvingPending},
                                                       **error_responses(401, 404, 409, 422, 429, 503)}
-NO_BODY = hashlib.sha256(b"").hexdigest()
-
-
-def body_sha256(body: dict[str, Any] | None) -> str:
-    """The sha256 of a request body's canonical JSON (keys sorted, no spaces), or of no body."""
-    if body is None:
-        return NO_BODY
-    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-                          ).hexdigest()
-
 
 async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *, started: float,
                          admit: Callable[[], Awaitable[None]], body: BaseModel | None = None,

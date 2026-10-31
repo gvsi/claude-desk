@@ -44,7 +44,7 @@ from desk.api.prompts import (
 from desk.api.setup import owner_name
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest
-from tests.api.fakes import ScriptedModel, gated, response
+from tests.api.fakes import ScriptedModel, gated, response, unavailable
 from tests.api.fakes import text as text_block
 from tests.kernel_contract.fake_kernel import OWNER_NAME, fake_kernel_app
 
@@ -1102,3 +1102,165 @@ async def test_a_stalled_model_call_ends_as_unavailable_with_nothing_stored(app,
     # The same answer sent again runs: the stalled one left nothing behind.
     reply = await answer(owner, model, interview_id, "Plumbing.")
     assert reply.status_code == 200 and reply.json()["question"] == "hours_and_area"
+
+
+# Idempotency keys ---------------------------------------------------------------------------------------------------
+
+KEY = "start-0c6f2e4a-9b1d-4f7e-8a35-2d9c41b7e6a0"
+
+
+async def start_keyed(owner: Owner, key: str | None = KEY, *, description: str = DESCRIPTION,
+                      **fields) -> httpx.Response:
+    """Start setup with the description and, unless `key` is None, the client's idempotency key."""
+    body = {"description": description, "timezone": TIMEZONE, **fields}
+    if key is not None:
+        body["idempotency_key"] = key
+    return await owner.browser.post("/api/owner/setup", json=body)
+
+
+async def interviews(engine) -> list[tuple[str, str | None]]:
+    async with engine.connect() as conn:
+        found = await conn.execute(sql("SELECT interview_id, desk_id FROM app.setup_interviews ORDER BY created_at"))
+        return [tuple(row) for row in found]
+
+
+async def test_a_repeated_key_starts_one_interview_and_one_desk(app, browser, fake, kernel_http, model, engine):
+    # The first answer was lost (a timeout, say) and the start is sent again with its key: the repeat answers the
+    # interview the first made, as it stands now, with no second model call or Desk.
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started())
+    first = await start_keyed(owner)
+    assert first.status_code == 201, first.text
+    repeat = await start_keyed(owner)
+    assert (repeat.status_code, repeat.json()) == (201, first.json())
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    state = first.json()
+    assert await interviews(engine) == [(state["interview_id"], state["desk_id"])]
+
+    moved_on = await consent(owner, state["interview_id"], False)
+    repeat = await start_keyed(owner)
+    assert (repeat.status_code, repeat.json()) == (201, moved_on)
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+
+
+@pytest.mark.parametrize("keys", [("start-a", "start-b"), (None, None)], ids=["two keys", "no key"])
+async def test_two_keys_or_none_start_two_interviews(app, browser, fake, kernel_http, model, engine, keys):
+    # Two clicks send two keys, and each starts its own interview and Desk. Without a key, as before keys, every start
+    # makes its own: pinned, so making the key required later is a deliberate change.
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started(), started())
+    first, second = [await start_keyed(owner, key) for key in keys]
+    assert (first.status_code, second.status_code) == (201, 201), (first.text, second.text)
+    assert first.json()["interview_id"] != second.json()["interview_id"]
+    assert first.json()["desk_id"] != second.json()["desk_id"]
+    assert len(fake.called("POST /desks")) == 2 and len(model.requests) == 2
+    assert len(await interviews(engine)) == 2
+
+
+async def test_the_same_key_in_another_copy_is_its_own_interview(app, browser, fake, kernel_http, model, engine):
+    one, other = await new_owner(app, browser, kernel_http), await new_owner(app, browser, kernel_http)
+    model.add(started(), started())
+    first, second = await start_keyed(one), await start_keyed(other)
+    assert (first.status_code, second.status_code) == (201, 201), (first.text, second.text)
+    assert first.json()["interview_id"] != second.json()["interview_id"]
+    assert len(fake.called("POST /desks")) == 2
+    # Each copy's repeat answers its own interview, and neither reads the other's.
+    assert (await start_keyed(one)).json() == first.json() and (await start_keyed(other)).json() == second.json()
+    assert (await other.browser.get(f"/api/owner/setup/{first.json()['interview_id']}")).status_code == 404
+    assert len(fake.called("POST /desks")) == 2 and len(model.requests) == 2
+
+
+async def test_the_same_key_with_another_body_is_a_conflict(app, browser, fake, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    model.add(started())
+    first = await start_keyed(owner)
+    assert first.status_code == 201, first.text
+    for changed in ({"description": "Rivera Plumbing, now in Berkeley too."}, {"timezone": "America/New_York"},
+                    {"owner_display_name": "Maria"}):
+        refused = await start_keyed(owner, **{"description": DESCRIPTION, **changed})
+        assert (refused.status_code, refused.json()) == (409, {"error": "conflict"}), changed
+    # The key's own body still answers its interview; nothing else was made or asked.
+    assert (await start_keyed(owner)).json() == first.json()
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    assert len(await interviews(engine)) == 1
+
+
+@pytest.mark.parametrize(("fail", "answered"), [
+    ("model", (503, {"error": "model_unavailable"})),
+    ("422", (422, {"error": "kernel", "code": "invalid"})),
+    ("500", (503, {"error": "kernel", "code": "internal"})),
+    ("timeout", (503, {"error": "kernel", "code": "kernel_unavailable"})),
+], ids=["model unavailable", "kernel refused", "kernel 500", "kernel timeout"])
+async def test_a_repeat_of_a_failed_start_answers_its_failure(app, browser, fake, kernel_http, model, engine, fail,
+                                                              answered):
+    # The first start failed, and its answer was lost: the repeat answers the same failure and makes nothing, not even
+    # a model call. A new click sends a new key, which starts afresh.
+    owner = await new_owner(app, browser, kernel_http)
+    if fail == "model":
+        model.add(unavailable())
+    else:
+        model.add(started())
+        fake.fail("POST /desks", fail, times=1)
+    first = await start_keyed(owner)
+    assert (first.status_code, first.json()) == answered
+    asked, made = len(model.requests), len(fake.called("POST /desks"))
+    repeat = await start_keyed(owner)
+    assert (repeat.status_code, repeat.json()) == answered
+    assert (len(model.requests), len(fake.called("POST /desks"))) == (asked, made)
+    ((interview_id, desk_id),) = await interviews(engine)
+    assert desk_id is None
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).status_code == 404
+
+    model.add(started())
+    fresh = await start_keyed(owner, "start-again")
+    assert fresh.status_code == 201, fresh.text
+    assert len(fake.called("POST /desks")) == made + 1
+
+
+async def test_a_repeat_while_the_first_is_starting_waits_for_it(app, browser, fake, kernel_http, model, engine):
+    # The first start is still waiting on Claude when its repeat arrives: the key's row is already written, so the
+    # repeat waits for it and answers the same interview, with one model call and one Desk between them.
+    owner = await new_owner(app, browser, kernel_http)
+    release = asyncio.Event()
+    model.add(gate := gated(started(), release))
+    first = asyncio.create_task(start_keyed(owner))
+    await asyncio.wait_for(gate.entered.wait(), 5)
+    ((interview_id, desk_id),) = await interviews(engine)
+    assert desk_id is None                                  # written before Claude answers or the kernel is called
+    repeat = asyncio.create_task(start_keyed(owner))
+    await asyncio.sleep(0.5)
+    assert not repeat.done()
+    release.set()
+    first, repeat = await asyncio.wait_for(asyncio.gather(first, repeat), 10)
+    assert (first.status_code, repeat.status_code) == (201, 201), (first.text, repeat.text)
+    assert repeat.json() == first.json() and first.json()["interview_id"] == interview_id
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+
+
+async def test_a_repeat_waits_only_so_long_for_the_first(app, browser, fake, kernel_http, model, engine, monkeypatch):
+    # Past the wait, the repeat answers 409 `in_progress` and makes nothing; sent again once the first is done, it
+    # answers the interview.
+    monkeypatch.setattr(desk_setup, "START_WAIT_S", 0.3)
+    owner = await new_owner(app, browser, kernel_http)
+    release = asyncio.Event()
+    model.add(gate := gated(started(), release))
+    first = asyncio.create_task(start_keyed(owner))
+    await asyncio.wait_for(gate.entered.wait(), 5)
+    waited = await asyncio.wait_for(start_keyed(owner), 5)
+    assert (waited.status_code, waited.json()) == (409, {"error": "in_progress"})
+    release.set()
+    first = await asyncio.wait_for(first, 10)
+    assert first.status_code == 201, first.text
+    assert (await start_keyed(owner)).json() == first.json()
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+
+
+@pytest.mark.parametrize("key", ["", "k" * 129, "start\x00a", "start\na"], ids=["empty", "129", "NUL", "newline"])
+async def test_a_key_is_1_to_128_characters_with_no_control_character(app, browser, fake, kernel_http, model, engine,
+                                                                       key):
+    owner = await new_owner(app, browser, kernel_http)
+    refused = await start_keyed(owner, key)
+    assert (refused.status_code, refused.json()) == (422, {"error": "invalid"})
+    assert fake.called("POST /desks") == [] and model.requests == [] and await interviews(engine) == []
+    model.add(started())
+    assert (await start_keyed(owner, "k" * 128)).status_code == 201
