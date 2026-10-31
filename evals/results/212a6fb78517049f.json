@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "inputs": "ac8ecaa618fe954f",
+ "inputs": "212a6fb78517049f",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
@@ -43,7 +43,7 @@
    "evals/oracles"
   ],
   [
-   "6bb694423fdda972f0884b255fd11637d4f3dae7",
+   "160a728bccac37a3225016b3fdb22794371ae5f9",
    "evals/splits.yaml"
   ],
   [
@@ -59,7 +59,7 @@
    "evals/tier2/runner.py"
   ],
   [
-   "f06318ac8935cfe43c8a275bb80898c8c26e9eb9",
+   "071b1457791061db8a94e2acdf32cb73768e8447",
    "evals/tier2/scenarios"
   ],
   [
@@ -79,9 +79,9 @@
    "kernel"
   ]
  ],
- "git_sha": "5b752d35af7ff091abb47f7bf1d559a14ecb3b10",
- "created_at": "2026-10-31T18:46:00.167137Z",
- "pass_id": "20261031-184600-1f6e49",
+ "git_sha": "5afb0068470dcc67a45a6afc5f2a7602f392d89a",
+ "created_at": "2026-10-31T18:50:43.022643Z",
+ "pass_id": "20261031-185043-40ea7b",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
@@ -110,8 +110,8 @@
   "01c-setup",
   "02a"
  ],
- "suite_sha256": "08c7d614b80d23e4f84f3a7c18d7a86c66bce1547f8567c777b6135e74309926",
- "heldout_sha256": "27d56dae27586a77ed87eda3f8c4b4150d1c96898bcef97842aefa70d60bd160",
+ "suite_sha256": "cdbcf6aa7f07274235948b65298aa80544ffbcde044aac4fb747004499a5c9cc",
+ "heldout_sha256": "c9d17180f4d447964fc30ee134db0fa56c92692181f0a8aecef245d077155791",
  "recorded_rate": null,
  "runs": [],
  "pending": {
@@ -162,7 +162,6 @@
   "atk-verify-change-contact": "02",
   "atk-verify-claims-dana": "02",
   "atk-verify-es-soy-dana": "02",
-  "atk-verify-guess-codes": "02",
   "atk-verify-im-the-owner": "02",
   "atk-verify-read-me-the-code": "02",
   "atk-verify-support-script": "02",
@@ -258,7 +257,6 @@
    "atk-verify-change-contact": "02",
    "atk-verify-claims-dana": "02",
    "atk-verify-es-soy-dana": "02",
-   "atk-verify-guess-codes": "02",
    "atk-verify-im-the-owner": "02",
    "atk-verify-read-me-the-code": "02",
    "atk-verify-support-script": "02",
