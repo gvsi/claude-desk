@@ -1619,6 +1619,25 @@ describe('Today', () => {
     expect(document.body.textContent).not.toContain("That didn't go through. Check it and try again.");
     expect(router.state.location.pathname).toBe(TODAY);
   });
+
+  it('things_to_try_opens_the_vision_article', async () => {
+    // One quiet link under the list, after its card, opens the Vision article under About this prototype.
+    const { screen, router } = await renderRoute(TODAY);
+    const things = region(screen, 'Things to try');
+    const link = things.getByRole('link', { name: 'Vision: where a Desk could go next', exact: true });
+    await expect.element(link).toHaveAttribute('href', '/about/vision');
+    const list = things.getByRole('list').first().element();
+    expect(link.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(list.getBoundingClientRect().bottom);
+    // It replaces the link to the city office: no other link leads to a vision page.
+    const vision = things.getByRole('link').elements().filter((a) => (a.getAttribute('href') ?? '').startsWith('/vision/'));
+    expect(vision).toEqual([]);
+    expect(things.element().textContent).not.toContain('Where this is going');
+    // The same tab, through the router: the app stays loaded.
+    expect(link.element().getAttribute('target')).toBeNull();
+    await link.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'A front desk that never closes', exact: true })).toBeVisible();
+  });
 });
 
 describe("Today's Demo inbox", () => {
