@@ -87,6 +87,7 @@ function atPlaceOf(heading: HTMLElement): boolean {
 export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): void {
   let going = placeOf(heading);
   heading.scrollIntoView({ behavior, block: 'start' });
+  keepSectionWhileTypeLoads(heading, behavior);
   // An instant jump has arrived already, and keeps its place as the page changes; so has a jump to where it is.
   if (Math.abs(window.scrollY - going) <= 1) return;
   let followedAgain = false;
@@ -111,29 +112,47 @@ export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): v
 const READER_ACTIONS = ['wheel', 'touchmove', 'pointerdown', 'keydown', 'popstate'] as const;
 
 /**
- * Keeps the window at the section an address opened until the reading type's web font has loaded, and returns what
- * cancels it. On a cold load the font swaps in after the page has opened there and moves the page under the window,
- * and the browser's scroll anchoring holds the window to some other element than the heading (about 2 px off on the
- * prediction). Once the type has loaded, the heading is followed once more, unless the reader has acted first (Back
- * and Forward included) or the page has cancelled it.
+ * Keeps the window at a section the page moved to (by an address, or a contents link) until the reading type's web
+ * font has loaded, and returns what cancels it. On a cold load the font swaps in after the page has moved there and
+ * shifts the page under the window, and the browser's scroll anchoring holds the window to some other element than
+ * the heading (about 2 px off after an address, about 30 px after a contents link). Once the type has loaded and the
+ * window has come to rest, a heading that has moved is followed once more, in `behavior`, unless the reader has acted
+ * first (Back and Forward included) or the page has cancelled it.
  */
-export function keepSectionWhileTypeLoads(heading: HTMLElement): () => void {
+export function keepSectionWhileTypeLoads(heading: HTMLElement, behavior: ScrollBehavior = 'instant'): () => void {
   const { fonts } = document;
   if (!fonts || fonts.status !== 'loading') return () => {};
-  const margin = parseFloat(getComputedStyle(heading).scrollMarginTop) || 0;
   let acted = false;
+  let moving = false;
   const act = () => {
     acted = true;
     stop();
   };
+  const onScroll = () => {
+    moving = true;
+  };
+  let afterRest: (() => void) | null = null;
+  const stopResting = onScrollRest(() => {
+    moving = false;
+    afterRest?.();
+  });
   function stop() {
     for (const kind of READER_ACTIONS) window.removeEventListener(kind, act);
+    window.removeEventListener('scroll', onScroll);
+    stopResting();
   }
   for (const kind of READER_ACTIONS) window.addEventListener(kind, act, { passive: true });
-  void fonts.ready.then(() => {
+  window.addEventListener('scroll', onScroll, { passive: true });
+  const followAgain = () => {
     stop();
     if (acted || !heading.isConnected) return;
-    if (Math.abs(heading.getBoundingClientRect().top - margin) > 1) heading.scrollIntoView({ behavior: 'instant', block: 'start' });
+    if (!atPlaceOf(heading)) heading.scrollIntoView({ behavior, block: 'start' });
+  };
+  void fonts.ready.then(() => {
+    if (acted) return;
+    // A glide still under way, or a jump whose scroll hasn't been heard to end, is let finish first.
+    if (moving) afterRest = followAgain;
+    else followAgain();
   });
   return act;
 }

@@ -754,6 +754,23 @@ describe('ReaderPage', () => {
     await screen.unmount();
   });
 
+  it('a_followed_section_keeps_its_place_while_the_type_loads', async () => {
+    // Followed from the contents list before the type has loaded, a section that the swap moves after the jump has
+    // arrived is back at its place once the type has loaded. The jump is instant under reduced motion.
+    withoutScrollAnchoring();
+    const loaded = typeStillLoading();
+    const screen = await renderReader('prediction');
+    await userEvent.click(screen.getByRole('link', { name: 'Limitations', exact: true }));
+    await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
+    await twoFrames();
+    swapType();
+    expect(offsetOf('limitations'), 'the swap moved the page').toBeGreaterThan(20);
+    loaded();
+    await expect.poll(() => Math.abs(offsetOf('limitations')), { message: 'once the type has loaded' }).toBeLessThanOrEqual(1);
+    expect(document.activeElement, 'focus stays on the section').toBe(headingOf('limitations'));
+    await screen.unmount();
+  });
+
   it('going_back_returns_to_the_readers_place', async () => {
     // Opening a page, by a link or in place of the current one, starts it at its top. Back and Forward return to
     // where the reader last was in that document; a memory router has no browser to restore it, so the page alone

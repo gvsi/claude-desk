@@ -106,6 +106,20 @@ function eachFrame<T>(read: () => T): { frames: T[]; stop: () => void } {
   return { frames, stop: () => cancelAnimationFrame(id) };
 }
 
+/** Makes the reading type's web font still loading, as on a cold load, and returns what finishes loading it. */
+function typeStillLoading(): () => void {
+  let loaded = () => {};
+  const ready = new Promise<void>((resolve) => {
+    loaded = resolve;
+  });
+  const fonts = { status: 'loading', ready } as unknown as FontFaceSet;
+  Object.defineProperty(document, 'fonts', { configurable: true, get: () => fonts });
+  onTestFinished(() => {
+    delete (document as { fonts?: FontFaceSet }).fonts;
+  });
+  return loaded;
+}
+
 describe('ReaderPage with motion', () => {
   it('contents_link_scrolls_smoothly', async () => {
     const screen = await renderReader('prediction');
@@ -263,6 +277,32 @@ describe('ReaderPage with motion', () => {
     await jumpTo(placeOf('why-its-coming') + 100);
     await expect.poll(marked, { timeout: 500, message: 'where the reader stopped' }).toEqual(['#why-its-coming']);
     watch.disconnect();
+    await screen.unmount();
+  });
+
+  it('a_followed_section_keeps_its_place_while_the_type_loads', async () => {
+    // Followed before the type has loaded, a section that the swap moves after the glide has arrived glides back to
+    // its place once the type has loaded. Scroll anchoring is off, so nothing else puts the window back.
+    document.documentElement.style.overflowAnchor = 'none';
+    onTestFinished(() => {
+      document.documentElement.style.overflowAnchor = '';
+    });
+    const loaded = typeStillLoading();
+    const screen = await renderReader('prediction');
+    const heading = headingOf('limitations');
+    await userEvent.click(linkTo('limitations'));
+    await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const grown = document.createElement('div');
+    grown.style.height = '29px';
+    onTestFinished(() => grown.remove());
+    (document.querySelector('[data-hero]') as HTMLElement).append(grown);
+    expect(heading.getBoundingClientRect().top - 88, 'the swap moved the page').toBeGreaterThan(20);
+    loaded();
+    await expect
+      .poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000, message: 'once the type has loaded' })
+      .toBeLessThanOrEqual(1);
+    expect(marked()).toEqual(['#limitations']);
     await screen.unmount();
   });
 
