@@ -892,6 +892,65 @@ describe('setup', () => {
     await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
   });
 
+  it('live_step_shows_the_signed_share_card', async () => {
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    const url = `${window.location.origin}/d/${state.slug}`;
+
+    // N-R2-Setup-14-Live: under "Go to Today", one card titled "Share it", the link's QR code at its
+    // left, and at its right "Website embed" and its line, marked "Coming later".
+    const card = screen.getByRole('region', { name: 'Share it' });
+    await expect.element(card).toBeVisible();
+    await expect.element(card.getByRole('heading', { name: 'Share it' })).toBeVisible();
+    const qr = card.getByRole('img', { name: `QR code for ${url}` });
+    await expect.element(qr).toBeVisible();
+    const embed = card.getByText('Website embed', { exact: true });
+    await expect.element(embed).toBeVisible();
+    await expect.element(card.getByText('The same chat on your own site.', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('Coming later', { exact: true })).toBeVisible();
+    const today = screen.getByRole('link', { name: 'Go to Today' }).element().getBoundingClientRect();
+    const box = card.element().getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(today.bottom);
+    expect(qr.element().getBoundingClientRect().right).toBeLessThanOrEqual(embed.element().getBoundingClientRect().left);
+    expect(qr.element().getBoundingClientRect().width).toBe(132);
+    expect(card.element().classList).toContain('cd-card');
+
+    // Nothing else: the printable card, the ready-made words and an embed code stay on Share.
+    expect(screen.getByRole('img', { name: /^QR code for / }).elements()).toHaveLength(1);
+    expect(screen.getByText('Ready-made words').elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Print card' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Copy' }).elements()).toHaveLength(0);
+    expect(card.element().querySelectorAll('pre, code, textarea')).toHaveLength(0);
+
+    // It needs only the link: with the Desks unreadable, the card still shows, with no loading line or error.
+    mockStore.inject({ route: 'desks', status: 503, times: 50 });
+    const reloaded = (await renderRoute(`/app/setup/${state.interview_id}`, { retryScale: 0 })).screen;
+    const again = reloaded.getByRole('region', { name: 'Share it' });
+    await expect.element(again.getByRole('img', { name: `QR code for ${url}` })).toBeVisible();
+    await expect.poll(() => requests('desks').length).toBeGreaterThan(1);
+    expect(again.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(reloaded.getByText(/^Loading/).elements()).toHaveLength(0);
+
+    // On a phone, as the share kit lays out there: the code above the words, nothing cut or sideways.
+    const phone = (await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' })).screen;
+    const small = phone.getByRole('region', { name: 'Share it' });
+    const code = small.getByRole('img', { name: `QR code for ${url}` });
+    await expect.element(code).toBeVisible();
+    const words = small.getByText('Website embed', { exact: true });
+    expect(code.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(words.element().getBoundingClientRect().top);
+    const right = small.element().getBoundingClientRect().right;
+    for (const el of small.element().querySelectorAll('*')) {
+      expect(el.getBoundingClientRect().right, el.className.toString()).toBeLessThanOrEqual(right);
+    }
+    for (const text of ['Share it', 'Website embed', 'The same chat on your own site.', 'Coming later']) {
+      const el = small.getByText(text, { exact: true }).element() as HTMLElement;
+      expect(el.scrollWidth, text).toBeLessThanOrEqual(el.clientWidth);
+    }
+    expectNoHorizontalScroll();
+  });
+
   it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {
     // A confirm the API took whose reply was lost, and the read after it failed: unknown. Pressed
     // again, the API answers 409 (setup is past the safety check), which is read: the preview opens.

@@ -150,13 +150,64 @@
   border-radius: var(--radius-card);
 }
 
-/* Live: "Share it", then the share kit 12 px under it. */
+/* Live: "Share it" (N-R2-Setup-14-Live), a card padded 16 px with its title, then 10 px under it the
+   link's QR code at 132 px, its corners rounded as a control's, and 24 px to its right "Website
+   embed" over its line, 2 px apart, with the "Coming later" pill 12 px to their right. The code
+   keeps its own light quiet zone, so any phone scans it. With less room than the code, the gap
+   and a readable column of words (as on a phone), the words wrap 16 px under the code, as the
+   share kit stacks there. */
+.cd-setup-live__share-title {
+  margin: 0;
+  color: var(--text-primary);
+}
+
 .cd-setup-live__share {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-16) var(--space-24);
+  min-width: 0;
+  margin-top: var(--space-10);
+}
+
+/* No size token is the board's 132 px code. */
+.cd-setup-live__qr {
+  flex: none;
+  width: 132px;
+  height: 132px;
+  overflow: hidden;
+  border-radius: var(--radius-control);
+}
+
+/* No size token is the words' readable column: "Website embed", its line and the pill on one row. */
+.cd-setup-live__embed {
+  display: flex;
+  flex: 1 1 300px;
+  align-items: flex-start;
   gap: var(--space-12);
   min-width: 0;
 }
+
+.cd-setup-live__embed-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cd-setup-live__embed-text p {
+  margin: 0;
+}
+
+/* No weight token: the section type's 520, as the share kit sets "Website embed". */
+.cd-setup-live__embed-title {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-setup-live__embed-line {
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}
+
 
 /* Narrower than a laptop: the bar takes two lines, the mark and "Save and exit", then the business
    and the steps, which say where the owner is in one line once they have under 480 px. */
