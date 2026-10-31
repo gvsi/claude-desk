@@ -16,7 +16,7 @@ import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, PUBLIC_SHELL_SCROLLER_EVENT, RATE_LIMI
 import { BREAK_IT_IDEAS, HANDOFF_MAX_AGE_MS, forgetTakenBreakItHandoffs, handOffBreakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../lib/storage.ts';
 import { worker } from '../mocks/browser.ts';
-import { HELD_PROSE, SCRIPT, matchRule, turnEnd, type RuleName } from '../mocks/script.ts';
+import { DEMO_CODE, HELD_PROSE, SCRIPT, matchRule, turnEnd, type RuleName } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
@@ -1597,6 +1597,14 @@ describe('public chat page', () => {
     expect(chatHead()).toEqual(withClaude(HEAD.en));
   });
 
+  it('a_newer_verify_answer_prevents_an_older_reopen_read_from_restoring_owner_mode', async () => {
+    await newerVerificationBeforeReopen(false);
+  });
+
+  it('a_newer_verify_fallback_read_prevents_an_older_reopen_read_from_restoring_owner_mode', async () => {
+    await newerVerificationBeforeReopen(true);
+  });
+
   it('a_newer_read_keeps_an_older_replayed_join_from_bringing_the_owner_back', async () => {
     const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);
@@ -2881,6 +2889,47 @@ function countStreams(): StreamCount {
     window.EventSource = native;
   });
   return count;
+}
+
+/** A newer verification result and an older reopen read can share a cursor, before the leave is stored. */
+async function newerVerificationBeforeReopen(fallback: boolean): Promise<void> {
+  const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+  await ready(screen);
+  await say(screen, 'Can you send my invoice?');
+  const chat = mockStore.visitorSession(RIVERA.slug);
+  if (!chat) throw new Error('this browser has a chat');
+  mockStore.world.takeOver(chat);
+  await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+  await router.navigate('/d/nobody-here');
+  await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+  const older = await request('visitorSession', { params: { slug: RIVERA.slug } });
+  let release = () => {};
+  mockStore.inject({ route: 'visitorSession', status: 200, body: older, until: new Promise<void>((resolve) => (release = resolve)) });
+  const reads = requests('visitorSession').length;
+  const texts = watchTexts();
+  useTimers();
+  await router.navigate(PAGE);
+  await readyNow(screen);
+  await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+  chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1, verified: true, assurance: 'demo_code' };
+  if (fallback) {
+    mockStore.inject({ route: 'verifyCheck', status: 'network' });
+    mockStore.inject({ route: 'visitorSession', status: 200, body: { ...older, state: chat.state } });
+  } else {
+    mockStore.inject({ route: 'verifyCheck', status: 200, body: { state: chat.state } });
+  }
+  await screen.getByRole('textbox', { name: '6-digit code' }).fill(DEMO_CODE);
+  await screen.getByRole('button', { name: 'Confirm' }).click();
+  await until(() => expect(screen.getByText('Verified with a code. Simulated verification').element()).toBeVisible());
+  release();
+  await settle();
+  await vi.advanceTimersByTimeAsync(CAUGHT_UP_AFTER_MS + MARGIN_MS);
+  await settle();
+  expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the older generation cannot restore the owner').toBe(false);
+  mockStore.emit(RIVERA.slug, { type: 'owner_left' });
+  await until(() => expect(systemLines().at(-1)).toBe('Claude is helping again.'));
+  texts.stop();
+  expect(chatHead()).toEqual(withClaude(HEAD.en));
 }
 
 /**

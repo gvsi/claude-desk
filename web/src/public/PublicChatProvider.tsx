@@ -204,6 +204,8 @@ class VisitorChat {
    * those still belong to this chat, which shows them when a page comes back.
    */
   private generation = 0;
+  /** Greatest kernel session generation seen, independent of the event cursor and this chat's lifecycle. */
+  private sessionGeneration = -1;
   /** Messages whose answer was lost, by id, until a read of the conversation shows whether they went through. */
   private readonly lost = new Map<string, string>();
   /** A read for the lost messages is out. */
@@ -288,6 +290,7 @@ class VisitorChat {
    * so its mode stands as read, as of that cursor.
    */
   private openedSession(transcript: VisitorTranscript): SessionState {
+    this.observeSession(transcript.state);
     this.modeKnown = true;
     this.modeAt = transcript.last_seq;
     return transcript.state;
@@ -299,7 +302,12 @@ class VisitorChat {
    * have been taken before a hand-back the stream has shown since. `said` is the mode it says.
    */
   private laterSession(next: SessionState, said: SessionMode | null): SessionState {
+    this.observeSession(next);
     return { ...next, mode: lowerOnly(this.snapshot.session?.mode ?? null, said) };
+  }
+
+  private observeSession(session: SessionState): void {
+    this.sessionGeneration = Math.max(this.sessionGeneration, session.generation);
   }
 
   /**
@@ -538,7 +546,8 @@ class VisitorChat {
     try {
       const transcript = await request('visitorSession', { params: { slug: this.slug } });
       if (epoch !== this.epoch) return;
-      if (since === this.tracked && transcript.last_seq >= this.modeAt) this.set({ session: this.openedSession(transcript) });
+      this.observeSession(transcript.state);
+      if (since === this.tracked && transcript.last_seq >= this.modeAt && transcript.state.generation >= this.sessionGeneration) this.set({ session: this.openedSession(transcript) });
       else this.set({ session: this.laterRead(transcript, since, false) });
     } catch {
       // Unanswered: nothing is confirmed, and the head keeps the AI disclosure.
@@ -552,7 +561,8 @@ class VisitorChat {
   private async afterClose(epoch: number): Promise<void> {
     this.dispatch({ type: 'connection', connection: 'reconnecting' });
     try {
-      await request('visitorSession', { params: { slug: this.slug } });
+      const transcript = await request('visitorSession', { params: { slug: this.slug } });
+      if (epoch === this.epoch) this.observeSession(transcript.state);
     } catch (err) {
       if (epoch !== this.epoch) return;
       if (sessionGone(err)) {
@@ -587,6 +597,7 @@ class VisitorChat {
   readonly newChat = (): void => {
     this.epoch += 1;
     this.generation += 1;
+    this.sessionGeneration = -1;
     const epoch = this.epoch;
     this.stop();
     this.loaded = false;
@@ -684,6 +695,7 @@ class VisitorChat {
       this.checkLater(generation);
       return;
     }
+    this.observeSession(transcript.state);
     this.checkRetries = 0;
     for (const [id, text] of lost) {
       this.lost.delete(id);
@@ -763,6 +775,7 @@ class VisitorChat {
     try {
       const { state } = await request('verifyCheck', { params: { slug: this.slug }, body: { code } });
       if (generation !== this.generation) return;
+      this.observeSession(state);
       // The answer may have been taken before a hand-back the stream has shown since: it may lower the mode only.
       this.set(state.verified ? { verifyStatus: 'idle', session: this.laterSession(state, state.mode) } : { verifyStatus: 'failed' });
     } catch (err) {
@@ -790,8 +803,11 @@ class VisitorChat {
    */
   private async readSession(): Promise<{ transcript: VisitorTranscript; since: number; following: boolean } | null> {
     const { tracked: since, following } = this;
+    const generation = this.generation;
     try {
-      return { transcript: await request('visitorSession', { params: { slug: this.slug } }), since, following };
+      const transcript = await request('visitorSession', { params: { slug: this.slug } });
+      if (generation === this.generation) this.observeSession(transcript.state);
+      return { transcript, since, following };
     } catch {
       return null;
     }
@@ -799,8 +815,10 @@ class VisitorChat {
 
   /** Whether the conversation holds an outcome for `decisionId`: a lost cancel that went through. */
   private async wasResolved(decisionId: string): Promise<boolean> {
+    const generation = this.generation;
     try {
       const transcript = await request('visitorSession', { params: { slug: this.slug } });
+      if (generation === this.generation) this.observeSession(transcript.state);
       return transcript.items.some((item) => item.event?.type === 'resolved' && item.event.decision_id === decisionId);
     } catch {
       return false;
