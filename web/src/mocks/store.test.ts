@@ -31,7 +31,7 @@ import type {
   VisitorSession,
   VisitorTranscript,
 } from '../api/views.ts';
-import { rivera } from '../ds/fixtures/index.ts';
+import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
@@ -52,6 +52,7 @@ import {
 import { RIVERA } from './seed.ts';
 import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
+import type { ReplayTurn } from './world.ts';
 
 const slug = RIVERA.slug;
 const deskId = RIVERA.deskId;
@@ -1928,9 +1929,9 @@ describe("Today's windows", () => {
       conversations: 0,
       bookings: 0,
       leads: 0,
-      blocked: 0,
+      turned_down: 0,
       total: 0,
-      newest: { blocked: null, booking: null, lead_or_answer: null },
+      newest: { turned_down: null, booking: null, lead_or_answer: null },
     });
     expect(quiet.this_week).toEqual({
       timezone: 'America/Los_Angeles',
@@ -1955,26 +1956,27 @@ describe("Today's windows", () => {
     // Rivera's seed: Alex Kim's assistant, whose deposit Claude quoted and charged within its signed
     // limit; the held visitor, whose drafted reply was stopped; and Dana's chat, where Maria
     // whispered and Claude booked her at the quoted list price. The stopped draft is no request the
-    // kernel refused, so the last 7 days count none stopped; the briefing still lists it as blocked.
+    // kernel refused, so the last 7 days count none stopped, and nothing in the briefing turned down:
+    // the draft stays on Safety, out of the briefing.
     mockStore.reset('rivera');
     const seeded = await read();
     expect(seeded.this_week).toMatchObject({ bookings: 1, booked_cents: 18_000, conversations: 3, handled: 2, stepped_in: 1, stopped: 0 });
     expect(seeded.this_week.days.at(-1)).toEqual({ date: '2026-10-29', conversations: 3, bookings: 1, stopped: 0 });
-    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, blocked: 1, total: 3 });
-    const blockedReply = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.summary.ok === false);
-    expect(seeded.briefing.newest.blocked).toMatchObject({
-      kind: 'blocked',
-      session_id: 'ses-visitor-web',
-      ref_id: String(blockedReply?.seq),
-      line: null,
-    });
+    expect(seeded.briefing).toMatchObject({ conversations: 3, bookings: 1, leads: 0, turned_down: 0, total: 2 });
+    expect(seeded.briefing.newest.turned_down).toBeNull();
     expect(seeded.briefing.newest.booking).toMatchObject({
       kind: 'booking',
       session_id: 'ses-dana-web',
       line: DECISIONS.book.reasonPlain,
+      cause: null,
     });
-    expect(seeded.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', session_id: 'ses-alex-agent', display_name: "Alex Kim's assistant" });
-    // The blocked reply's attempt on Safety has the same ref.
+    expect(seeded.briefing.newest.lead_or_answer).toMatchObject({
+      kind: 'answer',
+      session_id: 'ses-alex-agent',
+      display_name: "Alex Kim's assistant",
+      cause: null,
+    });
+    const blockedReply = mockStore.world.desks[0]?.ledger.find((e) => e.event.kind === 'reply' && e.event.summary.ok === false);
     const attempts = (await call('safety', { params: { desk_id: deskId } })).body as { kind: string; ref_id: string }[];
     expect(attempts.find((a) => a.kind === 'reply_blocked')?.ref_id).toBe(String(blockedReply?.seq));
 
@@ -1993,7 +1995,7 @@ describe("Today's windows", () => {
     await drain();
     const both = await read();
     expect(both.this_week).toMatchObject({ conversations: 5, stepped_in: 2, handled: 3 });
-    expect(both.briefing).toMatchObject({ conversations: 5, total: 5 });
+    expect(both.briefing).toMatchObject({ conversations: 5, total: 4 });
     expect(both.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', display_name: null });
 
     // And a visitor who asks for a callback is a lead, not an answer.
@@ -2002,7 +2004,7 @@ describe("Today's windows", () => {
     await send('Can you call me back?');
     await drain();
     const withLead = await read();
-    expect(withLead.briefing).toMatchObject({ leads: 1, total: 4 });
+    expect(withLead.briefing).toMatchObject({ leads: 1, total: 3 });
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
       display_name: 'Dana Whitfield',
@@ -2022,21 +2024,21 @@ describe("Today's windows", () => {
       display_name: null,
       ref_id: preview?.state.session_id,
       line: null,
+      cause: null,
     });
     expect(answered.this_week).toMatchObject({ conversations: 5, stepped_in: 1, handled: 4 });
 
     // The full list, newest first, and the short form's rows are its own.
     const full = await list();
-    expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'blocked', 'answer']);
+    expect(full.items.map((item) => item.kind)).toEqual(['answer', 'lead', 'booking', 'answer']);
     expect(full.items).toHaveLength(answered.briefing.total);
-    expect(full.items).toContainEqual(answered.briefing.newest.blocked);
     expect(full.items).toContainEqual(answered.briefing.newest.booking);
   });
 
   it('week_counts_refused_requests_only', async () => {
     // Rivera's seed keeps one of Claude's drafts the reply check stopped, which nobody tried; then the
     // built-in agent tries to charge over its signed limit, which the kernel refuses. The last 7 days
-    // count the refusal alone, as the API does; the briefing and Safety keep both.
+    // and the briefing count the refusal alone, as the API does, and Safety keeps both.
     mockStore.reset('rivera');
     await openChat();
     const sent = await call('sendAgent', { params: { slug }, body: { task: 'push_the_limit', idempotency_key: 'key-1' } });
@@ -2048,8 +2050,12 @@ describe("Today's windows", () => {
     const today = await read();
     expect(today.this_week.stopped).toBe(1);
     expect(today.this_week.days.map((d) => d.stopped)).toEqual([0, 0, 0, 0, 0, 0, 1]);
-    expect(today.briefing.blocked).toBe(2);
-    expect((await list()).items.filter((item) => item.kind === 'blocked')).toHaveLength(2);
+    expect(today.briefing.turned_down).toBe(1);
+    const turnedDown = (await list()).items.filter((item) => item.kind === 'turned_down');
+    expect(turnedDown).toEqual([today.briefing.newest.turned_down]);
+    const refusal = [...mockStore.world.decisions.values()].find((d) => d.decision.state === 'refused')?.decision;
+    // The kernel's own line, and the refusal's cause: over the agent's signed limit.
+    expect(turnedDown[0]).toMatchObject({ ref_id: refusal?.decision_id, line: refusal?.reason_plain, cause: 'agent_limit' });
     const attempts = (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
     expect(attempts.map((a) => a.kind).sort()).toEqual(['refused', 'reply_blocked']);
 
@@ -2059,6 +2065,105 @@ describe("Today's windows", () => {
     expect(refused?.policy_ids).toEqual(['B.agent_charge_within_mandate']);
     expect(attempts.find((a) => a.kind === 'refused')).toMatchObject({ ref_id: refused?.decision_id, cause: 'agent_limit' });
     expect(attempts.find((a) => a.kind === 'reply_blocked')?.cause).toBeNull();
+  });
+
+  /** A chat in the quiet copy, opened an hour ago with `turns` replayed as given, and its session. */
+  const chatWith = (turns: ReplayTurn[]) => {
+    mockStore.reset('rivera_quiet');
+    const desk = mockStore.world.desks[0];
+    if (!desk) throw new Error('the copy has its Desk');
+    const at = NOW.getTime() - HOUR;
+    const session = mockStore.world.at(at, () => mockStore.world.addSession(desk));
+    mockStore.world.replay(session, at, turns);
+    return session.state.session_id;
+  };
+  /** Safety's attempts, by kind. */
+  const attemptKinds = async () => ((await call('safety', { params: { desk_id: deskId } })).body as { kind: string }[]).map((a) => a.kind);
+
+  it('a_refusal_without_a_cause_and_any_other_outcome_have_none', async () => {
+    // A refusal whose policies have no known cause reads as one the API can't place. A booking
+    // has no cause even when its policy would identify a refusal's cause.
+    chatWith([
+      {
+        text: 'Book me Tuesday at 2.',
+        steps: [
+          (ctx) => ctx.status('receipt', ctx.decide({ ...DECISIONS.book, outcome: 'refuse', executed: false, policyIds: ['B.unknown'], reasonPlain: 'That time is taken.' })),
+          (ctx) => ctx.status('receipt', ctx.decide({ ...DECISIONS.book, policyIds: ['F.never.test'] })),
+        ],
+      },
+    ]);
+    const attempts = (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.cause).toBeNull();
+    const items = (await list()).items;
+    expect(items.map((item) => [item.kind, item.cause])).toEqual([
+      ['booking', null],
+      ['turned_down', null],
+    ]);
+    expect(items.find((item) => item.kind === 'turned_down')?.line).toBe('That time is taken.');
+  });
+
+  it('a_reply_delivered_after_a_stopped_draft_is_an_answer', async () => {
+    // Claude's first draft put a price in its own words, so the check stopped it, and the rewrite
+    // went out. The draft stays on Safety; in the briefing the chat is one Claude answered.
+    const sessionId = chatWith([
+      {
+        text: 'How much is drain clearing?',
+        steps: [
+          (ctx) => {
+            ctx.reply([proseBlock('It costs $1 today.')], { blocked: true });
+            return ctx.reply([proseBlock('Drain clearing is on the price list.')]);
+          },
+        ],
+      },
+    ]);
+    const today = await read();
+    expect(today.briefing).toMatchObject({ conversations: 1, turned_down: 0, total: 1 });
+    expect(today.briefing.newest.turned_down).toBeNull();
+    expect(today.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', session_id: sessionId, ref_id: sessionId, line: null, cause: null });
+    expect((await list()).items).toEqual([today.briefing.newest.lead_or_answer]);
+    expect(await attemptKinds()).toEqual(['reply_blocked']);
+  });
+
+  it('a_handoff_after_stopped_drafts_makes_no_row', async () => {
+    // Both of Claude's drafts were stopped and the visitor got the handoff clause: nobody was turned
+    // down and Claude didn't answer, so the briefing has nothing for the chat. Safety keeps both drafts.
+    chatWith([
+      {
+        text: 'How much is drain clearing?',
+        steps: [
+          (ctx) => {
+            ctx.reply([proseBlock('It costs $1 today.')], { blocked: true });
+            return ctx.reply([rivera.blocks.handoff[ctx.language]], { blocked: true });
+          },
+        ],
+      },
+    ]);
+    const today = await read();
+    expect(today.briefing).toMatchObject({ conversations: 1, bookings: 0, leads: 0, turned_down: 0, total: 0 });
+    expect(today.briefing.newest).toEqual({ turned_down: null, booking: null, lead_or_answer: null });
+    expect((await list()).items).toEqual([]);
+    expect(await attemptKinds()).toEqual(['reply_blocked', 'reply_blocked']);
+  });
+
+  it('a_chat_that_ends_in_a_handoff_is_no_answer', async () => {
+    // Claude answered first; a later draft was stopped and the visitor got the handoff clause. The
+    // chat isn't one Claude answered alone, as the API counts it, so its earlier reply makes no row.
+    chatWith([
+      { text: 'Hello there', steps: [(ctx) => ctx.reply([proseBlock('Hi, how can I help?')])] },
+      {
+        text: 'How much is drain clearing?',
+        steps: [
+          (ctx) => {
+            ctx.reply([proseBlock('It costs $1 today.')], { blocked: true });
+            return ctx.reply([rivera.blocks.handoff[ctx.language]], { blocked: true });
+          },
+        ],
+      },
+    ]);
+    const today = await read();
+    expect(today.briefing).toMatchObject({ conversations: 1, turned_down: 0, total: 0 });
+    expect((await list()).items).toEqual([]);
   });
 
   it('windows_follow_the_business_clock', async () => {

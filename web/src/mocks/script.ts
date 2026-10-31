@@ -702,7 +702,7 @@ export function afterVerify(allTools: boolean): readonly Step[] {
  * The seeded hold's turn, as the design system's fixtures have it (`rivera.conversations.visitor`):
  * the 15% quote is held, and Claude's draft named the discount in its own words, so the reply was
  * stopped and the visitor got the handoff card. A fresh copy keeps that stopped reply, which
- * Safety and the briefing show; a discount asked in a live chat gets the discount row's reply.
+ * Safety shows; a discount asked in a live chat gets the discount row's reply.
  */
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
   (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
