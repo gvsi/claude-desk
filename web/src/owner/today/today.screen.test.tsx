@@ -418,7 +418,7 @@ describe('Today', () => {
       { ...REFUSAL, at: minutesAgo(10) },
       { ...ANSWER, at: minutesAgo(20), ref_id: 'ses-a', session_id: 'ses-a', display_name: null },
       { ...BOOKING, at: minutesAgo(30) },
-      { kind: 'lead', at: minutesAgo(40), session_id: 'ses-b', display_name: 'Dana Wells', ref_id: 'lead-1', line: '(503) 555-0142 · Leaking water heater' },
+      { kind: 'lead', at: minutesAgo(40), session_id: 'ses-b', display_name: 'Dana Whitfield', ref_id: 'lead-1', line: '(510) 555-0118 · Leaking water heater' },
       { ...REFUSAL, at: minutesAgo(50), ref_id: 'dec-refused-2' },
       { ...ANSWER, at: minutesAgo(60), ref_id: 'ses-c', session_id: 'ses-c', display_name: null },
     ];

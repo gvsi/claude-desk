@@ -519,10 +519,11 @@ export const DEMO_CODE = '482913';
 export const PAYMENT_TOKEN = 'k7Hq2vX9';
 
 /**
- * Who asks for a callback: Dana Whitfield, the person the copy has on record, with the contact the
- * kernel's seed keeps for her (the fixtures show it masked, `d•••@example.com`).
+ * Who asks for a callback: Dana Whitfield, the person the copy has on record, with the phone number
+ * she typed, one of the fictional 555-01xx numbers (not the business's own, and not her contact on
+ * record, which only the kernel holds).
  */
-const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: 'dana@example.com' } as const;
+const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: '(510) 555-0118' } as const;
 
 /** The callback request the script records, as the visitor typed it. */
 export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact} · Leaking water heater`;

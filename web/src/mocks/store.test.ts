@@ -799,20 +799,23 @@ describe('the scripted Desk', () => {
   });
 
   it('callback_comes_from_dana_on_record', async () => {
-    // The callback the script files is from Dana Whitfield, the one Dana the copy has on record,
-    // with the contact the kernel's seed keeps for her (the fixtures show it masked).
+    // The callback the script files is from Dana Whitfield, the one Dana the copy has on record, by
+    // the name the kernel's seed keeps for her, with a phone number she typed: one of the fictional
+    // 555-01xx numbers, and not the business's own.
     const seedPy = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'kernel_service', 'seed.py'), 'utf8');
-    const [, name, contact] = /SeedPerson\(ref="dana", display_name="([^"]+)", contact="([^"]+)"\)/.exec(seedPy) ?? [];
+    const dana = /SeedPerson\(([^)]*\bref="dana"[^)]*)\)/.exec(seedPy)?.[1] ?? '';
+    const name = /\bdisplay_name="([^"]+)"/.exec(dana)?.[1];
     expect(name).toBe(rivera.people.dana.name);
-    expect(rivera.people.dana.maskedContact).toBe(`${contact?.charAt(0)}•••${contact?.slice(contact.indexOf('@'))}`);
+    const phone = '(510) 555-0118';
+    expect(phone).not.toBe(rivera.blocks.contact.en.title);
 
     await openChat();
     await send('Can you call me back?');
     await drain();
     const handoff = [...mockStore.world.handoffs.values()].at(-1)?.handoff;
-    expect(handoff?.reason).toBe(`${name} · ${contact} · Leaking water heater`);
+    expect(handoff?.reason).toBe(`${name} · ${phone} · Leaking water heater`);
     const lead = mockStore.world.leads.at(-1);
-    expect([lead?.displayName, lead?.note]).toEqual([name, `${contact} · Leaking water heater`]);
+    expect([lead?.displayName, lead?.note]).toEqual([name, `${phone} · Leaking water heater`]);
   });
 
   it('events_replay_after_seq', async () => {
@@ -1666,7 +1669,7 @@ describe("Today's windows", () => {
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
       display_name: 'Dana Whitfield',
-      line: 'dana@example.com · Leaking water heater',
+      line: '(510) 555-0118 · Leaking water heater',
     });
     await openChat();
     await vi.advanceTimersByTimeAsync(60_000);
