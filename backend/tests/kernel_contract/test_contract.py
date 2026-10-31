@@ -2848,7 +2848,7 @@ async def turn(view: CredentialView, session_id: str, generation: int, said: str
                            path={"session_id": session_id})
 
 
-@pytest.mark.kernel_plan("121")
+@pytest.mark.kernel_plan("01b")
 async def test_a_turn_speaks_the_language_of_the_message_that_started_it(kernel, ro_read):
     """The API sends each turn's newest visitor or agent message as the turn starts, and the kernel keeps the
     language it detects as the session's, so the turn's receipts speak it, not the last reply's. A message in neither
@@ -2883,7 +2883,7 @@ async def test_a_turn_speaks_the_language_of_the_message_that_started_it(kernel,
         assert said not in ledgered
 
 
-@pytest.mark.kernel_plan("121")
+@pytest.mark.kernel_plan("01b")
 async def test_a_turn_is_refused_like_the_other_turn_routes(kernel, ro_read, arrange):
     """Up to 2,000 characters, else 422 `invalid`; a token for another session 401; a stale generation 409
     `stale_generation`; a closed session 409 `closed`, before a stale generation."""
