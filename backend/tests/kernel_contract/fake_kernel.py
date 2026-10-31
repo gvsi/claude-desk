@@ -39,7 +39,9 @@ contract test, before the task that first uses them.
   verdict) or cancelled by its token alone; anything but `issued` is 409 `conflict`. Tokens are kept in memory,
   never mirrored. `PaymentLinkView` serves the contract's fields: the Desk's business name, the verified customer
   by first name and last initial while the link is issued, and `cancel_reason` `rules_changed` for a link a rule
-  change cancelled. The fake has no reviewer, so the review-gated `rv-link` card allows a link outright.
+  change cancelled. Policy activation rechecks open auto-allowed links, and the owner's
+  `GET /policy/{version}/cancelled_links` lists that activation's cancellations with fresh `link_cancelled` verdicts
+  for open sessions. The fake has no reviewer, so the review-gated `rv-link` card allows a link outright.
 - Signed agents (Plan 01c; master "Agent sessions"): `POST /agents/demo` mints a demo agent for the owner or a
   visitor session of the Desk (an Ed25519 key, `agent_key_id` the first 16 hex of its public key's sha256, and a
   mandate the copy's demo wallet signs: $20 a charge, $100 in all, for an hour), ten per copy an hour, then 429
@@ -196,6 +198,7 @@ from desk.kernel_api import (
     KernelError,
     KnowledgeRequest,
     LedgerAppendRequest,
+    LinkCancelled,
     ModeRequest,
     OpenStatus,
     OwnerMessageRequest,
@@ -256,6 +259,17 @@ RIVERA_PRICES = [PriceItem(item_id="deposit", title="Service call deposit", unit
                  PriceItem(item_id="drain", title="Drain clearing", unit_cents=18000),
                  PriceItem(item_id="heater", title="Water heater flush", unit_cents=15000),
                  PriceItem(item_id="leak", title="Leak repair", unit_cents=25000)]
+RIVERA_KNOWLEDGE = [
+    KnowledgeItem(item_id="kn-website", source="website",
+                  title="Your website, rivera-plumbing.example, read during setup",
+                  text="Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+                       "water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
+                  label=Label(readers=["public"])),
+    KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
+                  text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
+                       "water heater flush and leak repair. Each price is given in a quote from this list.",
+                  label=Label(readers=["public"])),
+]
 RIVERA_PEOPLE = [("dana", "Dana Whitfield", "dana@example.com"), ("bob", "Bob Okafor", "bob@example.com")]
 RIVERA_DOCUMENTS = [  # (ref, title, record owner, body): the kernel ends each body with a fresh canary
     ("dana-invoice", "Invoice, drain clearing", "dana",
@@ -730,7 +744,7 @@ TEMPLATE_KINDS = {"quote": "quote", "booking_options": "slots", "booking_confirm
                   "payment_link": "payment_link", "document_link": "document", "hours": "charter", "policy": "charter",
                   "contact": "charter", "charges": "charge", "refund_issued": "refund", "charge_confirmed": "charge",
                   "callback_confirmed": "handoff"}
-KERNEL_ONLY_TEMPLATES = ("owner_said", "payment_confirmed")
+KERNEL_ONLY_TEMPLATES = ("owner_said", "payment_confirmed", "link_cancelled")
 FACTLESS_TEMPLATES = ("handoff", "verify_prompt")
 OTHER_LANGUAGE_WORDS = {"bonjour", "merci", "je", "vous", "nous", "olá", "obrigado", "você", "ciao", "grazie",
                         "danke"}
@@ -987,6 +1001,7 @@ class PaymentLink:
     expires_at: datetime
     state: str = "issued"                       # issued, paid, expired or cancelled (no provider, so never unknown)
     cancel_reason: str | None = None            # rules_changed: a rule change cancelled it
+    cancelled_by_version: int | None = None
     customer_person_id: str | None = None       # the person a verified visitor's session was when the link was issued
 
     def ro_row(self) -> dict:
@@ -1335,15 +1350,7 @@ class FakeKernelState:
         desk.policy_version = self._next_version(desk)
         self._put_policy(desk, parent_version=parent)
         self.append(desk, "policy", {"version": desk.policy_version, "activated": True})
-        auto = {record.decision.action.action_id for record in self.decisions.values()
-                if record.decision.action is not None and record.decision.outcome == "allow"}
-        cancelled = []
-        for link in self.payment_links.values():
-            if (link.desk_id == desk_id and link.state == "issued" and link.action_id in auto
-                    and link.amount_cents > max_amount_cents):
-                link.cancel_reason = "rules_changed"
-                self._move_link(link, "cancelled", reason="rules_changed", version=desk.policy_version)
-                cancelled.append(link.link_id)
+        cancelled = self._cancel_disallowed_links(desk)
         self.flush()
         return cancelled
 
@@ -1543,7 +1550,10 @@ class FakeKernelState:
                        for ref, title, owner_ref, body in RIVERA_DOCUMENTS],
             notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"],
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
-        return self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
+        desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
+        for item in RIVERA_KNOWLEDGE:
+            self._store_knowledge(desk, item.model_copy(deep=True))
+        return desk
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
                      cards: list[RuleCard]) -> Desk:
@@ -1629,9 +1639,9 @@ class FakeKernelState:
         call = ToolCall(call_id="seed-held-quote", tool="native.quote",
                         args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 1500})
         action = self._normalize(session, desk, call)
-        outcome, card_ids = self._rule(session, desk, action)
+        outcome, card_ids, baseline = self._rule(session, desk, action)
         digest = sha256_hex(canonical({"desk_id": None, "tool": call.tool, "args": call.args}))
-        return self._new_decision(session, desk, call, digest, action, outcome, card_ids)
+        return self._new_decision(session, desk, call, digest, action, outcome, card_ids, baseline=baseline)
 
     # Sessions ------------------------------------------------------------------------------------
 
@@ -1956,10 +1966,10 @@ class FakeKernelState:
             call = ToolCall(call_id=new_id("call"), tool="native.quote",
                             args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 1500})
         action = self._normalize(session, desk, call)
-        outcome, card_ids = self._rule(session, desk, action)
+        outcome, card_ids, baseline = self._rule(session, desk, action)
         digest = sha256_hex(canonical({"desk_id": None, "tool": call.tool, "args": call.args}))
         inbox = len(self.inbox)
-        decision = self._new_decision(session, desk, call, digest, action, outcome, card_ids)
+        decision = self._new_decision(session, desk, call, digest, action, outcome, card_ids, baseline=baseline)
         del self.inbox[inbox:]                          # a hold's owner alert: a replay leaves none
         record = self.decisions[decision.decision_id]
         if outcome == "allow":
@@ -2127,12 +2137,13 @@ class FakeKernelState:
         action = self._normalize(session, desk, call)
         if action is None:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused")
-        outcome, card_ids = self._rule(session, desk, action)
+        outcome, card_ids, baseline = self._rule(session, desk, action)
         script = self._scripts.get(call.tool)
         scripted = script is not None and script.outcome is not None
         if scripted:
-            outcome = script.outcome
-        return self._new_decision(session, desk, call, digest, action, outcome, card_ids, scripted=scripted)
+            outcome, baseline = script.outcome, None
+        return self._new_decision(session, desk, call, digest, action, outcome, card_ids, scripted=scripted,
+                                  baseline=baseline)
 
     def _normalize(self, session: Session, desk: Desk, call: ToolCall) -> NormalizedAction | None:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
@@ -2184,41 +2195,42 @@ class FakeKernelState:
             resource=resource, list_cents=list_cents, discount_bp=discount_bp, amount_cents=amount_cents,
             recipient=recipient, starts_at=starts_at)
 
-    def _rule(self, session: Session, desk: Desk, action: NormalizedAction) -> tuple[str, list[str]]:
-        """The Rivera cards' outcome for a normalized call (the kernel evaluates Cedar)."""
+    def _rule(self, session: Session, desk: Desk, action: NormalizedAction) -> tuple[str, list[str], str | None]:
+        """The Rivera cards' outcome for a normalized call (the kernel evaluates Cedar), the cards behind it, and for
+        a refusal by the always-on baseline the `@id` of its forbid in `kernel/cedar/baseline.cedar`."""
         tool = action.tool
         if self._never(desk, tool):
-            return "refuse", [f"never-{tool}"]
+            return "refuse", [f"never-{tool}"], None
         if tool == "native.quote":
-            return ("hold" if action.discount_bp else "allow"), ["rv-quote"]
+            return ("hold" if action.discount_bp else "allow"), ["rv-quote"], None
         if tool == "native.book":
             window = in_hours(action.starts_at, desk.hours)
             if window is None:
-                return "hold", ["rv-book-wk"]
-            return "allow", ["rv-book-sat" if window.days == ["sat"] else "rv-book-wk"]
+                return "hold", ["rv-book-wk"], None
+            return "allow", ["rv-book-sat" if window.days == ["sat"] else "rv-book-wk"], None
         if tool == "native.release_document":
             if session.person_id is not None and session.person_id == action.resource.owner_person_id:
-                return "allow", ["rv-docs"]
-            return "refuse", []                 # the baseline: private data only to its verified record owner
+                return "allow", ["rv-docs"], None
+            return "refuse", [], "private_data_record_owner"     # private data only to its verified record owner
         if money_tool(tool, action.effects) and not 0 < (action.amount_cents or 0) <= AUTO_MONEY_HARD_CAP_CENTS:
-            return "refuse", []                 # the baseline: money always carries an amount, at most $10,000
+            return "refuse", [], "money_has_amount"              # money always carries an amount, at most $10,000
         if tool == "native.charge_mandate" and not self._room_for(session, action):
-            return "refuse", []                 # the baseline: an agent's charge stays within its mandate
+            return "refuse", [], "agent_charge_within_mandate"   # an agent's charge stays within its mandate
         if tool in ("native.payment_link", "native.charge_mandate"):
             card = next((card for card in desk.cards if card.applies_to == tool and card.mode == "auto"), None)
             if card is not None:
                 # within the card's limit and the active version's money cap, else it asks (the baseline's cap)
                 within = action.amount_cents <= min(card.max_amount_cents, desk.auto_money_cap_cents)
-                return ("allow" if within else "hold"), [card.card_id]
+                return ("allow" if within else "hold"), [card.card_id], None
         preset = next((card.card_id for card in desk.cards if card.applies_to == tool and card.mode == "auto"
                        and card.who == "anyone" and card.card_id.startswith("preset-")), None)
         if preset is not None:
-            return "allow", [preset]
-        return "hold", [f"default-{tool}"]
+            return "allow", [preset], None
+        return "hold", [f"default-{tool}"], None
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,
                       action: NormalizedAction | None, outcome: str, card_ids: list[str], *,
-                      why: str | None = None, scripted: bool = False) -> Decision:
+                      why: str | None = None, scripted: bool = False, baseline: str | None = None) -> Decision:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
@@ -2242,11 +2254,11 @@ class FakeKernelState:
                        if (answer != "allow_person" or (session.person_id is not None and not past_cap))
                        and (answer != "deny_always" or not limit_hold)]
             inbox = [self._alert_owner(desk, "A request is waiting for you.", decision_id=decision_id)]
-        tier = {"allow": "A", "hold": "H", "refuse": "B"}[outcome]
         decision = self._signed(Decision(
             decision_id=decision_id, session_id=session.session_id, call_id=call.call_id, action=action,
             outcome=outcome, state=state, policy_version=desk.policy_version,
-            policy_ids=[f"{tier}.{card_id}" for card_id in card_ids], card_ids=card_ids,
+            policy_ids=self._policy_ids(desk, outcome, card_ids, baseline=baseline, scripted=scripted),
+            card_ids=card_ids,
             reason_plain=self._reason(session, desk, call, action, card_ids),
             visitor_plain=status_line(state, tool=tool, session_kind=session.kind, language=session.last_language,
                                       owner=desk.owner_display_name),
@@ -2265,6 +2277,24 @@ class FakeKernelState:
                                              "starts_at"}),
                 "resource_kind": action.resource.kind, "created_at": self.now})
         return decision.model_copy(update={"inbox": inbox})
+
+    @staticmethod
+    def _policy_ids(desk: Desk, outcome: str, card_ids: list[str], *, baseline: str | None = None,
+                    scripted: bool = False) -> list[str]:
+        """The deciding policies, as the kernel's engine names them (`<set>.<@id>`, the compiler's `@id`s), sorted: a
+        refusal by the baseline names its forbid, `B.<baseline>`; a `never` card's refusal its forbid, `F.never.<card>`;
+        an allow its auto card's permit, `A.auto.<card>`; and a hold either an auto card's hold twin, `H.twin.<card>`
+        (past the card's limits), or an ask card's permit, `H.ask.<card>` (the default asks, and the ask card a scripted
+        hold stands for). A refusal before evaluation names none, as the kernel's step-1 refusals don't; a scripted
+        refusal stands for a `never` card's."""
+        if baseline is not None:
+            return [f"B.{baseline}"]
+        if outcome == "allow":
+            return sorted(f"A.auto.{card_id}" for card_id in card_ids)
+        if outcome == "refuse":
+            return sorted(f"F.never.{card_id}" for card_id in card_ids)
+        autos = set() if scripted else {card.card_id for card in desk.cards if card.mode == "auto"}
+        return sorted(f"H.{'twin' if card_id in autos else 'ask'}.{card_id}" for card_id in card_ids)
 
     def _alert_owner(self, desk: Desk, preview: str, *, decision_id: str | None = None) -> InboxNotice:
         """An owner alert in the copy's Demo inbox ("approval" alerts at once by the seed's defaults), and its
@@ -2312,7 +2342,7 @@ class FakeKernelState:
             "state": decision.state, "answers": list(decision.answers), "policy_version": decision.policy_version,
             "card_ids": decision.card_ids, "review": None, "reason_plain": decision.reason_plain,
             "visitor_plain": decision.visitor_plain, "expires_at": decision.expires_at,
-            "ledger_seq": decision.ledger_seq, "created_at": record.created_at})
+            "ledger_seq": decision.ledger_seq, "created_at": record.created_at, "policy_ids": decision.policy_ids})
 
     def _transition(self, record: DecisionRecord, state: str, kind: str = "decide", **summary) -> Decision:
         """Move a decision to `state`: ledgered, re-signed, mirrored."""
@@ -3124,7 +3154,61 @@ class FakeKernelState:
         self._put_version(desk, record)
         self.append(desk, "policy", {"version": record.version, "activated": True,
                                      "auto_money_cap_cents": record.auto_money_cap_cents})
+        self._cancel_disallowed_links(desk)
         return self._policy_version(desk, record)
+
+    def _cancel_disallowed_links(self, desk: Desk) -> list[str]:
+        """Activation rechecks auto-allowed links; single-use owner approvals survive a rule change."""
+        decisions = {record.decision.action.action_id: record for record in self.decisions.values()
+                     if record.decision.action is not None and record.decision.outcome == "allow"}
+        cancelled = []
+        for link in self.payment_links.values():
+            if link.desk_id != desk.desk_id or link.state != "issued" or link.action_id not in decisions:
+                continue
+            record = decisions[link.action_id]
+            action = record.decision.action
+            session = self.sessions[link.session_id]
+            who, subject_id = ("agent", session.agent_key_id) if session.kind == "agent" else (
+                ("person", session.person_id) if session.verified and session.person_id is not None
+                else ("verified" if session.verified else "anyone", None))
+            probe = Probe(actor="agent" if session.kind == "agent" else "visitor",
+                          who=who, subject_id=subject_id,
+                          call=ToolCall(call_id="activation", tool=action.tool, args=self._args[action.action_id]),
+                          amount_cents=action.amount_cents, resource_kind=action.resource.kind,
+                          starts_at=record.created_at,
+                          resource_owner="caller" if session.person_id == action.resource.owner_person_id
+                          and session.person_id is not None else "none",
+                          agent_mandate_remaining_cents=action.amount_cents if session.kind == "agent" else None)
+            # The fake has no reviewer: the link's stored allow already stands for a passing review.
+            cards = [card.model_copy(update={"review": False}) for card in desk.cards]
+            if (link.amount_cents > desk.auto_money_cap_cents
+                    or self._probe(desk, cards, probe).outcome != "allow"):
+                link.cancel_reason, link.cancelled_by_version = "rules_changed", desk.policy_version
+                self._move_link(link, "cancelled", reason="rules_changed", version=desk.policy_version)
+                cancelled.append(link.link_id)
+        return cancelled
+
+    def cancelled_links(self, request: Request, body: Any) -> list[LinkCancelled]:
+        """Re-reads list the same cancelled links with fresh verdicts at the open session's current generation."""
+        desk = self._owners_desk(request, request.query_params.get("desk_id", ""))
+        version = int(request.path_params["version"])
+        notices = []
+        for link in sorted(self.payment_links.values(), key=lambda link: link.link_id):
+            session = self.sessions[link.session_id]
+            if (link.desk_id != desk.desk_id or link.state != "cancelled" or link.cancel_reason != "rules_changed"
+                    or link.cancelled_by_version != version or session.closed_at is not None):
+                continue
+            language = session.last_language or "en"
+            reason = (f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "
+                      "Ask again if you still want to pay." if language == "en" else
+                      f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "
+                      "Pídelo de nuevo si todavía quieres pagar.")
+            title, lines = money(link.amount_cents), [link.title, reason]
+            block = RenderedBlock(kind="card", template="link_cancelled", text="\n".join([title, *lines]),
+                                  fact_id=f"payment_link:{link.link_id}", title=title, lines=lines)
+            verdict = self._verdict(session, desk, language, [block], [], [block.fact_id], author="desk")
+            notices.append(LinkCancelled(link_id=link.link_id, session_id=link.session_id, verdict=verdict))
+        return notices
 
     def policy_probe(self, request: Request, body: PolicyProbeRequest) -> list[ProbeResult]:
         """Each probe decided against the version's cards (a draft's or the active one's), one result per probe, with
@@ -3658,6 +3742,7 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /policy/draft": "policy_draft",
     "POST /policy/{version}/probe": "policy_probe",
     "POST /policy/confirm": "policy_confirm",
+    "GET /policy/{version}/cancelled_links?desk_id=": "cancelled_links",
     "POST /tools/connect": "tools_connect",
     "POST /knowledge": "knowledge",
     "POST /documents": "documents",

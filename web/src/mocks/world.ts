@@ -520,24 +520,27 @@ export class MockWorld {
     });
     let state: DecisionState = hold ? 'held' : spec.outcome === 'refuse' ? 'refused' : 'allowed';
     let ledgerSeq = decided.seq;
+    // In the order they were always drawn: the owner's alert for a hold, then the call and the action.
+    const inbox = hold ? [this.ownerAlert(desk, decisionId, spec.reasonPlain)] : [];
+    const callId = this.id('call');
+    const actionId = this.id('act');
     if (spec.outcome === 'allow' && spec.executed) {
       const ran = this.appendLedger(desk, {
         kind: 'execute',
         origin: 'kernel',
         session_id: sessionId,
         ref_id: decisionId,
-        summary: { tool: spec.tool, state: 'succeeded' },
+        summary: { decision_id: decisionId, action_id: actionId, state: 'executed' },
       });
       state = 'executed';
       ledgerSeq = ran.seq;
     }
-    const inbox = hold ? [this.ownerAlert(desk, decisionId, spec.reasonPlain)] : [];
     const decision: Decision = {
       decision_id: decisionId,
       session_id: sessionId,
-      call_id: this.id('call'),
+      call_id: callId,
       action: {
-        action_id: this.id('act'),
+        action_id: actionId,
         copy_id: this.ids.copyId,
         desk_id: desk.summary.desk_id,
         session_id: sessionId,
@@ -652,7 +655,11 @@ export class MockWorld {
     return { entry_id: entry.entry_id, to: 'owner', preview: 'A request needs your answer' };
   }
 
-  /** The owner's answer, as the kernel records it: the approval, and the run when it allows. */
+  /**
+   * The owner's answer, as the kernel records it: the approval, with the summary `approvals.py`
+   * writes as it takes an answer (the decision, its action, the answer, and `approved` or `denied`),
+   * and the run when it allows.
+   */
   answer(record: DecisionRecord, answer: ApprovalAnswer): Decision {
     const desk = this.desk(record.deskId);
     const session = this.sessions.get(record.decision.session_id);
@@ -663,7 +670,12 @@ export class MockWorld {
       origin: 'kernel',
       session_id: sessionId,
       ref_id: decisionId,
-      summary: { answer },
+      summary: {
+        decision_id: decisionId,
+        action_id: record.decision.action?.action_id ?? null,
+        answer,
+        state: allows(answer) ? 'approved' : 'denied',
+      },
     });
     let state: DecisionState = 'denied';
     let ledgerSeq = approval.seq;
@@ -673,7 +685,7 @@ export class MockWorld {
         origin: 'kernel',
         session_id: sessionId,
         ref_id: decisionId,
-        summary: { tool: record.decision.action?.tool ?? null, state: 'succeeded' },
+        summary: { decision_id: decisionId, action_id: record.decision.action?.action_id ?? null, state: 'executed' },
       });
       state = 'executed';
       ledgerSeq = ran.seq;

@@ -38,6 +38,9 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
   failed: "Copy didn't work. Select the link and copy it yourself.",
 };
 
+/** How long the link's pill says "Copied" after a copy that worked. */
+export const COPIED_FOR_MS = 1_600;
+
 /**
  * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy,
  * "Things to try", then, in this order, "Needs you" and "Live now" when they have something, and
@@ -62,9 +65,17 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
   const answers = useAnswer(deskId);
-  // An answered card moves to "Answered just now", and focus that fell to the page follows it.
+  // An answered card stays where it was answered, and focus that fell to the page follows it.
   const answeredFocus = useAnsweredFocus(answers.answered);
   const [linkCopy, setLinkCopy] = useState<LinkCopy>('idle');
+  // The pill says "Copied" while this is set: a count of the copies that worked since it last cleared,
+  // so each one starts the COPIED_FOR_MS wait again. A failed copy clears it; leaving Today ends the wait.
+  const [copied, setCopied] = useState<number | null>(null);
+  useEffect(() => {
+    if (copied === null) return undefined;
+    const timer = window.setTimeout(() => setCopied(null), COPIED_FOR_MS);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
   const cards = useRef(new Map<string, HTMLElement>());
   // Whether the Demo inbox's sheet is open, as it says once it has opened or closed.
   const [inboxOpen, setInboxOpen] = useState(false);
@@ -73,8 +84,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
-  // Held requests oldest first, whatever order the API lists them in, with any whose answer is
-  // still out or was lost kept in place; the ones answered here move to "Answered just now".
+  // The held requests still open, oldest first, whatever order the API lists them in, with any whose
+  // answer is still out or was lost kept in place. Needs you keeps the ones answered here in their
+  // places among them, but they no longer count as open.
   const items = needsYou.data ?? [];
   const listed = heldOldestFirst(items);
   const listedIds = new Set(listed.map((item) => item.decision.decision_id));
@@ -85,6 +97,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // whose items are unchanged: after a conflict, it is what lets a request's answers back.
   const readAt = needsYou.dataUpdatedAt;
   const firstHeld = held[0] ?? null;
+  // What the answers given here settled each request as: Things to try ticks "Answer a held request"
+  // from them as soon as one lands, before the record is read again.
+  const answeredDecisions = [...answers.answered.values()].map((a) => a.decision);
   // A failed read says so in Needs you, over whatever was read before, so it never looks as if
   // nothing needs the owner. It stays until a read works: React Query starts each read of a query
   // with nothing read yet as loading again and drops the error, so the section would blink out at
@@ -110,7 +125,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   };
 
   // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: on the held
-  // request's card, or under "Answered just now" if it was answered here. It lands once the latest
+  // request's card, whether it is still held or was answered here. It lands once the latest
   // read of Needs you has worked (a list kept from before a failed read may be missing the request),
   // once the page has drawn its sections, and once the Demo inbox's sheet, whose link it may be, has
   // closed and handed focus back to its button. A request that isn't in the list gets one more read
@@ -162,8 +177,14 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     Promise.resolve()
       .then(() => navigator.clipboard.writeText(link))
       .then(
-        () => setLinkCopy('copied'),
-        () => setLinkCopy('failed'),
+        () => {
+          setLinkCopy('copied');
+          setCopied((n) => (n ?? 0) + 1);
+        },
+        () => {
+          setLinkCopy('failed');
+          setCopied(null);
+        },
       );
   };
 
@@ -188,13 +209,13 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
           <Greeting
             text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
             presence={today.data ? greetingPresence(live) : undefined}
-            link={{ label: link, onCopy: copyLink }}
+            link={{ label: link, onCopy: copyLink, copied: copied !== null }}
           />
           <p className="cd-sr-only" role="status">
             {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
           </p>
         </div>
-        <ThingsToTry firstHeld={firstHeld} onFocusRequest={focusFirstHeld} />
+        <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
         {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
           <NeedsYou
             held={held}

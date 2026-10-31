@@ -22,7 +22,7 @@ export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
-const needsYouQuery = (deskId: string) =>
+export const needsYouQuery = (deskId: string) =>
   queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
 export const ownerInboxQuery = () => queryOptions({ queryKey: OWNER_INBOX_KEY, queryFn: () => request('ownerInbox') });
 
@@ -36,15 +36,24 @@ export const READ_AHEAD_MS = 3_000;
  */
 export const FRESH_MS = READ_AHEAD_MS + 2_000;
 
+export interface UseDesksOptions {
+  /**
+   * Follows the copy's Desks as the owner's frame reads them, and never reads them itself: not on
+   * mount, not on window focus. For a part of a page that needs only what the frame already has.
+   */
+  passive?: boolean;
+}
+
 /**
  * The copy's businesses, each with its Desks, for a page of `deskId`. A list that doesn't hold that
  * Desk is read again on mount however fresh it is: only a read made now can say it isn't the owner's.
  */
-export function useDesks(deskId: string) {
+export function useDesks(deskId: string, { passive = false }: UseDesksOptions = {}) {
   return useQuery({
     ...desksQuery(),
     staleTime: FRESH_MS,
     refetchOnMount: (query) => (query.state.data !== undefined && findDesk(query.state.data, deskId) !== null ? true : 'always'),
+    enabled: !passive,
   });
 }
 
@@ -65,9 +74,19 @@ export function useToday(deskId: string, { retryOnMount = true }: ReadOptions = 
   return useQuery({ ...todayQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('today'), retryOnMount });
 }
 
-/** What waits for the owner on a Desk: held requests and open callbacks, polled. */
-export function useNeedsYou(deskId: string, { retryOnMount = true }: ReadOptions = {}) {
-  return useQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('needsYou'), retryOnMount });
+/**
+ * What waits for the owner on a Desk: held requests and open callbacks, polled. With `readOnOpen`,
+ * the page reads it again as it opens however fresh the kept read is, for a page that shows only
+ * what a read of its own says (Rules' question about a hold).
+ */
+export function useNeedsYou(deskId: string, { retryOnMount = true, readOnOpen = false }: ReadOptions & { readOnOpen?: boolean } = {}) {
+  return useQuery({
+    ...needsYouQuery(deskId),
+    staleTime: FRESH_MS,
+    refetchInterval: pollMs('needsYou'),
+    retryOnMount,
+    ...(readOnOpen ? { refetchOnMount: 'always' as const } : {}),
+  });
 }
 
 /**

@@ -25,6 +25,7 @@ import {
   stoppedHeadline,
   triageOf,
 } from './copy.ts';
+import { attemptsQuery, ledgerQuery } from './queries.ts';
 import { RecordList } from './RecordList.tsx';
 
 import './Safety.css';
@@ -40,11 +41,7 @@ const VIEWS = [
 
 /** The Desk's signed record with the checkpoint's check of its chain, polled. */
 export function useLedger(deskId: string) {
-  return useQuery({
-    queryKey: ['ledger', deskId],
-    queryFn: () => request('ledger', { params: { desk_id: deskId }, query: { verify: true } }),
-    refetchInterval: pollMs('safety'),
-  });
+  return useQuery({ ...ledgerQuery(deskId), refetchInterval: pollMs('safety') });
 }
 
 /** Whether the checkpoint signs with the development key; false until it says so. */
@@ -55,11 +52,7 @@ function useDevKey(): boolean {
 
 /** The Desk's stopped attempts, newest first as the API lists them, polled. */
 function useAttempts(deskId: string) {
-  return useQuery({
-    queryKey: ['safety', deskId],
-    queryFn: () => request('safety', { params: { desk_id: deskId } }),
-    refetchInterval: pollMs('safety'),
-  });
+  return useQuery({ ...attemptsQuery(deskId), refetchInterval: pollMs('safety') });
 }
 
 /** An attempt's page under the Desk, which opens it beside the list. */

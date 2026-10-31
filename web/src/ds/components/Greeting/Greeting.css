@@ -96,23 +96,105 @@
   color: var(--text-secondary);
 }
 
-.cd-greeting__link-label {
+/* The link's words and "Copied" share one cell, laid over each other, so the pill is as wide as the
+   link's words whichever shows. */
+.cd-greeting__link-words {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.cd-greeting__link-label,
+.cd-greeting__copied {
+  grid-area: 1 / 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: opacity var(--motion-fast) var(--motion-ease);
 }
 
-/* The copy button fits inside the 32 px pill. */
-.cd-greeting__link > .cd-icon-button {
+/* "Copied" lies over the link's words without taking a pointer or a selection from them, so the
+   link can still be selected by hand. */
+.cd-greeting__copied {
+  color: var(--text-primary);
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* The copy button, and the check that takes its icon's place after a copy, in one spot. A press
+   presses both in. */
+.cd-greeting__copy {
+  position: relative;
+  display: flex;
+  flex: none;
+  transition: transform var(--motion-fast) var(--motion-ease);
+}
+
+.cd-greeting__copy:has(> .cd-icon-button:active) {
+  transform: scale(0.97);
+}
+
+/* The copy button fits inside the 32 px pill. Its own press is its spot's. */
+.cd-greeting__copy > .cd-icon-button {
   width: calc(var(--size-control) - var(--space-6));
   height: calc(var(--size-control) - var(--space-6));
   color: var(--text-secondary);
+}
+
+.cd-greeting__copy > .cd-icon-button:active {
+  transform: none;
+}
+
+.cd-greeting__copy > .cd-icon-button > svg {
+  transition:
+    opacity var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+/* The check settles in on the emphasis ease, as the board draws it. */
+.cd-greeting__check {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  opacity: 0;
+  transform: scale(0.8);
+  pointer-events: none;
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-emphasis),
+    transform var(--motion-fast) var(--motion-ease-emphasis);
+}
+
+/* Just after a copy: "Copied" over the link's words, and the check in place of the copy icon. */
+.cd-greeting__link--copied .cd-greeting__link-label {
+  opacity: 0;
+}
+
+.cd-greeting__link--copied .cd-greeting__copied {
+  opacity: 1;
+}
+
+.cd-greeting__link--copied .cd-icon-button > svg {
+  opacity: 0;
+  transform: scale(0.8);
+}
+
+.cd-greeting__link--copied .cd-greeting__check {
+  opacity: 1;
+  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .cd-greeting__glyph {
     animation: none;
     opacity: 1;
+  }
+
+  .cd-greeting__copy:has(> .cd-icon-button:active) {
+    transform: none;
   }
 }

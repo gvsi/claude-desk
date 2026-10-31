@@ -20,6 +20,7 @@ import type {
   OwnerTranscript,
   PeopleOut,
   PolicyVersionOut,
+  RuleChatOut,
   RulesDraft,
   RulesView,
   SetupState,
@@ -357,6 +358,32 @@ describe('the scripted Desk', () => {
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou.map((item) => item.decision?.decision_id)).not.toContain(decisionId);
     expect(needsYou).toHaveLength(1);
+  });
+
+  it('answer_records_the_kernels_approval', async () => {
+    // As `approvals.py` records an answer it takes: the decision, its action, the answer and the
+    // state it left the request in, `approved` for an allow (its run follows) and `denied` for a deny.
+    await openChat();
+    await send('Can I get 10% off?');
+    await drain();
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).flatMap((item) =>
+      item.decision ? [item.decision] : [],
+    );
+    const [seeded, asked] = held;
+    if (!seeded || !asked) throw new Error('the seed holds one request and the chat another');
+    expect((await call('answer', { params: { decision_id: seeded.decision_id }, body: { answer: 'allow_once' } })).status).toBe(200);
+    expect((await call('answer', { params: { decision_id: asked.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+
+    const ledger = (await call('ledger', { params: { desk_id: deskId } })).body as LedgerPage;
+    const approvals = ledger.entries.filter((e) => e.event.kind === 'approval');
+    expect(approvals.map((e) => [e.event.ref_id, e.event.summary])).toEqual([
+      [seeded.decision_id, { decision_id: seeded.decision_id, action_id: seeded.action?.action_id, answer: 'allow_once', state: 'approved' }],
+      [asked.decision_id, { decision_id: asked.decision_id, action_id: asked.action?.action_id, answer: 'deny_once', state: 'denied' }],
+    ]);
+    expect(seeded.action?.action_id).toEqual(expect.any(String));
+    // The allow's run, as `execute.py` records it: the decision, its action and the state it ran to.
+    const runs = ledger.entries.filter((e) => e.event.kind === 'execute' && e.event.ref_id === seeded.decision_id);
+    expect(runs.map((e) => e.event.summary)).toEqual([{ decision_id: seeded.decision_id, action_id: seeded.action?.action_id, state: 'executed' }]);
   });
 
   it('held_discount_is_the_one_asked_for', async () => {
@@ -1240,6 +1267,28 @@ describe('rules and tools', () => {
     for (const key of ['rules', 'people'] as const) expect((await call(key, { params: { desk_id: deskId } })).status).toBe(401);
     expect((await draftOf(8)).status).toBe(401);
     expect((await confirm(8)).status).toBe(401);
+  });
+
+  it('rule_chat_answers_about_the_hold_a_question_names', async () => {
+    const ask = async (text: string) => ((await call('ruleChat', { params: { desk_id: deskId }, body: { text } })).body as RuleChatOut).answer;
+    const offer = "If you'd like requests like this to go through on their own, ask me to draft that rule.";
+    const refund = mockStore.world.addHeldRefund();
+    const record = mockStore.world.decisions.get(refund.decision_id);
+    const main = mockStore.world.desk(deskId);
+    if (!record || !main) throw new Error('Dana has a refund held on the main Desk');
+
+    // Held by the refund rule: the request, the rule that held it, and an offer to draft one.
+    expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} It was held by your rule: Refunds to a customer wait for your answer. ${offer}`);
+
+    // Held with no rule of the owner's deciding it: the kernel's own words for the default ask.
+    record.decision.card_ids = [];
+    expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} Not covered by a rule yet, so it asks you. ${offer}`);
+
+    // Above the payment limit, which no rule goes past: no offer to draft one, with a rule or without.
+    main.policy.auto_money_cap_cents = 10_000;
+    expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} Not covered by a rule yet, so it asks you.`);
+    record.decision.card_ids = ['rv-refund'];
+    expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} It was held by your rule: Refunds to a customer wait for your answer.`);
   });
 
   it('people_mark_replayed_leads', async () => {

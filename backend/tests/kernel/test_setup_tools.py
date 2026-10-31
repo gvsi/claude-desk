@@ -19,7 +19,7 @@ from desk.kernel_service.adapters.fetch_website import FetchWebsiteAdapter
 
 from .helpers import rows_of, verify_session
 from .test_adapters import rivera, visitor_of
-from .test_context import context_of, owner_session_id
+from .test_context import SEEDED_PUBLIC_KNOWLEDGE, context_of, owner_session_id
 from .test_decide import decided, open_visitor
 from .test_desk_writes import new_desk, post_desk
 from .test_fetch_guard import HOST, PUBLIC, Resolver, Site, html
@@ -129,11 +129,13 @@ async def test_memory_reads_are_simulated(app, client):
         {"title": "Hours",
          "text": "Open Monday to Friday, 8 am to 6 pm, and Saturday, 9 am to 1 pm. Closed on Sundays."}]}
     # each item read is stored as knowledge imported from memory, the owner's alone
-    stored = await rows_of(app, copy.copy_id, select(KnowledgeRow).order_by(KnowledgeRow.item_id))
+    stored = await rows_of(app, copy.copy_id, select(KnowledgeRow).where(
+        KnowledgeRow.source == "memory_import").order_by(KnowledgeRow.item_id))
     assert [(k.item_id, k.source, k.title, k.readers) for k in stored] == [
         ("mem-hours", "memory_import", "Hours", ["owner"]),
         ("mem-service-area", "memory_import", "Service area", ["owner"])]
-    assert (await context_of(client, visitor.session_id, visitor.headers)).knowledge == []
+    assert [(k.item_id, k.label.readers) for k in (await context_of(
+        client, visitor.session_id, visitor.headers)).knowledge] == SEEDED_PUBLIC_KNOWLEDGE
 
     # a query naming every topic reads all five, again without repeats; one naming none reads nothing
     _, result = await owner.run("native.read_memory", {"query": "business name, trade, service area, hours, website"},
@@ -143,8 +145,8 @@ async def test_memory_reads_are_simulated(app, client):
     _, nothing = await owner.run("native.read_memory", {"query": "parking"}, call_id="call-3")
     assert nothing.model_view == {"simulated": True, "items": []}
     stored = await rows_of(app, copy.copy_id, select(KnowledgeRow))
-    assert sorted(k.item_id for k in stored) == ["mem-business", "mem-hours", "mem-service-area", "mem-trade",
-                                                 "mem-website"]
+    assert sorted(k.item_id for k in stored) == ["kn-price-list", "kn-website", "mem-business", "mem-hours",
+                                                 "mem-service-area", "mem-trade", "mem-website"]
 
     # memory holds no document of the business: no body and no canary reaches the read or knowledge
     documents = await rows_of(app, copy.copy_id, select(Document))
@@ -169,7 +171,7 @@ async def test_fetched_text_with_a_canary_stays_owner_only(app, client, registry
     [execute] = [summary for summary in logged if summary.get("action_id") == decision.action.action_id
                  and "state" in summary]
     assert (execute["state"], execute["violation"]) == ("executed", "canary")
-    [item] = await rows_of(app, copy.copy_id, select(KnowledgeRow))
+    [item] = await rows_of(app, copy.copy_id, select(KnowledgeRow).where(KnowledgeRow.title == "Old invoices"))
     assert (item.source, item.readers) == ("website", ["owner"])
     assert {"part": "knowledge", "item_id": item.item_id, "owner_only_forced": True} in logged
 
@@ -182,4 +184,5 @@ async def test_fetched_text_with_a_canary_stays_owner_only(app, client, registry
     [dana] = await rows_of(app, copy.copy_id, select(Person).where(Person.ref == "dana"))
     visitor = await open_visitor(client, copy)
     await verify_session(app, copy.copy_id, visitor.session_id, dana.person_id)
-    assert (await context_of(client, visitor.session_id, visitor.headers)).knowledge == []
+    assert [(k.item_id, k.label.readers) for k in (await context_of(
+        client, visitor.session_id, visitor.headers)).knowledge] == SEEDED_PUBLIC_KNOWLEDGE

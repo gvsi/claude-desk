@@ -17,10 +17,12 @@ import { pollMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { writeLocal } from '../../lib/storage.ts';
 import { worker } from '../../mocks/browser.ts';
 import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { expectLandedInPlace, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import {
   aPollPasses,
@@ -33,6 +35,7 @@ import {
 } from '../../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
 import { needsYouKey } from '../useDesks.ts';
+import { COPIED_FOR_MS } from './TodayPage.tsx';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const DESK = `/app/${RIVERA.deskId}`;
@@ -53,6 +56,24 @@ const CHANGED = 'This changed while you were looking. Reload to see where it sta
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
+
+/** The Desk's public link, as the greeting's pill shows it and its button copies it. */
+const PUBLIC_LINK = `${window.location.origin}/d/${RIVERA.slug}`;
+
+/** Waits `ms` of real time, or none when `ms` isn't positive. */
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
+/**
+ * What the greeting's link pill says now, the link or "Copied": its words drawn at full opacity.
+ * The other words lie under them, faded out.
+ */
+function linkPillShows(screen: RenderResult): string[] {
+  const pill = screen.getByRole('button', { name: 'Copy your Desk link' }).element().closest('.cd-greeting__link');
+  if (!pill) throw new Error("Today's greeting draws its link pill");
+  return [...pill.querySelectorAll('span')]
+    .filter((el) => el.childElementCount === 0 && getComputedStyle(el).opacity === '1')
+    .map((el) => el.textContent ?? '');
+}
 
 /** Today as the mock reads it now, changed by `patch`, answering every read of it from here on. */
 async function injectToday(patch: (today: Today) => Today): Promise<void> {
@@ -751,6 +772,58 @@ describe('Today', () => {
     expect(document.querySelectorAll('[aria-label*="Ask Claude" i], [placeholder*="Ask Claude" i]')).toHaveLength(0);
   });
 
+  it('copied_shows_in_the_link_then_the_link_again', async () => {
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+    const { screen } = await renderRoute(TODAY);
+    const copy = screen.getByRole('button', { name: 'Copy your Desk link' });
+    await expect.element(copy).toBeVisible();
+    expect(linkPillShows(screen)).toEqual([PUBLIC_LINK]);
+
+    // A copy that worked: the pill says "Copied" where the link was, and the status line says it
+    // to screen readers in its own words.
+    await copy.click();
+    await expect.poll(() => linkPillShows(screen)).toEqual(['Copied']);
+    const firstShown = performance.now();
+    expect(writeText).toHaveBeenCalledWith(PUBLIC_LINK);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Your Desk link is copied.' })).toBeInTheDocument();
+    expect(copy.element().getAttribute('aria-label')).toBe('Copy your Desk link');
+
+    // Another copy before it clears starts the wait again: past the first copy's time, it still
+    // says "Copied".
+    await pause(COPIED_FOR_MS / 2);
+    await copy.click();
+    await expect.poll(() => writeText.mock.calls.length).toBe(2);
+    const secondCopied = performance.now();
+    await pause(firstShown + COPIED_FOR_MS + 300 - performance.now());
+    expect(linkPillShows(screen)).toEqual(['Copied']);
+
+    // Then the link again, COPIED_FOR_MS after the last copy, while the status line keeps its words.
+    await expect.poll(() => linkPillShows(screen), { timeout: COPIED_FOR_MS + 2_000 }).toEqual([PUBLIC_LINK]);
+    expect(performance.now() - secondCopied).toBeGreaterThanOrEqual(COPIED_FOR_MS);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Your Desk link is copied.' })).toBeInTheDocument();
+  });
+
+  it('failed_copy_never_says_copied', async () => {
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
+    const { screen } = await renderRoute(TODAY);
+    const copy = screen.getByRole('button', { name: 'Copy your Desk link' });
+    const failedLine = screen.getByRole('status').filter({ hasText: "Copy didn't work. Select the link and copy it yourself." });
+
+    // The clipboard refused: the status line says so in its words, and the pill keeps the link.
+    await copy.click();
+    await expect.element(failedLine).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(linkPillShows(screen)).toEqual([PUBLIC_LINK]);
+
+    // A copy that worked, then one the clipboard refused: the pill takes back "Copied" at once.
+    writeText.mockResolvedValueOnce(undefined);
+    await copy.click();
+    await expect.poll(() => linkPillShows(screen)).toEqual(['Copied']);
+    await copy.click();
+    await expect.element(failedLine).toBeInTheDocument();
+    await expect.poll(() => linkPillShows(screen), { timeout: COPIED_FOR_MS / 2 }).toEqual([PUBLIC_LINK]);
+  });
+
   it('briefing_shows_one_row_per_kind', async () => {
     await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { blocked: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } } }));
     const { screen } = await renderRoute(TODAY);
@@ -1135,8 +1208,11 @@ describe('Today', () => {
     await expect
       .poll(() => visitor?.events.some(({ ev }) => ev.type === 'resolved' && ev.decision_id === decisionId), { timeout: 2_000 })
       .toBe(true);
-    // Nothing is held now, so Things to try no longer offers it.
+    // Nothing is held now, so Things to try no longer offers to open it: its row stays, ticked off.
     await expect.element(screen.getByRole('button', { name: 'Open the request' })).not.toBeInTheDocument();
+    const things = region(screen, 'Things to try');
+    await expect.element(things.getByText("Done. Your answer went to the visitor's chat.", { exact: true })).toBeVisible();
+    await expect.element(things.getByRole('heading', { level: 3, name: 'Answer a held request' })).toBeVisible();
   });
 
   it('answer_conflict_shows_final_state', async () => {
@@ -1252,6 +1328,72 @@ describe('Today', () => {
     expect(card.getByRole('alert').elements()).toHaveLength(0);
   });
 
+  it('answer_lands_in_its_slot', async () => {
+    // Things to try hidden, as the board draws it, so only the card is in play.
+    writeLocal('thingsToTryHidden', 'true');
+    const { screen } = await renderRoute(TODAY);
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    const allow = card.getByRole('button', { name: 'Allow this time' });
+    await expect.element(allow).toBeVisible();
+    const live = region(screen, 'Live now');
+    await expect.element(live).toBeVisible();
+    const element = card.element();
+    const item = element.closest('li');
+    if (!item) throw new Error('the card sits in an item of Needs you');
+
+    const watching = watchAnswerLanding(element, item, live.element());
+    await allow.click();
+    const frames = await watching;
+
+    // The same card, in the same place, with its final line and Dismiss under it: no heading of its own.
+    expect(heldCard(screen, SEEDED_REASON).element()).toBe(element);
+    expect(element.closest('li')).toBe(item);
+    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    const dismiss = needs.getByRole('button', { name: 'Dismiss' }).element();
+    expect(item.contains(dismiss)).toBe(true);
+    expect(element.compareDocumentPosition(dismiss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Answered just now' }).elements()).toHaveLength(0);
+    // Live now glides up by what the item lost (the answers, against Dismiss), and never down.
+    expect(expectLandedInPlace(frames)).toBeGreaterThan(0);
+    // The count counts only what's still open.
+    expect(needs.getByRole('img', { name: /needs? you$/ }).elements()).toHaveLength(0);
+  });
+
+  it('always_answer_lands_with_its_rule', async () => {
+    writeLocal('thingsToTryHidden', 'true');
+    mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(TODAY);
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, REFUND_REASON);
+    const deny = card.getByRole('button', { name: 'Deny', exact: true });
+    await expect.element(deny).toBeVisible();
+    const element = card.element();
+    const item = element.closest('li');
+    if (!item) throw new Error('the card sits in an item of Needs you');
+
+    await deny.click();
+    const watching = watchAnswerLanding(element, item, region(screen, 'Live now').element());
+    await screen.getByRole('menuitem', { name: 'Always' }).click();
+    const frames = await watching;
+
+    // The same card, settled in its place, with the rule the answer drafted under it, then Dismiss.
+    expect(heldCard(screen, REFUND_REASON).element()).toBe(element);
+    await expect.element(card.getByText('You denied this.', { exact: true })).toBeVisible();
+    const notice = needs.getByText(DRAFTED, { exact: true }).element();
+    const dismiss = needs.getByRole('button', { name: 'Dismiss' }).element();
+    expect(item.contains(notice)).toBe(true);
+    expect(item.contains(dismiss)).toBe(true);
+    expect(element.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.compareDocumentPosition(dismiss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // What follows moves one way only, to where the settled card, rule and Dismiss put it.
+    expectLandedInPlace(frames);
+    // The seeded request still waits, before it, and the count says so.
+    await expect.element(needs.getByRole('img', { name: '1 needs you' })).toBeVisible();
+    const order = needs.getByRole('article').elements().map((a) => a.getAttribute('aria-label'));
+    expect(order).toEqual([`Held for you: ${SEEDED_REASON}`, `Held for you: ${REFUND_REASON}`]);
+  });
+
   it('answered_card_survives_refetch', async () => {
     const { screen } = await renderRoute(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
@@ -1259,7 +1401,7 @@ describe('Today', () => {
     await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
     await readsMore('needsYou', 2);
     await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('heading', { name: 'Answered just now' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Answered just now' }).elements()).toHaveLength(0);
 
     // Dismissed, it goes.
     await region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).click();
@@ -1805,19 +1947,19 @@ describe("Today's Demo inbox", () => {
   });
 
   it('request_link_falls_back_to_the_answered_card', async () => {
-    // Answered here a moment ago, the request's card is under "Answered just now": that is where its
-    // address lands.
+    // Answered here a moment ago, the request's card stays where it was answered in Needs you: that
+    // is where its address lands.
     const held = seededHold();
     const { screen, router } = await renderRoute(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
     await card.getByRole('button', { name: 'Allow this time' }).click();
     await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('heading', { name: 'Answered just now' })).toBeVisible();
     (document.activeElement as HTMLElement | null)?.blur();
 
     await router.navigate(requestLink(held.decision_id));
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
-    expect(card.element().closest('.cd-needs-you__answered')).not.toBeNull();
+    expect(region(screen, 'Needs you').element().contains(card.element())).toBe(true);
+    expect(screen.getByRole('heading', { name: 'Answered just now' }).elements()).toHaveLength(0);
   });
 
   it('request_link_reads_needs_you_once_more_before_giving_up', async () => {

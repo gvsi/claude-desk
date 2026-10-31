@@ -1,9 +1,9 @@
 /**
  * A request held for the owner, answered in place wherever it shows: Today's Needs you and the
  * conversation it was held in. Both screens draw it with these pieces, so both answer it the same
- * way: the answers as the request stands, a conflict's line above it, the rule an "always" answer
- * drafted under it once answered, and keyboard focus that never falls to the page as the button
- * that had it goes away.
+ * way: the answers as the request stands, a conflict's line above it, one card from held to
+ * answered so the answer lands where it was given, the rule an "always" answer drafted under it
+ * once answered, and keyboard focus that never falls to the page as the button that had it goes away.
  */
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
@@ -14,8 +14,6 @@ import { ApprovalCard, Button, Notice } from '../../ds/index.ts';
 import { aboveMoneyCapCopy, relativeWait } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import type { AnswerDraftState, Answered, HeldItem, UseAnswer } from './useAnswer.ts';
-
-import './HeldRequest.css';
 
 const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
 
@@ -49,6 +47,7 @@ function catchFallenFocus(el: HTMLElement | null | undefined): void {
 }
 
 export interface HeldRequestProps {
+  /** The request as it was held: as Needs you lists it, or as it was answered here. */
   item: HeldItem;
   answers: UseAnswer;
   /** When Needs you was last read (its `dataUpdatedAt`): after a conflict, only a read since shows the request as it stands. */
@@ -56,18 +55,24 @@ export interface HeldRequestProps {
   now: Date;
   /** Called with the card as it mounts and unmounts, so "Open the request" can focus it. */
   registerCard?: (decisionId: string, el: HTMLElement | null) => void;
+  /** What follows the card once it is answered here, under the rule it drafted: Today's Dismiss. */
+  children?: ReactNode;
 }
 
 /**
- * A held request with its answers. After a conflict, its line sits above the request and the
- * answers are the ones a read since then offers; until one lands, it offers none. Focus that fell
- * to the page as the answers changed (the one pressed may no longer be offered) goes to the
- * request, once per conflict.
+ * A held request with its answers, and the same card once it is answered here: its final line,
+ * then the rule an "always" answer drafted and `children` under it. Keeping one card from held to
+ * answered is what lets the answer land in place. A request answered here before this card
+ * mounted (a conversation moves its card under the hold once the hold's receipt arrives) draws
+ * answered at once. After a conflict, its line sits above the request and the answers are the ones
+ * a read since then offers; until one lands, it offers none. Focus that fell to the page as the
+ * answers changed (the one pressed may no longer be offered) goes to the request, once per conflict.
  */
-export function HeldRequest({ item, answers, readAt, now, registerCard }: HeldRequestProps) {
+export function HeldRequest({ item, answers, readAt, now, registerCard, children }: HeldRequestProps) {
   const id = item.decision.decision_id;
+  const answered = answers.answered.get(id);
   const pending = answers.pending.has(id);
-  const conflict = answers.conflictFor(id);
+  const conflict = answered === undefined ? answers.conflictFor(id) : undefined;
   const asItStands = conflict === undefined || pending || readAt > conflict.at;
 
   const card = useRef<HTMLDivElement | null>(null);
@@ -85,42 +90,30 @@ export function HeldRequest({ item, answers, readAt, now, registerCard }: HeldRe
     catchFallenFocus(card.current);
   });
 
+  let decision = item.decision;
+  if (answered !== undefined) decision = answered.decision;
+  else if (!asItStands) decision = withNoAnswers(item.decision);
+  const drafted = answered !== undefined && answered.card_diff !== null && answered.card_diff.length > 0;
+  const after =
+    answered !== undefined && (drafted || (children !== undefined && children !== null)) ? (
+      <>
+        {drafted ? <DraftedRule entry={answered} /> : null}
+        {children}
+      </>
+    ) : undefined;
+
   return (
     <>
       {conflict !== undefined ? <Notice tone="error">{conflict.line}</Notice> : null}
-      <div ref={ref} className="cd-held-request" tabIndex={-1}>
-        <ApprovalCard
-          decision={asItStands ? item.decision : withNoAnswers(item.decision)}
-          {...aboutTheRequest(item, now)}
-          onAnswer={(a) => answers.answer(item, a)}
-          pending={pending}
-          error={answers.errorFor(id)}
-        />
-      </div>
-    </>
-  );
-}
-
-export interface AnsweredRequestProps {
-  entry: Answered;
-  now: Date;
-  /** `useAnsweredFocus`'s `register`, called with the card as it mounts and unmounts. */
-  registerCard: (decisionId: string, el: HTMLElement | null) => void;
-  /** What follows the card and its rule, such as Today's Dismiss. */
-  children?: ReactNode;
-}
-
-/** A request answered here: its final line, and under it the rule an "always" answer drafted. */
-export function AnsweredRequest({ entry, now, registerCard, children }: AnsweredRequestProps) {
-  const id = entry.decision.decision_id;
-  const ref = useCallback((el: HTMLDivElement | null) => registerCard(id, el), [id, registerCard]);
-  return (
-    <>
-      <div ref={ref} className="cd-held-request" tabIndex={-1}>
-        <ApprovalCard decision={entry.decision} {...aboutTheRequest(entry.item, now)} onAnswer={() => undefined} />
-      </div>
-      {entry.card_diff !== null && entry.card_diff.length > 0 ? <DraftedRule entry={entry} /> : null}
-      {children}
+      <ApprovalCard
+        decision={decision}
+        {...aboutTheRequest(item, now)}
+        onAnswer={(a) => answers.answer(item, a)}
+        pending={pending}
+        error={answers.errorFor(id)}
+        after={after}
+        cardRef={ref}
+      />
     </>
   );
 }
@@ -133,9 +126,10 @@ export interface AnsweredFocus {
 }
 
 /**
- * Focus for the requests answered on a screen. As an answer lands, its card changes (and on Today
- * it moves to "Answered just now"); focus that was on the button pressed, and fell to the page as
- * it went, follows the card. Requests answered before the screen mounted take no focus.
+ * Focus for the requests answered on a screen. As an answer lands, its card stays where it was and
+ * its answers go; focus that was on the button pressed, and fell to the page as it went, follows the
+ * card (the card itself moves it to its status line first). Requests answered before the screen
+ * mounted take no focus. `cardFor` finds an answered card, for Dismiss and for a request's address.
  */
 export function useAnsweredFocus(answered: ReadonlyMap<string, Answered>): AnsweredFocus {
   const cards = useRef(new Map<string, HTMLElement>());

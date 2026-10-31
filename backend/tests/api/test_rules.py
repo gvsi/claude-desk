@@ -553,6 +553,15 @@ async def test_rules_chat_counts_on_owner_ai_and_the_model_budget(app, browser, 
     monkeypatch.setattr(proving, "PROVING_WAIT_S", 0.3)
     owner = await new_owner(app, browser, fake, kernel_http)
     path = rules_path(owner, "chat")
+
+    async def finished(body: dict) -> httpx.Response:
+        for _ in range(40):
+            reply = await owner.browser.post(path, json=body)
+            if reply.status_code != 202:
+                return reply
+            assert reply.json() == {"retry": {"path": path, "body": body}}
+        raise AssertionError("the rules chat did not finish after its retry responses")
+
     extra = card("chat-1", "native.capture_lead", reason="Leads are saved on their own.")
     model.add(chatted("Done.", *(chat_card(each) for each in [*owner_cards(fake, owner.desk_id), extra])))
     release = fake.gate("POST /policy/draft")
@@ -561,10 +570,10 @@ async def test_rules_chat_counts_on_owner_ai_and_the_model_budget(app, browser, 
     assert (await owner.browser.post(path, json={"text": "Save leads on your own"})).status_code == 202
     assert (await owner.browser.post(path, json={"text": "Save leads on your own"})).status_code == 202
     release.set()
-    assert (await owner.browser.post(path, json={"text": "Save leads on your own"})).status_code == 200
+    assert (await finished({"text": "Save leads on your own"})).status_code == 200
     for n in range(LIMITS["owner_ai"].limit - 1):
         model.add(chatted("Quotes go out on their own."))
-        assert (await owner.browser.post(path, json={"text": f"What happens to quotes? ({n})"})).status_code == 200
+        assert (await finished({"text": f"What happens to quotes? ({n})"})).status_code == 200
     asked, drafts = len(model.requests), len(fake.called("POST /policy/draft"))
     assert asked == LIMITS["owner_ai"].limit
 

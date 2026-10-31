@@ -33,6 +33,7 @@ from .test_decide import add_desk, decided, desk_with, open_visitor, set_mode, s
 from .test_execute import executed
 
 ROUTE = "GET /context/{session_id}"
+SEEDED_PUBLIC_KNOWLEDGE = [("kn-price-list", ["public"]), ("kn-website", ["public"])]
 
 
 async def get_context(client: httpx.AsyncClient, session_id: str, headers: dict[str, str], *,
@@ -273,11 +274,13 @@ async def test_unlabelled_data_is_owner_only(app, client):
         ])
     seen = await context_of(client, stranger.session_id, stranger.headers)
     assert fact_ids(seen.facts) == PUBLIC_CHARTER
-    assert [(item.item_id, item.label.readers) for item in seen.knowledge] == [("kb-public", ["public"])]
+    assert [(item.item_id, item.label.readers) for item in seen.knowledge] == [
+        *SEEDED_PUBLIC_KNOWLEDGE, ("kb-public", ["public"])]
     owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
     owned = {fact.fact_id: fact.label.readers for fact in owner.facts}
     assert owned["owner:unlabelled"] == owned["owner:no-readers"] == ["owner"]
     assert [(item.item_id, item.label.readers) for item in owner.knowledge] == [
+        *SEEDED_PUBLIC_KNOWLEDGE,
         ("kb-no-readers", ["owner"]), ("kb-public", ["public"]), ("kb-unlabelled", ["owner"])]
 
     # a customer's document is theirs once they confirm who they are, and still no one else's

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.kernel_client import KernelFailed
+from desk.api.link_notices import tell_cancelled_links
 from desk.api.model import ModelClient
 from desk.api.owner_reads import people, utc
 from desk.api.prompts import (
@@ -217,27 +218,32 @@ async def draft_preset(owner: OwnerCtx, desk_id: str, name: PresetName) -> Rules
     return await draft(owner, desk_id, list(PRESETS[name]))
 
 
-async def confirm(owner: OwnerCtx, desk_id: str, version: int) -> PolicyVersion:
+async def confirm(owner: OwnerCtx, engine: AsyncEngine, desk_id: str, version: int) -> PolicyVersion:
     """Activate the Desk's drafted `version`, which makes its cards (and its money cap) the Desk's. A version that
     isn't one of the Desk's is 404; one already active is answered as it is (a confirm whose answer was lost); one the
     kernel didn't prove is 409 `conflict`; and when the rules changed after the draft (the kernel's 409), 409
-    `rules_changed_since_draft`."""
+    `rules_changed_since_draft`. After success, cancelled-link notices are delivered best effort, including when
+    recovering an already-active version; a notice failure never fails the confirm."""
     row = await owner.ro.one("policy_versions", desk_id=desk_id, version=version)
     if row is None:
         raise ApiProblem(404, "not_found")
     if row["status"] == "active":
-        return version_from_row(row)
-    if row["status"] != "proved":
-        raise ApiProblem(409, "conflict")
-    try:
-        return await owner.kernel.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=version))
-    except KernelFailed as refused:
-        if refused.code != "conflict":
-            raise
-        row = await owner.ro.one("policy_versions", desk_id=desk_id, version=version)
-        if row is not None and row["status"] == "active":
-            return version_from_row(row)
-        raise ApiProblem(409, "rules_changed_since_draft") from None
+        active = version_from_row(row)
+    else:
+        if row["status"] != "proved":
+            raise ApiProblem(409, "conflict")
+        try:
+            active = await owner.kernel.call("POST /policy/confirm", PolicyConfirmRequest(
+                desk_id=desk_id, version=version))
+        except KernelFailed as refused:
+            if refused.code != "conflict":
+                raise
+            row = await owner.ro.one("policy_versions", desk_id=desk_id, version=version)
+            if row is None or row["status"] != "active":
+                raise ApiProblem(409, "rules_changed_since_draft") from None
+            active = version_from_row(row)
+    await tell_cancelled_links(owner, engine, desk_id, active)
+    return active
 
 
 # Rules by chat -----------------------------------------------------------------------------------------------------

@@ -250,6 +250,6 @@ async def confirm_rules(desk_id: DeskId, body: ConfirmRulesIn, request: Request,
     `rules_changed_since_draft` when the rules changed after the draft (draft again from the rules now in force), 409
     `conflict` for a draft the kernel didn't prove, 404 for a version that isn't one of the Desk's."""
     async def work(owner: OwnerCtx, state: Runtime) -> PolicyVersion:
-        return await rules.confirm(owner, desk_id, body.version)
+        return await rules.confirm(owner, state.database(), desk_id, body.version)
 
     return await _drafting(request, ctx, desk_id, work, body=body, changes_rules=True)

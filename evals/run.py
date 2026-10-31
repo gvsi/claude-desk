@@ -9,6 +9,7 @@
     python -m evals.run record-rate --pass <id> --signed-off-by "<name>" --reason "<text>" [--lower-bar]
     python -m evals.run key
     python -m evals.run results-check --base <ref>
+    python -m evals.run merge-ready [--head <ref>]
     python -m evals.run calibrate --pass <id> [--write] [--owner-approved "<name>"]
     python -m evals.run latency --max-usd X [--turns 20] [--base-url URL] [--dry-run] [--pass <id>]
     python -m evals.run report --pass <id> [--null-baseline <id>]
@@ -39,6 +40,8 @@ held-out set unless `--lower-bar` is given, and then marks the entry `lowered` a
 fixed in the Desk, not by lowering its bar. `key` prints the inputs key
 (`make evals-key`), and `results-check` is the check CI runs (`make evals-results-check`), with no
 database, network or key: exit 0 or 1, the reason on stdout.
+`merge-ready` checks the head (default HEAD) against origin/main from their merge base, with no
+network or model call: exit 0 when ready, 1 when both sides changed results inputs, 2 on an error.
 
 `calibrate` (`evals/calibrate.py`) proposes each effect's reviewer thresholds from a finished
 calibration pass and writes its report with no model call: `evals/reports/calibration-v<N>.md` when a
@@ -293,6 +296,22 @@ def results_check(argv: list[str]) -> int:
     passed, reason = check(options.base)
     print(f"results-check: {reason}")
     return 0 if passed else 1
+
+
+def merge_ready(argv: list[str], *, root: Path | None = None) -> int:
+    from evals.results import REPO_ROOT, GitError
+    from evals.results import merge_ready as check
+
+    parser = argparse.ArgumentParser(prog="python -m evals.run merge-ready", allow_abbrev=False)
+    parser.add_argument("--head", default="HEAD")
+    options = parser.parse_args(argv)
+    try:
+        ready, reason = check(options.head, root if root is not None else REPO_ROOT)
+    except (GitError, OSError, UnicodeError) as error:
+        print(f"merge-ready: error: {' '.join(str(error).splitlines())}")
+        return 2
+    print(f"merge-ready: {reason}")
+    return 0 if ready else 1
 
 
 def calibrate_command(argv: list[str], *, root: Path | None = None) -> int:
@@ -702,7 +721,7 @@ def report_command(argv: list[str], *, root: Path | None = None) -> int:
 
 COMMANDS = {"tier1": tier1, "simulator-check": simulator_check, "tier2": tier2, "gate": gate_command,
             "results": results_command, "record-rate": record_rate_command, "key": key, "results-check": results_check,
-            "calibrate": calibrate_command, "latency": latency, "report": report_command}
+            "merge-ready": merge_ready, "calibrate": calibrate_command, "latency": latency, "report": report_command}
 
 
 def main(argv: list[str]) -> int:
