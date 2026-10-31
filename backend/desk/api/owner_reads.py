@@ -58,12 +58,17 @@ OWNER_NOTES = ("triage", "annotation")              # what the API writes later 
 LIVE_FOR = timedelta(minutes=5)                    # Today's "Live now": activity this recent
 BRIEFING_FROM = time(18)                           # "Since last night": from 18:00 yesterday
 WEEK_DAYS = 7                                      # "Last 7 days": today and the six dates before it
-KIND_ORDER = {"blocked": 0, "booking": 1, "lead": 2, "answer": 3}
+KIND_ORDER = {"turned_down": 0, "booking": 1, "lead": 2, "answer": 3}
 # The owner's line for a reply of Claude's the checkpoint stopped, and why: by rule ID where one says more than its
 # violation kind (a booking claim, which is a `promise_word`), else by the kind.
 REPLY_STOPPED = "A reply was stopped before it was shown"
 BOOKING_CLAIM = "it said a booking was made instead of showing the card"
-REPLY_WHY_BY_RULE = {"lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM}
+REPLY_WHY_BY_RULE = {
+    "lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM,
+    # Proposed wording awaiting the owner's sign-off.
+    "soft.unavailable": "the checkpoint wasn't available",
+    "soft.denies_ai": "it said it wasn't an AI",
+}
 REPLY_WHY = {
     "number_in_prose": "it wrote a number outside a checked card",
     "promise_word": "it made a promise the rules don't back",
@@ -370,6 +375,7 @@ class Activity:
     stepped: list[Timed]                       # the owner stepping into a session
     texts: list[Timed]                         # visitor and agent text rows
     replies: list[Timed]                       # Claude's delivered replies, a handoff clause left out
+    handoffs: list[Timed]                      # Claude's delivered replies carrying a handoff clause
 
 
 def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[str, dict]) -> list[Stopped]:
@@ -477,7 +483,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         .where(MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.created_at >= start,
                MESSAGES.c.kind.in_((*VISITOR_TEXT, "delivered", "owner_say", "whisper")))
         .order_by(MESSAGES.c.n))
-    texts, replies, stepped = [], [], _stepped_in(decisions, ledger)
+    texts, replies, handoffs, stepped = [], [], [], _stepped_in(decisions, ledger)
     for row in rows:
         if row.session_id not in who.sessions:
             continue
@@ -487,9 +493,11 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
             texts.append(at)
         elif row.author == "owner":
             stepped.append(at)                         # a say, a whisper, or a say delivered
-        elif row.kind == "delivered" and row.author == "claude" and not any(
-                block.template == "handoff" for block in row.blocks or []):
-            replies.append(at)
+        elif row.kind == "delivered" and row.author == "claude":
+            if any(block.template == "handoff" for block in row.blocks or []):
+                handoffs.append(at)
+            else:
+                replies.append(at)
     bookings = executed("native.book")
     return Activity(
         people=who, bookings=bookings, booked=booked_amounts(bookings, quotes),
@@ -499,7 +507,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         stopped=_stopped_attempts(decisions, ledger, who.sessions),
         holds=[Timed(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"])
                for row in decisions if row["outcome"] == "hold"],
-        stepped=stepped, texts=texts, replies=replies)
+        stepped=stepped, texts=texts, replies=replies, handoffs=handoffs)
 
 
 def _within(things: Iterable[Timed], start: datetime, end: datetime) -> list[Timed]:
@@ -511,7 +519,7 @@ def _sessions(things: Iterable[Timed]) -> set[str]:
 
 
 def _newest_first(items: list[BriefingItem]) -> list[BriefingItem]:
-    """By `at`, newest first, then by kind (blocked, booking, lead, answer), then by `ref_id` descending."""
+    """By `at`, newest first, then by kind (turned_down, booking, lead, answer), then by `ref_id` descending."""
     items = sorted(items, key=lambda item: item.ref_id, reverse=True)
     items.sort(key=lambda item: KIND_ORDER[item.kind])
     items.sort(key=lambda item: item.at, reverse=True)
@@ -520,11 +528,12 @@ def _newest_first(items: list[BriefingItem]) -> list[BriefingItem]:
 
 @dataclass(frozen=True)
 class Counted:
-    """What the briefing from `start` to `end` counts: the stopped attempts, bookings and leads, the conversations'
+    """What the briefing from `start` to `end` counts: the refused requests, bookings and leads, the conversations'
     text rows, and each conversation Claude answered alone (a reply it delivered, other than the handoff clause, and no
-    booking, lead, hold, stopped attempt or callback) at its newest such reply, by session."""
+    booking, lead, hold, refused request, callback or delivered handoff) at its newest such reply, by session.
+    Stopped drafts do not make a conversation busy."""
 
-    stopped: list[Timed]
+    stopped: list[Stopped]
     bookings: list[Timed]
     leads: list[Timed]
     texts: list[Timed]
@@ -532,10 +541,10 @@ class Counted:
 
 
 def briefing_counts(done: Activity, start: datetime, end: datetime) -> Counted:
-    stopped = _within(done.stopped, start, end)
+    stopped = [attempt for attempt in _within(done.stopped, start, end) if attempt.kind == "refused"]
     bookings, leads = _within(done.bookings, start, end), _within(done.leads, start, end)
     busy = _sessions([*stopped, *bookings, *leads, *_within(done.holds, start, end),
-                      *_within(done.callbacks, start, end)])
+                      *_within(done.callbacks, start, end), *_within(done.handoffs, start, end)])
     texts = _within(done.texts, start, end)
     conversations = _sessions(texts)
     newest: dict[str, Timed] = {}
@@ -547,16 +556,17 @@ def briefing_counts(done: Activity, start: datetime, end: datetime) -> Counted:
 
 
 def briefing_items(done: Activity, start: datetime, end: datetime) -> list[BriefingItem]:
-    """Every briefing item from `start` to `end`, newest first: each stopped attempt, booking and lead, and each
+    """Every briefing item from `start` to `end`, newest first: each refused request, booking and lead, and each
     conversation Claude answered alone, at its newest such reply (`briefing_counts`)."""
     who = done.people
 
-    def item(kind: str, thing: Timed, ref_id: str | None = None, line: str | None = None) -> BriefingItem:
+    def item(kind: str, thing: Timed, ref_id: str | None = None, line: str | None = None,
+             cause: RefusalCause | None = None) -> BriefingItem:
         return BriefingItem(kind=kind, at=thing.at, session_id=thing.session_id,
-                            display_name=who.name(thing.session_id), ref_id=ref_id or thing.ref_id, line=line)
+                            display_name=who.name(thing.session_id), ref_id=ref_id or thing.ref_id, line=line, cause=cause)
 
     counted = briefing_counts(done, start, end)
-    items = [item("blocked", attempt, line=attempt.line) for attempt in counted.stopped]
+    items = [item("turned_down", attempt, line=attempt.line, cause=attempt.cause) for attempt in counted.stopped]
     items += [item("booking", booking, line=booking.line) for booking in counted.bookings]
     items += [item("lead", lead, line=lead.line) for lead in counted.leads]
     items += [item("answer", reply, ref_id=session_id) for session_id, reply in counted.answers.items()]
@@ -572,8 +582,8 @@ def briefing(done: Activity, frame: Windows) -> Briefing:
     return Briefing(
         since=frame.since, conversations=len(_sessions(_within(done.texts, frame.since, frame.now))),
         bookings=sum(item.kind == "booking" for item in items), leads=sum(item.kind == "lead" for item in items),
-        blocked=sum(item.kind == "blocked" for item in items), total=len(items),
-        newest=BriefingNewest(blocked=first("blocked"), booking=first("booking"),
+        turned_down=sum(item.kind == "turned_down" for item in items), total=len(items),
+        newest=BriefingNewest(turned_down=first("turned_down"), booking=first("booking"),
                               lead_or_answer=first("lead", "answer")))
 
 
@@ -583,7 +593,7 @@ class WeekCounted:
     text rows, the bookings, the requests the kernel refused, and the owner stepping into those conversations; and
     from them, how many conversations there were, how many the owner stepped into and how many Claude handled alone.
     `stopped` holds the refused requests only: a draft of Claude's the reply check stopped is no attempt anyone made,
-    so it is listed on Safety and in the briefing but never counted here."""
+    so it is listed on Safety but omitted from the briefing and never counted here."""
 
     texts: list[Timed]
     bookings: list[Timed]
