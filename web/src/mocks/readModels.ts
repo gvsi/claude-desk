@@ -406,6 +406,17 @@ function briefingOf(a: Activity): Briefing {
 }
 
 /**
+ * One count of a span, from `from` to `end` (left out), as the API's `week_counts` makes it for
+ * Today's last 7 days and the reports alike: the conversations with someone's own words in it, how
+ * many of them the owner stepped into there, and the bookings made.
+ */
+function spanCounts(a: Activity, from: number, end: number): { conversations: number; steppedIn: number; bookings: Booking[] } {
+  const conversations = conversationsIn(a, from, end);
+  const steppedIn = new Set(within(a.steppedIn, from, end).map((h) => h.sessionId).filter((id) => conversations.has(id)));
+  return { conversations: conversations.size, steppedIn: steppedIn.size, bookings: within(a.bookings, from, end) };
+}
+
+/**
  * The last 7 days, as the API core's `this_week` counts them. `stopped` is the requests the kernel
  * refused, total and by day: a draft of Claude's the reply check stopped is no attempt anyone made,
  * so the briefing and Safety list it but the week doesn't count it.
@@ -413,9 +424,7 @@ function briefingOf(a: Activity): Briefing {
 function thisWeekOf(a: Activity): ThisWeek {
   const { days, weekFrom, now } = a.window;
   const end = now + 1;
-  const conversations = conversationsIn(a, weekFrom, end);
-  const steppedIn = new Set(within(a.steppedIn, weekFrom, end).map((h) => h.sessionId).filter((id) => conversations.has(id)));
-  const bookings = within(a.bookings, weekFrom, end);
+  const { conversations, steppedIn, bookings } = spanCounts(a, weekFrom, end);
   const refused = a.stopped.filter((s) => s.kind === 'refused');
   return {
     timezone: BUSINESS.timezone,
@@ -423,9 +432,9 @@ function thisWeekOf(a: Activity): ThisWeek {
     end: days.at(-1)?.date ?? '',
     bookings: bookings.length,
     booked_cents: bookings.reduce((sum, b) => sum + b.cents, 0),
-    conversations: conversations.size,
-    handled: conversations.size - steppedIn.size,
-    stepped_in: steppedIn.size,
+    conversations,
+    handled: conversations - steppedIn,
+    stepped_in: steppedIn,
     stopped: within(refused, weekFrom, end).length,
     days: days.map(({ date, from, to }) => ({
       date,
@@ -436,22 +445,44 @@ function thisWeekOf(a: Activity): ThisWeek {
   };
 }
 
-function paidCents(world: MockWorld, deskId: string): number {
-  return [...world.links.values()].filter((l) => l.deskId === deskId && l.view.state === 'paid').reduce((sum, l) => sum + l.view.amount_cents, 0);
+/**
+ * The money paid through the Desk's payment links from `from` to `end` (left out), by when the
+ * record says each was paid. (The API also counts what agents charged within their signed limits;
+ * the mock's reports don't yet.)
+ */
+function paidCents(world: MockWorld, desk: DeskRecord, from: number, end: number): number {
+  const paidAt = new Map(
+    desk.ledger.filter((e) => e.event.kind === 'payment' && e.event.summary.state === 'paid').map((e) => [e.event.ref_id, Date.parse(e.created_at)]),
+  );
+  return [...world.links]
+    .filter(([token, l]) => {
+      const at = paidAt.get(token);
+      return l.deskId === desk.summary.desk_id && l.view.state === 'paid' && at !== undefined && at >= from && at < end;
+    })
+    .reduce((sum, [, l]) => sum + l.view.amount_cents, 0);
 }
 
-export function reports(world: MockWorld, desk: DeskRecord): Reports {
-  const deskId = desk.summary.desk_id;
-  const customers = world.sessionsOf(deskId).filter((s) => !s.ownerPreview);
-  const neededYou = new Set([
-    ...decisionsOf(world, deskId).filter((d) => d.decision.outcome === 'hold').map((d) => d.decision.session_id),
-    ...[...world.handoffs.values()].filter((h) => h.deskId === deskId).map((h) => h.handoff.session_id),
-  ]);
+/** The reports' span when none is asked for, and the longest the API allows, in local dates. */
+export const REPORT_DAYS = { default: 30, max: 365 } as const;
+
+/**
+ * The reports for the last `days` local dates, today included, from 00:00 on the first of them to
+ * now, as the API counts them: the same count as Today's last 7 days (`spanCounts`), so a
+ * conversation needed the owner only when she stepped into it there (answered a request in it,
+ * took it over, whispered or resumed it). A request held for her, or a chat the handoff card handed
+ * to her, stays Claude's until she does.
+ */
+export function reports(world: MockWorld, desk: DeskRecord, days: number = REPORT_DAYS.default): Reports {
+  const a = activityOf(world, desk);
+  const { now } = a.window;
+  const end = now + 1;
+  const from = localInstant(addDays(wallClock(now, BUSINESS.timezone).date, 1 - days), 0, BUSINESS.timezone);
+  const { conversations, steppedIn, bookings } = spanCounts(a, from, end);
   return {
-    bookings: decisionsOf(world, deskId).filter((d) => d.decision.action?.tool === 'native.book' && d.decision.state === 'executed').length,
-    paid_cents: paidCents(world, deskId),
-    handled_by_claude: customers.filter((s) => !neededYou.has(s.state.session_id)).length,
-    needed_you: customers.filter((s) => neededYou.has(s.state.session_id)).length,
+    bookings: bookings.length,
+    paid_cents: paidCents(world, desk, from, end),
+    handled_by_claude: conversations - steppedIn,
+    needed_you: steppedIn,
   };
 }
 

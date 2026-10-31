@@ -21,6 +21,7 @@ import type {
   OwnerTranscript,
   PeopleOut,
   PolicyVersionOut,
+  Reports,
   RuleChatOut,
   RulesDraft,
   RulesView,
@@ -1982,6 +1983,47 @@ describe("Today's windows", () => {
     // The quote at 7:00 pm answered a question: Claude replied with no booking, lead, hold or stop.
     expect(today.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', line: null });
     expect(today.briefing.total).toBe(1);
+  });
+
+  it('reports_count_what_the_owner_stepped_into_in_their_days', async () => {
+    // As the API counts the reports: over the last `days` local dates, today included (30 unless
+    // asked), the conversations the owner stepped into needed her and Claude handled the rest, as
+    // Today's last 7 days count them. A request held for her, or a chat the handoff card handed to
+    // her, isn't one she stepped into until she answers, takes over, whispers or resumes it.
+    mockStore.reset('rivera');
+    const reports = async (days?: string) => {
+      const answer = await call('reports', { params: { desk_id: deskId }, query: days === undefined ? {} : { days } });
+      expect(answer.status, days).toBe(200);
+      return answer.body as Reports;
+    };
+    const split = (r: Reports) => [r.handled_by_claude, r.needed_you];
+
+    // The seeded copy as its last 7 days count it: Maria whispered in Dana's chat, and the held
+    // request she hasn't answered is still Claude's.
+    const week = (await read()).this_week;
+    expect([week.handled, week.stepped_in]).toEqual([2, 1]);
+    expect(split(await reports('7'))).toEqual([2, 1]);
+
+    // Three days ago Maria whispered in a chat: it needed her in the last 7 days, but not today.
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its Desk');
+    const at = NOW.getTime() - 3 * 24 * HOUR;
+    const earlier = mockStore.world.at(at, () => mockStore.world.addSession(desk));
+    mockStore.world.replay(earlier, at, [{ text: 'Is my water heater still covered?', whisper: 'Check the warranty first.', steps: [] }]);
+    expect(split(await reports('1'))).toEqual([2, 1]);
+    expect(split(await reports('7'))).toEqual([2, 2]);
+    expect(split(await reports())).toEqual([2, 2]);
+
+    // Today a visitor asks for her and the handoff card hands her the chat: Claude's, until she takes it over.
+    const { session } = await openChat();
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(split(await reports('1'))).toEqual([3, 1]);
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
+    expect(split(await reports('1'))).toEqual([2, 2]);
+
+    // A span the API refuses.
+    for (const days of ['0', '366', 'week']) expect((await call('reports', { params: { desk_id: deskId }, query: { days } })).status, days).toBe(422);
   });
 });
 

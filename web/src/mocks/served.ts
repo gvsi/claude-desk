@@ -37,6 +37,7 @@ import {
   paymentLinkOut,
   peopleOut,
   publicDesk,
+  REPORT_DAYS,
   reports,
   rulesView,
   today,
@@ -457,7 +458,12 @@ const SERVED: ServedRoutes = {
   },
   reports(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
-    return isFailure(desk) ? desk : ok(reports(sv.world, desk));
+    if (isFailure(desk)) return desk;
+    // `days`: whole local dates, 1 to 365, as the API takes them; anything else is refused.
+    const asked = req.query.get('days');
+    const days = asked === null ? REPORT_DAYS.default : /^\d+$/.test(asked) ? Number(asked) : NaN;
+    if (!Number.isInteger(days) || days < 1 || days > REPORT_DAYS.max) return INVALID;
+    return ok(reports(sv.world, desk, days));
   },
   answer(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
