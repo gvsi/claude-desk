@@ -11,7 +11,7 @@
  */
 import { Fragment, createElement, type ReactNode } from 'react';
 
-import type { CopyLanguage } from '../../ds/index.ts';
+import { AGENT_START_LOST_COPY, type CopyLanguage } from '../../ds/index.ts';
 
 /** The built-in agent's tasks, as the API names them (`send_agent {task}`). */
 export const DEMO_TASKS = ['book_visit', 'quote_and_deposit', 'push_the_limit'] as const;
@@ -206,3 +206,12 @@ export const AGENTS_COPY: Readonly<Record<CopyLanguage, AgentsCopy>> = {
     busy: 'El agente de demostración está ocupado. Inténtalo de nuevo en un minuto.',
   },
 };
+
+/**
+ * The line beside "Try again" when the answer to sending the agent was lost: the send may have
+ * started it, and "Try again" sends it again with the same key, which finds the run if it did.
+ */
+export function agentStartLostLine(language: CopyLanguage): string {
+  // pending: the design system's retry-safe lost-start line
+  return AGENT_START_LOST_COPY[language];
+}

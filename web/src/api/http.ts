@@ -98,6 +98,15 @@ export function isUncertain(err: unknown): boolean {
   return err instanceof ApiError && err.method !== 'GET' && (err.kind === 'network' || err.kind === 'unavailable');
 }
 
+/**
+ * A new client idempotency key for a start whose answer may be lost after it was applied
+ * (`sendAgent`, `startSetup`): one per click, sent again with that click's retries, so the API
+ * answers what the first started rather than starting it twice (plan 02b, #124).
+ */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID();
+}
+
 /** What the owner reads when a request fails, by kind. */
 export const OWNER_ERROR_COPY: Readonly<Record<ApiErrorKind, string>> = {
   unauthorized: 'Your demo session ended. Enter the passcode to start a fresh copy.',

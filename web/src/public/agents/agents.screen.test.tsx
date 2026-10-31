@@ -19,7 +19,6 @@ import { setPollScale } from '../../app/poll.ts';
 import { routes } from '../../app/routes.tsx';
 import { proseBlock, rivera } from '../../ds/fixtures/index.ts';
 import {
-  AGENT_START_LOST_COPY,
   CHAT_ENDED_COPY,
   DEMO_BUDGET_COPY,
   NEW_CHAT_LABEL,
@@ -33,12 +32,15 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { VIEWPORTS, renderRoute, type Viewport } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
-import { pageActions } from './SendAgentPanel.tsx';
+import { agentStartLostLine } from './copy.ts';
 
 const PAGE = `/d/${RIVERA.slug}/agents`;
 
-/** The requests a route got, by key. */
-const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
+/** The requests a route got, by key, from the `from`th request on. */
+const requests = (key: string, from = 0) => mockStore.requests.slice(from).filter((r) => r.key === key);
+
+/** How many runs the built-in agent has made in the mock: each opens an agent session. */
+const agentRuns = () => [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').length;
 
 /** The routes the page called, in order. */
 const calls = () => mockStore.requests.map((r) => r.key);
@@ -347,6 +349,10 @@ describe('agents page', () => {
     await expect.element(next.screen.getByText('The agent finished.', { exact: true })).toBeVisible();
     expect(requests('openSession')).toHaveLength(opened + 2);
     expect(requests('sendAgent').length).toBe(3);
+    // The send the 401 refused goes once more in the new session with the same key: one click.
+    const [firstKey, resentKey] = requests('sendAgent').slice(1).map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+    expect(firstKey).toEqual(expect.any(String));
+    expect(resentKey).toBe(firstKey);
 
     // When it ends again right away, the chat has ended: the page says so and offers a new one.
     mockStore.inject({ route: 'sendAgent', status: 401, times: 2 });
@@ -1073,25 +1079,76 @@ describe('agents page', () => {
     expect(requests('sendAgent')).toHaveLength(2);
   });
 
-  it('lost_start_offers_no_second_agent', async () => {
-    // The start's answer is lost: the agent may be on its way, and no read can find its run, so the
-    // page says it couldn't confirm and offers no task to send it twice. A reload is the retry.
-    for (const status of ['network', 503] as const) {
-      mockStore.inject({ route: 'sendAgent', status, afterCommit: true });
+  it('lost_start_is_sent_again_with_its_key', async () => {
+    // The start's answer is lost (no answer or a 5xx), whether or not the API started the agent: the
+    // panel says so and offers no task, only "Try again", which sends the same task with the same
+    // key. The API answers the run the first send started, or starts it now: the agent runs once.
+    const lost = [
+      { status: 'network' as const, afterCommit: true },
+      { status: 503 as const, afterCommit: true },
+      { status: 'network' as const },
+    ];
+    for (const fault of lost) {
+      mockStore.inject({ route: 'sendAgent', ...fault });
       const { screen } = await renderRoute(PAGE);
-      await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
       const panel = screen.getByRole('region', { name: 'Send an agent' });
-      await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
+      await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+      const mark = mockStore.requests.length;
+      const runs = agentRuns();
+      await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+      await expect.element(panel.getByText(agentStartLostLine('en'), { exact: true })).toBeVisible();
       expect(chipsIn(screen)).toEqual([]);
-      expect(requests('agentRun')).toHaveLength(0);
+      expect(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(0);
+      expect(requests('agentRun', mark)).toHaveLength(0);
       await expectScreenBasics(screen.container, { owner: false });
-      // "Reload the page" reloads it: the retry, on a page that reads where things stand.
-      const reload = vi.spyOn(pageActions, 'reload').mockImplementation(() => {});
-      await panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).click();
-      expect(reload).toHaveBeenCalledTimes(1);
-      reload.mockRestore();
+
+      await panel.getByRole('button', { name: 'Try again' }).click();
+      await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+      expect(panel.getByText(agentStartLostLine('en')).elements()).toHaveLength(0);
+      const sent = requests('sendAgent', mark).map((r) => r.body as { task: string; idempotency_key?: string });
+      expect(sent, JSON.stringify(fault)).toHaveLength(2);
+      expect(sent[0]?.task).toBe('book_visit');
+      expect(sent[1]).toEqual(sent[0]);
+      expect(sent[0]?.idempotency_key).toMatch(/^[^\x00-\x1f\x7f]{1,128}$/);
+      expect(agentRuns(), JSON.stringify(fault)).toBe(runs + 1);
+      expect(new Set(requests('agentRun', mark).map((r) => r.path)).size).toBe(1);
     }
-    expect(requests('sendAgent')).toHaveLength(2);
+  });
+
+  it('each_task_click_sends_a_new_key', async () => {
+    // A key belongs to one click: a task pressed again, or another task, is a new send with a new key.
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    const runs = agentRuns();
+    for (const task of ['Book the earliest visit', 'Book the earliest visit', 'Try to pay more than its limit']) {
+      await panel.getByRole('button', { name: task }).click();
+      await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    }
+    const keys = requests('sendAgent').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+    expect(keys).toHaveLength(3);
+    expect(new Set(keys).size).toBe(3);
+    expect(agentRuns()).toBe(runs + 3);
+  });
+
+  it('conflicting_key_is_not_sent', async () => {
+    // The API refuses the key (409 `conflict`: another task, session or Desk used it): nothing was
+    // sent, so the panel says so, keeps its lead and offers the tasks again, and the next click
+    // sends a new key.
+    mockStore.inject({ route: 'sendAgent', status: 409, body: { error: 'conflict' } });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+    expect(chipsIn(screen)).toEqual(TASKS);
+    expect(panel.element().querySelector('.cd-agents-card__lead')?.textContent).toBe(LEAD);
+    expect(panel.getByText(agentStartLostLine('en')).elements()).toHaveLength(0);
+    expect(requests('agentRun')).toHaveLength(0);
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    const keys = requests('sendAgent').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+    await expectScreenBasics(screen.container, { owner: false });
   });
 
   it('spent_demo_budget_sends_nothing', async () => {
@@ -1102,7 +1159,7 @@ describe('agents page', () => {
     const panel = screen.getByRole('region', { name: 'Send an agent' });
     await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(panel.getByText(DEMO_BUDGET_COPY.en, { exact: true })).toBeVisible();
-    expect(panel.getByText(AGENT_START_LOST_COPY.en).elements()).toHaveLength(0);
+    expect(panel.getByText(agentStartLostLine('en')).elements()).toHaveLength(0);
     expect(chipsIn(screen)).toEqual(TASKS);
     expect(panel.element().querySelector('.cd-agents-card__lead')?.textContent).toBe(LEAD);
     expect(requests('agentRun')).toHaveLength(0);

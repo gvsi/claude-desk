@@ -7,7 +7,9 @@
  * agent is never sent twice by mistake. A task picked moves focus to the panel's title, since the
  * task's button goes with the others, and so does "New chat", which goes with its notice; the next
  * Tab then goes on from the panel rather than from the top of the page. Opening the page moves no
- * focus: a run only ever starts from a pick.
+ * focus: a run only ever starts from a pick. Each task click sends a new idempotency key, and the
+ * click's retries send it again (a 401's one retry in a new session, "Try again" after a lost
+ * answer), so the API answers the run the click started, if it did, rather than starting another.
  *
  * The panel's card holds the run and so the Desk's reply cards: it is the one `Card` that
  * `holdsCards`, which only this file may use.
@@ -20,11 +22,10 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
-import { ApiError, isUncertain, request } from '../../api/http.ts';
+import { ApiError, isUncertain, newIdempotencyKey, request } from '../../api/http.ts';
 import type { AgentTurn, DemoAgentRun } from '../../api/views.ts';
 import { agentRunPollMs } from '../../app/poll.ts';
 import {
-  AGENT_START_LOST_COPY,
   AgentMessage,
   Button,
   CHAT_ENDED_COPY,
@@ -35,7 +36,6 @@ import {
   MarginReceipt,
   NEW_CHAT_LABEL,
   Notice,
-  RELOAD_PAGE_LABEL,
   SignedLimitPanel,
   SuggestionChips,
   SystemLine,
@@ -47,18 +47,12 @@ import {
 } from '../../ds/index.ts';
 import type { AgentSession } from './agentSession.ts';
 import { AgentsCardContent } from './AgentsCard.tsx';
-import { AGENTS_COPY, DEMO_TASKS, DEMO_TASK_COPY, type DemoTask } from './copy.ts';
+import { PUBLIC_COPY } from '../copy.ts';
+import { AGENTS_COPY, DEMO_TASKS, DEMO_TASK_COPY, agentStartLostLine, type DemoTask } from './copy.ts';
 import { useRunInView } from './runInView.ts';
 
 /** The panel's title's id, which the public page's "Send an agent" link names (`#send`). */
 export const SEND_ID = 'send';
-
-/** What the page does for "Reload the page", here so a test can stand in for the browser's reload. */
-export const pageActions = {
-  reload(): void {
-    window.location.reload();
-  },
-};
 
 /** The language of the Desk's replies to the built-in agent, which writes in English. */
 const RUN_LANGUAGE: CopyLanguage = 'en';
@@ -84,9 +78,11 @@ const MAX_MISSES = 5;
  * - `stopped`: the run failed, or the API no longer has it (404) or refuses to show it for good;
  * - `busy`: the API refused to start it (429);
  * - `budget`: the demo's model budget is spent, and the API refused to start it (503 `demo_budget`);
- * - `not_sent`: it clearly didn't start (the session couldn't open, or another refusal);
+ * - `not_sent`: it clearly didn't start (the session couldn't open, a 409 `conflict` for its key, or
+ *   another refusal);
  * - `lost`: the start's answer was lost (no answer, a timeout or a 5xx), so the agent may be on its
- *   way and no read can find its run: nothing more is sent from this page view;
+ *   way and no read can find its run: only "Try again" is offered, which sends the same task with
+ *   the same key and so finds the run if the agent started, or starts it if it didn't;
  * - `ended`: the chat ended (a 401 the session couldn't recover from).
  */
 type Status = 'idle' | 'sending' | 'running' | 'done' | 'stopped' | 'busy' | 'budget' | 'not_sent' | 'lost' | 'ended';
@@ -95,6 +91,8 @@ interface PanelState {
   status: Status;
   /** The task last chosen. */
   task: DemoTask | null;
+  /** The idempotency key of that click, sent with each of its tries. */
+  key: string | null;
   /** The run's id once the API started it, or null. */
   runId: string | null;
   /** The run as last read. */
@@ -103,7 +101,7 @@ interface PanelState {
   readsFailing: boolean;
 }
 
-const IDLE: PanelState = { status: 'idle', task: null, runId: null, run: null, readsFailing: false };
+const IDLE: PanelState = { status: 'idle', task: null, key: null, runId: null, run: null, readsFailing: false };
 
 /** The states that offer the tasks: before a run, after one ended, and after a start that clearly didn't go ahead. */
 const OFFERS_TASKS: ReadonlySet<Status> = new Set<Status>(['idle', 'done', 'stopped', 'busy', 'budget', 'not_sent']);
@@ -191,23 +189,24 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
     [],
   );
 
-  const send = async (task: DemoTask) => {
+  /** Sends the agent on `task` with `key`: a new key for a click, the same one to try that click again. */
+  const send = async (task: DemoTask, key: string) => {
     reading.current?.abort();
     const controller = new AbortController();
     reading.current = controller;
     const { signal } = controller;
-    setState({ status: 'sending', task, runId: null, run: null, readsFailing: false });
+    setState({ status: 'sending', task, key, runId: null, run: null, readsFailing: false });
     let runId: string;
     try {
-      const started = await session.call(() => request('sendAgent', { params: { slug }, body: { task } }));
+      const started = await session.call(() => request('sendAgent', { params: { slug }, body: { task, idempotency_key: key } }));
       if (typeof started?.run_id !== 'string') throw new ApiError('unavailable', { route: 'sendAgent', method: 'POST', status: 202 });
       runId = started.run_id;
     } catch (err) {
-      if (!signal.aborted) setState({ status: sendFailure(err), task, runId: null, run: null, readsFailing: false });
+      if (!signal.aborted) setState({ status: sendFailure(err), task, key, runId: null, run: null, readsFailing: false });
       return;
     }
     if (signal.aborted) return;
-    setState({ status: 'running', task, runId, run: null, readsFailing: false });
+    setState({ status: 'running', task, key, runId, run: null, readsFailing: false });
     // The run is read until it ends: done, failed, or gone. There is no deadline, since the agent
     // goes on whatever the page does.
     const startedAt = Date.now();
@@ -222,11 +221,11 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
         if (signal.aborted) return;
         misses = 0;
         if (run.state === 'done' || run.state === 'failed') {
-          setState({ status: run.state === 'done' ? 'done' : 'stopped', task, runId, run, readsFailing: false });
+          setState({ status: run.state === 'done' ? 'done' : 'stopped', task, key, runId, run, readsFailing: false });
           return;
         }
         // Running, or a state this build doesn't know, which isn't an end: read on.
-        setState({ status: 'running', task, runId, run, readsFailing: false });
+        setState({ status: 'running', task, key, runId, run, readsFailing: false });
       } catch (err) {
         if (signal.aborted) return;
         const ended = readFailure(err);
@@ -248,7 +247,14 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
     // the run into view is `runInView`'s, and a scroll here would cut its smooth one short.
     titleRef.current?.focus({ preventScroll: true });
     runInView.follow();
-    void send(task);
+    void send(task, newIdempotencyKey());
+  };
+
+  /** "Try again" after a lost start: the same task with the same key, so the agent runs once. */
+  const tryAgain = () => {
+    if (state.task === null || state.key === null) return;
+    runInView.follow();
+    void send(state.task, state.key);
   };
 
   const newChat = () => {
@@ -267,17 +273,17 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   else if (status === 'busy') notice = <Notice tone="error">{copy.busy}</Notice>;
   else if (status === 'budget') notice = <Notice tone="error">{DEMO_BUDGET_COPY[language]}</Notice>;
   else if (status === 'lost') {
-    // The agent may be on its way and no read can find its run: a reload is the retry.
+    // The agent may be on its way and no read can find its run without its id: the same key finds it.
     notice = (
       <Notice
         tone="error"
         action={
-          <Button variant="secondary" onClick={() => pageActions.reload()}>
-            {RELOAD_PAGE_LABEL[language]}
+          <Button variant="secondary" onClick={tryAgain}>
+            {PUBLIC_COPY[language].tryAgain}
           </Button>
         }
       >
-        {AGENT_START_LOST_COPY[language]}
+        {agentStartLostLine(language)}
       </Notice>
     );
   } else if (status === 'not_sent' || readsFailing) notice = <Notice tone="error">{UNREACHABLE_COPY[language]}</Notice>;
