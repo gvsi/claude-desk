@@ -1077,6 +1077,7 @@ class Desk:
     facts: dict[str, Fact] = field(default_factory=dict)
     tools: dict[str, ToolProfile] = field(default_factory=dict)
     knowledge: dict[str, KnowledgeItem] = field(default_factory=dict)   # by item_id
+    knowledge_created_at: dict[str, datetime] = field(default_factory=dict)   # first added; kept on replacement
     cards: list[RuleCard] = field(default_factory=list)
     policy_version: int = 1
     versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
@@ -2700,9 +2701,10 @@ class FakeKernelState:
     def _store_knowledge(self, desk: Desk, item: KnowledgeItem) -> KnowledgeItem:
         """Upsert a knowledge item by its ID, mirrored and ledgered `desk_data` (no text in the entry)."""
         desk.knowledge[item.item_id] = item
+        created_at = desk.knowledge_created_at.setdefault(item.item_id, self.now)
         self._put("knowledge_items", (desk.desk_id, item.item_id), {
             "item_id": item.item_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id, "source": item.source,
-            "title": item.title, "text": item.text, "readers": list(item.label.readers)})
+            "title": item.title, "text": item.text, "readers": list(item.label.readers), "created_at": created_at})
         self.append(desk, "desk_data", {"part": "knowledge", "item_id": item.item_id, "owner_only_forced": False})
         return item
 
