@@ -114,14 +114,27 @@ const INTRO_FALLBACK_NAME = /PlainIntroDialog/;
 const EXPORTS_INTRO_DIALOG = /\bexport\s*\{[^}]*\bIntroDialog\b[^}]*\}\s*from\b/;
 const IMPORTS_INTRO_FROM_THE_INDEX = /\bimport\s*\{[^}]*\bIntroDialog\b[^}]*\}\s*from\s*['"](?:\.\.\/)+ds\/index(?:\.ts)?['"]/;
 
-// Resource hints and speculation rules, which have a browser fetch a link before anyone clicks it,
-// and the path of a card's single-use document link, which no screen fetches or writes out: the web
-// opens one only from the card's own link, which the visitor clicks. As whole words, so React
-// Query's `prefetchQuery`, which reads the app's own data, isn't one.
-const LINK_HINT = /(?<![\w-])(?:dns-prefetch|prefetch|preload|prerender|prefetchDNS)(?![\w-])|speculationrules/i;
-// An API operation's name ("GET /api/d/{token}" in the generated operation list and the route
-// checks) names the route for a type check, not a link, so a path right after an HTTP method isn't one.
-const DOCUMENT_LINK = /(?<!\b(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) )\/api\/d\//i;
+// Resource hints and speculation rules, which have a browser fetch a link before anyone clicks it
+// (React DOM's own forms among them), and the path of a card's single-use document link, which no
+// screen fetches or writes out: the web opens one only from the card's own link, which the visitor
+// clicks. As whole words, so React Query's `prefetchQuery`, which reads the app's own data, isn't one.
+const LINK_HINT =
+  /(?<![\w-])(?:dns-prefetch|prefetch|preload|prerender|modulepreload|prefetchDNS|preinit|preloadModule|preinitModule)(?![\w-])|speculationrules/i;
+const DOCUMENT_LINK = /\/api\/d\//i;
+
+// An API operation's name, "GET /api/d/{token}", in capitals as the API's document writes it, names
+// the route for a check, never a link. It is passed over only in the two files that list operations
+// for the route checks: the generated operation list and the compile-time checks.
+const OPERATION_NAME = /\b(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) \/api\/d\//g;
+const listsOperations = (file: string) => file === 'api/openapi.gen.ts' || file.endsWith('.typecheck.ts');
+
+/** Every document link in `scanned`, but an operation's name in a file that lists operations. */
+function documentLinks(scanned: Source[]): string[] {
+  return hits(
+    DOCUMENT_LINK,
+    scanned.map((s) => (listsOperations(s.file) ? { ...s, text: s.text.replace(OPERATION_NAME, '') } : s)),
+  );
+}
 
 /** The app's page, read as the browser first gets it. */
 const INDEX_HTML: Source = { file: '../index.html', text: readFileSync(path.join(SRC, '..', 'index.html'), 'utf8') };
@@ -344,23 +357,33 @@ describe('app source guards', () => {
       '<link rel="dns-prefetch" href="//desk.example">',
       '<script type="speculationrules">{}</script>',
       "import { prefetchDNS } from 'react-dom';",
+      '<link rel="modulepreload" href="/x.js">',
+      "import { preinit } from 'react-dom';",
+      'ReactDOM.preloadModule(href);',
+      'preinitModule(href, { as: "script" });',
     ];
     for (const text of bad) expect(hits(LINK_HINT, sample(text)), text).toHaveLength(1);
-    expect(hits(LINK_HINT, sample("queryClient.prefetchQuery(desksQuery()); <link rel=\"modulepreload\" href=\"/x.js\">; // a link never prefetched"))).toEqual([]);
-    expect(hits(DOCUMENT_LINK, sample("fetch(`/api/d/${token}`); const href = '/API/d/x';"))).toHaveLength(2);
-    expect(hits(DOCUMENT_LINK, sample("request('paymentLink', { params: { token } }); const page = '/d/rivera';"))).toEqual([]);
+    expect(hits(LINK_HINT, sample('queryClient.prefetchQuery(desksQuery()); // a link never prefetched, preloaded or preinitialised'))).toEqual([]);
+    expect(documentLinks(sample("fetch(`/api/d/${token}`); const href = '/API/d/x';"))).toHaveLength(2);
+    expect(documentLinks(sample("request('paymentLink', { params: { token } }); const page = '/d/rivera';"))).toEqual([]);
     // A link built any other way is one too: a whole address, or a path joined to a token.
-    expect(hits(DOCUMENT_LINK, sample("const a = 'https://desk.example/api/d/tok'; const b = '/api/d/' + token; const c = `${origin}/api/d/${t}`;"))).toHaveLength(3);
-    // An API operation's name, "METHOD /path", as the generated operation list and the route checks
-    // write it, names the route for a check, never a link: it doesn't trip the guard.
-    expect(hits(DOCUMENT_LINK, sample("\"GET /api/d/{token}\": { 200: null },\nexport const NEVER_CALLED = ['GET /api/d/{token}'];"))).toEqual([]);
+    expect(documentLinks(sample("const a = 'https://desk.example/api/d/tok'; const b = '/api/d/' + token; const c = `${origin}/api/d/${t}`;"))).toHaveLength(3);
+    // An API operation's name, "GET /api/d/{token}", written as the generated operation list and the
+    // compile-time route checks write it, names the route for a check, never a link: in those files
+    // only, and in capitals only, it doesn't trip the guard. A link built there still does.
+    const named = (file: string, text: string) => documentLinks([{ file, text }]);
+    expect(named('api/openapi.gen.ts', '"GET /api/d/{token}": { 200: null },')).toEqual([]);
+    expect(named('api/routes.typecheck.ts', "export const NEVER_CALLED = ['GET /api/d/{token}'];")).toEqual([]);
+    expect(named('api/openapi.gen.ts', '"get /api/d/{token}": { 200: null },')).toHaveLength(1);
+    expect(named('api/routes.typecheck.ts', "const link = `${origin}/api/d/${token}`;")).toHaveLength(1);
+    expect(named('owner/share/ShareKit.tsx', "const route = 'GET /api/d/{token}';")).toHaveLength(1);
 
     // The app's code and its page: no hint that fetches a link ahead, and no document link written out.
     expect(INDEX_HTML.text).toContain('<div id="root"></div>');
     expect(hits(LINK_HINT, [...sources, INDEX_HTML])).toEqual([]);
     // The scan reads the generated operation list, which names the route, and finds no link in it.
     expect(sources.find((s) => s.file === 'api/openapi.gen.ts')?.text).toContain('GET /api/d/{token}');
-    expect(hits(DOCUMENT_LINK, [...sources, INDEX_HTML])).toEqual([]);
+    expect(documentLinks([...sources, INDEX_HTML])).toEqual([]);
   });
 
   it('visitor_code_never_shows_owner_reasons', () => {
