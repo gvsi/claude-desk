@@ -514,8 +514,14 @@ export const DEMO_CODE = '482913';
  */
 export const PAYMENT_TOKEN = 'k7Hq2vX9';
 
+/**
+ * Who asks for a callback: Dana Whitfield, the person the copy has on record, with the contact the
+ * kernel's seed keeps for her (the fixtures show it masked, `d•••@example.com`).
+ */
+const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: 'dana@example.com' } as const;
+
 /** The callback request the script records, as the visitor typed it. */
-export const CALLBACK_REASON = 'Dana Wells · (503) 555-0142 · Leaking water heater';
+export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact} · Leaking water heater`;
 
 export const SCRIPT: readonly ScriptRule[] = [
   {
@@ -597,7 +603,7 @@ export const SCRIPT: readonly ScriptRule[] = [
       (ctx) => {
         const decision = ctx.decide(DECISIONS.callback);
         const tonight = ctx.text.toLowerCase().includes('tonight');
-        ctx.openHandoff({ reason: CALLBACK_REASON, callbackWindow: tonight ? null : CALLBACK_WINDOW, lead: 'Dana Wells' });
+        ctx.openHandoff({ reason: CALLBACK_REASON, callbackWindow: tonight ? null : CALLBACK_WINDOW, lead: CALLBACK_LEAD.name });
         return ctx.status('receipt', decision);
       },
       (ctx) => {

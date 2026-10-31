@@ -2,6 +2,10 @@
  * The mock API's store, driven the way its handlers drive it: the scripted Desk, held requests and
  * answers, Today, the event log a stream replays, the transcript, a start over and injected faults.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
@@ -631,6 +635,23 @@ describe('the scripted Desk', () => {
 
     const unknown = await call('answer', { params: { decision_id: 'dec-elsewhere' }, body: { answer: 'allow_once' } });
     expect(unknown.status).toBe(404);
+  });
+
+  it('callback_comes_from_dana_on_record', async () => {
+    // The callback the script files is from Dana Whitfield, the one Dana the copy has on record,
+    // with the contact the kernel's seed keeps for her (the fixtures show it masked).
+    const seedPy = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'kernel_service', 'seed.py'), 'utf8');
+    const [, name, contact] = /SeedPerson\(ref="dana", display_name="([^"]+)", contact="([^"]+)"\)/.exec(seedPy) ?? [];
+    expect(name).toBe(rivera.people.dana.name);
+    expect(rivera.people.dana.maskedContact).toBe(`${contact?.charAt(0)}•••${contact?.slice(contact.indexOf('@'))}`);
+
+    await openChat();
+    await send('Can you call me back?');
+    await drain();
+    const handoff = [...mockStore.world.handoffs.values()].at(-1)?.handoff;
+    expect(handoff?.reason).toBe(`${name} · ${contact} · Leaking water heater`);
+    const lead = mockStore.world.leads.at(-1);
+    expect([lead?.displayName, lead?.note]).toEqual([name, `${contact} · Leaking water heater`]);
   });
 
   it('events_replay_after_seq', async () => {
@@ -1482,8 +1503,8 @@ describe("Today's windows", () => {
     expect(withLead.briefing).toMatchObject({ leads: 1, total: 4 });
     expect(withLead.briefing.newest.lead_or_answer).toMatchObject({
       kind: 'lead',
-      display_name: 'Dana Wells',
-      line: '(503) 555-0142 · Leaking water heater',
+      display_name: 'Dana Whitfield',
+      line: 'dana@example.com · Leaking water heater',
     });
     await openChat();
     await vi.advanceTimersByTimeAsync(60_000);
