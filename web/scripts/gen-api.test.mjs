@@ -170,6 +170,9 @@ describe('gen-api', () => {
     await expect(generate(answering({ 200: json(ref('Thing')), '4XX': json(ref('Item')) }))).rejects.toThrow(
       /GET \/x answers "4XX", which is neither a status code nor default/,
     );
+    // A path item the document only points at, whose operations would otherwise drop out unread.
+    const pointed = doc(schemas, { '/x': { get: { responses: { 200: json(ref('Thing')) } } }, '/y': { $ref: '#/components/pathItems/Y' } });
+    await expect(generate(pointed)).rejects.toThrow(/path "\/y" points at "#\/components\/pathItems\/Y", which is not read yet/);
     // An operation with no success answer, and a document with no operations or no schemas.
     await expect(generate(answering({ 404: json(ref('Item')) }))).rejects.toThrow(/GET \/x has no 2xx answer/);
     await expect(generate(doc(schemas, {}))).rejects.toThrow(/has no paths/);

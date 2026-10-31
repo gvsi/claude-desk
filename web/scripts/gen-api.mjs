@@ -133,9 +133,9 @@ const STATUS_CODE = /^[1-5]\d\d$/;
 
 /**
  * Every operation in `paths`, keyed "METHOD /path" in the document's order, with the schema name
- * of each of its 2xx answers by status code. An operation with no 2xx answer fails, as does a
- * response key that is neither a status code nor `default`, such as the range `2XX`, which would
- * otherwise drop out unread.
+ * of each of its 2xx answers by status code. An operation with no 2xx answer fails, as do a
+ * response key that is neither a status code nor `default`, such as the range `2XX`, and a path
+ * item the document only points at (`$ref`), either of which would otherwise drop out unread.
  */
 export function apiOperations(openapi) {
   const paths = openapi?.paths;
@@ -143,6 +143,9 @@ export function apiOperations(openapi) {
   if (!paths || typeof paths !== 'object' || Object.keys(paths).length === 0) fail('has no paths');
   const operations = {};
   for (const [route, item] of Object.entries(paths)) {
+    if (item && typeof item === 'object' && '$ref' in item) {
+      fail(`path ${JSON.stringify(route)} points at ${JSON.stringify(item.$ref)}, which is not read yet`);
+    }
     for (const [method, operation] of Object.entries(item ?? {})) {
       if (!HTTP_METHODS.has(method)) continue;
       const key = `${method.toUpperCase()} ${route}`;
