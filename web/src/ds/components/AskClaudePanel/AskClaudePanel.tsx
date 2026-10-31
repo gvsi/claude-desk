@@ -1,4 +1,13 @@
-import { useContext, useId, useLayoutEffect, useRef, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  useContext,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useSyncExternalStore,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
 
 import { AppShellPanelContext } from '../AppShell/AppShell.tsx';
 import { Composer } from '../Composer/Composer.tsx';
@@ -124,6 +133,13 @@ export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskC
     onClose();
   };
 
+  // A press on the sheet itself, outside its content (the scrim, which is the sheet's own backdrop,
+  // or its padding), changes nothing: the sheet stays open, keeping a half-written question, and
+  // focus stays on the control that had it.
+  const onMouseDown = (event: MouseEvent<HTMLElement>) => {
+    if (modal && event.target === event.currentTarget) event.preventDefault();
+  };
+
   // One element at every width, so crossing the breakpoint keeps the composer's draft; only its
   // role changes, from a complementary panel to a modal dialog.
   return (
@@ -134,6 +150,7 @@ export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskC
       aria-labelledby={headingId}
       className={`cd-ask-claude${modal ? ' cd-ask-claude--sheet' : ''}`}
       onKeyDown={onKeyDown}
+      onMouseDown={onMouseDown}
     >
       <div className="cd-ask-claude__header">
         <h2 id={headingId} className="cd-ask-claude__title cd-type-section">

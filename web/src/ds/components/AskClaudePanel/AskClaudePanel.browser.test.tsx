@@ -277,6 +277,36 @@ it('ask_claude_sheet_keyboard_walk_at_320', async () => {
   await walkTheSheet(NARROWEST.width, NARROWEST.height);
 });
 
+it('a_click_on_the_scrim_keeps_the_sheet_and_its_focus', async () => {
+  // Closing on a scrim click would throw away a half-written question, so the click changes
+  // nothing: the sheet stays open, focus stays on the composer, and Escape still closes it.
+  await page.viewport(TABLET.width, TABLET.height);
+  act(() => root.render(<Phone />));
+  const opener = page.getByRole('button', { name: 'Ask Claude to change a rule' });
+  await userEvent.click(opener);
+  await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
+  const composer = panel().querySelector('textarea');
+  if (!composer) throw new Error('No composer');
+  expect(document.activeElement).toBe(composer);
+  await act(async () => {
+    await userEvent.type(composer, 'Can verified clients book');
+  });
+
+  // A point left of the panel is the scrim, the sheet's own backdrop. The click lands there as a
+  // person's would, wherever the point is.
+  const [x, y] = [10, TABLET.height / 2];
+  expect(document.elementFromPoint(x, y), 'the point is the scrim').toBe(panel());
+  await userEvent.click(document.documentElement, { position: { x, y }, force: true });
+  expect(panel().getAttribute('role'), 'the sheet stays open').toBe('dialog');
+  expect(document.activeElement, 'focus stays on the composer').toBe(composer);
+  expect(composer.value, 'the half-written question is kept').toBe('Can verified clients book');
+
+  await userEvent.keyboard('{Escape}');
+  await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude')).toBeNull());
+  expect(document.activeElement).toBe(opener.element());
+  expect(container.querySelector('[inert]')).toBeNull();
+});
+
 it('standalone_sheet_keeps_focus_inside', async () => {
   // Without AppShell nothing makes the page inert, so the sheet itself keeps focus: a script's
   // focus on a control behind it, and the Tab after it, both stay in the sheet.
