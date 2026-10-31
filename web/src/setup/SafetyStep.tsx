@@ -248,6 +248,7 @@ export function SafetyStep({ state, onConfirmed, reread, live }: SafetyStepProps
                   <SafetyCheckRow
                     label={row.label}
                     attempt={row.tries}
+                    outcome={row.result.outcome}
                     blocked={row.blocked}
                     {...(row.blocked ? { stoppedBy: 'action' as const } : {})}
                     reason={row.result.reason_plain}
