@@ -175,7 +175,7 @@ export function KnowledgePage() {
 
   /**
    * Runs one write, `kind` busy until it and any read back are done; while it runs, every other add
-   * and change is ignored, the switch's included, which the design system doesn't hold during an add.
+   * and change waits, the switch included, until the write and any read back finish.
    */
   const exclusive = async (kind: Busy, write: () => Promise<void>) => {
     if (writing.current) return;

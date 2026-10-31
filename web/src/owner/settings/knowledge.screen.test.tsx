@@ -477,7 +477,10 @@ describe('knowledge', () => {
     mockStore.inject({ route: 'addKnowledge', status: 200, until: b.until, body: answered({ item_id: 'note-b', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: {} }, ['owner']) });
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
     await expect.element(main(screen).getByRole('button', { name: 'Add a note' })).toHaveAttribute('aria-busy', 'true');
-    await switchOf(screen).click();
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-disabled', 'true');
+    await expect.element(switchOf(screen)).not.toHaveAttribute('aria-busy', 'true');
+    // Force the press past Playwright's disabled-control wait to check the component's guard.
+    await switchOf(screen).click({ force: true });
     expect(posts()).toHaveLength(2);
     await expect.element(main(screen).getByRole('button', { name: 'Add a note' })).toHaveAttribute('aria-busy', 'true');
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
