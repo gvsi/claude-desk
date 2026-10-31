@@ -112,15 +112,25 @@ def api_routes() -> tuple[set[str], list[str]]:
     return called, unreadable
 
 
+def template(path: str) -> str:
+    """A path with its parameters' names (and converters) left out: `/desks/{desk_id}` and `/desks/{id}` agree."""
+    return re.sub(r"\{[^}]*\}", "{}", path)
+
+
 def served_routes(app: FastAPI) -> set[str]:
-    """The `KERNEL_ROUTES` keys the kernel app runs a route for, as its router would: the method and the path, its
-    parameters filled in and the query that tells some keys apart left out, as the client sends it."""
+    """The `KERNEL_ROUTES` keys the kernel app serves. For each key, the client's request (its method and path, the
+    parameters filled in and the query that tells some keys apart left out) goes to the first route the router would
+    run for it, a route with no methods (a mount) taking any; that route serves the key only when its template is the
+    key's, so a parameter route or a catch-all ahead of it doesn't stand in for it."""
     routes = list(iter_route_contexts(app.routes))
     served = set()
     for key in KERNEL_ROUTES:
         method, _, target = key.partition(" ")
-        path = re.sub(r"\{\w+\}", "p-1", target.partition("?")[0])
-        if any(method in (route.methods or ()) and route.path_regex.match(path) for route in routes):
+        key_template = target.partition("?")[0]
+        path = re.sub(r"\{\w+\}", "p-1", key_template)
+        runs = next((route for route in routes
+                     if (route.methods is None or method in route.methods) and route.path_regex.match(path)), None)
+        if runs is not None and template(runs.path) == template(key_template):
             served.add(key)
     return served
 
@@ -216,3 +226,36 @@ def test_a_route_is_served_when_the_kernel_runs_its_method_and_path():
     kernel.get("/verify/start")(lambda: None)                  # the key is a POST
     assert served_routes(kernel) == {"GET /demo_inbox?session_id=", "GET /demo_inbox",
                                      "GET /ledger/{desk_id}?verify=true", "DELETE /desks/{id}"}
+
+
+BY_CALL = "GET /decisions/by_call?session_id=&generation=&call_id="
+
+
+def test_a_parameter_route_doesnt_serve_a_key_with_a_fixed_segment():
+    kernel = FastAPI()
+    kernel.get("/decisions/{decision_id}")(lambda decision_id: {})
+    assert served_routes(kernel) == {"GET /decisions/{id}"}
+
+
+def test_a_key_is_served_by_the_first_route_the_router_runs():
+    kernel = FastAPI()
+    kernel.get("/decisions/{decision_id}")(lambda decision_id: {})     # declared first, it takes /decisions/by_call
+    kernel.get("/decisions/by_call")(lambda: {})
+    assert served_routes(kernel) == {"GET /decisions/{id}"}
+
+    kernel = FastAPI()
+    kernel.get("/decisions/by_call")(lambda: {})
+    kernel.get("/decisions/{decision_id}")(lambda decision_id: {})
+    assert served_routes(kernel) == {BY_CALL, "GET /decisions/{id}"}
+
+
+def test_a_catch_all_serves_nothing_it_isnt():
+    kernel = FastAPI()
+    kernel.api_route("/{rest:path}", methods=["GET", "POST", "PUT", "DELETE"])(lambda rest: {})
+    assert served_routes(kernel) == set()
+
+    kernel, inner = FastAPI(), FastAPI()
+    inner.get("/demo_inbox")(lambda: [])
+    kernel.mount("/", inner)                                           # a mount ahead of a route takes its requests
+    kernel.get("/demo_inbox")(lambda: [])
+    assert served_routes(kernel) == set()
