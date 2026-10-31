@@ -256,6 +256,17 @@ RIVERA_PRICES = [PriceItem(item_id="deposit", title="Service call deposit", unit
                  PriceItem(item_id="drain", title="Drain clearing", unit_cents=18000),
                  PriceItem(item_id="heater", title="Water heater flush", unit_cents=15000),
                  PriceItem(item_id="leak", title="Leak repair", unit_cents=25000)]
+RIVERA_KNOWLEDGE = [
+    KnowledgeItem(item_id="kn-website", source="website",
+                  title="Your website, rivera-plumbing.example, read during setup",
+                  text="Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+                       "water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
+                  label=Label(readers=["public"])),
+    KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
+                  text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
+                       "water heater flush and leak repair. Each price is given in a quote from this list.",
+                  label=Label(readers=["public"])),
+]
 RIVERA_PEOPLE = [("dana", "Dana Whitfield", "dana@example.com"), ("bob", "Bob Okafor", "bob@example.com")]
 RIVERA_DOCUMENTS = [  # (ref, title, record owner, body): the kernel ends each body with a fresh canary
     ("dana-invoice", "Invoice, drain clearing", "dana",
@@ -1537,7 +1548,10 @@ class FakeKernelState:
                        for ref, title, owner_ref, body in RIVERA_DOCUMENTS],
             notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"],
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
-        return self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
+        desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
+        for item in RIVERA_KNOWLEDGE:
+            self._store_knowledge(desk, item.model_copy(deep=True))
+        return desk
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
                      cards: list[RuleCard]) -> Desk:

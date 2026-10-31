@@ -1,7 +1,9 @@
 """The Rivera Plumbing seed: the demo business every visitor gets a fresh copy of.
 
 `POST /copies` writes it through `desks.create_desk`, the same path as an owner's new Desk, so a
-copy differs from another only in its IDs, canaries and dates. The seed connects the mock payments
+copy differs from another only in its IDs, canaries and dates. `seed_knowledge` stores what setup
+would have left the Desk knowing (`RIVERA_KNOWLEDGE`: the website read and the price list, public,
+with no amount in either) through the owner's own path. The seed connects the mock payments
 server (`connections`), with both its tools pinned at the hashes the seed is proved with, and
 `seed_charges` gives Dana and Bob their past payments there (`RIVERA_MOCKPAY_CHARGES`), each with a
 `charge:<id>` fact naming it for its owner. `RIVERA_CARDS` have fixed IDs and are scoped `anyone`,
@@ -25,6 +27,7 @@ from desk.contracts import (
     DeskSeed,
     Fact,
     HoursWindow,
+    KnowledgeItem,
     Label,
     NotificationDefaults,
     PriceItem,
@@ -39,8 +42,8 @@ from desk.kernel_service import labels, sessions
 from desk.kernel_service.repo import KernelCtx, KernelFailure
 from desk.presets import PRESETS
 
-__all__ = ["PRESETS", "RIVERA_CARDS", "RIVERA_MOCKPAY_CHARGES", "RIVERA_MONEY_CAP_CENTS", "rivera_seed",
-           "seed_charges", "seed_held_request"]
+__all__ = ["PRESETS", "RIVERA_CARDS", "RIVERA_KNOWLEDGE", "RIVERA_MOCKPAY_CHARGES", "RIVERA_MONEY_CAP_CENTS",
+           "rivera_seed", "seed_charges", "seed_held_request", "seed_knowledge"]
 
 log = logging.getLogger(__name__)
 
@@ -95,6 +98,21 @@ RIVERA_MOCKPAY_CHARGES: list[SeedCharge] = [
     SeedCharge("dana", 18_000, "Drain clearing", 21),
     SeedCharge("dana", 25_000, "Leak repair", 9),
     SeedCharge("bob", 15_000, "Water heater flush", 30),
+]
+
+# What the Desk knows on a new copy, as setup leaves it (Settings › Knowledge): the website read
+# and the price list from Maria's answers, both public. Knowledge is untrusted text, never policy,
+# and states no amount: a price reaches a visitor only on a quote card built from the price list.
+RIVERA_KNOWLEDGE: list[KnowledgeItem] = [
+    KnowledgeItem(item_id="kn-website", source="website",
+                  title="Your website, rivera-plumbing.example, read during setup",
+                  text="Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+                       "water heater flushes. We work in Oakland, Berkeley, Alameda and Emeryville.",
+                  label=Label(readers=["public"])),
+    KnowledgeItem(item_id="kn-price-list", source="setup", title="Price list, from your answers in setup",
+                  text="The price list Maria gave in setup covers the service call deposit, drain clearing, a "
+                       "water heater flush and leak repair. Each price is given in a quote from this list.",
+                  label=Label(readers=["public"])),
 ]
 
 # The held request: drain clearing at 15% off, which `rv-quote` (list price only) holds for Maria.
@@ -161,6 +179,13 @@ def calendar_slots(now: datetime) -> list[CalendarSlot]:
             slots.append(CalendarSlot(slot_id=starts_at.strftime("S-%Y%m%d-%H%M"), starts_at=starts_at,
                                       minutes=SLOT_MINUTES))
     return slots
+
+
+async def seed_knowledge(ctx: KernelCtx, desk_id: str, items: list[KnowledgeItem]) -> list[KnowledgeItem]:
+    """The Desk's knowledge `items`, in the caller's transaction, each through
+    `labels.store_knowledge` as an owner's item is: checked, read for canaries and ledgered
+    `desk_data`. Returns them as stored."""
+    return [await labels.store_knowledge(ctx, desk_id, item) for item in items]
 
 
 async def seed_charges(ctx: KernelCtx, desk_id: str, charges: list[SeedCharge]) -> list[str]:
