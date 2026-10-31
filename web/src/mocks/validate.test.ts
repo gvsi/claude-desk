@@ -67,6 +67,11 @@ describe('mock payloads', () => {
     expect(validateContract('PolicyVersion', { ...version, auto_money_cap_cents: -1 })).not.toEqual([]);
     expect(validateContract('PolicyVersion', { ...version, auto_money_cap_cents: 1_000_001 })).not.toEqual([]);
     expect(validateContract('PolicyVersion', { ...version, auto_money_cap_cents: '500' })).not.toEqual([]);
+
+    // Why a tool waits for review (kernel payments, plan 01c Task 4), or null when it doesn't.
+    const tool = mockStore.world.desks[0]?.tools[0];
+    for (const reason of ['new', 'changed', 'delisted', null]) expect(validateContract('ToolProfile', { ...tool, review_reason: reason }), String(reason)).toEqual([]);
+    expect(validateContract('ToolProfile', { ...tool, review_reason: 'renamed' })).not.toEqual([]);
   });
 
   it('mock_payloads_match_contracts', async () => {

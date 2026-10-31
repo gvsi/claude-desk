@@ -32,6 +32,7 @@ import type {
   Suggestion,
   ToolConfirmEntry,
   ToolConfirmedOut,
+  ToolRow,
   TranscriptItem,
   TranscriptKind,
 } from '../api/views.ts';
@@ -98,6 +99,12 @@ export interface SessionRecord {
   ownerTypedAt: number | null;
 }
 
+/**
+ * A tool as the kernel's tool row has it, with why it waits for review (`review_reason`, null unless
+ * it does), which the contract types don't have yet.
+ */
+export type ToolRecord = ToolProfile & Pick<ToolRow, 'review_reason'>;
+
 export interface DeskRecord {
   summary: DeskSummary;
   /** The active rules version, with its money cap. */
@@ -110,7 +117,7 @@ export interface DeskRecord {
   /** The highest rules version made for the Desk: versions are never reused. */
   lastVersion: number;
   /** The Desk's tools, as the kernel's tool rows have them. */
-  tools: ToolProfile[];
+  tools: ToolRecord[];
   /** Rules the owner's answers suggest, newest first; none until a test adds one. */
   suggestions: Suggestion[];
 }
@@ -1079,7 +1086,7 @@ export class MockWorld {
     for (const entry of record.enables) {
       desk.tools = desk.tools.map((tool) =>
         tool.tool === entry.tool
-          ? { ...tool, status: 'enabled', definition_sha256: entry.definition_sha256, pending_definition_text: null, pending_sha256: null }
+          ? { ...tool, status: 'enabled', definition_sha256: entry.definition_sha256, pending_definition_text: null, pending_sha256: null, review_reason: null }
           : tool,
       );
     }
@@ -1109,7 +1116,8 @@ export class MockWorld {
     if (!enable) {
       if (entries.some((entry) => entry.tool === 'native.start_verification')) return 'conflict';
       const off = new Set(entries.map((entry) => entry.tool));
-      desk.tools = desk.tools.map((tool) => (off.has(tool.tool) ? { ...tool, status: 'disabled' } : tool));
+      // Off no longer waits for review, so it gives no reason; a changed definition stays to review later.
+      desk.tools = desk.tools.map((tool) => (off.has(tool.tool) ? { ...tool, status: 'disabled', review_reason: null } : tool));
       for (const entry of entries) {
         this.appendLedger(desk, { kind: 'tool_pin', origin: 'kernel', session_id: null, ref_id: entry.tool, summary: { tool: entry.tool, enabled: false } });
       }
