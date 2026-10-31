@@ -21,7 +21,9 @@ from evals.tests.eval_repo import commit, make_repo, write
 from evals.tests.test_passes import NOW, config, deps
 from evals.tier2.passes import pass_dir, run_pass
 from evals.tier2.runner import RunError, RunOutcome, SimulatorStats
-from evals.tier2.verdict import Reviewed, RunVerdict
+from evals.tier2.verdict import SKIPPED_CHECKS, Reviewed, RunVerdict
+
+SKIPPED_CHECKS_LIST = list(SKIPPED_CHECKS)
 
 THRESHOLDS_PATH = "backend/desk/kernel_service/review_thresholds.py"
 # The kernel's thresholds file as the kernel core plan (01a) ships it: the initial rows outside the
@@ -498,6 +500,53 @@ async def test_only_a_whole_calibration_pass_is_written(repo, capsys, case):
         said), said
     assert "Proposed as version" not in said and "--write" not in said, said
     assert path.read_text() == THRESHOLDS_FILE and not list(reports.glob("calibration-*")), case
+
+
+@dataclass
+class SkippingOn(Reviewing):
+    """`Reviewing`, but every run of `scenario_id` skips `checks`, as a run does while plan 01b hasn't landed."""
+
+    scenario_id: str = "atk-cal"
+    checks: tuple[str, ...] = ()
+
+    async def __call__(self, scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> RunOutcome:
+        done = await super().__call__(scenario, rep, target, simulator, **kwargs)
+        if scenario.id != self.scenario_id:
+            return done
+        assert done.verdict is not None
+        return done.model_copy(update={"verdict": done.verdict.model_copy(update={"skipped": list(self.checks)})})
+
+
+async def test_a_pass_whose_runs_skipped_checks_is_never_written(tmp_path, capsys):
+    """A skipped check is never counted as passed, so the thresholds are never written from a pass whose
+    runs skipped one, even a whole calibration pass made before the plan its checks wait for has landed:
+    `--write` refuses it, naming the skipped checks and how many runs skipped each, and writes nothing.
+    Without `--write`, its report goes under `evals/out/reports/`, named by its pass, takes no version and
+    names the skipped checks."""
+    root = make_repo(tmp_path / "repo", landed=("master", "01a", "02a", "02"))   # plan 01b isn't landed
+    write(root, THRESHOLDS_PATH, THRESHOLDS_FILE)
+    commit(root, "the kernel's thresholds file")
+    path, reports, out = root / THRESHOLDS_PATH, root / "evals" / "reports", root / "evals" / "out" / "reports"
+    cap, inbox = SKIPPED_CHECKS_LIST[0], SKIPPED_CHECKS_LIST[1]
+    pass_id = (await run_pass(config(split="calibration"),
+                              deps(root, SkippingOn(REVIEWED, checks=(cap, inbox))))).pass_id
+    why = (f"in pass {pass_id}, 1 of 2 judged runs skipped checks waiting for plan 01b: in 1 runs, {cap}; "
+           f"in 1 runs, {inbox}")
+
+    with pytest.raises(CalibrationRefused) as refused:
+        calibrate(pass_id, root=root, write=True)
+    assert why in str(refused.value) and "nothing was written" in str(refused.value)
+    assert run.calibrate_command(["--pass", pass_id, "--write"], root=root) == 1
+    assert f"calibrate: {why}" in capsys.readouterr().out
+    assert path.read_text() == THRESHOLDS_FILE and not out.exists() and not list(reports.glob("calibration-*"))
+
+    done = calibrate(pass_id, root=root, today=NOW.date())
+    assert done.report == out / f"calibration-{pass_id}.md" and not done.written and done.version == 1
+    said = done.report.read_text().split("\n## The rule\n", 1)[0]
+    assert f"Its runs skipped checks, so its proposal can't be written: {why.split(', ', 1)[1]}." in said, said
+    assert "a pass whose runs skipped checks takes no version" in said and "Proposed as version" not in said
+    assert "--write" not in said, said
+    assert path.read_text() == THRESHOLDS_FILE and not list(reports.glob("calibration-*"))
 
 
 async def test_the_report_says_what_was_written(repo):
