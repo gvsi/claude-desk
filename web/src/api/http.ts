@@ -102,13 +102,23 @@ export function isUncertain(err: unknown): boolean {
   return err instanceof ApiError && err.method !== 'GET' && (err.kind === 'network' || err.kind === 'unavailable');
 }
 
+/** What a key is made from: the browser's `crypto`, or a stand-in a test passes. */
+type KeySource = Pick<Crypto, 'getRandomValues'> & { randomUUID?: () => string };
+
 /**
  * A new client idempotency key for a start whose answer may be lost after it was applied
  * (`sendAgent`, `startSetup`): one per click, sent again with that click's retries, so the API
- * answers what the first started rather than starting it twice (plan 02b).
+ * answers what the first started rather than starting it twice (plan 02b). A random UUID: the
+ * browser's `randomUUID`, which exists only on a secure page (https or localhost), else a version 4
+ * UUID from `getRandomValues`, which every page has.
  */
-export function newIdempotencyKey(): string {
-  return crypto.randomUUID();
+export function newIdempotencyKey(source: KeySource = crypto): string {
+  if (typeof source.randomUUID === 'function') return source.randomUUID();
+  const bytes = source.getRandomValues(new Uint8Array(16));
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 /** What the owner reads when a request fails, by kind. */
