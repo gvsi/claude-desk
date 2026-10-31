@@ -14,6 +14,7 @@ import {
 import { Icon } from '../../icons/index.tsx';
 import { IconButton } from '../IconButton/IconButton.tsx';
 import { Mark } from '../Mark/Mark.tsx';
+import { Skeleton } from '../Skeleton/Skeleton.tsx';
 
 import './AppShell.css';
 
@@ -33,6 +34,8 @@ export interface AppShellProps {
    * every page.
    */
   fill?: boolean;
+  /** Draw the compact bar as shapes and leave landmarks to the loading page. */
+  skeleton?: boolean;
   /**
    * A panel beside the page, such as `AskClaudePanel`: at the right of the main area, the main
    * area's height, the page narrowing to make room. A panel that becomes a modal sheet (on a phone
@@ -80,7 +83,7 @@ function isNarrow(): boolean {
  * Menu opens the sidebar as a modal sheet, and Escape, "Close menu" or going to a page closes it
  * and returns focus to Menu.
  */
-export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, panel, children }: AppShellProps) {
+export function AppShell({ sidebar, business, banner, layout = 'auto', fill = false, skeleton = false, panel, children }: AppShellProps) {
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const compact = layout === 'compact' || narrow;
 
@@ -104,6 +107,8 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
     if (inert || active === null || active === document.body) target.focus();
   }, [inert]);
 
+  const Column = skeleton ? 'div' : 'aside';
+
   // Only the navigation changes with the layout. The page stays in the same place in the tree, so
   // crossing the breakpoint (a resized window, a turned phone) keeps its drafts and other state.
   return (
@@ -113,14 +118,26 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
           {banner}
         </div>
       ) : null}
-      {compact ? <CompactNav sidebar={sidebar} business={business} inert={inert} /> : null}
+      {compact ? (
+        skeleton ? (
+          <div className="cd-app-shell__topbar" data-skeleton-anchor="top-bar">
+            <Skeleton shape="block" width={20} height={20} anchor="top-mark" />
+            <div className="cd-app-shell__business">
+              <Skeleton shape="line" text="control" width="65%" />
+            </div>
+            <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor="menu" />
+          </div>
+        ) : (
+          <CompactNav sidebar={sidebar} business={business} inert={inert} />
+        )
+      ) : null}
       <div className="cd-app-shell__body">
         {compact ? null : (
-          <aside className="cd-app-shell__column" aria-label="Claude Desk" {...inertWhen(inert)}>
+          <Column className="cd-app-shell__column" aria-label={skeleton ? undefined : 'Claude Desk'} {...inertWhen(inert)}>
             {sidebar}
-          </aside>
+          </Column>
         )}
-        <Main fill={fill} inert={inert}>
+        <Main fill={fill} inert={inert} skeleton={skeleton}>
           {children}
         </Main>
         {panel ? <AppShellPanelContext.Provider value={setModal}>{panel}</AppShellPanelContext.Provider> : null}
@@ -129,11 +146,12 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
   );
 }
 
-function Main({ fill, inert, children }: { fill: boolean; inert: boolean; children: ReactNode }) {
+function Main({ fill, inert, skeleton, children }: { fill: boolean; inert: boolean; skeleton: boolean; children: ReactNode }) {
+  const Area = skeleton ? 'div' : 'main';
   return (
-    <main className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`} {...inertWhen(inert)}>
+    <Area className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`} {...inertWhen(inert)}>
       <div className="cd-app-shell__content">{children}</div>
-    </main>
+    </Area>
   );
 }
 

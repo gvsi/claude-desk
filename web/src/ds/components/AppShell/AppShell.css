@@ -3,6 +3,8 @@
    and an optional panel at the right, each scrolling on its own. The page is padded 24/40/20 (16
    at the top and sides on a phone) and its content is at most size-content wide, centered.
 
+   Skeleton mode uses these same classes on divs, leaving landmarks to the loading page.
+
    Compact: a top bar on the panel replaces the column, above the page and the panel, and Menu
    opens the sidebar as a modal sheet from the left over a dimmed page. Nothing slides; the sheet
    appears in place. */

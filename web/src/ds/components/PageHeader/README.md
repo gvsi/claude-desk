@@ -32,3 +32,7 @@
 A title that wraps balances its lines (`text-wrap: balance`): the browser evens them out rather than filling each in turn, so a long business name doesn't leave its last word on a line of its own. "Bayview Heating, Plumbing & Drain Services of Greater Oakland is live" takes two even lines in setup's 720 px column, not a full line and "live". The title keeps the number of lines it would take anyway, so nothing under it moves. A word with no break in it still breaks rather than leaving the line (`overflow-wrap: anywhere`).
 
 The header has no outer margin; the `AppShell` pads the page above it, and the page spaces what follows.
+
+## Loading shapes
+
+`PageHeaderSkeleton` draws the title's line box, subtitle lines and an optional control-sized action block using this header's classes. `subtitleLines` defaults to 1 and accepts a number or `{ wide, phone }`; phone applies below 640 px. `actions`, `actionsBelowOnPhone` and `hideSubtitleOnPhone` follow the real header's placement rules. Use it for full-page loads; in-app loads keep the real header. It draws no heading landmark or words, so the loading page supplies its own hidden heading outside the layer. Companion stories compare both action layouts within 2 px at 1512 and 390.

@@ -39,3 +39,7 @@
 | `fill` | `boolean` | The page fills the main area, unpadded, for a page with its own columns. The sidebar is unchanged. |
 | `panel` | `ReactNode` | A panel at the right of the page. While it says it is a modal sheet, everything else is inert. |
 | `children` | `ReactNode` | Required. |
+
+## Loading shapes
+
+With `skeleton`, the compact bar draws the mark, business line and Menu as shapes. The sidebar column and main area use divs with the real layout classes instead of aside/main landmarks; the full-page loader supplies one real main and its hidden heading outside the layer. `sidebar`, `banner`, `fill` and `children` still determine the layout. Put the shell in `SkeletonScreen`'s hidden, inert layer and pass `SidebarSkeleton` and `ReviewerBarSkeleton`. The Skeleton stories compare both frames within 2 px at 1512 and 390.

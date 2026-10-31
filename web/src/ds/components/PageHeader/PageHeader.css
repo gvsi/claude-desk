@@ -84,3 +84,9 @@
     display: none;
   }
 }
+
+.cd-page-header .cd-page-header__phone-line { display: none; }
+@media (max-width: 639.98px) {
+  .cd-page-header .cd-page-header__phone-line { display: flex; }
+  .cd-page-header .cd-page-header__wide-line { display: none; }
+}
