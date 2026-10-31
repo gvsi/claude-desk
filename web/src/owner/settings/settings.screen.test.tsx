@@ -186,6 +186,26 @@ describe('Settings', () => {
     expect(saved()).toBe(true);
   });
 
+  it('answering_off_hands_a_price_question_to_maria', async () => {
+    // Turned off here, Answering is what a visitor's chat goes by: a price question gets the
+    // handoff card, as asking for Maria does, with no quote and nothing decided for it.
+    const { screen } = await renderRoute(GENERAL);
+    await main(screen).getByRole('switch', { name: 'Answering' }).click();
+    await expect.poll(() => mockStore.world.desk(RIVERA.deskId)?.summary.answering).toBe(false);
+    expect(requests('setAnswering').map((r) => r.body)).toEqual([{ on: false }]);
+
+    const params = { slug: RIVERA.slug };
+    expect(await mockStore.dispatch('openSession', { params })).toMatchObject({ status: 200 });
+    expect(await mockStore.dispatch('sendMessage', { params, body: { text: 'How much to clear a drain?' } })).toMatchObject({ status: 202 });
+    const session = mockStore.visitorSession(RIVERA.slug);
+    expect(session?.ownerPreview).toBe(false);
+    await expect.poll(() => session?.events.some(({ ev }) => ev.type === 'turn_end'), { timeout: 3_000 }).toBe(true);
+    const shown = session?.events.flatMap(({ ev }) => (ev.type === 'message' ? ev.blocks.map((block) => block.template) : []));
+    expect(shown).toEqual(['handoff']);
+    const decided = [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === session?.state.session_id);
+    expect(decided).toEqual([]);
+  });
+
   it('delete_desk_confirms', async () => {
     const { screen, router } = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
     const section = main(screen).getByRole('region', { name: 'Delete this Desk' });
