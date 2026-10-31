@@ -103,6 +103,11 @@ async function cpaAt(kind: string): Promise<SetupState> {
 }
 
 describe('setup consultant run and decisions', () => {
+  it('names_the_cpa_booking_free_intro_call', async () => {
+    const state = await cpaAt('schedule');
+    expect(state.messages.at(-1)?.card?.job?.config).toEqual({ block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 });
+  });
+
   it('connects_google_calendar_in_chat_without_adding_unsupported_tools', async () => {
     let state = await startState();
     const id = state.interview_id;
@@ -115,6 +120,7 @@ describe('setup consultant run and decisions', () => {
     state = await setupState('setupProposal', id, { accept: true }, calendar.proposal_id);
     expect(state.messages.find(({ card }) => card?.proposal_id === calendar.proposal_id)?.card?.state).toBe('accepted');
     expect(state.messages.at(-1)!.card?.job?.job).toBe('schedule');
+    expect(state.messages.at(-2)).toMatchObject({ role: 'claude', text: 'Connected. Now the intro call.', card: null });
     expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
     state = await setupState('setupSuggestions', id, {});
     expect(state.messages.flatMap(({ card }) => card?.connector ? [card.connector.connectable] : [])).toEqual([true, true]);
@@ -151,12 +157,25 @@ describe('setup consultant run and decisions', () => {
     expect((response.body as SetupState).messages.some(({ card }) => card)).toBe(false);
   });
 
+  it('keeps_questions_done_only_when_no_closing_plan_is_written', async () => {
+    let state = await startState('Rivera Plumbing. We fix leaks.');
+    state = await setupState('setupConsent', state.interview_id, { allow: false });
+    for (const { key: question } of SETUP_QUESTIONS) state = await setupState('setupAnswer', state.interview_id, { question, text: 'Yes' });
+    expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
+    expect(state.messages.filter(({ text }) => text === QUESTIONS_DONE)).toHaveLength(1);
+    let consultant = await cpaAt('money');
+    consultant = await setupState('setupAnswer', consultant.interview_id, { question: consultant.question, text: 'Ask me before every payment' });
+    expect(consultant.messages.at(-1)?.text).toContain('Here’s how your Desk will work.');
+    expect(consultant.messages.some(({ text }) => text === QUESTIONS_DONE)).toBe(false);
+  });
+
   it('suggestions_preserve_a_scripted_runs_answered_money_limit', async () => {
     let state = await startState('Rivera Plumbing. We fix leaks.');
     state = await setupState('setupConsent', state.interview_id, { allow: false });
     for (const { key: question } of SETUP_QUESTIONS.slice(0, -1)) state = await setupState('setupAnswer', state.interview_id, { question, text: question === 'money_limit' ? 'Up to $500' : 'Yes' });
     state = await setupState('setupSuggestions', state.interview_id, {});
-    expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
+    expect(state.messages.at(-1)?.text).toContain('Your plan for Rivera Plumbing:');
+    expect(state.messages.some(({ text }) => text === QUESTIONS_DONE)).toBe(false);
     expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 50000 } });
   });
 
@@ -203,8 +222,8 @@ describe('setup consultant run and decisions', () => {
   it('the_closing_plan_never_offers_a_declined_unpriced_payment', async () => {
     let state = await cpaAt('intake');
     state = await setupState('setupSuggestions', state.interview_id, {});
-    expect(state.messages.at(-2)?.text).not.toMatch(/retainer|payment link/i);
-    expect(state.messages.at(-2)?.text).toContain('Here’s how your Desk will work.');
+    expect(state.messages.at(-1)?.text).not.toMatch(/retainer|payment link/i);
+    expect(state.messages.at(-1)?.text).toContain('Here’s how your Desk will work.');
   });
 
   it('a_typed_payment_amount_prices_only_that_job_and_never_grants_money_permission', async () => {
@@ -333,7 +352,8 @@ describe('setup consultant run and decisions', () => {
     expect(extra[0]).toMatchObject({ role: 'owner', text: 'Use your suggestions' });
     expect(extra[1]).toMatchObject({ role: 'claude', text: 'Here’s the rest, as I’d set it up.' });
     expect(state.messages.flatMap(({ card }) => card ? [card.state] : [])).toEqual(['accepted', 'accepted', 'accepted', 'accepted', 'declined', 'accepted']);
-    expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
+    expect(state.messages.at(-1)?.text).toContain('Here’s how your Desk will work.');
+    expect(state.messages.some(({ text }) => text === QUESTIONS_DONE)).toBe(false);
     expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
   });
 

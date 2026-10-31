@@ -532,7 +532,7 @@ function consultantProposals(): ProposalCard[] {
       job: 'schedule', title: 'Book a free intro call', autonomy: 'auto', who: 'New clients',
       why: 'New clients pick a time for their free consult without emailing back and forth.',
       how: 'New clients pick a time within your opening hours and book a 20-minute call.',
-      can_do_today: true, config: { block: 'typed_booking', appointment_type: 'Intro consult', minutes: 20 },
+      can_do_today: true, config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 },
     },
     {
       job: 'intake', title: 'Ask new clients three questions', autonomy: 'auto', who: 'New clients, when they book',
@@ -576,6 +576,7 @@ export const CPA_COPY = {
   first: 'Who do you work with most?',
   clients: ['Both, about evenly', 'Mostly individuals', 'Mostly small businesses'],
   consult: 'Got it. First, intro calls. To book one I need to know when you’re free, so I’ll use your opening hours from your website, Monday to Friday, 9 to 6.',
+  calendarConnected: 'Connected. Now the intro call.',
   intake: 'Great, I’ll set it up this way. Next: the questions new clients answer before their call.',
   updated: 'Sure. Here’s the updated version.',
   retainer: 'Got it. Once you’ve priced the work, want the Desk to send the client a retainer link?',
@@ -623,7 +624,7 @@ function nextConsultant(interview: Interview): void {
     }
     const job = next.job;
     const intro = next.connector?.app === 'google_calendar' ? CPA_COPY.consult
-      : job?.job === 'schedule' ? null
+      : job?.job === 'schedule' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'google_calendar') ? CPA_COPY.calendarConnected : null
       : job?.job === 'intake' ? CPA_COPY.intake
       : job?.job === 'payment' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'stripe') ? CPA_COPY.stripeConnected : CPA_COPY.retainer
       : next.connector?.app === 'stripe' ? CPA_COPY.stripe
@@ -678,8 +679,9 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
     say(interview, 'claude', closing.join('\n\n'));
   } else if (suggestions) {
     say(interview, 'claude', `Your plan for ${interview.business}: answer from what you have shared and take customer details. Any limit you have not answered asks you first. For example: “Can you help with this?” leaves a request; “When can we talk?” asks for a time.`);
+  } else {
+    say(interview, 'claude', QUESTIONS_DONE);
   }
-  say(interview, 'claude', QUESTIONS_DONE);
   moveTo(interview, 'tools');
   const acceptedStripe = interview.state.messages.some(({ card }) => card?.state === 'accepted' && card.connector?.app === 'stripe' && card.connector.connectable);
   if (acceptedStripe) {

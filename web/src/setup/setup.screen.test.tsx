@@ -2981,6 +2981,7 @@ describe('consultant setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     const card = screen.getByRole('article', { name: 'Google Calendar', exact: true });
     await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
+    expect(card.getByText('Mock', { exact: true }).element().closest('.cd-connector-name--inline')).not.toBeNull();
     await card.getByRole('button', { name: action, exact: true }).click();
     await expect.element(screen.getByRole('article', { name: 'Book a free intro call', exact: true })).toBeVisible();
     await expect.element(card.getByText(action === 'Connect' ? 'Connected' : 'Not now', { exact: true })).toBeVisible();
