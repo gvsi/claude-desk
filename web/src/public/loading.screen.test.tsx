@@ -4,7 +4,7 @@ import { ROUTES } from '../api/routes.ts';
 import { newIdempotencyKey } from '../api/http.ts';
 import type { SetupState } from '../api/views.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
-import { RIVERA } from '../mocks/seed.ts';
+import { BUSINESS, RIVERA } from '../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { holdReads } from '../test/holdReads.ts';
@@ -108,7 +108,7 @@ it('setup_preview_opens_in_place', async () => {
   const read = holdReads(ROUTES.publicDesk.path.replace('{slug}', state.slug));
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    // Setup's owner name comes from its interview; keep this preview's existing geometry checks.
+    // The interview's owner-name change is recorded in setup_preview_ask_moves_once_for_the_owner_name.
     anchors: CHAT_ANCHORS.filter((anchor) => anchor.name !== 'concept-footer' && anchor.name !== 'ask-owner'),
     open: async () => {
       await renderRoute(`/app/setup/${state.interview_id}`, { pollScale: 100 });
@@ -120,6 +120,73 @@ it('setup_preview_opens_in_place', async () => {
     release: read.release,
   });
   await expectScreenBasics(document.body, { owner: true });
+});
+
+it('setup_preview_ask_moves_once_for_the_owner_name', async () => {
+  const started = await mockStore.dispatch('startSetup', { body: {
+    description: "Rivera Plumbing. I'm Maria, a plumber in Oakland.",
+    timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey(),
+  } });
+  if ('network' in started || started.status !== 201) throw new Error('Setup did not start');
+  const state = started.body as SetupState;
+  const params = { id: state.interview_id };
+  await mockStore.dispatch('setupConsent', { params, body: { allow: true } });
+  for (const question of SETUP_QUESTIONS) {
+    await mockStore.dispatch('setupAnswer', { params, body: { question: question.key, text: 'Yes, that works.' } });
+  }
+  await mockStore.dispatch('setupRules', { params });
+  await mockStore.dispatch('setupSituations', { params });
+  await mockStore.dispatch('setupSafetyCheck', { params });
+  await mockStore.dispatch('setupConfirm', { params });
+  const read = holdReads(ROUTES.publicDesk.path.replace('{slug}', state.slug));
+  await renderRoute(`/app/setup/${state.interview_id}`, { pollScale: 100 });
+  await vi.waitFor(() => expect(read.held()).toBe(1));
+  const preview = document.querySelector('.cd-setup-live__preview')!;
+  await vi.waitFor(() => expect(preview.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  const bounds = (element: Element) => {
+    const { top, left, width, height } = element.getBoundingClientRect();
+    return { top, left, width, height };
+  };
+  const shape = bounds(preview.querySelector('[data-skeleton-anchor="ask-owner"]')!);
+  const changes: { bounds: ReturnType<typeof bounds>; state: string | undefined }[] = [];
+  const record = () => {
+    const layer = preview.querySelector<HTMLElement>('.cd-skeleton-screen__layer');
+    // Read the real button from its first commit, while the shape is still fading over it.
+    const ask = preview.querySelector('.cd-public-shell__chat-head > button')
+      ?? layer?.querySelector('[data-skeleton-anchor="ask-owner"]');
+    if (!ask) return;
+    const next = bounds(ask);
+    if (JSON.stringify(changes.at(-1)?.bounds) !== JSON.stringify(next)) changes.push({ bounds: next, state: layer?.dataset.state });
+  };
+  record();
+  const observer = new MutationObserver(record);
+  observer.observe(preview, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] });
+  let frame = 0;
+  const sampleFrame = () => { record(); frame = requestAnimationFrame(sampleFrame); };
+  frame = requestAnimationFrame(sampleFrame);
+  try {
+    read.release();
+    await vi.waitFor(() => expect(preview.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+    const button = preview.querySelector<HTMLButtonElement>('.cd-public-shell__chat-head > button')!;
+    expect(button.textContent).toBe('Ask for Maria');
+    const real = bounds(button);
+    const context = document.createElement('canvas').getContext('2d')!;
+    context.font = getComputedStyle(button).font;
+    const ownerNameDifference = context.measureText(`Ask for ${BUSINESS.owner_display_name}`).width
+      - context.measureText('Ask for Maria').width;
+    expect(ownerNameDifference).toBeGreaterThan(2);
+    expect(Math.abs((shape.width - real.width) - ownerNameDifference)).toBeLessThanOrEqual(2);
+    expect(Math.abs((real.left - shape.left) - ownerNameDifference)).toBeLessThanOrEqual(2);
+    for (const edge of ['top', 'height'] as const) expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
+    expect(Math.abs((real.left + real.width) - (shape.left + shape.width))).toBeLessThanOrEqual(2);
+    // Keep sampling after the fade: landing is the only accepted bounds change.
+    await new Promise<void>((resolve) => setTimeout(resolve, 200));
+    expect(changes).toEqual([{ bounds: shape, state: 'shown' }, { bounds: real, state: 'leaving' }]);
+  } finally {
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+    read.release();
+  }
 });
 
 it('agents_page_opens_in_place_desktop', async () => {
