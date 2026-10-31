@@ -1,20 +1,21 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useNavigate, useParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
 
-import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
+import { ApiError, observeRequests, ownerErrorCopy, request } from '../api/http.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import type { SetupState, SetupStep } from '../api/views.ts';
 import { Button, ConceptFooter, LoadingLine, Mark, Notice, Steps, Wordmark } from '../ds/index.ts';
 import { inApp, useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../owner/inAppLinks.ts';
-import { desksQuery, findDesk } from '../owner/useDesks.ts';
+import { carrySetup, desksQuery, findDesk, invalidateCopy } from '../owner/useDesks.ts';
 import { SETUP_COPY, STEP_INDEX, STEP_NAMES } from './copy.ts';
 import { LiveStep } from './LiveStep.tsx';
 import { QuestionsStep } from './QuestionsStep.tsx';
 import { RulesStep } from './RulesStep.tsx';
 import { SafetyStep } from './SafetyStep.tsx';
 import { StartStep } from './StartStep.tsx';
+import { SETUP_REACHES, laterStep } from './shared.ts';
 import { ToolsStep } from './ToolsStep.tsx';
 
 import './SetupPage.css';
@@ -56,6 +57,11 @@ interface SetupShellProps {
   exitTo: string;
   /** The preview's wider column. */
   wide?: boolean;
+  /**
+   * What an in-app link out of setup waits for before it goes, such as the interview carried into
+   * the copy's Desks, so the page it opens is drawn from it.
+   */
+  beforeLeave?: () => Promise<void>;
   children: ReactNode;
 }
 
@@ -65,13 +71,18 @@ interface SetupShellProps {
  * business once known, the five steps and "Save and exit"; one column; the concept footer at the
  * window's foot.
  */
-function SetupShell({ business, step, live, exitTo, wide = false, children }: SetupShellProps) {
+function SetupShell({ business, step, live, exitTo, wide = false, beforeLeave, children }: SetupShellProps) {
   const navigate = useNavigate();
+  // An in-app link goes once `beforeLeave` is done, whether or not it worked.
+  const leave: NavigateFunction = (to: To | number, options?: NavigateOptions) => {
+    const go = () => (typeof to === 'number' ? navigate(to) : navigate(to, options));
+    return beforeLeave === undefined ? go() : beforeLeave().then(go, go);
+  };
   const compact = useSyncExternalStore(subscribeCompactBar, isCompactBar, () => false);
   // Setup's name, as its steps are labelled, at every step; the preview's public page leaves it be.
   useDocumentTitle(inApp(SETUP_COPY.stepsLabel));
   return (
-    <div className="cd-setup" onClick={followInAppLinks(navigate)}>
+    <div className="cd-setup" onClick={followInAppLinks(leave)}>
       <header className="cd-setup__bar">
         <div className="cd-setup__lead">
           <span className="cd-setup__brand">
@@ -120,22 +131,93 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const desks = useQuery({ ...desksQuery(), enabled: deskId !== null });
   const desk = deskId === null || desks.data === undefined ? null : (findDesk(desks.data, deskId)?.desk ?? null);
   const business = desk?.business_name ?? null;
-  /** The interview moved on: the screen shows its next step, as the API's state now says. */
-  const moveTo = useCallback(
-    (step: SetupStep) => queryClient.setQueryData<SetupState>(setupQuery(setupId).queryKey, (now) => (now === undefined ? now : { ...now, step })),
-    [queryClient, setupId],
+
+  /**
+   * The step the API has confirmed the interview at: the step it was read at, then what the API's
+   * answers say (an answer, a re-read) and the step each request that moves it on reaches once it
+   * succeeds (`SETUP_REACHES`). The page's own step can run ahead of it: "Continue" on the tools
+   * shows the rules before their draft is made, which may never be. Only the confirmed step is
+   * carried into the copy's Desks, and setup reopens at it.
+   */
+  const confirmed = useRef<SetupStep | null>(null);
+  if (confirmed.current === null && setup.data !== undefined) confirmed.current = setup.data.step;
+  const confirm = useCallback((step: SetupStep) => {
+    confirmed.current = confirmed.current === null ? step : laterStep(confirmed.current, step);
+  }, []);
+  useEffect(
+    () =>
+      observeRequests((outcome) => {
+        const reached = outcome.ok ? SETUP_REACHES[outcome.key] : undefined;
+        if (reached !== undefined) confirm(reached);
+      }),
+    [confirm],
   );
+  /** The interview as setup holds it, at the step the API confirmed. */
+  const asConfirmed = useCallback((now: SetupState): SetupState => ({ ...now, step: confirmed.current ?? now.step }), []);
+
+  /**
+   * The interview as it now stands. The copy's Desks name its step (`DeskSummary.setup`), so a new
+   * step has the confirmed one written into them (`carrySetup`), which also reads them again in the
+   * background: Today, opened next, would otherwise name the step before.
+   */
+  const update = useCallback(
+    (next: (now: SetupState | undefined) => SetupState | undefined) => {
+      const key = setupQuery(setupId).queryKey;
+      const was = queryClient.getQueryData<SetupState>(key)?.step;
+      const now = queryClient.setQueryData<SetupState>(key, next);
+      if (now !== undefined && now.step !== was) void carrySetup(queryClient, asConfirmed(now));
+    },
+    [queryClient, setupId, asConfirmed],
+  );
+  /** The page moves on: the screen shows the next step; the API confirms it with that step's own request. */
+  const moveTo = useCallback((step: SetupStep) => update((now) => (now === undefined ? now : { ...now, step })), [update]);
   /** The API answered with the interview as it stands. */
-  const onState = useCallback((next: SetupState) => queryClient.setQueryData(setupQuery(setupId).queryKey, next), [queryClient, setupId]);
+  const onState = useCallback(
+    (next: SetupState) => {
+      confirm(next.step);
+      update(() => next);
+    },
+    [confirm, update],
+  );
+  /**
+   * Leaving setup carries the interview as it stands into the copy's Desks once more (then they are
+   * read again): the steps' own reads (the draft, the situations, the safety check) can have moved it
+   * on in the API while a read of the Desks still out was answered with the step before, and the
+   * page that opens next names the step setup holds, even while the Desks can't be read. An in-app
+   * link out ("Save and exit", "Go to Today") goes once it is written (`SetupShell`'s `beforeLeave`);
+   * any other way out (Back, say) carries it as setup closes.
+   */
+  const carry = useCallback((): Promise<void> => {
+    const now = queryClient.getQueryData<SetupState>(setupQuery(setupId).queryKey);
+    if (now !== undefined) return carrySetup(queryClient, asConfirmed(now));
+    void invalidateCopy(queryClient);
+    return Promise.resolve();
+  }, [queryClient, setupId, asConfirmed]);
+  const leftByLink = useRef(false);
+  const beforeLeave = useCallback(() => {
+    leftByLink.current = true;
+    return carry();
+  }, [carry]);
+  useEffect(
+    () => () => {
+      // Setup reopens at the step the API confirmed, not one only this page showed.
+      queryClient.setQueryData<SetupState>(setupQuery(setupId).queryKey, (now) => (now === undefined ? now : asConfirmed(now)));
+      if (!leftByLink.current) void carry();
+    },
+    [carry, queryClient, setupId, asConfirmed],
+  );
   /** The interview read again, after a write whose answer was lost; null when it can't be read. */
   const reread = useCallback(
     () =>
       queryClient
         // One read, no retry: when it fails, the step says the outcome is unknown and the owner tries again.
         .fetchQuery({ ...setupQuery(setupId), staleTime: 0, retry: false })
-        .then((next) => next)
+        .then((next) => {
+          confirm(next.step);
+          return next;
+        })
         .catch(() => null),
-    [queryClient, setupId],
+    [queryClient, setupId, confirm],
   );
 
   const state = setup.data;
@@ -209,6 +291,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       live={state.step !== 'live' ? undefined : wentLiveHere ? 'draw' : 'drawn'}
       exitTo={todayPath(state.desk_id)}
       wide={state.step === 'preview'}
+      beforeLeave={beforeLeave}
     >
       {body}
     </SetupShell>

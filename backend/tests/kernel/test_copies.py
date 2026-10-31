@@ -3,6 +3,7 @@
 import ast
 import json
 import re
+import unicodedata
 from datetime import time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -15,13 +16,16 @@ from sqlalchemy import select
 from desk.contracts import Claim
 from desk.db.models import (ActorSession, Business, CalendarSlot, Copy, Desk, Document, Fact, LedgerEntry,
                              NotificationPref, Person, PriceItem, Tool)
+from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.db.session import COPY_SETTING, database_url, libpq_url
 from desk import presets
-from desk.kernel_service import adapters, auth, desks, mcp_client, seed
+from desk.kernel_service import adapters, auth, desks, mcp_client, reply_check, seed
 from desk.kernel_service.repo import Ctx, KernelFailure, new_id
 
 from .fakes import FakeAdapter
 from .helpers import kernel_ctx, rows_of
+from .test_adapters import visitor_of
+from .test_context import context_of
 
 TZ = ZoneInfo("America/Los_Angeles")
 
@@ -103,16 +107,19 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     assert windows.value == desk_kernel.canonical_json(json.dumps([w.model_dump(mode="json") for w in desk.hours]))
     assert [(w.days, w.start, w.end) for w in desk.hours] == [
         (["mon", "tue", "wed", "thu", "fri"], time(8), time(18)), (["sat"], time(9), time(13))]
-    # the Desk's creation is the first entry on its ledger, then its two mock payments tools pinned
+    # the Desk's creation and two knowledge items are first, then its two mock payments tools pinned
     # (plan 01c), its rules' activation, then the held request on Today
     # (test_adapters.test_copy_seeds_one_held_quote)
     entries = await rows_of(app, copy_id, select(LedgerEntry).order_by(LedgerEntry.seq))
     assert [(e.desk_id, e.seq, e.event.kind) for e in entries] == [
-        (desk_id, 1, "desk_data"), (desk_id, 2, "tool_pin"), (desk_id, 3, "tool_pin"), (desk_id, 4, "policy"),
-        (desk_id, 5, "session"), (desk_id, 6, "decide")]
+        (desk_id, 1, "desk_data"), (desk_id, 2, "desk_data"), (desk_id, 3, "desk_data"),
+        (desk_id, 4, "tool_pin"), (desk_id, 5, "tool_pin"), (desk_id, 6, "policy"),
+        (desk_id, 7, "session"), (desk_id, 8, "decide")]
     pins = mcp_client.seed_pins()
-    assert [e.event.summary for e in entries[:4]] == [
+    assert [e.event.summary for e in entries[:6]] == [
         {"part": "desk", "created": True},
+        {"part": "knowledge", "item_id": "kn-website", "owner_only_forced": False},
+        {"part": "knowledge", "item_id": "kn-price-list", "owner_only_forced": False},
         {"tool": "payments.create_refund", "event": "connected", "status": "enabled",
          "definition_sha256": pins["create_refund"]},
         {"tool": "payments.list_charges", "event": "connected", "status": "enabled",
@@ -143,6 +150,56 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     imported = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)} | {
         alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
     assert {name for name in imported if name.split(".")[0] not in ("datetime", "typing")} == {"desk.contracts"}
+
+
+SEEDED_KNOWLEDGE = [  # (item ID, source, title), as Settings › Knowledge lists them on a new copy
+    ("kn-website", "website", "Your website, rivera-plumbing.example, read during setup"),
+    ("kn-price-list", "setup", "Price list, from your answers in setup"),
+]
+
+
+async def test_copy_seeds_the_website_and_price_list_knowledge(app, client):
+    """A new copy's Desk knows what setup would have given it, everyone may read both items, and
+    each was stored as an owner's item is: canary-checked and ledgered `desk_data`."""
+    copy, visitor = await visitor_of(app, client)
+    stored = await rows_of(app, copy.copy_id, select(KnowledgeRow).order_by(KnowledgeRow.item_id))
+    assert sorted((row.desk_id, row.item_id, row.source, row.title, row.readers) for row in stored) == sorted(
+        (copy.desk_id, item_id, source, title, ["public"]) for item_id, source, title in SEEDED_KNOWLEDGE)
+    texts = {item.item_id: item.text for item in seed.RIVERA_KNOWLEDGE}       # as the seed keeps them
+    assert {row.item_id: row.text for row in stored} == texts
+    entries = await rows_of(app, copy.copy_id, select(LedgerEntry).where(LedgerEntry.desk_id == copy.desk_id)
+                            .order_by(LedgerEntry.seq))
+    assert [entry.event.summary for entry in entries if entry.event.kind == "desk_data"
+            and entry.event.summary.get("part") == "knowledge"] == [
+        {"part": "knowledge", "item_id": item_id, "owner_only_forced": False} for item_id, _, _ in SEEDED_KNOWLEDGE]
+    # a stranger's context carries both, and the API's view shows their titles and texts
+    context = await context_of(client, visitor.session_id, visitor.headers)
+    assert sorted((item.item_id, item.source, item.title, item.text, item.label.readers)
+                  for item in context.knowledge) == sorted(
+        (item_id, source, title, texts[item_id], ["public"]) for item_id, source, title in SEEDED_KNOWLEDGE)
+    assert api_rows(copy.copy_id, "SELECT item_id, source, title, text, readers FROM kernel_ro.knowledge_items"
+                                  " ORDER BY item_id") == sorted(
+        (item_id, source, title, texts[item_id], ["public"]) for item_id, source, title in SEEDED_KNOWLEDGE)
+
+
+def test_seeded_knowledge_states_no_amount(frozen_clock):
+    """A price reaches a visitor only on a quote card built from the price list, so the seeded
+    knowledge names the price list's items and states no amount: no digit, no currency, and nothing
+    the reply check's prose scan would stop if Claude repeated it word for word."""
+    _, desk = seed.rivera_seed(frozen_clock.now())
+    for item in seed.RIVERA_KNOWLEDGE:
+        for text in (item.title, item.text):
+            assert not re.search(r"\d|\bcents?\b|\bdollars?\b", text, re.IGNORECASE), text
+            assert not any(unicodedata.category(ch) == "Sc" for ch in text), text      # no currency sign
+            assert reply_check.scan_prose(text) == [], text
+    [price_list] = [item for item in seed.RIVERA_KNOWLEDGE if item.item_id == "kn-price-list"]
+    assert all(price.title.lower() in price_list.text.lower() for price in desk.price_items)
+    [website] = [item for item in seed.RIVERA_KNOWLEDGE if item.item_id == "kn-website"]
+    [area] = [claim.value for claim in desk.charter if claim.key == "policy:service_area"]
+    assert area in website.text                                                  # as the charter states it
+    assert website.text == (
+        "Rivera Plumbing is Maria Rivera's home plumbing business: drain clearing, leak repair and "
+        "water heater flushes. " + area)
 
 
 async def test_copies_are_isolated(app, client):

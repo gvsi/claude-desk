@@ -13,7 +13,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    route, in T2 by the execution of an adapter that writes the session's own rows
    (`locks_session`, a verification start) on either path, and by the owner's writes that close
    sessions (`desks.verified_sessions` when a person is removed or given another contact, a
-   Desk's deletion); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any
+   Desk's deletion), and by the turn's start (`turn.start_turn`, which writes `last_language` and
+   nothing else); `FOR SHARE` by an allow's execution in T1, and in T2 by the execution of any
    other adapter, on either path, so a Desk's deletion, which closes the session `FOR UPDATE`,
    commits before T2 takes the row or waits until T2 commits; written by a visitor's or agent's
    own requests (`last_seen_at`, `last_language`), the reply check's only at its end, just before
@@ -115,13 +116,15 @@ Activation (`activation.confirm`) holds no session, decision or execution row an
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the
 payment links its `ON_ACTIVATE` hooks lock and move (Plan 01c; a hook appends nothing), then the
 ledger head: its own `policy` entry first, then the hooks' `payment` events. A draft takes its
-key's advisory lock before the `versions` lock. The rebuild of a version an earlier kernel stored
+key's advisory lock before the `versions` lock. The rebuild of a version due one
 (`activation.rebuild_version`), at startup or in the background while the kernel serves, takes the
-same `versions` lock and active row `FOR UPDATE`, then the ledger head; the owner alert it writes
-when it can't rebuild is an insert under a fresh key. Before the rebuild, in a transaction of its
-own, startup or the background gives a Desk the native tools it has no row for
-(`desks.add_native_tools`) under the Desk row `FOR UPDATE`, as an owner's write holds it: the rows
-are inserts under fresh keys, and its `desk_data` entry takes the ledger head. Before both, the
+same `versions` lock and active row `FOR UPDATE`, reads the Desk's tools rows without a lock, then
+takes the ledger head; the owner alert it writes when it can't rebuild is an insert under a fresh
+key. Before the rebuild, in a transaction of its own, startup or the background brings a Desk's
+native tools up to date (`desks.update_native_tools`) under the Desk row `FOR UPDATE`, as an
+owner's write holds it, then its native tools rows `FOR UPDATE` in tool order, as a confirm that
+enables tools takes them (`mcp_pins.enable_tools`, which asks for no Desk row): new rows are
+inserts under fresh keys, and its `desk_data` entry takes the ledger head. Before both, the
 owner alert the background sends while a version waits (`activation._alert_waiting`) runs in a
 transaction of its own that takes the Desk's `waiting-alert` advisory lock first, before any row,
 and nothing else takes that lock; then the Desk row `FOR SHARE`, held to its commit, so a Desk's
@@ -162,7 +165,7 @@ import logging
 import re
 import secrets
 import traceback
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -436,24 +439,34 @@ async def copy_ids(runtime: KernelRuntime) -> list[str]:
         return sorted((await conn.scalars(select(func.kernel.copy_ids()))).all())
 
 
-async def desks_to_bring_up(runtime: KernelRuntime, copy_id: str, tools: Iterable[str],
-                            baseline_sha256: str) -> list[str]:
+async def desks_to_bring_up(runtime: KernelRuntime, copy_id: str, native: Mapping[str, str],
+                            due: Callable[[PolicyVersion, list[Tool]], bool]) -> list[str]:
     """The Desks of `copy_id`, in ID order, that the startup rebuild brings up: each with no
-    `tools` row for one of `tools`, the native tools the kernel registers (a Desk created before
-    one of them was), and each whose active rules version was stored under a baseline other than
-    `baseline_sha256`, the one the kernel enforces; never a deleted Desk, which decides nothing and
+    `tools` row for one of the native tools the kernel registers (a Desk created before one of them
+    was), or with a row for one at another `profile_sha256` than `native` names for it (written by
+    an earlier kernel), and each whose active rules version `due` says is to be rebuilt, given the
+    Desk's `tools` rows (`activation.rebuild_due`); never a deleted Desk, which decides nothing and
     whose owner has nothing to be told. Read through the copy's own `KernelRepo`, as
-    `orphan_intents` reads each copy, so row-level security still holds the reads to one copy."""
-    wanted = set(tools)
+    `orphan_intents` reads each copy, so row-level security still holds the reads to one copy. A
+    version is read without its cards and Cedar, only the columns `due` needs."""
     copy = KernelRepo(copy_id)
     async with runtime.sessions() as db:
         copy.bind(db)
         desk_ids = (await db.scalars(copy.scoped(select(Desk.desk_id).where(Desk.deleted_at.is_(None))
                                                  .order_by(Desk.desk_id)))).all()
-        rows = await db.execute(copy.scoped(select(Tool.desk_id, Tool.tool).where(Tool.tool.in_(sorted(wanted)))))
-        have: dict[str, set[str]] = {}
-        for desk_id, tool in rows:
-            have.setdefault(desk_id, set()).add(tool)
-        outdated = set((await db.scalars(copy.scoped(select(PolicyVersion.desk_id).where(
-            PolicyVersion.status == "active", PolicyVersion.baseline_sha256 != baseline_sha256)))).all())
-    return [desk_id for desk_id in desk_ids if have.get(desk_id, set()) != wanted or desk_id in outdated]
+        tools: dict[str, list[Tool]] = {}
+        for row in await db.scalars(copy.scoped(select(Tool).order_by(Tool.desk_id, Tool.tool))):
+            tools.setdefault(row.desk_id, []).append(row)
+        versions = {row.desk_id: row for row in await db.execute(copy.scoped(select(
+            PolicyVersion.desk_id, PolicyVersion.version, PolicyVersion.baseline_sha256,
+            PolicyVersion.invariants_sha256, PolicyVersion.profiles_sha256, PolicyVersion.auto_money_cap_cents,
+        ).where(PolicyVersion.status == "active")))}
+
+    def found(desk_id: str) -> bool:
+        pins = {row.tool: row.profile_sha256 for row in tools.get(desk_id, [])}
+        if any(pins.get(tool) != sha for tool, sha in native.items()):
+            return True
+        version = versions.get(desk_id)
+        return version is not None and due(version, tools.get(desk_id, []))
+
+    return [desk_id for desk_id in desk_ids if found(desk_id)]

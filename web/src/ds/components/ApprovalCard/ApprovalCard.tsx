@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -7,6 +8,7 @@ import {
   type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from 'react';
 
 import type { ApprovalAnswer, Decision, DecisionState } from '../../../api/contracts.ts';
@@ -17,7 +19,7 @@ import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { OWNER_STATE_WORDS, receiptTone } from '../MarginReceipt/receiptTone.ts';
 import { errorCopy } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
-import { StatusDot } from '../StatusDot/StatusDot.tsx';
+import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
 
 import './ApprovalCard.css';
 
@@ -77,6 +79,12 @@ const STATUS_LINES = {
 const SENDING_LINE = 'Sending your answer';
 const ERROR_LINE = "We couldn't confirm your answer. Try again, or reload to see where it stands.";
 
+/**
+ * How long past its own transition the settle waits for the height's `transitionend` before it
+ * ends itself: a settle whose height doesn't change, or a browser that drops the event, still ends.
+ */
+const SETTLE_SLACK_MS = 100;
+
 export interface ApprovalCardProps {
   /** The held request, as the kernel returned it. Its `state` and `answers` decide what the card offers. */
   decision: Decision;
@@ -104,9 +112,20 @@ export interface ApprovalCardProps {
   /**
    * Vision pages only, which make no requests: the answers keep their look, focus and tab order, a
    * menu still opens, and choosing an answer does nothing. The card never locks or shows a spinner,
-   * and `onAnswer` is never called.
+   * `onAnswer` is never called, and no answer ever lands.
    */
   inertAnswers?: boolean;
+  /**
+   * What sits under the card, outside it, such as the rule an "always" answer drafted and Today's
+   * Dismiss once the request is answered. Given with an answer given on this card, it fades in and
+   * settles with the answered card, inside its eased height.
+   */
+  after?: ReactNode;
+  /**
+   * Called with the card's own box (without `after`) as it mounts and unmounts. Given, the box takes
+   * focus (`tabIndex={-1}`), so a screen can bring the request into view and focus.
+   */
+  cardRef?: (el: HTMLDivElement | null) => void;
 }
 
 /** The click that is waiting for its result, and the screen's `pending` and `error` it last saw. */
@@ -118,6 +137,23 @@ interface AnswerLock {
   key: string;
   pending: boolean;
   error: boolean | string | undefined;
+  /** The request as it was held when the answer was given, and whether `after` was shown then. */
+  held: Decision;
+  hadAfter: boolean;
+}
+
+/**
+ * An answer given on this card landing: the held request drawn as it left, in the outgoing layer,
+ * while the answered one fades in and the card eases to its answered height.
+ */
+interface Settle {
+  /** The request as it was held, its chosen side busy and the other waiting, as they were. */
+  held: Decision;
+  side: Side;
+  /** The dot left held, so it pulses once. */
+  pulse: boolean;
+  /** `after` came with the answer, so it fades in and its height eases in with the card's. */
+  afterNew: boolean;
 }
 
 /** The menu that is open, and where focus lands in it, for the answers it was opened on. */
@@ -168,11 +204,37 @@ function statusLine(state: DecisionState): string {
   return Object.hasOwn(STATUS_LINES, state) ? STATUS_LINES[state] : errorCopy('conflict');
 }
 
+/** Each side the answers offer, in the card's order, with its answers. */
+function sidesOf(offered: readonly ApprovalAnswer[]): { side: Side; answers: ApprovalAnswer[] }[] {
+  return SIDE_ORDER.map((side) => ({ side, answers: offered.filter((value) => ANSWERS[value].side === side) })).filter(
+    ({ answers }) => answers.length > 0,
+  );
+}
+
+/**
+ * Whether the browser asks for reduced motion. The base stylesheet stops every animation then; the
+ * settle also skips its outgoing layer and its height lock, so the answered card draws at once.
+ */
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** The longest of an element's transitions, delay included, in milliseconds. */
+function transitionMs(el: Element): number {
+  const style = getComputedStyle(el);
+  const ms = (value: string) => (value.trim().endsWith('ms') ? Number.parseFloat(value) : Number.parseFloat(value) * 1000) || 0;
+  const durations = style.transitionDuration.split(',').map(ms);
+  const delays = style.transitionDelay.split(',').map(ms);
+  return Math.max(0, ...durations.map((duration, i) => duration + (delays[i % delays.length] ?? 0)));
+}
+
 /**
  * A request the owner's rules held: what was asked, the rule that held it, and only the answers
  * the kernel offers while it is held, as two controls, Allow and Deny. A side with one answer is a
  * plain button; a side with two opens a menu of them. After an answer or an event, the final line
- * takes the place of "Waiting for your answer" with its receipt dot, and the answers go.
+ * takes the place of "Waiting for your answer" with its receipt dot, and the answers go. An answer
+ * given on this card lands: the held card fades out as the answered one fades in, with `after`
+ * under it, the dot pulses once if it leaves held, and the card eases to its answered height.
  */
 export function ApprovalCard({
   decision,
@@ -184,6 +246,8 @@ export function ApprovalCard({
   pending = false,
   error,
   inertAnswers = false,
+  after,
+  cardRef,
 }: ApprovalCardProps) {
   const offered = offeredAnswers(decision);
   const showAnswers = offered.length > 0;
@@ -199,12 +263,22 @@ export function ApprovalCard({
   // On a vision page: whether an answer has been chosen, so its line shows from then on.
   const [inertPressed, setInertPressed] = useState(false);
   const clicks = useRef(0);
+  const hasAfter = after !== undefined && after !== null && after !== false;
+  const tone = receiptTone({ kind: 'decision', state: decision.state });
+  // An answer given on this card landing, while it settles.
+  const [settle, setSettle] = useState<Settle | null>(null);
   let locked = false;
   // The side whose answer is being sent, while this card knows it; null when the screen reports
   // `pending` for an answer sent from somewhere else.
   let chosen: Side | null = null;
   if (lock !== null) {
     if (lock.key !== answerKey) {
+      // The request left held with this card's answer out: the answer lands, unless the browser asks
+      // for reduced motion, when the answered card draws at once. A vision page's inert card never
+      // sends an answer, so it never lands one.
+      if (!inertAnswers && lock.held.decision_id === decision.decision_id && !showAnswers && !prefersReducedMotion()) {
+        setSettle({ held: lock.held, side: lock.side, pulse: tone !== 'held', afterNew: hasAfter && !lock.hadAfter });
+      }
       setLock(null);
     } else if (lock.pending === pending && lock.error === error) {
       locked = true;
@@ -218,8 +292,30 @@ export function ApprovalCard({
   if (locked && lock !== null) chosen = lock.side;
   const waitingForResult = pending || locked;
 
+  // The settle's parts: the card and what follows it (one region), the card's box and its body,
+  // which holds the answered layer and, while it settles, the outgoing one in the same place.
+  const regionRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const liveRef = useRef<HTMLDivElement>(null);
+  const leavingRef = useRef<HTMLDivElement | null>(null);
+  const setBox = useCallback(
+    (el: HTMLDivElement | null) => {
+      boxRef.current = el;
+      cardRef?.(el);
+    },
+    [cardRef],
+  );
+  // The outgoing layer is out of reach from its first frame: no pointer, key or find-in-page.
+  const setLeaving = useCallback((el: HTMLDivElement | null) => {
+    leavingRef.current = el;
+    el?.setAttribute('inert', '');
+  }, []);
+
   // When the answers go while one of them had focus, focus moves to the status line, so a
-  // keyboard user isn't dropped to the top of the page.
+  // keyboard user isn't dropped to the top of the page. The answers go from the answered layer in
+  // the commit that lands the answer, and the outgoing layer is drawn afresh, inert and hidden from
+  // its first frame, so focus never stays on a control that can't be reached.
   const statusRef = useRef<HTMLSpanElement>(null);
   const answeredHere = useRef(false);
   useLayoutEffect(() => {
@@ -227,8 +323,47 @@ export function ApprovalCard({
     answeredHere.current = false;
     const status = statusRef.current;
     const active = status?.ownerDocument.activeElement;
-    if (status && (active == null || active === status.ownerDocument.body)) status.focus();
+    if (status && (active == null || active === status.ownerDocument.body || leavingRef.current?.contains(active))) status.focus();
   }, [showAnswers]);
+
+  // The card eases from its held height to its answered height, and the region with it, so what
+  // follows glides instead of jumping. Each height is measured, locked where it was, then set to
+  // where it ends; the stylesheet's transition carries it between them, after the crossfade.
+  useLayoutEffect(() => {
+    const region = regionRef.current;
+    const box = boxRef.current;
+    const body = bodyRef.current;
+    const live = liveRef.current;
+    const leaving = leavingRef.current;
+    if (settle === null || !region || !box || !body || !live || !leaving) return undefined;
+    const heldBody = leaving.offsetHeight;
+    const answeredBody = live.offsetHeight;
+    // The two layers share one grid cell, so the body is now as tall as the taller of them.
+    const shared = body.offsetHeight;
+    const now = region.offsetHeight;
+    const afterBlock = settle.afterNew ? now - box.offsetHeight : 0;
+    body.style.height = `${heldBody}px`;
+    region.style.height = `${now - (shared - heldBody) - afterBlock}px`;
+    // Read back, so the browser starts the transition from the held heights.
+    void region.offsetHeight;
+    body.style.height = `${answeredBody}px`;
+    region.style.height = `${now - (shared - answeredBody)}px`;
+
+    const end = () => setSettle(null);
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target === region && event.propertyName === 'height') end();
+    };
+    region.addEventListener('transitionend', onEnd);
+    region.addEventListener('transitioncancel', onEnd);
+    const fallback = window.setTimeout(end, transitionMs(region) + SETTLE_SLACK_MS);
+    return () => {
+      region.removeEventListener('transitionend', onEnd);
+      region.removeEventListener('transitioncancel', onEnd);
+      window.clearTimeout(fallback);
+      region.style.height = '';
+      body.style.height = '';
+    };
+  }, [settle]);
 
   const answer = (value: ApprovalAnswer) => {
     // A vision page's card: the answer goes nowhere, so nothing waits for it, and the line says why.
@@ -240,7 +375,7 @@ export function ApprovalCard({
     answeredHere.current = true;
     clicks.current += 1;
     const click = clicks.current;
-    setLock({ click, side: ANSWERS[value].side, key: answerKey, pending, error });
+    setLock({ click, side: ANSWERS[value].side, key: answerKey, pending, error, held: decision, hadAfter: hasAfter });
     const sent = onAnswer(value);
     if (sent !== undefined && typeof sent.then === 'function') {
       sent.then(undefined, () => setLock((current) => (current !== null && current.click === click ? null : current)));
@@ -304,18 +439,119 @@ export function ApprovalCard({
     answer(value);
   };
 
-  const sides = SIDE_ORDER.map((side) => ({ side, answers: offered.filter((value) => ANSWERS[value].side === side) })).filter(
-    ({ answers }) => answers.length > 0,
-  );
+  const sides = sidesOf(offered);
+
+  const words = { heldBy, context, waiting };
+  const regionClass = ['cd-approval-card', settle ? 'cd-approval-card--settling' : '', settle?.pulse ? 'cd-approval-card--pulse' : '']
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <Card as="article" label={`${OWNER_STATE_WORDS.held}: ${decision.reason_plain}`}>
+    <div ref={regionRef} className={regionClass}>
+      <div ref={setBox} className="cd-approval-card__card" tabIndex={cardRef ? -1 : undefined}>
+        <Card as="article" label={`${OWNER_STATE_WORDS.held}: ${decision.reason_plain}`}>
+          <div ref={bodyRef} className="cd-approval-card__body">
+            <div ref={liveRef} className="cd-approval-card__layer cd-approval-card__layer--live">
+              <RequestWords decision={decision} tone={tone} statusRef={statusRef} {...words} />
+              {showAnswers ? (
+                <>
+                  <div
+                    role="group"
+                    aria-label="Your answer"
+                    aria-busy={waitingForResult || undefined}
+                    className="cd-approval-card__answers"
+                  >
+                    <div className="cd-approval-card__row">
+                      {sides.map(({ side, answers }) => {
+                        // Each side keeps one button, a plain one or a menu button, so focus stays on it when
+                        // its answers change.
+                        const [only] = answers;
+                        const single = answers.length === 1 ? only : undefined;
+                        const isOpen = single === undefined && menuSide === side;
+                        return (
+                          <div key={side} className="cd-approval-card__side" onBlur={(event) => onSideBlur(side, event)}>
+                            <Button
+                              id={buttonId(side)}
+                              variant={SIDES[side].variant}
+                              size="main"
+                              busy={waitingForResult && chosen === side}
+                              waiting={waitingForResult && chosen !== side}
+                              menuOpen={single === undefined ? isOpen : undefined}
+                              onClick={() => (single === undefined ? toggleMenu(side) : answer(single))}
+                              onKeyDown={single === undefined ? (event) => onMenuButtonKey(side, event) : undefined}
+                            >
+                              {single === undefined ? SIDES[side].word : buttonWords(single, personName)}
+                            </Button>
+                            {isOpen && open !== null ? (
+                              <AnswerMenu
+                                id={`${buttonId(side)}-menu`}
+                                side={side}
+                                labelledBy={buttonId(side)}
+                                answers={answers}
+                                personName={personName}
+                                focus={open.focus}
+                                openedAt={open.openedAt}
+                                heldKey={open.heldKey}
+                                onChoose={choose}
+                                onClose={closeMenu}
+                              />
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {/* Read out, unseen: the busy answer carries the wait, so the card keeps its height until the answer lands. */}
+                  <p role="status" className="cd-sr-only">
+                    {pending ? SENDING_LINE : null}
+                  </p>
+                  {inertAnswers ? <VisionInertLine shown={inertPressed} /> : null}
+                  {failed && !pending ? (
+                    <div className="cd-approval-card__error">
+                      <Notice tone="error">{error === true ? ERROR_LINE : error}</Notice>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+            {settle !== null ? (
+              <div ref={setLeaving} aria-hidden="true" className="cd-approval-card__layer cd-approval-card__layer--leaving">
+                <RequestWords decision={settle.held} tone="held" {...words} />
+                <LeavingAnswers settle={settle} personName={personName} />
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      </div>
+      {hasAfter ? <div className={`cd-approval-card__after${settle?.afterNew ? ' cd-approval-card__after--new' : ''}`}>{after}</div> : null}
+    </div>
+  );
+}
+
+interface RequestWordsProps {
+  decision: Decision;
+  tone: StatusTone;
+  heldBy: string | undefined;
+  context: ReactNode;
+  waiting: string;
+  /** The answered layer's status line: the one `role="status"` node, which takes focus when the answers go. */
+  statusRef?: RefObject<HTMLSpanElement>;
+}
+
+/** What the card says: its status line and when it was held, what was asked, and the rule that held it. */
+function RequestWords({ decision, tone, heldBy, context, waiting, statusRef }: RequestWordsProps) {
+  return (
+    <>
       <div className="cd-approval-card__top cd-type-caption">
         <span className="cd-approval-card__status">
-          <StatusDot tone={receiptTone({ kind: 'decision', state: decision.state })} />
-          <span ref={statusRef} role="status" tabIndex={-1} className="cd-approval-card__status-line">
-            {statusLine(decision.state)}
-          </span>
+          <StatusDot tone={tone} />
+          {statusRef ? (
+            <span ref={statusRef} role="status" tabIndex={-1} className="cd-approval-card__status-line">
+              {statusLine(decision.state)}
+            </span>
+          ) : (
+            <span className="cd-approval-card__status-line">{statusLine(decision.state)}</span>
+          )}
         </span>
         <span className="cd-approval-card__waiting">{waiting}</span>
       </div>
@@ -332,66 +568,42 @@ export function ApprovalCard({
           </span>
         </p>
       ) : null}
-      {showAnswers ? (
-        <>
-          <div
-            role="group"
-            aria-label="Your answer"
-            aria-busy={waitingForResult || undefined}
-            className="cd-approval-card__answers"
-          >
-            <div className="cd-approval-card__row">
-              {sides.map(({ side, answers }) => {
-                // Each side keeps one button, a plain one or a menu button, so focus stays on it when
-                // its answers change.
-                const [only] = answers;
-                const single = answers.length === 1 ? only : undefined;
-                const isOpen = single === undefined && menuSide === side;
-                return (
-                  <div key={side} className="cd-approval-card__side" onBlur={(event) => onSideBlur(side, event)}>
-                    <Button
-                      id={buttonId(side)}
-                      variant={SIDES[side].variant}
-                      size="main"
-                      busy={waitingForResult && chosen === side}
-                      waiting={waitingForResult && chosen !== side}
-                      menuOpen={single === undefined ? isOpen : undefined}
-                      onClick={() => (single === undefined ? toggleMenu(side) : answer(single))}
-                      onKeyDown={single === undefined ? (event) => onMenuButtonKey(side, event) : undefined}
-                    >
-                      {single === undefined ? SIDES[side].word : buttonWords(single, personName)}
-                    </Button>
-                    {isOpen && open !== null ? (
-                      <AnswerMenu
-                        id={`${buttonId(side)}-menu`}
-                        side={side}
-                        labelledBy={buttonId(side)}
-                        answers={answers}
-                        personName={personName}
-                        focus={open.focus}
-                        openedAt={open.openedAt}
-                        heldKey={open.heldKey}
-                        onChoose={choose}
-                        onClose={closeMenu}
-                      />
-                    ) : null}
-                  </div>
-                );
-              })}
+    </>
+  );
+}
+
+/** Does nothing: the outgoing layer's answers are a picture of the ones that went. */
+function noAnswer(): void {}
+
+/**
+ * The answers as they left, in the outgoing layer: the chosen side busy and the other waiting. The
+ * layer is inert and hidden, so none of it can be reached; it draws the last held frame so the
+ * crossfade starts from what the owner saw.
+ */
+function LeavingAnswers({ settle, personName }: { settle: Settle; personName: string | undefined }) {
+  return (
+    <div className="cd-approval-card__answers">
+      <div className="cd-approval-card__row">
+        {sidesOf(offeredAnswers(settle.held)).map(({ side, answers }) => {
+          const [only] = answers;
+          const single = answers.length === 1 ? only : undefined;
+          return (
+            <div key={side} className="cd-approval-card__side">
+              <Button
+                variant={SIDES[side].variant}
+                size="main"
+                busy={side === settle.side}
+                waiting={side !== settle.side}
+                menuOpen={single === undefined ? false : undefined}
+                onClick={noAnswer}
+              >
+                {single === undefined ? SIDES[side].word : buttonWords(single, personName)}
+              </Button>
             </div>
-          </div>
-          <p role="status" className="cd-approval-card__progress cd-type-caption">
-            {pending ? SENDING_LINE : null}
-          </p>
-          {inertAnswers ? <VisionInertLine shown={inertPressed} /> : null}
-          {failed && !pending ? (
-            <div className="cd-approval-card__error">
-              <Notice tone="error">{error === true ? ERROR_LINE : error}</Notice>
-            </div>
-          ) : null}
-        </>
-      ) : null}
-    </Card>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

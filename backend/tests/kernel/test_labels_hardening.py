@@ -25,7 +25,7 @@ from desk.contracts import Claim, Fact, KnowledgeItem, Label, ReplyVerdict
 from desk.db.models import Document, Execution
 from desk.db.models import Fact as FactRow
 from desk.db.models import KnowledgeItem as KnowledgeRow
-from desk.kernel_service import desks, labels, ledger
+from desk.kernel_service import desks, labels, ledger, seed
 from desk.kernel_service.adapters.base import AdapterResult
 
 from .fakes import FakeAdapter
@@ -33,7 +33,8 @@ from .helpers import CopyRows, kernel_ctx, ledger_rows, rows_of, verify_session
 from .test_adapters import Rivera, rivera, visitor_of
 from .test_approvals import add_person, answered
 from .test_compiler import card
-from .test_context import add_price_item, catalog_of, context_of, fact_ids, owner_session_id, tools
+from .test_context import (SEEDED_PUBLIC_KNOWLEDGE, add_price_item, catalog_of, context_of, fact_ids,
+                           owner_session_id, tools)
 from .test_copies import api_rows
 from .test_decide import decided, desk_with, open_visitor, set_session
 from .test_execute import Crash, executed, post_execute, read
@@ -446,24 +447,32 @@ async def seen_by(client: httpx.AsyncClient, copy: Rivera, session) -> list[tupl
 
 PARKING = knowledge("kb-parking", "Parking", "Street parking is fine on our block.", ["owner"])
 TOOLS = knowledge("kb-a-tools", "Tools", "Maria brings a drain camera to every call.", ["public"])
+SEEDED_KNOWLEDGE_ENTRIES = [
+    {"part": "knowledge", "item_id": item_id, "owner_only_forced": False}
+    for item_id in ("kn-website", "kn-price-list")]
+SEEDED_KNOWLEDGE_VIEW = sorted(
+    (item.item_id, item.source, item.title, item.text, item.label.readers) for item in seed.RIVERA_KNOWLEDGE)
 
 
 async def test_knowledge_marked_public_is_served_to_visitors(app, client, frozen_clock):
     copy, visitor = await visitor_of(app, client)
     # the owner's alone until marked public
     assert await stored(client, copy, PARKING) == KnowledgeItem.model_validate(PARKING)
-    assert await seen_by(client, copy, visitor) == []
-    assert await seen_by(client, copy, None) == [("kb-parking", ["owner"])]
+    assert await seen_by(client, copy, visitor) == SEEDED_PUBLIC_KNOWLEDGE
+    assert await seen_by(client, copy, None) == [("kb-parking", ["owner"]), *SEEDED_PUBLIC_KNOWLEDGE]
     frozen_clock.advance(60)
     await stored(client, copy, TOOLS)
     frozen_clock.advance(60)
     public = {**PARKING, "label": {"readers": ["public"]}}
     assert await stored(client, copy, public) == KnowledgeItem.model_validate(public)   # re-posted public
     # served to visitors in the order the owner first added them, each as it now reads
-    assert await seen_by(client, copy, visitor) == [("kb-parking", ["public"]), ("kb-a-tools", ["public"])]
-    assert (await context_of(client, visitor.session_id, visitor.headers)).knowledge[0].text == PARKING["text"]
+    assert await seen_by(client, copy, visitor) == [
+        ("kb-parking", ["public"]), *SEEDED_PUBLIC_KNOWLEDGE, ("kb-a-tools", ["public"])]
+    [parking] = [item for item in (await context_of(client, visitor.session_id, visitor.headers)).knowledge
+                 if item.item_id == "kb-parking"]
+    assert parking.text == PARKING["text"]
     # each write ledgered as Desk data, naming the item and never its text
-    assert await knowledge_entries(app, copy) == [
+    assert await knowledge_entries(app, copy) == SEEDED_KNOWLEDGE_ENTRIES + [
         {"part": "knowledge", "item_id": item_id, "owner_only_forced": False}
         for item_id in ("kb-parking", "kb-a-tools", "kb-parking")]
     # the owner of the copy alone: another copy's owner is 404, a visitor's token 401
@@ -472,7 +481,7 @@ async def test_knowledge_marked_public_is_served_to_visitors(app, client, frozen
     assert (response.status_code, response.json()) == (404, {"code": "not_found"})
     response = await post_knowledge(client, copy, PARKING, headers=visitor.headers)
     assert (response.status_code, response.json()) == (401, {"code": "auth"})
-    assert len(await knowledge_entries(app, copy)) == 3
+    assert len(await knowledge_entries(app, copy)) == len(SEEDED_KNOWLEDGE_ENTRIES) + 3
 
 
 async def test_knowledge_carrying_a_canary_stays_owner_only(app, client):
@@ -486,9 +495,10 @@ async def test_knowledge_carrying_a_canary_stays_owner_only(app, client):
     for item in (pasted, titled):
         assert (await stored(client, copy, item)).label == Label(readers=["owner"])
     assert (await stored(client, copy, pasted)).label == Label(readers=["owner"])     # posted public again
-    assert await seen_by(client, copy, visitor) == []
-    assert await seen_by(client, copy, None) == [("kb-invoice", ["owner"]), ("kb-titled", ["owner"])]
-    assert await knowledge_entries(app, copy) == [
+    assert await seen_by(client, copy, visitor) == SEEDED_PUBLIC_KNOWLEDGE
+    assert await seen_by(client, copy, None) == [
+        ("kb-invoice", ["owner"]), ("kb-titled", ["owner"]), *SEEDED_PUBLIC_KNOWLEDGE]
+    assert await knowledge_entries(app, copy) == SEEDED_KNOWLEDGE_ENTRIES + [
         {"part": "knowledge", "item_id": item_id, "owner_only_forced": True}
         for item_id in ("kb-invoice", "kb-titled", "kb-invoice")]
     await assert_no_canary_on_record(app, copy, dana.canary, spaced, wide)
@@ -497,9 +507,9 @@ async def test_knowledge_carrying_a_canary_stays_owner_only(app, client):
     for item_id in (dana.canary, f"kb-{dana.canary.upper()}", dana.canary.replace("-", "_")):
         response = await post_knowledge(client, copy, knowledge(item_id, "Note", "Text.", ["public"]))
         assert (response.status_code, response.json()) == (422, {"code": "invalid"}), item_id
-    assert len(await knowledge_entries(app, copy)) == 3
+    assert len(await knowledge_entries(app, copy)) == len(SEEDED_KNOWLEDGE_ENTRIES) + 3
     stored_ids = {row.item_id for row in await rows_of(app, copy.copy_id, select(KnowledgeRow))}
-    assert stored_ids == {"kb-invoice", "kb-titled"}
+    assert stored_ids == {"kn-website", "kn-price-list", "kb-invoice", "kb-titled"}
     await assert_no_canary_on_record(app, copy, dana.canary, dana.canary.upper(), dana.canary.replace("-", "_"))
 
     # a public row holding a canary that came some other way, in its text or its ID, is still never
@@ -510,7 +520,7 @@ async def test_knowledge_carrying_a_canary_stays_owner_only(app, client):
                                 title="Older note", text=f"Ref {dana.canary.upper()}", readers=["public"]))
         ctx.db.add(KnowledgeRow(desk_id=copy.desk_id, item_id=dana.canary, copy_id=copy.copy_id, source="setup",
                                 title="Parking", text="Street parking is fine on our block.", readers=["public"]))
-    assert await seen_by(client, copy, visitor) == []
+    assert await seen_by(client, copy, visitor) == SEEDED_PUBLIC_KNOWLEDGE
     assert {("kb-older", ("public",)), (dana.canary, ("public",))} <= {
         (item_id, tuple(readers)) for item_id, readers in await seen_by(client, copy, None)}
 
@@ -535,9 +545,11 @@ async def test_every_disguise_keeps_knowledge_and_facts_out_of_a_visitors_contex
                 fact_id=fact_id, kind="charter", status="available", source="kernel", label=Label(readers=["public"]),
                 claims=[Claim(key="policy:note", kind="text", value=f"See invoice {text}.")]), ctx.clock.now()))
     given = await context_of(client, visitor.session_id, visitor.headers)
-    assert given.knowledge == [] and not set(notes) & set(fact_ids(given.facts))
+    assert [(item.item_id, item.label.readers) for item in given.knowledge] == SEEDED_PUBLIC_KNOWLEDGE
+    assert not set(notes) & set(fact_ids(given.facts))
     owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
-    assert len(owner.knowledge) == 2 * len(disguised) and set(notes) <= set(fact_ids(owner.facts))
+    assert len(owner.knowledge) == len(SEEDED_PUBLIC_KNOWLEDGE) + 2 * len(disguised)
+    assert set(notes) <= set(fact_ids(owner.facts))
 
 
 def knowledge_view(copy: Rivera) -> list[tuple]:
@@ -559,6 +571,7 @@ async def test_the_knowledge_view_shows_no_document_text(app, client):
         ("kb-a-tools", "upload", TOOLS["title"], TOOLS["text"], ["public"]),
         ("kb-invoice", "upload", None, None, ["owner"]),
         ("kb-parking", "upload", PARKING["title"], PARKING["text"], ["owner"]),
+        *SEEDED_KNOWLEDGE_VIEW,
     ]
     assert dana.canary[4:] not in repr(knowledge_view(copy)).lower()
     # replaced without the canary it reads again, and pasted back it is hidden again
@@ -574,7 +587,7 @@ async def test_the_knowledge_view_shows_no_document_text(app, client):
                                 title="Older note", text=f"Ref {dana.canary.upper()}", readers=["public"]))
     assert ("kb-older", "setup", None, None, ["public"]) in knowledge_view(copy)
     # another copy's view holds none of these
-    assert knowledge_view(await rivera(app, client)) == []
+    assert knowledge_view(await rivera(app, client)) == SEEDED_KNOWLEDGE_VIEW
 
 
 async def test_knowledge_input_is_bounded(app, client):
@@ -600,8 +613,9 @@ async def test_knowledge_input_is_bounded(app, client):
     for item in refused:
         response = await post_knowledge(client, copy, item)
         assert (response.status_code, response.json()) == (422, {"code": "invalid"}), item["item_id"]
-    assert await rows_of(app, copy.copy_id, select(KnowledgeRow)) == []
-    assert await knowledge_entries(app, copy) == []
+    assert {row.item_id for row in await rows_of(app, copy.copy_id, select(KnowledgeRow))} == {
+        "kn-website", "kn-price-list"}
+    assert await knowledge_entries(app, copy) == SEEDED_KNOWLEDGE_ENTRIES
     # right at the bounds is fine
     edge = knowledge("k" * 64, "N" * 200, "a" * (100 * 1024), ["owner"])
     assert (await stored(client, copy, edge)).item_id == "k" * 64

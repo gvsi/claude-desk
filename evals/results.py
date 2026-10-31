@@ -212,6 +212,28 @@ def is_gated(path: str) -> bool:
     return any(path == gated or path.startswith(gated + "/") for gated in GATED_PATHS)
 
 
+def _needs_results(path: str) -> bool:
+    return is_gated(path) or path == RATES_PATH or path.startswith(RESULTS_DIR + "/")
+
+
+def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
+    """Refuse when both sides changed results inputs since their merge base; git errors propagate."""
+    head_commit = git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{head}^{{commit}}").strip()
+    main_commit = git(root, "rev-parse", "--verify", "--quiet", "origin/main^{commit}").strip()
+    base = git(root, "merge-base", head_commit, main_commit).strip()
+
+    def changed_inputs(commit: str) -> list[str]:
+        paths = git(root, "diff", "--no-renames", "-z", "--name-only", f"{base}..{commit}").split("\0")
+        return [path for path in paths if path and _needs_results(path)]
+
+    pr_paths, main_paths = changed_inputs(head_commit), changed_inputs(main_commit)
+    if pr_paths and main_paths:
+        return False, (f"not ready: PR gated paths: {', '.join(repr(path) for path in pr_paths)}; "
+                       f"origin/main gated paths: {', '.join(repr(path) for path in main_paths)}; "
+                       "rebase onto origin/main and regenerate the results file")
+    return True, "ready: results inputs changed on at most one side since the merge base with origin/main"
+
+
 def show(root: Path, rev: str, path: str) -> bytes | None:
     """The bytes of `path` at `rev`, or None when it isn't there."""
     done = subprocess.run(["git", "-C", str(root), "show", f"{rev}:{path}"], capture_output=True)
@@ -663,7 +685,7 @@ def _check(base: str, root: Path) -> str:
     # Without renames a move lists both its paths, and -z keeps non-ASCII paths unquoted.
     changed = [path for path in git(root, "diff", "--no-renames", "-z", "--name-only", f"{base}...HEAD").split("\0")
                if path]
-    if not any(is_gated(path) or path == RATES_PATH or path.startswith(RESULTS_DIR + "/") for path in changed):
+    if not any(_needs_results(path) for path in changed):
         return f"no gated path, recorded rate or results file changed since {base}; no results file needed"
     name = f"{RESULTS_DIR}/{inputs_key('HEAD', root)}.json"
     raw = show(root, "HEAD", name)
@@ -731,7 +753,7 @@ __all__ = [
     "API_ROUTES", "GATED_PATHS", "GATING_PROVIDER", "KERNEL_ROUTES", "PRODUCTION_MODEL_IDS", "PRODUCTION_MODELS",
     "RATE_MODEL_IDS", "RESULTS_DIR", "SIMULATOR_ROUTES", "CheckFailed", "RateRef", "Reconciled", "ResultsFile",
     "ResultsProviders", "ResultsRefused", "dirty_gated", "final_gate", "gated_from_pairs", "gated_map", "gated_pairs",
-    "gating_refusal", "inputs_key", "history_refusal", "is_gated", "key_of", "lowered_notice", "pass_target",
+    "gating_refusal", "inputs_key", "history_refusal", "is_gated", "key_of", "lowered_notice", "merge_ready", "pass_target",
     "rate_refusal", "reconcile", "reconcile_pass", "results_check", "results_file", "selection_problems",
     "unchecked_refusal", "write_results",
 ]

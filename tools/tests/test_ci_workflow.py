@@ -67,14 +67,14 @@ def is_checkout(step: dict) -> bool:
     return step.get("uses", "").startswith("actions/checkout@")
 
 
-def test_triggers_are_main_pushes_pull_requests_and_dispatch():
+def test_triggers_are_main_pushes_pull_requests_on_any_base_and_dispatch():
     workflow = load(WORKFLOW)
 
     assert workflow["name"] == "ci"
     on = triggers(workflow)
     assert set(on) == {"push", "pull_request", "workflow_dispatch"}
     assert on["push"] == {"branches": ["main"]}
-    assert on["pull_request"] == {"branches": ["main"]}
+    assert on["pull_request"] in (None, {})
     assert on["workflow_dispatch"] in (None, {})
     # One run per pull request push; a newer push cancels an older pull request run, never a run on main.
     assert workflow["concurrency"] == {
@@ -376,8 +376,8 @@ CHECKS = {
             "--", "make", "kernel-contract",
         ],
     ],
-    # Exactly the arguments test_gate's tier 2 regression exercises.
-    "tier 2 results": [TIER2_RESULTS_GATE],
+    # The same gate arguments as test_gate, with a base selected for the workflow event.
+    "tier 2 results": [[*TIER2_RESULTS_GATE[:-1], "BASE=$RESULTS_BASE"]],
     "web tests": [
         ["--name", "web", "--run-if", "web/package.json", "--", "make", "web-test"],
         [
@@ -388,7 +388,7 @@ CHECKS = {
         ],
     ],
     "infra synth": [["--name", "infra", "--run-if", "infra/cdk.json", "--", "make", "infra-check"]],
-    # The ref under test only (main's history plus the pull request's commits), never other branches.
+    # The ref under test only (the base's history plus the pull request's commits), never other branches.
     "secret scan": [
         'gitleaks git --redact --verbose --no-banner --exit-code 1 --ignore-gitleaks-allow --log-opts="--full-history HEAD" .'
     ],
@@ -421,12 +421,19 @@ def test_gated_jobs_go_through_the_gate():
     workflow = load(WORKFLOW)
 
     assert {job["name"]: checks(job) for job in jobs(workflow)} == CHECKS
-    assert TIER2_RESULTS_GATE[TIER2_RESULTS_GATE.index("--") + 1 :] == ["make", "evals-results-check", "BASE=origin/main"]
+    tier2_gate = CHECKS["tier 2 results"][0]
+    assert tier2_gate[tier2_gate.index("--") + 1 :] == ["make", "evals-results-check", "BASE=$RESULTS_BASE"]
     assert PROOFS_GATE[PROOFS_GATE.index("--") + 1 :] == ["make", "check-presets"]
-    # Tier 2 runs on pull requests, against main's full history.
+    # Tier 2 checks pull requests against their event's base commit, including stacked PRs;
+    # pushes and manual runs use the previous commit.
     tier2 = job_named("tier 2 results")
-    assert tier2["if"] == "github.event_name == 'pull_request'"
+    assert "if" not in tier2
     assert tier2["steps"][0]["with"]["fetch-depth"] == 0
+    [results] = [step for step in tier2["steps"] if step.get("name") == "Check the tier 2 results"]
+    assert results["env"] == {
+        "RESULTS_BASE": "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD~1' }}",
+    }
+    assert results["run"].endswith('make evals-results-check BASE="$RESULTS_BASE"')
     # The secret scan reads the whole history.
     assert job_named("secret scan")["steps"][0]["with"]["fetch-depth"] == 0
 

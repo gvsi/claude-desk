@@ -1,10 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
 import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
 import { chen, rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { Button } from '../Button/Button.tsx';
+import { Notice } from '../Notice/Notice.tsx';
 import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { ApprovalCard, type ApprovalCardProps } from './ApprovalCard.tsx';
 
@@ -129,19 +131,24 @@ function dotIn(root: HTMLElement): HTMLElement {
   return dots[0] as HTMLElement;
 }
 
-/** A final state: its line and dot, and no answer by any name, though the fixture still carries them. */
+/**
+ * A final state: its line and dot, and no answer by any name, though the fixture still carries them.
+ * It is drawn still: one layer, and nothing in the card moving.
+ */
 async function expectFinal(root: HTMLElement, decision: Decision, line: string, tone: string): Promise<void> {
   await expect(decision.answers?.length ?? 0).toBeGreaterThan(0);
-  const card = root.querySelector('article');
+  const card = root.querySelector<HTMLElement>('article');
   if (!card) throw new Error('no card');
   await expect(card).toHaveAccessibleName(`Held for you: ${decision.reason_plain}`);
-  await expect(root).toHaveTextContent(line);
-  await expect(root).not.toHaveTextContent('Waiting for your answer');
-  await expect(dotIn(root)).toHaveClass(`cd-status-dot--${tone}`);
-  await expect(root.querySelector('[role="group"]')).toBeNull();
-  await expect(root.querySelector('[role="menu"]')).toBeNull();
-  await expect(root.querySelectorAll('button')).toHaveLength(0);
-  for (const words of ANSWER_WORDS) await expect(root).not.toHaveTextContent(words);
+  await expect(card).toHaveTextContent(line);
+  await expect(card).not.toHaveTextContent('Waiting for your answer');
+  await expect(dotIn(card)).toHaveClass(`cd-status-dot--${tone}`);
+  await expect(card.querySelector('[role="group"]')).toBeNull();
+  await expect(card.querySelector('[role="menu"]')).toBeNull();
+  await expect(card.querySelectorAll('button')).toHaveLength(0);
+  for (const words of ANSWER_WORDS) await expect(card).not.toHaveTextContent(words);
+  await expect(card.querySelectorAll('.cd-approval-card__layer')).toHaveLength(1);
+  await expect(card.getAnimations({ subtree: true })).toHaveLength(0);
 }
 
 /** The card as Today holds it once an answer is sent and no result has come back yet. */
@@ -246,6 +253,239 @@ function UpdatingScreen(props: ApprovalCardProps) {
 /** Sends the screen new props for its card. */
 function updateScreen(root: HTMLElement, update: Partial<ApprovalCardProps>): void {
   root.ownerDocument.defaultView?.dispatchEvent(new CustomEvent(SCREEN_UPDATE, { detail: update }));
+}
+
+/**
+ * The card as Today holds it while an answer is out: pending once it is sent, until the story lands
+ * the answer's result (`land`), as the kernel returned it, with whatever the screen puts under the
+ * card once it is answered.
+ */
+function LandingScreen(props: ApprovalCardProps) {
+  const [pending, setPending] = useState(false);
+  const [landed, setLanded] = useState<Partial<ApprovalCardProps>>({});
+  useEffect(() => {
+    const onLand = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      setPending(false);
+      setLanded(event.detail as Partial<ApprovalCardProps>);
+    };
+    window.addEventListener(SCREEN_UPDATE, onLand);
+    return () => window.removeEventListener(SCREEN_UPDATE, onLand);
+  }, []);
+  return (
+    <ApprovalCard
+      {...props}
+      pending={pending}
+      {...landed}
+      onAnswer={(answer: ApprovalAnswer) => {
+        props.onAnswer(answer);
+        setPending(true);
+      }}
+    />
+  );
+}
+
+const HELD_LINE = 'Waiting for your answer';
+
+/** Whether this browser asks for reduced motion: the design system's browser tests do. */
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** A motion token, in milliseconds, as the page reads it. */
+function motionMs(token: '--motion-fast' | '--motion-base'): number {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+  return value.endsWith('ms') ? Number.parseFloat(value) : Number.parseFloat(value) * 1000;
+}
+
+/** An element's drawn scale, from its computed transform. */
+function scaleOf(el: Element | null | undefined): number {
+  const transform = el ? getComputedStyle(el).transform : 'none';
+  return transform === 'none' ? 1 : new DOMMatrixReadOnly(transform).a;
+}
+
+/** The card at one moment of its settle. */
+interface SettleFrame {
+  at: number;
+  /** The card and what follows it, together. */
+  height: number;
+  /** The card alone. */
+  cardHeight: number;
+  /** The outgoing layer's opacity, or null with none. */
+  leaving: number | null;
+  /** The answered layer's opacity. */
+  live: number;
+  /** What follows the card: its opacity, or null with nothing there. */
+  after: number | null;
+  /** The answered status dot's scale. */
+  dotScale: number;
+}
+
+/** What the commit that lands an answer drew, read before the browser paints it. */
+interface Landing {
+  /** The outgoing layer then, or null with none. */
+  leaving: { inert: boolean; hidden: string | null; statuses: number; focused: boolean } | null;
+  /** The card's status line then. */
+  status: Element;
+  /** Where focus was then. */
+  focus: Element | null;
+  /** The settle at each moment asked for, its animations paused there in turn. */
+  frames: SettleFrame[];
+}
+
+/** The animations of an answer landing: the card's own, not a busy spinner or a button's colors. */
+function settleMotion(animation: Animation): boolean {
+  if (animation instanceof CSSAnimation) return animation.animationName.startsWith('cd-approval-card');
+  return animation instanceof CSSTransition && animation.transitionProperty === 'height';
+}
+
+function readLanding(root: HTMLElement, status: Element, moments: readonly number[]): Landing {
+  const region = root.querySelector<HTMLElement>('.cd-approval-card');
+  const card = root.querySelector<HTMLElement>('article');
+  if (!region || !card) throw new Error('no card');
+  const leaving = card.querySelector<HTMLElement>('.cd-approval-card__layer--leaving');
+  const live = status.closest<HTMLElement>('.cd-approval-card__layer');
+  const after = region.querySelector<HTMLElement>('.cd-approval-card__after');
+  const dot = live?.querySelector<HTMLElement>('.cd-status-dot');
+  const focus = document.activeElement;
+  const opacity = (el: Element | null | undefined) => (el?.isConnected ? Number(getComputedStyle(el).opacity) : null);
+  const settling = region.getAnimations({ subtree: true }).filter(settleMotion);
+  for (const animation of settling) animation.pause();
+  const frames = moments.map((at) => {
+    for (const animation of settling) animation.currentTime = at;
+    return {
+      at,
+      height: region.getBoundingClientRect().height,
+      cardHeight: card.getBoundingClientRect().height,
+      leaving: opacity(leaving),
+      live: opacity(live) ?? 0,
+      after: opacity(after),
+      dotScale: scaleOf(dot),
+    };
+  });
+  for (const animation of settling) animation.finish();
+  return {
+    leaving:
+      leaving === null
+        ? null
+        : {
+            inert: leaving.hasAttribute('inert'),
+            hidden: leaving.getAttribute('aria-hidden'),
+            statuses: leaving.querySelectorAll('[role="status"]').length,
+            focused: leaving.contains(focus),
+          },
+    status,
+    focus,
+    frames,
+  };
+}
+
+/**
+ * Lands `update` on the screen and reads the commit that lands it, before the browser paints: the
+ * card's outgoing layer, its status line and focus, then the settle at each of `moments` (ms from
+ * its start), every animation of it paused there in turn. Then the settle finishes.
+ */
+function land(root: HTMLElement, update: Partial<ApprovalCardProps>, moments: readonly number[]): Promise<Landing> {
+  return new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      const status = root.querySelector('.cd-approval-card__status-line[role="status"]');
+      if (status === null || status.textContent === HELD_LINE) return;
+      observer.disconnect();
+      resolve(readLanding(root, status, moments));
+    });
+    observer.observe(root, { subtree: true, childList: true, characterData: true, attributes: true });
+    updateScreen(root, update);
+  });
+}
+
+/** The settle's moments: its start, mid-crossfade, the crossfade done, into the ease, the pulse at its widest, and its end. */
+function settleMoments(): number[] {
+  const fast = motionMs('--motion-fast');
+  const base = motionMs('--motion-base');
+  return [0, fast / 2, fast, fast + base / 4, fast + base / 2, fast + base];
+}
+
+const LANDS_NOTE =
+  'UXC-P202-After (canvas page "UX craft proposals", signed 2026-10-30) draws an answer landing: the held card fades out as the answered one fades in, its dot pulses once as it leaves held, and the card eases to its answered height. No reference board draws it; the nearest is N-Today-Run1. Storybook shows the motion your system asks for; the design system\'s browser tests render this story under reduced motion.';
+
+/**
+ * An answer given on the card lands as `final`: the held and answered layers cross, the dot pulses
+ * only if its tone leaves held, and the card eases from its held height to its answered height.
+ * Under reduced motion, the answered card draws at once.
+ */
+async function expectLands(
+  root: HTMLElement,
+  final: Decision,
+  { line, tone, pulse, after }: { line: string; tone: string; pulse: boolean; after?: ReactNode },
+): Promise<Landing> {
+  const card = root.querySelector<HTMLElement>('article');
+  const region = root.querySelector<HTMLElement>('.cd-approval-card');
+  if (!card || !region) throw new Error('no card');
+  const status = card.querySelector('[role="status"]');
+  await expect(status).toHaveTextContent(HELD_LINE);
+  const heldHeight = region.getBoundingClientRect().height;
+
+  const landing = await land(root, { decision: final, after }, settleMoments());
+
+  // One status node says it, its words changed in place.
+  await expect(landing.status).toBe(status);
+  await expect(status).toHaveTextContent(line);
+  const frames = landing.frames;
+  if (reducedMotion()) {
+    // Nothing crosses or eases: the answered card draws at once.
+    await expect(landing.leaving).toBeNull();
+  } else {
+    // From the first frame, the outgoing layer is out of reach: inert, hidden from assistive tech,
+    // with no status of its own.
+    await expect(landing.leaving).toMatchObject({ inert: true, hidden: 'true', statuses: 0 });
+    const [start, crossing, crossed, easing, widest, end] = frames as [SettleFrame, SettleFrame, SettleFrame, SettleFrame, SettleFrame, SettleFrame];
+    // The held and answered layers cross, the held one out over motion-fast, and the card keeps its
+    // held height until it has gone.
+    await expect([start.leaving, start.live]).toEqual([1, 0]);
+    await expect(crossing.leaving).toBeGreaterThan(0);
+    await expect(crossing.leaving).toBeLessThan(1);
+    await expect(crossing.live).toBeGreaterThan(0);
+    await expect(crossing.live).toBeLessThan(1);
+    await expect(crossed.leaving).toBe(0);
+    for (const frame of [start, crossing, crossed]) {
+      await expect(frame.height).toBeCloseTo(heldHeight, 0);
+      await expect(frame.cardHeight).toBeCloseTo(heldHeight, 0);
+    }
+    // Then the card eases to its answered height, as the dot pulses (or doesn't)...
+    const shrinks = Math.sign(start.cardHeight - end.cardHeight);
+    await expect(shrinks).toBe(1);
+    await expect(start.cardHeight - easing.cardHeight).toBeGreaterThan(0.5);
+    await expect(easing.cardHeight - end.cardHeight).toBeGreaterThan(0.5);
+    await expect(widest.dotScale).toBeCloseTo(pulse ? 1.8 : 1, 1);
+    // ...and the card with what follows it moves one way only, so nothing under it jumps.
+    const way = Math.sign(end.height - start.height);
+    for (const [i, frame] of frames.entries()) {
+      const step = frame.height - (frames[i - 1]?.height ?? frame.height);
+      if (Math.abs(step) > 0.5) await expect(Math.sign(step)).toBe(way);
+    }
+    await expect([start.dotScale, end.dotScale, end.live]).toEqual([1, 1, 1]);
+    // What came under the card with the answer fades in with the answered layer, inside the easing height.
+    if (after !== undefined) {
+      await expect(start.after).toBe(0);
+      await expect(crossing.after).toBeGreaterThan(0);
+      await expect(crossing.after).toBeLessThan(1);
+      await expect(end.after).toBe(1);
+      await expect(start.cardHeight).toBeCloseTo(start.height, 0);
+    } else {
+      await expect(frames.map((frame) => frame.after)).toEqual(frames.map(() => null));
+    }
+  }
+
+  // At the end: one layer, the answers gone from the accessibility tree and from the height, the
+  // final words and the tone of the returned decision.
+  await waitFor(() => expect(card.querySelector('.cd-approval-card__layer--leaving')).toBeNull());
+  await expect(region.style.height).toBe('');
+  await expect(card.querySelector('.cd-approval-card__answers')).toBeNull();
+  await expectFinal(root, final, line, tone);
+  const answeredHeight = region.getBoundingClientRect().height;
+  if (after === undefined) await expect(answeredHeight).toBeLessThan(heldHeight);
+  await expect(frames.at(-1)?.height).toBeCloseTo(answeredHeight, 0);
+  await expect(frames.at(-1)?.cardHeight).toBeCloseTo(card.getBoundingClientRect().height, 0);
+  if (reducedMotion()) await expect(frames[0]?.height).toBeCloseTo(answeredHeight, 0);
+  return landing;
 }
 
 const meta = {
@@ -947,14 +1187,14 @@ export const SendingStartsWhileOpen: Story = {
 
     // The screen starts sending an answer given elsewhere, say on the same request in its conversation.
     updateScreen(canvasElement, { pending: true });
-    await waitFor(() => expect(canvas.getByText('Sending your answer')).toBeVisible());
+    await waitFor(() => expect(canvas.getByText('Sending your answer').closest('[role="status"]')).not.toBeNull());
     // The menu goes, and focus moves to its button, where it waits.
     await expect(canvas.queryByRole('menu')).toBeNull();
     await expect(deny).toHaveFocus();
     await expect(deny).toHaveAttribute('aria-expanded', 'false');
     await expect(deny).toHaveAttribute('aria-disabled', 'true');
     // No answer was chosen here, so neither button shows the busy spinner: both wait in their busy
-    // colors, and the line under them says what is happening.
+    // colors, and the status region says what is happening.
     for (const button of answerButtons(canvasElement)) {
       await expect(button).toHaveAttribute('aria-disabled', 'true');
       await expect(button).not.toHaveAttribute('aria-busy');
@@ -1008,10 +1248,13 @@ export const SendingYourAnswer: Story = {
   args: refundArgs,
   render: (args) => <SendingScreen {...args} />,
   parameters: {
-    canvasNote: `${ANSWERS_BOARD} The N-Typing-Owner-Busy board and the owner's spinner decision show an answer being sent: the chosen answer shows the busy spinner, the other waits in its busy colors without one, and a line under them says so.`,
+    canvasNote: `${ANSWERS_BOARD} The N-Typing-Owner-Busy board and the owner's spinner decision show an answer being sent: the chosen answer shows the busy spinner and the other waits in its busy colors without one. "Sending your answer" is read out from the status region, unseen, so the card keeps its height until the answer lands.`,
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const [allow, deny] = answerButtons(canvasElement) as [HTMLElement, HTMLElement];
+    const card = canvasElement.querySelector<HTMLElement>('.cd-approval-card__card');
+    if (card === null) throw new Error('the card draws its box');
+    const heldHeight = card.getBoundingClientRect().height;
 
     // A click on Deny opens its menu, and a click on Always answers.
     await userEvent.click(deny);
@@ -1032,10 +1275,14 @@ export const SendingYourAnswer: Story = {
     await expect(deny).toHaveAttribute('aria-expanded', 'false');
     await expect(args.onAnswer).toHaveBeenCalledTimes(1);
 
-    // Neither control can be pressed, and a line under them says the answer is being sent.
+    // Neither control can be pressed. The busy button carries the wait: "Sending your answer" is read
+    // out from the status region, visually hidden, so the card's height doesn't change while it's sent.
     const group = canvas.getByRole('group', { name: 'Your answer' });
     await expect(group).toHaveAttribute('aria-busy', 'true');
-    await expect(canvas.getByText('Sending your answer').closest('[role="status"]')).not.toBeNull();
+    const sending = canvas.getByText('Sending your answer');
+    await expect(sending.closest('[role="status"]')).not.toBeNull();
+    await expect(sending.closest('.cd-sr-only')).not.toBeNull();
+    await expect(card.getBoundingClientRect().height).toBe(heldHeight);
     for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
 
     // spinner_on_the_chosen_answer: Deny, the side chosen, shows the busy spinner in place of its word
@@ -1103,7 +1350,7 @@ export const DeniedOnTheSecondTry: Story = {
     // A retry waits like any answer, and a second failure re-enables the answers again.
     await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
     await expect(args.onAnswer).toHaveBeenCalledTimes(1);
-    await expect(canvas.getByText('Sending your answer')).toBeVisible();
+    await expect(canvas.getByText('Sending your answer')).toBeInTheDocument();
     await expect(canvas.queryByRole('alert')).toBeNull();
     for (const button of answerButtons(canvasElement)) await expect(button).toHaveAttribute('aria-disabled', 'true');
     await waitFor(() => expect(canvas.getByRole('alert')).toHaveTextContent(ERROR_LINE));
@@ -1155,6 +1402,143 @@ export const FailsTwice: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
     await expect(args.onAnswer).toHaveBeenCalledTimes(3);
     await expect(args.onAnswer).toHaveBeenLastCalledWith('allow_once');
+  },
+};
+
+export const AnswerLands: Story = {
+  render: (args) => <LandingScreen {...args} />,
+  parameters: { canvas: 'none', canvasNote: LANDS_NOTE },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
+    await expect(args.onAnswer).toHaveBeenCalledWith('allow_once');
+    await waitFor(() => expect(canvas.getByText('Sending your answer')).toBeInTheDocument());
+    // Allow ends handled, with one pulse.
+    await expectLands(canvasElement, rivera.decisions.executed, { line: "You allowed this. It's done.", tone: 'handled', pulse: true });
+  },
+};
+
+export const DenyLands: Story = {
+  render: (args) => <LandingScreen {...args} />,
+  parameters: { canvas: 'none', canvasNote: `${LANDS_NOTE} Here Deny lands.` },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await userEvent.click(canvas.getByRole('button', { name: 'Deny this time' }));
+    await expect(args.onAnswer).toHaveBeenCalledWith('deny_once');
+    // Deny ends refused, with one pulse.
+    await expectLands(canvasElement, rivera.decisions.denied, { line: 'You denied this.', tone: 'refused', pulse: true });
+  },
+};
+
+export const UnknownLands: Story = {
+  render: (args) => <LandingScreen {...args} />,
+  parameters: { canvas: 'none', canvasNote: `${LANDS_NOTE} Here the outcome isn't known yet.` },
+  play: async ({ canvas, canvasElement, userEvent }) => {
+    await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
+    // An outcome not yet known keeps its held dot, and gets no pulse.
+    await expectLands(canvasElement, rivera.decisions.unknown, {
+      line: 'You allowed this. Still confirming whether it went through.',
+      tone: 'held',
+      pulse: false,
+    });
+  },
+};
+
+export const LateAnswerLands: Story = {
+  render: (args) => <LandingScreen {...args} />,
+  parameters: {
+    canvas: 'none',
+    canvasNote: `${LANDS_NOTE} Here the answer came too late: the request had expired, and its final line lands with that state's dot.`,
+  },
+  play: async ({ canvas, canvasElement, userEvent }) => {
+    await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
+    await expectLands(canvasElement, rivera.decisions.expired, {
+      line: 'This request expired before you answered. Nothing was done.',
+      tone: 'info',
+      pulse: true,
+    });
+  },
+};
+
+/** What Today puts under a card answered "Always": the rule it drafted, then Dismiss. */
+const DRAFTED_AND_DISMISS = (
+  <>
+    <Notice tone="info" action={<Button variant="secondary">Review the rule</Button>}>
+      Your answer also drafted a rule. Review it before it applies.
+    </Notice>
+    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <Button variant="ghost">Dismiss</Button>
+    </div>
+  </>
+);
+
+export const AlwaysLandsWithItsRule: Story = {
+  args: refundArgs,
+  render: (args) => <LandingScreen {...args} />,
+  parameters: {
+    canvas: 'none',
+    canvasNote: `${LANDS_NOTE} Here Deny always lands on Dana's refund, and what Today puts under an answered card comes with it: the rule the answer drafted, then Dismiss, fading in and settling inside the card's easing height.`,
+  },
+  play: async ({ canvas, canvasElement, userEvent }) => {
+    await userEvent.click(canvas.getByRole('button', { name: 'Deny' }));
+    await userEvent.click(within(canvas.getByRole('menu', { name: 'Deny' })).getByRole('menuitem', { name: 'Always' }));
+    await waitFor(() => expect(canvas.getByText('Sending your answer')).toBeInTheDocument());
+    await expectLands(
+      canvasElement,
+      { ...heldRefund, state: 'denied' },
+      { line: 'You denied this.', tone: 'refused', pulse: true, after: DRAFTED_AND_DISMISS },
+    );
+    // Under the card, in order: the rule, then Dismiss, each reachable once settled.
+    const card = canvas.getByRole('article');
+    const review = canvas.getByRole('button', { name: 'Review the rule' });
+    const dismiss = canvas.getByRole('button', { name: 'Dismiss' });
+    await expect(card.compareDocumentPosition(review) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expect(review.compareDocumentPosition(dismiss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expect(card.contains(review)).toBe(false);
+    await expect(review.getBoundingClientRect().top).toBeGreaterThan(card.getBoundingClientRect().bottom);
+  },
+};
+
+export const InertCardNeverLands: Story = {
+  args: { inertAnswers: true },
+  render: (args) => <LandingScreen {...args} />,
+  parameters: {
+    canvas: 'none',
+    canvasNote: `${LANDS_NOTE} Here the card is a vision page's (inertAnswers): pressing an answer sends nothing, so when the page draws the request answered, it draws it at once, with nothing landing.`,
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    await userEvent.click(canvas.getByRole('button', { name: 'Allow this time' }));
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+    await expect(canvas.getByText(VISION_INERT_LINE)).toBeVisible();
+    const landing = await land(canvasElement, { decision: rivera.decisions.executed }, settleMoments());
+    // No outgoing layer, no settle, and the answered height from the first frame.
+    await expect(landing.leaving).toBeNull();
+    await expect(canvasElement.querySelector('.cd-approval-card--settling')).toBeNull();
+    const height = canvasElement.querySelector('.cd-approval-card')?.getBoundingClientRect().height ?? 0;
+    for (const frame of landing.frames) await expect(frame.height).toBeCloseTo(height, 0);
+    await expectFinal(canvasElement, rivera.decisions.executed, "You allowed this. It's done.", 'handled');
+  },
+};
+
+export const EnterLands: Story = {
+  render: (args) => <LandingScreen {...args} />,
+  parameters: {
+    canvas: 'none',
+    canvasNote: `${LANDS_NOTE} Here the answer is given from the keyboard, and focus is checked once it has settled.`,
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const card = canvas.getByRole('article');
+    const [status] = within(card).getAllByRole('status');
+    await userEvent.tab();
+    await expect(canvas.getByRole('button', { name: 'Allow this time' })).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onAnswer).toHaveBeenCalledWith('allow_once');
+    updateScreen(canvasElement, { decision: rivera.decisions.executed });
+    await waitFor(() => expect(status).toHaveTextContent("You allowed this. It's done."));
+    // Once every animation of the settle is done, and a frame after: focus is on the status line,
+    // where the answers' focus goes, never on the page or the outgoing layer.
+    await Promise.allSettled(card.getAnimations({ subtree: true }).filter(settleMotion).map((animation) => animation.finished));
+    await waitFor(() => expect(card.querySelector('.cd-approval-card__layer--leaving')).toBeNull());
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    await expect(status).toHaveFocus();
   },
 };
 

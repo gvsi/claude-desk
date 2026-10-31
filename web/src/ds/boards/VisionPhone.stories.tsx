@@ -86,7 +86,7 @@ export const Board: Story = {
     const composer = within(visitor).getByRole('textbox', { name: 'Message Rivera Plumbing' });
     await userEvent.type(composer, 'Thanks');
     await expectTabOrder(userEvent, [
-      within(bar).getByRole('link', { name: 'Back to your Desk' }),
+      within(bar).getByRole('link', { name: 'Back to Vision' }),
       within(held).getByRole('button', { name: 'Allow this time' }),
       within(held).getByRole('button', { name: 'Deny this time' }),
       ...tabs,

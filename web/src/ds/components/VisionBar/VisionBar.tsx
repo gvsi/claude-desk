@@ -7,13 +7,13 @@ import './VisionBar.css';
 export const VISION_LINE = 'Vision, not in the prototype. Nothing here is live.';
 
 export interface VisionBarProps {
-  /** Where "Back to your Desk" goes: the owner's Today on the Desk they came from. */
+  /** Where "Back to Vision" goes: the Vision article, which links every vision page. */
   backHref: string;
 }
 
 /**
  * The bar across the top of every vision page: the "Vision" pill, one line saying none of it is in
- * the prototype or live, and a way back to the owner's own Desk. It can't be hidden: a vision page
+ * the prototype or live, and a way back to the Vision article. It can't be hidden: a vision page
  * always says what it is.
  */
 export function VisionBar({ backHref }: VisionBarProps) {
@@ -22,7 +22,7 @@ export function VisionBar({ backHref }: VisionBarProps) {
       <Pill>Vision</Pill>
       <p className="cd-vision-bar__line">{VISION_LINE}</p>
       <span className="cd-vision-bar__back">
-        <TextLink href={backHref}>Back to your Desk</TextLink>
+        <TextLink href={backHref}>Back to Vision</TextLink>
       </span>
     </div>
   );

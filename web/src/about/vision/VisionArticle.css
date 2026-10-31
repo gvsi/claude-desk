@@ -12,6 +12,11 @@
   --va-line: rgba(28, 27, 25, 0.13);
   --va-link: #2d5b8a;
   --va-bar: rgba(244, 242, 236, 0.94);
+  /* Cards on the page, a shade lighter than the paper, and their edge while pointed at. */
+  --va-tile: #fbfaf7;
+  --va-line-strong: rgba(28, 27, 25, 0.28);
+  /* A control in the bar while pointed at. */
+  --va-hover: rgba(28, 27, 25, 0.06);
   /* The phones: a dark device holding a light, crisp app screen. */
   --va-device: #151513;
   --va-device-shadow: 0 1px 2px rgba(28, 27, 25, 0.18), 0 24px 48px -18px rgba(28, 27, 25, 0.32);
@@ -56,7 +61,14 @@
   outline-color: var(--va-link);
 }
 
-/* The bar across the top, which stays while the page scrolls: the name, where you are, and the way back. */
+/* What keyboard focus scrolls to stops clear of the bar. */
+.vision-article main a,
+.vision-article .va-end a {
+  scroll-margin-top: 80px;
+}
+
+/* The bar across the top, which stays while the page scrolls: the name, then the About set's switch with this
+   page marked, and the way into the prototype (PrototypeLink, drawn here in the article's ink). */
 
 .vision-article .va-bar {
   position: sticky;
@@ -74,18 +86,50 @@
 }
 
 .vision-article .va-bar__brand {
+  margin-right: auto;
   font-family: var(--font-serif);
   font-size: 18px;
   font-weight: 460;
   letter-spacing: -0.1px;
 }
 
-.vision-article .va-bar__here {
-  color: var(--va-ink-2);
+.vision-article .va-switch {
+  display: flex;
+  gap: 4px;
 }
 
-.vision-article .va-bar__back {
-  margin-left: auto;
+.vision-article .va-switch__link {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: var(--va-ink-2);
+  font-size: 14px;
+  line-height: 20px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.vision-article .va-switch__link:hover {
+  background: var(--va-hover);
+  color: var(--va-ink);
+}
+
+.vision-article .va-switch__link[aria-current='page'] {
+  background: var(--va-band);
+  color: var(--va-ink);
+}
+
+.vision-article .va-bar .cd-about-try {
+  margin-left: 4px;
+  box-shadow: inset 0 0 0 1px var(--va-line);
+  color: var(--va-ink);
+  text-decoration: none;
+}
+
+.vision-article .va-bar .cd-about-try:hover {
+  background: var(--va-hover);
 }
 
 /* The headline block: the meta line, the headline, the dek and the note under it. */
@@ -258,7 +302,96 @@
   font-weight: 600;
 }
 
-/* The end: the note that it's vision, the way back, and the footer line. */
+/* The picture cards: "See each one up close", its lead, then a card for each idea, two by two at every width.
+   A card is one link: the top of the idea's phone on the band, scaled down and cut off, then its name and line. */
+
+.vision-article .va-cards {
+  padding-bottom: 40px;
+}
+
+.vision-article .va-cards__lead {
+  margin: 0 0 20px;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  line-height: 31px;
+  font-variation-settings: 'opsz' 20;
+  color: var(--va-ink-2);
+  text-wrap: pretty;
+}
+
+.vision-article .va-cards__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vision-article .va-cards__item {
+  display: flex;
+  min-width: 0;
+}
+
+.vision-article .va-card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--va-line);
+  border-radius: 14px;
+  background: var(--va-tile);
+  color: var(--va-ink);
+  text-decoration: none;
+}
+
+.vision-article .va-card:hover {
+  border-color: var(--va-line-strong);
+}
+
+.vision-article .va-card:focus-visible {
+  outline: 2px solid var(--va-link);
+  outline-offset: 2px;
+}
+
+.vision-article .va-card__top {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  height: 150px;
+  padding-top: 16px;
+  overflow: hidden;
+  background: var(--va-band);
+}
+
+.vision-article .va-card__top .va-phone {
+  transform: scale(0.72);
+  transform-origin: top center;
+}
+
+.vision-article .va-card__words {
+  display: block;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--va-line);
+}
+
+.vision-article .va-card__name {
+  display: block;
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 600;
+}
+
+.vision-article .va-card__line {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--va-ink-2);
+}
+
+/* The end: the note that it's vision, Read next, and the footer line. */
 
 .vision-article .va-end {
   max-width: 640px;
@@ -279,6 +412,58 @@
   line-height: 21px;
   font-weight: 400;
   color: var(--va-ink-2);
+}
+
+/* "Read next": the next page in the About set on a paper card, the whole card one link. */
+.vision-article .va-next {
+  position: relative;
+  margin: 24px 0;
+  padding: 16px 20px;
+  border: 1px solid var(--va-line);
+  border-radius: 14px;
+  background: var(--va-tile);
+}
+
+.vision-article .va-next:hover {
+  border-color: var(--va-line-strong);
+}
+
+.vision-article .va-end .va-next__label {
+  margin: 0;
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.vision-article .va-next__link {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  line-height: 31px;
+  color: var(--va-ink);
+  text-decoration: none;
+}
+
+.vision-article .va-next__link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+}
+
+.vision-article .va-next__link:focus-visible {
+  outline: none;
+}
+
+.vision-article .va-next__link:focus-visible::after {
+  outline: 2px solid var(--va-link);
+  outline-offset: 2px;
+}
+
+.vision-article .va-end .va-next__summary {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 19px;
 }
 
 /* The phones. */
@@ -551,8 +736,11 @@
     padding: 0 16px;
   }
 
-  .vision-article .va-bar__here {
-    display: none;
+  /* The switch leaves the bar for a row under it, which scrolls away with the page. */
+  .vision-article .va-switch {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 12px 16px 0;
   }
 
   .vision-article .va-hero {
@@ -621,6 +809,37 @@
   .vision-article .va-cap {
     max-width: 300px;
     margin: 0;
+  }
+
+  .vision-article .va-cards {
+    padding-bottom: 32px;
+  }
+
+  .vision-article .va-cards__lead {
+    font-size: 17px;
+    line-height: 28px;
+  }
+
+  .vision-article .va-cards__grid {
+    gap: 10px;
+  }
+
+  .vision-article .va-card__top {
+    height: 118px;
+    padding-top: 12px;
+  }
+
+  .vision-article .va-card__top .va-phone {
+    transform: scale(0.52);
+  }
+
+  .vision-article .va-card__words {
+    padding: 10px 12px 12px;
+  }
+
+  .vision-article .va-card__name {
+    font-size: 14px;
+    line-height: 19px;
   }
 
   .vision-article .va-end {

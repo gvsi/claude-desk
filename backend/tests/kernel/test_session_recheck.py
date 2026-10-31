@@ -50,6 +50,7 @@ from .test_execute import committed, fake_quote_desk, leave_an_intent, post_exec
 from .test_ledger_read import append_api
 from .test_release_document import BOB, DANA, confirmed
 from .test_reply_check import post_check
+from .test_turn_language import post_turn
 from .test_verification import check, start
 
 NEW_DOCUMENT = {"ref": "dana-estimate", "title": "Estimate, tankless heater", "body": "Tankless heater: $3,100.00",
@@ -185,6 +186,8 @@ SESSION_ROUTES: dict[str, Setup] = {
     "POST /check_reply": plain(lambda client, copy, v: post_check(client, v, "I can help with that.")),
     "POST /agents/demo": plain(lambda client, copy, v: client.post("/agents/demo", json={"desk_id": copy.desk_id},
                                                                     headers=v.headers)),
+    "POST /sessions/{session_id}/turn": plain(lambda client, copy, v: post_turn(client, v.session_id, v.headers,
+                                                                                "Hola, ¿me puede ayudar?")),
 }
 
 # Rows a session's token is proved on that record something which already happened and answer only

@@ -18,6 +18,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
+import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { watchLandings } from '../../test/landings.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
@@ -36,6 +37,15 @@ const DANA_LIVE = 'ses-dana-web';
 const SEEDED_HOLD = 'ses-visitor-web';
 
 const conversation = (sessionId: string) => `${LIST}/${sessionId}`;
+
+const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
+
+/** A held card's slot in the conversation: the card and what follows it there. */
+function slotOf(card: Element): Element {
+  const slot = card.closest('.cd-conversation__held');
+  if (!slot) throw new Error('the held card has its slot in the conversation');
+  return slot;
+}
 
 /** The owner's line for a read the server failed. */
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
@@ -930,6 +940,53 @@ describe('Conversations', () => {
     expect(chat.state.mode).toBe('owner');
     await expect.element(screen.getByRole('button', { name: 'Hand back to Claude' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('held_request_settles_in_its_slot', async () => {
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const card = heldCard(screen, SEEDED_REASON);
+    const allow = card.getByRole('button', { name: 'Allow this time' });
+    await expect.element(allow).toBeVisible();
+    const element = card.element();
+    const slot = slotOf(element);
+
+    const watching = watchAnswerLanding(element, slot);
+    await allow.click();
+    const frames = await watching;
+
+    // The same card, settled in its slot right after the hold's row, with its final line.
+    expect(heldCard(screen, SEEDED_REASON).element()).toBe(element);
+    expect(element.closest('.cd-conversation__held')).toBe(slot);
+    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    const row = receipt(screen, 'Held for you').element().closest('.cd-transcript-row');
+    expect(row?.nextElementSibling).toBe(slot);
+    // The card eases, and its slot with it, to its answered height: shorter by the answers' row, in one direction, eased.
+    expect(expectSettledInItsSlot(frames)).toBeGreaterThan(0);
+  });
+
+  it('always_answer_settles_in_its_slot_with_its_rule', async () => {
+    const refund = mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(conversation(refund.session_id));
+    const card = heldCard(screen, REFUND_REASON);
+    const deny = card.getByRole('button', { name: 'Deny', exact: true });
+    await expect.element(deny).toBeVisible();
+    const element = card.element();
+    const slot = slotOf(element);
+
+    await deny.click();
+    const watching = watchAnswerLanding(element, slot);
+    await screen.getByRole('menuitem', { name: 'Always' }).click();
+    const frames = await watching;
+
+    // The same card in its slot, with the rule the answer drafted under it.
+    expect(heldCard(screen, REFUND_REASON).element()).toBe(element);
+    expect(element.closest('.cd-conversation__held')).toBe(slot);
+    await expect.element(card.getByText('You denied this.', { exact: true })).toBeVisible();
+    const notice = screen.getByText(DRAFTED, { exact: true }).element();
+    expect(slot.contains(notice)).toBe(true);
+    expect(element.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The card eases, and its slot settles one way only, eased, to the settled card and its rule.
+    expectSettledInItsSlot(frames);
   });
 
   it('held_request_keeps_focus', async () => {

@@ -42,7 +42,7 @@ KERNEL_RO_COLUMNS: dict[str, tuple[str, ...]] = {
     "notification_prefs": ("copy_id", "desk_id", "now", "briefing"),
     "decisions": ("decision_id", "copy_id", "desk_id", "session_id", "tool", "effects", "outcome", "state",
                   "answers", "policy_version", "card_ids", "review", "reason_plain", "visitor_plain",
-                  "expires_at", "ledger_seq", "created_at"),
+                  "expires_at", "ledger_seq", "created_at", "policy_ids"),   # the deciding Cedar policies
     "approvals": ("approval_id", "copy_id", "decision_id", "answer", "expires_at", "consumed_at"),
     "actions": ("action_id", "copy_id", "desk_id", "session_id", "generation", "tool", "effects", "resource_kind",
                 "list_cents", "discount_bp", "amount_cents", "recipient", "starts_at", "created_at"),

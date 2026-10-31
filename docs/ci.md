@@ -1,6 +1,6 @@
 # Continuous integration
 
-Every push to `main`, every pull request to `main` and every manual run starts one GitHub Actions workflow, `ci` ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)). Each push to a pull request runs it once, and a newer push cancels the older run of the same pull request. A run on `main` is never cancelled once it starts; if several pushes to `main` are waiting, only the newest one runs.
+Every push to `main`, every pull request on any base branch (including stacked pull requests) and every manual run starts one GitHub Actions workflow, `ci` ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)). Each push to a pull request runs it once, and a newer push cancels the older run of the same pull request. A run on `main` is never cancelled once it starts; if several pushes to `main` are waiting, only the newest one runs.
 
 CI holds no secrets and no model key, and it can only read the repository:
 
@@ -21,10 +21,10 @@ The workflow has nine jobs. Their names are the check names, in this order:
 4. `tier 1 evals`: two suites pass against the real kernel and database. Both need no network and no model key:
    - the model-free attack suite (`make evals-tier1`). Every CI run is the strict one, a manual workflow run on any branch included: a plan whose code is on the branch but which `evals/tier1/landed.toml` doesn't list fails it at collection, and the run's summary names the plan under `unlisted` and counts it as failed. A local run on the plan's own branch only warns and keeps that plan's cases pending;
    - the API's kernel contract tests, against the real kernel and not only the fake one, for each part of the kernel that `evals/tier1/landed.toml` lists as landed (`make kernel-contract`).
-5. `tier 2 results`: on pull requests only. A change to the gated inputs has to carry a passing tier 2 results file for exactly those inputs (`make evals-results-check BASE=origin/main`). The gated inputs are the kernel, prompts, rule presets, shared contracts, mock payments and the eval judging code.
+5. `tier 2 results`: on pull requests, pushes to `main` and manual runs. A change to the gated inputs has to carry a passing tier 2 results file for exactly those inputs (`make evals-results-check BASE="$RESULTS_BASE"`, with `RESULTS_BASE` set to the event's base commit on pull requests and `HEAD~1` otherwise). The gated inputs are the kernel, prompts, rule presets, shared contracts, mock payments and the eval judging code.
 6. `web tests`: two steps pass in turn. First the web app type-checks and its unit tests pass (`make web-test`). Then it builds, the build check passes and the mocked end-to-end test passes (`make web-e2e`).
 7. `infra synth`: the infrastructure tests pass and the CDK app synthesizes (`make infra-check`). Nothing is deployed, and no cloud credentials are used.
-8. `secret scan`: gitleaks finds no secret in the history under test. On a pull request that is `main`'s history plus the pull request's commits; on a push to `main`, it is `main`'s history. Other branches aren't scanned, so one branch's finding can't fail every other run. A secret committed and later deleted still counts.
+8. `secret scan`: gitleaks finds no secret in the history under test. On a pull request that is the base branch's history plus the pull request's commits; on a push to `main`, it is `main`'s history. On a manual run, it is the selected ref's history. Other branches aren't scanned, so one branch's finding can't fail every other run. A secret committed and later deleted still counts.
    - It uses gitleaks' default rules with no exceptions. `.gitleaks.toml` has no allowlist, there is no `.gitleaksignore`, and inline `gitleaks:allow` comments are ignored.
    - Each finding is logged with its file, line and commit, and the secret itself is redacted.
 9. `repo checks`: three things pass:
@@ -49,14 +49,14 @@ The gate decides by paths alone, relative to the repository root. It never asks 
 | A `--run-if` path is missing and no `--required-if` path exists | Skips (exit 0) and says so in the job log and summary: "`<name>`: skipped, `<path>` is not in the repo yet" |
 | A usage error | Fails (exit 2) without running anything |
 
-The gates in the workflow:
+The gates in the workflow (`RESULTS_BASE` is the event's base commit on pull requests and `HEAD~1` otherwise):
 
 | Gate | Runs once this exists | Fails if missing while this exists | Command |
 |---|---|---|---|
 | `proofs` | `backend/scripts/prove_presets.py` | `kernel/cedar/proofs` or `backend/desk/kernel_service/compiler.py` | `make check-presets` |
 | `tier1` | `evals/run.py` | `backend/desk/kernel_service/app.py` | `make evals-tier1` |
 | `kernel-contract` | `backend/tests/kernel_contract/conftest.py` | `backend/desk/api/kernel_client.py` | `make kernel-contract` |
-| `tier2-results` | `evals/results.py` | `evals/results` | `make evals-results-check BASE=origin/main` |
+| `tier2-results` | `evals/results.py` | `evals/results` | `make evals-results-check BASE="$RESULTS_BASE"` |
 | `web` | `web/package.json` | | `make web-test` |
 | `web-e2e` | `web/playwright.config.ts` | `web/e2e` | `make web-e2e` |
 | `infra` | `infra/cdk.json` | | `make infra-check` |
@@ -73,9 +73,9 @@ Tier 2 is the model-driven attack suite and legitimate-task suite. It needs a mo
 
 - It runs locally with the development key.
 - Its results file is committed to `evals/results/`, named by a hash of the gated inputs.
-- On a pull request, `tier 2 results` recomputes that hash for the merge of the pull request into `main`, which is what CI checks out. It fails when gated inputs changed and no passing results file covers them.
-- When `main` gains gated changes after the results file was made, rebase the pull request and run tier 2 again to regenerate the file.
-- Pushes to `main` skip the job, since the pull request already ran it.
+- On a pull request, `tier 2 results` recomputes that hash for the merge of the pull request into its base branch, which is what CI checks out. It compares changes and recorded history against the event's base commit, including for stacked pull requests. It fails when gated inputs changed and no passing results file covers them.
+- Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`; when both sides changed results inputs since their merge base, rebase onto `origin/main`, regenerate results for the combined inputs (`make evals-tier2 MAX_USD=0` while every scenario is pending; a pass that runs scenarios spends money and needs the owner's go first), remove the stale file, push and wait for green before checking readiness again and merging.
+- Pushes to `main` and manual runs check against `HEAD~1`, so a squash merge whose combined gated inputs lack passing results fails immediately.
 
 ## Runners
 
@@ -101,7 +101,7 @@ While the repository is private, runs draw on the account's included Actions min
 Branch protection isn't configured from this repository; it is the repository owner's call.
 
 - **Plan.** On a private repository, branch protection needs GitHub Pro or a paid organization plan.
-- **Skips.** A skipped check counts as passing. That covers the gate's visible skips, and `tier 2 results` on pushes to `main`, where it doesn't run.
+- **Skips.** A skipped check counts as passing. That covers the gate's visible skips.
 - **Requiring the checks.** To require the nine checks on `main`, with each branch up to date before it merges, run:
 
 ```sh

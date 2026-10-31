@@ -30,9 +30,10 @@ from desk.kernel_service import desks, labels, reply_check
 
 from .helpers import kernel_ctx, rows_of
 from .test_adapters import Rivera, rivera, visitor_of
-from .test_context import context_of
+from .test_context import SEEDED_PUBLIC_KNOWLEDGE, context_of
 from .test_desk_writes import LOPEZ_DESK, desks_of, entries_of, new_desk, post_desk, upload
-from .test_labels_hardening import disguises, documents, knowledge, knowledge_entries, post_knowledge, stored
+from .test_labels_hardening import (SEEDED_KNOWLEDGE_ENTRIES, disguises, documents, knowledge,
+                                    knowledge_entries, post_knowledge, stored)
 
 
 def test_a_scan_with_no_canaries_reads_nothing(monkeypatch):
@@ -197,7 +198,7 @@ async def test_a_desk_holds_at_most_two_hundred_knowledge_items(app, client):
         ctx.bind(copy.copy_id)
         ctx.db.add_all(KnowledgeRow(desk_id=copy.desk_id, item_id=f"kb-{number}", copy_id=copy.copy_id, source="upload",
                                     title="Note", text="Street parking is fine.", readers=["owner"])
-                       for number in range(labels.MAX_KNOWLEDGE_ITEMS - 1))
+                       for number in range(labels.MAX_KNOWLEDGE_ITEMS - len(SEEDED_PUBLIC_KNOWLEDGE) - 1))
     await stored(client, copy, knowledge("kb-tools", "Tools", "Maria brings a drain camera.", ["public"]))   # the 200th
     before = len(await entries_of(app, copy))
     response = await post_knowledge(client, copy, knowledge("kb-one-more", "One more", "A note.", ["public"]))
@@ -224,15 +225,17 @@ async def test_knowledge_found_clean_is_not_read_again_until_a_document_is_added
     spans = labels.canary_spans
     monkeypatch.setattr(labels, "canary_spans", lambda text, canaries: scanned.append(text) or spans(text, canaries))
     for _ in range(2):
-        assert [item.item_id for item in (await context_of(client, visitor.session_id, visitor.headers)).knowledge] == [
-            "kb-tools"]
+        assert [(item.item_id, item.label.readers) for item in (await context_of(
+            client, visitor.session_id, visitor.headers)).knowledge] == [("kb-tools", ["public"]),
+                                                                      *SEEDED_PUBLIC_KNOWLEDGE]
     assert not any(planted in each for each in scanned)
 
     # a document whose canary the item holds: the item is read again and kept from the visitor
     monkeypatch.setattr(desks, "new_canary", lambda: planted)
     response = await upload(client, copy, {"ref": "old-invoice", "title": "Old invoice", "body": "Paid in full."})
     assert response.status_code == 200, response.text
-    assert (await context_of(client, visitor.session_id, visitor.headers)).knowledge == []
+    assert [(item.item_id, item.label.readers) for item in (await context_of(
+        client, visitor.session_id, visitor.headers)).knowledge] == SEEDED_PUBLIC_KNOWLEDGE
     assert any(planted in each for each in scanned)
 
 
@@ -245,9 +248,10 @@ async def test_a_canary_split_between_a_knowledge_items_id_and_title_keeps_it_th
     dana = (await documents(app, copy))["dana-invoice"]
     split = knowledge(f"kb-{dana.canary[:10]}", f"{dana.canary[10:]} invoice", "Paid in full.", ["public"])
     assert (await stored(client, copy, split)).label == Label(readers=["owner"])
-    assert await knowledge_entries(app, copy) == [
+    assert await knowledge_entries(app, copy) == SEEDED_KNOWLEDGE_ENTRIES + [
         {"part": "knowledge", "item_id": split["item_id"], "owner_only_forced": True}]
-    assert (await context_of(client, visitor.session_id, visitor.headers)).knowledge == []
+    assert [(item.item_id, item.label.readers) for item in (await context_of(
+        client, visitor.session_id, visitor.headers)).knowledge] == SEEDED_PUBLIC_KNOWLEDGE
 
 
 CONTEXT_BUDGET = 0.5                      # seconds for one `/context` call, on a laptop
@@ -310,7 +314,8 @@ async def test_a_full_copy_reads_its_context_within_budget(app, client, monkeypa
         started = time.perf_counter()
         given = await context_of(client, visitor.session_id, visitor.headers)
         elapsed = time.perf_counter() - started
-        assert [item.item_id for item in given.knowledge] == ["kb-references"]
+        assert [(item.item_id, item.label.readers) for item in given.knowledge] == [
+            ("kb-references", ["public"]), *SEEDED_PUBLIC_KNOWLEDGE]
         return elapsed
 
     budget = await calibrated_budget(app)

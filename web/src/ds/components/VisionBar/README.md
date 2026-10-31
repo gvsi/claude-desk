@@ -11,13 +11,13 @@
 
 ## What it shows
 
-- A `role="note"` named "Vision": the `Pill` "Vision", then "Vision, not in the prototype. Nothing here is live." (`VISION_LINE`), word for word as the boards write it, then the `TextLink` "Back to your Desk" at the right.
+- A `role="note"` named "Vision": the `Pill` "Vision", then "Vision, not in the prototype. Nothing here is live." (`VISION_LINE`), word for word as the boards write it, then the `TextLink` "Back to Vision" at the right.
 - The words are fixed: no prop changes them or hides the bar, so a vision page always says what it is.
 - It holds one tab stop, the link.
 
 ## What the consumer provides
 
-- `backHref`, where "Back to your Desk" goes: the owner's Today on the Desk they came from.
+- `backHref`, where "Back to Vision" goes: the Vision article under About this prototype, which links every vision page.
 
 ## Layout
 
@@ -28,7 +28,7 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `backHref` | `string` | Required. "Back to your Desk". |
+| `backHref` | `string` | Required. "Back to Vision". |
 
 Also exported: `VISION_LINE`, the line's words.
 

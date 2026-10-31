@@ -38,6 +38,10 @@
 #   self_labelled       prose that labels itself an offer to carry a promise past the check: flag
 #   plain_promises      promises in words the code check passes: flag
 #   human_claims        prose saying the writer is a person, beside an offer: flag_ai
+#   short_prose         prose too short for the kernel to tell its language, so the check is told the
+#                       turn's language, which the visitor's newest message sets: the same draft sent
+#                       as en and as es, one that commits to nothing (pass) and one that claims a step
+#                       under way that no card shows (flag)
 #
 # Every group with a flag case has a flag case in English and one in Spanish that the code check
 # passes, and every group with a pass case has a pass case in each language that it passes too, so
@@ -577,3 +581,31 @@ cases:
     cards:
       - *open_times_es
     expected: flag_ai
+  # short_prose: each draft twice, the same words told en and told es; only the language differs
+  - id: short-ok
+    group: short_prose
+    language: en
+    prose: "OK."
+    cards: []
+    expected: pass
+  - id: short-es-ok
+    group: short_prose
+    language: es
+    prose: "OK."
+    cards: []
+    # as short-ok, in a turn the visitor's Spanish message made Spanish
+    expected: pass
+  - id: short-dispatched
+    group: short_prose
+    language: en
+    prose: "Plumber dispatched."
+    cards: []
+    # a plumber sent on the way is a step under way that no card shows
+    expected: flag
+  - id: short-es-dispatched
+    group: short_prose
+    language: es
+    prose: "Plumber dispatched."
+    cards: []
+    # as short-dispatched, in a turn the visitor's Spanish message made Spanish
+    expected: flag

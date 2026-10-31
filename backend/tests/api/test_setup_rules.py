@@ -969,6 +969,34 @@ async def test_confirm_keeps_answering_off(app, browser, fake, kernel_http, mode
         assert (reply.status_code, reply.json()["error"]) == (409, "conflict")
 
 
+async def test_setup_confirm_tells_cancelled_links_chat_before_go_live(app, browser, fake, kernel_http, model, engine):
+    from desk.api.store import Ids, append_message
+    from desk.kernel_api import CreateSessionRequest
+    from tests.api.test_cancelled_links import notices
+    from tests.kernel_contract.test_contract import issue_payment_link
+
+    owner, state = await ready(app, browser, kernel_http, model)
+    await drafted_rules(owner, model, state, GOOD_CARDS[0], RuleCardDraft(
+        applies_to="native.payment_link", mode="ask", who="anyone", reason="Payment links ask first."))
+    desk_id = state["desk_id"]
+    # A preview chat can already exist before going live. Script an earlier auto-allowed link in it.
+    visitor = await kernel_http.owner(owner.token).call("POST /sessions", CreateSessionRequest(
+        desk_slug=fake.desks[desk_id].slug, kind="visitor", preview=True))
+    session_id = visitor.state.session_id
+    fake.script("native.quote", "allow")
+    fake.script("native.payment_link", "allow")
+    await issue_payment_link(kernel_http.session(visitor.session_token), session_id, "service-call-deposit", 1)
+    async with engine.begin() as conn:
+        await append_message(conn, Ids(copy_id=owner.copy_id, desk_id=desk_id, session_id=session_id),
+                             "visitor_text", text="Can I pay?", wake=False)
+    response = await owner.browser.post(policy(state, "confirm"))
+    assert response.status_code == 200, response.text
+    assert len(await notices(engine, session_id)) == 1
+    response = await owner.browser.post(policy(state, "go_live"))
+    assert response.status_code == 200, response.text
+    assert len(await notices(engine, session_id)) == 1
+
+
 async def test_confirm_conflict_returns_a_new_draft_to_confirm(app, browser, fake, kernel_http, model, engine,
                                                               monkeypatch):
     # The rules change between the draft and the confirm: the same cards are drafted again on the rules now in force,

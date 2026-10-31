@@ -1,6 +1,19 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { Link, Outlet, useLocation, useMatches, useNavigate, useNavigationType, useOutletContext, useParams } from 'react-router';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from 'react';
+import { Link, Outlet, useLocation, useMatches, useNavigate, useNavigationType, useParams } from 'react-router';
 
 import { ABOUT_LINKS } from '../about/links.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
@@ -28,7 +41,19 @@ import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
-import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead, withAnswering } from './useDesks.ts';
+import {
+  DESKS_KEY,
+  desksQuery,
+  dropTheOldInbox,
+  findDesk,
+  invalidateCopy,
+  lastOrFirst,
+  todayPath,
+  useDesks,
+  useToday,
+  useTodayReadAhead,
+  withAnswering,
+} from './useDesks.ts';
 
 import './OwnerLayout.css';
 
@@ -61,9 +86,22 @@ interface ShownDesk {
   desk: DeskSummary;
 }
 
+const DeskContext = createContext<OwnerDeskContext | null>(null);
+
+/**
+ * Gives the pages under it the business and Desk they are drawn for, and what they can do to it:
+ * the owner's frame around every page of a Desk, its nested pages included (Settings' sections), and
+ * the still preview of Today behind the intro dialog, where both do nothing.
+ */
+export function OwnerDeskProvider({ value, children }: { value: OwnerDeskContext; children: ReactNode }) {
+  return <DeskContext.Provider value={value}>{children}</DeskContext.Provider>;
+}
+
 /** The business and Desk the owner is on, for a page under `/app/:deskId`. */
 export function useOwnerDesk(): OwnerDeskContext {
-  return useOutletContext<OwnerDeskContext>();
+  const value = useContext(DeskContext);
+  if (value === null) throw new Error('useOwnerDesk: this page is drawn outside a Desk');
+  return value;
 }
 
 const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'rules', 'safety', 'share', 'settings'];
@@ -301,6 +339,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
     async (copy: CopyOut) => {
       setConfirming(false);
       const first = copy.desks[0];
+      // The old copy's inbox goes before the new copy's Desk frame reads its Today ahead.
+      await dropTheOldInbox(queryClient);
       // Leave this Desk first: read again while it is still shown, the copy without it would say it's gone.
       await navigate(first ? todayPath(first.desk_id) : '/', { replace: true });
       await invalidateCopy(queryClient);
@@ -340,8 +380,15 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const layoutClass = ['cd-owner-layout', fill ? 'cd-owner-layout--fill' : '', CENTERED_PAGES.has(current) ? 'cd-owner-layout--centered' : '']
     .filter(Boolean)
     .join(' ');
-  const setAnswering = (on: boolean) => answering.mutate(on);
-  const holdDesk = (on: boolean) => onHold(on ? { business, desk } : null);
+  // What every page under this Desk gets (`useOwnerDesk`), built here only. It stays the same object
+  // until the business or the Desk changes, so the pages don't draw again on each of the frame's reads.
+  const { mutate: answer } = answering;
+  const setAnswering = useCallback((on: boolean) => answer(on), [answer]);
+  const holdDesk = useCallback((on: boolean) => onHold(on ? { business, desk } : null), [onHold, business, desk]);
+  const deskContext = useMemo<OwnerDeskContext>(
+    () => ({ business, desk, setAnswering, holdDesk, reachPlace }),
+    [business, desk, setAnswering, holdDesk, reachPlace],
+  );
   const sidebar = (
     <OwnerSidebar
       businesses={businesses}
@@ -374,7 +421,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
           </div>
         ) : null}
         <AskClaudeProvider value={askClaude.value}>
-          <Outlet context={{ business, desk, setAnswering, holdDesk, reachPlace } satisfies OwnerDeskContext} />
+          <OwnerDeskProvider value={deskContext}>
+            <Outlet />
+          </OwnerDeskProvider>
         </AskClaudeProvider>
         {fill ? null : (
           <footer className="cd-owner-layout__footer">
@@ -397,7 +446,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   );
 }
 
-interface OwnerSidebarProps {
+export interface OwnerSidebarProps {
   businesses: BusinessOut[];
   business: BusinessOut;
   desk: DeskSummary;
@@ -412,8 +461,11 @@ interface OwnerSidebarProps {
   onAnsweringChange: (on: boolean) => void;
 }
 
-/** The sidebar, and the business switcher beside its business row while it is open. */
-function OwnerSidebar(props: OwnerSidebarProps) {
+/**
+ * The sidebar, and the business switcher beside its business row while it is open. The still
+ * preview of Today draws it too, so the frame it shows is the one Today opens in.
+ */
+export function OwnerSidebar(props: OwnerSidebarProps) {
   const { businesses, business, desk, liveCount } = props;
   const ref = useRef<HTMLDivElement>(null);
   return (

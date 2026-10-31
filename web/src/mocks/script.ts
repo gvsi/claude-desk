@@ -836,14 +836,47 @@ function draftCard(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'w
 /** Monday to Friday, all day. */
 const WEEKDAYS_ALL_DAY = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } satisfies RuleCard['hours'];
 
+/** A request held for the owner, as Claude on Rules reads it: its tool, the kernel's line on it, and the reason of the rule that held it. */
+export interface HeldForChat {
+  tool: ToolName;
+  reasonPlain: string;
+  heldBy: string | null;
+  /** It moves more money than the payment limit, which no rule goes past, so no rule could let it through. */
+  aboveLimit: boolean;
+}
+
+/** Why a hold no rule of the owner's decided waits, in the kernel's words for the default ask (`DEFAULT_REASON`, `kernel_service/compiler.py`). */
+const DEFAULT_ASK_REASON = 'Not covered by a rule yet, so it asks you.';
+
+/**
+ * What the owner calls each tool's requests, so Claude knows which hold a question names: the API's
+ * words (`TOOL_LABELS` in `backend/desk/api/rules.py`), but "identity check" for a verification,
+ * as the owner app and Rules' question about a hold name it.
+ */
+export const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
+  'native.quote': 'quote',
+  'native.find_slots': 'open times',
+  'native.book': 'booking',
+  'native.release_document': 'document',
+  'native.payment_link': 'payment link',
+  'native.charge_mandate': 'agent payment',
+  'native.capture_lead': 'contact details',
+  'native.request_callback': 'callback',
+  'native.start_verification': 'identity check',
+  'payments.list_charges': 'payment history',
+  'payments.create_refund': 'refund',
+};
+
 /**
  * How Rivera's Claude answers the owner on Rules, in place of the API's model turn: the Rules
  * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rule for
  * anyone to weekdays, so weekend quotes ask; "Quote water heater installs up to $600" adds a
- * quote rule up to that amount), a question is answered with no draft, and anything else says
- * what Claude can draft. `active` is the Desk's active rules.
+ * quote rule up to that amount); "Why was this refund held?" is answered about the newest held
+ * request of the tool it names, with the rule that held it, and an offer to draft one unless it is
+ * above the payment limit; another question is answered with no draft, and anything else says what
+ * Claude can draft. `active` is the Desk's active rules, and `held` its held requests, newest first.
  */
-export function ruleChatReply(text: string, active: readonly RuleCard[]): RuleChatReply {
+export function ruleChatReply(text: string, active: readonly RuleCard[], held: readonly HeldForChat[] = []): RuleChatReply {
   const lower = text.toLowerCase();
   if (lower.includes('weekend') && lower.includes('quot')) {
     const quote = active.find((card) => card.applies_to === 'native.quote' && card.who === 'anyone' && card.mode === 'auto' && card.is_default !== true);
@@ -876,12 +909,12 @@ export function ruleChatReply(text: string, active: readonly RuleCard[]): RuleCh
       ],
     };
   }
-  if (lower.includes('refund') && (lower.includes('why') || lower.includes('held'))) {
-    return {
-      answer:
-        "Dana's refund waited for you because refunds ask you first: your rule says refunds to a customer wait for your answer. If you'd like small refunds to go through on their own, ask me to draft that rule.",
-      add: [],
-    };
+  const asked = hasWord(lower, 'why') || hasWord(lower, 'held') ? held.find((h) => hasWord(lower, TOOL_LABELS[h.tool] ?? h.tool)) : undefined;
+  if (asked !== undefined) {
+    const why = asked.heldBy === null ? DEFAULT_ASK_REASON : `It was held by your rule: ${asked.heldBy}`;
+    // Above the payment limit no rule lets it through, so drafting one is no answer.
+    const offer = asked.aboveLimit ? '' : " If you'd like requests like this to go through on their own, ask me to draft that rule.";
+    return { answer: `${asked.reasonPlain} ${why}${offer}`, add: [] };
   }
   if (lower.trim().endsWith('?')) {
     return {

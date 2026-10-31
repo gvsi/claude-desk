@@ -1,24 +1,48 @@
-import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
+import type { Decision } from '../../api/contracts.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
-import { Button, Card, Icon, Notice, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
+import { Button, Card, Icon, Notice, Pill, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
 import { BREAK_IT_IDEAS, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
-import { VISION_PATHS } from '../../vision/data.ts';
+import { VISION_ARTICLE } from '../../about/links.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, useToday } from '../useDesks.ts';
-import { THINGS_TO_TRY } from './ideas.ts';
+import { doneCaption, type UncountedAnswer } from './doneSignals.ts';
+import { THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
+import { useDoneSignals, type Done } from './useDoneSignals.ts';
 
 export interface ThingsToTryProps {
-  /** The oldest held request, which "Answer a held request" waits for; null while nothing is held. */
+  /**
+   * The oldest request still held or with its answer still out, which "Answer a held request" waits
+   * for; null while there is none.
+   */
   firstHeld: NeedsYouItem | null;
+  /** The final decisions of the requests answered on Today in this view. */
+  answered: Iterable<{ state: Decision['state'] }>;
+  /** The final decision of the request answered on Today last, kept when its card is dismissed. */
+  latestAnswer: { decision_id: string; state: Decision['state'] } | null;
   /** "Open the request": brings the held request's card into view and focus. */
   onFocusRequest: () => void;
 }
 
 const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
+
+/**
+ * How a row ended, as it draws it: the line that takes the detail's place; whether it ticked (done,
+ * with a check and a Done pill) or only settled (an answer the list doesn't count: its line alone);
+ * and whether it was so at load.
+ */
+interface RowEnd extends Done {
+  line: string;
+  ticks: boolean;
+}
+
+function rowDone(done: Done | undefined, line: string): RowEnd | null {
+  return done === undefined ? null : { ...done, line, ticks: true };
+}
 
 /** What happened to the "Try to break it" idea the owner picked, by its key. */
 interface Pick {
@@ -59,16 +83,29 @@ function routerClick(go: () => void) {
 }
 
 /**
- * Today's "Things to try": four ways into the demo, each with its next step, then a link to where
- * this is going, the labelled vision pages. The public page always opens in a new tab, never on
- * Today. "Hide this list" is remembered in this browser when it can be.
+ * Today's "Things to try": four ways into the demo, each with its next step, ticked off in place as
+ * the owner does it, and counted in the line under the heading; then a link to the Vision article,
+ * where a Desk could go next. "Answer a held request" waits until something is held, and stays once
+ * it's answered: ticked when the answer counts, or settled in its slot with how the answer ended when
+ * it doesn't (a request that had expired or been cancelled, or an answer given on a Desk the list
+ * doesn't count). The public page always opens in a new tab, never on Today. "Hide this list" is
+ * remembered in this browser when it can be, and a hidden list reads nothing.
  */
-export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
+export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest }: ThingsToTryProps) {
   const { business, desk } = useOwnerDesk();
   const today = useToday(desk.desk_id, { retryOnMount: false });
   const navigate = useNavigate();
   const titleId = useId();
   const [hidden, setHidden] = useState(() => readLocal('thingsToTryHidden') === 'true');
+  const signals = useDoneSignals({ enabled: !hidden, deskId: desk.desk_id, answered, latest: latestAnswer });
+  // The row settles with how the latest answer given here ended, when the list doesn't count it, and
+  // keeps that line when its card is dismissed. A new request held clears it: the answer whose line it
+  // was is remembered here, so the line doesn't come back once that request is gone.
+  const waiting = firstHeld?.decision != null;
+  const latestId = latestAnswer?.decision_id ?? null;
+  const [clearedFor, setClearedFor] = useState<string | null>(null);
+  if (waiting && latestId !== null && latestId !== clearedFor) setClearedFor(latestId);
+  const settledAs: UncountedAnswer | null = !waiting && latestId !== null && latestId !== clearedFor ? signals.uncounted : null;
   // After hiding or showing, focus goes to the button that undoes it, rather than to the page.
   const toggleRef = useRef<HTMLDivElement>(null);
   const moveFocus = useRef(false);
@@ -97,6 +134,13 @@ export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
 
   const link = customerLink(desk.slug, desk.desk_id);
   const ownerName = today.data?.greeting_name ?? firstName(business.owner_display_name);
+  // "Answer a held request": done once answered; else waiting while a request is held (or its answer
+  // is still out); else settled, in its slot, by an answer given here that the list doesn't count;
+  // else not drawn.
+  const answerDone = rowDone(signals.done.answer, ANSWER.done);
+  const answerEnd: RowEnd | null =
+    answerDone ?? (!waiting && settledAs !== null ? { line: UNCOUNTED_ANSWER_LINES[settledAs], ticks: false, atLoad: false } : null);
+  const answerRow = answerDone !== null ? 'done' : waiting ? 'waiting' : answerEnd !== null ? 'settled' : 'absent';
 
   return (
     <section className="cd-things" aria-labelledby={titleId}>
@@ -104,7 +148,10 @@ export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
         <h2 id={titleId} className="cd-things__title cd-type-section">
           Things to try
         </h2>
-        <p className="cd-things__caption cd-type-meta">About 10 minutes. No real customer sees any of it.</p>
+        {/* The line keeps the room of its longest wording, so counting never changes its height. */}
+        <p className="cd-things__caption cd-type-meta" data-room={doneCaption(0)}>
+          <span className="cd-things__caption-now">{doneCaption(signals.count)}</span>
+        </p>
         <div ref={toggleRef} className="cd-things__hide">
           <Button variant="ghost" onClick={() => setHiddenAndRemember(true)}>
             Hide this list
@@ -113,20 +160,30 @@ export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
       </div>
       <Card padding={16}>
         <ul className="cd-things__list">
-          <Thing icon="conversations" title={CHAT.title} detail="Your public page opens in a new tab. Ask about a leak, a price or a time.">
+          <Thing
+            icon="conversations"
+            title={CHAT.title}
+            detail="Your public page opens in a new tab. Ask about a price or a time."
+            end={rowDone(signals.done.chat, CHAT.done)}
+          >
             <Button variant="secondary" href={link} external>
               Open your public page
             </Button>
           </Thing>
-          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} />
-          {firstHeld?.decision ? (
-            <Thing icon="clock" title={ANSWER.title} held detail={heldLine(firstHeld.held_by)}>
+          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} end={rowDone(signals.done.break, BREAK.done)} />
+          {answerRow === 'absent' ? null : (
+            <Thing icon="clock" title={ANSWER.title} held detail={heldLine(firstHeld?.held_by)} end={answerEnd}>
               <Button variant="secondary" onClick={onFocusRequest}>
                 Open the request
               </Button>
             </Thing>
-          ) : null}
-          <Thing icon="plus" title={CREATE.title} detail="Describe a business in a few sentences. Claude drafts the rules, and you confirm them.">
+          )}
+          <Thing
+            icon="plus"
+            title={CREATE.title}
+            detail="Describe a business in a few sentences. Claude drafts the rules, and you confirm them."
+            end={rowDone(signals.done.create, CREATE.done)}
+          >
             <Button variant="secondary" href="/app/setup" onClick={routerClick(() => void navigate('/app/setup'))}>
               Start a Desk
             </Button>
@@ -134,7 +191,7 @@ export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
         </ul>
       </Card>
       <p className="cd-things__vision cd-type-meta">
-        <TextLink href={VISION_PATHS.cityOffice}>Where this is going: channels, a city office and a team Desk</TextLink>
+        <TextLink href={VISION_ARTICLE.route}>Vision: where a Desk could go next</TextLink>
       </p>
     </section>
   );
@@ -148,25 +205,176 @@ interface ThingProps {
   detail: ReactNode;
   /** Shown under the detail, across the row. */
   below?: ReactNode;
+  /** Set once the row has ended: it ticks off when its thing is done, or settles with its line alone. */
+  end?: RowEnd | null;
   /** The row's next step, at its right. */
   children: ReactNode;
 }
 
-function Thing({ icon, title, held = false, detail, below, children }: ThingProps) {
+/**
+ * How long past its own transition a row's settle waits for `transitionend` before it ends itself:
+ * a browser that drops the event still lets the row take its own height.
+ */
+const SETTLE_SLACK_MS = 100;
+
+/**
+ * Whether the browser asks for reduced motion. The base stylesheet stops every transition then; a
+ * ticking row also keeps no height, so its end state draws at once.
+ */
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/** The longest of an element's transitions, delay included, in milliseconds. */
+function transitionMs(el: Element): number {
+  const style = getComputedStyle(el);
+  const ms = (value: string) => (value.trim().endsWith('ms') ? Number.parseFloat(value) : Number.parseFloat(value) * 1000) || 0;
+  const durations = style.transitionDuration.split(',').map(ms);
+  const delays = style.transitionDelay.split(',').map(ms);
+  return Math.max(0, ...durations.map((duration, i) => duration + (delays[i % delays.length] ?? 0)));
+}
+
+/** A ticked row easing from the height it had to its own, both measured. */
+interface Settle {
+  from: number;
+  to: number;
+}
+
+/**
+ * What happens to a row as it turns done in view, in the commit that ticks it, before paint:
+ * - Its height, when it ticks in view (`eases`, its check drawing): the whole row's height as it
+ *   stood (its open ideas included) holds while the check draws, then eases to the done row's own
+ *   height (`motion-base`, emphasis ease), so what's below glides up once instead of jumping. The
+ *   stylesheet's transition carries it between the two measured heights, and the row lets go on
+ *   `transitionend` or `transitioncancel`, with a fallback. Under reduced motion, and for a row done
+ *   before Today opened, the row takes its own height at once: there is no change of the owner's to
+ *   show.
+ * - Focus: the button or idea that had it is gone, so focus that was in the row goes to its title
+ *   rather than falling to the page. Focus anywhere else is left alone.
+ */
+function useTickInPlace(done: boolean, eases: boolean) {
+  const ref = useRef<HTMLLIElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  // The row's height while it isn't done, kept up to date as it changes.
+  const before = useRef<number | null>(null);
+  const wasDone = useRef(done);
+  // Whether focus is in the row, as the row's own focus events last said.
+  const focusInside = useRef(false);
+  const [settle, setSettle] = useState<Settle | null>(null);
+
+  useLayoutEffect(() => {
+    const item = ref.current;
+    if (item === null) return;
+    if (!done) {
+      before.current = item.getBoundingClientRect().height;
+      wasDone.current = false;
+      return;
+    }
+    if (wasDone.current) return;
+    wasDone.current = true;
+    const active = document.activeElement;
+    if (focusInside.current && (active === null || active === document.body)) titleRef.current?.focus({ preventScroll: true });
+    const from = before.current;
+    const to = item.getBoundingClientRect().height;
+    if (eases && from !== null && from - to > 0.5 && !prefersReducedMotion()) setSettle({ from, to });
+  });
+
+  // The settle, before paint: locked at the height the row had, then set to its own height, which the
+  // stylesheet's transition reaches once the check has drawn.
+  useLayoutEffect(() => {
+    const item = ref.current;
+    if (settle === null || item === null) return undefined;
+    item.style.minHeight = `${settle.from}px`;
+    // Read back, so the browser starts the transition from the height the row had.
+    void item.offsetHeight;
+    item.style.minHeight = `${settle.to}px`;
+    const end = () => setSettle(null);
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target === item && event.propertyName === 'min-height') end();
+    };
+    item.addEventListener('transitionend', onEnd);
+    item.addEventListener('transitioncancel', onEnd);
+    const fallback = window.setTimeout(end, transitionMs(item) + SETTLE_SLACK_MS);
+    return () => {
+      item.removeEventListener('transitionend', onEnd);
+      item.removeEventListener('transitioncancel', onEnd);
+      window.clearTimeout(fallback);
+      item.style.minHeight = '';
+    };
+  }, [settle]);
+
+  useEffect(() => {
+    const item = ref.current;
+    if (item === null || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => {
+      if (!wasDone.current) before.current = item.getBoundingClientRect().height;
+    });
+    observer.observe(item);
+    return () => observer.disconnect();
+  }, []);
+
+  return {
+    ref,
+    titleRef,
+    settling: settle !== null,
+    onFocus: () => {
+      focusInside.current = true;
+    },
+    onBlur: (event: FocusEvent<HTMLLIElement>) => {
+      focusInside.current = event.currentTarget.contains(event.relatedTarget as Node | null);
+    },
+  };
+}
+
+/**
+ * One thing to try. Once it's done, its icon gives way to a check, its detail to its done line and
+ * its next step to a Done pill, in place, at the height it had until the check has drawn. A row that
+ * settles instead (an answer the list doesn't count) keeps its icon, and its detail gives way to its
+ * line, with no check, no pill and no next step, in the same settle. The check draws, and the line
+ * comes in, when the row ends in view; a row that ended at load, or before it was drawn (a list
+ * shown again), is drawn still.
+ */
+function Thing({ icon, title, held = false, detail, below, end = null, children }: ThingProps) {
+  // Ended when it was drawn: drawn still. A row that waits again (a new request held) ends in view next time.
+  const [drawnEnded, setDrawnEnded] = useState(end !== null);
+  if (end === null && drawnEnded) setDrawnEnded(false);
+  const inView = end !== null && !end.atLoad && !drawnEnded;
+  const { ref, titleRef, settling, onFocus, onBlur } = useTickInPlace(end !== null, inView);
   return (
-    <li className="cd-things__item">
+    <li ref={ref} className={settling ? 'cd-things__item cd-things__item--settling' : 'cd-things__item'} onFocus={onFocus} onBlur={onBlur}>
       <span className="cd-things__icon">
-        <Icon name={icon} size={16} />
+        {end?.ticks ? (
+          <Icon name="check" size={16} className={inView ? 'cd-things__check cd-things__check--draws' : 'cd-things__check'} />
+        ) : (
+          <Icon name={icon} size={16} />
+        )}
       </span>
       <div className="cd-things__text">
-        <h3 className="cd-things__item-title cd-type-control">
+        <h3 ref={titleRef} className="cd-things__item-title cd-type-control" tabIndex={-1}>
           {title}
-          {held ? <StatusDot tone="held" /> : null}
+          {held && end === null ? <StatusDot tone="held" /> : null}
         </h3>
-        <p className="cd-things__detail cd-type-meta">{detail}</p>
+        <p className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'}>
+          {end === null ? detail : end.line}
+        </p>
       </div>
-      <div className="cd-things__action">{children}</div>
-      {below ? <div className="cd-things__below">{below}</div> : null}
+      {/* A settled row has no next step and no pill, so no place for one either. */}
+      {end === null || end.ticks ? (
+        <div className="cd-things__action">
+          {end === null ? (
+            children
+          ) : (
+            // The done line already says it in words, so the pill isn't read twice.
+            <span className={inView ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden="true">
+              <Pill>
+                <StatusDot tone="handled" />
+                Done
+              </Pill>
+            </span>
+          )}
+        </div>
+      ) : null}
+      {below && end === null ? <div className="cd-things__below">{below}</div> : null}
     </li>
   );
 }
@@ -191,7 +399,7 @@ function openByHand(href: string): ReactNode {
   );
 }
 
-function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ownerName: string }) {
+function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: string; ownerName: string; end: RowEnd | null }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
 
@@ -242,6 +450,7 @@ function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ow
         </>
       }
       below={below}
+      end={end}
     >
       <Button
         variant="secondary"

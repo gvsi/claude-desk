@@ -53,8 +53,9 @@ const LIVE_MS = 5 * MINUTE;
 const BLOCKED_REPLY_REASON =
   "Claude's reply put a price in its own words instead of a checked card, so it wasn't shown. The visitor was told you'll answer.";
 
+/** The copy's Desks, none with an unfinished setup: setup's own Desks name theirs (`withSetupDesks`). */
 function deskSummaries(world: MockWorld): DeskSummary[] {
-  return world.desks.map((desk) => ({ ...desk.summary, hours: desk.summary.hours.map((h) => ({ ...h })) }));
+  return world.desks.map((desk) => ({ ...desk.summary, hours: desk.summary.hours.map((h) => ({ ...h })), setup: null }));
 }
 
 export function copyOut(world: MockWorld): CopyOut {

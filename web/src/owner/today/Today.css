@@ -1,9 +1,9 @@
-/* Today: the page's column (the greeting, "Things to try", and the sections Today adds) and the
-   right column beside it from 1280 px, 420 px wide; under that the right column stacks under the
-   page. "Things to try" is a heading with its caption and "Hide this list" at the right, then one
-   card of rows divided by hairlines: a 32 px icon tile, the title and its line, and the next step
-   at the right, which drops under the words on a phone. The preview behind the intro dialog uses
-   the same layout. */
+/* Today: the page's column (the greeting, "Not live yet" while setup isn't finished, "Things to
+   try", and the sections Today adds) and the right column beside it from 1280 px, 420 px wide;
+   under that the right column stacks under the page. "Things to try" is a heading with its caption
+   and "Hide this list" at the right, then one card of rows divided by hairlines: a 32 px icon
+   tile, the title and its line, and the next step at the right, which drops under the words on a
+   phone. The preview behind the intro dialog is this page, drawn from a new copy's reads. */
 
 .cd-today {
   display: grid;
@@ -37,6 +37,60 @@
   min-height: 100dvh;
 }
 
+/* Not live yet: a Desk whose setup isn't finished, first in the page's column. The words, with
+   "Continue setup" at their right, then the setup steps under them. */
+
+.cd-continue-setup__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+}
+
+.cd-continue-setup__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-16);
+}
+
+.cd-continue-setup__words {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-continue-setup__status,
+.cd-continue-setup__title,
+.cd-continue-setup__line {
+  margin: 0;
+}
+
+.cd-continue-setup__status {
+  color: var(--text-secondary);
+}
+
+.cd-continue-setup__title {
+  margin-top: var(--space-6);
+  color: var(--text-primary);
+}
+
+.cd-continue-setup__line {
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+}
+
+.cd-continue-setup__action {
+  display: flex;
+  flex: none;
+}
+
+/* On a phone "Continue setup" drops under the words, from their left edge, as Things to try's next
+   steps do. */
+@media (max-width: 639.98px) {
+  .cd-continue-setup__head {
+    flex-direction: column;
+    gap: var(--space-12);
+  }
+}
+
 /* Things to try */
 
 .cd-things {
@@ -60,9 +114,23 @@
 }
 
 .cd-things__caption {
+  display: grid;
   min-width: 0;
   margin: 0;
   color: var(--text-secondary);
+}
+
+/* The caption and, under it unseen, the room of its longest wording (`data-room`), in one cell: a
+   count that wraps to fewer lines than "About 10 minutes" did leaves the heading's height alone. */
+.cd-things__caption::after {
+  content: attr(data-room);
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+
+.cd-things__caption-now {
+  grid-area: 1 / 1;
+  align-self: center;
 }
 
 .cd-things__hide,
@@ -79,12 +147,15 @@
   list-style: none;
 }
 
+/* A row that ticks keeps the height it had while its check draws (a least height set as it ticks),
+   with its words and its pill together in the middle of it. */
 .cd-things__item {
   display: grid;
   grid-template-columns: var(--size-control) minmax(0, 1fr) auto;
   column-gap: var(--space-14);
   row-gap: var(--space-12);
   align-items: center;
+  align-content: center;
   padding-block: var(--space-16);
   border-top: 1px solid var(--line-hairline);
 }
@@ -135,9 +206,53 @@
   justify-content: flex-end;
 }
 
-/* Where this is going: one quiet link under the list, to the vision pages. */
+/* One quiet link under the list, to the Vision article. */
 .cd-things__vision {
   margin: 0;
+}
+
+/* Then it eases to its own height, once the check has drawn, so what's below glides up once. */
+.cd-things__item--settling {
+  transition: min-height var(--motion-base) var(--motion-ease-emphasis) var(--motion-base);
+}
+
+/* A done row: the Done pill in the next step's place. */
+.cd-things__done {
+  display: flex;
+}
+
+/* A row done in view: its check draws once, short arm first, as every check in the app does (the
+   shared path starts at the long arm's tip, so the dash comes in from its end), and its done line
+   and pill come in. Without the animation (reduced motion), the check is drawn whole and the words
+   are there. */
+.cd-things__check--draws path {
+  stroke-dasharray: 24;
+  animation: cd-things-check-draw var(--motion-base) var(--motion-ease-emphasis);
+}
+
+.cd-things__detail--done,
+.cd-things__done--ticked {
+  animation: cd-things-done-in var(--motion-base) var(--motion-ease);
+}
+
+@keyframes cd-things-check-draw {
+  from {
+    stroke-dashoffset: -24;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes cd-things-done-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 /* The ideas and what a pick did, under the row's words. */
@@ -231,9 +346,9 @@
   color: var(--text-primary);
 }
 
-/* Needs you: held requests, then callbacks, then what was answered here. Each card sits in its
-   own wrapper, which takes focus for "Open the request", so nothing here depends on how the
-   approval card is built. */
+/* Needs you: held requests and those answered here, in one list, then callbacks. An answered
+   request keeps its place, with Dismiss under its card. The approval card's own box takes focus
+   for "Open the request". */
 
 .cd-today__section[tabindex='-1']:focus:not(:focus-visible) {
   outline: none;
@@ -253,18 +368,6 @@
   flex-direction: column;
   gap: var(--space-8);
   min-width: 0;
-}
-
-.cd-needs-you__answered {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-12);
-  padding-top: var(--space-8);
-}
-
-.cd-needs-you__answered-title {
-  margin: 0;
-  color: var(--text-secondary);
 }
 
 .cd-needs-you__dismiss {

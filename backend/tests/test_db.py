@@ -28,6 +28,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from psycopg.sql import SQL, Identifier
+from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 from sqlalchemy import cast, create_engine, exists, func, literal, literal_column, select, text, update
 from sqlalchemy.dialects.postgresql import REGCLASS
@@ -843,6 +844,48 @@ def test_a_downgrade_below_document_links_leaves_no_link_behind(scratch):
             insert("link-upgraded", "token-upgraded", digest)
 
 
+DECISION_POLICY_IDS_REVISION = "kernel_ro_decision_policy_ids"
+DECISIONS_BEFORE_POLICY_IDS = (   # kernel_ro.decisions below that revision, frozen here
+    "decision_id", "copy_id", "desk_id", "session_id", "tool", "effects", "outcome", "state", "answers",
+    "policy_version", "card_ids", "review", "reason_plain", "visitor_plain", "expires_at", "ledger_seq", "created_at")
+
+
+def test_the_decision_policy_ids_revision_goes_down_and_up(scratch):
+    """Below the revision that shows `policy_ids` in kernel_ro.decisions, the view is as it was, column for column,
+    and desk_ro_owner may read exactly those columns of the table; back at head the column returns to both. Either
+    way the view stays a security_barrier view filtered on the transaction's copy, owned by desk_ro_owner and readable
+    by desk_api alone, and the kernel's own column stays."""
+    admin = scratch.conn
+
+    def view() -> tuple:
+        owner, options, definition = admin.execute(
+            "SELECT pg_get_userbyid(relowner), reloptions, pg_get_viewdef(oid) FROM pg_class"
+            " WHERE oid = 'kernel_ro.decisions'::regclass").fetchone()
+        others = admin.execute(
+            "SELECT a.grantee::regrole::text, a.privilege_type FROM pg_class c, aclexplode(c.relacl) a"
+            " WHERE c.oid = 'kernel_ro.decisions'::regclass AND a.grantee <> c.relowner").fetchall()
+        filtered = "NULLIF(current_setting('desk.copy_id'::text, true), ''::text)" in definition
+        return owner, "security_barrier=true" in (options or []), filtered, others
+
+    def owner_reads() -> set[str]:
+        return {column for column in columns(admin, "kernel", "decisions") if admin.execute(
+            "SELECT has_column_privilege('desk_ro_owner', 'kernel.decisions', %s, 'SELECT')", (column,)).fetchone()[0]}
+
+    kept = ("desk_ro_owner", True, True, [("desk_api", "SELECT")])
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(DECISION_POLICY_IDS_REVISION).down_revision
+    try:
+        scratch.migrate(command.downgrade, before)
+        assert columns(admin, "kernel_ro", "decisions") == list(DECISIONS_BEFORE_POLICY_IDS)
+        assert owner_reads() == set(DECISIONS_BEFORE_POLICY_IDS)
+        assert view() == kept
+        assert "policy_ids" in columns(admin, "kernel", "decisions")
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    assert columns(admin, "kernel_ro", "decisions") == list(KERNEL_RO_COLUMNS["decisions"])
+    assert owner_reads() == set(KERNEL_RO_COLUMNS["decisions"])
+    assert view() == kept
+
+
 def test_no_downgrade_deletes_from_a_kernel_table():
     """Every kernel table forces row security, on its owner too: on a managed Postgres, whose
     migration role neither is a superuser nor bypasses row security, a DELETE in a downgrade sees no
@@ -1451,6 +1494,40 @@ def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
             session.rollback()
     finally:
         engine.dispose()
+
+
+def test_api_reads_the_deciding_policies_through_the_view_alone(admin, committed_copies, api):
+    """kernel_ro.decisions shows `policy_ids` last: the deciding Cedar policies the kernel recorded, as the engine
+    names them (`F.never.<card>`, `B.<baseline id>`), so the owner's Safety entries can say why a refusal happened.
+    desk_api reads them through the view alone, in its copy: the view grants it SELECT and nothing else, no column
+    of the view grants more, and the table's column is open only to the view's owner."""
+    assert columns(admin, "kernel_ro", "decisions")[-1] == "policy_ids"
+    view_acl = admin.execute(   # who holds what on the view, its owner aside
+        "SELECT a.grantee::regrole::text, a.privilege_type FROM pg_class c, aclexplode(c.relacl) a"
+        " WHERE c.oid = 'kernel_ro.decisions'::regclass AND a.grantee <> c.relowner").fetchall()
+    assert view_acl == [("desk_api", "SELECT")]
+    assert admin.execute("SELECT count(*) FROM pg_attribute WHERE attrelid = 'kernel_ro.decisions'::regclass"
+                         " AND attacl IS NOT NULL").fetchone() == (0,)
+    column_acl = admin.execute(
+        "SELECT a.grantee::regrole::text, a.privilege_type FROM pg_attribute t, aclexplode(t.attacl) a"
+        " WHERE t.attrelid = 'kernel.decisions'::regclass AND t.attname = 'policy_ids'").fetchall()
+    assert column_acl == [("desk_ro_owner", "SELECT")]
+    copy_a, copy_b = committed_copies
+    decided = {copy_a: ["F.never.never-native.quote"], copy_b: ["B.private_data_record_owner"]}
+    for copy_id, policy_ids in decided.items():
+        admin.execute(
+            "INSERT INTO kernel.decisions (decision_id, copy_id, desk_id, session_id, generation, call_id, call_sha256,"
+            " tool, outcome, state, policy_version, policy_ids, reason_plain, visitor_plain, expires_at, ledger_seq)"
+            " VALUES (%s, %s, %s, %s, 0, 'call-1', 'c', 'native.quote', 'refuse', 'refused', 1, %s, 'r', 'v', now(), 1)",
+            (f"dec-{copy_id}", copy_id, f"desk-{copy_id}", f"session-{copy_id}", Jsonb(policy_ids)))
+    for copy_id, policy_ids in decided.items():
+        with api.transaction(force_rollback=True):
+            api.execute("SELECT set_config('desk.copy_id', %s, true)", (copy_id,))
+            rows = api.execute("SELECT decision_id, policy_ids FROM kernel_ro.decisions WHERE copy_id = ANY(%s)",
+                               (list(committed_copies),)).fetchall()
+            assert rows == [(f"dec-{copy_id}", policy_ids)]
+            with pytest.raises(psycopg.errors.InsufficientPrivilege), api.transaction():
+                api.execute("SELECT policy_ids FROM kernel.decisions")
 
 
 # Lookups made before the copy is known (a session token, a public slug, every copy at startup)

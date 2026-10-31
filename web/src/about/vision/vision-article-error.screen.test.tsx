@@ -22,6 +22,9 @@ vi.mock('./text.ts', () => {
     get ARTICLE() {
       return unreadable();
     },
+    get PICTURE_CARDS() {
+      return unreadable();
+    },
     get READ_MINUTES() {
       return unreadable();
     },

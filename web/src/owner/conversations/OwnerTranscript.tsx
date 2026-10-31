@@ -28,6 +28,7 @@ import {
 } from '../../ds/index.ts';
 import { formatClock } from '../../lib/format.ts';
 import { groupRows, opensAReply, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
+import { ledgerQuery } from '../safety/queries.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { useOwnerReceipt } from './ownerReceipt.ts';
 
@@ -261,11 +262,7 @@ function RowView({ row, live, cards, shown, agentName, ownerName, timezone, onOp
 
 /** The Desk's signed record, read only while a trace is open. */
 function useRecord(deskId: string, open: boolean) {
-  const ledger = useQuery({
-    queryKey: ['ledger', deskId],
-    queryFn: () => request('ledger', { params: { desk_id: deskId }, query: { verify: true } }),
-    enabled: open,
-  });
+  const ledger = useQuery({ ...ledgerQuery(deskId), enabled: open });
   const health = useQuery({ queryKey: ['health'], queryFn: () => request('health'), enabled: open });
   return { ledger, devKey: health.data?.kernel?.dev_signing_key ?? false };
 }

@@ -378,18 +378,19 @@ async def authenticate_caller(ctx: KernelCtx, request: Request, session_id: str,
 
 
 async def check_caller(ctx: KernelCtx, request: Request, named: Named, *, generation: int | None = None,
-                       lock: bool = False) -> tuple[SessionRow, Desk]:
+                       lock: bool = False, seen: bool = True) -> tuple[SessionRow, Desk]:
     """The rest of the session-state rows for a caller `authenticate_caller` proved: its session
     open, at `generation` when the call carries one, on a Desk not deleted (409 `closed`); a
-    visitor's or agent's session is seen now. With `lock`, the checks run on the session's row as
-    `lock_session` reads it, held until the transaction ends."""
+    visitor's or agent's session is seen now, unless `seen` is False, which only the turn's start
+    passes (`turn.start_turn`, which writes the session's language and nothing else). With `lock`,
+    the checks run on the session's row as `lock_session` reads it, held until the transaction ends."""
     if lock:
         row = await lock_session(ctx, named.session_id)
     else:
         row = (await ctx.db.scalars(ctx.repo.scoped(
             select(SessionRow).where(SessionRow.session_id == named.session_id)))).one()
     require_open(ctx, request, row, generation=generation)
-    if row.kind != "owner":
+    if seen and row.kind != "owner":
         row.last_seen_at = ctx.clock.now()        # visitor and agent sessions idle out (`is_closed`)
     return row, await require_desk(ctx, request, row, named.desk_id)
 

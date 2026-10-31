@@ -62,6 +62,8 @@ export interface UseAnswer {
   conflictFor(decisionId: string): AnswerConflict | undefined;
   /** What was answered here, by `decision_id`, in the order it was answered. */
   answered: ReadonlyMap<string, Answered>;
+  /** The final decision of the request answered here last, kept when its card is dismissed. */
+  latest: Decision | null;
   /**
    * Held requests answered here whose answer hasn't settled (one in flight, or one whose answer was
    * lost), kept so their card stays to be asked again even when Needs you no longer lists them.
@@ -136,6 +138,7 @@ export function useAnswer(deskId: string): UseAnswer {
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
   const [errors, setErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [answered, setAnswered] = useState<ReadonlyMap<string, Answered>>(() => new Map());
+  const [latest, setLatest] = useState<Decision | null>(null);
   const [kept, setKept] = useState<ReadonlyMap<string, HeldItem>>(() => new Map());
   const [conflicts, setConflicts] = useState<ReadonlyMap<string, AnswerConflict>>(() => new Map());
   // The answers on their way, read synchronously so a second click can't send twice.
@@ -155,6 +158,7 @@ export function useAnswer(deskId: string): UseAnswer {
     (item: HeldItem, decision: Decision, cardDiff: RuleCard[] | null) => {
       const id = item.decision.decision_id;
       setAnswered((current) => withEntry(current, id, { item, decision, card_diff: cardDiff }));
+      setLatest(decision);
       setKept((current) => without(current, id));
       setErrors((current) => without(current, id));
       setConflicts((current) => without(current, id));
@@ -218,5 +222,5 @@ export function useAnswer(deskId: string): UseAnswer {
     setAnswered((current) => without(current, decisionId));
   }, []);
 
-  return { answer, pending, errorFor, conflictFor, answered, kept, dismiss };
+  return { answer, pending, errorFor, conflictFor, answered, latest, kept, dismiss };
 }

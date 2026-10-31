@@ -33,6 +33,8 @@ import type {
   EvOwnerJoined,
   EvOwnerLeft,
   EvOwnerTyping,
+  SessionMode,
+  SessionState,
   SseEvent,
   StatusEvent,
 } from '../api/contracts.ts';
@@ -146,6 +148,42 @@ export function ownerTypingDelayMs(ev: EvOwnerTyping, nowMs: number): number {
   const left = Date.parse(ev.until) - nowMs;
   if (!Number.isFinite(left) || left <= 0) return 0;
   return Math.min(left, OWNER_TYPING_MAX_MS);
+}
+
+/** What the visitor chat knows when it says whether the owner is in the chat. */
+export interface OwnerInChatFacts {
+  /** The session as the chat holds it: its mode is the kernel's, as `PublicChatProvider` keeps it. */
+  session: SessionState | null;
+  state: ChatState;
+  /** The chat has loaded (its status is `ready`). */
+  ready: boolean;
+  /**
+   * The chat knows the session's mode now: the read it opened with, and since it last lost track of
+   * the stream (a drop, the page going away), an `owner_joined` or a read of the session.
+   */
+  modeKnown: boolean;
+}
+
+/**
+ * Whether the page says the owner is in the chat (PublicShell's `ownerInChat`, which changes the AI
+ * disclosure's line). Its one source is the kernel's session mode, `session.mode === 'owner'`, which
+ * only the chat's opening read and the stream's `owner_joined` can set (`PublicChatProvider`). The
+ * chat's lines never turn it on. Everything else only turns it off: no session or any other mode, a
+ * chat not loaded, a mode not confirmed since the chat lost track of the stream, an error (the chat
+ * ending included), and a stream that is down or catching up on what it missed.
+ */
+export function ownerInChatNow({ session, state, ready, modeKnown }: OwnerInChatFacts): boolean {
+  return session?.mode === 'owner' && modeKnown && ready && state.error === null && state.connection === 'open' && !state.catchingUp;
+}
+
+/**
+ * The mode an answer after the chat has loaded may give the session: what it `said`, but never the
+ * owner's unless the chat already has it, since the answer may have been taken before a hand-back the
+ * stream has shown since. `said` is null for a read older than the stream's latest change of mode,
+ * which says nothing of it. Only the opening read and `owner_joined` put the chat in her hands.
+ */
+export function lowerOnly(current: SessionMode | null, said: SessionMode | null): SessionMode {
+  return said === null || said === 'owner' ? (current ?? 'ai') : said;
 }
 
 const messageKey = (ev: EvMessage) => `m:${ev.message_id}`;

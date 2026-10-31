@@ -18,8 +18,11 @@ export interface GreetingProps {
    * now."), and the first three `people` are drawn beside it as glyphs that breathe.
    */
   presence?: { line: string; people: PresenceGlyph[] };
-  /** The public link as the screen shows it, and a button that copies it. */
-  link?: { label: string; onCopy: () => void };
+  /**
+   * The public link as the screen shows it, and a button that copies it. `copied` is true for a
+   * short while after a copy that worked: the pill says "Copied" with a check, at the same width.
+   */
+  link?: { label: string; onCopy: () => void; copied?: boolean };
 }
 
 /** At most this many glyphs: the line carries the count, the glyphs only the feeling of company. */
@@ -55,9 +58,21 @@ export function Greeting({ text, presence, link }: GreetingProps) {
         ) : null}
       </div>
       {link ? (
-        <div className="cd-greeting__link cd-type-meta">
-          <span className="cd-greeting__link-label">{link.label}</span>
-          <IconButton label="Copy your Desk link" icon="copy" shape="round" onClick={link.onCopy} />
+        <div className={`cd-greeting__link cd-type-meta${link.copied ? ' cd-greeting__link--copied' : ''}`}>
+          {/* "Copied" is laid over the link's words, so the pill keeps its width. It and the check are
+              for sighted owners: the screen says it to screen readers in its own status line. */}
+          <span className="cd-greeting__link-words">
+            <span className="cd-greeting__link-label">{link.label}</span>
+            <span className="cd-greeting__copied" aria-hidden="true">
+              Copied
+            </span>
+          </span>
+          <span className="cd-greeting__copy">
+            <IconButton label="Copy your Desk link" icon="copy" shape="round" onClick={link.onCopy} />
+            <span className="cd-greeting__check" aria-hidden="true">
+              <Icon name="check" size={16} />
+            </span>
+          </span>
         </div>
       ) : null}
     </header>

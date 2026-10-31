@@ -55,6 +55,24 @@
   background: var(--button-primary);
 }
 
+/* On a touch screen the button takes a tap anywhere in the size-touch square centred on it, through
+   an unseen hit area: nothing is drawn, and the button keeps its size and place (position: relative
+   only gives the hit area its frame, and holds nothing else positioned). A layout that puts controls
+   closer together caps the reach on each axis at half its gap (--cd-touch-reach-block,
+   --cd-touch-reach-inline), so two hit areas never overlap. */
+@media (pointer: coarse) {
+  .cd-icon-button {
+    position: relative;
+  }
+
+  .cd-icon-button::after {
+    content: '';
+    position: absolute;
+    inset-block: max(-1 * var(--cd-touch-reach-block, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+    inset-inline: max(-1 * var(--cd-touch-reach-inline, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cd-icon-button {
     transition: none;

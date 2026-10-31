@@ -6,7 +6,13 @@ the session-state rows ("Session state responses": token, copy, closed, generati
 1. A paused session (the breaker) gets only the handoff clause and a `session_paused` violation;
    nothing is scanned.
 2. Language: `lang.detect` on the prose. Another language is `unsupported_language`; too little to
-   tell falls back to the session's last language, else English. Cards render in this language.
+   tell falls back to the session's language, else English. Cards render in this language. The
+   session's language is set at turn start from the visitor's latest message
+   (`POST /sessions/{session_id}/turn`, `turn.py`), and kept or changed at the end by the language
+   of Claude's prose (step 7). It decides only the language a reply whose prose can't be told
+   renders in: the code's checks find the same in a draft whichever language the session reads,
+   since both lexicons always run; the soft-promise check is told that language, with the cards
+   rendered in it.
 3. `scan_prose`: numerals and the letters drawn as digits, currency and percent signs, words
    mixing Latin letters with another script (but for the Desk's own name and its business's
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
@@ -33,8 +39,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
 6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
    handoff clause, in the reply's language.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
-   lines (its row written only now, so no lock on it is held while the model reads the draft),
-   and the verdict is ledgered (`reply`) and signed in the same transaction.
+   lines, until the next turn starts (its row written only now, so no lock on it is held while
+   the model reads the draft), and the verdict is ledgered (`reply`) and signed in the same
+   transaction.
 
 The owner's messages (`owner_message`) end in the same record: a say is checked for canaries
 alone and shown as typed in an `owner_said` card, and a whisper is only ledgered.

@@ -1,12 +1,12 @@
 /**
  * The Rules page's model, which the connector and tool pages reuse: the Desk's tools grouped by
  * connector, each with the outcome its rules give it (`hubSections`); the rules that govern one
- * tool (`governingRules`, `toolRuleRows`); the card an outcome menu drafts (`withOutcome`); and
- * the payment limit's field (`parseLimit`). It reads the rules and decides nothing: the kernel
- * decides every request.
+ * tool (`governingRules`, `toolRuleRows`); the card an outcome menu drafts (`withOutcome`); the
+ * payment limit's field (`parseLimit`); and the held request Ask Claude's suggestions ask about
+ * (`holdQuestion`). It reads the rules and decides nothing: the kernel decides every request.
  */
 import { MONEY_EFFECTS, type PolicyVersion, type RuleCard, type ToolName } from '../../api/contracts.ts';
-import type { PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
+import type { NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import {
   describeEffects,
   ruleWordsLine,
@@ -17,7 +17,8 @@ import {
   type ToolSummaryView,
 } from '../../ds/index.ts';
 import { aboveMoneyCapCopy, formatCents, listWords } from '../../lib/format.ts';
-import { CONNECTORS, TOOL_NAMES, connectorOn, toolState, type ConnectorKey } from '../connectors/catalog.ts';
+import { CONNECTORS, TOOL_NAMES, connectorOn, toolNoun, toolState, type ConnectorKey } from '../connectors/catalog.ts';
+import { heldOldestFirst } from '../useDesks.ts';
 import { coveredTools } from './changeRows.ts';
 import { toolOutcome } from './outcome.ts';
 import { ABOVE_CEILING, PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
@@ -233,4 +234,17 @@ export function parseLimit(text: string): { cents: number } | { error: string } 
   const digits = typed.replace(/^0+(?=\d)/, '');
   const cents = digits.length > 9 ? Number.POSITIVE_INFINITY : Number(digits) * 100;
   return cents > PAYMENT_MAX_CENTS ? { error: ABOVE_CEILING } : { cents };
+}
+
+/**
+ * Ask Claude's suggestion about the Desk's latest hold, in the owner's words: "Why was this refund
+ * held?", for the newest request in Needs you's `items` whose tool has a plain noun (`toolNoun`).
+ * A hold whose tool has none is left out; with no hold left, there is no question (null).
+ */
+export function holdQuestion(items: readonly NeedsYouItem[]): string | null {
+  for (const item of heldOldestFirst(items).reverse()) {
+    const noun = item.decision.action ? toolNoun(item.decision.action.tool) : null;
+    if (noun !== null) return `Why was this ${noun} held?`;
+  }
+  return null;
 }

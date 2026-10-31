@@ -49,6 +49,16 @@ const FIGURES = [
   },
 ] as const;
 
+/** The picture cards after "What stays the same": each idea's name and line, word for word, and its vision page. */
+const CARDS_HEADING = 'See each one up close';
+const CARDS_LEAD = 'Each idea has its own page, drawn as it would work.';
+const CARDS = [
+  { name: 'A city office that answers after hours', line: 'Meridian Bay Permits, after five', href: '/vision/city-office' },
+  { name: 'A Desk for the team', line: 'Rivera Plumbing’s plumbers, from the van', href: '/vision/team-desk' },
+  { name: 'Recognized, with your permission', line: 'Dana, signed in with her Claude account', href: '/vision/claude-account' },
+  { name: 'In your pocket', line: 'Maria’s requests on her phone', href: '/vision/phone' },
+] as const;
+
 /**
  * The words a reader reads in `root`: its text, but what is hidden from everyone (`aria-hidden`) and the
  * elements `skip` names, each text node a run of its own so that two blocks never join into one word.
@@ -178,6 +188,63 @@ describe('The Vision article', () => {
     }
   });
 
+  it('picture_cards_link_each_vision_page', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      const heading = screen.getByRole('heading', { level: 2, name: CARDS_HEADING, exact: true });
+      await expect.element(heading, { message: viewport }).toBeVisible();
+      const section = screen.getByRole('region', { name: CARDS_HEADING, exact: true });
+      await expect.element(section.getByText(CARDS_LEAD, { exact: true }), { message: viewport }).toBeVisible();
+
+      // After "What stays the same" and its last words, inside the article, before the end note.
+      const lastWords = screen.getByText(/^What changes is how much a Desk can handle before it has to ask\./).element();
+      const box = section.element().getBoundingClientRect();
+      expect(section.element().closest('article'), viewport).not.toBeNull();
+      expect(box.top, viewport).toBeGreaterThanOrEqual(lastWords.getBoundingClientRect().bottom);
+      expect(box.bottom, viewport).toBeLessThanOrEqual(screen.getByText(END_NOTE, { exact: true }).element().getBoundingClientRect().top);
+
+      // Four cards, each one link named by its idea and line, not by the phone drawn in it, to its vision page.
+      const links = section.getByRole('link').elements();
+      expect(links.map((link) => link.getAttribute('href')), viewport).toEqual(CARDS.map(({ href }) => href));
+      for (const [i, { name, line, href }] of CARDS.entries()) {
+        const where = `${name} at ${viewport}`;
+        const link = section.getByRole('link', { name: `${name} ${line}`, exact: true });
+        await expect.element(link, { message: where }).toHaveAttribute('href', href);
+        expect(link.element(), where).toBe(links[i]);
+        expect(link.element().getAttribute('target'), where).toBeNull();
+        // The top of the idea's phone, first in the card, is hidden from screen readers and labels nothing.
+        const top = link.element().firstElementChild;
+        expect(top?.getAttribute('aria-hidden'), where).toBe('true');
+        expect(top?.querySelector('.va-phone'), where).not.toBeNull();
+        expect(top?.querySelectorAll('[role], [aria-label]'), where).toHaveLength(0);
+        // On a phone a visitor or the team reads, the line saying Claude, an AI, is answering shows in the card.
+        const ai = FIGURES[i]?.ai;
+        if (ai) {
+          const aiLine = [...(top?.querySelectorAll('p') ?? [])].find((p) => flat(p) === ai);
+          expect(aiLine, where).toBeDefined();
+          expect(aiLine?.getBoundingClientRect().bottom ?? Infinity, where).toBeLessThanOrEqual(top?.getBoundingClientRect().bottom ?? -Infinity);
+        }
+      }
+
+      // Two by two at every width, the pairs side by side and level, in the article's column.
+      const [a, b, c, d] = links.map((link) => link.getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect, DOMRect];
+      expect([b.top, d.top], viewport).toEqual([a.top, c.top]);
+      expect([c.left, d.left], viewport).toEqual([a.left, b.left]);
+      expect(b.left, viewport).toBeGreaterThan(a.right);
+      expect(c.top, viewport).toBeGreaterThan(Math.max(a.bottom, b.bottom));
+      const column = screen.getByText(FIRST_WORDS).element().getBoundingClientRect();
+      expect(a.left, viewport).toBeGreaterThanOrEqual(column.left - 0.5);
+      expect(b.right, viewport).toBeLessThanOrEqual(column.right + 0.5);
+      expectNoHorizontalScroll();
+    }
+
+    // Followed, a card opens its vision page in the app.
+    const { screen, router } = await renderRoute(PATH);
+    await screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(CARDS[0].href);
+    await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
+  });
+
   it('the_cover_band_is_decoration_hidden_on_phones', async () => {
     for (const viewport of ['desktop', 'phone'] as const) {
       const { screen } = await renderRoute(PATH, { viewport });
@@ -264,31 +331,82 @@ describe('The Vision article', () => {
     }
   });
 
-  it('the_back_links_go_where_the_reading_pages_way_back_goes', async () => {
+  it('the_way_into_the_prototype_is_the_reading_pages_own', async () => {
     for (const [lastDesk, to] of [
       [RIVERA.deskId, `/app/${RIVERA.deskId}/today`],
       [null, '/'],
     ] as const) {
-      writeLocal('lastDesk', lastDesk);
-      // A reading page's way back into the prototype.
-      const reader = await renderRoute('/about/prediction');
-      await expect.element(reader.screen.getByRole('link', { name: 'Try Desk prototype', exact: true })).toHaveAttribute('href', to);
+      for (const viewport of ['desktop', 'phone'] as const) {
+        const where = `at ${viewport}, last Desk ${lastDesk}`;
+        writeLocal('lastDesk', lastDesk);
+        // A reading page's way into the prototype.
+        const reader = await renderRoute('/about/prediction', { viewport });
+        await expect.element(reader.screen.getByRole('link', { name: 'Try Desk prototype', exact: true })).toHaveAttribute('href', to);
 
-      // The article's two: in the top bar and at the end.
-      const { screen } = await renderRoute(PATH);
-      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
-      const top = screen.getByRole('banner').getByRole('link', { name: 'Back to your Desk', exact: true });
-      const end = screen.getByRole('contentinfo').getByRole('link', { name: 'Back to your Desk', exact: true });
-      await expect.element(top, { message: `top, last Desk ${lastDesk}` }).toHaveAttribute('href', to);
-      await expect.element(end, { message: `end, last Desk ${lastDesk}` }).toHaveAttribute('href', to);
-      expect(screen.getByRole('link', { name: 'Back to your Desk', exact: true }).elements()).toHaveLength(2);
+        // The article's: the same words and target, once, in its top bar, in place of "Back to your Desk".
+        const { screen } = await renderRoute(PATH, { viewport });
+        await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true }), { message: where }).toBeVisible();
+        const tryIt = screen.getByRole('banner').getByRole('link', { name: 'Try Desk prototype', exact: true });
+        await expect.element(tryIt, { message: where }).toHaveAttribute('href', to);
+        expect(screen.getByRole('link', { name: 'Try Desk prototype', exact: true }).elements(), where).toHaveLength(1);
+        expect(document.body.textContent, where).not.toContain('Back to your Desk');
+      }
     }
 
-    // Followed, the way back opens the Desk.
+    // Followed, it opens the Desk.
     writeLocal('lastDesk', RIVERA.deskId);
     const { screen, router } = await renderRoute(PATH);
-    await screen.getByRole('contentinfo').getByRole('link', { name: 'Back to your Desk', exact: true }).click();
+    await screen.getByRole('banner').getByRole('link', { name: 'Try Desk prototype', exact: true }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.deskId}/today`);
+  });
+
+  it('the_bar_and_the_end_join_the_about_set', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true }), { message: viewport }).toBeVisible();
+      const bar = screen.getByRole('banner').element();
+      const documents = screen.getByRole('navigation', { name: 'About this prototype' });
+      const vision = documents.getByRole('link', { name: 'Vision', exact: true }).element();
+      expect(vision.getAttribute('aria-current'), viewport).toBe('page');
+      // The page on show is drawn as the reading pages draw it, in the article's palette: ink on the band's paper.
+      expect(getComputedStyle(vision).backgroundColor, viewport).toBe('rgb(234, 230, 220)');
+      expect(getComputedStyle(vision).color, viewport).toBe('rgb(28, 27, 25)');
+      if (viewport === 'desktop') {
+        // In the bar, between the name and the way into the prototype, on one line.
+        expect(bar.contains(documents.element()), viewport).toBe(true);
+        const [name, links, tryIt] = [bar.querySelector('.va-bar__brand'), documents.element(), bar.querySelector('a.cd-about-try')].map((el) =>
+          (el as Element).getBoundingClientRect(),
+        ) as [DOMRect, DOMRect, DOMRect];
+        expect(links.left, viewport).toBeGreaterThan(name.right);
+        expect(tryIt.left, viewport).toBeGreaterThan(links.right);
+        expect(Math.abs(links.top + links.height / 2 - (tryIt.top + tryIt.height / 2)), viewport).toBeLessThanOrEqual(0.5);
+      } else {
+        // On a phone, under the bar, and it scrolls away with the page while the bar stays.
+        expect(bar.contains(documents.element()), viewport).toBe(false);
+        expect(documents.element().getBoundingClientRect().top, viewport).toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+        window.scrollTo(0, 600);
+        await expect.poll(() => window.scrollY).toBe(600);
+        expect(bar.getBoundingClientRect().top, viewport).toBe(0);
+        expect(documents.element().getBoundingClientRect().bottom, viewport).toBeLessThan(0);
+        window.scrollTo(0, 0);
+      }
+
+      // The end: its note, "Read next" back to the prediction on its own card, then the footer.
+      const end = screen.getByRole('contentinfo').element();
+      const note = screen.getByText(END_NOTE, { exact: true }).element();
+      const label = end.querySelector('[data-next-label]');
+      expect(label?.textContent, viewport).toBe('Read next');
+      const card = label?.parentElement as HTMLElement;
+      const next = screen.getByRole('contentinfo').getByRole('link', { name: 'Capability prediction', exact: true });
+      await expect.element(next, { message: viewport }).toHaveAttribute('href', '/about/prediction');
+      expect(card.contains(next.element()), viewport).toBe(true);
+      expect(card.getBoundingClientRect().top, viewport).toBeGreaterThan(note.getBoundingClientRect().bottom);
+      const footer = end.querySelector('[data-ds="concept-footer"]') as Element;
+      expect(footer.getBoundingClientRect().top, viewport).toBeGreaterThan(card.getBoundingClientRect().bottom);
+      // A paper card on the page, its corners 14 px.
+      expect(getComputedStyle(card).backgroundColor, viewport).toBe('rgb(251, 250, 247)');
+      expect(getComputedStyle(card).borderTopLeftRadius, viewport).toBe('14px');
+    }
   });
 
   it('the_article_names_the_tab_and_is_noindex', async () => {

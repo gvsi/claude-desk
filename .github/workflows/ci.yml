@@ -1,4 +1,4 @@
-# The nine checks on main and on pull requests to main; docs/ci.md says what each one proves.
+# The nine checks on main and on pull requests to any base; docs/ci.md says what each one proves.
 # Suites that other parts of the project add run through tools/desk_tools/gate.py, which runs,
 # skips visibly or fails each one by whether its code is in the repo. No secrets, read-only.
 # Jobs run on GitHub-hosted ubuntu-24.04 unless the repository variable CI_RUNNER_MODE is "ec2" and
@@ -10,7 +10,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -147,7 +146,6 @@ jobs:
 
   tier2:
     name: tier 2 results
-    if: github.event_name == 'pull_request'
     runs-on: ${{ vars.CI_RUNNER_MODE == 'ec2' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(format('["self-hosted","desk-ci-{0}-{1}-{2}-tier2"]', github.event_name == 'pull_request' && 'spot' || 'ondemand', github.run_id, github.run_attempt)) || 'ubuntu-24.04' }}
     timeout-minutes: 25
     steps:
@@ -159,7 +157,9 @@ jobs:
         with:
           build: false
       - name: Check the tier 2 results
-        run: uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE=origin/main
+        env:
+          RESULTS_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD~1' }}
+        run: uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE"
 
   web:
     name: web tests

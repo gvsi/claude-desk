@@ -486,6 +486,12 @@ describe('design tokens', () => {
     expect(tokenValue('size-agents-column')).toBe('760px');
   });
 
+  test('touch_target_is_a_token', () => {
+    // The least a finger needs in each dimension on a touch screen. Controls drawn smaller keep
+    // their look and reach it with an unseen hit area under a coarse pointer.
+    expect(tokenValue('size-touch')).toBe('44px');
+  });
+
   test('settings_measures_are_tokens', () => {
     // Settings' section links, 200 px wide beside the content, as the signed Settings boards draw them.
     expect(tokenValue('size-sub-nav')).toBe('200px');

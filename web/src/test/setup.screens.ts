@@ -2,10 +2,10 @@
  * Setup for the `screens` project: the app's styles, as `main.tsx` loads them; the mock API's
  * service worker, started once, with every fetch and EventSource request to `/api/` stamped with
  * the test it was sent in; a fresh Rivera copy before every test, which none of those the last
- * test's page sent late can reach; and after it, a clean slate (the app unmounted, handlers a test
- * added dropped, poll intervals and the retry delay at real time, the browser's own languages, the
- * Connectors pages as the app has them) and no request to an
- * `/api/` path the mock doesn't serve, unless the test took it as expected with
+ * test's page sent late can reach, in a browser that has had no owner's copy; and after it, a
+ * clean slate (the app unmounted, handlers a test added dropped, poll intervals and the retry delay
+ * at real time, the browser's own languages, the Connectors pages as the app has them) and no
+ * request to an `/api/` path the mock doesn't serve, unless the test took it as expected with
  * `mockStore.takeUnhandled`.
  */
 // The app's styles in the app's order (main.tsx): the design system's tokens and base styles
@@ -17,6 +17,7 @@ import { afterEach, beforeAll, beforeEach, expect } from 'vitest';
 import { cleanup } from 'vitest-browser-react';
 
 import { setPollScale, setRetryScale } from '../app/poll.ts';
+import { writeLocal } from '../lib/storage.ts';
 import { stampRequests, startTest, worker } from '../mocks/browser.ts';
 import { mockStore } from '../mocks/store.ts';
 import { CONNECTOR_PAGES_BUILT, setConnectorPagesBuilt } from '../owner/connectors/pages.ts';
@@ -32,6 +33,8 @@ beforeAll(async () => {
 
 beforeEach(() => {
   startTest();
+  // Whether the intro says an owner's session ended depends on it, so no test inherits it from the last.
+  writeLocal('hadOwnerCopy', null);
 });
 
 afterEach(async () => {

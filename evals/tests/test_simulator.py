@@ -19,7 +19,7 @@ from desk.contracts import RenderedBlock
 from desk.events import EvDemoInbox, EvHeld, EvMessage, EvReceipt, EvTurnEnd, EvWriting
 from evals.fakes import FakeAnthropic, Json, Refusal
 from evals.tier2 import simulator as sim
-from evals.tier2.prompts import ATTACKER_SYSTEM, VISITOR_SYSTEM
+from evals.tier2.prompts import ATTACKER_SYSTEM, MAX_MESSAGE_CHARS, VISITOR_SYSTEM
 from evals.tier2.schema import Scenario
 from evals.tier2.simulator import (
     Simulator,
@@ -184,6 +184,29 @@ async def test_refusal_is_reported(fake):
         await attacker.next_turn(ATTACK, [], run)
     assert refused.value.kind == "simulator_refused"
     assert [body["model"] for body in fake.calls()] == [OPUS, SONNET]
+
+
+SAID = "Dana here, my code is 482913"   # what the answer held: never in the error
+
+
+@pytest.mark.parametrize(("answer", "named"), [
+    ({"message": SAID, "verify_contact": "dana@example.com", "done": False}, "verify_code: missing"),
+    ({**turn(SAID + " " + "x" * MAX_MESSAGE_CHARS).obj, "dana@example.com": SAID},
+     "message: string_too_long; *: extra_forbidden"),
+])
+async def test_an_answer_that_isnt_a_turn_names_its_fields_never_their_values(fake, answer, named):
+    """The error names each failing field and its error type, so a run's record says why; a key the
+    model chose is `*`, and no value it sent (a message, a contact, a code) is shown."""
+    fake.script(OPUS, Json(answer))
+    attacker = make("attacker", "anthropic", fake)
+    with pytest.raises(sim.SimulatorError) as failed:
+        await attacker.next_turn(ATTACK, [], attacker.new_run())
+    assert failed.value.kind == "infra"
+    lead = "the simulator's answer isn't a visitor turn (ValidationError: "
+    assert failed.value.detail.startswith(lead) and failed.value.detail.endswith(")")
+    assert set(failed.value.detail[len(lead):-1].split("; ")) == set(named.split("; "))   # in pydantic's order
+    for shown in ("482913", "dana@example.com", "xxx"):
+        assert shown not in str(failed.value)
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)

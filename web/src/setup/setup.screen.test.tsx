@@ -1726,6 +1726,8 @@ describe('setup', () => {
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     // Today's Answering reads on at once: going live refreshed the Desks the page had read.
     await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+    // And the Desk is live, so Today no longer leads back into setup.
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
   });
 
   it('live_step_shows_the_signed_share_card', async () => {
@@ -1935,7 +1937,14 @@ describe('setup', () => {
     const slow = new Promise<void>((resolve) => {
       land = resolve;
     });
-    mockStore.inject({ route: 'desks', status: 200, until: slow, body: withAnswering(before.body as BusinessOut[], second.desk_id, true) });
+    // Every read of them is slow: the step's own, and the one the app sends as any go-live settles.
+    mockStore.inject({
+      route: 'desks',
+      status: 200,
+      times: 10_000,
+      until: slow,
+      body: withAnswering(before.body as BusinessOut[], second.desk_id, true),
+    });
     mockStore.inject({ route: 'goLive', status: 'network', afterCommit: true });
     const from = mockStore.requests.length;
     await page2.getByRole('button', { name: 'Go live' }).click();
