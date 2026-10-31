@@ -2,9 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
 import { chen, rivera } from '../../fixtures';
+import { expectBalancedLines } from '../../test/expectBalancedLines.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
 import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
+import type { ConnectorView } from '../ConnectorName/ConnectorName.tsx';
 import { ConnectorReview } from './ConnectorReview.tsx';
 
 const HINT = "You'll see the change to your rules before anything runs.";
@@ -180,5 +182,43 @@ export const Phone: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);
+  },
+};
+
+/**
+ * A connector with a long name. The demo's connectors are named in a word or two, so this stands
+ * for a long one: Google Calendar's view, named for the business's calendar. Wrapped greedily, its
+ * title would leave the Mock badge alone on the last line, on a laptop and on a phone.
+ */
+const LONG_NAMED: ConnectorView = { ...rivera.googleCalendar.view, name: 'Google Calendar for Bayview Heating & Plumbing' };
+const LONG_TITLE = `Review what Claude could do with ${LONG_NAMED.name} Mock`;
+
+export const LongName: Story = {
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  args: { connector: LONG_NAMED, tools: rivera.googleCalendar.review.tools },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws a connector name this long; the demo\'s are a word or two. The nearest is N-Conn-09-GCal-Review. The title balances its lines, so its Mock badge doesn\'t sit alone on the second.',
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(1440);
+    await expectBalancedLines(canvas.getByRole('heading', { level: 1 }), LONG_TITLE, 2);
+  },
+};
+
+export const LongNameOnAPhone: Story = {
+  name: 'Long name on a phone',
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: { connector: LONG_NAMED, tools: rivera.googleCalendar.review.tools },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws a connector name this long, or this review on a phone. The nearest is N-Conn-09-GCal-Review, at the canvas\'s width; on a phone the title takes four lines beside its tile, balanced too.',
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(390);
+    await expectBalancedLines(canvas.getByRole('heading', { level: 1 }), LONG_TITLE, 4);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };

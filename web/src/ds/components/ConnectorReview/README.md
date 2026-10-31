@@ -9,7 +9,7 @@
 
 ## What it shows
 
-- The connector's `ConnectorIcon`, drawn 44 px here and centered on the title and its lead line, beside the page's `h1`, "Review what Claude could do with {name}" in serif `.cd-type-page-title`, with "Built in" or the Mock badge (`ConnectorName`).
+- The connector's `ConnectorIcon`, drawn 44 px here and centered on the title and its lead line, beside the page's `h1`, "Review what Claude could do with {name}" in serif `.cd-type-page-title`, with "Built in" or the Mock badge (`ConnectorName`). The title balances its lines when it wraps (see Long names).
 - Under the title, in secondary body type: "A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on." for a built-in connector, or "Nothing runs until you turn it on." followed by `intro` (the connector's promise) for an app.
 - A `Card` named "Tools" with a row per tool, each under a hairline (the first too) and padded 14 px above and below: its name at weight 520, its `description` in secondary meta, then a line per rule that covers it, in secondary meta:
   - the owner's rule: "Covered by your rule: {text} · {outcomePhrase(mode, limit)}" ("… · Automatic up to $300; over $300, ask me first");
@@ -18,6 +18,10 @@
 - Each tool's outcome at the right, an `OutcomeMenu` at `mode`. The screen starts every new tool at "Ask me first"; with `onChangeOutcome` each outcome is a menu, and without it, words and a dot. Each row lays out by its own width: under 640 px the outcome sits on its own line under its words.
 - A primary "Turn it on", a secondary "Cancel", and "You'll see the change to your rules before anything runs." in secondary meta.
 - `error`, in an error `Notice` under them.
+
+## Long names
+
+A title that wraps balances its lines (`text-wrap: balance`), as `PageHeader`'s does: the browser evens them out rather than filling each in turn, so a long connector name doesn't leave its last word, or its Mock badge, on a line of its own. "Review what Claude could do with Google Calendar for Bayview Heating & Plumbing" takes two even lines on a laptop and four on a phone, its badge on the last with the words before it. The title keeps the number of lines it would take anyway, so nothing under it moves. On a phone the tile stays at the title's top.
 
 ## States
 

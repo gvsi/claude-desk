@@ -33,10 +33,13 @@
   min-width: 0;
 }
 
+/* A title that wraps balances its lines, as page titles do (`PageHeader`), so a long connector name
+   doesn't leave its last word, or its badge, on a line of its own. */
 .cd-connector-review__title {
   margin: 0;
   color: var(--text-primary);
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .cd-connector-review__title .cd-connector-name__built-in,

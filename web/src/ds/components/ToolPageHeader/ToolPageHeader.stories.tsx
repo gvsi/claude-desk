@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
+import { expectBalancedLines } from '../../test/expectBalancedLines.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
 import { ToolPageHeader, type ToolPageHeaderProps } from './ToolPageHeader.tsx';
@@ -192,5 +193,41 @@ export const Simulating: Story = {
     await expect(button).toHaveTextContent('Simulate a tool change');
     await userEvent.click(button);
     await expect(args.onSimulateChange).toHaveBeenCalledTimes(1);
+  },
+};
+
+/**
+ * A tool with a long name, as a connected app might name one. Wrapped greedily on a phone, it would
+ * leave "visit" alone on its last line.
+ */
+const LONG_NAME = 'Refund a deposit to the card it came from when a customer cancels a visit';
+
+export const LongName: Story = {
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  args: { name: LONG_NAME },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No board draws a tool name this long; the demo's are a word or two. The nearest is N-Conn-05-Refund. On a laptop the name fits the page's line, so it stays on one.",
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(1440);
+    await expectBalancedLines(canvas.getByRole('heading', { level: 1 }), LONG_NAME, 1);
+  },
+};
+
+export const LongNameOnAPhone: Story = {
+  name: 'Long name on a phone',
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: { name: LONG_NAME },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No board draws a tool name this long, or a tool's page on a phone. The nearest is N-Conn-05-Refund, at the canvas's width; on a phone the name takes three lines, balanced so its last word doesn't sit alone.",
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(390);
+    await expectBalancedLines(canvas.getByRole('heading', { level: 1 }), LONG_NAME, 3);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };
