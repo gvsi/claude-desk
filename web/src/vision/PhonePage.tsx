@@ -15,9 +15,7 @@ import {
 } from '../ds/index.ts';
 import { brandFrom } from '../public/brand.ts';
 import { PHONE_CHAT, PHONE_PAGE, PHONE_TAB_HREFS, PHONE_TODAY, RIVERA_PUBLIC_DESK } from './data.ts';
-import { VisionFrame } from './VisionFrame.tsx';
-
-const noop = () => undefined;
+import { noop, VisionFrame } from './VisionFrame.tsx';
 
 /**
  * `/vision/phone` (N-R2-Vision-Phone): Claude Desk as phone apps, side by side under the title. The

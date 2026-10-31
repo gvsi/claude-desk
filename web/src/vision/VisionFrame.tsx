@@ -42,7 +42,8 @@ export function VisionFrame({ title, children }: VisionFrameProps) {
   );
 }
 
-const noop = () => undefined;
+/** What a vision page's control does when used: nothing, since nothing here is live. */
+export const noop = () => undefined;
 
 export interface VisionOwnerShellProps extends VisionOwner {
   /** The vision bar, across the top of the app. */

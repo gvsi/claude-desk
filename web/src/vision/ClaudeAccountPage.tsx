@@ -8,9 +8,7 @@ import {
   CLAUDE_ACCOUNT_WELCOME,
   RIVERA_PUBLIC_DESK,
 } from './data.ts';
-import { ClaudeWords, VisionFrame } from './VisionFrame.tsx';
-
-const noop = () => undefined;
+import { ClaudeWords, noop, VisionFrame } from './VisionFrame.tsx';
 
 /**
  * `/vision/claude-account` (N-R2-Vision-ClaudeAccount): Dana, a returning customer, back on Rivera

@@ -13,9 +13,7 @@ import {
   VisitorMessage,
 } from '../ds/index.ts';
 import { LUIS_ACCESS, TEAM_CHAT, TEAM_EVERYONE, TEAM_HEADER, TEAM_OWNER, TEAM_TODAY, TEAM_TURNS, TEAMMATES, type TeamTurn } from './data.ts';
-import { ClaudeWords, VisionFrame, VisionOwnerShell } from './VisionFrame.tsx';
-
-const noop = () => undefined;
+import { ClaudeWords, noop, VisionFrame, VisionOwnerShell } from './VisionFrame.tsx';
 
 /** "Luis Ortega" is "LO": the first letters of the first and last names. */
 function initials(name: string): string {

@@ -1,9 +1,7 @@
 import { ClaudeMessage, Composer, FactCard, MarginReceipt, PublicShell, SuggestionChips, SystemLine, Transcript, TranscriptRow, VisitorMessage, type ReceiptSource } from '../ds/index.ts';
 import { brandFrom } from '../public/brand.ts';
 import { CITY_DESK, CITY_INSPECTION_TIMES, CITY_PERMIT, CITY_SOURCES, CITY_SUGGESTIONS, CITY_TURNS, CITY_VERIFY_PROMPT, proseOf } from './data.ts';
-import { ClaudeWords, VisionFrame } from './VisionFrame.tsx';
-
-const noop = () => undefined;
+import { ClaudeWords, noop, VisionFrame } from './VisionFrame.tsx';
 
 /** The two receipts under each of Claude's answers: the reply's check, then what ran or what waits for a person. */
 function cityReceipts(seq: number, source: ReceiptSource, plain: string) {
