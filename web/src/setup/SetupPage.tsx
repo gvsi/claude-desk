@@ -144,11 +144,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
       body = <RulesStep state={state} business={name} onNext={moveTo} />;
       break;
     case 'safety_check':
-      body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} />;
+      body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} reread={reread} />;
       break;
     case 'preview':
     case 'live':
-      body = <LiveStep state={state} business={name} onLive={() => moveTo('live')} />;
+      body = <LiveStep state={state} business={name} onLive={() => moveTo('live')} reread={reread} />;
       break;
   }
   return (

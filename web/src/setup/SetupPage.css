@@ -13,7 +13,8 @@
 
 .cd-setup__bar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* The steps lay out by their own width, so their column has one: room for all five on a line. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px) minmax(0, 1fr);
   grid-template-areas: 'brand steps exit';
   align-items: center;
   column-gap: var(--space-16);
@@ -166,14 +167,16 @@
   border-radius: var(--radius-card);
 }
 
-@media (max-width: 639.98px) {
+/* Narrower than a laptop: the bar takes two lines, the mark and "Save and exit", then the business
+   and the steps, which say where the owner is in one line once they have under 480 px. */
+@media (max-width: 1099.98px) {
   .cd-setup__bar {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
     grid-template-areas:
       'brand exit'
       'business steps';
     row-gap: var(--space-6);
-    padding: var(--space-12) var(--space-16);
+    padding: var(--space-12) var(--space-40);
   }
 
   .cd-setup__lead {
@@ -181,7 +184,13 @@
   }
 
   .cd-setup__steps {
-    justify-self: end;
+    text-align: end;
+  }
+}
+
+@media (max-width: 639.98px) {
+  .cd-setup__bar {
+    padding: var(--space-12) var(--space-16);
   }
 
   .cd-setup__main {

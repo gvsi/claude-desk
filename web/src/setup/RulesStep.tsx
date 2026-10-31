@@ -1,5 +1,217 @@
-import type { SetupState, SetupStep } from '../api/views.ts';
+import { useQuery } from '@tanstack/react-query';
+import { useState, type ReactNode } from 'react';
 
-export function RulesStep(_: { state: SetupState; business: string; onNext: (step: SetupStep) => void }) {
-  return null;
+import type { RuleCard } from '../api/contracts.ts';
+import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
+import type { PeopleOut, RulesDraft, SetupState, SetupStep } from '../api/views.ts';
+import {
+  AlwaysOnList,
+  Button,
+  Card,
+  EmptyState,
+  LoadingLine,
+  Notice,
+  OutcomeGroups,
+  PageHeader,
+  SituationRow,
+  StatusLabel,
+  type OutcomeGroupRow,
+  type RuleMode,
+  type StatusTone,
+} from '../ds/index.ts';
+import { checkStatus, type CheckStatus } from '../owner/rules/checkStatus.ts';
+import { capOf } from '../owner/rules/drafts.ts';
+import { peopleQuery } from '../owner/rules/RuleDraftReview.tsx';
+import { moneyLimitLine, ruleWords } from '../owner/rules/ruleWords.ts';
+import { SETUP_COPY } from './copy.ts';
+
+const copy = SETUP_COPY.rules;
+
+/** Setup's rules draft: posted once on the way in, and read again by the same post (the API answers the same draft). */
+export function setupRulesQuery(id: string) {
+  return {
+    queryKey: ['setupRules', id] as const,
+    queryFn: () => request('setupRules', { params: { id } }),
+    staleTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+  };
+}
+
+export interface RulesStepProps {
+  state: SetupState;
+  /** The business's name, once known. */
+  business: string;
+  /** The interview moved on. */
+  onNext: (step: SetupStep) => void;
+}
+
+/** A card's reason as a row's words: the board's rows end without a full stop. */
+const rowWords = (reason: string) => reason.trim().replace(/\.$/, '');
+
+/** The draft's rules by what Claude does, a row per card: what it does, and who it is for. */
+function groupRows(cards: readonly RuleCard[], people: PeopleOut | null | undefined): Partial<Record<RuleMode, OutcomeGroupRow[]>> {
+  const rows: Partial<Record<RuleMode, OutcomeGroupRow[]>> = {};
+  for (const card of cards) {
+    if (card.is_default === true) continue;
+    const who = ruleWords(card, people).find((word) => word.field === 'who')?.text ?? 'Anyone';
+    (rows[card.mode] ??= []).push({ key: card.card_id, text: rowWords(card.reason), who });
+  }
+  return rows;
+}
+
+const CHECK_TONES: Readonly<Record<CheckStatus['status'], StatusTone>> = { checked: 'handled', failed: 'refused', unavailable: 'held' };
+
+/**
+ * The payment limit, leading the rules under it, in its signed words. "Change" is left out until
+ * setup has a way to draft the limit again; the line's place keeps room for it.
+ */
+function MoneyLimitLine({ cents }: { cents: number }) {
+  return <p className="cd-setup-rules__limit cd-type-body">{moneyLimitLine(cents)}</p>;
+}
+
+/** The draft and its check: the limit, the rules by outcome, what is always on, and the check's lines. */
+function DraftRules({ draft, people, check }: { draft: RulesDraft; people: PeopleOut | null | undefined; check: CheckStatus }) {
+  const rows = groupRows(draft.cards, people);
+  const none = Object.values(rows).every((group) => group.length === 0);
+  return (
+    <>
+      <OutcomeGroups rows={rows} moneyLimit={<MoneyLimitLine cents={capOf(draft)} />} />
+      {none ? <EmptyState title={copy.empty} body={copy.emptyBody} /> : null}
+      <Card padding={16}>
+        <AlwaysOnList />
+      </Card>
+      {/* A check that couldn't run is said once, above the rules. */}
+      {check.status === 'unavailable' ? null : (
+        <ul role="list" className="cd-setup-rules__checks">
+          {check.lines.map((line) => (
+          <li key={line} className="cd-type-meta">
+            <StatusLabel tone={CHECK_TONES[check.status]}>{line}</StatusLabel>
+          </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+/**
+ * "Your rules": setup's draft from the answers (`setupRules`), its payment limit in the signed words,
+ * what Claude does on its own, asks about and never does, the always-on rules and the check. A
+ * draft that can't be checked can't go on: only "Save and exit". "Check real situations" runs the
+ * draft on situations from the owner's answers; "Looks right" goes on to the safety check.
+ */
+export function RulesStep({ state, business, onNext }: RulesStepProps) {
+  const id = state.interview_id;
+  const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
+  const [view, setView] = useState<'rules' | 'situations'>(state.step === 'situations' ? 'situations' : 'rules');
+  const draft = useQuery(setupRulesQuery(id));
+  const people = useQuery({ ...peopleQuery(state.desk_id), refetchOnWindowFocus: false });
+  const situations = useQuery({
+    queryKey: ['setupSituations', id] as const,
+    queryFn: () => request('setupSituations', { params: { id } }),
+    enabled: view === 'situations' && draft.data !== undefined,
+    staleTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
+  const saveAndExit = (
+    <div className="cd-setup-step__actions">
+      <Button variant="primary" size="main" href={exit}>
+        {SETUP_COPY.saveAndExit}
+      </Button>
+    </div>
+  );
+  const failure = (error: unknown, retry: () => void): ReactNode =>
+    error instanceof ApiError && error.code === 'rules_cannot_be_checked' ? (
+      <>
+        <Notice tone="info">{ownerErrorCopy(error)}</Notice>
+        {saveAndExit}
+      </>
+    ) : (
+      <Notice
+        tone="error"
+        action={
+          <Button variant="secondary" onClick={retry}>
+            {SETUP_COPY.questions.tryAgain}
+          </Button>
+        }
+      >
+        {ownerErrorCopy(error)}
+      </Notice>
+    );
+
+  if (view === 'situations' && draft.data !== undefined) {
+    const s = SETUP_COPY.situations;
+    let body: ReactNode;
+    if (situations.data === undefined) {
+      body = situations.isError ? failure(situations.error, () => void situations.refetch()) : <LoadingLine>{s.loading}</LoadingLine>;
+    } else {
+      body = (
+        <>
+          {situations.data.length === 0 ? (
+            <EmptyState title={s.empty} body={s.emptyBody} />
+          ) : (
+            <Card padding={16}>
+              <ul role="list" className="cd-setup-step__rows" aria-label={s.label}>
+                {situations.data.map(({ situation, result, matches }, index) => (
+                  <li key={`${index}-${situation.title}`}>
+                    <SituationRow
+                      title={situation.title}
+                      who={s.who[situation.who] ?? s.who.public}
+                      outcome={result.outcome}
+                      dependsOnReview={result.depends_on_review}
+                      reason={result.reason_plain}
+                      matches={matches}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
+          <div className="cd-setup-step__actions">
+            <Button variant="primary" size="main" onClick={() => onNext('safety_check')}>
+              {s.looksRight}
+            </Button>
+          </div>
+        </>
+      );
+    }
+    return (
+      <div className="cd-setup-step">
+        <PageHeader title={s.title} subtitle={s.subtitle(business || 'your business')} />
+        {body}
+      </div>
+    );
+  }
+
+  let body: ReactNode;
+  if (draft.data === undefined) {
+    body = draft.isError ? failure(draft.error, () => void draft.refetch()) : <LoadingLine>{copy.loading}</LoadingLine>;
+  } else {
+    const check = checkStatus(draft.data.proof);
+    // Only a draft whose check passed goes on; one that can't be checked, or failed, waits here.
+    body = (
+      <>
+        {check.status === 'unavailable' ? <Notice tone="info">{check.lines.join(' ')}</Notice> : null}
+        <DraftRules draft={draft.data} people={people.data} check={check} />
+        {check.status === 'checked' ? (
+          <div className="cd-setup-step__actions">
+            <Button variant="primary" size="main" onClick={() => setView('situations')}>
+              {copy.checkSituations}
+            </Button>
+          </div>
+        ) : (
+          saveAndExit
+        )}
+      </>
+    );
+  }
+  return (
+    <div className="cd-setup-step">
+      <PageHeader title={copy.title} subtitle={copy.subtitle} />
+      {body}
+    </div>
+  );
 }

@@ -116,7 +116,9 @@ export const SETUP_COPY = {
     previewTitle: 'Try it as a customer before anyone else can',
     previewSubtitle: 'Answering stays off until you go live. Only you can see this preview.',
     goLive: 'Go live',
-    liveTitle: (business: string) => `${business} is live`,
+    /** After the business's name. */
+    isLive: ' is live',
+    yourDeskIsLive: 'Your Desk is live',
     liveSubtitle: 'Customers and their agents can reach your Desk at this link, day or night.',
     open: 'Open',
     goToToday: 'Go to Today',
