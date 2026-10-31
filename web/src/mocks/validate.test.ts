@@ -14,6 +14,8 @@ import type {
   OwnerTranscript,
   RulesDraft,
   RulesView,
+  SetupState,
+  SetupTools,
   ToolConfirmedOut,
   VisitorSession,
   VisitorTranscript,
@@ -193,5 +195,30 @@ describe('mock payloads', () => {
       expect(confirmed.profile, name).toMatchObject({ tool: name, status: 'enabled', review_reason: null });
       expect(validateContract('ToolConfirmed', confirmed), name).toEqual([]);
     }
+  });
+
+  it('setup_desk_tools_say_why_they_wait_for_review', async () => {
+    // A new Desk's Documents and Payments tools, and the mock payments server's once connected,
+    // wait for review as a connect never confirmed ("new"); the rest are on and wait for nothing.
+    const started = (await body('startSetup', { body: { description: 'Rivera Plumbing, a plumber in Oakland.', timezone: 'America/Los_Angeles' } })) as SetupState;
+    const id = started.interview_id;
+    await body('setupConnect', { params: { id }, body: { server: 'mock_payments' } });
+    const { tools } = (await body('setupTools', { params: { id } })) as SetupTools;
+    const waiting = ['native.release_document', 'native.payment_link', 'native.charge_mandate', 'payments.list_charges', 'payments.create_refund'];
+    for (const row of tools) {
+      expect(row.review_reason, row.tool).toBe(waiting.includes(row.tool) ? 'new' : null);
+      expect(row.status, row.tool).toBe(waiting.includes(row.tool) ? 'needs_review' : 'enabled');
+    }
+    expect(tools.map((row) => row.tool)).toEqual(expect.arrayContaining(waiting));
+
+    // Each tool record is a profile the contract takes, and a tool already on confirms in its shape.
+    const desk = mockStore.world.desk(started.desk_id);
+    for (const tool of desk?.tools ?? []) expect(validateContract('ToolProfile', tool), tool.tool).toEqual([]);
+    const quote = tools.find((row) => row.tool === 'native.quote');
+    const confirmed = await body('confirmTool', {
+      params: { desk_id: started.desk_id },
+      body: { tools: [{ tool: 'native.quote', definition_sha256: quote?.definition_sha256 }], enable: true },
+    });
+    expect(validateContract('ToolConfirmed', confirmed)).toEqual([]);
   });
 });
