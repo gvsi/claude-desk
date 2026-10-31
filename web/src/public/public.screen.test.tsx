@@ -11,7 +11,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import type { EvMessage, OpenStatus, PublicDesk, SseEvent } from '../api/contracts.ts';
 import { typingPingMs } from '../app/poll.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY, UNREACHABLE_COPY } from '../ds/index.ts';
+import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, PUBLIC_SHELL_SCROLLER_EVENT, RATE_LIMITED_COPY, UNREACHABLE_COPY, type PublicShellScrollerDetail } from '../ds/index.ts';
 import { worker } from '../mocks/browser.ts';
 import { HELD_PROSE, SCRIPT, matchRule, type RuleName } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -812,7 +812,8 @@ describe('public chat page', () => {
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
     const shell = document.querySelector('.cd-public-shell');
     if (!shell) throw new Error('no shell');
-    const switched = () => shell.dispatchEvent(new CustomEvent(SCROLLER_SWITCHED, { bubbles: true, detail: { scroller: chatScroller() } }));
+    const switched = () =>
+      shell.dispatchEvent(new CustomEvent<PublicShellScrollerDetail>(PUBLIC_SHELL_SCROLLER_EVENT, { bubbles: true, detail: { scroller: chatScroller() } }));
 
     // At the end: the switch leaves the conversation at its start, and the shell's event follows.
     chatScroller().scrollTo({ top: 0, behavior: 'instant' });
@@ -1436,9 +1437,6 @@ const LONG_CHAT = [
   'Can I get 15% off if I pay cash?',
   'Hello there',
 ] as const;
-
-/** The event the design system's shell sends from its root once it has switched which part of it scrolls. */
-const SCROLLER_SWITCHED = 'cd-public-shell-scroller';
 
 /** The AI disclosure, as the page shows it in English. */
 const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";

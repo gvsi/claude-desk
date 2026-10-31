@@ -20,6 +20,7 @@ import {
   MarginReceipt,
   NEW_CHAT_LABEL,
   Notice,
+  PUBLIC_SHELL_SCROLLER_EVENT,
   PersonMessage,
   PublicShell,
   RATE_LIMITED_COPY,
@@ -219,12 +220,6 @@ const SHELL = '.cd-public-shell';
 const COMPOSER_AREA = '.cd-public-shell__composer';
 
 /**
- * The event the design system's shell sends from its root once it has switched which of its parts
- * scrolls the conversation: its scroll region, or on a short window the shell itself.
- */
-const SCROLLER_SWITCHED = 'cd-public-shell-scroller';
-
-/**
  * Whether a visitor who was at the end, where the page last knew they were (`seen`), has moved
  * away from it to stand where the conversation is now: only by moving it up, in the same scroller,
  * with the shell the same size. The page changing size moves the conversation too, before the page
@@ -377,12 +372,12 @@ function useNewestInView(
     const shell = shown ? end.current?.closest(SHELL) : null;
     const area = composer.current?.closest(COMPOSER_AREA);
     if (!shell) return undefined;
-    shell.addEventListener(SCROLLER_SWITCHED, pin);
+    shell.addEventListener(PUBLIC_SHELL_SCROLLER_EVENT, pin);
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(pin);
     observer?.observe(shell);
     if (area) observer?.observe(area);
     return () => {
-      shell.removeEventListener(SCROLLER_SWITCHED, pin);
+      shell.removeEventListener(PUBLIC_SHELL_SCROLLER_EVENT, pin);
       observer?.disconnect();
     };
   }, [shown, end, composer, pin]);
