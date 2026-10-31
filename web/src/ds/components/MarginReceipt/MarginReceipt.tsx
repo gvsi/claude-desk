@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import { MarginLine } from './MarginLine.tsx';
 import { receiptLine, receiptTone, type ReceiptSource } from './receiptTone.ts';
 
@@ -25,6 +27,13 @@ export interface MarginReceiptProps {
   onOpenTrace?: (ledgerSeq: number) => void;
   /** An executed booking or a paid link: the sage check that draws once, shown only when handled. */
   drawCheck?: boolean;
+  /**
+   * The receipt was already on screen before the row it is attached to arrived: it moved under
+   * the reply with it (shown under the question while the reply was on its way). Under a
+   * `TranscriptRow` that lands, it shows at once instead of landing again. Read when the receipt
+   * is first drawn.
+   */
+  shownBefore?: boolean;
 }
 
 /**
@@ -32,7 +41,9 @@ export interface MarginReceiptProps {
  * and the kernel's line, or on owner screens the state's words and the decision's reason
  * (`receiptLine`). It never rewrites either line or adds a time.
  */
-export function MarginReceipt({ source, plain, ledgerSeq, reason, cardBelow, onOpenTrace, drawCheck = false }: MarginReceiptProps) {
+export function MarginReceipt({ source, plain, ledgerSeq, reason, cardBelow, onOpenTrace, drawCheck = false, shownBefore = false }: MarginReceiptProps) {
+  // As it was when first drawn: a re-render never starts a landing it was spared, or cuts one short.
+  const [seen] = useState(shownBefore);
   const tone = receiptTone(source);
   const { lead, text } = receiptLine({ source, plain, reason, cardBelow });
   return (
@@ -43,6 +54,7 @@ export function MarginReceipt({ source, plain, ledgerSeq, reason, cardBelow, onO
       text={text}
       check={drawCheck && tone === 'handled'}
       onOpen={onOpenTrace === undefined ? undefined : () => onOpenTrace(ledgerSeq)}
+      shownBefore={seen}
     />
   );
 }

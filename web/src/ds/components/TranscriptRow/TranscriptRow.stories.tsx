@@ -3,6 +3,7 @@ import { expect, fn } from 'storybook/test';
 
 import type { EvMessage, SseEvent, StatusEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
+import { expectComputed } from '../../test/expectComputed.ts';
 import { AgentMessage } from '../AgentMessage/AgentMessage.tsx';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { MarginNote } from '../MarginNote/MarginNote.tsx';
@@ -51,8 +52,11 @@ const agentReceipt = receiptFromEvent(
 );
 const LEAD_SAVED = 'Name and phone saved to Customers as a new lead.';
 
-/** The opening of Dana's conversation as the owner reads it: her question, then the reply and its receipts. */
-function DanaOpening({ onOpenTrace }: { onOpenTrace: (ledgerSeq: number) => void }) {
+/**
+ * The opening of Dana's conversation as the owner reads it: her question, then the reply and its
+ * receipts. With `live`, the reply arrives live, as on an open page.
+ */
+function DanaOpening({ onOpenTrace, live = false }: { onOpenTrace: (ledgerSeq: number) => void; live?: boolean }) {
   return (
     <Transcript label={`Conversation with ${dana.name}`}>
       <TranscriptHeader
@@ -63,6 +67,7 @@ function DanaOpening({ onOpenTrace }: { onOpenTrace: (ledgerSeq: number) => void
         <VisitorMessage text={question} />
       </TranscriptRow>
       <TranscriptRow
+        live={live}
         margin={receipts.map((receipt) => (
           <MarginReceipt key={receipt.ledgerSeq} {...receipt} onOpenTrace={onOpenTrace} />
         ))}
@@ -161,6 +166,65 @@ export const ReplyWithReceipts: Story = {
     await expect(right?.getBoundingClientRect().left).toBe(reply.left);
     await expect(right?.getBoundingClientRect().top).toBeGreaterThanOrEqual(left?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY);
     await expect(right).toHaveTextContent('Notes from the checks. Select one for the full trace.');
+  },
+};
+
+/** `motion-stagger` as the page reads it, in ms. */
+function staggerMs(): number {
+  const token = getComputedStyle(document.documentElement).getPropertyValue('--motion-stagger').trim();
+  if (!/^\d+ms$/.test(token)) throw new Error(`motion-stagger reads "${token}", not a time in ms`);
+  return Number.parseInt(token, 10);
+}
+
+/** An animation delay of `ms`, as the browser computes it. */
+const delayOf = (ms: number) => `${ms / 1000}s`;
+
+/** The look of the moment a reply lands: `motion-base`, on `motion-ease-emphasis`, held at its start until its delay. */
+const LANDING = { animationDuration: '0.2s', animationTimingFunction: 'cubic-bezier(0.165, 0.84, 0.44, 1)', animationFillMode: 'backwards', animationIterationCount: '1' };
+
+/** Nothing under `root` moves. */
+function expectStill(root: HTMLElement): void {
+  for (const el of root.querySelectorAll<HTMLElement>('*')) expectComputed(el, { animationName: 'none' });
+}
+
+export const LiveReply: Story = {
+  render: () => <DanaOpening onOpenTrace={fn()} live />,
+  parameters: {
+    canvasNote:
+      "Boards are still frames. Here Claude's reply arrives live: it rises into place, and its receipts land one by one, motion-stagger apart, with the kernel's lines unchanged. Storybook shows the motion your system asks for; the design system's browser tests render this story under reduced motion.",
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const log = canvas.getByRole('log', { name: `Conversation with ${dana.name}` });
+    const { row, main, margin } = rowParts(canvasElement, '.cd-claude-message__prose');
+    const lines = [...margin.children] as HTMLElement[];
+    // The motion is visual only: the same lines, in the same order, inside the live log.
+    await expect(lines).toHaveLength(receipts.length);
+    for (const [index, line] of lines.entries()) {
+      await expect(line).toHaveAccessibleName(`${receipts[index]?.plain} Open the full trace.`);
+      await expect(line.closest('[aria-live]')).toBe(log);
+    }
+    const asked = canvasElement.querySelector<HTMLElement>('.cd-visitor-message')?.closest<HTMLElement>('.cd-transcript-row');
+    if (!asked) throw new Error("no row holds Dana's question");
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // live_reply_still_under_reduced_motion: the reply and its receipts show at once.
+      expectStill(row);
+      return;
+    }
+    // live_reply_lands: the reply rises in at once, and each receipt lands one motion-stagger after
+    // the one before, its dot growing with its line.
+    expectComputed(main, { ...LANDING, animationName: /^(?!none$).+/, animationDelay: '0s' });
+    const stagger = staggerMs();
+    await expect(stagger).toBe(150);
+    for (const [index, line] of lines.entries()) {
+      const delay = delayOf(stagger * (index + 1));
+      expectComputed(line, { ...LANDING, animationName: /^(?!none$).+/, animationDelay: delay });
+      const dot = line.querySelector<HTMLElement>('.cd-status-dot');
+      if (!dot) throw new Error('no dot on a receipt');
+      expectComputed(dot, { ...LANDING, animationName: /^(?!none$).+/, animationDelay: delay });
+    }
+    // A row that didn't arrive live (Dana's question, read from the conversation) is still.
+    expectStill(asked);
   },
 };
 

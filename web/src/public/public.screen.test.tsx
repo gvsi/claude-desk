@@ -13,11 +13,13 @@ import { typingPingMs } from '../app/poll.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY, UNREACHABLE_COPY } from '../ds/index.ts';
 import { worker } from '../mocks/browser.ts';
-import { HELD_PROSE, SCRIPT, matchRule, type RuleName } from '../mocks/script.ts';
+import { HELD_PROSE, SCRIPT, matchRule, turnEnd, type RuleName } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
+import { watchLandings } from '../test/landings.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { CAUGHT_UP_AFTER_MS } from './PublicChatProvider.tsx';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -70,6 +72,19 @@ async function turnEnded(before: number): Promise<void> {
     expect(shownMessages()).toHaveLength(messagesOf(chatEvents()).length);
     expect(document.querySelector('.cd-writing-indicator')).toBeNull();
   });
+}
+
+/**
+ * Claude answers `question` in this browser's chat without the page: the visitor's words (sent
+ * from another tab, say), then the price turn, each event on the chat's stream at once.
+ */
+function priceTurnWithoutThePage(question: string): void {
+  const chat = mockStore.visitorSession(RIVERA.slug);
+  const price = SCRIPT.find((rule) => rule.name === 'price');
+  if (!chat || !price) throw new Error('the chat and the script\'s price row exist');
+  mockStore.world.visitorText(chat, question);
+  const turn = mockStore.world.context(chat, 'en', question);
+  for (const step of [...price.steps, turnEnd]) mockStore.world.emit(chat, step(turn));
 }
 
 /** The row (`.cd-transcript-row`) holding `el`. */
@@ -215,6 +230,25 @@ describe('public chat page', () => {
     expect(cancel.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(held.element().getBoundingClientRect().bottom);
     // Receipts are lines to read, never controls.
     expect(screen.container.querySelectorAll('.cd-margin-receipt button, button.cd-margin-receipt')).toHaveLength(0);
+  });
+
+  it('cancelled_line_under_a_landed_reply_shows_at_once', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 15% off if I pay cash?');
+    const reply = rowOf(screen.getByText(rivera.decisions.held.visitor_plain, { exact: true }).element());
+    // The held reply has landed, with its receipts and the cancel under them.
+    await expect.poll(() => reply.getAnimations({ subtree: true }).length).toBe(0);
+
+    // What cancelling says attaches under it later, and shows at once: no beat to wait for.
+    await screen.getByRole('button', { name: 'Cancel this request' }).click();
+    const cancelled = screen.getByText('Cancelled', { exact: true });
+    await expect.element(cancelled).toBeInTheDocument();
+    const line = cancelled.element().closest('.cd-margin-receipt');
+    if (!line) throw new Error('the cancelled line is a receipt');
+    expect(rowOf(line)).toBe(reply);
+    expect(getComputedStyle(line).animationName).toBe('none');
+    expect(getComputedStyle(line).animationDelay).toBe('0s');
   });
 
   it('held_request_can_be_cancelled', async () => {
@@ -761,6 +795,100 @@ describe('public chat page', () => {
       `/api/public/desks/${RIVERA.slug}/sessions`,
       `/api/public/desks/${RIVERA.slug}/sessions`,
     ]);
+  });
+
+  it('live_reply_lands_once_and_history_draws_still', async () => {
+    const landed = watchLandings();
+    const { screen, router } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'How much is drain clearing?');
+    const quote = () => screen.getByRole('article', { name: 'Quote' });
+
+    // The reply came on the stream, so its row lands with its receipts; the visitor's own message,
+    // shown as it was sent, doesn't.
+    await expect.element(quote()).toBeVisible();
+    expect(landed.rows()).toEqual([rowOf(quote().element())]);
+    expect(receiptsOf(rowOf(quote().element()))).toHaveLength(2);
+
+    // It lands once: leaving the page and coming back to the same chat draws it still.
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    await router.navigate(PAGE);
+    await ready(screen);
+    await expect.element(quote()).toBeVisible();
+    expect(landed.rows()).toHaveLength(1);
+
+    // A reload reads the stored conversation: every row draws still, and the stream it resumes adds nothing.
+    const second = await renderRoute(PAGE);
+    await ready(second.screen);
+    await expect.element(second.screen.getByRole('article', { name: 'Quote' })).toBeVisible();
+    await vi.waitFor(() => expect(requests('events').at(-1)?.path).toMatch(/after=4$/));
+    await sleep(300);
+    expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(2);
+    expect(landed.rows()).toHaveLength(1);
+  });
+
+  it('a_reply_that_came_while_away_draws_still', async () => {
+    const landed = watchLandings();
+    const { screen, router } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'How much is drain clearing?');
+    const quotes = () => screen.getByRole('article', { name: 'Quote' }).elements();
+    expect(landed.rows()).toHaveLength(1);
+
+    // The visitor leaves the page, and a reply comes meanwhile. Back on the page, it shows where it
+    // belongs and draws still: it came while they were away.
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    priceTurnWithoutThePage('And for two drains?');
+    await router.navigate(PAGE);
+    await ready(screen);
+    await expect.poll(() => quotes().length).toBe(2);
+    await sleep(CAUGHT_UP_AFTER_MS);
+    expect(landed.rows()).toHaveLength(1);
+
+    // Caught up, the chat lands a reply that arrives while the page is open again.
+    await say(screen, 'How much is drain clearing?');
+    await expect.poll(() => quotes().length).toBe(3);
+    expect(landed.rows()).toHaveLength(2);
+    expect(landed.rows().at(-1)).toBe(rowOf(quotes().at(-1) as Element));
+  });
+
+  it('a_reconnect_with_an_unseen_message_draws_still', async () => {
+    const landed = watchLandings();
+    // The stream can't open at first: the chat says it is reconnecting, and opens it again 2 s later.
+    mockStore.inject({ route: 'events', status: 503 });
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await expect.poll(() => screen.container.textContent).toContain('Reconnecting to the chat');
+
+    // A reply comes while the stream is down. The stream that opens again sends it first: it shows,
+    // and draws still, since the page wasn't following when it came.
+    priceTurnWithoutThePage('How much is drain clearing?');
+    await expect.element(screen.getByRole('article', { name: 'Quote' }), { timeout: 5_000 }).toBeVisible();
+    await sleep(CAUGHT_UP_AFTER_MS);
+    expect(landed.rows()).toEqual([]);
+
+    // Caught up, the chat lands a reply that arrives while the page is open again.
+    await say(screen, 'Can someone come Tuesday afternoon?');
+    expect(landed.rows()).toHaveLength(1);
+  });
+
+  it('axe_check_leaves_a_landed_reply_still', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'How much is drain clearing?');
+    const reply = rowOf(screen.getByRole('article', { name: 'Quote' }).element());
+    const moving = () => reply.getAnimations({ subtree: true }).map((a) => (a instanceof CSSAnimation ? a.animationName : 'other'));
+    await expect.poll(moving).toEqual([]);
+
+    // The screen's checks read it at rest and leave it so: nothing in the reply moves again, and it
+    // shows whole for whatever the test checks next.
+    await expectScreenBasics(screen.container, { owner: false });
+    expect(moving()).toEqual([]);
+    const main = reply.querySelector('.cd-transcript-row__main');
+    if (!main) throw new Error('the reply has its message');
+    expect(getComputedStyle(main).opacity).toBe('1');
   });
 
   it('callback_card_shows_the_kernel_title', async () => {
