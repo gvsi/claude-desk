@@ -521,10 +521,13 @@ export const CITY_DESK: PublicDesk = {
  * status, fee, date or time (invariant 2); the garage question is a plan checker's decision, so it
  * is held for staff.
  *
- * The system line and the receipts are a vision of what the kernel's lines could say, beyond what
- * they say today: the app writes "Verified with a code", and the kernel's visitor lines are "Reply
- * checked against {owner}'s rules", "Verification started", "Times read from {owner}'s calendar"
- * and "Waiting for {owner} to approve". No tool reads a permit file ("Read from your own permit file").
+ * By the owner's vision-copy ruling (follow the product's rules, keep the warmth), the garage
+ * reply says who it went to and where the answer comes, and the held receipt is the kernel's
+ * visitor line for a hold, "Waiting for {owner} to approve"; the hold's reason shows only on owner
+ * screens. The system line and the other receipts are a vision of what the kernel's lines could
+ * say, beyond what they say today: the app writes "Verified with a code", and the kernel's visitor
+ * lines are "Reply checked against {owner}'s rules", "Verification started" and "Times read from
+ * {owner}'s calendar". No tool reads a permit file ("Read from your own permit file").
  */
 export const CITY_TURNS = {
   status: 'Hi, it’s Marcus Bell. What’s the status of my kitchen remodel permit?',
@@ -538,8 +541,8 @@ export const CITY_TURNS = {
   times: 'These times are open on the inspection calendar. Which one works for you?',
   readCalendar: 'Times read from the inspection calendar',
   garage: 'One more thing. I’d like to turn my garage into a home office. Does that need a permit at all?',
-  staffDecides: 'Whether your garage conversion needs a permit is a plan checker’s decision, so I’ve asked one to get back to you.',
-  heldForStaff: 'Held for a person: whether work needs a permit is a staff decision',
+  staffDecides: 'Whether your garage conversion needs a permit is a plan checker’s decision. I’ve asked Permit Center staff, and the answer will show up here.',
+  waitingForStaff: 'Waiting for Permit Center staff to approve',
   checked: 'Reply checked against the City’s rules',
 } as const;
 
@@ -649,7 +652,7 @@ export function CityOfficeChat() {
         <TranscriptRow>
           <VisitorMessage text={t.garage} />
         </TranscriptRow>
-        <TranscriptRow margin={cityReceipts(57, decided('held'), t.heldForStaff)}>
+        <TranscriptRow margin={cityReceipts(57, decided('held'), t.waitingForStaff)}>
           <CityReply text={t.staffDecides} />
         </TranscriptRow>
       </Transcript>
