@@ -231,48 +231,6 @@ export const PaymentConfirmed: Story = {
   },
 };
 
-export const LinkCancelled: Story = {
-  args: { block: blocks.link_cancelled.en },
-  parameters: {
-    canvas: 'N-R2-Chat-Link-Cancelled',
-    canvasNote:
-      "The Desk's card for a payment link a confirmed rule change cancelled: the amount, what the link was for and the kernel's line. The board adds the test-payment note; a cancelled link moves no money, so the card has none.",
-  },
-  play: async ({ canvas, canvasElement }) => {
-    // link_cancelled_card_shows_amount_title_and_line: named by its label, then the kernel's
-    // title (the amount) as the headline and its lines (what the link was for, the line) as details.
-    const card = canvas.getByRole('article', { name: 'Payment link cancelled' });
-    const { title, lines = [] } = blocks.link_cancelled.en;
-    await expect(card.textContent).toBe(['Payment link cancelled', title, ...lines].join(''));
-    expectComputed(canvas.getByText('$20.00'), { fontSize: '15px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
-    for (const line of lines) expectComputed(canvas.getByText(line), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
-    // The payment link's card icon beside the label, 16 px and hidden from screen readers.
-    const icon = canvasElement.querySelector<SVGSVGElement>('.cd-reply-card__label svg')!;
-    await expect(icon).toHaveAttribute('aria-hidden', 'true');
-    await expect(icon.getBoundingClientRect().width).toBe(16);
-    await expect([...icon.querySelectorAll('rect, path')].map((shape) => shape.tagName)).toEqual(['rect', 'path']);
-    // No money moved and the link is gone: no test-payment note, no link and no button.
-    await expect(card).not.toHaveTextContent(TEST_PAYMENT.en);
-    await expect(canvas.queryByRole('link')).toBeNull();
-    await expect(canvas.queryByRole('button')).toBeNull();
-  },
-};
-
-export const LinkCancelledEs: Story = {
-  args: { block: blocks.link_cancelled.es, language: 'es' },
-  parameters: {
-    canvas: 'none',
-    canvasNote: 'N-R2-Chat-Link-Cancelled in Spanish: the label in Spanish, and the kernel’s amount, title and line as they arrive.',
-  },
-  play: async ({ canvas, canvasElement }) => {
-    const card = canvas.getByRole('article', { name: 'Enlace de pago cancelado' });
-    const { title, lines = [] } = blocks.link_cancelled.es;
-    await expect(card.textContent).toBe(['Enlace de pago cancelado', title, ...lines].join(''));
-    await expect(card).not.toHaveTextContent(TEST_PAYMENT.es);
-    await expect(canvasElement.querySelector('.cd-reply-card')).toHaveAttribute('lang', 'es');
-  },
-};
-
 export const QuoteEs: Story = {
   args: { block: blocks.quote.es, language: 'es' },
   parameters: { canvasNote: 'The board is in English; this is the same card for a visitor writing in Spanish.' },

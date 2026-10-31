@@ -1,7 +1,7 @@
 import { Icon } from '../../icons/index.tsx';
 import { Card } from '../Card/Card.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
-import { CARD_CHROME } from './chrome.ts';
+import { LINK_CANCELLED_CHROME } from './chrome.ts';
 
 import './ReplyCard.css';
 
@@ -18,7 +18,7 @@ export interface LinkCancelledCardProps {
  * button, since the link is gone, and no test-payment note, since no money moved.
  */
 export function LinkCancelledCard({ line, language }: LinkCancelledCardProps) {
-  const chrome = CARD_CHROME.link_cancelled[language] ?? CARD_CHROME.link_cancelled.en;
+  const chrome = LINK_CANCELLED_CHROME[language] ?? LINK_CANCELLED_CHROME.en;
   return (
     <div className="cd-reply-card" lang={language}>
       <Card as="article" label={chrome.label} padding={16}>
