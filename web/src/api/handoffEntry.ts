@@ -1,9 +1,9 @@
 /**
- * Which handoff a `desk_data` record entry is about, as the kernel writes them (kernel plan H1): the
+ * Which handoff a `desk_data` record entry is about, as the kernel writes them (plan 01b): the
  * handoff card handing a conversation to the owner (`part: "handoffs"`, `kind: "card"`), and the
  * owner marking a handoff done, a call-back request's or a card's (`part: "handoffs"`, no `kind`).
- * A call-back request opening its handoff writes no `desk_data` entry. The owner's record rows and
- * the design system's trace both name the two entries from this one rule.
+ * A call-back request opening its handoff writes no `desk_data` entry. The owner's record rows name
+ * the two entries from this one rule, and the design system's trace will read it too.
  */
 import type { LedgerEvent } from './contracts.ts';
 
