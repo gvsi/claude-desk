@@ -19,6 +19,7 @@ import {
   formatWhen,
   greetingFor,
   hoursParts,
+  localDate,
   presenceLine,
   relativeWait,
 } from './format.ts';
@@ -62,6 +63,15 @@ describe('format', () => {
     expect(formatStarted('2026-10-29T05:10:00Z', LA, now)).toBe('Yesterday at 10:10 pm');
     expect(formatStarted('2026-10-27T16:52:00Z', LA, now)).toBe('Oct 27 at 9:52 am');
     expect(formatStarted('nope', LA, now)).toBe('');
+  });
+
+  it('local_date_on_the_business_clock', () => {
+    expect(localDate('2026-10-29T07:00:00Z', LA)).toBe('2026-10-29'); // 00:00 on the 29th in Los Angeles
+    expect(localDate('2026-10-29T06:59:59Z', LA)).toBe('2026-10-28'); // still the 28th there, the 29th in UTC
+    expect(localDate('2026-10-24T03:00:00.000000Z', LA)).toBe('2026-10-23'); // as the API writes its times
+    expect(localDate('2026-11-01T09:30:00Z', LA)).toBe('2026-11-01'); // after the clocks went back
+    expect(localDate('2026-10-29T06:59:59Z', 'UTC')).toBe('2026-10-29');
+    expect(localDate('not a time', LA)).toBeNull();
   });
 
   it('greeting_by_local_hour', () => {

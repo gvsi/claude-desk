@@ -165,6 +165,33 @@ function attempt(fields: Partial<Attempt> = {}): Attempt {
   };
 }
 
+/** A blocked reply's line as the API writes it, when no violation says more. */
+const STOPPED_REPLY = 'A reply was stopped before it was shown.';
+
+/** Safety's empty state, and its headline for any count. */
+const NOTHING = 'Nothing stopped this week';
+const HEADLINE = /^\d+ attempts? to talk me around (?:was|were) stopped this week\.$/;
+
+/**
+ * One of Claude's drafts the reply check stopped at `at`: entry `seq` of the record, and its
+ * attempt as the API lists it.
+ */
+function stoppedDraft(seq: number, at: string): { entry: LedgerEntry; attempt: Attempt } {
+  return {
+    entry: entry(seq, at, { kind: 'reply', session_id: `ses-${seq}`, summary: { author: 'claude', ok: false, language: 'en', violations: [] } }),
+    attempt: attempt({ ref_id: String(seq), kind: 'reply_blocked', reason_plain: STOPPED_REPLY, created_at: at, ledger_seq: seq }),
+  };
+}
+
+/** A read the test lets land when it chooses. */
+function held(): { until: Promise<void>; release: () => void } {
+  let release = () => {};
+  const until = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { until, release };
+}
+
 /** The open attempt beside the list. */
 function detail(screen: RenderResult) {
   return region(screen, 'Attempt details');
@@ -216,6 +243,78 @@ describe('Safety', () => {
     await stoppedThisWeek(1);
     const one = await renderRoute(SAFETY);
     await expect.element(one.screen.getByText('1 attempt to talk me around was stopped this week.', { exact: true })).toBeVisible();
+  });
+
+  it('empty_state_only_when_nothing_was_stopped_this_week', async () => {
+    // A fresh copy, with nothing stopped ever. The empty state waits for the attempts, so it never
+    // says nothing was stopped before the list has said so too.
+    mockStore.reset('rivera_quiet');
+    const list = held();
+    mockStore.inject({ route: 'safety', status: 200, body: [], until: list.until });
+    const quiet = await renderRoute(SAFETY);
+    await readsMore('today', 2);
+    expect(quiet.screen.getByText(NOTHING).elements()).toHaveLength(0);
+    list.release();
+    await expect.element(quiet.screen.getByText(NOTHING, { exact: true })).toBeVisible();
+    expect(quiet.screen.getByText(HEADLINE).elements()).toHaveLength(0);
+    expect(quiet.screen.getByRole('list', { name: 'Attempts, newest first' }).elements()).toHaveLength(0);
+
+    // A draft of Claude's the reply check stopped at 8:00 pm on Friday the 23rd in Los Angeles,
+    // already the 24th in UTC: before the seven days began, so this week has still stopped nothing,
+    // and the list still shows it.
+    mockStore.reset('rivera');
+    const older = stoppedDraft(1, '2026-10-24T03:00:00.000000Z');
+    injectLedger(ledgerPage([older.entry]));
+    injectAttempts([older.attempt]);
+    await stoppedThisWeek(0);
+    const { screen } = await renderRoute(SAFETY);
+    await expect.element(screen.getByText(NOTHING, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('link', { name: /^Oct 23, 8:00 pm A reply was stopped before it was shown\./ })).toBeVisible();
+  });
+
+  it('stopped_drafts_alone_show_no_headline', async () => {
+    // Only Claude's own drafts were stopped this week, at 12:30 am on its first day and at 9:52 am
+    // today, and no request was refused: nobody tried to talk Claude around, so there is no count,
+    // and nothing says nothing was stopped. The list shows both drafts.
+    const first = stoppedDraft(1, '2026-10-24T07:30:00.000000Z');
+    const second = stoppedDraft(2, isoTime(NOW.getTime() - 38 * 60_000));
+    injectLedger(ledgerPage([first.entry, second.entry]));
+    injectAttempts([second.attempt, first.attempt]);
+    await stoppedThisWeek(0);
+    const { screen } = await renderRoute(SAFETY);
+    const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('link');
+    await expect.element(rows.first()).toBeVisible();
+    expect(rows.elements().map((row) => row.querySelector('.cd-attempt-row__title')?.textContent)).toEqual([STOPPED_REPLY, STOPPED_REPLY]);
+    await expect.element(detail(screen).getByText('This reply was never shown.', { exact: true })).toBeVisible();
+
+    // Today's count has been read again with the list on screen: still no count and no empty state.
+    await readsMore('today', 2);
+    expect(screen.getByText(NOTHING).elements()).toHaveLength(0);
+    expect(screen.getByRole('link', { name: 'Open your public page' }).elements()).toHaveLength(0);
+    expect(document.body.textContent).not.toMatch(/talk me around/);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('refused_requests_keep_the_headline', async () => {
+    // A request the kernel refused this week, beside a draft of Claude's the reply check stopped:
+    // the headline counts the refused request as Today does, and the list keeps both.
+    const refusedAt = '2026-10-29T16:51:00.000000Z';
+    const draft = stoppedDraft(3, '2026-10-29T17:10:00.000000Z');
+    const refusal = entry(2, refusedAt, {
+      kind: 'decide',
+      session_id: 'ses-1',
+      ref_id: 'dec-refund',
+      summary: { tool: 'payments.create_refund', outcome: 'refuse', state: 'refused', card_ids: [] },
+    });
+    injectLedger(ledgerPage([refusal, draft.entry]));
+    injectAttempts([draft.attempt, attempt({ created_at: refusedAt })]);
+    await stoppedThisWeek(1);
+    const { screen } = await renderRoute(SAFETY);
+    await expect.element(screen.getByText('1 attempt to talk me around was stopped this week.', { exact: true })).toBeVisible();
+    const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('link');
+    await expect.element(rows.first()).toBeVisible();
+    expect(rows.elements().map((row) => row.querySelector('.cd-attempt-row__title')?.textContent)).toEqual([STOPPED_REPLY, REFUND_REASON]);
+    expect(screen.getByText(NOTHING).elements()).toHaveLength(0);
   });
 
   it('headline_counts_the_listed_attempts', async () => {

@@ -1,11 +1,12 @@
 /**
  * Safety's words and the few rules behind them: what each kind of record entry is called, where an
  * entry came from, what an attempt was about, which checkpoint stopped it, the one entry an attempt
- * is shown with, and the one time an entry shows.
+ * is shown with, the one time an entry shows, and whether the week stopped anything at all.
  */
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
-import type { Attempt, Triage, TriageCategory } from '../../api/views.ts';
+import type { Attempt, ThisWeek, Triage, TriageCategory } from '../../api/views.ts';
 import type { Checkpoint } from '../../ds/index.ts';
+import { localDate } from '../../lib/format.ts';
 
 /** Each kind of record entry, as a row of the record names it. A kind missing here is a compile error. */
 export const LEDGER_KIND_COPY = {
@@ -125,4 +126,22 @@ export function categoryLabel(a: Pick<Attempt, 'triage'>): string {
 /** Safety's headline, in Claude's voice, for `n` attempts stopped in the last seven days. */
 export function stoppedHeadline(n: number): string {
   return n === 1 ? '1 attempt to talk me around was stopped this week.' : `${n} attempts to talk me around were stopped this week.`;
+}
+
+/**
+ * Whether anything was stopped in the last seven days, as Today's "Last 7 days" frames them: a
+ * request the kernel refused or a draft of Claude's the reply check stopped, by its `created_at`'s
+ * local date in the week's time zone, `start` to `end`. A hold isn't stopped. An attempt whose time
+ * can't be read may be this week's, so it counts: the week is never said to have stopped nothing
+ * when it may have.
+ */
+export function anythingStoppedIn(
+  attempts: readonly Pick<Attempt, 'kind' | 'created_at'>[],
+  week: Pick<ThisWeek, 'timezone' | 'start' | 'end'>,
+): boolean {
+  return attempts.some((a) => {
+    if (a.kind !== 'refused' && a.kind !== 'reply_blocked') return false;
+    const date = localDate(a.created_at, week.timezone);
+    return date === null || (date >= week.start && date <= week.end);
+  });
 }

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
 import type { LedgerPage } from '../../api/contracts.ts';
@@ -14,7 +14,17 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, todayPath, useNeedsYou, useToday } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { AttemptDetail } from './AttemptDetail.tsx';
-import { CATEGORY_LABELS, NOT_SORTED, attemptTime, categoryLabel, originCopy, stoppedBy, stoppedHeadline, triageOf } from './copy.ts';
+import {
+  CATEGORY_LABELS,
+  NOT_SORTED,
+  anythingStoppedIn,
+  attemptTime,
+  categoryLabel,
+  originCopy,
+  stoppedBy,
+  stoppedHeadline,
+  triageOf,
+} from './copy.ts';
 import { RecordList } from './RecordList.tsx';
 
 import './Safety.css';
@@ -75,29 +85,37 @@ function ReadFailed({ failure }: { failure: ReadFailure | null }) {
 }
 
 /**
- * This week's count of stopped attempts in Claude's voice, the figure Today's "Last 7 days" shows,
- * or, with none, what will show up here and how to see one. A failed read says so first.
+ * This week's count of the requests the kernel refused, in Claude's voice: the figure Today's
+ * "Last 7 days" shows. With none, what will show up here and how to see one, but only once the
+ * attempts say nothing else was stopped this week either; with Claude's own stopped drafts alone
+ * nobody tried to talk Claude around, so nothing shows here and the list below has the drafts. A
+ * failed read of the count says so first.
  */
 function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   const today = useToday(deskId);
+  const attempts = useAttempts(deskId).data;
   const failure = useReadFailure(today);
-  const stopped = today.data?.this_week.stopped;
+  const week = today.data?.this_week;
+  let shown: ReactNode = null;
+  if (week !== undefined && week.stopped > 0) {
+    shown = <p className="cd-safety__headline cd-type-summary">{stoppedHeadline(week.stopped)}</p>;
+  } else if (week !== undefined && attempts !== undefined && !anythingStoppedIn(attempts, week)) {
+    shown = (
+      <EmptyState
+        title="Nothing stopped this week"
+        body="When someone tries to get around your rules, you'll see here what they tried and what stopped it. Try it yourself from your public page."
+        action={
+          <Button variant="secondary" href={customerLink(slug, deskId)} external>
+            Open your public page
+          </Button>
+        }
+      />
+    );
+  }
   return (
     <>
       <ReadFailed failure={failure} />
-      {stopped === undefined ? null : stopped === 0 ? (
-        <EmptyState
-          title="Nothing stopped this week"
-          body="When someone tries to get around your rules, you'll see here what they tried and what stopped it. Try it yourself from your public page."
-          action={
-            <Button variant="secondary" href={customerLink(slug, deskId)} external>
-              Open your public page
-            </Button>
-          }
-        />
-      ) : (
-        <p className="cd-safety__headline cd-type-summary">{stoppedHeadline(stopped)}</p>
-      )}
+      {shown}
     </>
   );
 }
@@ -160,8 +178,8 @@ interface AttemptsViewProps {
 
 /**
  * The attempts, each a link that opens it beside the list: the one the address names, else the
- * newest. With none, the list is left out: the headline above already says nothing was stopped. A
- * failed read says so first, over the attempts read before.
+ * newest. With none, the list is left out: the empty state above already says nothing was stopped.
+ * A failed read says so first, over the attempts read before.
  */
 function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewProps) {
   const safety = useAttempts(deskId);
