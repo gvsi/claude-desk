@@ -200,9 +200,15 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("No doubt about it: no hidden charges.", "lex.en.promise", "no hidden charges"),
     ("There's no one-off charge.", "lex.en.promise", "no one-off charge"),
     ("There's no one-time cost.", "lex.en.promise", "no one-time cost"),
-    # nor after "worries" or "questions", which pass (below), on the charge and cost line and the
-    # fee line; other words can start a waiver ("standard", "set", "single", "fixed", "exact"), so a
-    # charge, cost or fee after them blocks, failing closed when it states no price
+    # nor after any other word, which can start a waiver or sit in a sentence that makes one ("No
+    # worries about costs; you pay nothing."), so a charge, cost or fee after it blocks, failing
+    # closed when it states no price
+    ("No worries about costs; you pay nothing.", "lex.en.promise", "No worries about costs"),
+    ("No worries about fees; you pay nothing.", "lex.en.promise", "No worries about fees"),
+    ("No questions about costs: there aren't any.", "lex.en.promise", "No questions about costs"),
+    ("No questions about fees: there aren't any.", "lex.en.promise", "No questions about fees"),
+    ("No worries about cost, the quote below has it.", "lex.en.promise", "No worries about cost"),
+    ("No questions about cost?", "lex.en.promise", "No questions about cost"),
     ("No worries, there's no extra charge.", "lex.en.promise", "no extra charge"),
     ("No problem: no hidden fees.", "lex.en.promise", "no hidden fees"),
     ("No problem the cost is in the quote below.", "lex.en.promise", "No problem the cost"),
@@ -305,11 +311,6 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "No way it costs that much.",
     "No doubt the cost is worth it.",
     "No matter the charges, Maria can help.",
-    # nor do "worries" or "questions", before a charge, a cost or a fee
-    "No worries about cost, the quote below has it.",
-    "No questions about cost?",
-    "No worries about fees, the quote below has them.",
-    "No questions about fees?",
     # "no hay", "no tiene" or "no lleva" states no price with more than two words, a stop or the
     # noun before it
     "No tiene que preocuparse por el costo; está en la cotización.",

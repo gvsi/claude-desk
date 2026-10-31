@@ -69,21 +69,14 @@ promise	discount(?:s|ed|ing)?|refund(?:s|ed|ing|able)?|waiv(?:e|es|ed|er|ing)|co
 promise	on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
 # A price of nothing, with any one or two words before the charge or the cost, as before a fee
 # below, and in the plural too: "no charge", "no extra charge", "no call-out charge", "no hidden
-# charges", "no added cost", "at no additional cost". "matter", "one", "way", "doubt", "worries" or
-# "questions" right after "no" starts no price ("No matter the cost, call us.", "No one charges
-# less.", "No worries about cost", "No questions about cost?"), unless a hyphen goes on with it ("no
-# one-off charge"). Words that can start a waiver ("no standard fees", "no set fee", "no fixed
-# charge") take no exception, so a sentence such as "There's no set cost until Maria sees the
-# leak." blocks too, failing closed.
-promise	no[\s-]+(?!(?:matter|one|way|doubt|worries|questions)(?![\w-]))(?:[^\W\d_]+[\s-]+){0,2}(?:charges?|costs?)
+# charges", "no added cost", "at no additional cost". "matter", "one", "way" or "doubt" right after
+# "no" starts no price ("No matter the cost, call us.", "No one charges less."), unless a hyphen
+# goes on with it ("no one-off charge").
+promise	no[\s-]+(?!(?:matter|one|way|doubt)(?![\w-]))(?:[^\W\d_]+[\s-]+){0,2}(?:charges?|costs?)
 # "on us" is a price of nothing ("it's on us"), but not after "count", "rely" or "depend"
 # ("you can count on us").
 promise	(?<!count )(?<!counts )(?<!counted )(?<!counting )(?<!rely )(?<!relies )(?<!relied )(?<!relying )(?<!depend )(?<!depends )(?<!depended )(?<!depending )on[\s-]+us
-# A fee of nothing, with any one or two words before the fee ("no fee", "no call-out fee", "no
-# hidden fees"). "worries" or "questions" right after "no" starts no price ("No questions about
-# fees?"), unless a hyphen goes on with it. This line doesn't take "matter", "one", "way" or
-# "doubt", so "No matter the fee, call us." still blocks.
-promise	no[\s-]+(?!(?:worries|questions)(?![\w-]))(?:[^\W\d_]+[\s-]+){0,2}fees?
+promise	no[\s-]+(?:[^\W\d_]+[\s-]+){0,2}fees?
 
 # Booking confirmations, which only a booking card makes, written from a claim's parts rather than
 # sample phrasings. A claim is a booking noun (booking, appointment, visit, reservation, slot,
