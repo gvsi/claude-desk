@@ -58,7 +58,10 @@ reason on stdout.
 booking, each kind in its own copy, on the in-process stack built from this tree (its API on
 `MODEL_PROVIDER`; every model scripted with `--dry-run`) or on the deployment at `--base-url`, and
 writes `evals/out/latency/<id>.json`, its numbers labelled `local` or `hosted` and `--pass` naming the
-pass they are for. It exits 1 when the run is refused or measured nothing it can report.
+pass they are for. A real run starts no turn once its calls cost `--max-usd`, read from records it can
+trust, and appends what they cost to the shared spend file; a run on the deployment is refused, since
+the deployment reports no usage of its conversation's calls it could stop by. It exits 1 when the run
+is refused or measured nothing it can report.
 
 `report` (`evals/report.py`) writes the report of a finished pass with no model call: under
 `evals/reports/`, `<date>-<pass_id>.md`, `latest.json` and this month's rows of the shared spend file as

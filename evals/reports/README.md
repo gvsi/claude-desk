@@ -59,7 +59,7 @@ A run that broke a baseline rule is also listed as not stopped, with the oracle 
 **Latency.** p50 and p95 for each measure, in two parts:
 
 - Local: the full turn as the client sees it, with cold first turns apart, and the reveal delay, reply check, decide, reviewer and proving times from the records.
-- Hosted: the full turn and the reviewer, measured against the deployment.
+- Hosted: the full turn and the reviewer, measured against the deployment. A hosted run is refused until the deployment reports what its calls cost, since that is how a run stops at its `--max-usd`; until then this part says it wasn't measured.
 
 **Limits.** What the numbers don't show:
 

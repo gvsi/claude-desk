@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from evals.client import ApiCallFailed, StreamEvent
 from evals.latency import (
+    KINDS,
     MESSAGES,
     LatencyConfig,
     LatencyDeps,
@@ -429,7 +430,8 @@ PROVED = {"rivera": {"p50_ms": 2_310, "p95_ms": 3_480}, "cards_30": {"p50_ms": 4
 
 class Stands:
     """What `run_latency` reaches outside itself, standing in: the in-process target, both measurements,
-    the proving script, credentials and prices; it notes each call."""
+    a meter of the deployment's usage it can trust, the proving script, credentials and prices; it notes
+    each call."""
 
     def __init__(self, root: Path, measured: Measured | None = None, *, keys: dict[str, str] = KEYS,
                  prices: Any = PRICES, proved: Any = PROVED):
@@ -439,8 +441,12 @@ class Stands:
 
     def deps(self) -> LatencyDeps:
         return LatencyDeps(root=self.root, target=self.target, measure_local=self.measure_local,
-                           measure_hosted=self.measure_hosted, prove=self.prove, credential=self.keys.get,
-                           prices=self.prices, spend_file=self.root / "spend.csv", now=lambda: NOW)
+                           measure_hosted=self.measure_hosted, prove=self.prove, hosted_usage=self.hosted_usage,
+                           credential=self.keys.get, prices=self.prices, spend_file=self.root / "spend.csv",
+                           now=lambda: NOW)
+
+    async def hosted_usage(self, chats: Any) -> list[UsageRecord]:
+        return list(self.measured.usage)
 
     @asynccontextmanager
     async def target(self, config: LatencyConfig) -> AsyncIterator[Any]:
@@ -452,7 +458,8 @@ class Stands:
         return self.measured
 
     async def measure_hosted(self, base_url: str, passcode: str, **kwargs: Any) -> Measured:
-        self.calls.append(("hosted", base_url, kwargs["turns"]))
+        self.calls.append(("hosted", base_url, kwargs["turns"], kwargs["max_usd"],
+                           kwargs["usage_of"] == self.hosted_usage))
         return self.measured
 
     def prove(self, root: Path) -> Any:
@@ -468,9 +475,9 @@ def latency_config(**changes: Any) -> LatencyConfig:
 
 async def test_latency_run_refuses_before_any_turn(tmp_path):
     """No turn is made, and nothing is proved or spent, when the estimate is over --max-usd, a credential
-    or a list price is missing, this month's eval spend would pass the limit less the demo reserve, or
-    the hosted run has no passcode; proving runs before the turns, so a failed proof stops a local run
-    before any model call."""
+    or a list price is missing, this month's eval spend would pass the limit less the demo reserve (for a
+    hosted run too, whose metered spend the guard counts), or the hosted run has no passcode; proving
+    runs before the turns, so a failed proof stops a local run before any model call."""
     root = make_repo(tmp_path / "repo")
     (root / "spend.csv").write_text("pass_id,date,provider,runs,desk_usd,simulator_usd,claude_api_usd,total_usd\n"
                                     "earlier,2026-11-01,anthropic,240,90.0,8.0,598.5,98.0\n")
@@ -483,6 +490,9 @@ async def test_latency_run_refuses_before_any_turn(tmp_path):
         (latency_config(provider="bedrock", max_usd=0.15, turns=1), {}, "no list prices for bedrock"),
         (latency_config(base_url="https://desk.example.com"), {"keys": no_bedrock_key | {"DESK_PASSCODE": ""}},
          "DESK_PASSCODE"),
+        (latency_config(base_url="https://desk.example.com"), {}, "this month's eval spend"),
+        (latency_config(base_url="https://desk.example.com", max_usd=0.15, turns=1), {"prices": {}},
+         "no list prices for anthropic"),
         (latency_config(max_usd=0.15, turns=1), {"proved": RuntimeError("desk-prove exited 2")}, "prove_latency"),
     ]
     for config, changes, reason in cases:
@@ -499,7 +509,9 @@ async def test_latency_run_refuses_before_any_turn(tmp_path):
 async def test_latency_run_writes_labelled_numbers_and_its_spend(tmp_path):
     """A local run proves first, measures with the budget on, appends what its calls cost to the shared
     spend file (no tier 2 runs) and writes its numbers under `local`, with the pass it was run for; a
-    hosted run writes them under `hosted` and spends nothing here; a dry run spends nothing."""
+    hosted run measures with the budget on its meter, writes its numbers under `hosted`, its API's
+    provider as unknown, and appends what its metered calls cost at the Claude API's list prices; a dry
+    run spends nothing."""
     root = make_repo(tmp_path / "repo")
     usage = [UsageRecord(route="conversation", model=OPUS, session_id="s-q", input_tokens=1_500, cached_tokens=4_500,
                          cache_write_tokens=0, output_tokens=350, ms=2_400),
@@ -533,17 +545,20 @@ async def test_latency_run_writes_labelled_numbers_and_its_spend(tmp_path):
     hosted = Stands(root, measured)
     run, path = await run_latency(latency_config(base_url="https://desk.example.com"), hosted.deps())
     data = json.loads(path.read_text())
-    assert hosted.calls == [("hosted", "https://desk.example.com", 20)]
-    assert (data["where"], data["provider"], data["latency"]["local"], data["spend_usd"]) == (
-        "hosted", "unknown", None, None)
+    assert hosted.calls == [("hosted", "https://desk.example.com", 20, 3.0, True)]
+    assert (data["where"], data["provider"], data["latency"]["local"]) == ("hosted", "unknown", None)
     assert Latency.model_validate(data["latency"]).hosted == hosted_latency(
         samples, ledger_entries=measured.ledger_entries, session_ids=measured.session_ids)
+    [_, row] = read_spend(root / "spend.csv")
+    assert (row["pass_id"], row["provider"], row["runs"]) == (f"latency-{run.latency_id}", "anthropic", "0")
+    assert float(row["total_usd"]) == float(row["claude_api_usd"]) == pytest.approx(0.0139 + 0.00252, abs=1e-4)
+    assert data["spend_usd"] == pytest.approx(0.0139 + 0.00252) and data["spend_estimated"] is False
 
     dry = Stands(root, measured, keys={}, prices={})
     run, path = await run_latency(latency_config(dry_run=True, max_usd=0.0), dry.deps())
     assert dry.calls == [("prove",), ("target", True), ("local", 20, None, "anthropic")]
     assert (json.loads(path.read_text())["provider"], run.spend_usd) == ("fake", None)
-    assert len(read_spend(root / "spend.csv")) == 1   # neither the hosted run nor the dry run spent here
+    assert len(read_spend(root / "spend.csv")) == 2   # the dry run spent nothing here
 
     broken = Stands(root, measured)
 
@@ -695,6 +710,118 @@ async def test_latency_spend_that_cant_be_priced_is_charged_the_estimate(tmp_pat
     monkeypatch.setenv("MODEL_PROVIDER", "anthropic")
     assert await evals_run.latency_command(["--max-usd", "3", "--turns", "2"], Stands(root, measured).deps()) == 0
     assert "$0.30 charged as an estimate, since its calls couldn't all be priced" in capsys.readouterr().out
+
+
+class ChargingApi(StandInApi):
+    """A stand-in deployment that charges each visitor turn one conversation call of `input_tokens` on Opus
+    5.5, recorded for the turn's session in `calls`: what a meter the run could trust would read."""
+
+    def __init__(self, *, turns: int, input_tokens: int):
+        super().__init__({(kind, n): [(1_000, message(f"m-{kind}-{n}")), (1_100, TURN_END)]
+                          for kind in KINDS for n in range(1, turns + 1)})
+        self.input_tokens, self.calls = input_tokens, []
+
+    def client(self) -> "ChargingClient":
+        return ChargingClient(self)
+
+
+class ChargingClient(StandInClient):
+    async def send(self, text: str) -> None:
+        await super().send(text)
+        self.api.calls.append(UsageRecord(route="conversation", model=OPUS, session_id=self.session_id,
+                                          input_tokens=self.api.input_tokens, cached_tokens=0, cache_write_tokens=0,
+                                          output_tokens=0))
+
+    async def owner_ledger(self, desk_id: str) -> dict[str, Any]:
+        return {"entries": []}
+
+
+def on_the_deployment(monkeypatch: pytest.MonkeyPatch, api: StandInApi) -> None:
+    """`measure_hosted`'s clients are the stand-in deployment's."""
+    from evals import latency
+
+    class Clients:
+        def __init__(self, base_url: str, passcode: str, timeout_s: float):
+            pass
+
+        def __call__(self) -> StandInClient:
+            return api.client()
+
+        async def aclose(self) -> None:
+            pass
+
+    monkeypatch.setattr(latency, "_Clients", Clients)
+
+
+async def test_a_hosted_run_with_no_usage_it_can_trust_is_refused(tmp_path, monkeypatch):
+    """The deployment's database is private and its owner's ledger records only the kernel's checks, never
+    the conversation's calls, so a hosted run can read no usage it can trust between turns. It is refused
+    before it enters the deployment, rather than run past --max-usd: here a turn costs a dollar and the cap
+    is $0.45. Nothing is entered, spent or written."""
+    root = make_repo(tmp_path / "repo")
+    api = ChargingApi(turns=3, input_tokens=250_000)   # $4 per million input tokens: a dollar a turn
+    on_the_deployment(monkeypatch, api)
+    deps = LatencyDeps(root=root, credential=KEYS.get, spend_file=root / "spend.csv", now=lambda: NOW)
+
+    with pytest.raises(LatencyRefused, match="can't stop at --max-usd"):
+        await run_latency(latency_config(turns=3, max_usd=0.45, base_url="https://desk.example.com"), deps)
+
+    assert api.copies == [] and api.sent == [] and api.calls == []
+    assert not (root / "spend.csv").exists() and not (root / "evals" / "out" / "latency").exists()
+
+
+async def test_a_hosted_run_stops_at_max_usd_by_the_usage_it_meters(tmp_path, monkeypatch, capsys):
+    """With a meter it can trust, a hosted run reads before each turn what its chats' calls have cost, at
+    the Claude API's list prices (a deployment runs on it), and starts no turn once that reaches --max-usd.
+    It appends that spend to the shared spend file with no tier 2 runs, and its file and the command say it
+    was stopped. A meter that can't be read stops the run, which is charged its estimate, marked so."""
+    from evals import run as evals_run
+
+    def metering(api: ChargingApi) -> Any:
+        async def usage(chats: Any) -> list[UsageRecord]:
+            sessions = {chat.session_id for chat in chats}
+            return [call for call in api.calls if call.session_id in sessions]
+        return usage
+
+    root = make_repo(tmp_path / "repo")
+    api = ChargingApi(turns=3, input_tokens=50_000)   # $0.20 a turn
+    on_the_deployment(monkeypatch, api)
+    deps = LatencyDeps(root=root, hosted_usage=metering(api), credential=KEYS.get, spend_file=root / "spend.csv",
+                       now=lambda: NOW)
+
+    run, path = await run_latency(latency_config(turns=3, max_usd=0.45, base_url="https://desk.example.com"), deps)
+
+    # $0.20, $0.40 and $0.60 once each turn is made: the fourth doesn't start.
+    assert len(api.sent) == len(run.samples) == 3
+    assert run.stopped_by_budget and json.loads(path.read_text())["stopped_by_budget"] is True
+    assert (run.where, run.provider, run.spend_usd, run.spend_estimated) == ("hosted", "unknown", pytest.approx(0.6),
+                                                                             False)
+    [row] = read_spend(root / "spend.csv")
+    assert (row["pass_id"], row["provider"], row["runs"]) == (f"latency-{run.latency_id}", "anthropic", "0")
+    assert row["total_usd"] == row["claude_api_usd"] == "0.6000" and row["estimated_usd"] == "0.0000"
+
+    monkeypatch.setenv("MODEL_PROVIDER", "anthropic")
+    api = ChargingApi(turns=3, input_tokens=50_000)
+    on_the_deployment(monkeypatch, api)
+    deps.hosted_usage = metering(api)
+    assert await evals_run.latency_command(["--turns", "3", "--max-usd", "0.45", "--base-url",
+                                            "https://desk.example.com"], deps) == 0
+    assert "3 of 3 turns measured, 0 failed, stopped by --max-usd, $0.60 spent" in capsys.readouterr().out
+
+    api = ChargingApi(turns=3, input_tokens=50_000)
+    on_the_deployment(monkeypatch, api)
+
+    async def unreadable(chats: Any) -> list[UsageRecord]:
+        if api.sent:
+            raise ApiCallFailed("owner_ledger", 503, {"error": "unavailable"})
+        return []
+
+    deps.hosted_usage = unreadable
+    with pytest.raises(ApiCallFailed):
+        await run_latency(latency_config(turns=3, max_usd=0.45, base_url="https://desk.example.com"), deps)
+    assert len(api.sent) == 1
+    last = read_spend(root / "spend.csv")[-1]   # what it spent can't be read: charged its estimate, marked so
+    assert last["total_usd"] == last["claude_api_usd"] == last["estimated_usd"] == "0.4500"
 
 
 async def test_latency_command_names_a_failed_call_without_its_body(tmp_path, capsys):
