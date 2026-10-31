@@ -587,6 +587,43 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
   });
 
+  it('a_new_passcode_drops_the_old_copys_late_inbox', async () => {
+    // The ended copy's inbox holds an entry the new copy's doesn't, and its first read is still out
+    // when the session ends; it answers, with the ended copy's entries, while the new copy is read
+    // ahead. The new copy's Today reads and shows its own inbox.
+    const leftBehind = 'A note in the copy that ended.';
+    mockStore.world.inbox.push({
+      entry: { entry_id: 'inbox-left-behind', to: 'owner', kind: 'alert', body: leftBehind, created_at: new Date().toISOString(), decision_id: null },
+      deskId: RIVERA.deskId,
+      sessionId: null,
+    });
+    const oldInbox = holdTheAnswerTo('ownerInbox');
+    const { screen, router } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
+    mockStore.reset('rivera', { signedIn: false });
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    await expect.element(introDialog(screen)).toBeVisible();
+
+    // The new copy's reads wait until the ended copy's inbox has answered.
+    const newInbox = holdReads(ROUTES.ownerInbox.path);
+    const newDesks = holdReads(ROUTES.desks.path);
+    await startTheDemo(screen);
+    await vi.waitFor(() => expect(newDesks.held()).toBeGreaterThan(0));
+    const late = nextAnswerTo('ownerInbox');
+    oldInbox.release();
+    await late.settled;
+    newInbox.release();
+    newDesks.release();
+
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    // Time for a read on mount to go out, had Today sent one: the new copy's inbox was read once, ahead.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(requests('ownerInbox')).toHaveLength(1);
+  });
+
   it('arrival_keeps_the_chat_closed', async () => {
     const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
     await startTheDemo(screen);
@@ -1082,7 +1119,11 @@ describe('OwnerLayout', () => {
     await screen.getByRole('button', { name: 'Start over' }).click();
     await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${mockStore.world.ids.deskId}/today`);
-    await expect.poll(() => requests('ownerInbox').length).toBe(2);
+    await expect.element(heldCard(screen)).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+    // Time for a read on mount to go out, had Today sent one: the new copy's inbox is read once.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(requests('ownerInbox')).toHaveLength(2);
   });
 
   it('start_over_drops_the_old_copys_late_inbox', async () => {
@@ -1120,9 +1161,11 @@ describe('OwnerLayout', () => {
     // The new copy's Today reads its own inbox ahead with the rest of it, so it opens with its one
     // entry counted, never with the inbox still opening.
     await expect.element(heldCard(screen)).toBeVisible();
-    await expect.poll(() => requests('ownerInbox').length).toBe(2);
     await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
     expect(sawItOpening()).toBe(false);
+    // Time for a read on mount to go out, had Today sent one: the old copy's read and the new one's.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(requests('ownerInbox')).toHaveLength(2);
 
     // With the sheet's own read held, it shows what Today read: the new copy's alert, linking to the
     // new copy's held request, and nothing of the old copy.
