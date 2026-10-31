@@ -73,17 +73,20 @@ async def start_setup(body: SetupStartIn, request: Request,
     now, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409
     `conflict`, and one sent while the first is still starting answers 409 `in_progress` at once, to be sent again
     after `retry_after`. A first that stopped before the kernel was asked for the Desk (its process did, say) frees
-    the key once it is older than the longest a start can take; one that stopped after asking, with no answer kept,
-    may have made the Desk, so it answers 409 `in_progress` for good, and only a new key starts again. A start is
-    admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent meanwhile waits
-    for that admission and is never counted; another process admits on its own, so during a deploy's overlap a repeat
-    routed to the other task can be counted twice.
+    the key once it is older than the longest a start can take. A start is admitted (looked up, counted and claimed)
+    under its key's lock in this process, so a repeat sent meanwhile waits for that admission and is never counted;
+    another process admits on its own, so during a deploy's overlap a repeat routed to the other task can be counted
+    twice.
+
+    409 `key_spent` (no `retry_after`) means this key is spent: its start asked the kernel for the Desk and then
+    failed, or stopped with no answer kept and is now older than the longest a start can take. The Desk may exist,
+    so the key never starts again and waiting changes nothing; a new click needs a new key. The first request still
+    answers its own failure.
 
     One rule for failures, as when sending the built-in agent: a start that fails before anything is made (refused by
     the limits, or Claude couldn't answer, before the kernel is asked for the Desk) frees its key, so the same request
     can be sent again; once the Desk was asked for, the key keeps the outcome, and a repeat of a start that failed
-    then answers its failure again (a new click sends a new key). Without a key, each start makes its own interview
-    and Desk."""
+    then answers 409 `key_spent`. Without a key, each start makes its own interview and Desk."""
     state = runtime(request).started()
 
     async def admit() -> None:

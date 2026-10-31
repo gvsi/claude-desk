@@ -14,11 +14,12 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   nothing was made, so the same request can be sent again. Before the kernel is asked for the Desk, the start records
   it on the row (`desk_requested_at`, committed); from then on the row keeps the outcome, a failure too
   (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands, with nothing
-  made: 409 `conflict` for another body, the stored failure again when the first failed, and while the first is still
-  starting, 409 `in_progress` at once (`retry_after` 2 s), holding nothing while the client waits. A row that never
-  recorded asking for its Desk and is still starting after the longest a start can take (`START_ABANDONED_S`) is
-  abandoned, and a repeat deletes it. A row that did record it but has no Desk and no failure stays uncertain (the
-  Desk may exist, its answer lost): it answers 409 `in_progress` for good, and only a new key starts again.
+  made: 409 `conflict` for another body, 409 `key_spent` when the first failed (the key can't start again, so a new
+  click sends a new key), and while the first is still starting, 409 `in_progress` at once (`retry_after` 2 s),
+  holding nothing while the client waits. A row still starting after the longest a start can take
+  (`START_ABANDONED_S`) has stopped. One that never recorded asking for its Desk is abandoned, and a repeat deletes
+  it. One that did record it, with no Desk and no failure, stays uncertain (the Desk may exist, its answer lost): it
+  is kept, and its key is spent (409 `key_spent`), so only a new key starts again.
   The lookup, the limits and the claim run under the key's lock in this process (`ADMISSIONS`), so a concurrent
   repeat waits for the first's admission and is never counted; another process's repeat meets the unique index
   instead. A start without a key writes its row last.
@@ -654,7 +655,8 @@ async def _claim(engine: AsyncEngine, copy_id: str, key: str, request_sha256: st
 
 
 def _failure_record(error: BaseException) -> dict:
-    """What a keyed start that failed answered, for a repeat to answer again (`_failure`)."""
+    """What a keyed start that failed once its Desk was asked for answered, kept on its row: the row is settled and
+    its key spent (a repeat answers 409 `key_spent`)."""
     if isinstance(error, ApiProblem):
         return {"status": error.status, "error": error.error, "code": error.code}
     if isinstance(error, KernelFailed):
@@ -662,15 +664,6 @@ def _failure_record(error: BaseException) -> dict:
     if isinstance(error, KernelUnavailable):
         return {"kernel": "unavailable", "route": error.route, "status": error.status, "code": error.code}
     return {"status": 500, "error": "internal", "code": None}
-
-
-def _failure(record: dict) -> Exception:
-    """The error a stored failure answers with again, as the app answered the first."""
-    if record.get("kernel") == "failed":
-        return KernelFailed(record["status"], record["code"])
-    if record.get("kernel") == "unavailable":
-        return KernelUnavailable(record["route"], record["status"], record["code"])
-    return ApiProblem(record["status"], record["error"], code=record["code"])
 
 
 async def _desks_now(owner: OwnerCtx) -> OwnerCtx:
@@ -684,11 +677,12 @@ async def _desks_now(owner: OwnerCtx) -> OwnerCtx:
 
 async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartIn) -> SetupState | None:
     """The interview a start with this key made in the copy, as it stands now; None when none holds the key. 409
-    `conflict` when the key's start had another body, and the first's failure again when it failed. While the first
-    is still starting, 409 `in_progress` at once, to be sent again in `START_RETRY_S`. A row that never recorded
-    asking the kernel for its Desk and is still starting after `START_ABANDONED_S` is abandoned (its request stopped
-    before anything was made): it is deleted, if it still is one, and the key is free. A row that did record it stays
-    `in_progress` however old: its Desk may exist."""
+    `conflict` when the key's start had another body, and 409 `key_spent` when it failed: its Desk was asked for and
+    may exist, so the key can't start again. While the first is still starting, 409 `in_progress` at once, to be sent
+    again in `START_RETRY_S`. A row still starting after `START_ABANDONED_S` has stopped. One that never recorded
+    asking the kernel for its Desk is abandoned (its request stopped before anything was made): it is deleted, if it
+    still is one, and the key is free. One that did record it is kept, since its Desk may exist, and its key is spent
+    (409 `key_spent`)."""
     key, sha = body.idempotency_key, start_sha256(body)
     found = select(INTERVIEWS.c.interview_id, INTERVIEWS.c.desk_id, INTERVIEWS.c.request_sha256,
                    INTERVIEWS.c.start_error, INTERVIEWS.c.desk_requested_at, _STALE.label("stale")).where(
@@ -700,10 +694,11 @@ async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartI
     if row["request_sha256"] != sha:
         raise ApiProblem(409, "conflict")
     if row["start_error"] is not None:
-        raise _failure(row["start_error"])
+        raise ApiProblem(409, "key_spent")
     if row["desk_id"] is None:
-        abandoned = row["stale"] and row["desk_requested_at"] is None
-        if abandoned and await _drop_abandoned(engine, owner.copy_id, row["interview_id"]):
+        if row["stale"] and row["desk_requested_at"] is not None:
+            raise ApiProblem(409, "key_spent")
+        if row["stale"] and await _drop_abandoned(engine, owner.copy_id, row["interview_id"]):
             return None
         raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
     if row["desk_id"] not in owner.desk_ids:          # made after this request read the copy's Desks
