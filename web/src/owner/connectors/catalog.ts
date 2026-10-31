@@ -3,7 +3,7 @@
  * tool belongs to, and names each tool and connector in the boards' words (the signed presets and
  * Connectors boards). Rules, Connectors, Today and setup group tools only through it.
  */
-import type { ToolName } from '../../api/contracts.ts';
+import type { ToolName, ToolProfile } from '../../api/contracts.ts';
 import type { ToolRow } from '../../api/views.ts';
 import type { ConnectorIconName, ConnectorView } from '../../ds/index.ts';
 
@@ -121,6 +121,41 @@ export const TOOL_NAMES = {
   'native.fetch_website': { name: 'Website reading', line: 'Reads your website to learn about your business.' },
   'native.read_memory': { name: 'Memory reading', line: 'Reads the notes you brought in to learn about your business.' },
 } as const satisfies Record<ToolName, ToolWords>;
+
+/**
+ * What each tool acts on, as the kernel's tool profiles have it (`ToolProfile.resource_kind`: each
+ * adapter's profile under `backend/desk/kernel_service/adapters/`, and the master plan's tool table
+ * for the payment tools). The tool rows the API sends don't carry it.
+ */
+export const TOOL_RESOURCES = {
+  'native.quote': 'desk',
+  'native.find_slots': 'desk',
+  'native.book': 'slot',
+  'native.capture_lead': 'desk',
+  'native.request_callback': 'desk',
+  'native.start_verification': 'desk',
+  'native.release_document': 'document',
+  'native.payment_link': 'quote',
+  'native.charge_mandate': 'quote',
+  'payments.list_charges': 'charge',
+  'payments.create_refund': 'charge',
+  'native.fetch_website': 'desk',
+  'native.read_memory': 'desk',
+} as const satisfies Record<ToolName, ToolProfile['resource_kind']>;
+
+/**
+ * The resources a person can own, so a rule for record owners can match: a document, its
+ * `record_owner_person_id` (the Share a document adapter), and a charge, the person it was charged
+ * to (master plan, "Listing charges"; plan 01c's refund adapter). The Desk itself, a calendar slot
+ * and a quote have no owner: those adapters resolve them with `owner_person_id=None`, and the
+ * quotes table has no owner to read.
+ */
+const OWNED_RESOURCES: ReadonlySet<ToolProfile['resource_kind']> = new Set(['document', 'charge']);
+
+/** Whether the tool's records can have an owner, so a rule for record owners can apply to it. */
+export function hasRecordOwner(tool: string): boolean {
+  return Object.hasOwn(TOOL_RESOURCES, tool) && OWNED_RESOURCES.has(TOOL_RESOURCES[tool as ToolName]);
+}
 
 const BY_KEY: ReadonlyMap<string, CatalogConnector> = new Map(CONNECTORS.map((connector) => [connector.key, connector]));
 const BY_TOOL: ReadonlyMap<string, CatalogConnector> = new Map(CONNECTORS.flatMap((connector) => connector.tools.map((tool) => [tool, connector])));

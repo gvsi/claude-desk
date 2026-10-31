@@ -19,6 +19,7 @@ import {
 import { aboveMoneyCapCopy, formatCents, listWords } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, connectorOn, toolState, type ConnectorKey } from '../connectors/catalog.ts';
 import { coveredTools } from './changeRows.ts';
+import { toolOutcome } from './outcome.ts';
 import { ABOVE_CEILING, PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
 
 /** The rules a tool is read against: the active version's cards. */
@@ -46,43 +47,8 @@ export function governingRules(row: Pick<ToolRow, 'tool' | 'effects'>, active: A
   return rulesForTool({ tool: row.tool, effects: row.effects }, active.cards);
 }
 
-/** A rule for one person or one agent, which never says what happens for everyone else. */
-const personScoped = (card: RuleCard) => card.who === 'person' || card.who === 'agent';
-
-/** How wide a group a card that isn't for one person or agent is for. */
-const GROUP_WIDTH: Readonly<Record<string, number>> = { anyone: 3, verified: 2, record_owner: 1 };
-
 /** A shared rule: one on an effect group (`effect:charge`), which every tool with that effect shares. */
 export const isShared = (card: Pick<RuleCard, 'applies_to'>) => card.applies_to.startsWith('effect:');
-
-/**
- * Whether `card` decides over `other`, two rules for groups of people that govern one tool, by the
- * kernel's precedence (master plan, "Coverage and overlap"): a `never` rule always wins; otherwise
- * the more specific rule, a tool's own above a shared one; at the same rank, "Ask me first" over
- * "Automatic". Which group a rule is for doesn't rank it, so among equals the wider group's comes
- * first, for its limit.
- */
-function decidesOver(card: RuleCard, other: RuleCard): boolean {
-  if ((card.mode === 'never') !== (other.mode === 'never')) return card.mode === 'never';
-  if (isShared(card) !== isShared(other)) return !isShared(card);
-  if (card.mode !== other.mode) return card.mode === 'ask';
-  return (GROUP_WIDTH[card.who] ?? 0) > (GROUP_WIDTH[other.who] ?? 0);
-}
-
-/**
- * The rule whose outcome the hub shows for a tool: of the rules for groups of people that govern
- * it, the one the kernel's precedence puts first (`decidesOver`), the first among equals; so the
- * outcome is the kernel's for someone all of them are for. None when only rules for one person or
- * agent govern it: they never say what happens for everyone else, who get the default ask.
- */
-function decidingRule(rules: readonly RuleCard[]): RuleCard | undefined {
-  let best: RuleCard | undefined;
-  for (const card of rules) {
-    if (personScoped(card)) continue;
-    if (best === undefined || decidesOver(card, best)) best = card;
-  }
-  return best;
-}
 
 /**
  * Built-in tools whose own line already says what they change, so the hub adds only whether it can
@@ -213,12 +179,11 @@ function summaryOf(tool: ToolName, rules: readonly RuleCard[], people: PeopleOut
   return shared > 0 ? `${rules.length} rules · ${shared} shared` : `${rules.length} rules`;
 }
 
-/** A tool on the hub: its words, its rules' words, its outcome and its page. */
+/** A tool on the hub: its words, its rules' words, its outcome (`toolOutcome`: the most that runs on its own for some visitor) and its page. */
 function toolSummary(row: ToolRow, key: ConnectorKey, active: ActiveCards, people: PeopleOut | null | undefined): ToolSummaryView {
   const rules = governingRules(row, active);
-  const deciding = decidingRule(rules);
-  const mode: RuleMode = deciding?.mode ?? 'ask';
-  const limit = deciding !== undefined && deciding.mode === 'auto' && deciding.max_amount_cents != null ? formatCents(deciding.max_amount_cents) : undefined;
+  const { mode, limitCents } = toolOutcome(row, active.cards);
+  const limit = mode === 'auto' && limitCents !== null ? formatCents(limitCents) : undefined;
   return {
     key: row.tool,
     name: TOOL_NAMES[row.tool].name,
