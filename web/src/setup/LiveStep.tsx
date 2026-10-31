@@ -3,7 +3,7 @@ import { useId, useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { SetupState, WentLive } from '../api/views.ts';
-import { Button, Notice, PageHeader, SectionHeader } from '../ds/index.ts';
+import { Button, LoadingLine, Notice, PageHeader, SectionHeader } from '../ds/index.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { ShareKit } from '../owner/share/ShareKit.tsx';
@@ -51,9 +51,9 @@ export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const shareId = useId();
-  // The owner's name, from the copy's Desks the setup page has read: whom the printed card names.
+  // The business and its owner, from the copy's Desks the setup page reads: whom the printed card names.
   const desks = useQuery({ ...desksQuery(), staleTime: Infinity });
-  const ownerName = (desks.data && findDesk(desks.data, state.desk_id)?.business.owner_display_name) ?? '';
+  const found = desks.data ? findDesk(desks.data, state.desk_id) : null;
 
   const goLive = async () => {
     setPending(true);
@@ -105,12 +105,26 @@ export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
             {copy.goToToday}
           </Button>
         </div>
-        {business === '' || ownerName === '' ? null : (
-          <section className="cd-setup-live__share" aria-labelledby={shareId}>
-            <SectionHeader id={shareId} title={copy.shareIt} />
-            <ShareKit publicUrl={url} business={business} ownerName={ownerName} showLink={false} />
-          </section>
-        )}
+        <section className="cd-setup-live__share" aria-labelledby={shareId}>
+          <SectionHeader id={shareId} title={copy.shareIt} />
+          {found !== null ? (
+            <ShareKit publicUrl={url} business={found.desk.business_name} ownerName={found.business.owner_display_name} showLink={false} />
+          ) : desks.isError || (desks.data !== undefined && !desks.isFetching) ? (
+            // The Desks couldn't be read, or the read doesn't hold this Desk yet: say so, and read again.
+            <Notice
+              tone="error"
+              action={
+                <Button variant="secondary" busy={desks.isFetching} onClick={() => void desks.refetch()}>
+                  {copy.tryAgain}
+                </Button>
+              }
+            >
+              {ownerErrorCopy(desks.error)}
+            </Notice>
+          ) : (
+            <LoadingLine>{copy.shareLoading}</LoadingLine>
+          )}
+        </section>
       </div>
     );
   }

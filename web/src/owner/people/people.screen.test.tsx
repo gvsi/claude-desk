@@ -664,6 +664,50 @@ describe('share', () => {
   });
 });
 
+describe("setup's live step", () => {
+  it('live_step_shares_the_apis_public_link', async () => {
+    // The API names the public link on another address than this page's: the kit shares that one,
+    // not one built from the slug here.
+    const state = await setupAtPreview();
+    const apiLink = `https://desk.example/d/${state.slug}`;
+    mockStore.inject({ route: 'goLive', status: 200, afterCommit: true, body: { public_url: apiLink, slug: state.slug } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    const card = screen.getByRole('figure', { name: 'Rivera Plumbing' });
+    await expect.element(card.getByRole('img', { name: `QR code for ${apiLink}` })).toBeVisible();
+    await expect.element(card.getByText(`desk.example/d/${state.slug}`, { exact: true })).toBeVisible();
+    expect(screen.container.textContent).not.toContain(`${window.location.host}/d/${state.slug}`);
+    const writeText = stubClipboard();
+    await screen.getByRole('button', { name: 'Copy link' }).click();
+    expect(writeText).toHaveBeenCalledWith(apiLink);
+  });
+
+  it('live_step_kit_waits_for_the_desks_and_tries_again', async () => {
+    const state = await setupAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+
+    // While the copy's Desks are read: the loading line under "Share it".
+    const desks = held();
+    mockStore.inject({ route: 'desks', status: 200, until: desks.until, body: (await mockStore.dispatch('desks') as { body: unknown }).body });
+    const slow = (await renderRoute(`/app/setup/${state.interview_id}`, { pollScale: 100 })).screen;
+    const share = slow.getByRole('region', { name: 'Share it' });
+    await expect.element(share.getByRole('status').filter({ hasText: /^Loading the card and ready-made words$/ })).toBeVisible();
+    expect(share.getByRole('figure').query()).toBeNull();
+    desks.release();
+    await expect.element(share.getByRole('figure')).toBeVisible();
+
+    // When they can't be read (nor on the one retry): what went wrong and Try again, which brings the kit.
+    mockStore.inject({ route: 'desks', status: 503, times: 2 });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { pollScale: 100, retryScale: 0 });
+    const region = screen.getByRole('region', { name: 'Share it' });
+    await expect.element(region.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    expect(region.getByRole('figure').query()).toBeNull();
+    await region.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(region.getByRole('figure')).toBeVisible();
+    expect(region.getByText(UNAVAILABLE, { exact: true }).query()).toBeNull();
+  });
+});
+
 describe('customers and share, everywhere', () => {
   beforeEach(freezeClock);
 
