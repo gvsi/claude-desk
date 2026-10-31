@@ -46,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, create_model, mode
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-30.15"
+PROMPT_VERSION = "2026-10-30.16"
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
 # here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
 # one list or the other.
@@ -189,9 +189,11 @@ SUMMARY_TAG = "conversation_so_far"
 ROW_TAGS = {"visitor_text": VISITOR_MESSAGE_TAG, "agent_text": AGENT_MESSAGE_TAG, "owner_say": OWNER_SAID_TAG,
             "whisper": OWNER_WHISPER_TAG, "action_update": ACTION_UPDATE_TAG, "desk_context": DESK_CONTEXT_TAG,
             "note": NOTE_TAG, "delivered": SHOWN_TO_VISITOR_TAG}
-# The summary labels each line by what it holds: a visitor's or an agent's words, an action update, or what was shown
-# to the visitor, by who wrote it (Claude, the owner or the Desk), each label that author and `SHOWN_SUFFIX`.
-SUMMARY_LABELS = {"visitor_text": "visitor", "agent_text": "agent", "action_update": "action_update"}
+# The summary labels each line by what it holds: a visitor's or an agent's words, an action update, a state note (the
+# visitor verified, the owner took over or handed back), or what was shown to the visitor, by who wrote it (Claude,
+# the owner or the Desk), each label that author and `SHOWN_SUFFIX`.
+SUMMARY_LABELS = {"visitor_text": "visitor", "agent_text": "agent", "action_update": "action_update",
+                  "note": "note"}
 SHOWN_SUFFIX = " (shown to the visitor)"
 SHOWN_LABELS = {author: author + SHOWN_SUFFIX for author in ("claude", "owner", "desk")}
 # A result of one of Claude's calls that it hadn't read when its context closed, labelled by the call's tool.

@@ -68,6 +68,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.prompts import (
+    NOTES,
     ROW_TAGS,
     SEND_REPLY_TOOL,
     SHOWN_LABELS,
@@ -191,6 +192,9 @@ PRESENCE_KINDS = frozenset({"owner_joined", "owner_left"})   # the owner's take-
 EVENT_KINDS = frozenset({"delivered", "status", *PRESENCE_KINDS})   # rows holding the event they published
 NOT_REPLAYED = MESSAGES.c.replay_id.is_(None)   # every query that builds a model context leaves out recorded history
 SEND_REPLY = SEND_REPLY_TOOL["name"]
+# The notes whose state a fresh context's summary keeps, the latest of each group: the visitor verified, and the
+# owner's latest take-over, hand-back or resume.
+STATE_NOTES = ((NOTES["verified"],), (NOTES["taken_over"], NOTES["handed_back"], NOTES["resumed"]))
 
 
 def lock_key(name: str) -> int:
@@ -491,18 +495,30 @@ def _result_text(block: dict) -> str:
     return json.dumps(content, ensure_ascii=False)
 
 
+async def _state_notes(conn: AsyncConnection, session_id: str) -> list[Any]:
+    """The latest note of each `STATE_NOTES` group, when the model has been sent it; one still waiting follows the
+    summary in full, and an older one is overtaken by it."""
+    rows = (await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.text,
+                                      MESSAGES.c.blocks, MESSAGES.c.model_seq).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "note",
+        MESSAGES.c.text.in_([text for group in STATE_NOTES for text in group])).order_by(MESSAGES.c.n))).all()
+    latest = [next((row for row in reversed(rows) if row.text in group), None) for group in STATE_NOTES]
+    return [row for row in latest if row is not None and row.model_seq is not None]
+
+
 async def _summary(conn: AsyncConnection, session_id: str, unread: UnreadResults | None) -> str:
-    """The conversation so far, by code: texts, delivered blocks (says included) and action updates, each on one
-    labelled, escaped line, and, where they were written, the results Claude hadn't read (`unread`), one line each,
-    labelled by tool: the context they were written in is closing, and Claude must not lose what its calls did. Rows
-    still waiting for the model are left out; they follow it in full. Recorded history is never in it."""
+    """The conversation so far, by code: texts, delivered blocks (says included), action updates and the latest
+    state notes (`STATE_NOTES`; whispers never), each on one labelled, escaped line, and, where they were written,
+    the results Claude hadn't read (`unread`), one line each, labelled by tool: the context they were written in is
+    closing, and Claude must not lose what its calls did. Rows still waiting for the model are left out; they follow
+    it in full. Recorded history is never in it."""
     rows = await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.text,
                                      MESSAGES.c.blocks).where(
         MESSAGES.c.session_id == session_id,
         MESSAGES.c.kind.in_(("visitor_text", "agent_text", "delivered", "action_update")),
         ~and_(MESSAGES.c.model_seq.is_(None), MESSAGES.c.model_content.is_not(None)), NOT_REPLAYED,
     ).order_by(MESSAGES.c.n))
-    lines = [(row.n, _summary_line(row)) for row in rows]
+    lines = [(row.n, _summary_line(row)) for row in [*rows, *await _state_notes(conn, session_id)]]
     if unread is not None:
         lines += [(unread.n, result_line(tool, _result_text(block))) for tool, block in unread.results]
     return conversation_so_far([line for _, line in sorted(lines, key=lambda item: item[0])])
