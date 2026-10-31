@@ -66,8 +66,10 @@ promise	free(?=[\s-]+to[\s-]+(?:new|existing|first[\s-]?time|current|returning|r
 promise	free(?=[\s-]+to[\s-]+(?:members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?)\b)
 promise	free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b)
 promise	discount(?:s|ed|ing)?|refund(?:s|ed|ing|able)?|waiv(?:e|es|ed|er|ing)|complimentary
-promise	no[\s-]+charge|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
-promise	(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+)?cost
+# A price of nothing, with "extra", "additional" or "further" before the charge or the cost and in
+# the plural too: "no extra charge", "no further charges", "at no additional cost".
+promise	no[\s-]+(?:extra[\s-]+|additional[\s-]+|further[\s-]+)?charges?|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back
+promise	(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+|further[\s-]+)?costs?
 # "on us" is a price of nothing ("it's on us"), but not after "count", "rely" or "depend"
 # ("you can count on us").
 promise	(?<!count )(?<!counts )(?<!counted )(?<!counting )(?<!rely )(?<!relies )(?<!relied )(?<!relying )(?<!depend )(?<!depends )(?<!depended )(?<!depending )on[\s-]+us

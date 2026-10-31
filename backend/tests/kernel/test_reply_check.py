@@ -180,6 +180,19 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("There is no fee for the visit.", "lex.en.promise", "no fee"),
     ("There are no hidden fees.", "lex.en.promise", "no hidden fees"),
     ("There's no call-out fee.", "lex.en.promise", "no call-out fee"),
+    # a price of nothing with a word between "no" and "charge" or "cost", and in the plural
+    ("I'll book it with no extra charge.", "lex.en.promise", "no extra charge"),
+    ("There's no extra charge for that.", "lex.en.promise", "no extra charge"),
+    ("There's no additional charge for the visit.", "lex.en.promise", "no additional charge"),
+    ("There are no further charges.", "lex.en.promise", "no further charges"),
+    ("There are no charges for the visit.", "lex.en.promise", "no charges"),
+    ("There's no further cost to you.", "lex.en.promise", "no further cost"),
+    ("There are no additional costs.", "lex.en.promise", "no additional costs"),
+    ("La visita va sin cargo extra.", "lex.es.promise", "sin cargo"),             # the word after needs no rule
+    ("Se lo hacemos sin costo adicional.", "lex.es.promise", "sin costo"),
+    ("La visita va sin cargos adicionales.", "lex.es.promise", "sin cargos"),     # the plural
+    ("Se lo hacemos sin costos extra.", "lex.es.promise", "sin costos"),
+    ("La visita va sin ningún coste.", "lex.es.promise", "sin ningún coste"),
     ("La visita va sin comisión.", "lex.es.promise", "sin comisión"),
     ("Sin ninguna comisión por la visita.", "lex.es.promise", "Sin ninguna comisión"),
     ("Maria can be there in an hour.", "lex.en.date", "in an hour"),
