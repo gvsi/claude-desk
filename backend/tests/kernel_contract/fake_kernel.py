@@ -1333,15 +1333,7 @@ class FakeKernelState:
         desk.policy_version = self._next_version(desk)
         self._put_policy(desk, parent_version=parent)
         self.append(desk, "policy", {"version": desk.policy_version, "activated": True})
-        auto = {record.decision.action.action_id for record in self.decisions.values()
-                if record.decision.action is not None and record.decision.outcome == "allow"}
-        cancelled = []
-        for link in self.payment_links.values():
-            if (link.desk_id == desk_id and link.state == "issued" and link.action_id in auto
-                    and link.amount_cents > max_amount_cents):
-                link.cancel_reason, link.cancelled_by_version = "rules_changed", desk.policy_version
-                self._move_link(link, "cancelled", reason="rules_changed", version=desk.policy_version)
-                cancelled.append(link.link_id)
+        cancelled = self._cancel_disallowed_links(desk)
         self.flush()
         return cancelled
 
@@ -3117,19 +3109,25 @@ class FakeKernelState:
         self._cancel_disallowed_links(desk)
         return self._policy_version(desk, record)
 
-    def _cancel_disallowed_links(self, desk: Desk) -> None:
+    def _cancel_disallowed_links(self, desk: Desk) -> list[str]:
         """Activation rechecks auto-allowed links; single-use owner approvals survive a rule change."""
         decisions = {record.decision.action.action_id: record for record in self.decisions.values()
                      if record.decision.action is not None and record.decision.outcome == "allow"}
+        cancelled = []
         for link in self.payment_links.values():
             if link.desk_id != desk.desk_id or link.state != "issued" or link.action_id not in decisions:
                 continue
-            action = decisions[link.action_id].decision.action
+            record = decisions[link.action_id]
+            action = record.decision.action
             session = self.sessions[link.session_id]
+            who, subject_id = ("agent", session.agent_key_id) if session.kind == "agent" else (
+                ("person", session.person_id) if session.verified and session.person_id is not None
+                else ("verified" if session.verified else "anyone", None))
             probe = Probe(actor="agent" if session.kind == "agent" else "visitor",
-                          who="verified" if session.verified else "anyone",
+                          who=who, subject_id=subject_id,
                           call=ToolCall(call_id="activation", tool=action.tool, args=self._args[action.action_id]),
                           amount_cents=action.amount_cents, resource_kind=action.resource.kind,
+                          starts_at=record.created_at,
                           resource_owner="caller" if session.person_id == action.resource.owner_person_id
                           and session.person_id is not None else "none",
                           agent_mandate_remaining_cents=action.amount_cents if session.kind == "agent" else None)
@@ -3139,6 +3137,8 @@ class FakeKernelState:
                     or self._probe(desk, cards, probe).outcome != "allow"):
                 link.cancel_reason, link.cancelled_by_version = "rules_changed", desk.policy_version
                 self._move_link(link, "cancelled", reason="rules_changed", version=desk.policy_version)
+                cancelled.append(link.link_id)
+        return cancelled
 
     def cancelled_links(self, request: Request, body: Any) -> list[LinkCancelled]:
         """Re-reads list the same cancelled links with fresh verdicts at the open session's current generation."""
