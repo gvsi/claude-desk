@@ -245,7 +245,7 @@ describe('Conversations', () => {
     const chat = log(screen);
     // The first receipt is the first reply's check, signed with its own ledger entry.
     const reply = session(DANA_LIVE).items.find((item) => item.kind === 'delivered');
-    const seq = reply?.event?.ledger_seq ?? 0;
+    const seq = reply?.event?.type === 'message' ? reply.event.ledger_seq : 0;
     const receipt = chat.getByRole('button', { name: /Open the full trace\.$/ }).first();
     await expect.element(receipt).toBeVisible();
 
@@ -269,7 +269,7 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     const chat = log(screen);
     const reply = session(DANA_LIVE).items.find((item) => item.kind === 'delivered');
-    const seq = reply?.event?.ledger_seq ?? 0;
+    const seq = reply?.event?.type === 'message' ? reply.event.ledger_seq : 0;
     const receipt = chat.getByRole('button', { name: /Open the full trace\.$/ }).first();
     await expect.element(receipt).toBeVisible();
     const tryAgain = chat.getByRole('button', { name: 'Try again', exact: true });
@@ -308,14 +308,25 @@ describe('Conversations', () => {
     const chat = named(DANA_LIVE, DANA);
     const { generation } = chat.state;
     const { screen } = await renderRoute(conversation(DANA_LIVE));
+    // The kernel's line for the newest thing in the chat, under its title.
+    const latest = () => document.querySelector('.cd-conversation__latest')?.textContent;
+    await expect.poll(latest).toMatch(/^Latest: \S/);
+    const before = latest();
 
     // Taking over posts the generation last read, and the owner's composer takes the whisper's place.
     await screen.getByRole('button', { name: 'Take over' }).click();
     const box = screen.getByRole('textbox', { name: 'Write to them' });
     await expect.element(box).toBeVisible();
     expect(requests('takeover').map((r) => r.body)).toEqual([{ generation }]);
-    await expect.element(screen.getByRole('button', { name: 'Hand back to Claude' })).toBeVisible();
+    const handBack = screen.getByRole('button', { name: 'Hand back to Claude' });
+    await expect.element(handBack).toBeVisible();
     expect(screen.getByRole('textbox', { name: 'Whisper to Claude' }).elements()).toHaveLength(0);
+
+    // The chat as read again ends where she joined, which has no line of the kernel's: the latest
+    // line stays its newest receipt or message.
+    await expect.poll(() => handBack.element().classList.contains('cd-button--waiting')).toBe(false);
+    expect(session(DANA_LIVE).items.at(-1)?.kind).toBe('owner_joined');
+    expect(latest()).toBe(before);
 
     // Her words go to Dana exactly as she wrote them, and show here as hers.
     const words = 'Hi Dana, it is Maria. I can come at 4 today.';

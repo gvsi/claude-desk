@@ -14,6 +14,8 @@ import type {
   DecisionState,
   EvHeld,
   EvMessage,
+  EvOwnerJoined,
+  EvOwnerLeft,
   EvReceipt,
   EvResolved,
   ExecResult,
@@ -225,18 +227,24 @@ export interface ApprovalAnswerOut {
 
 // Conversations
 
-export type TranscriptKind = 'visitor_text' | 'agent_text' | 'delivered' | 'status' | 'whisper';
+export type TranscriptKind = 'visitor_text' | 'agent_text' | 'delivered' | 'status' | 'whisper' | 'owner_joined' | 'owner_left';
 
 export interface TranscriptItem {
   /** The transcript cursor (`after`). */
   n: number;
-  /** An owner's say is a `delivered` item whose `EvMessage.author` is `owner`. */
+  /**
+   * An owner's say is a `delivered` item whose `EvMessage.author` is `owner`. `owner_joined` and
+   * `owner_left` are where the owner took the chat over and handed it back (plan 02b).
+   */
   kind: TranscriptKind;
   created_at: string;
-  /** Someone's own words; null for `delivered` and `status`. Untrusted. */
+  /** Someone's own words; null for the items that carry an event. Untrusted. */
   text: string | null;
-  /** The stored signed event, or null. */
-  event: EvMessage | EvReceipt | EvHeld | EvResolved | null;
+  /**
+   * The stored event, or null: a delivered message's or a status's signed event, or the
+   * `EvOwnerJoined` or `EvOwnerLeft` the visitor's stream got when the owner joined or left.
+   */
+  event: EvMessage | EvReceipt | EvHeld | EvResolved | EvOwnerJoined | EvOwnerLeft | null;
   /** Owner view only. */
   owner_translation?: string | null;
   /** Owner view only, AI-written. */
