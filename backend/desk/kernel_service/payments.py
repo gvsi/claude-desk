@@ -379,7 +379,11 @@ async def quote_unpayable(ctx: KernelCtx, quote_row: Quote, *, link_id: str | No
     money moved (the quote `paid`) or that nothing did: a charge `failed`, by its T3 or by
     reconciliation's `void`; a link back to `issued` without its marker (a provider that was never
     reached), or `expired` or `cancelled` by the provider's atomic cancel. An orphan blocks until
-    reconciliation settles it (a read of its decision or of its link, or the kernel's startup)."""
+    reconciliation settles it (a read of its decision or of its link, or the kernel's startup).
+    Startup settles only intents and markers older than `execute.ORPHAN_AFTER`, so after a crash
+    and a restart within that time a stranded payment keeps its quote unpayable until its own
+    decision or link is read, at most for the quote's life (`QUOTE_TTL`); a new quote isn't
+    affected. That is an accepted cost of paying a quote once."""
     if quote_row.status == QUOTE_PAID:
         return "quote_paid"
     links = (await ctx.db.execute(ctx.repo.scoped(select(
