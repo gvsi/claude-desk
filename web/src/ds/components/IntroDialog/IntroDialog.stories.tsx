@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useState } from 'react';
 import { expect, fn, spyOn, waitFor, within, type Mock } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { settled } from '../../test/settled.ts';
 import { INTRO_ERROR_COPY, type IntroErrorCode } from './introCopy.ts';
 import { IntroDialog, type IntroDialogProps } from './IntroDialog.tsx';
@@ -481,6 +482,9 @@ export const PlaysOnce: Story = {
     try {
       const playing = dialog.getAnimations({ subtree: true });
       await expect(playing).toHaveLength(6);
+      // check_draws_short_arm_first: the booking's check draws as a hand writes one. Looked at
+      // without moving it, so the beats still end in their order.
+      await expectDrawsShortArmFirst(check);
       await Promise.all(playing.map((animation) => animation.finished));
       await waitFor(() => expect(art).toHaveClass(PLAYED));
       await expect(endedAsItWasPlayed).toEqual(beats);

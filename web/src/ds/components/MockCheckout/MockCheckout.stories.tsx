@@ -3,6 +3,7 @@ import { expect, fn, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { MockCheckout } from './MockCheckout.tsx';
 
 const BOARD = 'N-Checkout-Run2';
@@ -414,7 +415,14 @@ export const Paid: Story = {
     await expect(check).toHaveAttribute('aria-hidden', 'true');
     expectComputed(check, { color: 'rgba(250, 249, 245, 0.92)', width: '14px' });
     const stroke = check.querySelector('path') as SVGPathElement;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Under reduced motion the check doesn't move: it is drawn from the start.
+      expectComputed(stroke, { animationName: 'none', strokeDashoffset: '0px' });
+      return;
+    }
     expectComputed(stroke, { animationName: /draw/, animationIterationCount: '1' });
+    // It draws short arm first, as a hand writes a check.
+    await expectDrawsShortArmFirst(stroke);
   },
 };
 

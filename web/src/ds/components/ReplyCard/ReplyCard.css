@@ -73,9 +73,11 @@
   color: var(--status-handled);
 }
 
+/* Drawn short arm first, as a hand writes a check: the dash (24) covers the whole path, and the
+   offset starts negative, so the stroke shows from the path's end (the short arm's tip). */
 .cd-reply-card__check path {
   stroke-dasharray: 24;
-  stroke-dashoffset: 24;
+  stroke-dashoffset: -24;
   animation: cd-reply-card-draw var(--motion-base) var(--motion-ease-emphasis) forwards;
 }
 

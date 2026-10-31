@@ -52,7 +52,7 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 - The guard `inert_controls_only_on_the_vision_pages` lets only these components, the vision boards' page parts and the vision pages (`web/src/vision/`) use it.
 - `contact` lines stay text. They never become `tel:` or `mailto:` links.
 - `owner_said`, `policy` and `contact` carry the owner's own words verbatim, so their fields are marked `data-copy="user"`.
-- `booking_confirmed` and `payment_confirmed` draw a sage check once beside their label, at `motion-base`. Under reduced motion it is drawn from the start. Every other template has a 16 px line icon.
+- `booking_confirmed` and `payment_confirmed` draw a sage check once beside their label, at `motion-base`, short arm first as a hand writes one. Under reduced motion it is drawn from the start. Every other template has a 16 px line icon.
 - A template this build doesn't know shows its text in a plain card, with no label, icon or link.
 
 ## A cancelled payment link (`LinkCancelledCard`)

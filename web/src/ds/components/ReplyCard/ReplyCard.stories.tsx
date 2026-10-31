@@ -4,6 +4,7 @@ import { expect } from 'storybook/test';
 import type { CardBlock } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { ReplyCard } from './ReplyCard.tsx';
 
@@ -96,6 +97,16 @@ export const BookingConfirmed: Story = {
     const check = canvasElement.querySelector('.cd-reply-card__check');
     await expect(check).toHaveAttribute('aria-hidden', 'true');
     expectComputed(check as Element, { color: SAGE });
+    const stroke = check?.querySelector('path');
+    if (!stroke) throw new Error('no check stroke');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Under reduced motion the check doesn't move: it is drawn from the start.
+      expectComputed(stroke, { animationName: 'none', strokeDashoffset: '0px' });
+      return;
+    }
+    // It draws once, in motion-base, short arm first.
+    expectComputed(stroke, { animationName: 'cd-reply-card-draw', animationDuration: '0.2s', animationIterationCount: '1' });
+    await expectDrawsShortArmFirst(stroke);
   },
 };
 
