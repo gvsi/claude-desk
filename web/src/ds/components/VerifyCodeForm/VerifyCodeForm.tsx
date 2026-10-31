@@ -75,12 +75,34 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: Ver
     onSubmit(code);
   };
 
+  // Two rules before the field changes; everything else goes on to `change`. A native listener,
+  // since React's `onBeforeInput` isn't the browser's `beforeinput`.
+  // - Text that brings six digits or more of its own is a whole new code: its first six digits
+  //   are the code, whatever the field held, so a visitor who pastes the newest code after a failed
+  //   one sends that code, never the old one again.
+  // - Typing into a whole code, with nothing selected, is refused, so the six digits and the caret
+  //   stay as they were, as a length limit would keep them. Typing or pasting over a selection
+  //   replaces it as usual.
+  useEffect(() => {
+    const field = fieldRef.current;
+    if (!field) return undefined;
+    const beforeInput = (event: InputEvent) => {
+      if (!event.cancelable || !event.inputType.startsWith('insert')) return;
+      const inserted = digitsOf(event.data ?? event.dataTransfer?.getData('text/plain') ?? '');
+      if (inserted.length === CODE_LENGTH) {
+        event.preventDefault();
+        sent.current = false;
+        setCode(inserted);
+        return;
+      }
+      const collapsed = field.selectionStart === field.selectionEnd;
+      if (event.inputType === 'insertText' && collapsed && WHOLE_CODE.test(field.value)) event.preventDefault();
+    };
+    field.addEventListener('beforeinput', beforeInput);
+    return () => field.removeEventListener('beforeinput', beforeInput);
+  }, []);
+
   const change = (next: string) => {
-    // The field always shows the code, so a value one character longer is one character added to
-    // it. A whole code takes none, wherever it is typed: the six digits stay as they were, rather
-    // than the last one being pushed out. A longer paste or insertion still keeps its first six
-    // digits, and typing over a selection replaces it as usual.
-    if (whole && next.length === code.length + 1) return;
     sent.current = false;
     setCode(digitsOf(next));
   };
