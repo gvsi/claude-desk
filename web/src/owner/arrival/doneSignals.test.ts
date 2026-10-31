@@ -282,6 +282,20 @@ describe('create your own Desk', () => {
   it('once the first Desk is deleted, the Desks still listed are the others', () => {
     expect(madeAnotherDesk([business('biz-new', [desk('desk-new')])], 'desk-main')).toBe(true);
   });
+
+  it("a Desk still in setup isn't one until it goes live, Answering on or not, the first Desk listed or deleted", () => {
+    const inSetup: DeskSummary = { ...desk('desk-new'), answering: true, setup: { interview_id: 'int-new', step: 'preview' } };
+    const main = business('biz-rivera', [desk('desk-main')]);
+    expect(madeAnotherDesk([main, business('biz-new', [inSetup])], 'desk-main')).toBe(false);
+    expect(madeAnotherDesk([business('biz-new', [inSetup])], 'desk-main')).toBe(false);
+    expect(madeAnotherDesk([main, business('biz-new', [{ ...inSetup, setup: null }])], 'desk-main')).toBe(true);
+  });
+
+  it("a Desk listed without its setup isn't one: only a setup of null is live", () => {
+    const { setup: _setup, ...withoutSetup } = desk('desk-new');
+    const malformed = withoutSetup as DeskSummary;
+    expect(madeAnotherDesk([business('biz-rivera', [desk('desk-main')]), business('biz-new', [malformed])], 'desk-main')).toBe(false);
+  });
 });
 
 /** What the reads show for each thing now: nothing settled and nothing done, unless given. */
