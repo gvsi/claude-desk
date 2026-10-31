@@ -549,6 +549,38 @@ async def test_a_pass_whose_runs_skipped_checks_is_never_written(tmp_path, capsy
     assert path.read_text() == THRESHOLDS_FILE and not list(reports.glob("calibration-*"))
 
 
+async def test_a_pass_at_other_gated_inputs_than_the_heads_is_never_written(repo, capsys):
+    """The thresholds are written only from a pass at the head's gated inputs (`results.inputs_key("HEAD")`),
+    so what the calibration measured is what the head holds: once a gated change is committed after the
+    pass, `--write` refuses it, naming both keys, and writes nothing. Without `--write`, its report goes
+    under `evals/out/reports/`, named by its pass, takes no version and says why it can't be written."""
+    from evals.results import inputs_key
+
+    path, reports, out = repo / THRESHOLDS_PATH, repo / "evals" / "reports", repo / "evals" / "out" / "reports"
+    pass_id = await a_pass(repo, "calibration", REVIEWED)                 # rows that would change
+    ran_at = inputs_key("HEAD", repo)
+    write(repo, "backend/desk/api/prompts.py", "# prompts, changed after the pass\n")
+    commit(repo, "a prompt change after the calibration pass")
+    head = inputs_key("HEAD", repo)
+    assert head != ran_at
+    why = f"pass {pass_id} ran at gated inputs {ran_at}, and the head's are {head}"
+
+    with pytest.raises(CalibrationRefused) as refused:
+        calibrate(pass_id, root=repo, write=True)
+    assert why in str(refused.value) and "nothing was written" in str(refused.value)
+    assert run.calibrate_command(["--pass", pass_id, "--write"], root=repo) == 1
+    assert f"calibrate: {why}" in capsys.readouterr().out
+    assert path.read_text() == THRESHOLDS_FILE and not out.exists() and not list(reports.glob("calibration-*"))
+
+    done = calibrate(pass_id, root=repo, today=NOW.date())
+    assert done.report == out / f"calibration-{pass_id}.md" and not done.written and done.version == 1
+    said = done.report.read_text().split("\n## The rule\n", 1)[0]
+    assert f"This pass can't be held to the head's gated inputs, so its proposal can't be written: {why}." in said
+    assert "a pass not at the head's gated inputs takes no version" in said, said
+    assert "Proposed as version" not in said and "--write" not in said, said
+    assert path.read_text() == THRESHOLDS_FILE and not list(reports.glob("calibration-*"))
+
+
 async def test_the_report_says_what_was_written(repo):
     """The report's status line matches what the calibration did and what writing it would take: a
     rehearsal's rows take no version and name no command, a proposal names `--write`, and one with a

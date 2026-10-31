@@ -31,14 +31,16 @@ uncommitted changes under the gated paths, or whose rows don't hold one judged r
 calibration scenario and repetition its commit doesn't leave pending, reconciled row by row with the
 suite at its commit (`results.selection_problems`). So does a pass any of whose runs skipped a check
 while a plan hadn't landed where it ran (`_skipping`), since a skipped check is never counted as
-passed; its report names each skipped check and how many runs skipped it. `write` refuses a
-rehearsal, an exploratory pass, such a partial pass and such a skipping pass before anything is
-written, with the reason. With `write`, when a row changes, it rewrites only the lines between the
-file's `# calibration: begin` and `# calibration: end` lines: the new rows, `REVIEW_THRESHOLDS_VERSION` + 1 and `CALIBRATION` (version, pass id, split, date,
-report and the owner's approval). The rewrite is checked by executing it before it replaces the
-file. The report is staged beside its place first, then the thresholds are written, then the
-report moves into place; if it can't, the thresholds file is put back as it was. When no row
-changes, the file is left as it is and only the report is written.
+passed; its report names each skipped check and how many runs skipped it. So does a pass whose gated
+inputs aren't the head's (`results.inputs_key("HEAD")`, `_moved`), since the thresholds must come
+from what the head holds; its report names both keys. `write` refuses a rehearsal, an exploratory
+pass, such a partial pass, such a skipping pass and such a moved pass before anything is written,
+with the reason. With `write`, when a row changes, it rewrites only the lines between the file's
+`# calibration: begin` and `# calibration: end` lines: the new rows, `REVIEW_THRESHOLDS_VERSION` + 1
+and `CALIBRATION` (version, pass id, split, date, report and the owner's approval). The rewrite is
+checked by executing it before it replaces the file. The report is staged beside its place first,
+then the thresholds are written, then the report moves into place; if it can't, the thresholds file
+is put back as it was. When no row changes, the file is left as it is and only the report is written.
 """
 
 import ast
@@ -54,7 +56,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from desk.contracts import Effect, ReviewThresholds
 from evals.gate import skipped_summary
-from evals.results import gating_refusal, selection_problems
+from evals.results import GitError, gating_refusal, inputs_key, selection_problems
 from evals.tier2.passes import REPO_ROOT, PassRefused, PassResult, load_pass, pass_dir
 from evals.tier2.verdict import SKIPPED_CHECKS, Reviewed, RunVerdict
 
@@ -220,6 +222,12 @@ def calibrate(pass_id: str, *, root: Path = REPO_ROOT, thresholds_file: Path | N
                                  "reviewer's thresholds are written only from a calibration pass whose runs ran every "
                                  "check, and nothing was written; without --write, its proposal is reported under "
                                  f"{OUT_REPORTS_PATH}/")
+    moved = _moved(result, root)
+    if write and moved:
+        raise CalibrationRefused(f"pass {pass_id} {moved}. The reviewer's thresholds are written only from a "
+                                 "calibration pass at the head's gated inputs, since they must come from what the head "
+                                 "holds, so nothing was written; without --write, its proposal is reported under "
+                                 f"{OUT_REPORTS_PATH}/")
     current = load_thresholds(thresholds_file)
     if write:   # before anything is written, whether or not a row changes
         marked_block(thresholds_file.read_text().splitlines(keepends=True))
@@ -227,10 +235,11 @@ def calibrate(pass_id: str, *, root: Path = REPO_ROOT, thresholds_file: Path | N
     changed = proposal.table != current.table
     # A real calibration that changes a row proposes (or writes) the next version, and its report takes that
     # version's name. One that changes none, a rehearsal, an exploratory pass, one that doesn't stand for the
-    # whole calibration split or one whose runs skipped checks takes no version: its report is named by its pass
-    # and never overwrites one already there, and a rehearsal's, an exploratory pass's, a partial pass's or a
-    # skipping pass's stays under evals/out/, never committed.
-    kept_back = rehearsal or explores or partial or skipping
+    # whole calibration split, one whose runs skipped checks or one at other gated inputs than the head's takes
+    # no version: its report is named by its pass and never overwrites one already there, and a rehearsal's, an
+    # exploratory pass's, a partial pass's, a skipping pass's or a moved pass's stays under evals/out/, never
+    # committed.
+    kept_back = rehearsal or explores or partial or skipping or moved
     versioned = changed and not kept_back
     version = current.version + 1 if versioned else current.version
     report = root / (REPORTS_PATH if not kept_back else OUT_REPORTS_PATH) / (
@@ -248,7 +257,7 @@ def calibrate(pass_id: str, *, root: Path = REPO_ROOT, thresholds_file: Path | N
         raise CalibrationRefused("--owner-approved approves writing a charge or pay_out row looser than its initial "
                                  "values, and this calibration writes no such row")
     text = render_calibration(result, proposal, current, version=version, today=today, written=written,
-                              owner_approved=owner_approved, partial=partial, skipping=skipping)
+                              owner_approved=owner_approved, partial=partial, skipping=skipping, moved=moved)
     # The report is staged beside its place first, then the thresholds are written, then the report moves
     # into place, so the thresholds file never names a report that isn't there.
     staged = report.with_name(f".{report.name}.staging")
@@ -351,6 +360,17 @@ def _skipping(result: PassResult) -> str | None:
     counts = [(name, k) for name in SKIPPED_CHECKS if (k := sum(name in r.skipped for r in skipping))]
     return (f"{skipped_summary(len(skipping), [name for name, _ in counts], judged=len(judged))}: "
             + "; ".join(f"in {k} runs, {name}" for name, k in counts))
+
+
+def _moved(result: PassResult, root: Path) -> str | None:
+    """Why the pass's gated inputs aren't the head's (`results.inputs_key("HEAD")`), naming both keys, or
+    None when they are; a head whose gated inputs can't be read is a reason too, never a match. Reads as
+    "pass <id> <reason>"."""
+    try:
+        head = inputs_key("HEAD", root)
+    except GitError as error:
+        return f"can't be held to the head's gated inputs, which can't be read ({type(error).__name__})"
+    return f"ran at gated inputs {result.inputs}, and the head's are {head}" if head != result.inputs else None
 
 
 def reviewed_decisions(result: PassResult, root: Path = REPO_ROOT) -> list[Reviewed]:
@@ -462,11 +482,11 @@ def _row(row: ReviewThresholds) -> str:
 
 def render_calibration(result: PassResult, proposal: Proposal, current: Thresholds, *, version: int,
                        today: date, written: bool, partial: str | None, skipping: str | None,
-                       owner_approved: str | None = None) -> str:
+                       moved: str | None, owner_approved: str | None = None) -> str:
     """The calibration report: the pass, whether the thresholds changed, the rule, and each effect's
     counts before and after. `partial` is why the pass doesn't stand for the whole calibration split
-    (`_partial`), and `skipping` the checks its runs skipped (`_skipping`), each None when there is none;
-    whoever renders one states both."""
+    (`_partial`), `skipping` the checks its runs skipped (`_skipping`) and `moved` why its gated inputs
+    aren't the head's (`_moved`), each None when there is none; whoever renders one states all three."""
     scored = sum(r.status == "scored" for r in result.runs)
     scenarios = len({r.scenario_id for r in result.runs})
     looser = looser_money_rows(proposal.table, current.initial)
@@ -489,6 +509,9 @@ def render_calibration(result: PassResult, proposal: Proposal, current: Threshol
     elif skipping:
         status = ("Some rows would change, but a pass whose runs skipped checks takes no version, so nothing here is "
                   "written to the thresholds file.")
+    elif moved:
+        status = ("Some rows would change, but a pass not at the head's gated inputs takes no version, so nothing "
+                  "here is written to the thresholds file.")
     elif looser:
         rows = "row is" if len(looser) == 1 else "rows are"
         status = (f"Proposed as version {version}; its {' and '.join(looser)} {rows} looser than the kernel's "
@@ -516,6 +539,9 @@ def render_calibration(result: PassResult, proposal: Proposal, current: Threshol
     if skipping:   # named whatever else keeps the pass back, since a skipped check is never counted as passed
         lines += [f"Its runs skipped checks, so its proposal can't be written: {skipping}. A skipped check is never "
                   "counted as passed; each runs once its plan has landed.", ""]
+    if moved:
+        lines += [f"This pass can't be held to the head's gated inputs, so its proposal can't be written: pass "
+                  f"{result.pass_id} {moved}.", ""]
     lines += [
         status,
         "",
