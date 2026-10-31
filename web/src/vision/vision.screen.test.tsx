@@ -643,6 +643,17 @@ describe('Vision pages against their boards', () => {
       chat.getByRole('button', { name: 'Take over' }).element() as HTMLElement,
       access.querySelector('button') as HTMLElement,
     ]);
+
+    // At the story's width, the page is 1061 px tall, so it fits the story's 1512 by 1061 window
+    // exactly: nothing scrolls, and the footer sits 20 px over the window's foot. Its own height is
+    // measured in a shorter window first: under the 40 px bar, the main area scrolls 1021 px.
+    await browserPage.viewport(1512, 900);
+    await expect.poll(() => window.innerHeight).toBe(900);
+    expect(page.scrollHeight).toBe(1061 - 40);
+    await browserPage.viewport(1512, 1061);
+    await expect.poll(() => window.innerHeight).toBe(1061);
+    expect(page.scrollHeight).toBe(page.clientHeight);
+    expect(round(window.innerHeight - bottom(footer))).toBe(20);
   });
 
   it('claude_account_matches_its_board', async () => {
@@ -726,6 +737,17 @@ describe('Vision pages against their boards', () => {
       download.element() as HTMLElement,
       main(screen).getByRole('textbox', { name: 'Message Rivera Plumbing' }).element() as HTMLElement,
     ]);
+
+    // At the story's width, the page is 994 px tall with Dana's last visit in it, so it fits the
+    // story's 1512 by 994 window exactly. The shell is at least the window's height, so its own
+    // height is measured in a shorter window first.
+    await browserPage.viewport(1512, 900);
+    await expect.poll(() => window.innerHeight).toBe(900);
+    expect(round(one(root, '.cd-public-shell').getBoundingClientRect().height)).toBe(994);
+    await browserPage.viewport(1512, 994);
+    await expect.poll(() => window.innerHeight).toBe(994);
+    expect(round(one(root, '.cd-public-shell').getBoundingClientRect().height)).toBe(994);
+    expect(document.documentElement.scrollHeight).toBe(994);
 
     // Nothing here is live: the download's click goes nowhere, not even to a page of the app or a
     // place on this one, and nothing is asked of the API.
