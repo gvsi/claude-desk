@@ -20,7 +20,7 @@ import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { watchLandings } from '../../test/landings.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
@@ -66,6 +66,33 @@ function named(sessionId: string, name: string): SessionRecord {
 
 function log(screen: RenderResult) {
   return screen.getByRole('log');
+}
+
+/** Makes `chat` longer than the window: `count` more messages from the visitor. Returns the last. */
+function lengthen(chat: SessionRecord, count = 30): string {
+  let last = '';
+  for (let i = 1; i <= count; i += 1) {
+    last = `Message ${i} of ${count}: the water heater is still dripping.`;
+    mockStore.world.visitorText(chat, last);
+  }
+  return last;
+}
+
+/** Makes the list longer than the window: `count` more chats, each with a visitor's message. Returns how many. */
+function moreChats(count = 20): number {
+  const desk = mockStore.world.desk(RIVERA.deskId);
+  if (!desk) throw new Error("the copy has Rivera's main Desk");
+  for (let i = 1; i <= count; i += 1) mockStore.world.visitorText(mockStore.world.addSession(desk), `Hello, question ${i}.`);
+  return count;
+}
+
+/** The element whose scrolling moves `el`: the nearest that scrolls, `el` included, or the page. */
+function scrollerOf(el: Element): Element {
+  for (let node: Element | null = el; node !== null; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+  }
+  return document.scrollingElement ?? document.documentElement;
 }
 
 /** A receipt in the conversation, by the words it shows. */
@@ -346,6 +373,307 @@ describe('Conversations', () => {
     expect(sent[1]).toMatchObject({ type: 'message', author: 'owner' });
     expect(sent[1]?.type === 'message' && sent[1].blocks.map((b) => b.text)).toEqual([words]);
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('a_long_chat_scrolls_on_its_own', async () => {
+    // A chat and a list longer than the window, at 1440 by 900.
+    const last = lengthen(named(DANA_LIVE, DANA));
+    const added = moreChats();
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const list = screen.getByRole('navigation', { name: 'Conversations' });
+    const rows = list.getByRole('link');
+    await expect.poll(() => rows.elements().length).toBe(3 + added);
+    const head = screen.getByRole('heading', { level: 2, name: DANA });
+    const latest = log(screen).getByText(last, { exact: true });
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    await expect.element(latest).toBeInTheDocument();
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+
+    // Read to its end, the chat scrolls on its own: the list's first row, the chat's head and the
+    // owner's controls stay in view.
+    latest.element().scrollIntoView({ block: 'end' });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    await expect.element(rows.first()).toBeInViewport({ ratio: 1 });
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+    await expect.element(takeOver).toBeInViewport({ ratio: 1 });
+
+    // The transcript is its own scroll region, apart from the head, the list and the controls; the
+    // main area around the page and the window don't scroll.
+    const transcript = scrollerOf(log(screen).element());
+    expect(transcript.scrollTop).toBeGreaterThan(0);
+    for (const other of [head.element(), list.element(), takeOver.element()]) expect(transcript.contains(other)).toBe(false);
+    const main = screen.getByRole('main').element();
+    expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
+    expectNoWindowScroll();
+
+    // The list is its own scroll region too: read to its last row, the chat stays where it was.
+    expect(scrollerOf(list.element())).toBe(list.element());
+    const readTo = transcript.scrollTop;
+    rows.last().element().scrollIntoView({ block: 'end' });
+    await expect.element(rows.last()).toBeInViewport({ ratio: 1 });
+    expect(list.element().scrollTop).toBeGreaterThan(0);
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    expect(transcript.scrollTop).toBe(readTo);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('a_long_chat_opens_at_its_latest', async () => {
+    // A chat longer than the window opens at its end, as a chat does: Dana's latest message sits
+    // over the owner's controls, where she would write next, under the chat's head.
+    const last = lengthen(named(DANA_LIVE, DANA));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const latest = log(screen).getByText(last, { exact: true });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('heading', { level: 2, name: DANA })).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeInViewport({ ratio: 1 });
+    const transcript = scrollerOf(log(screen).element());
+    expect(transcript.scrollTop).toBeGreaterThan(0);
+    expect(transcript.scrollTop + transcript.clientHeight).toBeGreaterThanOrEqual(transcript.scrollHeight - 1);
+  });
+
+  it('take_over_keeps_the_list_and_the_head_in_place', async () => {
+    const last = lengthen(named(DANA_LIVE, DANA));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const firstRow = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link').first();
+    const head = screen.getByRole('heading', { level: 2, name: DANA });
+    const latest = log(screen).getByText(last, { exact: true });
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    await expect.element(takeOver).toBeVisible();
+    await expect.element(firstRow).toBeInViewport({ ratio: 1 });
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+    // She has read the chat to its end.
+    latest.element().scrollIntoView({ block: 'end' });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    const rowAt = firstRow.element().getBoundingClientRect().top;
+    const headAt = head.element().getBoundingClientRect().top;
+
+    // Take over, under a chat longer than the window: the owner's composer and Hand back come into
+    // view in the whisper's place, the list's first row and the chat's head haven't moved, and the
+    // end of the chat is still in view over the taller controls.
+    await takeOver.click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('button', { name: 'Hand back to Claude' })).toBeInViewport({ ratio: 1 });
+    await expect.element(firstRow).toBeInViewport({ ratio: 1 });
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    expect(firstRow.element().getBoundingClientRect().top).toBe(rowAt);
+    expect(head.element().getBoundingClientRect().top).toBe(headAt);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('the_end_of_the_chat_stays_in_view', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const last = lengthen(chat);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const latest = log(screen).getByText(last, { exact: true });
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeVisible();
+    const transcript = scrollerOf(log(screen).element());
+
+    // At the end of the chat, her words and Dana's answer each come into view as they arrive.
+    latest.element().scrollIntoView({ block: 'end' });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    await box.fill('I can come at 4 today.');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log(screen).getByText('I can come at 4 today.', { exact: true })).toBeInViewport({ ratio: 1 });
+    mockStore.world.visitorText(chat, 'Four works, thank you.');
+    await expect.element(log(screen).getByText('Four works, thank you.', { exact: true })).toBeInViewport({ ratio: 1 });
+
+    // Scrolled back to read, she stays where she is while the chat moves on.
+    transcript.scrollTop = 0;
+    await expect.poll(() => transcript.scrollTop).toBe(0);
+    mockStore.world.visitorText(chat, 'Should I leave the gate open?');
+    const asked = log(screen).getByText('Should I leave the gate open?', { exact: true });
+    await expect.element(asked).toBeInTheDocument();
+    await readsMore('conversation', 2);
+    expect(transcript.scrollTop).toBe(0);
+    await expect.element(asked).not.toBeInViewport();
+
+    // Sending brings the end back, with her words in view.
+    await box.fill('Yes, please.');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log(screen).getByText('Yes, please.', { exact: true })).toBeInViewport({ ratio: 1 });
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  // A short laptop window and a phone with little height: too short to give the transcript a region
+  // of its own between the head and the owner's controls after Take over. Each chat is opened from
+  // the list once the window has that size, as the owner would open it.
+  for (const [width, height] of [
+    [1440, 560],
+    [390, 500],
+  ] as const) {
+    const viewport = width < 1024 ? 'phone' : 'desktop';
+
+    it(`a_long_chat_opens_at_its_latest_in_a_short_window_at_${width}x${height}`, async () => {
+      const last = lengthen(named(DANA_LIVE, DANA));
+      const { screen, router } = await renderRoute(LIST, { viewport });
+      await page.viewport(width, height);
+      await router.navigate(conversation(DANA_LIVE));
+
+      // Without her scrolling, Dana's latest message sits over the owner's controls, where she would
+      // write next, in the open conversation that scrolls as one with its head.
+      await expect.element(log(screen).getByText(last, { exact: true })).toBeInViewport({ ratio: 1 });
+      await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeInViewport({ ratio: 1 });
+      await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toBeInViewport({ ratio: 1 });
+      const head = screen.getByRole('heading', { level: 2, name: DANA }).element();
+      expect(scrollerOf(log(screen).element()).contains(head)).toBe(true);
+      expectNoWindowScroll();
+    });
+
+    it(`a_short_window_scrolls_the_chat_as_one_at_${width}x${height}`, async () => {
+      // Dana's refund held, in a chat longer than the window.
+      const held = mockStore.world.addHeldRefund();
+      const last = lengthen(named(held.session_id, DANA));
+      const { screen, router } = await renderRoute(LIST, { viewport });
+      await page.viewport(width, height);
+      await router.navigate(conversation(held.session_id));
+      const head = screen.getByRole('heading', { level: 2, name: DANA });
+      const latest = log(screen).getByText(last, { exact: true });
+      await expect.element(latest).toBeInViewport({ ratio: 1 });
+      await screen.getByRole('button', { name: 'Take over' }).click();
+
+      // Without her scrolling, the composer and Hand back come into view at the conversation's end,
+      // under Dana's latest message.
+      const box = screen.getByRole('textbox', { name: 'Write to them' });
+      await expect.element(box).toBeInViewport({ ratio: 1 });
+      await expect.element(screen.getByRole('button', { name: 'Hand back to Claude' })).toBeInViewport({ ratio: 1 });
+      await expect.element(latest).toBeInViewport({ ratio: 1 });
+
+      // The open conversation scrolls as one, its head, transcript and controls together: the
+      // transcript doesn't scroll inside it, and the main area and the window don't scroll around it.
+      const column = scrollerOf(log(screen).element());
+      const main = screen.getByRole('main').element();
+      expect(column).not.toBe(main);
+      expect(main.contains(column)).toBe(true);
+      expect(column.contains(head.element())).toBe(true);
+      expect(scrollerOf(box.element())).toBe(column);
+      expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
+      expectNoWindowScroll();
+
+      // Scrolled back to it, the held request, further up the chat, shows whole.
+      heldCard(screen, REFUND_REASON).element().scrollIntoView({ block: 'start' });
+      await expect.element(heldCard(screen, REFUND_REASON)).toBeInViewport({ ratio: 1 });
+      expectNoWindowScroll();
+    });
+  }
+
+  it('a_window_made_short_keeps_the_latest_in_view', async () => {
+    // A long chat read at 1440 by 900, in the transcript's own region under the head.
+    const last = lengthen(named(DANA_LIVE, DANA));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const latest = log(screen).getByText(last, { exact: true });
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    const head = screen.getByRole('heading', { level: 2, name: DANA }).element();
+    const scrollsWithTheHead = () => scrollerOf(log(screen).element()).contains(head);
+    expect(scrollsWithTheHead()).toBe(false);
+
+    // Made short, the open conversation scrolls as one, and Dana's latest message is still in view
+    // over the owner's controls.
+    await page.viewport(1440, 560);
+    await expect.poll(scrollsWithTheHead).toBe(true);
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    await expect.element(takeOver).toBeInViewport({ ratio: 1 });
+
+    // Made tall again, the transcript's region is back, still at its end.
+    await page.viewport(1440, 900);
+    await expect.poll(scrollsWithTheHead).toBe(false);
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    await expect.element(takeOver).toBeInViewport({ ratio: 1 });
+  });
+
+  it('in_a_short_window_the_end_of_the_chat_stays_in_view', async () => {
+    // A phone with little height, 390 by 500, where the open conversation scrolls as one.
+    const chat = named(DANA_LIVE, DANA);
+    const last = lengthen(chat);
+    const { screen, router } = await renderRoute(LIST, { viewport: 'phone' });
+    await page.viewport(390, 500);
+    await router.navigate(conversation(DANA_LIVE));
+    await expect.element(log(screen).getByText(last, { exact: true })).toBeInViewport({ ratio: 1 });
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeInViewport({ ratio: 1 });
+    const column = scrollerOf(log(screen).element());
+    expect(column.contains(box.element())).toBe(true);
+
+    // At the end of the chat, each of Dana's messages comes into view over the composer as it arrives.
+    for (let i = 1; i <= 5; i += 1) {
+      const words = `Update ${i}: it is still dripping.`;
+      mockStore.world.visitorText(chat, words);
+      await expect.element(log(screen).getByText(words, { exact: true })).toBeInViewport({ ratio: 1 });
+      await expect.element(box).toBeInViewport({ ratio: 1 });
+    }
+
+    // Scrolled back to read, she stays where she is while the chat moves on.
+    column.scrollTop = 0;
+    await expect.poll(() => column.scrollTop).toBe(0);
+    mockStore.world.visitorText(chat, 'Should I leave the gate open?');
+    const asked = log(screen).getByText('Should I leave the gate open?', { exact: true });
+    await expect.element(asked).toBeInTheDocument();
+    await readsMore('conversation', 2);
+    expect(column.scrollTop).toBe(0);
+    await expect.element(asked).not.toBeInViewport();
+
+    // Writing back brings the end back, and once her words are sent they and the composer stay in
+    // view as the chat grows under them.
+    await box.fill('Yes, please.');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log(screen).getByText('Yes, please.', { exact: true })).toBeInViewport({ ratio: 1 });
+    await expect.element(box).toBeInViewport({ ratio: 1 });
+    expectNoWindowScroll();
+  });
+
+  it('in_a_short_window_focus_in_the_transcript_holds_it', async () => {
+    // A long chat with Dana's refund held at its end, opened at 1440 by 560, where the open
+    // conversation scrolls as one: it opens at its end, and the owner is on the last receipt.
+    const first = mockStore.world.addHeldRefund();
+    const chat = named(first.session_id, DANA);
+    lengthen(chat);
+    mockStore.world.addHeldRefund();
+    const { screen, router } = await renderRoute(LIST);
+    await page.viewport(1440, 560);
+    await router.navigate(conversation(first.session_id));
+    await expect.poll(() => heldCard(screen, REFUND_REASON).elements().length).toBe(2);
+    const lastReceipt = log(screen).getByRole('button', { name: /Open the full trace\.$/ }).last();
+    await expect.element(lastReceipt).toBeInViewport({ ratio: 1 });
+    (lastReceipt.element() as HTMLElement).focus({ preventScroll: true });
+    const column = scrollerOf(log(screen).element());
+    expect(column.contains(screen.getByRole('heading', { level: 2, name: DANA }).element())).toBe(true);
+    const at = column.scrollTop;
+
+    // A message arrives while focus is in the transcript: nothing moves under her.
+    mockStore.world.visitorText(chat, 'Are you still there?');
+    await expect.element(log(screen).getByText('Are you still there?', { exact: true })).toBeInTheDocument();
+    await readsMore('conversation', 2);
+    expect(column.scrollTop).toBe(at);
+    expect(document.activeElement).toBe(lastReceipt.element());
+  });
+
+  it('focus_in_the_transcript_holds_it', async () => {
+    // A long chat with Dana's refund held at its end: it opens there, and the owner is on the last
+    // receipt, about to open its trace.
+    const first = mockStore.world.addHeldRefund();
+    const chat = session(first.session_id);
+    lengthen(chat);
+    mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(conversation(first.session_id));
+    await expect.poll(() => heldCard(screen, REFUND_REASON).elements().length).toBe(2);
+    const lastReceipt = log(screen).getByRole('button', { name: /Open the full trace\.$/ }).last();
+    await expect.element(lastReceipt).toBeInViewport({ ratio: 1 });
+    (lastReceipt.element() as HTMLElement).focus();
+    const transcript = scrollerOf(log(screen).element());
+    const at = transcript.scrollTop;
+
+    // A message arrives while focus is in the transcript: nothing moves under her.
+    mockStore.world.visitorText(chat, 'Are you still there?');
+    await expect.element(log(screen).getByText('Are you still there?', { exact: true })).toBeInTheDocument();
+    await readsMore('conversation', 2);
+    expect(transcript.scrollTop).toBe(at);
+    expect(document.activeElement).toBe(lastReceipt.element());
   });
 
   it('unsent_words_never_replace_newer_ones', async () => {
@@ -953,6 +1281,32 @@ describe('Conversations', () => {
     await expect.element(screen.getByRole('button', { name: 'Review the rule' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
   });
+  it('answer_menus_open_whole_at_the_end_of_a_long_chat', async () => {
+    // Dana's refund held, a chat longer than the window after it, then a second refund held near
+    // its end, where an answer menu reaches past the foot of the transcript's scroll region.
+    const first = mockStore.world.addHeldRefund();
+    lengthen(session(first.session_id));
+    mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(conversation(first.session_id));
+    const cards = heldCard(screen, REFUND_REASON);
+    await expect.poll(() => cards.elements().length).toBe(2);
+    const transcript = scrollerOf(log(screen).element());
+    transcript.scrollTop = transcript.scrollHeight;
+    await expect.poll(() => transcript.scrollTop + transcript.clientHeight).toBeGreaterThanOrEqual(transcript.scrollHeight - 1);
+
+    // Each menu opens with both of its answers in view, the second as well as the one focus lands on.
+    for (const side of ['Allow', 'Deny'] as const) {
+      await cards.last().getByRole('button', { name: side, exact: true }).click();
+      const items = screen.getByRole('menu', { name: side }).getByRole('menuitem');
+      await expect.poll(() => items.elements().length).toBe(2);
+      await expect.element(items.first()).toBeInViewport({ ratio: 1 });
+      await expect.element(items.last()).toBeInViewport({ ratio: 1 });
+      await userEvent.keyboard('{Escape}');
+      await expect.element(items.first()).not.toBeInTheDocument();
+    }
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('visitor_typing_shows_a_bubble', async () => {
     const chat = named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
@@ -1150,7 +1504,7 @@ describe('Conversations', () => {
   });
 
   it('conversations_fit_a_phone', async () => {
-    named(DANA_LIVE, DANA);
+    const last = lengthen(named(DANA_LIVE, DANA));
     mockStore.world.addHeldRefund();
     const { screen, router } = await renderRoute(LIST, { viewport: 'phone' });
 
@@ -1169,6 +1523,19 @@ describe('Conversations', () => {
     await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
+
+    // Read to its end, the chat scrolls on its own there too: the way back and the chat's head stay
+    // in view above it, and the owner's controls under it.
+    const latest = log(screen).getByText(last, { exact: true });
+    latest.element().scrollIntoView({ block: 'end' });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('link', { name: 'All conversations' })).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('heading', { level: 2, name: DANA })).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeInViewport({ ratio: 1 });
+    const main = screen.getByRole('main').element();
+    expect(scrollerOf(latest.element())).not.toBe(main);
+    expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
+    expectNoWindowScroll();
     await screen.getByRole('link', { name: 'All conversations' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(LIST);
     await expect.element(list).toBeVisible();

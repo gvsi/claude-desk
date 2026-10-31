@@ -5,7 +5,7 @@
  * back or resume, whisper to Claude, or write to the visitor in their own words. Polled while open.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 
 import type { SessionState } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
@@ -35,6 +35,7 @@ import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
+import { useEndInView } from './useEndInView.ts';
 import { useOwnerTyping } from './useOwnerTyping.ts';
 import { conversationKey, useTakeOver } from './useTakeOver.ts';
 
@@ -92,6 +93,15 @@ function useTypingBubble(read: OwnerTranscriptRead | undefined): boolean {
     if (current !== seen) setSeen(current);
   }, [current, seen]);
   return current !== null && words <= current.words;
+}
+
+/**
+ * A held request's answer menu opens under its button, inside the transcript's scroll region, which
+ * clips whatever reaches past its foot, and focus lands on one of its answers. As it does, the
+ * region shows the whole menu, so she reads every answer before choosing, not only the one focused.
+ */
+function showTheWholeMenu(event: FocusEvent<HTMLElement>): void {
+  if (event.target instanceof Element) event.target.closest('[role="menu"]')?.scrollIntoView({ block: 'nearest' });
 }
 
 /** A read that failed, in the owner's words, with a way to read it again. */
@@ -152,6 +162,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   const controls = useTakeOver(sessionId);
   const ownerTyping = useOwnerTyping(sessionId);
   const typing = useTypingBubble(chat.data);
+  const endInView = useEndInView();
   const mode = chat.data?.state.mode;
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
@@ -227,13 +238,16 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
 
   // Words that didn't go come back into the box they were written in, as soon as it is there: the
   // owner's words for the visitor wait for her to take the chat over again if it was handed back.
+  // Sending brings the end of the chat back into view, where her words will show.
   const say = (text: string) => {
     ownerTyping.sent();
+    endInView.follow();
     void controls.say(text).then((sent) => {
       if (!sent) setUnsent({ kind: 'say', text });
     });
   };
   const whisper = (text: string) => {
+    endInView.follow();
     void controls.whisper(text).then((sent) => {
       if (!sent) setUnsent({ kind: 'whisper', text });
     });
@@ -294,25 +308,28 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
-      <Transcript label={`Conversation with ${who}`}>
-        <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
-        <OwnerTranscript
-          items={read.items}
-          agentName={who}
-          ownerName={business.owner_display_name}
-          timezone={business.timezone}
-          deskId={deskId}
-          heldIds={heldIds}
-          renderHeld={renderHeld}
-          recorded={read.replayed === true}
-          readSinceOpened={readSinceOpened}
-        />
-        {typing && state.kind !== 'agent' ? (
-          <TranscriptRow>
-            <WritingIndicator language="en" variant="bubble" who={who} />
-          </TranscriptRow>
-        ) : null}
-      </Transcript>
+      {/* The transcript, its end in view as a chat's: it scrolls on its own between the head and the owner's controls, or in a short window with them, as one. */}
+      <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
+        <Transcript label={`Conversation with ${who}`}>
+          <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
+          <OwnerTranscript
+            items={read.items}
+            agentName={who}
+            ownerName={business.owner_display_name}
+            timezone={business.timezone}
+            deskId={deskId}
+            heldIds={heldIds}
+            renderHeld={renderHeld}
+            recorded={read.replayed === true}
+            readSinceOpened={readSinceOpened}
+          />
+          {typing && state.kind !== 'agent' ? (
+            <TranscriptRow>
+              <WritingIndicator language="en" variant="bubble" who={who} />
+            </TranscriptRow>
+          ) : null}
+        </Transcript>
+      </div>
       {/* No one is on the other side of a recorded chat: nothing to take over, whisper or write. */}
       {read.replayed === true ? null : (
         <div className="cd-conversation__controls">
