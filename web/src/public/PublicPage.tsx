@@ -56,7 +56,7 @@ export function PublicPage() {
   useDocumentLanguage(language);
   // The idea handed over as the page opened, for this Desk only: moving to another Desk's page
   // doesn't carry it over. Reading changes nothing, so a render that runs twice reads the same.
-  const [arrival] = useState(() => ({ slug, idea: ideaFrom(params, slug), read: params.has(TRY) }));
+  const [arrival, setArrival] = useState(() => ({ slug, idea: ideaFrom(params, slug), read: params.has(TRY) }));
   const idea = arrival.slug === slug ? arrival.idea : null;
   const preview = params.get('preview') ?? '';
   const agents = `/d/${encodeURIComponent(slug)}/agents`;
@@ -67,9 +67,12 @@ export function PublicPage() {
   ];
 
   // A hand-off is read once: a page that opened with a `try` drops it, whether or not it matched.
+  // And the idea goes to the chat that opened with the page, once: the chat keeps it from its first
+  // render, so the page lets go of it, and a later chat here (another Desk's, then back) gets none.
   useEffect(() => {
     if (arrival.read) dropBreakItHandoff();
-  }, [arrival.read]);
+    if (arrival.idea !== null) setArrival((now) => ({ ...now, idea: null }));
+  }, [arrival.read, arrival.idea]);
 
   // Once: the token leaves the address, which the browser's history replaces rather than adds to.
   const taken = useRef(false);

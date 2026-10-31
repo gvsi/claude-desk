@@ -1748,6 +1748,14 @@ describe('public chat page', () => {
     await ready(screen);
     await frames(10);
     expect(document.querySelector<HTMLTextAreaElement>('.cd-public-shell__composer textarea')?.value).toBe('');
+
+    // Back to the first Desk: the idea was handed over once, so its new chat box stays empty too.
+    await router.navigate(-1);
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe(PAGE));
+    await frames(10);
+    await ready(screen);
+    await frames(10);
+    expect(document.querySelector<HTMLTextAreaElement>('.cd-public-shell__composer textarea')?.value).toBe('');
     expect(requests('sendMessage')).toEqual([]);
   });
 
