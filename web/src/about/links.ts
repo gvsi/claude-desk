@@ -13,6 +13,9 @@ export const ABOUT_PAGES: Record<AboutId, { route: string; title: string }> = {
   proposal: { route: '/about/proposal', title: 'Product proposal' },
 };
 
+/** The Vision article's route and title. It is no document, so the reader's switch between the two leaves it out. */
+export const VISION_ARTICLE = { route: '/about/vision', title: 'Vision' } as const;
+
 // The prediction comes first (project owner, 2026-10-30).
 const ORDER: AboutId[] = ['prediction', 'proposal'];
 

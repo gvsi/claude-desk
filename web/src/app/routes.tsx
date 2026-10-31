@@ -1,7 +1,7 @@
 import { Navigate, type RouteObject } from 'react-router';
 
 import { ReaderError } from '../about/ReaderError.tsx';
-import { ABOUT_PAGES, type AboutId } from '../about/links.ts';
+import { ABOUT_PAGES, VISION_ARTICLE, type AboutId } from '../about/links.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { ConversationsPage } from '../owner/conversations/ConversationsPage.tsx';
 import { OwnerLayout } from '../owner/OwnerLayout.tsx';
@@ -50,9 +50,24 @@ function aboutRoute(id: AboutId): RouteObject {
 }
 
 /**
+ * The Vision article, under About this prototype. It loads only when its address opens, as the reading pages
+ * do, and shares their error page and their wait. It reads no document: its words are its own.
+ */
+const visionArticleRoute: RouteObject = {
+  path: VISION_ARTICLE.route,
+  errorElement: <ReaderError />,
+  HydrateFallback: ReaderLoading,
+  lazy: async () => {
+    const { VisionArticle } = await import('../about/vision/VisionArticle.tsx');
+    return { element: <VisionArticle /> };
+  },
+};
+
+/**
  * The app's routes. Screens join as they are built: `/` (the first visit's intro dialog),
  * `/app/:deskId/*` (owner), `/app/setup/*`, `/d/:slug` (public page), `/d/:slug/agents`,
- * `/pay/:token`, `/vision/*` and `/about/*` (the About this prototype reading pages). Each screen's
+ * `/pay/:token`, `/vision/*` and `/about/*` (the About this prototype reading pages and the Vision
+ * article). Each screen's
  * route carries an error element, so a page that throws while it draws shows a kind line and never
  * React Router's own error page.
  */
@@ -106,5 +121,6 @@ export const routes: RouteObject[] = [
   { path: VISION_PATHS.phone, element: <PhonePage />, errorElement: <RouteError /> },
   aboutRoute('proposal'),
   aboutRoute('prediction'),
+  visionArticleRoute,
   { path: '*', element: <NotFound /> },
 ];
