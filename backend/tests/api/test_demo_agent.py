@@ -23,14 +23,16 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text
 
-from desk.api.agents import MAX_KEYS, MAX_RUNS, DemoAgents, a2a_client
+from desk.api.agents import MAX_KEYS, MAX_RUNS, DemoAgents, HeldKey, a2a_client
 from desk.api.main import create_app
 from desk.api.metrics import record_model_call
 from desk.api.model import ModelRequest, ModelResponse, build_kwargs
 from desk.api.prompts import VISITING_AGENT_SYSTEM, AgentStep, agent_task
 from desk.api.routes import public
 from desk.api.schemas import DemoAgentRun
-from desk.contracts import DemoAgentIssued
+from desk.api.setup import default_notifications
+from desk.contracts import BusinessSeed, DemoAgentIssued, DeskSeed
+from desk.kernel_api import CreateCopyRequest, CreateDeskRequest
 from tests.api.fakes import JOB_ROUTES, ScriptedModel, response, tool_use, unavailable
 from tests.api.fakes import text as text_block
 from tests.api.test_copies import production_settings, usage_row
@@ -615,6 +617,35 @@ async def test_the_same_key_in_another_copy_is_its_own_run(app, browser, fake, k
     assert len(fake.called("POST /agents/demo")) == 2 and len(agent_model.requests) == 2
 
 
+async def two_desks_of_a_copy(kernel_http, fake) -> tuple[str, str]:
+    """The slugs of a fresh Rivera copy's Desk and of a second Desk its owner makes in the same copy."""
+    copy = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    made = await kernel_http.owner(copy.owner_token).call("POST /desks", CreateDeskRequest(
+        business=BusinessSeed(name="Rivera Plumbing", owner_display_name="Maria Rivera",
+                              timezone="America/Los_Angeles"),
+        desk=DeskSeed(name="Emergency line", charter=[], hours=[], price_items=[], calendar_slots=[], people=[],
+                      documents=[], notifications=default_notifications("trade"))))
+    return fake.desks[copy.desk_ids[0]].slug, made.slug
+
+
+async def test_a_key_answers_only_the_session_and_desk_that_sent_it(app, browser, fake, kernel_http, agent_model):
+    # The key holds the session that sent it and the Desk it went to: the same key from another session of the copy,
+    # or sent to another of the copy's Desks, is 409 and starts nothing.
+    slug, other_slug = await two_desks_of_a_copy(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    agent_model.add(step("", done=True))
+    first = await send_keyed(client, slug)
+    assert first.status_code == 202, first.text
+    neighbour, _, _ = await open_session(app, browser, slug, ip="198.51.100.44")
+    assert (await client.post(f"/api/public/desks/{other_slug}/sessions")).status_code == 200
+    for sender, sent_to in ((neighbour, slug), (client, other_slug)):
+        refused = await send_keyed(sender, sent_to)
+        assert (refused.status_code, refused.json()) == (409, {"error": "conflict"}), sent_to
+    await app.state.runtime.agents.drain()
+    assert (await send_keyed(client, slug)).json() == first.json()
+    assert len(fake.called("POST /agents/demo")) == 1 and len(agent_model.requests) == 1
+
+
 async def test_a_repeat_while_the_first_is_minting_answers_the_same_run(app, browser, fake, kernel_http, agent_model,
                                                                         monkeypatch):
     # The first request has claimed the key and waits on the kernel to mint the agent when its repeat arrives: the
@@ -720,7 +751,9 @@ async def test_keys_are_kept_for_an_hour_in_a_bounded_map_of_their_own(app, brow
 
     # The key map keeps the newest 1000: one more key pushes out the oldest, this run's, whose repeat is then a first.
     for n in range(MAX_KEYS - 1):
-        agents._keys[("copy-filler", f"key-{n}")] = ("run-filler", "0" * 64, clock())
+        agents._keys[("copy-filler", f"key-{n}")] = HeldKey(run_id="run-filler", request_sha256="0" * 64,
+                                                             session_id="session-filler", slug=slug,
+                                                             claimed_at=clock())
     newest = await send_keyed(client, slug, key="agent-newest")
     assert newest.status_code == 202 and len(agents._keys) == MAX_KEYS
     again = await send_keyed(client, slug)

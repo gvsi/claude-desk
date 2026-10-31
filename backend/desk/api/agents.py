@@ -24,8 +24,8 @@ then the Desk's, with the blocks and signed statuses the kernel checked. Runs li
 
 A send with the client's idempotency key (one per click) claims the key in the copy before the kernel mints the agent
 (`DemoAgents.claim`, which checks and takes it with no await between, so of two requests racing in the process one
-takes it): a repeat answers the run the first started and starts nothing; one for another task is `KeyReused`; and a
-run whose agent couldn't be minted stays `failed`. Keys live in memory beside the runs, in a map of their own (the
+takes it): a repeat answers the run the first started and starts nothing; one for another task, or from another
+session or to another Desk than the key's, is `KeyReused`; and a run whose agent couldn't be minted stays `failed`. Keys live in memory beside the runs, in a map of their own (the
 1000 newest, each for its run's hour), so a key outlives a run record the 50-run bound dropped: its repeat answers the
 same run ID, whose poll is then 404, and never starts a second run. Like the runs, keys are this process's alone: a
 process restart, or a repeat routed to the other task during a deploy's overlap, forgets them.
@@ -37,6 +37,7 @@ import json
 import logging
 import secrets
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
@@ -81,7 +82,20 @@ class RunFailed(Exception):
 
 
 class KeyReused(Exception):
-    """The idempotency key's first request in the copy had another body."""
+    """The idempotency key's first request in the copy had another body, or came from another session or to another
+    Desk."""
+
+
+@dataclass(frozen=True)
+class HeldKey:
+    """An idempotency key a request took in its copy: the run it started, the request's hash, the session that sent
+    it, the Desk it went to and when it was claimed."""
+
+    run_id: str
+    request_sha256: str
+    session_id: str
+    slug: str
+    claimed_at: datetime
 
 
 # Signing ------------------------------------------------------------------------------------------------------
@@ -225,8 +239,7 @@ class DemoAgents:
         self._model, self._a2a, self._engine, self._clock = model, a2a, engine, clock
         self._production = production
         self._runs: dict[str, tuple[DemoAgentRun, datetime]] = {}      # oldest first
-        # (copy, idempotency key) -> the run it started, its request's hash and when it was claimed; oldest first
-        self._keys: dict[tuple[str, str], tuple[str, str, datetime]] = {}
+        self._keys: dict[tuple[str, str], HeldKey] = {}                # by (copy, idempotency key), oldest first
         self._tasks: set[asyncio.Task] = set()
 
     def _new_run(self, task: DemoTask, slug: str, launcher: Ids) -> DemoAgentRun:
@@ -238,29 +251,29 @@ class DemoAgents:
         self._runs[run.run_id] = (run, now)
         return run
 
-    def keyed(self, copy_id: str, key: str, request_sha256: str) -> str | None:
+    def keyed(self, copy_id: str, key: str, request_sha256: str, slug: str, launcher: Ids) -> str | None:
         """The ID of the run a request with this key started in the copy within the hour, or None; `KeyReused` when
-        that request's body hashed otherwise."""
+        that request's body hashed otherwise, or it came from another session or went to another Desk."""
         self._forget_keys(self._clock())
-        found = self._keys.get((copy_id, key))
-        if found is None:
+        held = self._keys.get((copy_id, key))
+        if held is None:
             return None
-        run_id, claimed_sha256, _ = found
-        if claimed_sha256 != request_sha256:
+        if (held.request_sha256, held.session_id, held.slug) != (request_sha256, launcher.session_id, slug):
             raise KeyReused
-        return run_id
+        return held.run_id
 
     def claim(self, copy_id: str, key: str, request_sha256: str, task: DemoTask, slug: str,
               launcher: Ids) -> tuple[str, DemoAgentRun | None]:
         """Take the key in the copy for a new `running` run, checked and taken with no await between: the run's ID
         and its record, which the caller then `launch`es or `fail`s. When the copy already holds the key, the ID of
         the run it started and None (`KeyReused` for another body)."""
-        held = self.keyed(copy_id, key, request_sha256)
+        held = self.keyed(copy_id, key, request_sha256, slug, launcher)
         if held is not None:
             return held, None
         run = self._new_run(task, slug, launcher)
         self._forget_keys(self._clock(), room=1)
-        self._keys[(copy_id, key)] = (run.run_id, request_sha256, self._clock())
+        self._keys[(copy_id, key)] = HeldKey(run_id=run.run_id, request_sha256=request_sha256,
+                                             session_id=launcher.session_id, slug=slug, claimed_at=self._clock())
         return run.run_id, run
 
     def fail(self, run: DemoAgentRun, reason: str) -> None:
@@ -308,9 +321,9 @@ class DemoAgents:
 
     def _forget_keys(self, now: datetime, room: int = 0) -> None:
         """Drop the keys claimed over an hour ago, then the oldest until `room` more fit."""
-        for held, (_, _, claimed) in list(self._keys.items()):
-            if now - claimed >= RUN_LIFE:
-                del self._keys[held]
+        for copy_key, held in list(self._keys.items()):
+            if now - held.claimed_at >= RUN_LIFE:
+                del self._keys[copy_key]
         while self._keys and len(self._keys) + room > MAX_KEYS:
             del self._keys[next(iter(self._keys))]
 

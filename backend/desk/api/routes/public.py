@@ -391,11 +391,11 @@ def _keyed(agents: DemoAgents, ctx: VisitorCtx, body: SendAgentIn, slug: str, *,
            claim: bool) -> tuple[str | None, DemoAgentRun | None]:
     """The run the body's key started in the copy, and with `claim`, a new run's record when the copy doesn't hold the
     key yet (taken with no await between the check and the claim); 409 `conflict` when the key's request had another
-    body."""
+    body, or came from another session or went to another Desk."""
     key, sha = body.idempotency_key, body_sha256(body.model_dump(mode="json", exclude={"idempotency_key"}))
     try:
         if not claim:
-            return agents.keyed(ctx.ids.copy_id, key, sha), None
+            return agents.keyed(ctx.ids.copy_id, key, sha, slug, ctx.ids), None
         return agents.claim(ctx.ids.copy_id, key, sha, body.task, slug, ctx.ids)
     except KeyReused:
         raise ApiProblem(409, "conflict") from None
@@ -410,8 +410,8 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
     here. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.
 
     With an `idempotency_key` (one per click), a repeat in the copy within the hour answers the run the first started
-    (its ID; poll it for its state) and starts nothing, without counting on the limit; one with another task is 409
-    `conflict`. The key is claimed once the limit and the budget let the request through, before the kernel mints the
+    (its ID; poll it for its state) and starts nothing, without counting on the limit; one with another task, or from
+    another session or to another Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request through, before the kernel mints the
     agent, so a request they refuse claims nothing; a run whose agent couldn't be minted stays `failed`, and a new
     click sends a new key. Keys live in this process's memory, like the runs. Without a key, each request starts its
     own run."""
