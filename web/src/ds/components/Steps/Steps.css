@@ -1,8 +1,10 @@
 /* Steps: a row of 22 px circles with their names, joined by 28 px hairlines. Done: a check on the
    secondary fill. Current: the primary button's fill with its number, and its name in primary
-   text. Later: the number on the secondary fill. It lays out by its own width: under 480 px the
-   list stays for screen readers but isn't drawn, and one line says "Step 1 of 5: Questions", its
-   count in secondary text and the current step's name in primary. */
+   text; once the flow is finished, a check there instead, which can draw once (motion-base, the
+   emphasis ease) and is drawn from the start under reduced motion. Later: the number on the
+   secondary fill. It lays out by its own width: under 480 px the list stays for screen readers but
+   isn't drawn, and one line says "Step 1 of 5: Questions", its count in secondary text and the
+   current step's name in primary. */
 
 .cd-steps-frame {
   container: cd-steps / inline-size;
@@ -63,6 +65,19 @@
   color: var(--text-primary);
 }
 
+/* A finished flow's last check, drawn once as the person reaches it. */
+.cd-steps__check--draw path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: cd-steps-draw var(--motion-base) var(--motion-ease-emphasis) forwards;
+}
+
+@keyframes cd-steps-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 .cd-steps__name {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -93,5 +108,13 @@
 
   .cd-steps__compact {
     display: block;
+  }
+}
+
+/* Reduced motion: the check is drawn from the start. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-steps__check--draw path {
+    animation: none;
+    stroke-dashoffset: 0;
   }
 }

@@ -3,7 +3,7 @@ import { useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { SetupState, WentLive } from '../api/views.ts';
-import { Button, Card, Notice, PageHeader, Pill } from '../ds/index.ts';
+import { Button, Card, Notice, PageHeader, Pill, StatusDot } from '../ds/index.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { QrCode } from '../owner/share/QrCode.tsx';
@@ -17,6 +17,8 @@ export interface LiveStepProps {
   state: SetupState;
   /** The business's name, once known. */
   business: string;
+  /** Answering is on: the Desk went live on this page, or the Desks say so. */
+  answering: boolean;
   /** The Desk went live. */
   onLive: () => void;
   /** Reads the interview again after a write whose answer was lost; null when it can't be read. */
@@ -41,11 +43,12 @@ function publicLink(wentLive: WentLive | null, slug: string): string {
 /**
  * The last step, opened by a confirmed setup. Before going live (step `preview`): the public page
  * in a frame, on the owner's own preview chat, while Answering is off; "Go live" turns it on. Live:
- * the link to share with "Copy link" and "Open"; "Go to Today"; and under them "Share it" as
- * N-R2-Setup-14-Live draws it: the link's QR code, and the website embed, coming later. It is built
- * from the link alone; the printable card and the ready-made words are on Share.
+ * "Answering now" under the title, its handled dot breathing, while the Desk answers; the link to
+ * share with "Copy link" and "Open"; "Go to Today"; and under them "Share it" as N-R2-Setup-14-Live
+ * draws it: the link's QR code, and the website embed, coming later. It is built from the link
+ * alone; the printable card and the ready-made words are on Share.
  */
-export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
+export function LiveStep({ state, business, answering, onLive, reread }: LiveStepProps) {
   const queryClient = useQueryClient();
   const id = state.interview_id;
   const [wentLive, setWentLive] = useState<WentLive | null>(null);
@@ -76,19 +79,27 @@ export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
     const url = publicLink(wentLive, state.slug);
     return (
       <div className="cd-setup-step">
-        <PageHeader
-          title={
-            business === '' ? (
-              copy.yourDeskIsLive
-            ) : (
-              <>
-                <span data-copy="user">{business}</span>
-                {copy.isLive}
-              </>
-            )
-          }
-          subtitle={copy.liveSubtitle}
-        />
+        <div className="cd-setup-live__head">
+          <PageHeader
+            title={
+              business === '' ? (
+                copy.yourDeskIsLive
+              ) : (
+                <>
+                  <span data-copy="user">{business}</span>
+                  {copy.isLive}
+                </>
+              )
+            }
+            subtitle={copy.liveSubtitle}
+          />
+          {answering ? (
+            <p className="cd-setup-live__answering cd-type-meta">
+              <StatusDot tone="handled" />
+              {copy.answeringNow}
+            </p>
+          ) : null}
+        </div>
         <CopyLink
           url={url}
           actions={

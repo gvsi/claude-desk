@@ -187,6 +187,23 @@ const LONG_BUSINESS_NAME = 'Bayview Heating, Plumbing & Drain Services of Greate
 /** The composer's failed box, which keeps an answer that didn't go through beside "Try again". */
 const keptAnswer = (screen: RenderResult) => screen.getByRole('group', { name: 'Your answer' });
 
+/** Setup's five steps in the bar, as screen readers read them. */
+const setupSteps = (screen: RenderResult) => screen.getByRole('list', { name: 'Set up your Desk' }).getByRole('listitem');
+
+/** A step's circle, drawn only. */
+function stepCircle(step: Element): HTMLElement {
+  const circle = step.querySelector<HTMLElement>('.cd-steps__circle');
+  if (!circle) throw new Error('No circle on the step');
+  return circle;
+}
+
+/** The stroke of the check a step's circle shows. */
+function checkPath(circle: Element): SVGPathElement {
+  const path = circle.querySelector<SVGPathElement>('svg path');
+  if (!path) throw new Error('No check in the circle');
+  return path;
+}
+
 /** Whether `el` is set in Claude's serif. */
 const inSerif = (el: Element) => /Source Serif 4/.test(getComputedStyle(el).fontFamily);
 
@@ -1793,6 +1810,102 @@ describe('setup', () => {
       expect(balanced.at(-1)?.length ?? 0, read).toBeGreaterThan(1);
       expectNoHorizontalScroll();
     }
+  });
+
+  it('going_live_is_a_moment', async () => {
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const live = setupSteps(screen).last();
+
+    // Before going live, "Live" is the current step with its number, and nothing says it's answering.
+    await expect.element(live).toHaveAttribute('aria-current', 'step');
+    await expect.element(live).not.toHaveTextContent('done');
+    expect(stepCircle(live.element()).textContent).toBe('5');
+    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+
+    // Step 5's number gives way to a check that draws once, on motion-base and the emphasis ease:
+    // all five steps read done, and "Live" stays the current one.
+    await expect.element(live).toHaveTextContent('Live, done');
+    await expect.element(live).toHaveAttribute('aria-current', 'step');
+    const circle = stepCircle(live.element());
+    expect(circle.textContent).toBe('');
+    const check = checkPath(circle);
+    expect(getComputedStyle(check)).toMatchObject({
+      animationName: 'cd-steps-draw',
+      animationDuration: '0.2s',
+      animationIterationCount: '1',
+      animationTimingFunction: 'cubic-bezier(0.165, 0.84, 0.44, 1)',
+      animationFillMode: 'forwards',
+    });
+    await expect.poll(() => getComputedStyle(check).strokeDashoffset).toBe('0px');
+
+    // Under the title and its line, "Answering now" with its handled dot breathing on the presence loop.
+    const answering = screen.getByText('Answering now', { exact: true });
+    await expect.element(answering).toBeVisible();
+    const dot = answering.element().querySelector('.cd-status-dot--handled');
+    if (!dot) throw new Error('No handled dot beside "Answering now"');
+    expect(getComputedStyle(dot)).toMatchObject({ animationDuration: '5s', animationIterationCount: 'infinite', animationDirection: 'alternate' });
+    expect(getComputedStyle(dot).animationName).not.toBe('none');
+    const subtitle = screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true }).element();
+    const link = screen.getByRole('button', { name: 'Copy link' }).element();
+    const line = answering.element().getBoundingClientRect();
+    expect(line.top).toBeGreaterThanOrEqual(subtitle.getBoundingClientRect().bottom);
+    expect(line.bottom).toBeLessThanOrEqual(link.getBoundingClientRect().top);
+  });
+
+  it('going_live_under_reduced_motion_is_drawn_still', async () => {
+    await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    try {
+      expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+      const state = await interviewAtPreview();
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+      await screen.getByRole('button', { name: 'Go live' }).click();
+      await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+
+      // Nothing moves: the check is drawn from the start, and the dot is still at full strength.
+      const live = setupSteps(screen).last();
+      await expect.element(live).toHaveTextContent('Live, done');
+      const check = checkPath(stepCircle(live.element()));
+      expect(getComputedStyle(check).animationName).toBe('none');
+      expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
+      expect(check.getAnimations()).toHaveLength(0);
+      const answering = screen.getByText('Answering now', { exact: true });
+      await expect.element(answering).toBeVisible();
+      const dot = answering.element().querySelector('.cd-status-dot--handled');
+      if (!dot) throw new Error('No handled dot beside "Answering now"');
+      expect(getComputedStyle(dot)).toMatchObject({ animationName: 'none', opacity: '1' });
+      expect(dot.getAnimations()).toHaveLength(0);
+    } finally {
+      await cdp().send('Emulation.setEmulatedMedia', { features: [] });
+    }
+  });
+
+  it('live_at_load_shows_the_check_drawn', async () => {
+    // A reload on the live step: the Desk went live before this page opened, so nothing draws.
+    const state = await interviewAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    const live = setupSteps(screen).last();
+    await expect.element(live).toHaveTextContent('Live, done');
+    await expect.element(live).toHaveAttribute('aria-current', 'step');
+    const check = checkPath(stepCircle(live.element()));
+    expect(getComputedStyle(check).animationName).toBe('none');
+    expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
+    // The Desks say it is answering, so the line shows, its dot breathing as it does on Today.
+    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+
+    // A live Desk whose owner has turned Answering off since doesn't claim to be answering.
+    const off = await interviewAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: off.interview_id } });
+    deskOf(off).summary.answering = false;
+    const reopened = (await renderRoute(`/app/setup/${off.interview_id}`)).screen;
+    // The title names the business from the Desks, so once it does, the line has had its answer.
+    await expect.element(reopened.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(reopened.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
   });
 
   it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {

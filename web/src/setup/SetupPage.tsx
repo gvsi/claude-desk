@@ -48,6 +48,11 @@ interface SetupShellProps {
   business: string | null;
   /** The step the bar marks, counted from 0. */
   step: number;
+  /**
+   * The Desk is live: the bar's last step reads done, its check drawing once when the Desk went
+   * live on this page (`draw`) or drawn already when the page opened on it (`drawn`).
+   */
+  live?: 'draw' | 'drawn';
   exitTo: string;
   /** The preview's wider column. */
   wide?: boolean;
@@ -60,7 +65,7 @@ interface SetupShellProps {
  * business once known, the five steps and "Save and exit"; one column; the concept footer at the
  * window's foot.
  */
-function SetupShell({ business, step, exitTo, wide = false, children }: SetupShellProps) {
+function SetupShell({ business, step, live, exitTo, wide = false, children }: SetupShellProps) {
   const navigate = useNavigate();
   const compact = useSyncExternalStore(subscribeCompactBar, isCompactBar, () => false);
   // Setup's name, as its steps are labelled, at every step; the preview's public page leaves it be.
@@ -81,7 +86,7 @@ function SetupShell({ business, step, exitTo, wide = false, children }: SetupShe
           ) : null}
         </div>
         <div className="cd-setup__steps">
-          <Steps label={SETUP_COPY.stepsLabel} steps={STEP_NAMES} current={step} />
+          <Steps label={SETUP_COPY.stepsLabel} steps={STEP_NAMES} current={step} finished={live !== undefined} drawCheck={live === 'draw'} />
         </div>
         <span className="cd-setup__exit">
           <Button variant="ghost" href={exitTo}>
@@ -113,7 +118,12 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const deskId = setup.data?.desk_id ?? null;
   // The business's name: the API names it from the owner's words, on the new Desk.
   const desks = useQuery({ ...desksQuery(), enabled: deskId !== null });
-  const business = deskId === null || desks.data === undefined ? null : (findDesk(desks.data, deskId)?.desk.business_name ?? null);
+  const desk = deskId === null || desks.data === undefined ? null : (findDesk(desks.data, deskId)?.desk ?? null);
+  const business = desk?.business_name ?? null;
+  // The step the interview was at when this page first read it: a Desk that goes live here is a
+  // moment (the last step's check draws once); a page opened on a live Desk shows it already drawn.
+  const [openedAt, setOpenedAt] = useState<SetupStep | null>(null);
+  if (setup.data !== undefined && openedAt === null) setOpenedAt(setup.data.step);
 
   /** The interview moved on: the screen shows its next step, as the API's state now says. */
   const moveTo = useCallback(
@@ -163,6 +173,10 @@ function SetupInterview({ setupId }: { setupId: string }) {
   }
 
   const name = business ?? '';
+  const wentLiveHere = state.step === 'live' && openedAt !== null && openedAt !== 'live';
+  // Answering is on: the Desk went live here, or the Desks say so. A live Desk whose owner has
+  // turned Answering off since doesn't claim it.
+  const answering = wentLiveHere || desk?.answering === true;
   let body: ReactNode;
   switch (state.step) {
     case 'questions':
@@ -180,11 +194,17 @@ function SetupInterview({ setupId }: { setupId: string }) {
       break;
     case 'preview':
     case 'live':
-      body = <LiveStep state={state} business={name} onLive={() => moveTo('live')} reread={reread} />;
+      body = <LiveStep state={state} business={name} answering={answering} onLive={() => moveTo('live')} reread={reread} />;
       break;
   }
   return (
-    <SetupShell business={business} step={STEP_INDEX[state.step]} exitTo={todayPath(state.desk_id)} wide={state.step === 'preview'}>
+    <SetupShell
+      business={business}
+      step={STEP_INDEX[state.step]}
+      live={state.step !== 'live' ? undefined : wentLiveHere ? 'draw' : 'drawn'}
+      exitTo={todayPath(state.desk_id)}
+      wide={state.step === 'preview'}
+    >
       {body}
     </SetupShell>
   );
