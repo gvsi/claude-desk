@@ -8,7 +8,7 @@ import type { Attempt, ThisWeek, Triage, TriageCategory } from '../../api/views.
 import type { Checkpoint } from '../../ds/index.ts';
 import { localDate } from '../../lib/format.ts';
 
-/** Known record entries, as a row names them; newer kinds keep the generic fallback below. */
+/** Every record entry, as a row names it; unknown runtime values keep the fallback below. */
 export const LEDGER_KIND_COPY = {
   session: 'Chat started',
   auth: 'Credential check',
@@ -29,7 +29,8 @@ export const LEDGER_KIND_COPY = {
   agent_auth: 'Agent signature',
   head_checkpoint: 'Record checkpoint',
   desk_data: 'Desk details changed',
-} as const satisfies Partial<Record<LedgerEvent['kind'], string>>;
+  business_tools: 'Business tools changed',
+} as const satisfies Record<LedgerEvent['kind'], string>;
 
 /**
  * Where an entry came from, the same words on every row, detail and trace: the checkpoint wrote it,

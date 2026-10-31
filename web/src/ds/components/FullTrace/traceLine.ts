@@ -1,7 +1,7 @@
 import type { LedgerEvent, LedgerPage } from '../../../api/contracts.ts';
 import type { StatusTone } from '../StatusDot/StatusDot.tsx';
 
-/** Known ledger entries in plain words; newer kinds keep the generic fallback below. */
+/** Every ledger entry in plain words; unknown runtime values keep the fallback below. */
 const KIND_LINES = {
   session: 'A chat started.',
   auth: 'A check of who sent a request.',
@@ -22,7 +22,8 @@ const KIND_LINES = {
   agent_auth: "A check of a visiting agent's signature.",
   head_checkpoint: 'A signed checkpoint of the record so far.',
   desk_data: "A change to your Desk's details.",
-} as const satisfies Partial<Record<LedgerEvent['kind'], string>>;
+  business_tools: 'Business tools changed.',
+} as const satisfies Record<LedgerEvent['kind'], string>;
 
 /** Who wrote the entry: the checkpoint, or the chat service, whose report is recorded as it arrived, unchecked. */
 const ORIGIN_LINES = {
