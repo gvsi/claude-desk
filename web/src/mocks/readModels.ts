@@ -3,7 +3,7 @@
  * copy as it stands (world.ts) in the shapes of Plan 02's read models (`api/views.ts`) and the
  * shared contracts.
  */
-import type { Decision, DecisionState, LedgerEntry, LedgerPage, PublicDesk, RuleCard } from '../api/contracts.ts';
+import type { Decision, DecisionState, LedgerEntry, LedgerPage, PublicDesk, RuleCard, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
   Briefing,
@@ -563,9 +563,9 @@ function presetOf(cards: readonly RuleCard[]): RulesPreset | null {
 export function rulesView(desk: DeskRecord): RulesView {
   const cards = desk.policy.cards;
   const tools = desk.tools.map((tool): ToolRow => {
-    const covering = new Set(rulesForTool({ tool: tool.tool, effects: tool.effects }, cards).map((card) => card.card_id));
+    const covering = new Set(rulesForTool({ tool: tool.tool as ToolName, effects: tool.effects }, cards).map((card) => card.card_id));
     return {
-      tool: tool.tool,
+      tool: tool.tool as ToolName,
       source: tool.source,
       effects: [...tool.effects],
       reversible: tool.reversible,

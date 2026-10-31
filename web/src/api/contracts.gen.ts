@@ -2,6 +2,24 @@
 // Source: backend/desk/contracts.schema.json. Run `npm run gen:contracts` after it changes.
 // Import these from src/api/contracts.ts, the one import path for contract types.
 
+export type AnyToolName =
+  | (
+      | "native.quote"
+      | "native.find_slots"
+      | "native.book"
+      | "native.release_document"
+      | "native.payment_link"
+      | "native.charge_mandate"
+      | "native.capture_lead"
+      | "native.request_callback"
+      | "native.start_verification"
+      | "native.fetch_website"
+      | "native.read_memory"
+      | "payments.list_charges"
+      | "payments.create_refund"
+    )
+  | string;
+export type BusinessToolName = string;
 export type SseEvent =
   | EvWriting
   | EvMessage
@@ -14,6 +32,20 @@ export type SseEvent =
   | EvOwnerLeft
   | EvDemoInbox
   | EvError;
+export type ToolName =
+  | "native.quote"
+  | "native.find_slots"
+  | "native.book"
+  | "native.release_document"
+  | "native.payment_link"
+  | "native.charge_mandate"
+  | "native.capture_lead"
+  | "native.request_callback"
+  | "native.start_verification"
+  | "native.fetch_website"
+  | "native.read_memory"
+  | "payments.list_charges"
+  | "payments.create_refund";
 
 export interface A2ARequest {
   desk_slug: string;
@@ -194,19 +226,22 @@ export interface NormalizedAction {
   session_id: string;
   generation: number;
   tool:
-    | "native.quote"
-    | "native.find_slots"
-    | "native.book"
-    | "native.release_document"
-    | "native.payment_link"
-    | "native.charge_mandate"
-    | "native.capture_lead"
-    | "native.request_callback"
-    | "native.start_verification"
-    | "native.fetch_website"
-    | "native.read_memory"
-    | "payments.list_charges"
-    | "payments.create_refund";
+    | (
+        | "native.quote"
+        | "native.find_slots"
+        | "native.book"
+        | "native.release_document"
+        | "native.payment_link"
+        | "native.charge_mandate"
+        | "native.capture_lead"
+        | "native.request_callback"
+        | "native.start_verification"
+        | "native.fetch_website"
+        | "native.read_memory"
+        | "payments.list_charges"
+        | "payments.create_refund"
+      )
+    | string;
   effects: ("read" | "private_data" | "change" | "charge" | "pay_out" | "send_message")[];
   args_sha256: string;
   profile_sha256: string;
@@ -301,6 +336,59 @@ export interface BusinessSeed {
     [k: string]: string;
   };
   existing_business_id?: string | null;
+}
+export interface BusinessTool {
+  title: string;
+  description: string;
+  config: IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig;
+  tool: string;
+}
+export interface IntakeConfig {
+  block: "intake";
+  /**
+   * @minItems 1
+   * @maxItems 5
+   */
+  questions:
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string];
+}
+export interface TypedBookingConfig {
+  block: "typed_booking";
+  appointment_type: string;
+  minutes: number;
+}
+export interface PurposePaymentConfig {
+  block: "purpose_payment";
+  purpose: string;
+  amount_cents: number;
+}
+export interface UrgentConfig {
+  block: "urgent";
+  urgent_when: string;
+}
+export interface BusinessToolDef {
+  title: string;
+  description: string;
+  config: IntakeConfig | TypedBookingConfig | PurposePaymentConfig | UrgentConfig;
+}
+export interface BusinessToolsRequest {
+  /**
+   * @maxItems 8
+   */
+  tools:
+    | []
+    | [BusinessTool]
+    | [BusinessTool, BusinessTool]
+    | [BusinessTool, BusinessTool, BusinessTool]
+    | [BusinessTool, BusinessTool, BusinessTool, BusinessTool]
+    | [BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool]
+    | [BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool]
+    | [BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool]
+    | [BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool, BusinessTool];
 }
 export interface CalendarSlot {
   slot_id: string;
@@ -625,7 +713,8 @@ export interface LedgerEvent {
     | "rate_limit"
     | "agent_auth"
     | "head_checkpoint"
-    | "desk_data";
+    | "desk_data"
+    | "business_tools";
   origin: "kernel" | "api";
   session_id?: string | null;
   ref_id?: string | null;
@@ -775,20 +864,23 @@ export interface SessionContext {
 }
 export interface ToolProfile {
   tool:
-    | "native.quote"
-    | "native.find_slots"
-    | "native.book"
-    | "native.release_document"
-    | "native.payment_link"
-    | "native.charge_mandate"
-    | "native.capture_lead"
-    | "native.request_callback"
-    | "native.start_verification"
-    | "native.fetch_website"
-    | "native.read_memory"
-    | "payments.list_charges"
-    | "payments.create_refund";
-  source: "native" | "mcp";
+    | (
+        | "native.quote"
+        | "native.find_slots"
+        | "native.book"
+        | "native.release_document"
+        | "native.payment_link"
+        | "native.charge_mandate"
+        | "native.capture_lead"
+        | "native.request_callback"
+        | "native.start_verification"
+        | "native.fetch_website"
+        | "native.read_memory"
+        | "payments.list_charges"
+        | "payments.create_refund"
+      )
+    | string;
+  source: "native" | "mcp" | "business";
   effects: ("read" | "private_data" | "change" | "charge" | "pay_out" | "send_message")[];
   reversible: boolean;
   adapter: string;
@@ -800,6 +892,7 @@ export interface ToolProfile {
   pending_sha256?: string | null;
   status: "enabled" | "needs_review" | "disabled";
   review_reason?: ("new" | "changed" | "delisted") | null;
+  business?: BusinessToolDef | null;
 }
 export interface SessionCreated {
   state: SessionState;
@@ -811,26 +904,29 @@ export interface ToolConfirmed {
 }
 export interface ToolPin {
   tool:
-    | "native.quote"
-    | "native.find_slots"
-    | "native.book"
-    | "native.release_document"
-    | "native.payment_link"
-    | "native.charge_mandate"
-    | "native.capture_lead"
-    | "native.request_callback"
-    | "native.start_verification"
-    | "native.fetch_website"
-    | "native.read_memory"
-    | "payments.list_charges"
-    | "payments.create_refund";
+    | (
+        | "native.quote"
+        | "native.find_slots"
+        | "native.book"
+        | "native.release_document"
+        | "native.payment_link"
+        | "native.charge_mandate"
+        | "native.capture_lead"
+        | "native.request_callback"
+        | "native.start_verification"
+        | "native.fetch_website"
+        | "native.read_memory"
+        | "payments.list_charges"
+        | "payments.create_refund"
+      )
+    | string;
   definition_sha256: string;
 }
 export interface ToolsConfirmRequest {
   desk_id: string;
   /**
    * @minItems 1
-   * @maxItems 13
+   * @maxItems 21
    */
   tools:
     | [ToolPin]
@@ -846,6 +942,162 @@ export interface ToolsConfirmRequest {
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
         ToolPin,
         ToolPin,
         ToolPin,

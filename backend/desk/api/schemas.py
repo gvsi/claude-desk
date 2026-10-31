@@ -35,6 +35,8 @@ from desk.api.prompts import (
     Triage,
 )
 from desk.contracts import (
+    AnyToolName,
+    BusinessToolDef,
     AUTO_MONEY_HARD_CAP_CENTS,
     ActorKind,
     ApprovalAnswer,
@@ -648,7 +650,7 @@ class ToolRow(BaseModel):
     active rules' cards that cover it, default asks included, in card order (Plan 02b, Task 9)."""
 
     tool: str
-    source: Literal["native", "mcp"]
+    source: Literal["native", "mcp", "business"]
     effects: list[str]
     reversible: bool
     status: Literal["enabled", "needs_review", "disabled"]
@@ -657,6 +659,7 @@ class ToolRow(BaseModel):
     pending_definition_text: str | None   # a changed definition, untrusted text to show as quoted
     pending_sha256: str | None
     cards: list[CoveringCard]
+    business: BusinessToolDef | None = None
 
 
 class SetupTools(BaseModel):
@@ -951,7 +954,7 @@ class SimulateChangeIn(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    tool: ToolName
+    tool: AnyToolName
 
 
 class KnowledgeIn(BaseModel):

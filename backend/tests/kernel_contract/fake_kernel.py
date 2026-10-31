@@ -1524,7 +1524,8 @@ class FakeKernelState:
             "effects": profile.effects, "reversible": profile.reversible, "status": profile.status,
             "description_confirmed": profile.description_confirmed, "definition_sha256": profile.definition_sha256,
             "pending_definition_text": profile.pending_definition_text, "pending_sha256": profile.pending_sha256,
-            "review_reason": profile.review_reason})
+            "review_reason": profile.review_reason,
+            "business": profile.business.model_dump(mode="json") if profile.business is not None else None})
 
     def append(self, desk: Desk, kind: str, summary: dict, *, origin: str = "kernel", session_id: str | None = None,
                ref_id: str | None = None) -> LedgerEntry:
@@ -3365,6 +3366,55 @@ class FakeKernelState:
 
     # Connected tools (Plan 01c) -----------------------------------------------------------------------
 
+    def put_business_tools(self, request: Request, body: dict) -> DeskUpdated:
+        from desk.contracts import BusinessToolDef
+        from desk.kernel_api import BusinessToolsRequest
+        from desk.kernel_service.adapters.blocks import profile as block_profile
+        from desk.kernel_service.business_tools import config_texts, public_fields, public_promise_fields
+        from desk.kernel_service.repo import storable
+
+        desk = self._owners_desk(request, request.path_params["id"])
+
+        def refuse() -> None:
+            self.append(desk, "business_tools", {"tools": []})
+            raise Refusal(422, "invalid")
+
+        try:
+            batch = BusinessToolsRequest.model_validate(body)
+        except ValidationError:
+            refuse()
+        if len({tool.tool for tool in batch.tools}) != len(batch.tools):
+            refuse()
+        if not all(storable(text) for text in config_texts(batch.model_dump(mode="json"))):
+            refuse()
+        text = batch.model_dump_json()
+        if "\x00" in text or any(document.canary in text for each in self.desks.values()
+                                  if each.copy_id == desk.copy_id for document in each.documents.values()):
+            refuse()
+        if public_promise_fields(public_fields(batch)):
+            refuse()
+        # Build the entire batch before changing any row.
+        profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
+                    for tool in batch.tools]
+        remaining = {name for name, stored in desk.tools.items() if stored.source == "business"}
+        changes = []
+        for profile in profiles:
+            previous = desk.tools.get(profile.tool)
+            change = ("new" if previous is None else "kept"
+                      if previous.definition_sha256 == profile.definition_sha256 else "changed")
+            if change != "kept":
+                self._put_tool(desk, profile.model_copy(update={"review_reason": change}))
+            remaining.discard(profile.tool)
+            changes.append({"tool": profile.tool, "block": profile.business.config.block,
+                            "definition_sha256": profile.definition_sha256, "change": change})
+        for name in sorted(remaining):
+            previous = desk.tools[name]
+            self._put_tool(desk, previous.model_copy(update={"status": "disabled", "review_reason": None}))
+            changes.append({"tool": name, "block": previous.business.config.block,
+                            "definition_sha256": previous.definition_sha256, "change": "removed"})
+        self.append(desk, "business_tools", {"tools": changes})
+        return DeskUpdated(desk_id=desk.desk_id, updated_at=self.now)
+
     def tools_connect(self, request: Request, body: ToolsConnectRequest) -> list[ToolProfile]:
         """The mock payments server's tools, each pinned by its definition's hash and `needs_review` (`review_reason`
         "new") until the owner confirms it (a tool already connected is left as it is), ledgered `tool_pin`."""
@@ -3747,6 +3797,7 @@ FAILURE_CODES = {"500": "internal", "422": "invalid", "409": "conflict"}
 
 # The routes this fake answers, by KERNEL_ROUTES key, with the state method that answers each.
 FAKE_ROUTES: dict[str, str] = {
+    "PUT /desks/{id}/business_tools": "put_business_tools",
     "GET /health": "health",
     "POST /copies": "create_copy",
     "GET /public/{desk_slug}": "public_desk",
@@ -3823,7 +3874,7 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
         if failure is not None:
             return _error(int(failure), FAILURE_CODES[failure])
         try:
-            body = _parse(request_model, raw)
+            body = body_json if key == "PUT /desks/{id}/business_tools" else _parse(request_model, raw)
             state._route = route_template(key)     # handlers don't await, so no other call answers meanwhile
             result = handler(request, body)
         except Refusal as refusal:

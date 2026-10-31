@@ -99,7 +99,7 @@ const NO_EXECUTED_LINE = {
   'native.read_memory': true,
 } as const satisfies Record<Exclude<ToolName, ExecutedTool>, true>;
 
-function hasExecutedLine(tool: ToolName): tool is ExecutedTool {
+function hasExecutedLine(tool: string): tool is ExecutedTool {
   return !Object.hasOwn(NO_EXECUTED_LINE, tool);
 }
 
@@ -109,7 +109,7 @@ const OWNER = rivera.business.ownerName;
  * The visitor's line for a decision in `state`: an executed one names what its tool did, in the
  * signed per-tool words the design system's fixtures carry, never a bare "Done".
  */
-export function statusLine(language: Language, state: DecisionState | 'refused_over_mandate', tool: ToolName | null): string {
+export function statusLine(language: Language, state: DecisionState | 'refused_over_mandate', tool: string | null): string {
   if (state !== 'executed') return VISITOR_PLAIN[language][state];
   if (tool === null || !hasExecutedLine(tool)) throw new Error(`the mock has no executed line for ${tool ?? 'a decision with no tool'}`);
   return executedLine(tool, language, OWNER);
@@ -308,7 +308,7 @@ export const DECISIONS = {
   },
   /** Verified Dana wants her $180.00 drain clearing payment back; the refund card asks about every refund. */
   heldRefund: {
-    tool: refundFixture.action.tool,
+    tool: refundFixture.action.tool as ToolName,
     effects: refundFixture.action.effects,
     outcome: 'hold',
     executed: false,
@@ -842,7 +842,7 @@ const WEEKDAYS_ALL_DAY = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00
 
 /** A request held for the owner, as Claude on Rules reads it: its tool, the kernel's line on it, and the reason of the rule that held it. */
 export interface HeldForChat {
-  tool: ToolName;
+  tool: string;
   reasonPlain: string;
   heldBy: string | null;
   /** It moves more money than the payment limit, which no rule goes past, so no rule could let it through. */
@@ -857,7 +857,7 @@ const DEFAULT_ASK_REASON = 'Not covered by a rule yet, so it asks you.';
  * words (`TOOL_LABELS` in `backend/desk/api/rules.py`), but "identity check" for a verification,
  * as the owner app and Rules' question about a hold name it.
  */
-export const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
+export const TOOL_LABELS: Readonly<Partial<Record<string, string>>> = {
   'native.quote': 'quote',
   'native.find_slots': 'open times',
   'native.book': 'booking',

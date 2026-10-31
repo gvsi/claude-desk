@@ -22,7 +22,7 @@ const KIND_LINES = {
   agent_auth: "A check of a visiting agent's signature.",
   head_checkpoint: 'A signed checkpoint of the record so far.',
   desk_data: "A change to your Desk's details.",
-} as const satisfies Record<LedgerEvent['kind'], string>;
+} as const satisfies Partial<Record<LedgerEvent['kind'], string>>;
 
 /** Who wrote the entry: the checkpoint, or the chat service, whose report is recorded as it arrived, unchecked. */
 const ORIGIN_LINES = {
@@ -36,7 +36,7 @@ const ORIGIN_LINES = {
  * checked.
  */
 export function traceLine(event: Pick<LedgerEvent, 'kind' | 'origin'>): string {
-  const what = Object.hasOwn(KIND_LINES, event.kind) ? KIND_LINES[event.kind] : 'An entry in the record.';
+  const what = Object.hasOwn(KIND_LINES, event.kind) ? KIND_LINES[event.kind as keyof typeof KIND_LINES] : 'An entry in the record.';
   const who = event.origin === 'kernel' ? ORIGIN_LINES.kernel : ORIGIN_LINES.api;
   return `${what} ${who}`;
 }

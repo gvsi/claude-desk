@@ -156,7 +156,7 @@ describe('the connector catalog', () => {
 
   it('record_owners_only_where_the_kernel_resolves_one', () => {
     // What each tool acts on is its profile's, as the mock serves the kernel's profiles.
-    for (const profile of riveraTools()) expect(TOOL_RESOURCES[profile.tool], profile.tool).toBe(profile.resource_kind);
+    for (const profile of riveraTools()) expect(TOOL_RESOURCES[profile.tool as ToolName], profile.tool).toBe(profile.resource_kind);
     // Only a document or a charge has an owner, so only these tools' records do.
     const owned = (Object.keys(EVERY_TOOL) as ToolName[]).filter((tool) => hasRecordOwner(tool));
     expect(owned).toEqual(['native.release_document', 'payments.list_charges', 'payments.create_refund']);

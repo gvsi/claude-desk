@@ -29,7 +29,7 @@ export const LEDGER_KIND_COPY = {
   agent_auth: 'Agent signature',
   head_checkpoint: 'Record checkpoint',
   desk_data: 'Desk details changed',
-} as const satisfies Record<LedgerEvent['kind'], string>;
+} as const satisfies Partial<Record<LedgerEvent['kind'], string>>;
 
 /**
  * Where an entry came from, the same words on every row, detail and trace: the checkpoint wrote it,
@@ -67,7 +67,7 @@ export function originCopy(origin: string): string {
 
 /** A kind of entry's name; a kind this build doesn't know is named as plainly as it can be. */
 export function kindCopy(kind: string): string {
-  return Object.hasOwn(LEDGER_KIND_COPY, kind) ? LEDGER_KIND_COPY[kind as LedgerEvent['kind']] : 'Other entry';
+  return Object.hasOwn(LEDGER_KIND_COPY, kind) ? LEDGER_KIND_COPY[kind as keyof typeof LEDGER_KIND_COPY] : 'Other entry';
 }
 
 /** The checkpoint that stopped an attempt: a blocked reply at the reply checkpoint, anything else at the action checkpoint. */
