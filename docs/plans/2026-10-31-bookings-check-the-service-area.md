@@ -1,6 +1,6 @@
 # Plan amendment: bookings check the service area (issue #172)
 
-Status: reviewed by the kernel safety reviewer and the API lane, 2026-10-31. Nothing here is built yet. The copy in section 4 waits for the owner's sign-off. Issue #172.
+Status: reviewed by the kernel safety reviewer and the API lane, 2026-10-31. Nothing here is built yet. The owner signed off section 4's copy on 2026-10-31. Issue #172.
 
 Owner decision, 2026-10-31: build all three layers, and hold whenever a visit's place is outside the service area or unclear.
 
@@ -128,7 +128,9 @@ class DeskServiceAreaRequest(KernelRequest):  # PUT /desks/{id}/service_area
   - The setup review shows the list. `_put_parts` writes it with `PUT /desks/{id}/service_area` only after the owner confirms, as it does the charter. Nothing reaches the kernel unconfirmed.
 - **Settings:** a new owner route, `PUT /api/owner/desks/{desk_id}/service_area` (`_put_part`), edits the list. The owner sees the kernel's 422 in plain words.
 
-## 4. Copy (each item needs the owner's sign-off)
+## 4. Copy (signed off by the owner, 2026-10-31)
+
+The owner approved the owner's reason sentences, the proof check's sentence, the trade preset's booking reason and the Rules labels below as written. The tool description sentence and the prompt line go through the evals gate, and the Settings section is designed and signed off with its boards.
 
 **Owner's reason.** `AREA_PLAIN` adds one sentence to `_reason_plain`, after the deciding cards' quotes and before the reviewer and Claude's note. It appears only on a limit hold of `native.book` whose `visit_area` isn't `inside` and where no deciding card sets `any_area`:
 - `outside`: "The visit isn't in a town or ZIP code on your service area list."
