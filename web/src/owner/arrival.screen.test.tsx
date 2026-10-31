@@ -455,8 +455,14 @@ describe('Arrival', () => {
   });
 
   it('session_end_returns_to_the_intro', async () => {
+    // Today opens drawn, with nothing of its own still being read, and reads the Demo inbox once as
+    // it opens. That read answers slowly here, as on a slow machine, and is in before the session
+    // ends, so the 401 that ends it is Today's own poll and not that read.
+    delayNextRead(ROUTES.ownerInbox.path, 60);
+    const inboxRead = nextAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    await inboxRead.settled;
 
     // The demo session ends: the browser's owner cookie no longer opens a copy, so Today's next poll is a 401.
     mockStore.reset('rivera', { signedIn: false });
