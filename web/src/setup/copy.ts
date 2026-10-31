@@ -215,7 +215,7 @@ export const SETUP_COPY = {
     who: {
       public: 'A visitor, not verified',
       verified: 'A customer, verified',
-      agent: 'Someone’s agent, signed limit',
+      agent: "Someone's agent, signed limit",
       after_hours: 'A visitor, after hours',
     },
   },
