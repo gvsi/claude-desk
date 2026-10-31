@@ -1,0 +1,18 @@
+/* RuleChat: the Ask Claude panel itself lays out the conversation. The wrapper only holds it for
+   focus, so it takes no box of its own. Claude's answer and the change it drafted sit 12 px apart. */
+
+.cd-rule-chat {
+  display: contents;
+}
+
+.cd-rule-chat__answer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-rule-chat__kept {
+  margin: 0;
+  color: var(--text-secondary);
+}

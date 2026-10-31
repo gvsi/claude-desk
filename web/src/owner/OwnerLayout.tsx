@@ -23,6 +23,7 @@ import {
   type SwitcherPick,
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
+import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead } from './useDesks.ts';
 
 import './OwnerLayout.css';
@@ -151,6 +152,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const location = useLocation();
   const queryClient = useQueryClient();
   const today = useToday(deskId);
+  // Ask Claude, beside the page that opened it (the Rules page, a tool's page).
+  const askClaude = useAskClaudeHost(deskId, business.owner_display_name);
   const [switching, setSwitching] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -266,6 +269,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={() => setConfirming(true)} />}
       sidebar={sidebar}
       fill={fill}
+      panel={askClaude.panel}
     >
       <div className={layoutClass}>
         {notice !== null ? (
@@ -273,7 +277,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
             <Notice tone="error">{notice}</Notice>
           </div>
         ) : null}
-        <Outlet context={{ business, desk, setAnswering, holdDesk } satisfies OwnerDeskContext} />
+        <AskClaudeProvider value={askClaude.value}>
+          <Outlet context={{ business, desk, setAnswering, holdDesk } satisfies OwnerDeskContext} />
+        </AskClaudeProvider>
         {fill ? null : (
           <footer className="cd-owner-layout__footer">
             <ConceptFooter />
