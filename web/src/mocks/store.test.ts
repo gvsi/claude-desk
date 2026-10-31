@@ -1150,11 +1150,13 @@ describe('rules and tools', () => {
     expect(before.tools.map((row) => row.tool)).toContain('payments.create_refund');
     expect(before.tools.every((row) => row.status === 'enabled')).toBe(true);
     expect(Object.keys(before.tools[0] ?? {}).sort()).toEqual(
-      ['cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'source', 'status', 'tool'],
+      ['cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'review_reason', 'source', 'status', 'tool'],
     );
     // Each row lists the active cards that cover its tool, in card order, a shared one marked so (plan 02b Task 9).
     const quote = rivera.ruleCards['rv-quote'];
     expect(before.tools.find((row) => row.tool === 'native.quote')?.cards).toEqual([{ card_id: quote.card_id, mode: quote.mode, reason: quote.reason, shared: false }]);
+    // A tool gives a reason only while it waits for review.
+    expect(before.tools.every((row) => row.review_reason === null)).toBe(true);
 
     // A draft reads back by its version until it is confirmed; nothing applies before then.
     const quoteAsks = { ...rivera.ruleCards['rv-quote'], mode: 'ask' as const };
@@ -1263,11 +1265,13 @@ describe('rules and tools', () => {
     expect((again.body as ToolConfirmedOut).draft).toBeNull();
   });
 
-  /** The connector changes `tool`'s definition to one hashed `sha`: it waits for the owner's review. */
+  /** The connector changes `tool`'s definition to one hashed `sha`: it waits for the owner's review, and says why. */
   const drift = (tool: string, sha: string) => {
     const desk = mockStore.world.desk(deskId);
     if (!desk) throw new Error('the mock has the main Desk');
-    desk.tools = desk.tools.map((row) => (row.tool === tool ? { ...row, status: 'needs_review', pending_definition_text: `Changed ${sha[0]}`, pending_sha256: sha } : row));
+    desk.tools = desk.tools.map((row) =>
+      row.tool === tool ? { ...row, status: 'needs_review', pending_definition_text: `Changed ${sha[0]}`, pending_sha256: sha, review_reason: 'changed' } : row,
+    );
   };
   const rowOf = async (tool: string) => (await rules()).tools.find((row) => row.tool === tool);
 
@@ -1284,9 +1288,9 @@ describe('rules and tools', () => {
     const on = await confirmTools({ tools: [{ tool: refund, definition_sha256: 'e'.repeat(64) }], enable: true });
     expect(on.status).toBe(200);
     const version = (on.body as ToolConfirmedOut).draft?.version;
-    expect(await rowOf(refund)).toMatchObject({ status: 'needs_review', definition_sha256: old, pending_sha256: 'e'.repeat(64) });
+    expect(await rowOf(refund)).toMatchObject({ status: 'needs_review', definition_sha256: old, pending_sha256: 'e'.repeat(64), review_reason: 'changed' });
     expect((await confirm(version)).status).toBe(200);
-    expect(await rowOf(refund)).toMatchObject({ status: 'enabled', definition_sha256: 'e'.repeat(64), pending_sha256: null, pending_definition_text: null });
+    expect(await rowOf(refund)).toMatchObject({ status: 'enabled', definition_sha256: 'e'.repeat(64), pending_sha256: null, pending_definition_text: null, review_reason: null });
   });
 
   it('second_drift_blocks_the_pending_confirm', async () => {
@@ -1311,7 +1315,12 @@ describe('rules and tools', () => {
     const back = await confirmTools({ tools: [{ tool: charges, definition_sha256: listed }], enable: true });
     drift(charges, 'b'.repeat(64));
     expect(await confirm((back.body as ToolConfirmedOut).draft?.version)).toEqual({ status: 409, body: { error: 'rules_changed_since_draft' } });
-    expect(await rowOf(charges)).toMatchObject({ status: 'needs_review', pending_sha256: 'b'.repeat(64) });
+    expect(await rowOf(charges)).toMatchObject({ status: 'needs_review', pending_sha256: 'b'.repeat(64), review_reason: 'changed' });
+
+    // Kept off with the changed definition's hash: off at once, so it no longer waits for review
+    // and gives no reason, while the changed definition stays for a later review.
+    expect((await confirmTools({ tools: [{ tool: charges, definition_sha256: 'b'.repeat(64) }], enable: false })).status).toBe(200);
+    expect(await rowOf(charges)).toMatchObject({ status: 'disabled', pending_sha256: 'b'.repeat(64), review_reason: null });
   });
 });
 

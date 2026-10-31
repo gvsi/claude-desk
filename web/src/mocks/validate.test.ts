@@ -14,6 +14,8 @@ import type {
   OwnerTranscript,
   RulesDraft,
   RulesView,
+  SetupState,
+  SetupTools,
   ToolConfirmedOut,
   VisitorSession,
   VisitorTranscript,
@@ -67,6 +69,11 @@ describe('mock payloads', () => {
     expect(validateContract('PolicyVersion', { ...version, auto_money_cap_cents: -1 })).not.toEqual([]);
     expect(validateContract('PolicyVersion', { ...version, auto_money_cap_cents: 1_000_001 })).not.toEqual([]);
     expect(validateContract('PolicyVersion', { ...version, auto_money_cap_cents: '500' })).not.toEqual([]);
+
+    // Why a tool waits for review (kernel payments, plan 01c Task 4), or null when it doesn't.
+    const tool = mockStore.world.desks[0]?.tools[0];
+    for (const reason of ['new', 'changed', 'delisted', null]) expect(validateContract('ToolProfile', { ...tool, review_reason: reason }), String(reason)).toEqual([]);
+    expect(validateContract('ToolProfile', { ...tool, review_reason: 'renamed' })).not.toEqual([]);
   });
 
   it('mock_payloads_match_contracts', async () => {
@@ -173,5 +180,45 @@ describe('mock payloads', () => {
 
     const errors = checks.flatMap(([model, value]) => validateContract(model, value));
     expect(errors).toEqual([]);
+  });
+
+  it('confirming_a_tool_already_on_answers_in_the_contracts_shape', async () => {
+    // A seeded tool that is already on, confirmed at its own hash, changes nothing and drafts
+    // nothing, and its profile still says why it waits for review: it doesn't.
+    const owner = { params: { desk_id: RIVERA.deskId } };
+    const rules = (await body('rules', owner)) as RulesView;
+    for (const name of ['payments.list_charges', 'native.quote']) {
+      const row = rules.tools.find((tool) => tool.tool === name);
+      expect(row?.status, name).toBe('enabled');
+      const confirmed = (await body('confirmTool', { ...owner, body: { tools: [{ tool: name, definition_sha256: row?.definition_sha256 }], enable: true } })) as ToolConfirmedOut;
+      expect(confirmed.draft, name).toBeNull();
+      expect(confirmed.profile, name).toMatchObject({ tool: name, status: 'enabled', review_reason: null });
+      expect(validateContract('ToolConfirmed', confirmed), name).toEqual([]);
+    }
+  });
+
+  it('setup_desk_tools_say_why_they_wait_for_review', async () => {
+    // A new Desk's Documents and Payments tools, and the mock payments server's once connected,
+    // wait for review as a connect never confirmed ("new"); the rest are on and wait for nothing.
+    const started = (await body('startSetup', { body: { description: 'Rivera Plumbing, a plumber in Oakland.', timezone: 'America/Los_Angeles' } })) as SetupState;
+    const id = started.interview_id;
+    await body('setupConnect', { params: { id }, body: { server: 'mock_payments' } });
+    const { tools } = (await body('setupTools', { params: { id } })) as SetupTools;
+    const waiting = ['native.release_document', 'native.payment_link', 'native.charge_mandate', 'payments.list_charges', 'payments.create_refund'];
+    for (const row of tools) {
+      expect(row.review_reason, row.tool).toBe(waiting.includes(row.tool) ? 'new' : null);
+      expect(row.status, row.tool).toBe(waiting.includes(row.tool) ? 'needs_review' : 'enabled');
+    }
+    expect(tools.map((row) => row.tool)).toEqual(expect.arrayContaining(waiting));
+
+    // Each tool record is a profile the contract takes, and a tool already on confirms in its shape.
+    const desk = mockStore.world.desk(started.desk_id);
+    for (const tool of desk?.tools ?? []) expect(validateContract('ToolProfile', tool), tool.tool).toEqual([]);
+    const quote = tools.find((row) => row.tool === 'native.quote');
+    const confirmed = await body('confirmTool', {
+      params: { desk_id: started.desk_id },
+      body: { tools: [{ tool: 'native.quote', definition_sha256: quote?.definition_sha256 }], enable: true },
+    });
+    expect(validateContract('ToolConfirmed', confirmed)).toEqual([]);
   });
 });

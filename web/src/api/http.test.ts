@@ -245,6 +245,29 @@ describe('request', () => {
     for (let n = 1; n < 20; n += 1) expect(call(n).url).toBe('/api/owner/policy/d1/draft');
   });
 
+  it('rules_cannot_be_checked_is_uncertain_only_when_the_app_gave_up', async () => {
+    const confirm = () => request('confirmRules', { params: { desk_id: 'd1' }, body: { version: 8 } });
+    const shape = (err: ApiError) => [err.kind, err.status, err.code, isUncertain(err)];
+
+    // The API's own answer that the rules couldn't be checked: nothing applied, and it says so.
+    replies = [{ status: 409, body: { error: 'rules_cannot_be_checked' } }];
+    const answered = await failure(confirm());
+    expect(shape(answered)).toEqual(['conflict', 409, 'rules_cannot_be_checked', false]);
+    expect(ownerErrorCopy(answered)).toBe(RULES_UNAVAILABLE_COPY);
+
+    // The app stopped waiting a minute after the first send, while the API was still checking: the
+    // change may still apply, so a screen reads the rules before it says anything.
+    const stillChecking = { status: 202, body: { retry: { path: '/api/owner/policy/d1/confirm', body: { version: 8 } } } };
+    replies = [stillChecking];
+    expect(shape(await failure(confirm(), 60_000))).toEqual(['unavailable', null, 'rules_cannot_be_checked', true]);
+
+    // The same when the last retry got no answer by the end of the minute.
+    fetchMock.mockClear();
+    replies = [...Array<Reply>(19).fill(stillChecking), { hang: true }];
+    expect(shape(await failure(confirm(), 60_000))).toEqual(['unavailable', null, 'rules_cannot_be_checked', true]);
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+  });
+
   it('proving_request_waits_past_25_s', async () => {
     replies = [{ status: 200, body: draft, delayMs: 26_000 }];
     const proving = request('confirmRules', { params: { desk_id: 'd1' }, body: { version: 8 } });

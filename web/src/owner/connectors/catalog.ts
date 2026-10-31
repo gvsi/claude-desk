@@ -141,22 +141,30 @@ export function toolWords(tool: string): ToolWords | null {
 }
 
 /**
- * What a tool row's status means on every screen, so no screen reads `status` alone:
+ * What a tool row's status means on every screen, so no screen reads `status` alone. Why a tool
+ * waits for review is the kernel's `review_reason`, never read off its other columns:
  * - `on`: enabled ("On", and its outcome on Rules);
  * - `changed`: its definition changed and waits for the owner's review ("Needs your review");
- * - `not_on`: connected and never turned on, or no longer listed by its connector ("Off", no Today item);
+ * - `not_on`: connected and never turned on ("Off", no Today item);
+ * - `delisted`: no longer listed by its connector ("Off", no Today item, and never offered to add again);
  * - `off`: turned off ("Off").
  */
-export type ToolState = 'on' | 'changed' | 'not_on' | 'off';
+export type ToolState = 'on' | 'changed' | 'not_on' | 'delisted' | 'off';
 
-/** The row's state. Only a review with the changed definition's hash counts as changed; an unknown status is off. */
-export function toolState(row: Pick<ToolRow, 'status' | 'pending_sha256'>): ToolState {
+/**
+ * The row's state, from its status and, while it waits for review, its reason. A row waiting with
+ * no reason (an API without the field, which sends `needs_review` only for a connect) or a reason
+ * this build doesn't know is `not_on`, never changed or on; an unknown status is off.
+ */
+export function toolState(row: Pick<ToolRow, 'status' | 'review_reason'>): ToolState {
   if (row.status === 'enabled') return 'on';
-  if (row.status === 'needs_review') return row.pending_sha256 != null && row.pending_sha256 !== '' ? 'changed' : 'not_on';
-  return 'off';
+  if (row.status !== 'needs_review') return 'off';
+  if (row.review_reason === 'changed') return 'changed';
+  if (row.review_reason === 'delisted') return 'delisted';
+  return 'not_on';
 }
 
 /** A connector is on while any of its tools is on or changed (listed in `rows`), else off. */
-export function connectorOn(connector: CatalogConnector, rows: readonly Pick<ToolRow, 'tool' | 'status' | 'pending_sha256'>[]): boolean {
+export function connectorOn(connector: CatalogConnector, rows: readonly Pick<ToolRow, 'tool' | 'status' | 'review_reason'>[]): boolean {
   return rows.some((row) => connector.tools.includes(row.tool) && (toolState(row) === 'on' || toolState(row) === 'changed'));
 }
