@@ -54,9 +54,10 @@ interface SetupShellProps {
 }
 
 /**
- * Setup's frame, as the signed setup boards draw it: the bar with the app's lockup (the bell with no
- * tile at 36 px and the wordmark, with its Preview badge from 1100 px up), the business once known,
- * the five steps and "Save and exit"; one column; the concept footer at the window's foot.
+ * Setup's frame, as the signed setup boards draw it: the bar with the bell (no tile, 20 px at every
+ * width, as on a standalone page) and the wordmark, with its Preview badge from 1100 px up, the
+ * business once known, the five steps and "Save and exit"; one column; the concept footer at the
+ * window's foot.
  */
 function SetupShell({ business, step, exitTo, wide = false, children }: SetupShellProps) {
   const navigate = useNavigate();
@@ -66,7 +67,7 @@ function SetupShell({ business, step, exitTo, wide = false, children }: SetupShe
       <header className="cd-setup__bar">
         <div className="cd-setup__lead">
           <span className="cd-setup__brand">
-            <Mark size={36} />
+            <Mark size={20} />
             <Wordmark preview={!compact} />
           </span>
           {business ? (

@@ -1227,8 +1227,8 @@ describe('setup', () => {
   }
 
   it('setup_bar_shows_the_preview_badge_from_1100_px', async () => {
-    // The app's lockup, as the setup board draws it: the bell with no tile at 36 px beside "Claude
-    // Desk". From 1100 px up the wordmark carries its Preview badge; below, a top bar is a phone's
+    // The bell with no tile at 20 px beside "Claude Desk", as the setup boards draw it, at every
+    // width. From 1100 px up the wordmark carries its Preview badge; below, a top bar is a phone's
     // and carries none. "Save and exit" keeps its width and one line either way, and the lockup
     // stays clear of the steps beside it.
     const state = await startInterview();
@@ -1244,7 +1244,7 @@ describe('setup', () => {
       const where = `at ${width}`;
       await expect.poll(() => bar.querySelector('.cd-wordmark')?.textContent, { message: where }).toBe(badge ? 'Claude DeskPreview' : 'Claude Desk');
       const mark = bar.querySelector('svg.cd-mark');
-      expect(mark?.getAttribute('width'), where).toBe('36');
+      expect(mark?.getAttribute('width'), where).toBe('20');
       // No tile: the bell alone draws no rectangle behind it.
       expect(mark?.querySelector('rect'), where).toBeNull();
       const exit = screen.getByRole('link', { name: 'Save and exit' }).element() as HTMLElement;
