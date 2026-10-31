@@ -25,6 +25,31 @@
  *   (`_limits`, line 480);
  * - else it asks (an ask rule, a permit's hold twin, or the default ask).
  *
+ * The always-on baseline (`kernel/cedar/baseline.cedar`) forbids in every decision, whatever the
+ * rules say; its line numbers follow. Two of its rules change what runs for one of the three
+ * visitors, and are read here:
+ * - `private_data_record_owner` (lines 18-24): private data goes only to a verified visitor whose
+ *   record it is (`principal.verified && context.record_owner_match`, which
+ *   `backend/desk/kernel_service/decide.py` sets at line 129). So a tool with the `private_data` effect refuses a stranger and a verified customer
+ *   who isn't the owner, and runs, if at all, only for the record's owner;
+ * - `money_has_amount` (lines 58-68): money always moves an amount above zero, and a permit on a
+ *   money tool requires the amount to be within its bound (`_limits` in `compiler.py`, lines 475-477), so a permit
+ *   up to $0 on a tool that charges or pays out never runs.
+ * The others change nothing these three visitors can run:
+ * - `same_copy` (lines 10-16): every session acts on its own copy's records;
+ * - `recipient_owner_or_verified_contact` (lines 26-36), with verification codes going only to the
+ *   contact on record: an adapter sets a recipient only to `owner` or `verified_contact`
+ *   (`backend/desk/kernel_service/adapters/base.py`, line 67), and no rule can change Confirm it's them
+ *   (`changes_always_on`, `backend/desk/always_on.py` lines 49-69);
+ * - `no_agent_pay_out` and `agent_charge_within_mandate` (lines 38-56): they bind agents only, and
+ *   an agent is held to the rules for anyone that a stranger is, so it never runs more than one;
+ *   the signed limit only narrows what an agent runs within them;
+ * - `auto_money_cap` (lines 70-83): every automatic money rule in a version is within its payment
+ *   limit (`validate_cards`, `compiler.py` lines 334-336; `lower_to_cap`, `backend/desk/money_cap.py`
+ *   lines 29-52), so the payment limit never stops a permit its own limit lets run.
+ * Nor does the kernel's money check (step 5, `kernel/core/src/policy.rs` lines 316-339): every
+ * permit read here comes from an owner's rule on the tool or on one of its effects.
+ *
  * Limits, as `_limits` bounds a permit (lines 474-477): a permit runs up to the tightest amount
  * limit among its rules, so a tool covered by shared rules on its several effects runs up to the
  * tightest of them; the permits that run add up, since any one of them allows a request, so a
@@ -38,9 +63,10 @@
  * its own, as the kernel reads a request's local day and minute.
  *
  * The outcome is the most permissive over visitors and stretches of the week: automatic, then ask
- * me first, then never, an automatic one at its largest limit.
+ * me first, then never, an automatic one at its largest limit. When every visitor is refused, it
+ * names the never rule that refuses the one the baseline doesn't.
  */
-import type { RuleCard } from '../../api/contracts.ts';
+import { MONEY_EFFECTS, type RuleCard } from '../../api/contracts.ts';
 import type { RuleMode, RulesTool } from '../../ds/index.ts';
 import { hasRecordOwner } from '../connectors/catalog.ts';
 
@@ -65,6 +91,9 @@ const VISITORS = [
 
 /** A rule on an effect group (`effect:charge`), which every tool with that effect shares. */
 const isShared = (card: RuleCard) => card.applies_to.startsWith('effect:');
+
+/** The baseline's refusal: no rule of the owner's gives it, so it names none. */
+const REFUSED: ToolOutcome = { mode: 'never', limitCents: null };
 
 /** The kernel's rank of a rule for a group of people: a tool's own rule above a shared one. */
 const rank = (card: RuleCard) => (isShared(card) ? 0 : 1);
@@ -162,6 +191,15 @@ function morePermissive(a: ToolOutcome, b: ToolOutcome): boolean {
 }
 
 /**
+ * Whether `reading` replaces `best` as the outcome: it lets more run on its own, or, both refusing,
+ * it names the never rule that refuses where `best` is the baseline's refusal, which names none.
+ */
+function replaces(reading: ToolOutcome, best: ToolOutcome | undefined): boolean {
+  if (best === undefined || morePermissive(reading, best)) return true;
+  return reading.mode === 'never' && best.mode === 'never' && best.rule === undefined && reading.rule !== undefined;
+}
+
+/**
  * The tool's outcome under `cards` (a version's, or one side of a draft): the most that runs on its
  * own for some visitor, as this module's header sets out. Default cards are left out: the default
  * ask is what is left when nothing else decides.
@@ -172,9 +210,17 @@ export function toolOutcome(tool: RulesTool, cards: readonly RuleCard[]): ToolOu
   );
   const moments = weekMoments(covering.filter((card) => card.mode === 'auto'));
   const owned = hasRecordOwner(tool.tool);
+  // The baseline's `private_data_record_owner`: only the record's owner gets private data.
+  const privateData = tool.effects.includes('private_data');
+  // The baseline's `money_has_amount`: money moves only in an amount above zero.
+  const money = tool.effects.some((effect) => MONEY_EFFECTS.has(effect));
   let best: ToolOutcome | undefined;
   for (const visitor of VISITORS) {
     if (visitor.ownersOnly && !owned) continue;
+    if (privateData && !visitor.ownersOnly) {
+      if (replaces(REFUSED, best)) best = REFUSED;
+      continue;
+    }
     const rules = covering.filter((card) => visitor.who.has(card.who));
     const byRank = [...rules].sort((a, b) => rank(b) - rank(a));
     const never = byRank.find((card) => card.mode === 'never');
@@ -188,11 +234,13 @@ export function toolOutcome(tool: RulesTool, cards: readonly RuleCard[]): ToolOu
       if (never === undefined) {
         for (const permit of running) {
           if (!permit.rules.every((card) => runsAt(card, minute))) continue;
-          const runs: ToolOutcome = { mode: 'auto', limitCents: permitLimit(permit), rule: permitRule(permit) };
+          const limit = permitLimit(permit);
+          if (money && limit !== null && limit <= 0) continue;
+          const runs: ToolOutcome = { mode: 'auto', limitCents: limit, rule: permitRule(permit) };
           if (morePermissive(runs, reading)) reading = runs;
         }
       }
-      if (best === undefined || morePermissive(reading, best)) best = reading;
+      if (replaces(reading, best)) best = reading;
     }
   }
   return best ?? { mode: 'ask', limitCents: null };

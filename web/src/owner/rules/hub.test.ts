@@ -325,10 +325,39 @@ describe('the Rules hub', () => {
     const changeNever = card({ ...quoteNever, card_id: 'card-change-owner-never', applies_to: 'effect:change' });
     expect(hubTool(view([changeNever]), 'native.quote')).toMatchObject({ mode: 'auto' });
 
-    // A document is its owner's: with a never rule for record owners beside their automatic rule,
-    // no one gets one on their own, and anyone else is asked about.
+    // A document is its owner's: a never rule for record owners beside their automatic rule refuses
+    // its owner, the one visitor the always-on baseline lets have it.
     const docsNever = card({ card_id: 'card-docs-owner-never', applies_to: 'native.release_document', mode: 'never', who: 'record_owner', reason: 'No documents for now.' });
-    expect(hubTool(view([docsNever]), 'native.release_document')).toMatchObject({ summary: '2 rules', mode: 'ask' });
+    expect(hubTool(view([docsNever]), 'native.release_document')).toMatchObject({ summary: '2 rules', mode: 'never' });
+  });
+
+  it('private_data_goes_only_to_the_record_owner', () => {
+    // The always-on baseline gives private data only to the verified person the record belongs to,
+    // so a tool that touches it runs for no stranger and no other verified customer, whatever the
+    // rules say. Share a document, automatic for anyone, runs for its record's owner.
+    desk().policy.cards = desk().policy.cards.filter((c) => c.card_id !== 'rv-docs');
+    const docsForAnyone = card({ card_id: 'card-docs-anyone', applies_to: 'native.release_document', mode: 'auto', reason: 'Documents go out on their own.' });
+    expect(hubTool(view([docsForAnyone]), 'native.release_document')).toMatchObject({ mode: 'auto' });
+    // With a never rule for record owners beside it, the one visitor it could run for is refused.
+    const docsOwnerNever = card({ card_id: 'card-docs-owner-never', applies_to: 'native.release_document', mode: 'never', who: 'record_owner', reason: 'No documents for now.' });
+    expect(hubTool(view([docsOwnerNever]), 'native.release_document')).toMatchObject({ summary: '2 rules', mode: 'never' });
+
+    // See charges, automatic for verified customers and asking for record owners: a verified
+    // customer who isn't the owner gets nothing, and the owner is asked about.
+    desk().policy.cards = desk().policy.cards.filter((c) => c.card_id !== 'rv-charges');
+    const chargesVerified = card({ card_id: 'card-charges-verified', applies_to: 'payments.list_charges', mode: 'auto', who: 'verified', reason: 'Verified customers see charges.' });
+    const chargesOwnerAsk = card({ card_id: 'card-charges-owner-ask', applies_to: 'payments.list_charges', mode: 'ask', who: 'record_owner', reason: 'Customers ask to see their charges.' });
+    expect(hubTool(view([chargesVerified, chargesOwnerAsk]), 'payments.list_charges')).toMatchObject({ summary: '2 rules', mode: 'ask' });
+  });
+
+  it('money_moves_only_in_an_amount_above_zero', () => {
+    // The always-on baseline refuses money with no amount above zero, so an automatic rule up to $0
+    // runs for no one: Payment link asks, with no limit to show.
+    desk().policy.cards = desk().policy.cards.filter((c) => c.card_id !== 'rv-link');
+    const linksUpToZero = card({ card_id: 'card-link-zero', applies_to: 'native.payment_link', mode: 'auto', max_amount_cents: 0, reason: 'Payment links up to $0.' });
+    const link = hubTool(view([linksUpToZero]), 'native.payment_link');
+    expect(link).toMatchObject({ mode: 'ask' });
+    expect(link.limit).toBeUndefined();
   });
 
   it('summary_limit_is_the_kernels', () => {
