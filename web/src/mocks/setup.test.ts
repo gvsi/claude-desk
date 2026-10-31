@@ -49,11 +49,39 @@ describe("the business's name, from the description", () => {
     expect((await started("I'm Lee and I own Acme Bakery on Main Street.")).business).toBe('Acme Bakery');
     expect((await started('Hello, I am Sam and I own Kernel Plumbing')).business).toBe('Kernel Plumbing');
 
-    // Still cut to 60 characters.
+    // A comma ends the name; with none, the whole name is kept, up to the API's 80 characters.
     const long = await started("I'm Maria. I run Rivera Plumbing, Heating and Emergency Drain Services of the East Bay.");
     expect(long.business).toBe('Rivera Plumbing');
     const longer = await started("I'm Maria. I run Rivera Plumbing Heating and Emergency Drain Services of the East Bay.");
-    expect(longer.business).toBe('Rivera Plumbing Heating and Emergency Drain Services of the');
+    expect(longer.business).toBe('Rivera Plumbing Heating and Emergency Drain Services of the East Bay');
+  });
+
+  it('a_name_keeps_the_apis_80_characters_and_is_cut_only_at_a_whole_word', async () => {
+    // Up to 80 characters, as the API keeps a business's name: one over 60 is kept whole, however it's named.
+    const bayview = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland';
+    expect(bayview.length).toBeGreaterThan(60);
+    expect((await started(`${bayview}. I'm Sam, a plumber in Oakland.`)).business).toBe(bayview);
+    expect((await started(`I'm Sam. ${bayview} is my business.`)).business).toBe(bayview);
+    // Its white space as the API keeps it: one space between words.
+    expect((await started("Rivera   Plumbing. I'm Maria.")).business).toBe('Rivera Plumbing');
+
+    // A longer name ends on the last whole word that fits, with no comma or "&" left at its end.
+    const cases: [string, string][] = [
+      [`${bayview}, Berkeley, Richmond and Walnut Creek`, `${bayview}, Berkeley`],
+      [`${bayview}, Berkeley & Richmond Too`, `${bayview}, Berkeley`],
+      // Whole words that fill the 80 characters exactly are all kept.
+      [`${bayview} and the Inner East Bay Hills`, `${bayview} and the Inner East`],
+    ];
+    for (const [name, kept] of cases) {
+      const business = (await started(`${name}. I'm Sam.`)).business ?? '';
+      expect(business, name).toBe(kept);
+      expect(business.length, name).toBeLessThanOrEqual(80);
+      // The name's start, with no letter or digit of a cut word after it.
+      expect(name.startsWith(business), name).toBe(true);
+      expect(name.slice(business.length), `${name}: ends on a whole word`).toMatch(/^[^\p{L}\p{N}]/u);
+    }
+    // A single word longer than that has no whole word to keep: it names nothing.
+    expect((await started(`${'Bayview'.repeat(12)}.`)).business).toBe('Your business');
   });
 
   it('a_phrase_like_is_my_shop_names_the_business', async () => {
@@ -213,8 +241,8 @@ describe('a description in Spanish', () => {
         'Panadería Inés y Compañía de Repostería Artesanal',
         'Thanks, Inés.',
       ],
-      // Still cut to 60 characters.
-      ['Soy Inés. Tengo Panadería Inés y Compañía de Repostería Artesanal de la Bahía de San Francisco.', 'Panadería Inés y Compañía de Repostería Artesanal de la Bahí', 'Thanks, Inés.'],
+      // Up to the API's 80 characters, so this one is whole.
+      ['Soy Inés. Tengo Panadería Inés y Compañía de Repostería Artesanal de la Bahía de San Francisco.', 'Panadería Inés y Compañía de Repostería Artesanal de la Bahía de San Francisco', 'Thanks, Inés.'],
     ];
     for (const [description, business, greeting] of cases) {
       const { business: named, first } = await started(description);
