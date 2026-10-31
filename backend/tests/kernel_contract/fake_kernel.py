@@ -2605,7 +2605,7 @@ class FakeKernelState:
         """The Rivera cards' outcome for a normalized call (the kernel evaluates Cedar), the cards behind it, and for
         a refusal by the always-on baseline the `@id` of its forbid in `kernel/cedar/baseline.cedar`."""
         tool = action.tool
-        if self._never(desk, tool):
+        if not tool.startswith('desk.') and self._never(desk, tool):
             return "refuse", [f"never-{tool}"], None
         if self._intake_profile(desk, tool) is not None:
             covering = [card for card in desk.cards if (

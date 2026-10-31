@@ -131,8 +131,11 @@ async def test_reviewed_intake_decides_executes_and_cannot_select_its_config(ker
     assert confirmed.draft.status == 'proved'
     active = await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=confirmed.draft.version))
     auto = RuleCard(card_id='intake-auto', applies_to=tool.tool, mode='auto', who='anyone', reason='Take enquiries.')
+    [person, *_] = ro_read(schema, copy.copy_id, 'SELECT person_id FROM {ro}.people WHERE desk_id = %s', (desk_id,))
+    scoped_never = RuleCard(card_id='intake-never-person', applies_to=tool.tool, mode='never', who='person',
+                            person_id=person['person_id'], reason='This person asks another way.')
     draft = await owner.call('POST /policy/draft', PolicyDraftRequest(
-        desk_id=desk_id, expected_parent=active.version, cards=[auto]))
+        desk_id=desk_id, expected_parent=active.version, cards=[auto, scoped_never]))
     assert draft.status == 'proved'
     await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
     visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
