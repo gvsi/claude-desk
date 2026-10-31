@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
+from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
 from desk.contracts import (
     AgentAuth,
@@ -520,6 +521,14 @@ async def read_policy_ids(api_ro_conn, ro_schema: str, copy: CopyCreated, decisi
     return row["policy_ids"]
 
 
+async def read_refusal_cause(api_ro_conn, ro_schema: str, copy: CopyCreated, decision_id: str) -> str | None:
+    """The Safety cause from the same decision and ledger views the API reads, on either kernel."""
+    ro = KernelRO(api_ro_conn, copy.copy_id, ro_schema)
+    row = await ro.one("decisions", decision_id=decision_id)
+    entry = await ro.one("ledger_entries", desk_id=copy.desk_ids[0], seq=row["ledger_seq"])
+    return refusal_cause(row, entry)
+
+
 @pytest.mark.kernel_plan("01a")
 async def test_a_never_cards_refusal_names_its_forbid(kernel, ro_read, arrange, api_ro_conn):
     """The owner's Safety entries say why a refusal happened from the decision's deciding policies, which the API reads
@@ -536,6 +545,7 @@ async def test_a_never_cards_refusal_names_its_forbid(kernel, ro_read, arrange, 
     expected = ["F.never.never-native.quote"]
     assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
     assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
+    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) == "owner_rule"
 
 
 @pytest.mark.kernel_plan("01a")
@@ -1521,6 +1531,7 @@ async def test_a_baseline_refusal_names_its_forbid(kernel, ro_read, arrange, api
     expected = ["B.private_data_record_owner"]
     assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
     assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
+    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) == "not_verified"
 
 
 # Single-use links: payment links (Plan 01c) -------------------------------------------------------------------------

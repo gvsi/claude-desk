@@ -43,6 +43,7 @@ from desk.api.schemas import (
     NeedsYouItem,
     NeedsYouSession,
     RecordedHistory,
+    RefusalCause,
     Reports,
     ThisWeek,
     Today,
@@ -239,6 +240,78 @@ class Stopped(Timed):
     card_ids: tuple[str, ...] = ()
     origin: Literal["kernel", "api"] = "kernel"
     ledger_seq: int = 0
+    cause: RefusalCause | None = None
+
+
+def refusal_cause(row: dict, entry: dict | None) -> RefusalCause | None:
+    """A refused decision's cause, from its row and the already-read kernel-built `decide` entry.
+
+    Exact codes only; never inspect or echo owner/visitor prose. Early `reason` wins, including an unknown one.
+    For evaluated refusals, take the first match in the policy precedence below, regardless of the IDs' row order.
+    Unknown codes/IDs and a missing entry have no label. The web holds the signed labels shown here for reference.
+
+    Source                                           Cause                 Signed label
+    reason: paused                                   paused                The chat was paused
+    reason: unknown_tool, not_given                  tool_not_available    Not a tool this chat can use
+    reason: invalid_args                             incomplete_request    The request was incomplete
+    reason: no_active_version                        no_rules              No rules turned on yet
+    reason: version_unloadable, version_outdated,
+            evaluation_error                         rules_unchecked       Your rules couldn't be checked, so I said no
+    reason: adapter_refused, by check:
+      no_such_slot                                   no_such_slot          That time isn't open
+      unknown_item                                   unknown_item          Not on the price list
+      over_limit                                     over_quote_ceiling    Over the $10,000 quote ceiling
+      no_such_quote, quote_paid, quote_paying         quote_unpayable       That quote can't be paid now
+      no_such_charge                                 no_such_charge        No such payment on record
+      not_refundable                                 not_refundable        That payment can't be refunded
+      no_such_document                               no_such_document      No such document
+      not_verified                                   not_verified          Not verified yet
+      no_mandate, mandate_exhausted,
+        not_an_agent_with_a_mandate                   agent_limit           Over the agent's spending limit
+    policy precedence:
+      F.never.*                                      owner_rule            Your rule says no
+      B.same_copy                                    other_copy            Not a record on this Desk
+      B.private_data_record_owner                    not_verified          Not verified yet
+      B.recipient_owner_or_verified_contact          recipient             Only to you or a contact on record
+      B.no_agent_pay_out                             agent_pay_out         Agents can't send money out
+      B.agent_charge_within_mandate                  agent_limit           Over the agent's spending limit
+      B.money_has_amount                             no_amount             No amount given
+    no reason, empty policy_ids                      no_rule               No rule covers this yet
+    anything else                                    null                  (no label)
+    """
+    if entry is None:
+        return None
+    summary = (entry["event"] or {}).get("summary") or {}
+    if "reason" in summary:
+        if summary["reason"] == "adapter_refused":
+            checks: dict[str, RefusalCause] = {
+                "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
+                "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
+                "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
+                "no_such_document": "no_such_document", "not_verified": "not_verified",
+                "no_mandate": "agent_limit", "mandate_exhausted": "agent_limit",
+                "not_an_agent_with_a_mandate": "agent_limit",
+            }
+            return checks.get(summary.get("check"))
+        reasons: dict[str, RefusalCause] = {
+            "paused": "paused", "unknown_tool": "tool_not_available", "not_given": "tool_not_available",
+            "invalid_args": "incomplete_request", "no_active_version": "no_rules",
+            "version_unloadable": "rules_unchecked", "version_outdated": "rules_unchecked",
+            "evaluation_error": "rules_unchecked",
+        }
+        return reasons.get(summary["reason"])
+    policies = row["policy_ids"]
+    if any(policy.startswith("F.never.") for policy in policies):
+        return "owner_rule"
+    baselines: dict[str, RefusalCause] = {
+        "B.same_copy": "other_copy", "B.private_data_record_owner": "not_verified",
+        "B.recipient_owner_or_verified_contact": "recipient", "B.no_agent_pay_out": "agent_pay_out",
+        "B.agent_charge_within_mandate": "agent_limit", "B.money_has_amount": "no_amount",
+    }
+    for policy, cause in baselines.items():
+        if policy in policies:
+            return cause
+    return None if policies else "no_rule"
 
 
 def reply_violations(summary: dict) -> list[tuple[str, str | None]]:
@@ -293,7 +366,7 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
         found.append(Stopped(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"],
                              line=row["reason_plain"], replayed=decision_replayed(row, entry), kind="refused",
                              reason_plain=row["reason_plain"], card_ids=tuple(row["card_ids"] or ()), origin=origin,
-                             ledger_seq=row["ledger_seq"]))
+                             ledger_seq=row["ledger_seq"], cause=refusal_cause(row, entry)))
     for entry in ledger:
         event = entry["event"] or {}
         summary = event.get("summary") or {}
@@ -679,8 +752,9 @@ async def today(ctx: OwnerCtx, desk_id: str, now: datetime) -> Today:
 
 
 async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
-    """The Desk's stopped attempts (Today's "Stopped"), newest first, each with its AI-written triage once one is
-    written (Plan 02b, Task 10), else None."""
+    """The Desk's refused requests and Claude's stopped drafts, newest first, each with its AI-written triage once
+    written (Plan 02b, Task 10), else None. Only refusals count in Today; their nullable `cause` maps the decision's
+    `policy_ids` and its already-read ledger decide summary's `reason`/`check` through `refusal_cause`."""
     sessions = {row["session_id"]: row for row in await ctx.ro.rows("sessions", desk_id=desk_id)}
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
@@ -689,7 +763,8 @@ async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
     found.sort(key=lambda attempt: attempt.at, reverse=True)
     return [Attempt(ref_id=attempt.ref_id, kind=attempt.kind, reason_plain=attempt.reason_plain,
                     card_ids=list(attempt.card_ids), origin=attempt.origin, created_at=attempt.at,
-                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq) for attempt in found]
+                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq,
+                    cause=attempt.cause) for attempt in found]
 
 
 # The Desk list (#233) -----------------------------------------------------------------------------------------
