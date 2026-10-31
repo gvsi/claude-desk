@@ -464,8 +464,10 @@ function carriesBookingCard(root: Element | null): boolean {
 }
 
 /**
- * vision_prose_states_no_facts: Claude's words under `root`, and every receipt line under them, pass
- * the kernel's prose check as `factsInProse` mirrors it. A booking claim passes in a message that
+ * vision_prose_states_no_facts: Claude's words under `root` pass the kernel's prose check as
+ * `factsInProse` mirrors it, and so does every receipt line under them. The kernel scans only a
+ * reply's prose, since a real receipt is its own fixed line; a vision page's receipts are free text,
+ * so the vision pages hold them to the same check themselves. A booking claim passes in a message that
  * carries its booking card, as the kernel decides; a receipt goes with its message's card. Returns
  * how many lines of Claude's words and how many receipt lines it checked.
  */

@@ -120,6 +120,8 @@ export const DocumentLink: Story = {
     await expect(canvas.getByRole('article', { name: 'Document, only for you' })).toBeVisible();
     await expectOneLink(canvasElement, 'Download', '/api/d/9fK2mQ');
     await expect(canvas.getByRole('link')).toHaveClass('cd-button--primary');
+    // A real document card has no vision line.
+    await expect(canvasElement.querySelector('.cd-vision-inert-line')).toBeNull();
   },
 };
 

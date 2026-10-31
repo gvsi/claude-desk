@@ -122,7 +122,7 @@ export const Visitor: Story = {
   parameters: {
     canvasNote: "The board's composer is the same single row; the footer beside it is the public shell's.",
   },
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
     const send = canvas.getByRole('button', { name: 'Send' });
     const box = boxOf(input);
@@ -153,6 +153,8 @@ export const Visitor: Story = {
     await expect(args.onSend).toHaveBeenCalledWith('How much to clear a clogged drain?');
     await expect(input).toHaveValue('');
     await expect(input).toHaveFocus();
+    // A real composer has no vision line, before or after a send.
+    await expect(canvasElement.querySelector('.cd-vision-inert-line')).toBeNull();
   },
 };
 
