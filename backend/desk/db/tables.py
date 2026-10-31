@@ -36,7 +36,7 @@ KERNEL_RO_COLUMNS: dict[str, tuple[str, ...]] = {
     "documents": ("document_id", "copy_id", "desk_id", "title", "record_owner_person_id", "created_at"),
     "leads": ("lead_id", "copy_id", "desk_id", "session_id", "display_name", "note", "created_at"),
     "tools": ("copy_id", "desk_id", "tool", "source", "effects", "reversible", "status", "description_confirmed",
-              "definition_sha256", "pending_definition_text", "pending_sha256", "review_reason"),   # the pin is public
+              "definition_sha256", "pending_definition_text", "pending_sha256", "review_reason", "business"),   # the pin is public
     "price_items": ("item_id", "copy_id", "desk_id", "title", "unit_cents"),
     "calendar_slots": ("slot_id", "copy_id", "desk_id", "starts_at", "minutes"),
     "notification_prefs": ("copy_id", "desk_id", "now", "briefing"),
