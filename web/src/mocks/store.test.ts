@@ -1779,6 +1779,20 @@ describe('idempotency keys', () => {
     expect((await send('book_visit', 'k'.repeat(128))).status).toBe(202);
   });
 
+  it('send_agent_key_is_forgotten_after_its_hour', async () => {
+    // As the API does, a send's key is kept for its run's hour and then forgotten: a repeat within
+    // the hour answers the same run, and one after it starts a new run.
+    await openChat();
+    const send = () => call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
+    const first = await send();
+    vi.advanceTimersByTime(60 * 60_000 - 1);
+    expect(await send()).toEqual(first);
+    vi.advanceTimersByTime(1);
+    const later = await send();
+    expect(later.status).toBe(202);
+    expect(later.body).not.toEqual(first.body);
+  });
+
   it('setup_start_repeat_answers_the_same_interview', async () => {
     // As the API does (plan 02b): a repeat with the same key and body answers the interview the first
     // made (201, as the first) and makes nothing; the same key with another body is 409 `conflict`.
