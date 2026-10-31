@@ -219,11 +219,12 @@ async def recheck(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) 
 async def recheck_under(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Checked | str:
     """`recheck`, answering with the version and money cap it passed under, or, when it fails, with
     the part that failed (`desk`, `tool`, `session`, `args`, `profile`, `policy` or `binding`), the
-    `check` its refusal is ledgered with, as an allow's is."""
+    `check` its refusal is ledgered with, as an allow's is. A pass that named no version fails as
+    `policy`, so the refusal never ledgers a null check."""
     target = await _target(ctx, decision_row)
     if (failed := await _recheck(ctx, target, path)) is not None:
         return failed
-    return target.checked
+    return target.checked if target.checked is not None else "policy"
 
 
 async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | None:

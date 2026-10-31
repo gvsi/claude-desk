@@ -291,6 +291,24 @@ async def test_answers_after_a_rule_change_are_re_decided(app, client):
     assert approval.policy_version == 1
 
 
+async def test_a_re_check_that_names_no_version_is_refused_as_the_rules(app, client, monkeypatch):
+    """A re-check that fails nothing yet names no version and cap to run under can't run the
+    approval: it is refused at execution, and ledgered with `check: "policy"`, never a null check."""
+    copy, held = await seeded_hold(app, client)
+
+    async def passes_with_no_version(ctx, target, path) -> None:
+        return None                                    # leaves target.checked unset
+
+    monkeypatch.setattr(execute, "_recheck", passes_with_no_version)
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.execution, result.card_diff) == ("refused_at_execution", None, None)
+    assert await rows_of(app, copy.copy_id, select(Execution)) == []           # no intent, nothing ran
+    assert await rows_of(app, copy.copy_id, select(Quote)) == []
+    [entry] = [e.event.summary for e in await ledger_rows(app, copy) if e.seq == result.decision.ledger_seq]
+    assert entry == {"decision_id": held.decision_id, "action_id": held.action_id, "answer": "allow_once",
+                     "state": "refused_at_execution", "reason": "rules_changed", "check": "policy"}
+
+
 async def test_answers_execute_during_a_take_over(app, client):
     copy, visitor, held = await held_quote(app, client)
     state = await set_mode(client, copy, visitor.session_id, "owner", 0)      # Maria takes the conversation over
