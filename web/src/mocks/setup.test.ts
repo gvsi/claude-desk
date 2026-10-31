@@ -65,10 +65,14 @@ describe("the business's name, from the description", () => {
     // Its white space as the API keeps it: one space between words.
     expect((await started("Rivera   Plumbing. I'm Maria.")).business).toBe('Rivera Plumbing');
 
-    // A longer name ends on the last whole word that fits, with no comma or "&" left at its end.
+    // A longer name ends on the last whole word that fits, with no comma, "&", "and" or "or" (or the
+    // Spanish "y" or "o") left at its end.
     const cases: [string, string][] = [
       [`${bayview}, Berkeley, Richmond and Walnut Creek`, `${bayview}, Berkeley`],
       [`${bayview}, Berkeley & Richmond Too`, `${bayview}, Berkeley`],
+      [`${bayview}, Berkeley and Richmond Too`, `${bayview}, Berkeley`],
+      [`${bayview}, Berkeley And Richmond Too`, `${bayview}, Berkeley`],
+      ['Panadería Inés y Compañía de Repostería Artesanal de Oakland, Berkeley y Richmond', 'Panadería Inés y Compañía de Repostería Artesanal de Oakland, Berkeley'],
       // Whole words that fill the 80 characters exactly are all kept.
       [`${bayview} and the Inner East Bay Hills`, `${bayview} and the Inner East`],
     ];
@@ -80,8 +84,14 @@ describe("the business's name, from the description", () => {
       expect(name.startsWith(business), name).toBe(true);
       expect(name.slice(business.length), `${name}: ends on a whole word`).toMatch(/^[^\p{L}\p{N}]/u);
     }
-    // A single word longer than that has no whole word to keep: it names nothing.
+    // Characters are counted as the API counts them, one per code point: with a 🔧, which JavaScript
+    // counts as two, a name of exactly 80 is still whole.
+    const wrench = `${bayview} 🔧 and the East Bay`;
+    expect([[...wrench].length, wrench.length]).toEqual([80, 81]);
+    expect((await started(`${wrench}. I'm Sam.`)).business).toBe(wrench);
+    // A single word longer than that has no whole word to keep: it names nothing, so a later sentence can.
     expect((await started(`${'Bayview'.repeat(12)}.`)).business).toBe('Your business');
+    expect((await started(`${'Bayview'.repeat(12)}. I run Acme Bakery.`)).business).toBe('Acme Bakery');
   });
 
   it('a_phrase_like_is_my_shop_names_the_business', async () => {

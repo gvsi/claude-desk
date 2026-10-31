@@ -198,12 +198,15 @@ function businessNameOf(description: string): string {
 
 /** The most characters a business's name has: the API's reading of a description keeps no more (`SetupStart.business_name`). */
 const NAME_MAX = 80;
+/** What a cut name mustn't end on: punctuation or a dash, or a word that joins it to the words cut off. */
+const HANGING_END = /(?:\s+(?:and|or|y|o)|[\s,;:&/–—-])+$/iu;
 
 /**
  * A name as the API keeps it: one space between its words, and at most `NAME_MAX` characters, counted
  * as the API counts them. The API's reading never gives a longer one, so here a longer one ends on
- * the last whole word that fits, never mid-word, with no comma or "&" left at its end; a first word
- * longer than that leaves no name (null).
+ * the last whole word that fits, never mid-word, with nothing left hanging at its end: no comma or
+ * "&", and no "and" or "or" (or the Spanish "y" or "o"). A first word longer than that leaves no
+ * name (null).
  */
 function nameAsKept(name: string): string | null {
   const spaced = name.split(/\s+/).filter((word) => word !== '').join(' ');
@@ -212,7 +215,7 @@ function nameAsKept(name: string): string | null {
   // The characters that fit and the one after them: a space there means the last word that fits is whole.
   const head = chars.slice(0, NAME_MAX + 1).join('');
   const end = head.lastIndexOf(' ');
-  const kept = end <= 0 ? '' : head.slice(0, end).replace(/[\s,;:&/–—-]+$/u, '');
+  const kept = end <= 0 ? '' : head.slice(0, end).replace(HANGING_END, '');
   return kept === '' ? null : kept;
 }
 
