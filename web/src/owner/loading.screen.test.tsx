@@ -3,7 +3,9 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { cleanup } from 'vitest-browser-react';
 
+import { observeRequests, OWNER_ERROR_COPY, TIMEOUT_MS } from '../api/http.ts';
 import { ROUTES } from '../api/routes.ts';
+import { retryDelayMs } from '../app/poll.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
 import { Skeleton, SkeletonScreen } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
@@ -242,6 +244,42 @@ it('deadline_failure_ends_todays_skeleton', { timeout: 10_000 }, async () => {
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   expect(mockStore.requests.filter(({ key }) => key === 'needsYou')).toHaveLength(2);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('unanswered_needs_you_ends_todays_skeleton_at_the_read_timeout', { timeout: 30_000 }, async () => {
+  // Real request timeouts, with the production retry delay: 10 s + 1 s + 10 s. No answer or
+  // planted failure releases this read; the request layer itself must give up (plan 08c, Task 7).
+  const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  onTestFinished(needsYou.release);
+  const failures: { at: number; kind: string; status: number | null }[] = [];
+  onTestFinished(observeRequests((outcome) => {
+    if (outcome.key === 'needsYou' && !outcome.ok) {
+      failures.push({ at: performance.now(), kind: outcome.error.kind, status: outcome.error.status });
+    }
+  }));
+  const started = performance.now();
+  const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 1 });
+  const giveUpMs = 2 * TIMEOUT_MS.default + retryDelayMs(0);
+  const renderSlackMs = 1_000;
+  await vi.waitFor(() => expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 5_000 });
+  expect(failures).toHaveLength(0);
+  await expect.poll(() => failures.length, {
+    timeout: giveUpMs + renderSlackMs - (performance.now() - started),
+    interval: 50,
+  }).toBe(2);
+  expect(failures.map(({ kind, status }) => ({ kind, status }))).toEqual([
+    { kind: 'network', status: null },
+    { kind: 'network', status: null },
+  ]);
+  expect(failures[1]!.at - started).toBeLessThanOrEqual(giveUpMs + renderSlackMs);
+  expect(needsYou.held()).toBe(2);
+  const needs = screen.getByRole('region', { name: 'Needs you', exact: true });
+  await expect.element(needs.getByRole('alert').getByText(OWNER_ERROR_COPY.network, { exact: true })).toBeVisible();
+  await expect.element(needs.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  expect(performance.now() - started).toBeLessThanOrEqual(giveUpMs + renderSlackMs);
   await expectScreenBasics(document.body, { owner: true });
 });
 
