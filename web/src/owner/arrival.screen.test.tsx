@@ -11,6 +11,7 @@ import type { RenderResult } from 'vitest-browser-react';
 
 import { observeRequests } from '../api/http.ts';
 import { rivera } from '../ds/fixtures/index.ts';
+import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { readLocal } from '../lib/storage.ts';
 import { worker } from '../mocks/browser.ts';
@@ -77,6 +78,8 @@ describe('Arrival', () => {
       await expect.element(dialog.getByText(detail, { exact: true })).toBeVisible();
     }
     expect(document.body.textContent).not.toContain(ENDED);
+    // Checked at rest, once the panel has arrived and the illustration has played.
+    await settled(dialog.element());
     await expectScreenBasics(screen.container, { owner: true });
 
     await startTheDemo(screen);
@@ -100,6 +103,21 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(heldCard(screen)).toBeVisible();
     expect(pages()).toEqual(['preview', 'today']);
+  });
+
+  it('start_the_demo_lets_the_dialog_go_onto_today', async () => {
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+
+    // The dialog leaves only once Today is read ahead, closes while the page is still the
+    // preview, and only then does Today open, already drawn.
+    await startTheDemo(screen);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+    expect(handOff.readsAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1 });
   });
 
   it('returning_owner_opens_today_drawn', async () => {
@@ -395,13 +413,18 @@ describe('Arrival', () => {
 
   it('wrong_passcode_shows_its_copy', async () => {
     const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
-    await startTheDemo(screen, 'wrong');
     const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    await startTheDemo(screen, 'wrong');
     await expect.element(dialog.getByRole('alert')).toHaveTextContent(WRONG_PASSCODE);
     await expect.element(screen.getByLabelText('Passcode')).toHaveAttribute('aria-invalid', 'true');
     await expect.element(dialog).toBeVisible();
     expect(router.state.location.pathname).toBe('/');
     expect(requests('desks')).toEqual([]);
+    // The dialog never starts to leave, even well after an exit would have ended.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(handOff.steps()).toEqual(['open']);
   });
 
   it('rate_limited_shows_its_copy', async () => {
@@ -917,6 +940,7 @@ describe('Today', () => {
     const illustration = document.querySelector('.cd-intro__illustration');
     expect(illustration === null || illustration.getClientRects().length === 0).toBe(true);
     expectNoHorizontalScroll();
+    await settled(introDialog(arrival.screen).element());
     await expectScreenBasics(arrival.screen.container, { owner: true });
   });
 });
@@ -938,6 +962,74 @@ function delayNextRead(path: string, ms: number): void {
       return undefined;
     }),
   );
+}
+
+/**
+ * Every page the browser draws from now until the test ends, in order, a page drawn many times in a
+ * row named once: the preview behind the intro dialog, the owner's loading page or its error, and
+ * Today, which is named for what it lacks until it holds its held request and its briefing.
+ */
+function watchPages(): () => string[] {
+  const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
+  const seen: string[] = [];
+  const pageNow = (): string | null => {
+    const state = document.querySelector('.cd-owner-state');
+    const preview = document.querySelector('.cd-today-preview') !== null;
+    if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
+    if (!preview && document.querySelector('.cd-today') !== null) {
+      if (document.querySelector(held) === null) return 'today without its held request';
+      if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
+      return 'today';
+    }
+    return preview ? 'preview' : null;
+  };
+  const look = () => {
+    const page = pageNow();
+    if (page !== null && seen.at(-1) !== page) seen.push(page);
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => watch.disconnect());
+  return () => [...seen];
+}
+
+/**
+ * The intro dialog's hand-off to Today, from now until the test ends, each step named once: the
+ * dialog open, leaving, closed while still on the page, then gone, with Today or still the preview
+ * under it. Also how many times Today's reads had gone out as it started to leave.
+ */
+function watchTheHandOff(dialog: HTMLDialogElement): {
+  steps: () => string[];
+  readsAsItLeft: () => Record<string, number> | null;
+} {
+  const steps: string[] = [];
+  let readsAsItLeft: Record<string, number> | null = null;
+  const look = () => {
+    let step: string;
+    if (dialog.isConnected) step = !dialog.open ? 'closed' : dialog.classList.contains('cd-intro--leaving') ? 'leaving' : 'open';
+    else step = document.querySelector('.cd-today-preview') === null ? 'today' : 'gone over the preview';
+    if (step === 'leaving' && readsAsItLeft === null) {
+      readsAsItLeft = Object.fromEntries((['desks', 'today', 'needsYou'] as const).map((key) => [key, requests(key).length]));
+    }
+    if (steps.at(-1) !== step) steps.push(step);
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'open'] });
+  onTestFinished(() => watch.disconnect());
+  return { steps: () => [...steps], readsAsItLeft: () => readsAsItLeft };
+}
+
+/** Whether `text` showed anywhere on the page, even for a moment, from now until the test ends. */
+function watchFor(text: string): () => boolean {
+  let seen = false;
+  const observer = new MutationObserver(() => {
+    if (document.body.textContent?.includes(text)) seen = true;
+  });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => observer.disconnect());
+  return () => seen;
 }
 
 /** The next answer to `key`, or its failure: whether it has come yet, and a promise that settles when it does. */
