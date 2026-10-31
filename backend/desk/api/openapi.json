@@ -7751,7 +7751,8 @@
           "why": {
             "type": "string",
             "maxLength": 200,
-            "title": "Why"
+            "title": "Why",
+            "description": "Why this helps, at most 200 characters."
           },
           "connectable": {
             "type": "boolean",
@@ -9075,12 +9076,14 @@
             "items": {
               "type": "string",
               "maxLength": 120,
-              "minLength": 1
+              "minLength": 1,
+              "description": "1 to 120 characters."
             },
             "type": "array",
             "maxItems": 5,
             "minItems": 1,
-            "title": "Questions"
+            "title": "Questions",
+            "description": "1 to 5 intake questions, each 1 to 120 characters."
           }
         },
         "additionalProperties": false,
@@ -9110,17 +9113,20 @@
           "title": {
             "type": "string",
             "maxLength": 60,
-            "title": "Title"
+            "title": "Title",
+            "description": "Title, at most 60 characters."
           },
           "why": {
             "type": "string",
             "maxLength": 200,
-            "title": "Why"
+            "title": "Why",
+            "description": "Why this helps, at most 200 characters."
           },
           "how": {
             "type": "string",
             "maxLength": 300,
-            "title": "How"
+            "title": "How",
+            "description": "How the Desk helps, at most 300 characters."
           },
           "autonomy": {
             "type": "string",
@@ -10940,7 +10946,8 @@
             "type": "string",
             "maxLength": 60,
             "minLength": 1,
-            "title": "Purpose"
+            "title": "Purpose",
+            "description": "Payment purpose, 1 to 60 characters."
           },
           "amount_cents": {
             "anyOf": [
@@ -11932,6 +11939,17 @@
             ],
             "title": "Question"
           },
+          "pending_card": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Card"
+          },
           "messages": {
             "items": {
               "$ref": "#/components/schemas/SetupMessage"
@@ -12730,13 +12748,15 @@
             "type": "string",
             "maxLength": 60,
             "minLength": 1,
-            "title": "Appointment Type"
+            "title": "Appointment Type",
+            "description": "Appointment name, 1 to 60 characters."
           },
           "minutes": {
             "type": "integer",
             "maximum": 60.0,
             "minimum": 15.0,
-            "title": "Minutes"
+            "title": "Minutes",
+            "description": "Appointment length, 15 to 60 minutes."
           }
         },
         "additionalProperties": false,
@@ -12759,7 +12779,8 @@
             "type": "string",
             "maxLength": 300,
             "minLength": 1,
-            "title": "Urgent When"
+            "title": "Urgent When",
+            "description": "When a request is urgent, 1 to 300 characters."
           }
         },
         "additionalProperties": false,

@@ -126,10 +126,12 @@ from desk.api.prompts import (
     MEMORY_TAG,
     OPT_IN_TOPICS,
     OWNER_ANSWER_TAG,
+    OWNER_DECISION_TAG,
     OWNER_DESCRIPTION_TAG,
     PRICE_ITEMS_MAX,
     PRICES_TAG,
     QUESTION_KEYS,
+    QUESTION_ASKED_TAG,
     RULES_TAG,
     SETUP_EXCHANGE_LABELS,
     SETUP_NEXT_HEAD,
@@ -149,6 +151,8 @@ from desk.api.prompts import (
     ConnectorProposal,
     DraftedRules,
     DraftedSituations,
+    DraftOutput,
+    JobDraft,
     JobProposal,
     PlannedOutcome,
     PriceAnswer,
@@ -343,7 +347,8 @@ class Entry(BaseModel):
     """One stored line of an interview: what the owner sees (`role`, `text`), and for code alone, the question a
     Claude line asks, the read a label stands for and what it returned (untrusted text, for later turns), and a
     website the line named or read. A Claude question can carry choices; a card is a Claude entry with empty text.
-    Covered topics record what this entry's turn finished or skipped, for code alone."""
+    Covered topics record what this entry's turn finished or skipped, for code alone. Planned cards and dropped
+    proposal ids are hidden turn metadata; a shown card is a separate copy so its decision can change in place."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -357,6 +362,8 @@ class Entry(BaseModel):
     card: ProposalCard | None = None
     covered: list[QuestionKey] = []
     suggested: SuggestedFacts | None = None
+    planned: list[ProposalCard] = []
+    dropped: list[str] = []
 
 
 @dataclass
@@ -378,8 +385,34 @@ class Interview:
         """The question waiting for an answer: the last one asked, from consent until the questions step ends."""
         if self.step != "questions" or self.consent is None:
             return None
-        asked = [entry.question for entry in self.transcript if entry.question in QUESTION_KEYS]
-        return asked[-1] if asked else None
+        asked = self.latest_ask
+        return asked.question if asked is not None and asked.question in QUESTION_KEYS else None
+
+    @property
+    def latest_ask(self) -> Entry | None:
+        return next((entry for entry in reversed(self.transcript) if entry.question or entry.card), None)
+
+    @property
+    def pending_card(self) -> str | None:
+        asked = self.latest_ask
+        if self.step == "questions" and asked is not None and asked.card and asked.card.state == "proposed":
+            return asked.card.proposal_id
+        return None
+
+    @property
+    def planned(self) -> list[ProposalCard]:
+        shown = {entry.card.proposal_id: entry.card for entry in self.transcript if entry.card}
+        return [shown.get(card.proposal_id, card) for entry in self.transcript for card in entry.planned]
+
+    @property
+    def dropped(self) -> set[str]:
+        return {proposal_id for entry in self.transcript for proposal_id in entry.dropped}
+
+    @property
+    def unshown(self) -> list[ProposalCard]:
+        shown = {entry.card.proposal_id for entry in self.transcript if entry.card}
+        return [card for card in self.planned if card.proposal_id not in shown | self.dropped
+                and card.state == "proposed"]
 
     def tried_websites(self) -> set[str]:
         return {entry.website for entry in self.transcript if entry.read == "website" and entry.website}
@@ -432,7 +465,8 @@ def _stored(interview: Interview) -> dict:
             # Omit only top-level nulls and empty additions; nested card nulls are part of its payload.
             "transcript": [entry.model_dump(mode="json", exclude={name for name, value in entry
                                                                  if value is None or
-                                                                 (name in {"choices", "covered"} and not value)})
+                                                                 (name in {"choices", "covered", "planned", "dropped"}
+                                                                  and not value)})
                            for entry in interview.transcript],
             "draft_cards": [card.model_dump(mode="json") for card in interview.draft_cards],
             "draft_version": interview.draft_version}
@@ -481,9 +515,11 @@ def setup_state(interview: Interview, slug: str, *, cards: bool = False) -> Setu
     description (`start` puts it there), which the owner isn't shown back; the stored transcript, which later turns
     read, keeps it. Card messages appear only when requested by a client that can render them."""
     return SetupState(interview_id=interview.interview_id, desk_id=interview.desk_id, slug=slug, step=interview.step,
-                      consent=interview.consent, question=interview.question,
+                      consent=interview.consent, question=interview.question, pending_card=interview.pending_card,
                       messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=entry.card)
-                                for entry in interview.transcript[1:] if cards or entry.card is None])
+                                for entry in interview.transcript[1:]
+                                if (entry.text or entry.choices or entry.card is not None) and
+                                (cards or entry.card is None)])
 
 
 async def _slug(owner: OwnerCtx, desk_id: str) -> str:
@@ -583,10 +619,31 @@ async def structured(model: ModelClient, record: Record, system: str, messages: 
                      output: type[Output], max_tokens: int) -> Output:
     """The setup route's answer as `output`. An answer that doesn't fit gets one retry, with its errors; then, or
     when the model gives no answer at all, 503 `model_unavailable`."""
-    answer = await ask_model(model, record, system, messages, output, max_tokens=max_tokens)
+    answer = await _ask_drafts(model, record, system, messages, output, max_tokens=max_tokens)
     if answer is None:
         raise ApiProblem(503, "model_unavailable")
     return answer
+
+
+async def _ask_drafts(model: ModelClient, record: Record, system: str, messages: list[dict],
+                      output: type[Output], **kwargs) -> Output | None:
+    """Retry dropped proposals once; a partial second answer remains usable, including on an unavailable retry."""
+    last = None
+
+    def check(parsed: Output) -> str | None:
+        nonlocal last
+        first = last is None
+        last = parsed
+        errors = parsed._draft_errors if isinstance(parsed, DraftOutput) else []
+        return "\n".join(errors) if first and errors else None
+
+    try:
+        answer = await ask_model(model, record, system, messages, output, check=check, **kwargs)
+        return answer if answer is not None else last
+    except ApiProblem:
+        if last is not None:
+            return last
+        raise
 
 
 # Setup tools -------------------------------------------------------------------------------------------------------
@@ -887,7 +944,7 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
                          entries: list[Entry]) -> None:
     """Append the consultant opening and its first fact question; the caller owns persistence."""
     try:
-        answer = await ask_model(model, recorder(engine, owner), SETUP_UNDERSTAND_SYSTEM,
+        answer = await _ask_drafts(model, recorder(engine, owner), SETUP_UNDERSTAND_SYSTEM,
                                  [_understanding_message(interview, entries)], SetupUnderstanding,
                                  max_tokens=UNDERSTAND_MAX_TOKENS, effort="medium", timeout_s=UNDERSTAND_TIMEOUT_S)
     except ApiProblem as failed:
@@ -898,16 +955,9 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
         logger.warning("the setup understanding was unavailable; asking the first question")
         interview.transcript.append(_ask(interview, "what_you_do"))
         return
-    interview.transcript.append(Entry(role="claude", text=answer.reply.strip(), suggested=answer.suggested))
-    for draft in answer.jobs:
-        fields = draft.model_dump(mode="json")
-        if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
-            fields["config"]["amount_cents"] = None
-        if not interview.business_tools_enabled:
-            fields["config"] = None
-        job = JobProposal(**fields, can_do_today=CAPABILITIES[draft.job])
-        interview.transcript.append(Entry(role="claude", text="", card=ProposalCard(
-            proposal_id=new_proposal_id(), kind="job", state="proposed", job=job, connector=None)))
+    opening = Entry(role="claude", text=answer.reply.strip(), suggested=answer.suggested)
+    interview.transcript.append(opening)
+    opening.planned = [_planned_job(interview, draft) for draft in answer.jobs]
     seen = set()
     for draft in answer.connectors:
         if draft.app in seen:
@@ -915,8 +965,8 @@ async def _after_consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClien
         seen.add(draft.app)
         connector = ConnectorProposal(app=draft.app, label=CONNECTOR_LABELS[draft.app], why=draft.why,
                                       connectable=draft.app == "stripe")
-        interview.transcript.append(Entry(role="claude", text="", card=ProposalCard(
-            proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None, connector=connector)))
+        opening.planned.append(ProposalCard(
+            proposal_id=new_proposal_id(), kind="connector", state="proposed", job=None, connector=connector))
     interview.transcript.append(Entry(role="claude", text=answer.question.strip() or
                                      question_text(answer.next_topic, interview.business_type),
                                      question=answer.next_topic, choices=_normalize_choices(answer.choices)))
@@ -948,20 +998,21 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
 
 
 def _setup_plan(interview: Interview) -> dict:
-    plan = {"understanding": next((entry.text for entry in interview.transcript if entry.suggested is not None), ""),
-            "jobs": [], "connectors": []}
-    for entry in interview.transcript:
-        card = entry.card
-        if card is not None and card.job is not None:
-            plan["jobs"].append({**card.job.model_dump(include={"title", "why", "how", "autonomy"}),
-                                 "state": card.state})
-        elif card is not None and card.connector is not None:
-            plan["connectors"].append({**card.connector.model_dump(include={"label", "why"}), "state": card.state})
-    return plan
+    shown = {entry.card.proposal_id for entry in interview.transcript if entry.card}
+    items = []
+    for card in interview.planned:
+        status = (card.state if card.state != "proposed" else
+                  "dropped" if card.proposal_id in interview.dropped else
+                  "shown" if card.proposal_id in shown else "planned")
+        payload = (card.job.model_dump(include={"title", "why", "how", "autonomy"}) if card.job else
+                   card.connector.model_dump(include={"app", "label", "why"}))
+        items.append({"id": card.proposal_id, "kind": card.kind, **payload, "status": status})
+    return {"understanding": next((entry.text for entry in interview.transcript if entry.suggested is not None), ""),
+            "items": items}
 
 
 def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
-    """The answer turn's one message: the fixed head, then everything untrusted inside its wrapper. A limit question's
+    """The answer turn's one message: a fact's actual question is wrapped; a limit keeps its fixed head. A limit
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
     even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
@@ -972,14 +1023,17 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
     so_far = interview.answers.model_dump_json(exclude_defaults=True)
     if limit_turn:
         so_far = interview.answers.model_dump_json(include=set(LIMIT_QUESTIONS), exclude_defaults=True)
-    parts = [setup_turn_head(interview.business_type, key), wrap(ANSWERS_SO_FAR_TAG, so_far)]
+    asked = next((entry.text for entry in reversed(interview.transcript) if entry.question == key), "")
+    parts = ([setup_turn_head(interview.business_type, key)] if limit_turn else
+             [SETUP_UNDERSTAND_HEAD.format(business_type=interview.business_type), wrap(QUESTION_ASKED_TAG, asked)])
+    parts.append(wrap(ANSWERS_SO_FAR_TAG, so_far))
     reads = [] if limit_turn else interview.transcript
     for entry in reads:
         if entry.read == "memory" and entry.content:
             parts.append(wrap(MEMORY_TAG, entry.content))
         elif entry.read == "website" and entry.content:
             parts.append(wrap_website(entry.content, entry.website or ""))
-    if not limit_turn and interview.suggested is not None:
+    if not limit_turn:
         parts.append(wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)))
     start = next((index + 1 for index in range(len(interview.transcript) - 1, -1, -1)
                   if interview.transcript[index].question == key), len(interview.transcript))
@@ -1087,40 +1141,132 @@ def _names_a_number(text: str) -> bool:
     return numeric or _NUMBER_WORDS.search(text) is not None or _NUMBER_WORDS.search(words) is not None
 
 
-def _next_topic(interview: Interview, proposed: str) -> QuestionKey | None:
-    """Honor an uncovered topic; fallback never opts the owner into money."""
-    if proposed in QUESTION_KEYS and proposed not in interview.covered:
-        return cast(QuestionKey, proposed)
-    return next((key for key in QUESTION_KEYS if key not in interview.covered and key not in OPT_IN_TOPICS), None)
+def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard:
+    fields = draft.model_dump(mode="json")
+    if fields["config"] is not None and fields["config"]["block"] == "purpose_payment":
+        fields["config"]["amount_cents"] = None
+    if not interview.business_tools_enabled:
+        fields["config"] = None
+    return ProposalCard(proposal_id=new_proposal_id(), kind="job", state="proposed",
+                        job=JobProposal(**fields, can_do_today=CAPABILITIES[draft.job]), connector=None)
+
+
+def _next_ask(interview: Interview, source, available: list[ProposalCard]) -> QuestionKey | ProposalCard | None:
+    """Honor one fitting ask, otherwise ordinary topics first, then the hidden plan in order."""
+    unshown = [card for card in available if card.proposal_id not in interview.dropped]
+    proposed = source.next if source is not None else None
+    if proposed is not None:
+        if proposed.kind == "topic" and proposed.topic not in interview.covered:
+            return proposed.topic
+        if proposed.kind == "job":
+            found = next((card for card in unshown if card.job and card.proposal_id == proposed.job), None)
+            if found is not None:
+                return found
+        if proposed.kind == "connector":
+            found = next((card for card in unshown if card.connector and card.connector.app == proposed.connector), None)
+            if found is not None:
+                return found
+    return next((key for key in QUESTION_KEYS if key not in interview.covered and key not in OPT_IN_TOPICS),
+                unshown[0] if unshown else None)
 
 
 async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
-                     interview: Interview) -> SetupNextStep | None:
-    """Plan after a limit without giving the planner any field that can set a limit."""
-    message = _user("\n\n".join([
+                     interview: Interview, decision: str | None = None) -> SetupNextStep | None:
+    """Plan after a limit or card decision without any field that can set a limit."""
+    parts = [
         SETUP_NEXT_HEAD.format(business_type=interview.business_type,
                                covered=", ".join(key for key in QUESTION_KEYS if key in interview.covered),
                                uncovered=", ".join(key for key in QUESTION_KEYS if key not in interview.covered)),
         wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json()),
         wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)),
-    ]))
+    ]
+    if decision is not None:
+        parts.append(wrap(OWNER_DECISION_TAG, decision))
     try:
-        answer = await ask_model(model, recorder(engine, owner), SETUP_NEXT_SYSTEM, [message], SetupNextStep,
-                                 max_tokens=TURN_MAX_TOKENS, effort="low")
+        answer = await _ask_drafts(model, recorder(engine, owner), SETUP_NEXT_SYSTEM, [_user("\n\n".join(parts))],
+                                   SetupNextStep, max_tokens=TURN_MAX_TOKENS, effort="low")
     except ApiProblem:
         answer = None
     if answer is None:
-        logger.warning("the setup next step was unavailable; using uncovered topics")
+        logger.warning("the setup next step was unavailable; using uncovered topics and planned items")
     return answer
 
 
+async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
+                   source, reply: Entry, *, closing_call: bool = False) -> None:
+    """Append exactly one ask or close. Metadata lives on this turn's Claude entry, never on a card."""
+    if source is not None:
+        interview.cover(source.skip)
+    available = _record_plan(interview, source, reply)
+    asked = _next_ask(interview, source, available)
+    if isinstance(asked, str):
+        if asked in LIMIT_CHOICES and _names_a_number(reply.text):
+            reply.text = ""  # retain coverage and hidden plan metadata, omit the empty message
+        fitting = source is not None and source.next.kind == "topic" and source.next.topic == asked
+        interview.transcript.append(_ask(interview, asked) if asked in LIMIT_CHOICES or not fitting else
+                                    Entry(role="claude", text=source.question.strip() or
+                                          question_text(asked, interview.business_type), question=asked,
+                                          choices=_normalize_choices(source.choices)))
+    elif isinstance(asked, ProposalCard):
+        fitting = source is not None and (
+            source.next.kind == "job" and source.next.job == asked.proposal_id or
+            source.next.kind == "connector" and asked.connector and source.next.connector == asked.connector.app)
+        if fitting and source.question.strip():
+            interview.transcript.append(Entry(role="claude", text=source.question.strip()))
+        interview.transcript.append(Entry(role="claude", text="", card=asked.model_copy(deep=True)))
+    else:
+        # An added job becomes eligible only on a later planning call, never on the turn that minted it.
+        if interview.unshown:
+            following = None if closing_call else await _next_step(owner, engine, model, interview)
+            entry = Entry(role="claude", text=following.reply.strip() if following else "")
+            interview.transcript.append(entry)
+            await _advance(owner, engine, model, interview, following, entry, closing_call=True)
+            return
+        plan = source.plan.strip() if source is not None and source.next.kind == "done" else ""
+        if not plan and not closing_call:
+            following = await _next_step(owner, engine, model, interview)
+            entry = Entry(role="claude", text=following.reply.strip() if following else "")
+            interview.transcript.append(entry)
+            await _advance(owner, engine, model, interview, following, entry, closing_call=True)
+            return
+        if plan:
+            interview.transcript.append(Entry(role="claude", text=plan))
+        interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
+        finish(interview)
+
+
+def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCard]:
+    """Record additions and valid drops even on a follow-up; return only items available before this turn."""
+    available = interview.unshown
+    if source is not None:
+        available_ids = {card.proposal_id for card in available}
+        reply.dropped = list(dict.fromkeys(proposal_id for proposal_id in source.drop if proposal_id in available_ids))
+        reply.planned = [_planned_job(interview, draft) for draft in source.add_jobs]
+    return available
+
+
+async def card_turn(owner, engine, model, interview: Interview, proposal_id: str) -> None:
+    """Continue an in-place card decision. The guarded route owns saving and after_finish."""
+    card = next((entry.card for entry in reversed(interview.transcript)
+                 if entry.card and entry.card.proposal_id == proposal_id), None)
+    if card is None or card.state == "proposed":
+        return
+    payload = card.job.model_dump(mode="json") if card.job else card.connector.model_dump(mode="json")
+    decision = json.dumps({"proposal_id": proposal_id, "decision": card.state, **payload}, ensure_ascii=False)
+    following = await _next_step(owner, engine, model, interview, decision)
+    reply = Entry(role="claude", text=following.reply.strip() if following else "")
+    interview.transcript.append(reply)
+    await _advance(owner, engine, model, interview, following, reply, closing_call=following is None)
+
+
 async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, question: QuestionKey,
-                 text: str, *, cards: bool = False) -> SetupState:
+                 text: str, *, cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
     """One answer turn on the question waiting (module docstring); 409 `conflict`, before any model call, when none
     is, the answer names another (an answer sent twice finds the next question waiting) or one is running already.
     The model call, the website read and the kernel's rename run with no lock held."""
     interview = await _read(engine, owner, interview_id)
     desk_id = owner.desk(interview.desk_id)
+    interview.business_tools_enabled = business_tools_enabled
     key = interview.question
     if key is None or key != question:
         raise ApiProblem(409, "conflict")
@@ -1152,46 +1298,19 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         interview.transcript += entries
         if turn.step_done:
             interview.cover([key])
-            limit_turn = key in LIMIT_CHOICES
-            following = None
-            if not limit_turn:
-                interview.cover(turn.skip)
-                next_key = _next_topic(interview, turn.next_topic)
-            else:
-                following = await _next_step(owner, engine, model, interview)
-                if following is not None:
-                    interview.cover(following.skip)
-                # Once all ordinary topics are covered, a planning call is only writing the closing plan.
-                next_key = _next_topic(interview, following.next_topic if following is not None else "done") \
-                    if _next_topic(interview, "done") is not None else None
-            if next_key is not None:
-                source = following if limit_turn else turn
-                # Fallback questions always use code's wording, even if the unusable suggestion had wording.
-                if next_key in LIMIT_CHOICES or source is None or source.next_topic != next_key:
-                    asked = _ask(interview, next_key)
-                else:
-                    asked = Entry(role="claude", text=source.question.strip() or
-                                  question_text(next_key, interview.business_type), question=next_key,
-                                  choices=_normalize_choices(source.choices))
-                if not limit_turn and next_key in LIMIT_CHOICES and _names_a_number(reply.text):
-                    # Keep coverage and remove this exact entry, even if an earlier reply has identical text.
-                    said.covered.extend(reply.covered)
-                    interview.transcript = [entry for entry in interview.transcript if entry is not reply]
-                interview.transcript.append(asked)
-            else:
-                plan = reply.text if not limit_turn and turn.next_topic == "done" else ""
-                if not plan:
-                    if following is None and not limit_turn:
-                        following = await _next_step(owner, engine, model, interview)
-                    plan = following.plan.strip() if following is not None else ""
-                # A fact turn's closing reply is already the last entry unless it also read a website.
-                if plan and (plan != reply.text or interview.transcript[-1] is not reply):
-                    if not limit_turn and plan == reply.text:
-                        said.covered.extend(reply.covered)
-                        interview.transcript = [entry for entry in interview.transcript if entry is not reply]
-                    interview.transcript.append(Entry(role="claude", text=plan))
-                interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
-                finish(interview)
+            following = await _next_step(owner, engine, model, interview) if key in LIMIT_CHOICES else turn
+            next_reply = reply
+            if key in LIMIT_CHOICES:
+                next_reply = Entry(role="claude", text=following.reply.strip() if following else "")
+                interview.transcript.append(next_reply)
+            elif not any(entry is reply for entry in interview.transcript):
+                interview.transcript.append(reply)
+            await _advance(owner, engine, model, interview, following, next_reply,
+                           closing_call=key in LIMIT_CHOICES)
+        elif key not in LIMIT_CHOICES:
+            if not any(entry is reply for entry in interview.transcript):
+                interview.transcript.append(reply)
+            _record_plan(interview, turn, reply)
         await _commit(engine, owner, interview, seen)
         if interview.step == "tools":
             await after_finish(owner, interview)

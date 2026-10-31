@@ -247,6 +247,9 @@ export interface ConfirmRulesIn {
 export interface ConnectorProposal {
   app: "google_calendar" | "gmail" | "google_drive" | "quickbooks" | "stripe" | "square" | "calendly";
   label: string;
+  /**
+   * Why this helps, at most 200 characters.
+   */
   why: string;
   connectable: boolean;
 }
@@ -360,8 +363,12 @@ export interface HealthOut {
 export interface IntakeConfig {
   block: "intake";
   /**
+   * 1 to 5 intake questions, each 1 to 120 characters.
+   *
    * @minItems 1
    * @maxItems 5
+   *
+   * Items: 1 to 120 characters.
    */
   questions:
     | [string]
@@ -372,8 +379,17 @@ export interface IntakeConfig {
 }
 export interface JobProposal {
   job: "answer" | "intake" | "schedule" | "price" | "documents" | "status" | "payment" | "urgent";
+  /**
+   * Title, at most 60 characters.
+   */
   title: string;
+  /**
+   * Why this helps, at most 200 characters.
+   */
   why: string;
+  /**
+   * How the Desk helps, at most 300 characters.
+   */
   how: string;
   autonomy: "auto" | "ask";
   can_do_today: boolean;
@@ -381,16 +397,28 @@ export interface JobProposal {
 }
 export interface TypedBookingConfig {
   block: "typed_booking";
+  /**
+   * Appointment name, 1 to 60 characters.
+   */
   appointment_type: string;
+  /**
+   * Appointment length, 15 to 60 minutes.
+   */
   minutes: number;
 }
 export interface PurposePaymentConfig {
   block: "purpose_payment";
+  /**
+   * Payment purpose, 1 to 60 characters.
+   */
   purpose: string;
   amount_cents: number | null;
 }
 export interface UrgentConfig {
   block: "urgent";
+  /**
+   * When a request is urgent, 1 to 300 characters.
+   */
   urgent_when: string;
 }
 /**
@@ -756,6 +784,7 @@ export interface SetupState {
         | "contact_and_after_hours"
       )
     | null;
+  pending_card?: string | null;
   messages: SetupMessage[];
 }
 /**

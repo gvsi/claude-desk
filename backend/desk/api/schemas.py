@@ -613,6 +613,7 @@ class SetupState(BaseModel):
     step: SetupStep
     consent: bool | None
     question: QuestionKey | None
+    pending_card: str | None = None
     messages: list[SetupMessage]
 
 
