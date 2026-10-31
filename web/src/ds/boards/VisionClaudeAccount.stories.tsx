@@ -90,8 +90,11 @@ export const Board: Story = {
     // The invoice is a document card, only for her, with its download.
     const invoice = within(log).getByRole('article', { name: 'Document, only for you' });
     await expect(invoice).toHaveTextContent('Invoice, drain clearing');
-    const download = within(invoice).getByRole('link', { name: 'Download' });
+    // A vision page makes no requests: Download is drawn as the board draws it, a button going nowhere.
+    const download = within(invoice).getByRole('button', { name: 'Download' });
     expectComputed(download, SPEC.primary);
+    await expect(canvasElement.querySelectorAll('a[href*="/api/"], [href*="/api/"]')).toHaveLength(0);
+    await expect(canvasElement.innerHTML).not.toContain('/api/d/');
 
     // The about column: hours, the service area and the phone, as the board draws them.
     const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });

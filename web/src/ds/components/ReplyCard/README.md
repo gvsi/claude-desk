@@ -42,6 +42,12 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 
 - Every card about money moving always says "Test payment, no money moves" / "Pago de prueba, no se mueve dinero". `MONEY_TEMPLATES` lists them: `payment_link`, `payment_confirmed`, `charge_confirmed` and `refund_issued`. `chrome.test.ts` fails if one of them lacks the note in either language, or if a template outside the list carries it, so a new money card goes in the list.
 - `payment_link` ends with a secondary "Open payment page" button. `document_link` ends with a primary "Download" button. Both go to the proxied path, and the path is never shown as text.
+
+## A vision page's Download (`inertDownload`)
+
+- Vision pages only. A vision page makes no requests, so with `inertDownload` a `document_link` card draws its "Download" exactly as a real one does, as a plain `<button type="button">` with no destination. It ignores any `href` the block carries and needs none, so a vision page's data holds no `/api/d/` path. On the Claude account vision page (N-R2-Vision-ClaudeAccount) it draws Dana's invoice.
+- Never on a real card. Without it, a document card draws Download only as a link to the kernel's `/api/d/{token}` path (`cardView`), and a card without that path draws none (`DocumentWithoutItsPath`, `DocumentWithAnotherPath`). The link guard is unchanged.
+- It changes no other template: a payment link, for one, keeps its own rules.
 - `contact` lines stay text. They never become `tel:` or `mailto:` links.
 - `owner_said`, `policy` and `contact` carry the owner's own words verbatim, so their fields are marked `data-copy="user"`.
 - `booking_confirmed` and `payment_confirmed` draw a sage check once beside their label, at `motion-base`. Under reduced motion it is drawn from the start. Every other template has a 16 px line icon.
@@ -68,5 +74,6 @@ Card data carries no separate amount or date. The kernel renders money and times
 | `block` | `CardBlock` | Required. Rendered as given. |
 | `language` | `'en' \| 'es'` | Required. The chrome's language. |
 | `ownerName` | `string` | Required. The owner's display name. |
+| `inertDownload` | `boolean` | Vision pages only: a document card's Download is a button going nowhere. `false` by default. |
 
 The card is a `Card` at most 520 px wide with 16 px padding, an `article` named by its label. Label in secondary `caption`, headline in `section`, details in secondary `meta`, options in `body`, note in secondary `caption`. Also exported: `cardView`, `CARD_CHROME`, `MONEY_TEMPLATES`, `LINK_CANCELLED_CHROME` and the `CardView` and `CardChrome` types.

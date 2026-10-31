@@ -341,13 +341,12 @@ export function ClaudeAccountChat() {
             <MarginReceipt key="released" source={decided('executed')} plain={t.releasedReceipt} ledgerSeq={44} />,
           ]}
         >
+          {/* A vision page makes no requests: the invoice card carries no link, and its Download goes nowhere. */}
           <ClaudeMessage
-            blocks={[
-              proseBlock(t.sent),
-              cardBlock('document_link', { fact_id: 'document_link:DL-501', title: 'Invoice, drain clearing', href: '/api/d/9fK2mQ' }),
-            ]}
+            blocks={[proseBlock(t.sent), cardBlock('document_link', { fact_id: 'document_link:DL-501', title: 'Invoice, drain clearing' })]}
             language="en"
             ownerName={owner}
+            inertDownload
           />
         </TranscriptRow>
       </Transcript>
