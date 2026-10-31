@@ -353,6 +353,11 @@ def test_backend_job_fails_on_two_alembic_heads():
 
 GATE = ["uv", "run", "--project", "tools", "python", "-m", "desk_tools.gate"]
 MIGRATIONS = [SETTINGS, ONE_HEAD, MIGRATE, "make db-roles"]
+TIER2_BASE_SETUP = (
+    'if [ -z "$RESULTS_BASE" ]; then\n'
+    '  RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"\n'
+    'fi'
+)
 
 # What each check runs after its setup, as Plan 06a Task 2's job table says: a string is a plain
 # command, a list is the gate's arguments.
@@ -408,6 +413,9 @@ def checks(job: dict) -> list[str | list[str]]:
             continue
         run = step["run"].strip()
         if "desk_tools.gate" in run:
+            if step.get("name") == "Check the tier 2 results":
+                assert run.startswith(TIER2_BASE_SETUP + "\n")
+                run = run[len(TIER2_BASE_SETUP) + 1 :]
             # One gate call per step, nothing else, so its exit code is the step's.
             words = shlex.split(run)
             assert words[: len(GATE)] == GATE, run
@@ -425,15 +433,15 @@ def test_gated_jobs_go_through_the_gate():
     assert tier2_gate[tier2_gate.index("--") + 1 :] == ["make", "evals-results-check", "BASE=$RESULTS_BASE"]
     assert PROOFS_GATE[PROOFS_GATE.index("--") + 1 :] == ["make", "check-presets"]
     # Tier 2 checks pull requests against their event's base commit, including stacked PRs;
-    # pushes and manual runs use the previous commit.
+    # pushes and manual runs check the head against the root commit, even after cancelled runs.
     tier2 = job_named("tier 2 results")
     assert "if" not in tier2
     assert tier2["steps"][0]["with"]["fetch-depth"] == 0
     [results] = [step for step in tier2["steps"] if step.get("name") == "Check the tier 2 results"]
     assert results["env"] == {
-        "RESULTS_BASE": "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD~1' }}",
+        "RESULTS_BASE": "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}",
     }
-    assert results["run"].endswith('make evals-results-check BASE="$RESULTS_BASE"')
+    assert results["run"].rstrip().endswith('make evals-results-check BASE="$RESULTS_BASE"')
     # The secret scan reads the whole history.
     assert job_named("secret scan")["steps"][0]["with"]["fetch-depth"] == 0
 
