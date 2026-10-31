@@ -43,6 +43,13 @@ export interface IntroDialogProps {
   busy?: boolean;
   /** Why the last try failed, shown as a line under the field. */
   error?: IntroErrorCode;
+  /**
+   * The passcode worked and the next page is ready: the dialog leaves, still starting the demo, and
+   * closes. Once set, it stays set.
+   */
+  leaving?: boolean;
+  /** Called once, when the dialog has closed after `leaving`. */
+  onClosed?: () => void;
 }
 
 /** What the status line says while the demo starts; the button itself only shows the busy spinner. */
@@ -68,6 +75,13 @@ function errorLine(code: IntroErrorCode): string {
   return Object.hasOwn(INTRO_ERROR_COPY, code) ? INTRO_ERROR_COPY[code] : INTRO_ERROR_COPY.unreachable;
 }
 
+/** A CSS time as the browser computes it, in seconds or milliseconds, as milliseconds; 0 when there is none. */
+function millis(time: string): number {
+  const value = Number.parseFloat(time);
+  if (!Number.isFinite(value)) return 0;
+  return time.trim().endsWith('ms') ? value : value * 1000;
+}
+
 /** The browser asks before it closes a modal dialog (a `cancel` event); the answer is always no. */
 function keepOpen(event: SyntheticEvent): void {
   event.preventDefault();
@@ -78,22 +92,39 @@ function keepOpen(event: SyntheticEvent): void {
  * lists what to try and takes the demo passcode, beside a clay illustration of a booked visit.
  * It can't be dismissed: the only way on is the passcode.
  */
-export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, busy = false, error }: IntroDialogProps) {
+export function IntroDialog({
+  title,
+  intro,
+  thingsToTry,
+  submitLabel,
+  onSubmit,
+  busy = false,
+  error,
+  leaving = false,
+  onClosed,
+}: IntroDialogProps) {
   const id = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const fieldRef = useRef<HTMLInputElement>(null);
   // Set from a submit until its promise settles, so a second Enter before `busy` arrives sends nothing.
   const sending = useRef(false);
+  // Set once the dialog has closed after leaving, so `onClosed` is called once.
+  const closed = useRef(false);
+  const onClosedRef = useRef(onClosed);
   const [passcode, setPasscode] = useState('');
+  // Set once the illustration's story has played to its end, so it never plays again.
+  const [played, setPlayed] = useState(false);
 
+  // While it leaves, the demo is still starting: the spinner stays and nothing more is sent.
+  const starting = busy || leaving;
   const code = passcode.trim();
-  const canSubmit = code !== '' && !busy;
+  const canSubmit = code !== '' && !starting;
   // Empty: truly disabled. Busy: the Button stays focusable and inert (aria-disabled), so a person
   // who pressed it keeps their place while the demo starts.
-  const empty = code === '' && !busy;
+  const empty = code === '' && !starting;
   // No error while a try is out, so the next failure is a new alert and is announced, even when the
   // page leaves `error` set to the same code throughout.
-  const shownError = busy ? undefined : error;
+  const shownError = starting ? undefined : error;
 
   const titleId = `${id}-title`;
   const introId = `${id}-intro`;
@@ -109,6 +140,41 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
     if (!dialog.open) dialog.showModal();
     fieldRef.current?.focus();
   }, []);
+
+  // Keep this before the leaving effect: with no exit to run, that effect closes the dialog at once,
+  // and must call the `onClosed` of the render that set `leaving`, not an earlier one.
+  useLayoutEffect(() => {
+    onClosedRef.current = onClosed;
+  });
+
+  // Leaving: the dialog closes when its exit animation ends. With no exit to run (reduced motion)
+  // it closes at once, and if the animation's end never reaches it, a timer closes it no later than
+  // the exit's length plus motion-instant, so it can never stay open over the page.
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!leaving || !dialog) return;
+    const close = () => {
+      if (closed.current) return;
+      closed.current = true;
+      dialog.close();
+      onClosedRef.current?.();
+    };
+    const style = getComputedStyle(dialog);
+    const lasts = millis(style.animationDuration) + millis(style.animationDelay);
+    if (style.animationName === 'none' || lasts <= 0) {
+      close();
+      return;
+    }
+    const onEnd = (event: AnimationEvent) => {
+      if (event.target === dialog) close();
+    };
+    dialog.addEventListener('animationend', onEnd);
+    const fallback = window.setTimeout(close, lasts + millis(style.getPropertyValue('--motion-instant')));
+    return () => {
+      dialog.removeEventListener('animationend', onEnd);
+      window.clearTimeout(fallback);
+    };
+  }, [leaving]);
 
   // When a try fails, the field takes focus with its text selected, ready to type over.
   useEffect(() => {
@@ -155,7 +221,7 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
   return (
     <dialog
       ref={dialogRef}
-      className="cd-intro"
+      className={leaving ? 'cd-intro cd-intro--leaving' : 'cd-intro'}
       aria-labelledby={titleId}
       aria-describedby={introId}
       onCancel={keepOpen}
@@ -194,7 +260,7 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
           </div>
 
           <div className="cd-intro__foot">
-            <form className="cd-intro__form" aria-busy={busy || undefined} noValidate onSubmit={submit}>
+            <form className="cd-intro__form" aria-busy={starting || undefined} noValidate onSubmit={submit}>
               <label htmlFor={fieldId} className="cd-intro__label cd-type-meta">
                 Passcode
               </label>
@@ -210,13 +276,13 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
                   aria-describedby={shownError !== undefined ? errorId : undefined}
                   onChange={(event) => setPasscode(event.target.value)}
                 />
-                <Button variant="primary" size="main" type="submit" disabled={empty} busy={busy}>
+                <Button variant="primary" size="main" type="submit" disabled={empty} busy={starting}>
                   {submitLabel}
                 </Button>
               </div>
               {/* Always on the page and empty until the demo starts, so the change is announced. */}
               <p className="cd-sr-only" role="status">
-                {busy ? STARTING_LINE : null}
+                {starting ? STARTING_LINE : null}
               </p>
               {shownError !== undefined ? (
                 <div id={errorId}>
@@ -228,25 +294,32 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
           </div>
         </div>
 
-        <Illustration />
+        <Illustration played={played} onPlayed={() => setPlayed(true)} />
       </div>
     </dialog>
   );
+}
+
+interface IllustrationProps {
+  /** Its story has played to the end: it rests there and never plays again. */
+  played: boolean;
+  /** Called as the story ends, when the last receipt has ticked in. */
+  onPlayed: () => void;
 }
 
 /**
  * The clay half: Dana asks for a visit on Rivera's public page, and Claude books it within Maria's
  * rules. Decoration only, so it is `aria-hidden` and holds nothing focusable.
  */
-function Illustration() {
+function Illustration({ played, onPlayed }: IllustrationProps) {
   return (
-    <div className="cd-intro__illustration" aria-hidden="true">
+    <div className={played ? 'cd-intro__illustration cd-intro__illustration--played' : 'cd-intro__illustration'} aria-hidden="true">
       <svg className="cd-intro__arcs" width="420" height="600" viewBox="0 0 420 600" fill="none" focusable="false">
         <path d="M-60 150 C 80 60, 260 40, 480 -40" />
         <path d="M-40 640 C 120 520, 300 520, 470 430" />
       </svg>
 
-      <div className="cd-intro__card">
+      <div className="cd-intro__card cd-intro__card--asked">
         <span className="cd-intro__avatar">DW</span>
         <div className="cd-intro__card-body">
           <p className="cd-intro__who cd-type-body">
@@ -256,7 +329,7 @@ function Illustration() {
         </div>
       </div>
 
-      <div className="cd-intro__card">
+      <div className="cd-intro__card cd-intro__card--answered">
         {/* The mark alone in an avatar's place: no tile and no frame, in its dark ink on the light card. */}
         <Mark size={32} ground="light" />
         <div className="cd-intro__card-body cd-intro__card-body--reply">
@@ -278,7 +351,13 @@ function Illustration() {
               <span className="cd-intro__dot" />
               Reply checked against Maria Rivera’s rules
             </p>
-            <p className="cd-intro__receipt">
+            {/* The story ends as this last receipt ticks in. */}
+            <p
+              className="cd-intro__receipt"
+              onAnimationEnd={(event) => {
+                if (event.target === event.currentTarget) onPlayed();
+              }}
+            >
               <span className="cd-intro__dot" />
               Booked on Maria Rivera’s calendar
             </p>

@@ -114,7 +114,16 @@ export const RULES_UNAVAILABLE_COPY =
 
 const KERNEL_CODES: ReadonlySet<string> = new Set(KERNEL_ERROR_CODES);
 
-/** The owner's line for any failure: rules that can't be checked, a kernel code, else the kind. */
+/**
+ * The owner's line for any failure: rules that can't be checked, a kernel code, else the kind.
+ *
+ * `RULES_UNAVAILABLE_COPY` says the change wasn't applied, which holds for a drafting route (nothing
+ * applies until a confirm), whether the API answered 409 or the request layer gave up a minute in,
+ * and for the API's own 409 on any route. On a route that applies a change (`confirmRules`,
+ * `setupConfirm`, `goLive`, or `confirmTool` turning tools off), an uncertain failure
+ * (`isUncertain`, the give-up included) may still apply: the screen reads where things stand first
+ * and says so in its own words, never with this line.
+ */
 export function ownerErrorCopy(err: unknown): string {
   if (!(err instanceof ApiError)) return OWNER_ERROR_COPY.unavailable;
   if (err.code === 'rules_cannot_be_checked') return RULES_UNAVAILABLE_COPY;

@@ -3,6 +3,7 @@ import { expect, fn, within } from 'storybook/test';
 
 import { IntroDialog } from '../components/IntroDialog/IntroDialog.tsx';
 import { expectComputed } from '../test/expectComputed.ts';
+import { settled } from '../test/settled.ts';
 import { TodayNeedsYou } from './parts.tsx';
 import { SPEC, expectFooter, one } from './spec.ts';
 
@@ -65,7 +66,9 @@ export const Board: Story = {
     // (owner, 2026-10-30), where the board draws a "Demo" pill.
     await expect(one(dialog, '.cd-intro__brand').textContent).toBe('Claude DeskPreview');
 
-    // At this width the illustration fills the dialog's right side, 400 px of its 880.
+    // At this width the illustration fills the dialog's right side, 400 px of its 880, once the
+    // panel has arrived and the illustration has played.
+    await settled(dialog);
     const illustration = one(dialog, '.cd-intro__illustration');
     const panel = one(dialog, '.cd-intro__panel').getBoundingClientRect();
     await expect(illustration).toBeVisible();

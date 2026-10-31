@@ -8,6 +8,13 @@ export interface SignedLimitPanelProps {
   perCharge: string;
   /** The most its charges can add up to, in the page's words: "$100". The mandate's `total_cents`. */
   total: string;
+  /**
+   * What the agent has used of the limit, in the screen's words: "$20". It is the kernel's committed
+   * amount for the mandate, which reaches the owner's screen through an owner-view field; a screen
+   * never adds it up from the conversation's text. The screen formats it, as it does the other
+   * figures; without it, no Used term.
+   */
+  used?: string;
   /** How long the limit lasts, in the page's words: "One hour". The mandate's lifetime. */
   duration: string;
   /** Whose wallet signed it, in the page's words: "Signed limit from Alex Kim’s demo wallet". */
@@ -18,16 +25,18 @@ export interface SignedLimitPanelProps {
 
 /**
  * A visiting agent's signed spending limit: what one charge can be, what its charges can add up to,
- * how long the limit lasts, and whose wallet signed it. Every value is the page's own static words
- * for the signed mandate, never Claude's; the panel only lays them out. A blank value draws no
- * panel at all, so it never shows part of a limit.
+ * what they have used so far when the screen says, how long the limit lasts, and whose wallet
+ * signed it. Every value is the screen's own words for the signed mandate, never Claude's; the
+ * panel only lays them out and formats nothing. A blank value draws no panel at all, so it never
+ * shows part of a limit.
  */
-export function SignedLimitPanel({ perCharge, total, duration, source, language }: SignedLimitPanelProps) {
-  if ([perCharge, total, duration, source].some((value) => value.trim() === '')) return null;
+export function SignedLimitPanel({ perCharge, total, used, duration, source, language }: SignedLimitPanelProps) {
+  if ([perCharge, total, duration, source, ...(used === undefined ? [] : [used])].some((value) => value.trim() === '')) return null;
   const copy = SIGNED_LIMIT_COPY[language];
   const terms: [string, string][] = [
     [copy.perCharge, perCharge],
     [copy.total, total],
+    ...(used === undefined ? [] : [[copy.used, used] as [string, string]]),
     [copy.duration, duration],
   ];
   return (

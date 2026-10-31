@@ -96,6 +96,29 @@ describe('mock checkout', () => {
     expectNoHorizontalScroll();
   });
 
+  it('checkout_document_language_follows_the_page', async () => {
+    // The document's language, as index.html sets it (the test browser's page has its own).
+    document.documentElement.lang = 'en';
+    // A link in Spanish: the whole document is Spanish while the checkout shows it, whatever the browser's language.
+    const es = await renderRoute(`/pay/${issueLink('es')}`, { language: 'en-US' });
+    await expect.element(es.screen.getByRole('heading', { name: 'Depósito de visita de servicio' })).toBeVisible();
+    expect(document.documentElement.lang).toBe('es');
+    // Leaving the page hands the document its language back.
+    await es.router.navigate('/no/such/page');
+    await expect.element(es.screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.documentElement.lang).toBe('en');
+
+    // A link in English from a Spanish browser: English once the link shows.
+    const en = await renderRoute(`/pay/${issueLink('en')}`, { language: 'es-MX' });
+    await expect.element(en.screen.getByRole('heading', { name: 'Service call deposit' })).toBeVisible();
+    expect(document.documentElement.lang).toBe('en');
+
+    // Before a link shows, the page is in the browser's language, and so is the document.
+    const missing = await renderRoute('/pay/n0SuchL1nk', { language: 'es-MX' });
+    await expect.element(missing.screen.getByText('Este enlace de pago no existe. Pide uno nuevo en el chat.')).toBeVisible();
+    expect(document.documentElement.lang).toBe('es');
+  });
+
   it('checkout_amount_from_cents', async () => {
     // The kernel's cents, written with their cents as a payment page does: never a figure of the page's own.
     const { screen } = await renderRoute(`/pay/${issueLink('en', 2000)}`);

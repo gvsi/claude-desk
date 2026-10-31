@@ -54,6 +54,7 @@ function row(fields: Partial<ToolRow> = {}): ToolRow {
     definition_sha256: 'a'.repeat(64),
     pending_definition_text: null,
     pending_sha256: null,
+    review_reason: null,
     ...fields,
   };
 }
@@ -116,13 +117,27 @@ describe('the connector catalog', () => {
 
   it('tool_states_follow_the_rows', () => {
     const pending = { pending_definition_text: '{"name": "create_refund"}', pending_sha256: 'b'.repeat(64) };
+    /** A row waiting for review, for `reason`, as the kernel says it. */
+    const waiting = (reason: ToolRow['review_reason'], fields: Partial<ToolRow> = {}) => row({ status: 'needs_review', review_reason: reason, ...fields });
     expect(toolState(row({ status: 'enabled' }))).toBe('on');
+    // Why a tool waits for review is the kernel's reason, never read off its pending hash.
     // A changed definition waits for the owner's review.
-    expect(toolState(row({ status: 'needs_review', ...pending }))).toBe('changed');
-    // Connected and never turned on, or no longer listed by its connector: off, with nothing to review.
-    expect(toolState(row({ status: 'needs_review' }))).toBe('not_on');
-    expect(toolState(row({ status: 'needs_review', pending_definition_text: 'text with no hash' }))).toBe('not_on');
+    expect(toolState(waiting('changed', pending))).toBe('changed');
+    expect(toolState(waiting('changed'))).toBe('changed');
+    // Connected and never turned on: off, with nothing to review.
+    expect(toolState(waiting('new'))).toBe('not_on');
+    expect(toolState(waiting('new', pending))).toBe('not_on');
+    // No longer listed by its connector: off, with nothing to review and nothing to add again.
+    expect(toolState(waiting('delisted'))).toBe('delisted');
+    expect(toolState(waiting('delisted', pending))).toBe('delisted');
+    // A row that gives no reason, or one this build doesn't know, is never read as changed or on.
+    expect(toolState(waiting(null, pending))).toBe('not_on');
+    expect(toolState({ status: 'needs_review' })).toBe('not_on');
+    expect(toolState(waiting('renamed' as ToolRow['review_reason'], pending))).toBe('not_on');
     expect(toolState(row({ status: 'disabled' }))).toBe('off');
+    // A reason only counts while the tool waits for review.
+    expect(toolState(row({ status: 'enabled', review_reason: 'changed' }))).toBe('on');
+    expect(toolState(row({ status: 'disabled', review_reason: 'changed', ...pending }))).toBe('off');
     // A status this build doesn't know is never read as on.
     expect(toolState(row({ status: 'paused' as ToolRow['status'] }))).toBe('off');
 
@@ -132,9 +147,12 @@ describe('the connector catalog', () => {
     const refund = row({ tool: 'payments.create_refund', source: 'mcp', effects: ['pay_out', 'private_data'], reversible: false });
     // On while any of its tools is on or changed.
     expect(connectorOn(stripe, [charges, refund])).toBe(true);
-    expect(connectorOn(stripe, [{ ...charges, status: 'disabled' }, { ...refund, status: 'needs_review', ...pending }])).toBe(true);
-    // Off when every tool is off or not on, or none is listed; another connector's rows don't count.
-    expect(connectorOn(stripe, [{ ...charges, status: 'disabled' }, { ...refund, status: 'needs_review' }])).toBe(false);
+    expect(connectorOn(stripe, [{ ...charges, status: 'disabled' }, { ...refund, status: 'needs_review', review_reason: 'changed' }])).toBe(true);
+    // Off when every tool is off, not on or delisted, whatever hash it carries, or none is listed;
+    // another connector's rows don't count.
+    expect(connectorOn(stripe, [{ ...charges, status: 'disabled' }, { ...refund, status: 'needs_review', review_reason: 'new', ...pending }])).toBe(false);
+    expect(connectorOn(stripe, [{ ...charges, status: 'needs_review', review_reason: 'delisted', ...pending }, { ...refund, status: 'needs_review', review_reason: 'new' }])).toBe(false);
+    expect(connectorOn(stripe, [{ ...charges, status: 'disabled' }, { ...refund, status: 'needs_review', review_reason: null, ...pending }])).toBe(false);
     expect(connectorOn(stripe, [])).toBe(false);
     expect(connectorOn(stripe, [row({ tool: 'native.quote' })])).toBe(false);
   });

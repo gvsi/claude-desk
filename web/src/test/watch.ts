@@ -6,28 +6,39 @@ import { onTestFinished } from 'vitest';
 
 import { rivera } from '../ds/fixtures/index.ts';
 
+/** What the not-found page says. */
+const NOT_FOUND = "This page doesn't exist";
+
 /**
- * Every page the browser draws from now until the test ends, in order, a page drawn many times in a
- * row named once: the preview behind the intro dialog, the owner's loading page or its error, and
- * Today, which is named for what it lacks until it holds Rivera's held request and its briefing.
+ * The page drawn now, by name: the preview behind the intro dialog; the owner's loading page or its
+ * error; the not-found page, or another page outside the app's frame (an error); Today, named for
+ * what it lacks until it holds Rivera's held request and its briefing; any other page; or nothing.
+ */
+export function pageNow(): string {
+  const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
+  const state = document.querySelector('.cd-owner-state');
+  if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
+  const standalone = document.querySelector('.cd-standalone-page');
+  if (standalone !== null) return standalone.textContent?.includes(NOT_FOUND) ? 'not found' : 'an error page';
+  if (document.querySelector('.cd-today-preview') !== null) return 'preview';
+  if (document.querySelector('.cd-today') !== null) {
+    if (document.querySelector(held) === null) return 'today without its held request';
+    if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
+    return 'today';
+  }
+  return document.body.textContent.trim() ? 'a page it can’t name' : 'nothing';
+}
+
+/**
+ * Every page the browser draws from now until the test ends, in order and named as `pageNow` names
+ * it, a page drawn many times in a row named once. Nothing drawn before the first page isn't a step.
  */
 export function watchPages(): () => string[] {
-  const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
   const seen: string[] = [];
-  const pageNow = (): string | null => {
-    const state = document.querySelector('.cd-owner-state');
-    const preview = document.querySelector('.cd-today-preview') !== null;
-    if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
-    if (!preview && document.querySelector('.cd-today') !== null) {
-      if (document.querySelector(held) === null) return 'today without its held request';
-      if (document.querySelector('.cd-today__loading') !== null) return 'today still reading its briefing';
-      return 'today';
-    }
-    return preview ? 'preview' : null;
-  };
   const look = () => {
     const page = pageNow();
-    if (page !== null && seen.at(-1) !== page) seen.push(page);
+    if (seen.length === 0 && page === 'nothing') return;
+    if (seen.at(-1) !== page) seen.push(page);
   };
   look();
   const watch = new MutationObserver(look);

@@ -68,7 +68,7 @@ export const NoRulesJustForThem: Story = {
   play: async ({ canvas }) => {
     // no_rules_says_so: a quiet line in place of the card, and the way to add one on Rules.
     const section = canvas.getByRole('region', { name: 'Rules for Dana Whitfield' });
-    const line = within(section).getByText('No rules just for Dana Whitfield.');
+    const line = within(section).getByText((_, el) => el?.tagName === 'P' && el.textContent === 'No rules just for Dana Whitfield.');
     expectComputed(line, { color: 'rgba(250, 249, 245, 0.64)' });
     await expect(within(section).queryByRole('list')).toBeNull();
     await expect(within(section).getByRole('link', { name: 'Change them on Rules' })).toBeVisible();
@@ -117,5 +117,138 @@ export const NarrowPhoneWithALimit: Story = {
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width + 0.5);
     await expect(tooWide).toEqual([]);
+  },
+};
+
+/** The words in an element's text that its lines split: a word whose letters sit on more than one line. */
+function splitWords(element: Element): string[] {
+  const split: string[] = [];
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const text = node.textContent ?? '';
+    for (const match of text.matchAll(/\S+/g)) {
+      const range = document.createRange();
+      range.setStart(node, match.index);
+      range.setEnd(node, match.index + match[0].length);
+      const tops = new Set([...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top)));
+      if (tops.size > 1) split.push(match[0]);
+    }
+  }
+  return split;
+}
+
+export const LongRuleNarrow: Story = {
+  name: 'A long rule, narrow',
+  args: {
+    rules: [
+      {
+        key: 'rv-dana-weekend',
+        title: 'Book a weekend emergency visit',
+        rule: { card_id: 'rv-dana-weekend', mode: 'auto', reason: 'Dana can book a weekend emergency visit at her home without asking you first.' },
+        words: [
+          { field: 'who', text: 'Dana Whitfield' },
+          { field: 'who', text: 'Verified' },
+          { field: 'hours', text: 'Saturdays and Sundays, 9:00 am to 1:00 pm' },
+          { field: 'review', text: 'Checked by the reviewer' },
+        ],
+      },
+      {
+        key: 'rv-dana-links',
+        title: 'Payment link',
+        rule: { card_id: 'rv-dana-links', mode: 'auto', reason: 'Dana can pay her invoices by link without asking you first.' },
+        words: [
+          { field: 'who', text: 'Dana Whitfield' },
+          { field: 'limits', text: 'Up to $10,000' },
+          { field: 'review', text: 'Checked by the reviewer' },
+        ],
+        limit: '$10,000',
+      },
+    ],
+  },
+  render: (args) => (
+    <div style={{ width: 520 }}>
+      <PersonRules {...args} />
+    </div>
+  ),
+  parameters: { canvasNote: `${NOTE} A long rule in a column just wide enough to keep each row on one line.` },
+  play: async ({ canvas }) => {
+    // outcome_words_stay_whole: the outcome shrinks only to its longest word, wrapping between words
+    // and never inside one, however long the rest of the row is.
+    const rows = within(canvas.getByRole('region', { name: 'Rules for Dana Whitfield' })).getAllByRole('listitem');
+    await expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      const outcome = row.querySelector<HTMLElement>('.cd-outcome');
+      if (!outcome) throw new Error('No outcome');
+      await expect(splitWords(outcome), `${row.textContent ?? ''}: no word split across lines`).toEqual([]);
+      // Nothing in the outcome reaches past it, and it stays inside its row.
+      const box = outcome.getBoundingClientRect();
+      for (const part of outcome.querySelectorAll('*')) {
+        await expect(part.getBoundingClientRect().right).toBeLessThanOrEqual(box.right + 0.5);
+      }
+      await expect(box.right).toBeLessThanOrEqual(row.getBoundingClientRect().right - 16 + 0.5);
+    }
+  },
+};
+
+/** A name the voice rules would flag if it were the component's own words: its initials are in capitals. */
+const MARKED_NAME = 'JJ Okafor';
+
+export const MarkedName: Story = {
+  name: 'A name marked as theirs',
+  args: {
+    name: MARKED_NAME,
+    rules: [
+      {
+        key: 'rv-jj-saturday',
+        title: 'Book a visit',
+        rule: { card_id: 'rv-jj-saturday', mode: 'ask', reason: 'Saturday visits wait for you to say yes.' },
+        words: [{ field: 'hours', text: 'Saturdays 9:00 am to 1:00 pm' }],
+      },
+    ],
+  },
+  parameters: { canvasNote: `${NOTE} The person's name is theirs, marked as user text inside the component's words.` },
+  play: async ({ canvas }) => {
+    // person_name_is_user_text: "Rules for" is the component's copy; the name in it is marked as theirs.
+    const section = canvas.getByRole('region', { name: `Rules for ${MARKED_NAME}` });
+    const heading = within(section).getByRole('heading', { level: 2, name: `Rules for ${MARKED_NAME}` });
+    const marked = heading.querySelectorAll('[data-copy="user"]');
+    await expect(marked).toHaveLength(1);
+    await expect(marked[0]).toHaveTextContent(new RegExp(`^${MARKED_NAME}$`));
+    await expect(heading).toHaveTextContent(new RegExp(`^Rules for ${MARKED_NAME}$`));
+  },
+};
+
+export const MarkedNameNoRules: Story = {
+  name: 'A name marked as theirs, no rules',
+  args: { name: MARKED_NAME, rules: [] },
+  parameters: { canvasNote: `${NOTE} With no rules, the line names the person, marked as user text.` },
+  play: async ({ canvas }) => {
+    const line = canvas.getByText((_, el) => el?.tagName === 'P' && el.textContent === `No rules just for ${MARKED_NAME}.`);
+    const marked = line.querySelectorAll('[data-copy="user"]');
+    await expect(marked).toHaveLength(1);
+    await expect(marked[0]).toHaveTextContent(new RegExp(`^${MARKED_NAME}$`));
+  },
+};
+
+/** A name holding a right-to-left override (U+202E) with no end: unisolated, it would reorder the words after it. */
+const OVERRIDE_NAME = 'Dana \u202EWhitfield';
+
+export const NameWithDirectionOverride: Story = {
+  name: 'A name with a direction override',
+  args: { name: OVERRIDE_NAME, rules: [] },
+  parameters: { canvasNote: `${NOTE} A name holding a right-to-left override (U+202E): the name is isolated, so it can't reorder the words after it.` },
+  play: async ({ canvasElement }) => {
+    // person_name_is_isolated: the "." after the name stays after it, at its right.
+    const line = canvasElement.querySelector<HTMLElement>('.cd-person-rules__none');
+    const name = line?.querySelector<HTMLElement>('[data-copy="user"]');
+    const dot = line?.lastChild;
+    if (!line || !name || !dot || dot.textContent !== '.') throw new Error('No line with the name and its "."');
+    const range = document.createRange();
+    range.selectNodeContents(dot);
+    await expect(range.getBoundingClientRect().left, 'the "." after the name').toBeGreaterThanOrEqual(name.getBoundingClientRect().right - 0.5);
+    expectComputed(name, { unicodeBidi: 'isolate' });
+    const heading = canvasElement.querySelector<HTMLElement>('h2 [data-copy="user"]');
+    if (!heading) throw new Error('No name in the heading');
+    expectComputed(heading, { unicodeBidi: 'isolate' });
   },
 };

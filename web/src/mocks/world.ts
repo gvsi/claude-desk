@@ -32,6 +32,7 @@ import type {
   Suggestion,
   ToolConfirmEntry,
   ToolConfirmedOut,
+  ToolReviewReason,
   TranscriptItem,
   TranscriptKind,
 } from '../api/views.ts';
@@ -98,6 +99,13 @@ export interface SessionRecord {
   ownerTypedAt: number | null;
 }
 
+/**
+ * A tool as the kernel's tool row has it, with why it waits for review (`review_reason`, null unless
+ * it does), which the contract types don't have yet. Every record carries the reason, so the profile
+ * a tool confirm answers with always has it.
+ */
+export type ToolRecord = ToolProfile & { review_reason: ToolReviewReason | null };
+
 export interface DeskRecord {
   summary: DeskSummary;
   /** The active rules version, with its money cap. */
@@ -110,7 +118,7 @@ export interface DeskRecord {
   /** The highest rules version made for the Desk: versions are never reused. */
   lastVersion: number;
   /** The Desk's tools, as the kernel's tool rows have them. */
-  tools: ToolProfile[];
+  tools: ToolRecord[];
   /** Rules the owner's answers suggest, newest first; none until a test adds one. */
   suggestions: Suggestion[];
 }
@@ -472,13 +480,18 @@ export class MockWorld {
     this.emit(session, { type: 'owner_typing', name: BUSINESS.owner_display_name, until: isoTime(now + TYPING_SHOWS_MS) });
   }
 
-  /** Adds `ev` to the session's stream with the next seq, keeps what the transcript keeps, and tells listeners. */
+  /**
+   * Adds `ev` to the session's stream with the next seq, keeps what the transcript keeps, and tells
+   * listeners. The transcript keeps a delivered message, a status, and where the owner joined and
+   * left (an item of the event's own kind holding it), as the API does.
+   */
   emit(session: SessionRecord, ev: SseEvent): number {
     const seq = session.events.length + 1;
     session.events.push({ seq, ev });
     session.lastActivity = this.now();
     if (ev.type === 'message') this.addItem(session, 'delivered', null, ev);
     else if (ev.type === 'receipt' || ev.type === 'held' || ev.type === 'resolved') this.addItem(session, 'status', null, ev);
+    else if (ev.type === 'owner_joined' || ev.type === 'owner_left') this.addItem(session, ev.type, null, ev);
     for (const listener of [...session.listeners]) {
       try {
         listener(seq, ev);
@@ -1082,7 +1095,7 @@ export class MockWorld {
     for (const entry of record.enables) {
       desk.tools = desk.tools.map((tool) =>
         tool.tool === entry.tool
-          ? { ...tool, status: 'enabled', definition_sha256: entry.definition_sha256, pending_definition_text: null, pending_sha256: null }
+          ? { ...tool, status: 'enabled', definition_sha256: entry.definition_sha256, pending_definition_text: null, pending_sha256: null, review_reason: null }
           : tool,
       );
     }
@@ -1112,7 +1125,8 @@ export class MockWorld {
     if (!enable) {
       if (entries.some((entry) => entry.tool === 'native.start_verification')) return 'conflict';
       const off = new Set(entries.map((entry) => entry.tool));
-      desk.tools = desk.tools.map((tool) => (off.has(tool.tool) ? { ...tool, status: 'disabled' } : tool));
+      // Off no longer waits for review, so it gives no reason; a changed definition stays to review later.
+      desk.tools = desk.tools.map((tool) => (off.has(tool.tool) ? { ...tool, status: 'disabled', review_reason: null } : tool));
       for (const entry of entries) {
         this.appendLedger(desk, { kind: 'tool_pin', origin: 'kernel', session_id: null, ref_id: entry.tool, summary: { tool: entry.tool, enabled: false } });
       }

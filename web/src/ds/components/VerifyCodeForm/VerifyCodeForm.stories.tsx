@@ -87,11 +87,13 @@ function formOf(root: HTMLElement): HTMLFormElement {
 export const Idle: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const form = formOf(canvasElement);
-    const field = canvas.getByLabelText('6-digit code');
+    const field = canvas.getByLabelText('6-digit code') as HTMLInputElement;
     const confirm = canvas.getByRole('button', { name: 'Confirm' });
     await expect(field).toHaveAttribute('inputmode', 'numeric');
     await expect(field).toHaveAttribute('autocomplete', 'one-time-code');
-    await expect(field).toHaveAttribute('maxlength', '6');
+    // No character limit of the browser's, which would cut a code before its spaces are dropped:
+    // the form keeps six digits itself (pastes_spaced_code, below).
+    await expect(field).not.toHaveAttribute('maxlength');
     await expect(field).toHaveValue('');
 
     // The board's parts: the label above a main-height field, and Confirm beside it on the same
@@ -147,6 +149,74 @@ export const Idle: Story = {
     await userEvent.click(field);
     await userEvent.paste('Code: 615 204.');
     await expect(field).toHaveValue('615204');
+    await userEvent.clear(field);
+    // pastes_spaced_code: a code written with spaces or a dash keeps all six digits, as a paste or
+    // as one insertion with no paste event, the way a phone keyboard's clipboard suggestion, a
+    // dropped text or a filling tool brings it in. Still six digits at most.
+    for (const spaced of ['482 913', '48 29 13', '482-913']) {
+      await userEvent.click(field);
+      await userEvent.paste(spaced);
+      await expect(field).toHaveValue('482913');
+      await userEvent.clear(field);
+      field.focus();
+      document.execCommand('insertText', false, spaced);
+      await expect(field).toHaveValue('482913');
+      await userEvent.clear(field);
+    }
+    field.focus();
+    document.execCommand('insertText', false, '48 29 13 77');
+    await expect(field).toHaveValue('482913');
+    await userEvent.clear(field);
+    // keeps_a_whole_code: a digit typed into six digits, at the start, in the middle or at the end,
+    // is refused, and the six and the caret stay as they were.
+    await userEvent.type(field, '482913');
+    await userEvent.type(field, '7', { initialSelectionStart: 0, initialSelectionEnd: 0 });
+    await expect(field).toHaveValue('482913');
+    await userEvent.type(field, '7', { initialSelectionStart: 3, initialSelectionEnd: 3 });
+    await expect(field).toHaveValue('482913');
+    await expect(field.selectionStart).toBe(3);
+    await userEvent.type(field, '7');
+    await expect(field).toHaveValue('482913');
+    // Nor does a short paste with nothing selected: "7" at the start, "77" in the middle.
+    field.setSelectionRange(0, 0);
+    await userEvent.paste('7');
+    await expect(field).toHaveValue('482913');
+    field.setSelectionRange(3, 3);
+    await userEvent.paste('77');
+    await expect(field).toHaveValue('482913');
+    // What goes over a selection replaces it, and the digits around it stay: "77" over the 9.
+    field.setSelectionRange(3, 4);
+    await userEvent.paste('77');
+    await expect(field).toHaveValue('482771');
+    // A new code over the whole one selected, as after a failed try, keeps its six digits, written
+    // with a space or a dash, pasted or inserted.
+    for (const next of ['615 204', '615-204']) {
+      await userEvent.clear(field);
+      await userEvent.type(field, '482913');
+      field.setSelectionRange(0, 6);
+      await userEvent.paste(next);
+      await expect(field).toHaveValue('615204');
+      await userEvent.clear(field);
+      await userEvent.type(field, '482913');
+      field.select();
+      document.execCommand('insertText', false, next);
+      await expect(field).toHaveValue('615204');
+    }
+    field.select();
+    document.execCommand('insertText', false, '61 52 04 99');
+    await expect(field).toHaveValue('615204');
+    // A whole new code is the code, wherever it goes in: pasted or inserted with the caret at the
+    // end of the old one, it takes its place rather than being dropped after it.
+    await userEvent.clear(field);
+    await userEvent.type(field, '482913');
+    field.setSelectionRange(6, 6);
+    await userEvent.paste('615204');
+    await expect(field).toHaveValue('615204');
+    // A phone keyboard's clipboard suggestion inserts the whole text as one typed insertion.
+    // (`execCommand` sends no `beforeinput`, so the keyboard's event is sent as it would send it.)
+    field.setSelectionRange(6, 6);
+    field.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: '48 29 13', bubbles: true, cancelable: true }));
+    await waitFor(() => expect(field).toHaveValue('482913'));
     await userEvent.clear(field);
     await expect(args.onSubmit).not.toHaveBeenCalled();
 

@@ -7,6 +7,12 @@
  * the chat already holds (a transcript read before their seqs were known) is matched by identity:
  * a message by its `message_id`, a status by its `(decision_id, ledger_seq)`.
  *
+ * Where the owner joined and left shows the same whether the page was open or loaded later: the
+ * stored conversation keeps each join and leave, and each becomes the line the stream's event for it
+ * does, two joins in a row included (a hand-back whose leave was never kept). Those events carry no
+ * identity, so only the cursor keeps one from showing twice: the API reads `last_seq` in the same
+ * snapshot as the items, so the stream resumes after the last join or leave the transcript holds.
+ *
  * A held request's later lines ("Cancelled", "Maria Rivera approved this") stay under the message
  * that holds it, as every receipt stays under its own message, however far the chat has gone on.
  * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
@@ -44,7 +50,8 @@ export type SendFailure = 'rate_limited' | 'too_long' | 'not_sent' | 'session';
 export type ChatItem =
   | { kind: 'visitor'; id: string; text: string; status: VisitorStatus; failure?: SendFailure }
   | { kind: 'message'; seq: number | null; ev: EvMessage }
-  | { kind: 'system'; seq: number; ev: EvOwnerJoined | EvOwnerLeft };
+  /** The owner joined or left: `id` is `n{n}` for a line read from the stored conversation, `s{seq}` for one the stream brought. */
+  | { kind: 'system'; id: string; ev: EvOwnerJoined | EvOwnerLeft };
 
 export type ChatRow = GroupedRow<ChatItem, ReceiptView>;
 
@@ -148,6 +155,15 @@ function isStatus(ev: TranscriptItem['event']): ev is StatusEvent {
   return ev !== null && (ev.type === 'receipt' || ev.type === 'held' || ev.type === 'resolved');
 }
 
+function isPresence(ev: TranscriptItem['event']): ev is EvOwnerJoined | EvOwnerLeft {
+  return ev !== null && (ev.type === 'owner_joined' || ev.type === 'owner_left');
+}
+
+/** The line for the owner joining or leaving, `id` as `ChatItem` names it. */
+function presenceLine(id: string, ev: EvOwnerJoined | EvOwnerLeft): RowPart<ChatItem, ReceiptView> {
+  return { kind: 'line', row: { kind: 'system', id, ev } };
+}
+
 /** A held request is open until its resolution arrives. */
 function withHolds(openHolds: string[], ev: StatusEvent): string[] {
   if (ev.type === 'held') return openHolds.includes(ev.decision_id) ? openHolds : [...openHolds, ev.decision_id];
@@ -173,7 +189,8 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
   const seen = new Set<string>();
   let openHolds: string[] = [];
   let holds: ReadonlyMap<string, ReceiptView> = new Map();
-  // How a stored item joins the chat: the visitor's words, a delivered message, or a status.
+  // How a stored item joins the chat: the visitor's words, a delivered message, a status, or where
+  // the owner joined or left, as the stream's events for them do.
   const partOf = (item: TranscriptItem): RowPart<ChatItem, ReceiptView> | null => {
     const { event } = item;
     if (item.kind === 'visitor_text') {
@@ -190,6 +207,8 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
       holds = status.holds;
       return status.part;
     }
+    // Each join and leave kept is a line of its own.
+    if (isPresence(event) && event.type === item.kind) return presenceLine(`n${item.n}`, event);
     // Whispers and agents' text never reach a visitor's transcript; anything else is left out.
     return null;
   };
@@ -235,9 +254,9 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
       };
     }
     case 'owner_joined':
-      return { ...state, ...arrived(state, addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } })), writing: false };
+      return { ...state, ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))), writing: false };
     case 'owner_left':
-      return { ...state, ...arrived(state, addPart(state, { kind: 'line', row: { kind: 'system', seq, ev } })), writing: false, ownerTyping: null };
+      return { ...state, ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))), writing: false, ownerTyping: null };
     case 'owner_typing': {
       // Kept whole, without its type: a later typing event replaces it.
       const { type: _type, ...ownerTyping } = ev;

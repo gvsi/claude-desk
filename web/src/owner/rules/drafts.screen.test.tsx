@@ -3,12 +3,15 @@
  * check in plain words, the payment limit in its signed words, and one confirm that applies it,
  * only once the check passed.
  */
-import { describe, expect, it } from 'vitest';
+import { http } from 'msw';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import type { ProofReport, RuleCard } from '../../api/contracts.ts';
-import { RULES_UNAVAILABLE_COPY, request } from '../../api/http.ts';
+import { PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, request } from '../../api/http.ts';
+import { apiPath } from '../../api/routes.ts';
 import type { RulesDraft } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { worker } from '../../mocks/browser.ts';
 import { PRESETS, RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
@@ -92,6 +95,61 @@ function before(first: Element | null, second: Element | null): boolean {
 
 /** A failed part of a check, in the kernel's plain words. */
 const failing = (name: string, counterexample: string | null) => ({ name, ok: false, counterexample_plain: counterexample, counterexample_raw: null });
+
+const CONFIRM_PATH = apiPath('confirmRules', { desk_id: RIVERA.deskId });
+
+/** The API's 202 for a confirm of `version` it is still checking: send the same request again. */
+const stillChecking = (version: number) => ({ retry: { path: CONFIRM_PATH, body: { version } } });
+
+/**
+ * A clock the request layer times its minute of waiting by, moved only by the test (and a little
+ * by each `expect.poll` it runs); the page's timers and the mock keep real time.
+ */
+function freezeClock(): { pass: (ms: number) => void } {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  return { pass: (ms) => vi.advanceTimersByTime(ms) };
+}
+
+/**
+ * Holds the next confirm before it reaches the mock: `arrived()` once the app sent it, and
+ * `release()` lets it through to the mock, which answers it (a planted fault included).
+ */
+function holdNextConfirm(): { arrived: () => boolean; release: () => void } {
+  let arrived = false;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // Never left waiting past its test.
+  onTestFinished(() => release());
+  worker.use(
+    http.post(
+      CONFIRM_PATH,
+      async () => {
+        arrived = true;
+        await released;
+        return undefined;
+      },
+      { once: true },
+    ),
+  );
+  return { arrived: () => arrived, release };
+}
+
+/**
+ * Clicks `label` and lets the confirm reach the mock only once a minute has passed on `clock`: the
+ * API's 202 then comes back after the app's minute of waiting is up, so the app gives up on it.
+ */
+async function confirmAfterTheMinute(screen: Awaited<ReturnType<typeof openDraft>>['screen'], clock: { pass: (ms: number) => void }) {
+  const held = holdNextConfirm();
+  await screen.getByRole('button', { name: 'Confirm change' }).click();
+  await expect.poll(held.arrived).toBe(true);
+  clock.pass(PROVING_GIVE_UP_MS);
+  held.release();
+}
 
 describe('rule draft review', () => {
   it('checked_draft_confirms', async () => {
@@ -393,6 +451,8 @@ describe('rule draft review', () => {
   });
 
   it('lost_custom_confirm_reads_the_rules_first', async () => {
+    const clock = freezeClock();
+
     // A caller that applies the draft its own way (setup's confirm) loses the answer too: the rules
     // as they stand settle it, since applying it makes the draft's version the active one.
     const confirmed: number[] = [];
@@ -423,5 +483,82 @@ describe('rule draft review', () => {
     expect(second.screen.getByText('Your rules are updated.', { exact: true }).elements()).toHaveLength(0);
     expect(confirmed).toEqual([applied.version, lost.version]);
     expect(desk().policy.version).toBe(applied.version);
+
+    // Its confirm still being checked when the app stopped waiting a minute in: the rules are read
+    // again, don't show it yet, and it may still apply, so the review says it couldn't confirm it.
+    const checking = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-quote'], mode: 'ask' }]);
+    mockStore.inject({ route: 'confirmRules', status: 202, body: stillChecking(checking.version) });
+    const third = await reviewOf(checking);
+    await expect.element(third.screen.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    const reads = requests('rules').length;
+    await confirmAfterTheMinute(third.screen, clock);
+    await expect.element(third.screen.getByRole('alert')).toHaveTextContent("We couldn't confirm whether your change went through. Open Rules to see where it stands.");
+    expect(requests('rules').length).toBeGreaterThan(reads);
+    expect(third.screen.container.textContent).not.toContain("can't be applied");
+    expect(third.screen.getByText('Your rules are updated.', { exact: true }).elements()).toHaveLength(0);
+    expect(confirmed).toEqual([applied.version, lost.version, checking.version]);
+    expect(desk().policy.version).toBe(applied.version);
+  });
+
+  it('given_up_confirm_reads_the_rules_first', async () => {
+    const clock = freezeClock();
+
+    // The API applied the confirm but still answered that it was checking when the app's minute was
+    // up: the app stops waiting, and the rules as they stand say it applied.
+    const applied = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-book-sat'], mode: 'ask' }]);
+    mockStore.inject({ route: 'confirmRules', status: 202, body: stillChecking(applied.version), afterCommit: true });
+    const first = await openDraft(applied.version);
+    await confirmAfterTheMinute(first.screen, clock);
+    await expect.element(first.screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
+    expect(first.screen.getByRole('alert').elements()).toHaveLength(0);
+    expect(requests('confirmRules')).toHaveLength(1);
+    expect(desk().policy.version).toBe(applied.version);
+
+    // Still being checked when the app stopped waiting: the rules don't show it yet, but it may still
+    // apply, so the review says it couldn't confirm it, and never that it wasn't applied.
+    const checking = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-quote'], mode: 'ask' }]);
+    mockStore.inject({ route: 'confirmRules', status: 202, body: stillChecking(checking.version) });
+    const second = await openDraft(checking.version);
+    await expect.element(second.screen.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    const reads = requests('rules').length;
+    await confirmAfterTheMinute(second.screen, clock);
+    await expect.element(second.screen.getByRole('alert')).toHaveTextContent("We couldn't confirm whether your change went through. Open Rules to see where it stands.");
+    // The rules were read again after it stopped waiting, not only when the review opened.
+    expect(requests('rules').length).toBeGreaterThan(reads);
+    const text = second.screen.container.textContent ?? '';
+    expect(text).not.toContain("can't be applied");
+    expect(text).not.toContain('Your current rules stay in place.');
+    expect(second.screen.getByText('Your rules are updated.', { exact: true }).elements()).toHaveLength(0);
+    // It gave up rather than send the confirm again.
+    expect(requests('confirmRules')).toHaveLength(2);
+    expect(desk().policy.version).toBe(applied.version);
+  });
+
+  it('unchecked_confirm_keeps_its_line', async () => {
+    // The API answered that the rules couldn't be checked: a clear answer that nothing applied.
+    const draft = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-book-sat'], mode: 'ask' }]);
+    mockStore.inject({ route: 'confirmRules', status: 409, body: { error: 'rules_cannot_be_checked' } });
+    const { screen } = await openDraft(draft.version);
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent(RULES_UNAVAILABLE_COPY);
+    expect(screen.getByText('Your rules are updated.', { exact: true }).elements()).toHaveLength(0);
+    expect(requests('confirmRules')).toHaveLength(1);
+    expect(desk().policy.version).toBe(7);
+  });
+
+  it('unchecked_5xx_confirm_is_uncertain', async () => {
+    // The same code on a 5xx is no clear answer: the change may still apply, so the review reads the
+    // rules, which don't show it yet, and never says it can't be applied.
+    const draft = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-book-sat'], mode: 'ask' }]);
+    mockStore.inject({ route: 'confirmRules', status: 503, body: { error: 'rules_cannot_be_checked' } });
+    const { screen } = await openDraft(draft.version);
+    await expect.element(screen.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    const reads = requests('rules').length;
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("We couldn't confirm whether your change went through. Open Rules to see where it stands.");
+    expect(requests('rules').length).toBeGreaterThan(reads);
+    expect(screen.container.textContent).not.toContain("can't be applied");
+    expect(requests('confirmRules')).toHaveLength(1);
+    expect(desk().policy.version).toBe(7);
   });
 });

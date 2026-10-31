@@ -14,6 +14,8 @@ import type {
   DecisionState,
   EvHeld,
   EvMessage,
+  EvOwnerJoined,
+  EvOwnerLeft,
   EvReceipt,
   EvResolved,
   ExecResult,
@@ -225,18 +227,24 @@ export interface ApprovalAnswerOut {
 
 // Conversations
 
-export type TranscriptKind = 'visitor_text' | 'agent_text' | 'delivered' | 'status' | 'whisper';
+export type TranscriptKind = 'visitor_text' | 'agent_text' | 'delivered' | 'status' | 'whisper' | 'owner_joined' | 'owner_left';
 
 export interface TranscriptItem {
   /** The transcript cursor (`after`). */
   n: number;
-  /** An owner's say is a `delivered` item whose `EvMessage.author` is `owner`. */
+  /**
+   * An owner's say is a `delivered` item whose `EvMessage.author` is `owner`. `owner_joined` and
+   * `owner_left` are where the owner took the chat over and handed it back (plan 02b).
+   */
   kind: TranscriptKind;
   created_at: string;
-  /** Someone's own words; null for `delivered` and `status`. Untrusted. */
+  /** Someone's own words; null for the items that carry an event. Untrusted. */
   text: string | null;
-  /** The stored signed event, or null. */
-  event: EvMessage | EvReceipt | EvHeld | EvResolved | null;
+  /**
+   * The stored event, or null: a delivered message's or a status's signed event, or the
+   * `EvOwnerJoined` or `EvOwnerLeft` the visitor's stream got when the owner joined or left.
+   */
+  event: EvMessage | EvReceipt | EvHeld | EvResolved | EvOwnerJoined | EvOwnerLeft | null;
   /** Owner view only. */
   owner_translation?: string | null;
   /** Owner view only, AI-written. */
@@ -309,6 +317,12 @@ export interface PeopleOut {
   leads: { lead_id: string; display_name: string | null; note: string | null; created_at: string; replayed?: boolean }[];
 }
 
+/**
+ * Why a tool waits for the owner's review (kernel payments, plan 01c Task 4): connected and never
+ * confirmed (`new`), its definition changed (`changed`), or no longer listed by its connector (`delisted`).
+ */
+export type ToolReviewReason = 'new' | 'changed' | 'delisted';
+
 /** A tool as the owner reviews it: the kernel's tool row (`ToolProfile`'s columns). */
 export interface ToolRow {
   tool: ToolName;
@@ -322,6 +336,11 @@ export interface ToolRow {
   /** A changed definition waiting for review. Untrusted. */
   pending_definition_text: string | null;
   pending_sha256: string | null;
+  /**
+   * Why it waits for review, set by the kernel and null unless `status` is `needs_review`. Typed
+   * here, and optional, until the regenerated contract types have it: a row without it gives no reason.
+   */
+  review_reason?: ToolReviewReason | null;
   /**
    * The active version's cards that cover the tool, in card order, `shared` for a rule on an effect
    * group (plan 02b Task 9; pending, typed here and optional until the API sends it). Screens read

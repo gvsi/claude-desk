@@ -261,7 +261,7 @@ export const PaymentLimitReview: Story = {
   render: () => (
     <RiveraFrame current="rules" counts={COUNTS}>
       <BoardPage>
-        <Trail items={['Rules', 'Payment limit']} />
+        <Trail items={['Rules', 'Change your payment limit']} />
         <PageHeader title="Change your payment limit" subtitle={REVIEW_LINE} />
         <LimitChange {...rivera.limitRaise} />
         <ChangeReview
@@ -277,7 +277,7 @@ export const PaymentLimitReview: Story = {
   parameters: {
     canvas: 'N-Conn-20-Ceiling-Review',
     canvasNote: [
-      'The trail names the page, "Rules / Payment limit", as every review page’s does, where the board draws "Rules" alone.',
+      'The trail names the page by its title, "Rules / Change your payment limit" (owner decision 2026-10-30), as every review page’s does, where the board draws "Rules" alone.',
       'The new limit is set in the summary style, the serif at its optical size 20, about 2% narrower than the board’s.',
       SIDEBAR_ROW_NOTE,
     ].join(' '),
@@ -295,7 +295,12 @@ export const PaymentLimitReview: Story = {
     const confirm = within(main).getByRole('button', { name: 'Confirm change' });
     expectComputed(confirm, SPEC.primary);
     await expect(confirm).toBeEnabled();
-    const crumbs = within(within(main).getByRole('navigation', { name: 'Breadcrumb' })).getAllByRole('link');
+    // limit_review_trail_names_the_page: "Rules / Change your payment limit", the page by its title.
+    const trail = within(main).getByRole('navigation', { name: 'Breadcrumb' });
+    await expect(trail).toHaveTextContent(/^Rules\/Change your payment limit$/);
+    await expect(within(trail).getByText('Change your payment limit')).toHaveAttribute('aria-current', 'page');
+    const crumbs = within(trail).getAllByRole('link');
+    await expect(crumbs.map((crumb) => crumb.textContent)).toEqual(['Rules']);
     await expectTabOrder(userEvent, [...crumbs, confirm, within(main).getByRole('button', { name: 'Keep my rules' })]);
     await expectFooter(canvasElement);
   },

@@ -11,7 +11,7 @@ import type { PolicyVersionOut, RulesPreset } from '../api/views.ts';
 import { RIVERA_MONEY_CAP_CENTS, placeholderHex, rivera } from '../ds/fixtures/index.ts';
 import { seedAgentChat } from './agents.ts';
 import { DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
-import type { MockWorld, ReplayTurn } from './world.ts';
+import type { MockWorld, ReplayTurn, ToolRecord } from './world.ts';
 
 export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks';
 
@@ -195,11 +195,11 @@ export function activePolicy(deskId: string): PolicyVersionOut {
   };
 }
 
-/** A built-in tool's profile: its adapter's, pinned at the adapter profile's hash, enabled. */
+/** A built-in tool's profile: its adapter's, pinned at the adapter profile's hash, enabled and with no reason to review it. */
 function nativeTool(
   tool: ToolName,
   fields: Pick<ToolProfile, 'effects' | 'reversible' | 'resource_kind' | 'description_confirmed'>,
-): ToolProfile {
+): ToolRecord {
   return {
     tool,
     source: 'native',
@@ -209,6 +209,7 @@ function nativeTool(
     pending_definition_text: null,
     pending_sha256: null,
     status: 'enabled',
+    review_reason: null,
     ...fields,
   };
 }
@@ -216,9 +217,9 @@ function nativeTool(
 /**
  * The tools a Rivera copy starts with, as the kernel's tool rows have them: every built-in tool,
  * with the effects the master plan's tool table gives each, and both of the mock payments server's,
- * connected and pinned (the fixtures' profiles). Every one is on.
+ * connected and pinned (the fixtures' profiles). Every one is on, so none waits for review.
  */
-export function riveraTools(): ToolProfile[] {
+export function riveraTools(): ToolRecord[] {
   return [
     nativeTool('native.quote', { effects: ['change'], reversible: true, resource_kind: 'desk', description_confirmed: "Price a job from the business's price list." }),
     nativeTool('native.find_slots', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Find open times on the calendar.' }),
@@ -246,8 +247,8 @@ export function riveraTools(): ToolProfile[] {
     }),
     nativeTool('native.fetch_website', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: "Read the business's website." }),
     nativeTool('native.read_memory', { effects: ['read'], reversible: true, resource_kind: 'desk', description_confirmed: 'Read the notes the owner brought in.' }),
-    { ...rivera.toolProfiles.listCharges },
-    { ...rivera.toolProfiles.createRefund },
+    { ...rivera.toolProfiles.listCharges, review_reason: null },
+    { ...rivera.toolProfiles.createRefund, review_reason: null },
   ];
 }
 

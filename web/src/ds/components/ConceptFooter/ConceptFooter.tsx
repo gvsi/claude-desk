@@ -9,11 +9,13 @@ export interface ConceptFooterProps {
 
 /**
  * The line every surface carries, word for word. The copy check reads `[data-ds="concept-footer"]`
- * against its own copy of the text, so a change here fails every story that shows the footer.
+ * against its own copy of the text, so a change here fails every story that shows the footer. It is
+ * English on every page, a Spanish visitor's too, and says so (`lang="en"`), so a screen reader
+ * doesn't read it with the page's Spanish voice.
  */
 export function ConceptFooter({ poweredBy = false }: ConceptFooterProps) {
   return (
-    <div className="cd-concept-footer">
+    <div className="cd-concept-footer" lang="en">
       <p className="cd-concept-footer__text cd-type-caption" data-ds="concept-footer">
         Concept prototype by Giovanni Alcantara, not an Anthropic product
       </p>

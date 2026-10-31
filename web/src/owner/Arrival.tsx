@@ -48,6 +48,8 @@ export function Arrival() {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<IntroErrorCode | undefined>(undefined);
+  // The Desk whose Today, read ahead, the dialog is leaving onto; Today opens once it has closed.
+  const [leavingTo, setLeavingTo] = useState<string | null>(null);
   // The copy this browser has is opening: Today is read ahead behind the preview, which assistive
   // technology doesn't see, so a status says so.
   const [opening, setOpening] = useState(false);
@@ -90,9 +92,10 @@ export function Arrival() {
 
   /**
    * The new copy's first Today, which takes the dialog away. The dialog stays up, busy over the
-   * preview, until Today is read ahead, so it closes onto the page already drawn. When the owner has
-   * left this page while the copy was made, the reads are left to the page they went to, which
-   * already shows them: dropping its Desks would leave it watching a read nothing updates.
+   * preview, until Today is read ahead; then it leaves, and Today opens once it has closed, already
+   * drawn. When the owner has left this page while the copy was made, the reads are left to the
+   * page they went to, which already shows them: dropping its Desks would leave it watching a read
+   * nothing updates.
    */
   const openCopy = async (copy: CopyOut): Promise<boolean> => {
     const first = copy.desks[0];
@@ -101,8 +104,13 @@ export function Arrival() {
     await invalidateCopy(queryClient);
     if (!shown.current) return true;
     await readAhead(queryClient, first.desk_id);
-    if (shown.current) void navigate(todayPath(first.desk_id), { replace: true });
+    if (shown.current) setLeavingTo(first.desk_id);
     return true;
+  };
+
+  /** The dialog has left: on to the Today it left onto, unless the owner has gone elsewhere. */
+  const onClosed = () => {
+    if (leavingTo !== null && shown.current) void navigate(todayPath(leavingTo), { replace: true });
   };
 
   const onSubmit = async (passcode: string): Promise<void> => {
@@ -139,6 +147,8 @@ export function Arrival() {
           onSubmit={onSubmit}
           busy={busy}
           error={error}
+          leaving={leavingTo !== null}
+          onClosed={onClosed}
         />
       ) : null}
     </>

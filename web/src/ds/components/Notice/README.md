@@ -28,6 +28,10 @@ Static lines in English and Spanish, each a `CopyPair` (`{ en, es }`). No line c
 | `RATE_LIMITED_COPY` | "You're sending messages quickly. Wait a moment, then try again." |
 | `AGENT_START_LOST_COPY` with `RELOAD_PAGE_LABEL` | On the agents page, when the answer to starting an agent was lost and the agent may be running: "The agent may have started, but we lost the answer. If you reload and send it again, it may run twice." and the button "Reload the page". |
 | `SETUP_START_LOST_COPY` | An owner line, in English only and so a plain string, not a `CopyPair`: when the answer to starting setup was lost and the setup interview may already exist, "Setup may have started, but we lost the answer. If you reload and start again, you may get two drafts." |
+| `AGENT_START_RETRY_COPY` | On the agents page, once starting an agent is safe to repeat, in place of `AGENT_START_LOST_COPY`: "We lost the answer, so we don't know yet whether the agent started. Try again: if it did, you'll see it." / "Perdimos la respuesta, así que aún no sabemos si el agente empezó. Inténtalo de nuevo: si empezó, lo verás." |
+| `SETUP_START_RETRY_COPY` | An owner line in English, once starting setup is safe to repeat, in place of `SETUP_START_LOST_COPY`: "We lost the answer, so we don't know yet whether setup started. Try again: if it did, you'll go straight to it." |
+| `SETUP_START_SLOW_COPY` | An owner line in English, when setup takes longer than usual to start: "Setup is taking longer than usual to start. Try again in a moment." |
+| `SETUP_START_SPENT_COPY` | An owner line in English, when setup didn't start: "Setup didn't start. If a draft Desk shows in your Desks, open it from there. Otherwise, start again." Its wording isn't settled yet, so no screen uses it so far. |
 | `DEMO_BUDGET_COPY` | The demo has spent its model budget for now: "The demo has used its budget for now. Try again later." |
 
 Owner lines by `KernelError.code`:

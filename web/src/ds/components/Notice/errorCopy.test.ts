@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { EV_ERROR_CODES, KERNEL_ERROR_CODES, type EvError, type KernelErrorCode } from '../../../api/contracts';
 import { rivera } from '../../fixtures';
+import * as ds from '../../index.ts';
+import { assertCleanCopy } from '../../test/copy.ts';
 import {
   AGENT_START_LOST_COPY,
+  AGENT_START_RETRY_COPY,
   CHANGED_REFRESHED,
   CHAT_ENDED_COPY,
   DEMO_BUDGET_COPY,
@@ -11,6 +14,9 @@ import {
   RATE_LIMITED_COPY,
   RELOAD_PAGE_LABEL,
   SETUP_START_LOST_COPY,
+  SETUP_START_RETRY_COPY,
+  SETUP_START_SLOW_COPY,
+  SETUP_START_SPENT_COPY,
   UNREACHABLE_COPY,
   errorCopy,
   evErrorCopy,
@@ -176,6 +182,35 @@ describe('static error copy', () => {
     // The plain-word exception covers one sentence of one line, the owner's auth line in English,
     // so it can't quietly spread to another line.
     expect(lines.filter((line) => PLAIN_PHRASES.some((phrase) => line.includes(phrase)))).toEqual([errorCopy('auth', 'en')]);
+  });
+
+  it('start_retry_copy_word_for_word', () => {
+    // The answer to starting an agent or setup was lost, and trying again is safe: if it started,
+    // the retry finds it. Starting setup can also be slow, or fail with nothing started.
+    expect(AGENT_START_RETRY_COPY).toEqual({
+      en: "We lost the answer, so we don't know yet whether the agent started. Try again: if it did, you'll see it.",
+      es: 'Perdimos la respuesta, así que aún no sabemos si el agente empezó. Inténtalo de nuevo: si empezó, lo verás.',
+    });
+    expect(SETUP_START_RETRY_COPY).toBe("We lost the answer, so we don't know yet whether setup started. Try again: if it did, you'll go straight to it.");
+    expect(SETUP_START_SLOW_COPY).toBe('Setup is taking longer than usual to start. Try again in a moment.');
+    expect(SETUP_START_SPENT_COPY).toBe("Setup didn't start. If a draft Desk shows in your Desks, open it from there. Otherwise, start again.");
+
+    // Exported from the design system's index, beside the lines they replace.
+    expect(ds.AGENT_START_RETRY_COPY).toBe(AGENT_START_RETRY_COPY);
+    expect(ds.SETUP_START_RETRY_COPY).toBe(SETUP_START_RETRY_COPY);
+    expect(ds.SETUP_START_SLOW_COPY).toBe(SETUP_START_SLOW_COPY);
+    expect(ds.SETUP_START_SPENT_COPY).toBe(SETUP_START_SPENT_COPY);
+
+    // No line shows a code, and each passes the copy check as shown.
+    const lines = [AGENT_START_RETRY_COPY.en, AGENT_START_RETRY_COPY.es, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, SETUP_START_SPENT_COPY];
+    expect(lines.filter((line) => shownCodes(line).length > 0)).toEqual([]);
+    for (const line of lines) {
+      const shown = document.createElement('p');
+      shown.textContent = line;
+      document.body.append(shown);
+      expect(() => assertCleanCopy(shown), line).not.toThrow();
+      shown.remove();
+    }
   });
 
   it('setup_start_lost_copy_word_for_word', () => {

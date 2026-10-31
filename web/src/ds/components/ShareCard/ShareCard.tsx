@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
@@ -33,10 +33,13 @@ export interface ShareCardProps {
  */
 export function ShareCard({ name, url, ownerName, language, qr, onPrint }: ShareCardProps) {
   const answeredBy = ANSWERED_BY[language] ?? ANSWERED_BY.en;
+  const nameId = useId();
+  // The card is named by the business's name as it is shown, marked as theirs, rather than by a
+  // label of its own that would read the name as the card's words.
   return (
     <div className="cd-share-card">
-      <figure className="cd-share-card__card" aria-label={name} lang={language}>
-        <p className="cd-share-card__name cd-type-section" data-copy="user">
+      <figure className="cd-share-card__card" aria-labelledby={nameId} lang={language}>
+        <p id={nameId} className="cd-share-card__name cd-type-section" data-copy="user">
           {name}
         </p>
         <div className="cd-share-card__qr">{qr}</div>
@@ -44,7 +47,7 @@ export function ShareCard({ name, url, ownerName, language, qr, onPrint }: Share
           {url}
         </p>
         <figcaption className="cd-share-card__answered cd-type-meta">
-          {answeredBy(<span data-copy="user">{ownerName}</span>)}
+          {answeredBy(<bdi data-copy="user">{ownerName}</bdi>)}
         </figcaption>
       </figure>
       {onPrint === undefined ? null : (

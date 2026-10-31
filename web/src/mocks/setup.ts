@@ -7,7 +7,7 @@
  * with Answering still off; going live turns Answering on. The interviews are kept per copy beside
  * its world, so a start over leaves none behind.
  */
-import type { Probe, ProbeResult, PublicDesk, RuleCard, ToolProfile } from '../api/contracts.ts';
+import type { Probe, ProbeResult, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   BusinessOut,
   PaymentLinkOut,
@@ -30,7 +30,7 @@ import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
-import type { DeskRecord, LinkRecord, MockWorld } from './world.ts';
+import type { DeskRecord, LinkRecord, MockWorld, ToolRecord } from './world.ts';
 
 /** Plan 02's limits on the business's description and on an answer. */
 const DESCRIPTION_MAX = 1500;
@@ -251,14 +251,14 @@ export function capFromAnswer(text: string): number {
 
 /**
  * The new Desk's tools: every built-in tool, with Documents and Payments connected but not on (each
- * `needs_review` with no changed definition), and nothing from the mock payments server until it
- * is connected.
+ * `needs_review` as a connect never confirmed, `new`, with no changed definition), and nothing from
+ * the mock payments server until it is connected.
  */
-function newDeskTools(): ToolProfile[] {
+function newDeskTools(): ToolRecord[] {
   const notYetOn: ReadonlySet<string> = new Set(['native.release_document', 'native.payment_link', 'native.charge_mandate']);
   return riveraTools()
     .filter((tool) => tool.source === 'native')
-    .map((tool) => (notYetOn.has(tool.tool) ? { ...tool, status: 'needs_review' } : tool));
+    .map((tool) => (notYetOn.has(tool.tool) ? { ...tool, status: 'needs_review', review_reason: 'new' } : tool));
 }
 
 /** The new Desk's first rules: "Ask me first", at a money limit of 0, as `POST /desks` activates them. */
@@ -644,8 +644,8 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (!desk.tools.some((tool) => MOCK_PAYMENTS.has(tool.tool))) {
       desk.tools = [
         ...desk.tools,
-        { ...rivera.toolProfiles.listCharges, status: 'needs_review', pending_definition_text: null, pending_sha256: null },
-        { ...rivera.toolProfiles.createRefund, status: 'needs_review', pending_definition_text: null, pending_sha256: null },
+        { ...rivera.toolProfiles.listCharges, status: 'needs_review', pending_definition_text: null, pending_sha256: null, review_reason: 'new' },
+        { ...rivera.toolProfiles.createRefund, status: 'needs_review', pending_definition_text: null, pending_sha256: null, review_reason: 'new' },
       ];
     }
     return ok(toolRows(desk, MOCK_PAYMENTS));

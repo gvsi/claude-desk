@@ -6,20 +6,21 @@
  */
 import { http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { userEvent } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { observeRequests } from '../api/http.ts';
 import { rivera } from '../ds/fixtures/index.ts';
+import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { readLocal } from '../lib/storage.ts';
 import { worker } from '../mocks/browser.ts';
 import { copyOut } from '../mocks/readModels.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
-import { renderRoute } from '../test/renderRoute.tsx';
+import { renderRoute, VIEWPORTS } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
-import { watchFor, watchPages } from '../test/watch.ts';
+import { pageNow, watchFor, watchPages } from '../test/watch.ts';
 import { FRESH_MS } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
@@ -39,6 +40,8 @@ const RATE_LIMITED = 'That’s a lot of tries. Wait a while, then try again.';
 const UNREACHABLE = 'We couldn’t reach the demo. Try again in a moment.';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
+/** Safety's every-entry view: the signed record, long enough to scroll at the desktop size too. */
+const SAFETY_ENTRIES = `/app/${RIVERA.deskId}/safety?view=entries`;
 /** Rivera's public page, a route that loads with the app. */
 const PUBLIC_PAGE = `/d/${RIVERA.slug}`;
 
@@ -54,6 +57,68 @@ function introDialog(screen: RenderResult) {
 async function startTheDemo(screen: RenderResult, passcode = 'demo'): Promise<void> {
   await screen.getByLabelText('Passcode').fill(passcode);
   await screen.getByRole('button', { name: 'Start the demo' }).click();
+}
+
+/** The owner frame's reviewer bar and the page's scrolling column. */
+function ownerFrame(): { bar: Element; column: HTMLElement } {
+  const column = document.querySelector('main');
+  const bar = [...document.querySelectorAll('[role="note"]')].find((note) => note.textContent?.includes('This is a concept prototype.'));
+  if (!column || !bar) throw new Error('the owner frame draws the reviewer bar and the page column');
+  return { bar, column };
+}
+
+/**
+ * The reviewer bar is no part of the page's scrolling column, and the column starts at or below
+ * its foot: nothing the page scrolls can pass under the bar. So the column needs no scroll padding
+ * for it; padding the column by the bar's height would only push every scrolled-to or focused
+ * control down by a second bar's height.
+ */
+function expectTheColumnStartsBelowTheBar(): void {
+  const { bar, column } = ownerFrame();
+  expect(column.contains(bar), 'the bar is outside the page column').toBe(false);
+  expect(column.getBoundingClientRect().top).toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+}
+
+/**
+ * Moves focus to the stop after `control`, lets `place` scroll the page's column, then brings focus
+ * back to `control` from the keyboard (Shift+Tab, in the browser's own order). It must be in sight
+ * inside the column, below the reviewer bar, where a pointer at its middle reaches it and not the bar.
+ */
+async function expectKeyboardFocusInSight(control: HTMLElement, place: (column: HTMLElement) => void): Promise<void> {
+  const { bar, column } = ownerFrame();
+  control.focus({ preventScroll: true });
+  await userEvent.tab();
+  expect(document.activeElement).not.toBe(control);
+  place(column);
+
+  await userEvent.tab({ shift: true });
+  expect(document.activeElement).toBe(control);
+  const box = control.getBoundingClientRect();
+  const scrollport = column.getBoundingClientRect();
+  expect(box.top, 'inside the column').toBeGreaterThanOrEqual(scrollport.top);
+  expect(box.bottom, 'inside the column').toBeLessThanOrEqual(scrollport.bottom);
+  expect(box.top, 'below the bar').toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  expect(control.contains(hit), 'a pointer at its middle reaches it').toBe(true);
+}
+
+/**
+ * Keyboard focus on `control` stays clear of the reviewer bar in the two places it could hide:
+ * scrolled past (the column at its foot, the control out of sight above it), where the browser
+ * scrolls it back; and at the column's top edge, its top 1 px inside the column, where the browser
+ * sees it in view and leaves it, so a bar pinned over the column's top would cover it.
+ */
+async function expectFocusComesBackBelowTheBar(control: HTMLElement): Promise<void> {
+  await expectKeyboardFocusInSight(control, (column) => {
+    column.scrollTop = column.scrollHeight;
+    expect(control.getBoundingClientRect().bottom, 'scrolled out of sight').toBeLessThanOrEqual(column.getBoundingClientRect().top);
+  });
+  await expectKeyboardFocusInSight(control, (column) => {
+    column.scrollTop += control.getBoundingClientRect().top - column.getBoundingClientRect().top - 1;
+    const edge = control.getBoundingClientRect().top - column.getBoundingClientRect().top;
+    expect(edge, 'at the column’s top edge').toBeGreaterThan(0);
+    expect(edge, 'at the column’s top edge').toBeLessThan(2);
+  });
 }
 
 // The last Desk and the hidden list live in this browser's storage, which outlives a test.
@@ -77,6 +142,8 @@ describe('Arrival', () => {
       await expect.element(dialog.getByText(detail, { exact: true })).toBeVisible();
     }
     expect(document.body.textContent).not.toContain(ENDED);
+    // Checked at rest, once the panel has arrived and the illustration has played.
+    await settled(dialog.element());
     await expectScreenBasics(screen.container, { owner: true });
 
     await startTheDemo(screen);
@@ -85,6 +152,22 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(screen.getByText(/^You're Maria Rivera today\. This is a concept prototype\.$/)).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Maria$/ })).toBeVisible();
+  });
+
+  it('the_illustration_plays_once_as_the_window_changes', async () => {
+    // Under 960 px the illustration isn't drawn. Played once at the desktop width, it stays where its
+    // story ended when the window narrows past that and widens again, as a tablet does when it turns.
+    const { screen } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const art = dialog.element().querySelector('.cd-intro__illustration') as HTMLElement;
+    await settled(art);
+    await page.viewport(900, VIEWPORTS.desktop.height);
+    expect(art.getClientRects()).toHaveLength(0);
+    await page.viewport(VIEWPORTS.desktop.width, VIEWPORTS.desktop.height);
+    expect(art.getClientRects().length).toBeGreaterThan(0);
+    const playing = art.getAnimations({ subtree: true }).filter((animation) => animation.playState !== 'finished');
+    expect(playing.map((animation) => (animation as CSSAnimation).animationName)).toEqual([]);
   });
 
   it('start_the_demo_opens_today_drawn', async () => {
@@ -100,6 +183,22 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(heldCard(screen)).toBeVisible();
     expect(pages()).toEqual(['preview', 'today']);
+  });
+
+  it('start_the_demo_lets_the_dialog_go_onto_today', async () => {
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+
+    // The dialog leaves only once Today is read ahead, closes while the page is still the
+    // preview, and only then does Today open, already drawn.
+    await startTheDemo(screen);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    // Each of Today's reads had been answered, once and successfully, before it started to leave.
+    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1 });
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
   });
 
   it('returning_owner_opens_today_drawn', async () => {
@@ -395,13 +494,18 @@ describe('Arrival', () => {
 
   it('wrong_passcode_shows_its_copy', async () => {
     const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
-    await startTheDemo(screen, 'wrong');
     const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    await startTheDemo(screen, 'wrong');
     await expect.element(dialog.getByRole('alert')).toHaveTextContent(WRONG_PASSCODE);
     await expect.element(screen.getByLabelText('Passcode')).toHaveAttribute('aria-invalid', 'true');
     await expect.element(dialog).toBeVisible();
     expect(router.state.location.pathname).toBe('/');
     expect(requests('desks')).toEqual([]);
+    // The dialog never starts to leave, even well after an exit would have ended.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(handOff.steps()).toEqual(['open']);
   });
 
   it('rate_limited_shows_its_copy', async () => {
@@ -802,6 +906,48 @@ describe('OwnerLayout', () => {
     }
     expect(requests('startOver')).toHaveLength(2);
   });
+
+  it.each(['desktop', 'phone'] as const)('focus_comes_back_below_the_reviewer_bar_%s', async (viewport) => {
+    // The reviewer bar sits above the page's scrolling column, never over it: a control near the
+    // top that the page has scrolled past, or that sits at the column's top edge, is in sight below
+    // the bar when the keyboard reaches it (WCAG 2.2, 2.4.11 Focus Not Obscured), on Today and on
+    // Safety's record. Each page is measured once every read on it is in, so nothing loads in above
+    // a control, or below it, while the column is being scrolled.
+    const pages = [
+      {
+        path: TODAY,
+        settled: async (screen: RenderResult) => {
+          await expect.element(heldCard(screen)).toBeVisible();
+          await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
+          await expect.element(screen.getByText('Opening your Demo inbox', { exact: true })).not.toBeInTheDocument();
+        },
+        controls: (screen: RenderResult) => [
+          screen.getByRole('button', { name: 'Copy your Desk link' }),
+          screen.getByRole('button', { name: 'Hide this list' }),
+          screen.getByRole('button', { name: 'Show me ideas' }),
+        ],
+      },
+      {
+        path: SAFETY_ENTRIES,
+        settled: async (screen: RenderResult) => {
+          await expect.element(screen.getByText(/^\d+ attempts? to talk me around (?:was|were) stopped this week\.$/)).toBeVisible();
+          await expect.element(screen.getByRole('list', { name: 'Every entry, newest first' })).toBeVisible();
+        },
+        controls: (screen: RenderResult) => [
+          screen.getByRole('link', { name: '1 held for you' }),
+          screen.getByRole('radiogroup', { name: 'What to show' }).getByRole('radio', { name: 'Every entry', exact: true }),
+        ],
+      },
+    ];
+    for (const { path, settled, controls } of pages) {
+      const { screen } = await renderRoute(path, { viewport });
+      await settled(screen);
+      const found = controls(screen);
+      for (const control of found) await expect.element(control).toBeVisible();
+      expectTheColumnStartsBelowTheBar();
+      for (const control of found) await expectFocusComesBackBelowTheBar(control.element() as HTMLElement);
+    }
+  });
 });
 
 describe('Today', () => {
@@ -917,6 +1063,7 @@ describe('Today', () => {
     const illustration = document.querySelector('.cd-intro__illustration');
     expect(illustration === null || illustration.getClientRects().length === 0).toBe(true);
     expectNoHorizontalScroll();
+    await settled(introDialog(arrival.screen).element());
     await expectScreenBasics(arrival.screen.container, { owner: true });
   });
 });
@@ -938,6 +1085,42 @@ function delayNextRead(path: string, ms: number): void {
       return undefined;
     }),
   );
+}
+
+/** Today's first reads: the copy's Desks, Today and Needs you. */
+type TodaysReads = Record<'desks' | 'today' | 'needsYou', number>;
+
+/**
+ * The intro dialog's hand-off to Today, from now until the test ends, each step named once: the
+ * dialog open, leaving, then closed while still on the page; once it is gone, the page under it, as
+ * `pageNow` names it. Also how many of Today's reads had been answered, successfully, as it started
+ * to leave.
+ */
+function watchTheHandOff(dialog: HTMLDialogElement): {
+  steps: () => string[];
+  answeredAsItLeft: () => TodaysReads | null;
+} {
+  const steps: string[] = [];
+  const answered: TodaysReads = { desks: 0, today: 0, needsYou: 0 };
+  let answeredAsItLeft: TodaysReads | null = null;
+  const stopCounting = observeRequests((outcome) => {
+    if (outcome.ok && Object.hasOwn(answered, outcome.key)) answered[outcome.key as keyof TodaysReads] += 1;
+  });
+  const look = () => {
+    let step: string;
+    if (dialog.isConnected) step = !dialog.open ? 'closed' : dialog.classList.contains('cd-intro--leaving') ? 'leaving' : 'open';
+    else step = pageNow();
+    if (step === 'leaving' && answeredAsItLeft === null) answeredAsItLeft = { ...answered };
+    if (steps.at(-1) !== step) steps.push(step);
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'open'] });
+  onTestFinished(() => {
+    watch.disconnect();
+    stopCounting();
+  });
+  return { steps: () => [...steps], answeredAsItLeft: () => answeredAsItLeft };
 }
 
 /** The next answer to `key`, or its failure: whether it has come yet, and a promise that settles when it does. */
