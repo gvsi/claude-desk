@@ -1291,6 +1291,42 @@ describe('Things to try ticks off', () => {
     expect(requests('desks')).toHaveLength(reads.desks);
   });
 
+  it('a_record_read_before_today_opened_is_not_its_first_read', async () => {
+    // Two held requests, so "Answer a held request" is drawn waiting when Today opens. Safety reads the
+    // record, then the first request is answered elsewhere; nothing polls meanwhile.
+    mockStore.world.addHeldRefund();
+    const { screen, router } = await renderRoute(SAFETY_ENTRIES, { pollScale: 100 });
+    await expect.poll(() => requests('ledger').length).toBeGreaterThan(0);
+    const held = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === rivera.decisions.held.reason_plain)?.decision;
+    if (!held) throw new Error('the seed holds the 15% quote');
+    await mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } });
+
+    // Today opens with Safety's copy of the record, from before the answer, and reads it again (that
+    // read held a moment, so the row shows waiting first): the answer was given before Today opened,
+    // so the row is done at load, drawn still.
+    delayNextRead(ROUTES.ledger.path.replace('{desk_id}', RIVERA.deskId), 1_000);
+    const animated = watchListAnimations();
+    await router.navigate(TODAY);
+    await expect.element(thingRow(screen, 'Answer a held request').getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true }), { timeout: 3_000 }).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(animated()).toEqual([]);
+  });
+
+  it('starting_over_starts_the_list_afresh', async () => {
+    const { screen, router } = await renderRoute(TODAY);
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+
+    await screen.getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
+    // The new copy's list has nothing done, and its held request waits.
+    await expect.element(thingRow(screen, 'Answer a held request').getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
+    expect(thingsToTry(screen).getByText('Done', { exact: true }).elements()).toHaveLength(0);
+  });
+
   it('a_ticked_row_shown_again_is_drawn_still', async () => {
     const { screen } = await renderRoute(TODAY);
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
@@ -1480,15 +1516,28 @@ describe('Things to try ticks off', () => {
     await section.getByRole('button', { name: 'Delete this Desk' }).click();
     await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+    const animated = watchListAnimations();
+    // The copy's Desks are read again without the main line: the Desk switcher goes.
+    await expect.element(screen.getByRole('button', { name: /^Switch Desk/ })).not.toBeInTheDocument();
 
     // What this view saw stays done, drawn still; Emergencies is a Desk besides the one the copy started with.
-    const animated = watchListAnimations();
-    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
-    await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
-    await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    const expectWhatWasSeen = async () => {
+      await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+      await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+      await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    };
+    await expectWhatWasSeen();
     // And nothing more is read from the Desk that's gone.
     const reads = { conversations: requests('conversations').length, ledger: requests('ledger').length };
     await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(requests('needsYou').length + 4);
+    expect(requests('conversations').slice(reads.conversations).filter((r) => r.path.startsWith(mainLinePath('conversations')))).toEqual([]);
+    expect(requests('ledger').slice(reads.ledger).filter((r) => r.path.startsWith(mainLinePath('ledger')))).toEqual([]);
+
+    // Away from Today and back, with the main line no longer in the copy's Desks: the same.
+    await router.navigate(`/app/${RIVERA.emergenciesDeskId}/conversations`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+    await router.navigate(`/app/${RIVERA.emergenciesDeskId}/today`);
+    await expectWhatWasSeen();
     expect(requests('conversations').slice(reads.conversations).filter((r) => r.path.startsWith(mainLinePath('conversations')))).toEqual([]);
     expect(requests('ledger').slice(reads.ledger).filter((r) => r.path.startsWith(mainLinePath('ledger')))).toEqual([]);
     expect(animated()).toEqual([]);

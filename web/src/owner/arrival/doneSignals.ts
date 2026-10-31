@@ -144,13 +144,48 @@ export function answeredInView(decisions: Iterable<Pick<Decision, 'state'>>): bo
 }
 
 /** The copy's Desks in the order the API lists them, the order they were made. */
-function desksOf(businesses: readonly BusinessOut[]): string[] {
+export function listedDesks(businesses: readonly BusinessOut[]): string[] {
   return businesses.flatMap((b) => b.desks.map((d) => d.desk_id));
 }
 
 /** The first Desk the copy lists: the one it started with, while it is listed. Null when it lists none. */
 export function firstDesk(businesses: readonly BusinessOut[]): string | null {
-  return desksOf(businesses)[0] ?? null;
+  return listedDesks(businesses)[0] ?? null;
+}
+
+/**
+ * What the list keeps of the copy it shows, across visits to Today in this app: the Desk the copy
+ * started with (still that one once it is deleted), every Desk the copy has listed, and the memory
+ * of what was seen done.
+ */
+export interface Kept {
+  startedWith: string | null;
+  seen: ReadonlySet<string>;
+  memory: DoneMemory;
+}
+
+const NOTHING_KEPT: Kept = { startedWith: null, seen: new Set(), memory: NOTHING_DONE };
+
+/**
+ * `kept` once the copy lists `listed`: the first Desk listed is the one the copy started with, if
+ * none was yet, and every Desk listed is seen. Returns `kept` itself when nothing changed.
+ */
+export function keepFor(kept: Kept, listed: readonly string[]): Kept {
+  const startedWith = kept.startedWith ?? listed[0] ?? null;
+  const unseen = listed.filter((id) => !kept.seen.has(id));
+  if (startedWith === kept.startedWith && unseen.length === 0) return kept;
+  return { ...kept, startedWith, seen: unseen.length === 0 ? kept.seen : new Set([...kept.seen, ...unseen]) };
+}
+
+/**
+ * What a newly drawn list starts from: what was kept, while the copy still lists a Desk it saw (a
+ * Desk deleted leaves the others), else nothing (Start over makes a copy of all new Desks). Which
+ * reads settled stays with the list that read them: a newly drawn list's first settled reads are
+ * its own.
+ */
+export function restoreKept(kept: Kept | undefined, listed: readonly string[]): Kept {
+  if (kept === undefined || !listed.some((id) => kept.seen.has(id))) return NOTHING_KEPT;
+  return { ...kept, memory: { done: kept.memory.done, settled: {} } };
 }
 
 /**
@@ -158,5 +193,5 @@ export function firstDesk(businesses: readonly BusinessOut[]): string | null {
  * listed this is two or more Desks; once it has been deleted, any Desk still listed is another.
  */
 export function madeAnotherDesk(businesses: readonly BusinessOut[], startedWith: string): boolean {
-  return desksOf(businesses).some((id) => id !== startedWith);
+  return listedDesks(businesses).some((id) => id !== startedWith);
 }

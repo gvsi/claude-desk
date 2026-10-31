@@ -14,9 +14,12 @@ import {
   chattedAsCustomer,
   doneCaption,
   firstDesk,
+  keepFor,
+  listedDesks,
   madeAnotherDesk,
   previewSessions,
   remember,
+  restoreKept,
   stoppedInPreview,
   type Reading,
   type Thing,
@@ -314,5 +317,32 @@ describe("the list's line", () => {
     expect(doneCaption(1)).toBe('1 of 4 done. No real customer sees any of it.');
     expect(doneCaption(3)).toBe('3 of 4 done. No real customer sees any of it.');
     expect(doneCaption(4)).toBe('All 4 done. No real customer sees any of it.');
+  });
+});
+
+describe('what the list keeps across visits to Today', () => {
+  const copy = [business('biz-rivera', [desk('desk-main'), desk('desk-em')])];
+  const seen = remember(NOTHING_DONE, reading({ answer: { done: true, settled: true }, chat: { settled: true } }));
+
+  it('keeps the Desk the copy started with, every Desk it listed, and what was seen done, but not what was read', () => {
+    const kept = keepFor({ startedWith: null, seen: new Set(), memory: NOTHING_DONE }, listedDesks(copy));
+    expect(kept.startedWith).toBe('desk-main');
+    expect([...kept.seen]).toEqual(['desk-main', 'desk-em']);
+    const later = restoreKept({ ...kept, memory: seen }, ['desk-em']);
+    expect(later.startedWith).toBe('desk-main');
+    expect(later.memory).toEqual({ done: { answer: { atLoad: true } }, settled: {} });
+  });
+
+  it('a copy that lists none of the Desks seen is a new copy, and starts afresh', () => {
+    const kept = { ...keepFor({ startedWith: null, seen: new Set(), memory: NOTHING_DONE }, listedDesks(copy)), memory: seen };
+    const fresh = restoreKept(kept, ['desk-main-2']);
+    expect(fresh).toEqual({ startedWith: null, seen: new Set(), memory: NOTHING_DONE });
+    expect(restoreKept(undefined, ['desk-main'])).toEqual({ startedWith: null, seen: new Set(), memory: NOTHING_DONE });
+  });
+
+  it('keeping the same Desks again changes nothing', () => {
+    const kept = keepFor({ startedWith: null, seen: new Set(), memory: NOTHING_DONE }, listedDesks(copy));
+    expect(keepFor(kept, ['desk-em'])).toBe(kept);
+    expect([...keepFor(kept, ['desk-em', 'desk-new']).seen]).toEqual(['desk-main', 'desk-em', 'desk-new']);
   });
 });

@@ -5,9 +5,11 @@
  * Signals 1 to 3 read the Desk the copy started with, on whichever Desk the list shows; "Create your
  * own Desk" is copy-wide. A hidden list reads nothing, and a read stops once every thing it tells is
  * done. A read that is loading or failed ticks nothing and shows no error: the list is a guide.
+ * What the list remembers (the Desk the copy started with and the things seen done) lasts while the
+ * app runs, across visits to Today, until a reload or a new copy.
  */
-import { useQueries, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 
 import type { Decision } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
@@ -17,16 +19,18 @@ import { conversationKey } from '../conversations/useTakeOver.ts';
 import { attemptsQuery, ledgerQuery } from '../safety/queries.ts';
 import { useDesks } from '../useDesks.ts';
 import {
-  NOTHING_DONE,
   THINGS,
   answeredInView,
   answeredOnRecord,
   chattedAsCustomer,
-  firstDesk,
+  keepFor,
+  listedDesks,
   madeAnotherDesk,
   previewSessions,
   remember,
+  restoreKept,
   stoppedInPreview,
+  type Kept,
   type Reading,
   type Thing,
 } from './doneSignals.ts';
@@ -57,27 +61,50 @@ function polled() {
   return { refetchInterval: pollMs('today'), refetchOnWindowFocus: true } as const;
 }
 
+interface Read<T> {
+  status: 'pending' | 'error' | 'success';
+  data: T | undefined;
+  isFetchedAfterMount: boolean;
+}
+
 /**
  * What a read shows, only while its latest attempt worked. React Query keeps the data of an earlier
  * read through a failure; that copy may be from before this view, so a failing read ticks nothing new.
  */
-function worked<T>(read: { status: 'pending' | 'error' | 'success'; data: T | undefined }): T | undefined {
+function worked<T>(read: Pick<Read<T>, 'status' | 'data'>): T | undefined {
   return read.status === 'success' ? read.data : undefined;
 }
 
+/**
+ * Whether a read has settled for this list: one made since the list was drawn has worked. A copy
+ * another screen read earlier isn't this list's first read, so what it shows waits for a fresh one,
+ * and what was done before Today opened is never taken for something done in view.
+ */
+function fresh<T>(read: Read<T>): boolean {
+  return read.status === 'success' && read.isFetchedAfterMount;
+}
+
+/** Per app (its query client, so a reload starts afresh), what the list last kept of its copy. */
+const keptByApp = new WeakMap<QueryClient, Kept>();
+
 export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOptions): DoneSignals {
-  const [memory, setMemory] = useState(NOTHING_DONE);
+  const queryClient = useQueryClient();
   // The copy's Desks as the owner's frame reads them, never read again here.
   const desks = useDesks(deskId, { passive: true });
   const businesses = desks.data;
+  const listed = businesses === undefined ? [] : listedDesks(businesses);
 
-  // The Desk the copy started with: the first one listed when this view first read the copy, and
+  // What the list kept on an earlier visit to Today, while the copy is the same one.
+  const [kept, setKept] = useState(() => restoreKept(keptByApp.get(queryClient), listed));
+  useEffect(() => {
+    keptByApp.set(queryClient, kept);
+  }, [queryClient, kept]);
+  // The Desk the copy started with: the first one listed when the list first read the copy, and
   // still that one after it is deleted, when the list ticks nothing new from it.
-  const [startedWith, setStartedWith] = useState<string | null>(null);
-  const first = businesses === undefined ? null : firstDesk(businesses);
-  if (startedWith === null && first !== null) setStartedWith(first);
-  const seeded = startedWith ?? first;
-  const seededListed = seeded !== null && businesses !== undefined && businesses.some((b) => b.desks.some((d) => d.desk_id === seeded));
+  const knowing = keepFor(kept, listed);
+  const seeded = knowing.startedWith;
+  const memory = knowing.memory;
+  const seededListed = seeded !== null && listed.includes(seeded);
   const reading = enabled && seededListed && seeded !== null;
   const seen = memory.done;
 
@@ -108,24 +135,27 @@ export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOpti
     ...polled(),
   });
 
-  // Only reads whose latest attempt worked say anything; rows already seen done stay done (`remember`).
-  const listed = worked(conversations) !== undefined;
+  // Only reads whose latest attempt worked say anything, and only reads made since the list was
+  // drawn settle; rows already seen done stay done (`remember`).
+  const conversationsWorked = worked(conversations) !== undefined;
   const chats = transcripts.map((t) => worked(t));
   const stopped = worked(attempts);
   const record = worked(ledger);
+  // The frame reads the copy's Desks as it opens and again whenever the copy changes, so what it
+  // keeps is current: it settles as it is.
   const copy = worked(desks);
   const previewIds = new Set(previews);
   const now: Record<Thing, Reading> = {
     chat: {
-      settled: reading && listed && chats.every((chat) => chat !== undefined),
-      done: reading && listed && chattedAsCustomer(chats),
+      settled: reading && fresh(conversations) && transcripts.every((t) => fresh(t)),
+      done: reading && conversationsWorked && chattedAsCustomer(chats),
     },
     break: {
-      settled: reading && listed && (previews.length === 0 || (stopped !== undefined && record !== undefined)),
-      done: reading && listed && stopped !== undefined && record !== undefined && stoppedInPreview(stopped, record, previewIds),
+      settled: reading && fresh(conversations) && (previews.length === 0 || (fresh(attempts) && fresh(ledger))),
+      done: reading && conversationsWorked && stopped !== undefined && record !== undefined && stoppedInPreview(stopped, record, previewIds),
     },
     answer: {
-      settled: reading && record !== undefined,
+      settled: reading && fresh(ledger),
       done: reading && record !== undefined && answeredOnRecord(record),
       inView: reading && deskId === seeded && answeredInView(answered),
     },
@@ -135,7 +165,8 @@ export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOpti
     },
   };
 
-  const next = remember(memory, now);
-  if (next !== memory) setMemory(next);
-  return { done: next.done, count: THINGS.filter((thing) => next.done[thing] !== undefined).length };
+  const remembered = remember(memory, now);
+  const next = remembered === memory ? knowing : { ...knowing, memory: remembered };
+  if (next !== kept) setKept(next);
+  return { done: remembered.done, count: THINGS.filter((thing) => remembered.done[thing] !== undefined).length };
 }
