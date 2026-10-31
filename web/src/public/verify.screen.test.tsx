@@ -394,10 +394,15 @@ describe('Demo inbox', () => {
   });
 
   it('owner_inbox_that_cant_be_read_says_so', async () => {
-    // While Today reads it, the inbox's place says so; when the read and its retry fail, it says
-    // the Demo inbox couldn't be opened, with "Try again", never a sheet that would say it's empty.
+    // Today opened from another of the Desk's pages reads its inbox itself (only a Today opened from
+    // the loading page is read ahead). While it reads, the inbox's place says so; when the read and
+    // its retry fail, it says the Demo inbox couldn't be opened, with "Try again", never a sheet
+    // that would say it's empty.
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/rules`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    expect(requests('ownerInbox')).toEqual([]);
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2, delayMs: 300 });
-    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
+    await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Today' }).click();
     await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Demo inbox' })).toBeVisible();
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
@@ -413,6 +418,25 @@ describe('Demo inbox', () => {
     await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
     await expect.element(line).not.toBeInTheDocument();
     await expect.element(place).not.toBeInTheDocument();
+  });
+
+  it('owner_inbox_that_cant_be_read_on_a_reload_says_so', async () => {
+    // Opened from the loading page, Today is read ahead, its inbox with it. When that read and its
+    // retry fail, Today still opens; it reads the inbox again, saying so, and when that read and its
+    // retry fail too, it says the Demo inbox couldn't be opened, with "Try again".
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 4, delayMs: 300 });
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Demo inbox' })).toBeVisible();
+    // Past the read ahead's two.
+    expect(requests('ownerInbox').length).toBeGreaterThanOrEqual(3);
+    const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(4);
+    expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
+
+    await screen.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+    await expect.element(line).not.toBeInTheDocument();
   });
 
   it('owner_inbox_refresh_that_fails_says_so', async () => {
