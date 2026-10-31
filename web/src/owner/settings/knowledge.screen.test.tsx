@@ -111,8 +111,14 @@ describe('knowledge', () => {
     expect(added?.item_id).toMatch(/^note-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     expect(added).toEqual({ item_id: added?.item_id, source: 'setup', title: NOTE.slice(0, 60), text: NOTE, label: { readers: ['owner'] } });
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
-    // The note stays in its field beside the card, as the board draws it.
-    await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveValue(NOTE);
+    // Once added, the field clears; pressing Add again asks for words without posting a duplicate.
+    await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveValue('');
+    const list = main(screen).getByRole('list', { name: 'What I know now' });
+    await expect.poll(() => list.getByRole('listitem').elements().length).toBe(1);
+    await main(screen).getByRole('button', { name: 'Add a note' }).click();
+    await expect.element(main(screen).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.emptyNote);
+    expect(posts()).toHaveLength(1);
+    expect(list.getByRole('listitem').elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Customers can see it: the same item posted again, public; the line no longer says only you can.
@@ -261,6 +267,7 @@ describe('knowledge', () => {
     await addButton.click();
     await expect.element(main(screen).getByText(ADDED, { exact: true })).toBeVisible();
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
+    await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveValue('');
     expect(main(screen).getByRole('alert').query()).toBeNull();
     expect(mockStore.requests.filter((r) => r.key === 'knowledge').length).toBeGreaterThanOrEqual(2);
 
@@ -289,6 +296,7 @@ describe('knowledge', () => {
     await main(fresh).getByRole('button', { name: 'Add a note' }).click();
     // The add says it couldn't confirm; the list, which couldn't be read either, says so on its own.
     await expect.element(main(fresh).getByRole('region', { name: 'Add something' }).getByRole('alert')).toHaveTextContent(KNOWLEDGE_COPY.unconfirmed);
+    await expect.element(main(fresh).getByRole('textbox', { name: 'A note' })).toHaveValue(other);
     expect(switchOf(fresh).query()).toBeNull();
     await main(fresh).getByRole('button', { name: 'Add a note' }).click();
     await expect.element(switchOf(fresh)).toBeVisible();

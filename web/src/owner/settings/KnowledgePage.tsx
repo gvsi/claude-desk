@@ -183,6 +183,7 @@ export function KnowledgePage() {
     try {
       const stored = await post(item);
       setAdded(stored);
+      if (kind === 'note') setNote('');
       setSwitchLine(undefined);
       listChanged();
     } catch (err) {
@@ -198,6 +199,7 @@ export function KnowledgePage() {
       else {
         // The list may withhold its words; the card keeps the ones posted, with the label read back.
         setAdded({ ...item, label: now.label });
+        if (kind === 'note') setNote('');
         setSwitchLine(undefined);
       }
     }
