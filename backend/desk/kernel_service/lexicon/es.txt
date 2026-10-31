@@ -56,11 +56,13 @@ date	(?:a[\s-]+)?primera[\s-]+hora
 # "libre para usted", "libre para vosotros". It passes elsewhere, where it is a time that is open
 # or a freedom: "un horario libre", "tengo la tarde libre", "libre para la cita", "usted es libre
 # de preguntar". "entrada libre" and "libre de costo", "de cargo", "de pago" or "de impuestos" are
-# a price wherever they stand, and so are "sin costo", "sin coste" and "sin cargo", in the plural
-# too, whatever word follows ("sin cargo extra", "sin costos adicionales").
+# a price wherever they stand, and so are "sin costo", "sin coste", "sin cargo" and "sin recargo"
+# (no surcharge), in the plural too, whatever word follows ("sin cargo extra", "sin costos
+# adicionales").
 promise	garantias?|garantiz[a-z]*|promet[a-z]*|promesas?
 promise	gratis|gratuit[oa]s?|descuentos?|descont[a-z]*|reembols[a-z]*
 promise	sin[\s-]+(?:ningun[\s-]+)?(?:costos?|costes?|cargos?)|de[\s-]+regalo
+promise	sin[\s-]+recargos?
 promise	sin[\s-]+(?:ninguna[\s-]+)?comision(?:es)?
 promise	por[\s-]+nuestra[\s-]+cuenta|(?:por[\s-]+)?cuenta[\s-]+de[\s-]+la[\s-]+casa
 promise	entradas?[\s-]+libres?
