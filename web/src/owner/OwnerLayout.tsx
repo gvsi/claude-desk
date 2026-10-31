@@ -23,7 +23,7 @@ import {
   type SwitcherPick,
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
-import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday } from './useDesks.ts';
+import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead } from './useDesks.ts';
 
 import './OwnerLayout.css';
 
@@ -73,6 +73,12 @@ function currentNav(pathname: string): NavKey {
   return NAV_KEYS.find((key) => key === segment) ?? 'today';
 }
 
+/** Whether the page at `pathname` is the Desk's Today, which the Desk's own address opens too. */
+function opensToday(pathname: string): boolean {
+  const [page = '', ...rest] = pathname.split('/').slice(3);
+  return (page === '' || page === 'today') && rest.every((segment) => segment === '');
+}
+
 /** No Connectors href yet: the Connectors page comes with run 2, so its row stays hidden. */
 function hrefsFor(deskId: string): SidebarHrefs {
   const base = `/app/${encodeURIComponent(deskId)}`;
@@ -111,15 +117,23 @@ export function OwnerLayout() {
  * One Desk's frame, mounted afresh for each Desk, so the copy's Desks are read again whenever the
  * owner lands on a Desk they don't list (a new copy's, a Desk just made). Only that fresh read can
  * say the Desk isn't the owner's, unless a page holds the Desk (`holdDesk`) while it settles a
- * delete: then the frame stays up as it last was, and the page moves on once it knows.
+ * delete: then the frame stays up as it last was, and the page moves on once it knows. Opened onto
+ * Today with the loading page up (a reload, a Desk not listed yet), the loading page stays while
+ * Today is read ahead too, as on a first visit, so Today opens drawn; a Desk already listed (a
+ * switch between Desks) opens at once.
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
+  const location = useLocation();
   const found = desks.data ? findDesk(desks.data, deskId) : null;
   const [held, setHeld] = useState<ShownDesk | null>(null);
   const shown = found ?? held;
+  const readingAhead = useTodayReadAhead(deskId, found === null && opensToday(location.pathname));
 
-  if (shown) return <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />;
+  if (shown) {
+    if (readingAhead) return <OwnerState />;
+    return <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />;
+  }
   if (desks.isError) return <OwnerState error={desks.error} onRetry={() => void desks.refetch()} />;
   if (desks.data && !desks.isFetching) return <NotFound />;
   return <OwnerState />;

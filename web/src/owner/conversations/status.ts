@@ -12,17 +12,25 @@ export interface ConversationStatus {
 
 /**
  * A conversation's state, first match: something held for the owner, the owner in the chat, a
- * chat paused after blocked attempts, the owner's own preview, an agent, a verified customer, a
- * visitor. `held` is how many of its requests are held now.
+ * chat paused after blocked attempts, the owner's own preview, then what they are: an agent, a
+ * verified customer, a visitor. `held` is how many of its requests are held now. With no name on
+ * record or given, the name line (`whoLabel`) already says what they are, so the status is left
+ * out (null) rather than say it twice.
  */
-export function conversationStatus(s: ConversationSummary, held: number): ConversationStatus {
+export function conversationStatus(s: ConversationSummary, held: number): ConversationStatus | null {
   if (held > 0) return { tone: 'held', text: 'Needs you' };
   if (s.mode === 'owner') return { tone: 'info', text: "You're in this chat" };
   if (s.mode === 'paused') return { tone: 'held', text: 'Paused after blocked attempts' };
   if (s.owner_preview) return { tone: 'info', text: 'Your own preview' };
+  if (!hasName(s)) return null;
   if (s.kind === 'agent') return { tone: 'info', text: 'Agent' };
   if (s.verified) return { tone: 'handled', text: 'Verified customer' };
   return { tone: 'handled', text: 'Visitor' };
+}
+
+/** A name on record or given: more than spaces. */
+function hasName(s: ConversationSummary): s is ConversationSummary & { display_name: string } {
+  return s.display_name != null && s.display_name.trim() !== '';
 }
 
 /**
@@ -31,8 +39,7 @@ export function conversationStatus(s: ConversationSummary, held: number): Conver
  */
 export function whoLabel(s: ConversationSummary): string {
   if (s.owner_preview) return 'Your preview';
-  const name = s.display_name?.trim();
-  if (name) return s.display_name ?? name;
+  if (hasName(s)) return s.display_name;
   if (s.kind === 'agent') return 'Agent';
   if (s.verified) return 'Verified customer';
   return 'Visitor';
