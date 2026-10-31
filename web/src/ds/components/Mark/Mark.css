@@ -1,7 +1,9 @@
-/* The Claude Desk mark: a white tile with a hairline edge, a clay dome and black ink. These are the
-   mark's fixed colors (the mark-* tokens), the same in every theme, and nothing else uses them. The
-   fills are set here, not as SVG attributes, because presentation attributes can't read custom
-   properties. */
+/* The Claude Desk mark: a clay dome under ink lines, with no tile. On the dark grounds the ink is
+   light (mark-ink-light); on a light ground it keeps the drawing's dark ink (mark-ink). Only the app
+   icon draws the white tile (mark-tile, with its mark-hairline edge), and on it the ink is the
+   drawing's dark ink. These are the mark's fixed colors, the same in every theme, and
+   nothing else uses them. The fills are set here, not as SVG attributes, because presentation
+   attributes can't read custom properties. */
 
 .cd-mark {
   display: block;
@@ -17,16 +19,48 @@
   fill: var(--mark-clay);
 }
 
-.cd-mark__ink {
+.cd-mark--dark .cd-mark__ink {
+  fill: var(--mark-ink-light);
+}
+
+.cd-mark--light .cd-mark__ink,
+.cd-mark--tile .cd-mark__ink {
   fill: var(--mark-ink);
 }
 
+/* The wordmark on one line: the name, then the Preview badge 8 px to its right, centred on it. The
+   name never splits across two lines. */
 .cd-wordmark {
   display: inline-flex;
-  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
   color: var(--text-primary);
 }
 
-.cd-wordmark__beta {
-  color: var(--text-secondary);
+.cd-wordmark__name {
+  white-space: nowrap;
+}
+
+/* The app icon: the mark on its white tile, centred on a clay field with corners a quarter of its
+   size (owner, 2026-10-30), 120 px on the About pages' desktop layout and 88 px on their phone
+   layout. The field counts as part of the mark: clay shows here and behind the intro illustration,
+   nowhere else. */
+.cd-mark-app-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--clay);
+}
+
+.cd-mark-app-icon--large {
+  width: 120px;
+  height: 120px;
+  border-radius: 30px;
+}
+
+.cd-mark-app-icon--compact {
+  width: 88px;
+  height: 88px;
+  border-radius: 22px;
 }

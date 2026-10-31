@@ -119,6 +119,23 @@ describe('assertCleanCopy', () => {
     expect(check('<svg><title>NEW</title></svg>')).toThrow(/all caps "NEW"/);
   });
 
+  it('allows_capitals_only_on_the_preview_badge', () => {
+    // The one all-caps label: the lockup's badge, its word written "Preview" and drawn in capitals.
+    expect(check('<span data-ds="preview-badge" style="text-transform: uppercase">Preview</span>')).not.toThrow();
+    // Any other word on the badge, or the same word written in capitals, still fails.
+    expect(check('<span data-ds="preview-badge" style="text-transform: uppercase">Beta</span>')).toThrow(
+      /text-transform uppercase on <span>: "Beta"/,
+    );
+    expect(check('<span data-ds="preview-badge">PREVIEW</span>')).toThrow(/all caps "PREVIEW"/);
+    expect(check('<span data-ds="preview-badge" style="text-transform: uppercase">Preview <b>now</b></span>')).toThrow(/text-transform/);
+    // The word in capitals anywhere else still fails, drawn or written.
+    expect(check('<span style="text-transform: uppercase">Preview</span>')).toThrow(/text-transform uppercase on <span>: "Preview"/);
+    expect(check('<span data-ds="pill" style="text-transform: uppercase">Preview</span>')).toThrow(/text-transform uppercase/);
+    expect(check('<p>PREVIEW</p>')).toThrow(/all caps "PREVIEW"/);
+    // Small caps are never the badge's look.
+    expect(check('<span data-ds="preview-badge" style="font-variant-caps: all-small-caps">Preview</span>')).toThrow(/font-variant-caps/);
+  });
+
   it('flags_uppercase_transform', () => {
     expect(check('<span style="text-transform: uppercase">Needs you</span>')).toThrow(
       /text-transform uppercase on <span>: "Needs you"/,

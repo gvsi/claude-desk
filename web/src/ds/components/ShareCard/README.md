@@ -10,7 +10,7 @@
 ## What the consumer provides
 
 - `name`: `business_name`; `url`: the Desk's public link as people type it ("desk.example/rivera"); `ownerName`: `owner_display_name`. All three are shown as written.
-- `qr`: the QR code for the link, which the web app draws (`QrCode`, plan 04). It fills a 152 px square, centered. The card never makes, fetches or checks a code. A QR code needs its own light quiet zone to scan, which the web app's code draws; nothing else in the design system is light, so that ground stays inside the code.
+- `qr`: the QR code for the link, which the web app draws (`QrCode`, plan 04). It fills a 152 px square, centered. The card never makes, fetches or checks a code. A QR code needs its own light quiet zone to scan, which the web app's code draws, so that ground stays inside the code. It is one of the product's three light surfaces, with the intro illustration's cards and the white tile of the About pages' app icon.
 - `language`: the language the card is printed in.
 - `onPrint` to show "Print card" under the card. The screen prints; nothing here does.
 

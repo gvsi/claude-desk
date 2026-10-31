@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect } from 'storybook/test';
 
+import { expectComputed } from '../../test/expectComputed.ts';
 import { ConceptFooter } from './ConceptFooter.tsx';
 
 const meta = {
@@ -28,12 +29,18 @@ export const PoweredBy: Story = {
   args: { poweredBy: true },
   parameters: {
     canvas: 'N-Public-Rivera-Run1',
-    canvasNote: 'The board draws a 14 px mark; here it is the smallest mark size, 16 px.',
+    canvasNote:
+      'The board draws a 14 px mark on its tile; here it is the smallest mark size, 16 px, with no tile in its light ink (N-Explore-Mark-Decided, signed 2026-10-30).',
   },
   play: async ({ canvas, canvasElement }) => {
     // The concept line stays exact; "Powered by" sits beside it, never inside it.
     await expect(canvasElement.querySelector('[data-ds="concept-footer"]')).toHaveTextContent(new RegExp(`^${CONCEPT}$`));
     await expect(canvas.getByText(/Powered by/)).toHaveTextContent(/^Powered by Claude Desk$/);
-    await expect(canvasElement.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    const mark = canvasElement.querySelector('svg.cd-mark') as SVGSVGElement;
+    await expect(mark).toHaveAttribute('aria-hidden', 'true');
+    // powered_by_mark_has_no_tile: the 16 px bell with no tile, in its light ink on the dark page.
+    await expect(mark.getAttribute('width')).toBe('16');
+    await expect(mark.querySelector('rect')).toBeNull();
+    expectComputed(mark.querySelector(':scope > g > g:last-child') as Element, { fill: 'rgb(250, 249, 245)' });
   },
 };

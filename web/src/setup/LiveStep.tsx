@@ -1,13 +1,13 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useId, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { SetupState, WentLive } from '../api/views.ts';
-import { Button, LoadingLine, Notice, PageHeader, SectionHeader } from '../ds/index.ts';
+import { Button, Card, Notice, PageHeader, Pill } from '../ds/index.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
-import { ShareKit } from '../owner/share/ShareKit.tsx';
-import { DESKS_KEY, desksQuery, findDesk } from '../owner/useDesks.ts';
+import { QrCode } from '../owner/share/QrCode.tsx';
+import { DESKS_KEY } from '../owner/useDesks.ts';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { gaveUp } from './shared.ts';
 
@@ -41,8 +41,9 @@ function publicLink(wentLive: WentLive | null, slug: string): string {
 /**
  * The last step, opened by a confirmed setup. Before going live (step `preview`): the public page
  * in a frame, on the owner's own preview chat, while Answering is off; "Go live" turns it on. Live:
- * the link to share with "Copy link" and "Open", "Go to Today", and under them the share kit, as
- * Share has it, once the business and its owner are known.
+ * the link to share with "Copy link" and "Open"; "Go to Today"; and under them "Share it" as
+ * N-R2-Setup-14-Live draws it: the link's QR code, and the website embed, coming later. It is built
+ * from the link alone; the printable card and the ready-made words are on Share.
  */
 export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
   const queryClient = useQueryClient();
@@ -50,10 +51,6 @@ export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
   const [wentLive, setWentLive] = useState<WentLive | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const shareId = useId();
-  // The business and its owner, from the copy's Desks the setup page reads: whom the printed card names.
-  const desks = useQuery({ ...desksQuery(), staleTime: Infinity });
-  const found = desks.data ? findDesk(desks.data, state.desk_id) : null;
 
   const goLive = async () => {
     setPending(true);
@@ -105,26 +102,21 @@ export function LiveStep({ state, business, onLive, reread }: LiveStepProps) {
             {copy.goToToday}
           </Button>
         </div>
-        <section className="cd-setup-live__share" aria-labelledby={shareId}>
-          <SectionHeader id={shareId} title={copy.shareIt} />
-          {found !== null ? (
-            <ShareKit publicUrl={url} business={found.desk.business_name} ownerName={found.business.owner_display_name} showLink={false} />
-          ) : desks.isError || (desks.data !== undefined && !desks.isFetching) ? (
-            // The Desks couldn't be read, or the read doesn't hold this Desk yet: say so, and read again.
-            <Notice
-              tone="error"
-              action={
-                <Button variant="secondary" busy={desks.isFetching} onClick={() => void desks.refetch()}>
-                  {copy.tryAgain}
-                </Button>
-              }
-            >
-              {ownerErrorCopy(desks.error)}
-            </Notice>
-          ) : (
-            <LoadingLine>{copy.shareLoading}</LoadingLine>
-          )}
-        </section>
+        <Card as="section" label={copy.shareIt} padding={16}>
+          <h2 className="cd-setup-live__share-title cd-type-control">{copy.shareIt}</h2>
+          <div className="cd-setup-live__share">
+            <div className="cd-setup-live__qr">
+              <QrCode url={url} />
+            </div>
+            <div className="cd-setup-live__embed">
+              <div className="cd-setup-live__embed-text">
+                <p className="cd-setup-live__embed-title cd-type-body">{copy.websiteEmbed}</p>
+                <p className="cd-setup-live__embed-line cd-type-meta">{copy.websiteEmbedLine}</p>
+              </div>
+              <Pill>{copy.comingLater}</Pill>
+            </div>
+          </div>
+        </Card>
       </div>
     );
   }

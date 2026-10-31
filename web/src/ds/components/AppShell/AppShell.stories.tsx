@@ -225,7 +225,11 @@ export const Compact: Story = {
     await expect(menu).toHaveAttribute('aria-expanded', 'false');
     const bar = menu.closest('.cd-app-shell__topbar') as HTMLElement;
     await expect(within(bar).getByText(rivera.business.name)).toBeVisible();
-    await expect(bar.querySelector('.cd-mark')).not.toBeNull();
+    // compact_bar_mark_has_no_tile: the 20 px bell with no tile, in its light ink on the panel.
+    const mark = bar.querySelector('svg.cd-mark') as SVGSVGElement;
+    await expect(mark.getAttribute('width')).toBe('20');
+    await expect(mark.querySelector('rect')).toBeNull();
+    expectComputed(mark.querySelector(':scope > g > g:last-child') as Element, { fill: 'rgb(250, 249, 245)' });
     await expect(canvas.getByRole('main')).toBeVisible();
 
     // compact_menu_returns_focus: Menu opens the sidebar as a sheet with focus inside it, and

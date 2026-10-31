@@ -1,4 +1,4 @@
-/* Sidebar: the owner app's column contents, top to bottom: the mark and wordmark, the business
+/* Sidebar: the owner app's column contents, top to bottom: the lockup, the business
    row and the Desk picker, pinned at the top; the eight nav rows and the optional "About this
    prototype" group, which scroll between them when the window is short; and the Answering switch
    and the owner, pinned at the foot.
@@ -18,16 +18,12 @@
   color: var(--text-primary);
 }
 
+/* The lockup: the 36 px bell, then the wordmark and its Preview badge, centred on one line. */
 .cd-sidebar__brand {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-10);
   padding: var(--space-2) var(--space-8) var(--space-12);
-}
-
-/* The 20 px mark sits on the wordmark's 22 px first line. */
-.cd-sidebar__brand > .cd-mark {
-  margin-top: var(--space-2);
 }
 
 .cd-sidebar__ellipsis {

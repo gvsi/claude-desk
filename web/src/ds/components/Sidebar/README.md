@@ -1,6 +1,6 @@
 # Sidebar
 
-`Sidebar` is the owner app's navigation: the Claude Desk mark, the business and Desk switchers, the pages in a fixed order, an optional "About this prototype" group, the Answering switch and the owner.
+`Sidebar` is the owner app's navigation: the Claude Desk lockup, the business and Desk switchers, the pages in a fixed order, an optional "About this prototype" group, the Answering switch and the owner.
 
 ## When to use
 
@@ -9,7 +9,7 @@
 
 ## What it shows
 
-- The mark and the "Claude Desk" wordmark with "Beta" beneath. They are not a link.
+- The lockup, on one line and centred (owner, 2026-10-30): the 36 px `Mark` with no tile, in its light ink; 10 px on, the "Claude Desk" wordmark; 8 px on, the "Preview" badge (`Wordmark preview`), a `Pill` drawn in capitals. It is not a link. The row is 50 px tall with its padding, as the stacked lockup was, so nothing under it moves.
 - The business row, "Switch business, current: {business}", which calls `onSwitchBusiness` (the screen opens `SwitcherMenu`, which lists businesses and "New business").
 - The Desk picker, "Switch Desk, current: {name}", only when the business has two or more Desks. It is where the owner picks a Desk; `SwitcherMenu` lists none. It opens the business's Desks under it ("Desks in {business}"), the current one marked with a check and `aria-current`. Picking a Desk calls `onSwitchDesk(id)`; picking it, or Escape, closes the list and returns focus to the picker. Escape stops there, so a sheet the sidebar sits in stays open.
 - The pages, always in this order: Today, Conversations, {peopleLabel}, Rules, Connectors, Safety, Share, Settings. Each row is `size-nav-row` tall, `space-2` apart, with a 20 px line icon named for its page (Connectors' is a plug). The current page is on `bg-selected` with `aria-current="page"`; there are no accent bars.
@@ -21,7 +21,7 @@
   - the link marked `current` is `aria-current="page"` on `bg-selected`, and then the main nav marks no row, so one page is current;
   - in the keyboard order, after the main nav and before Answering. On a narrow screen, `AppShell`'s sheet shows the same sidebar, so the same group.
   Without `about`, nothing is drawn and nothing else moves: the foot stays at the bottom.
-- When the window is too short for it all, the nav and the about group scroll inside the column, between the pinned top (the mark, the business row and the Desk picker) and the pinned foot, so the Answering switch and the owner always show. The scrolling part reaches 4 px past its rows, so a focused row's ring is never clipped, and at normal heights every row sits where it would without it.
+- When the window is too short for it all, the nav and the about group scroll inside the column, between the pinned top (the lockup, the business row and the Desk picker) and the pinned foot, so the Answering switch and the owner always show. The scrolling part reaches 4 px past its rows, so a focused row's ring is never clipped, and at normal heights every row sits where it would without it.
 - At the foot, above a hairline: the "Answering" `Switch` with its line, "Claude answers under your rules" unless the Desk passes its own (`answeringDescription`), then the owner: an initials avatar (`aria-hidden`, the first letters of the first and last words of the name, as written) beside the name and a status line. The owner row isn't a control.
 
 ## What the consumer provides

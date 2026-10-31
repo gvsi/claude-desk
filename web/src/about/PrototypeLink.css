@@ -27,3 +27,11 @@
   padding: 0 var(--space-8) 0 var(--space-4);
   box-shadow: none;
 }
+
+/* On the narrowest phones the top bar holds the link, the 32 px bell and "Claude Desk" only without
+   the link's chat icon; its words say where it goes. */
+@media (max-width: 359.98px) {
+  .cd-about-try--compact .cd-about-try__icon {
+    display: none;
+  }
+}

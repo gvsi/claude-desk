@@ -6,9 +6,10 @@
 import { composeStory } from '@storybook/react-vite';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { expect, it } from 'vitest';
-import { userEvent } from 'vitest/browser';
+import { afterEach, expect, it } from 'vitest';
+import { page, userEvent } from 'vitest/browser';
 
+import { CAPS_BADGE } from '../../test/copy.ts';
 import { INTRO_ERROR_COPY, type IntroErrorCode } from './introCopy.ts';
 import { IntroDialog, type IntroDialogProps } from './IntroDialog.tsx';
 import meta, { Default } from './IntroDialog.stories.tsx';
@@ -117,4 +118,38 @@ it('an_unknown_error_code_reads_as_unreachable', async () => {
   expect(dialog.querySelector('[role="alert"]')?.textContent).toBe(INTRO_ERROR_COPY.unreachable);
   expect(dialog.querySelector('input')?.getAttribute('aria-invalid')).toBe('true');
   expect(document.body.innerHTML).not.toContain('brand_new_code');
+});
+
+afterEach(async () => {
+  await page.viewport(1280, 820);
+});
+
+it('brand_row_shows_the_preview_badge_as_the_lockup_does', async () => {
+  // The brand row is the mark and the Wordmark with its Preview badge, the one label the product
+  // shows beside its name (owner, 2026-10-30), set as the sidebar's lockup sets it: the badge 8 px
+  // from the name, each centred on the mark, the name on one line. The mark keeps the intro board's
+  // 20 px and 8 px. At a phone's width the row still fits on one line.
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ] as const) {
+    const where = `at ${width}`;
+    await page.viewport(width, height);
+    const { dialog } = await openDialog();
+    const brand = dialog.querySelector<HTMLElement>('.cd-intro__brand');
+    expect(brand?.textContent, where).toBe('Claude DeskPreview');
+    const mark = brand?.querySelector(':scope > svg.cd-mark');
+    const name = brand?.querySelector(':scope > .cd-wordmark > .cd-type-wordmark');
+    const badge = brand?.querySelector(`:scope > .cd-wordmark > ${CAPS_BADGE.selector}`);
+    if (!mark || !name || !badge) throw new Error(`${where}: the brand row has no mark, name or badge`);
+    expect([mark.getAttribute('width'), mark.getAttribute('height')], where).toEqual(['20', '20']);
+    const [m, n, b] = [mark, name, badge].map((el) => el.getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect];
+    expect(n.left - m.right, where).toBe(8);
+    expect(b.left - n.right, where).toBe(8);
+    expect(n.height, where).toBe(22);
+    const middle = (r: DOMRect) => r.top + r.height / 2;
+    expect(Math.abs(middle(n) - middle(m)), where).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(middle(b) - middle(m)), where).toBeLessThanOrEqual(0.5);
+    expect(b.right, where).toBeLessThanOrEqual((brand?.getBoundingClientRect().right ?? 0) + 0.5);
+  }
 });

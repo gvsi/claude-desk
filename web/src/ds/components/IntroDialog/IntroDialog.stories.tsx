@@ -100,6 +100,8 @@ const meta = {
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-Intro-D',
+    canvasNote:
+      'N-Intro-D draws the reply card’s mark at 18 px inside a dark 32 px tile; the owner dropped that frame on 2026-10-30, so the mark stands alone at 32 px, with no tile, in its dark ink (N-Explore-Mark-Decided), and the brand’s mark has no tile. The board’s brand row ends in a “Demo” pill; the owner replaced it on 2026-10-30 with the Wordmark’s “Preview” badge, the sidebar lockup’s one label.',
   },
 } satisfies Meta<typeof IntroDialog>;
 
@@ -210,6 +212,36 @@ export const Default: Story = {
     // Claude's line on the reply card is in serif, like everything Claude says.
     const reply = art?.querySelector('.cd-intro__reply') as HTMLElement;
     expectComputed(reply, { fontFamily: /Source Serif 4/, fontSize: '16px', lineHeight: '24px', fontWeight: '380' });
+
+    // reply_avatar_is_the_mark_alone: the reply card's avatar is the Claude Desk mark at 32 px with no
+    // tile and no frame, in the drawing's dark ink straight on the light card (owner, 2026-10-30), in
+    // the place and at the size of Dana's initials on the card above. The name line keeps its place:
+    // level with the mark's top, 12 px to its right.
+    const cards = [...(art?.querySelectorAll<HTMLElement>(':scope > .cd-intro__card') ?? [])];
+    await expect(cards).toHaveLength(2);
+    const [request, replyCard] = cards as [HTMLElement, HTMLElement];
+    const mark = replyCard.firstElementChild as SVGSVGElement;
+    await expect(mark.getAttribute('class')).toBe('cd-mark cd-mark--light');
+    await expect([mark.getAttribute('width'), mark.getAttribute('height')]).toEqual(['32', '32']);
+    await expect(replyCard.querySelector('.cd-intro__tile')).toBeNull();
+    await expect(mark.querySelector('rect')).toBeNull();
+    expectComputed(mark.querySelector(':scope > g > g:last-child') as Element, { fill: 'rgb(20, 20, 19)' });
+    expectComputed(mark, { backgroundColor: 'rgba(0, 0, 0, 0)' });
+    expectComputed(replyCard, { backgroundColor: 'rgb(250, 249, 245)' });
+    // brand_mark_has_no_tile: the mark beside the wordmark at the top of the dialog is drawn without
+    // its tile, in the light ink on the dialog's dark surface.
+    const brandMark = dialog.querySelector('.cd-intro__brand > svg.cd-mark') as SVGSVGElement;
+    await expect(brandMark.querySelector('rect')).toBeNull();
+    expectComputed(brandMark.querySelector(':scope > g > g:last-child') as Element, { fill: 'rgb(250, 249, 245)' });
+    /** Where `el` sits in `card` and how big it is: [left, top, width, height] in px. */
+    const inCard = (el: Element | null, card: HTMLElement) => {
+      const outer = card.getBoundingClientRect();
+      const inner = (el as Element).getBoundingClientRect();
+      return [inner.left - outer.left, inner.top - outer.top, inner.width, inner.height];
+    };
+    await expect(inCard(mark, replyCard)).toEqual([16, 14, 32, 32]);
+    await expect(inCard(mark, replyCard)).toEqual(inCard(request.querySelector('.cd-intro__avatar'), request));
+    await expect(inCard(replyCard.querySelector('.cd-intro__who'), replyCard).slice(0, 2)).toEqual([60, 14]);
   },
 };
 

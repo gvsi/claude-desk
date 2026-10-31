@@ -20,6 +20,10 @@ const LIST_FAMILIES = ['spacing', 'radius', 'size', 'motion'];
 const NUMERIC = new Set(['tabular-nums']);
 // The font styles a type style may ask for: italic, for a reading page's quotations.
 const FONT_STYLES = new Set(['italic']);
+// The one style that draws capitals, and how: the lockup's "Preview" badge, the product's one
+// all-caps label. Any other style, or any other transform, is refused.
+const CAPS_STYLE = 'badge-caps';
+const TEXT_TRANSFORMS = new Set(['uppercase']);
 
 function fail(message) {
   throw new Error(`tokens.json: ${message}`);
@@ -88,6 +92,12 @@ function typeStyleRule(style, groupFamily, families) {
   if (style.letterSpacing !== undefined) {
     if (!LENGTH.test(style.letterSpacing)) fail(`type style ${style.name} has an unsupported letterSpacing`);
     lines.push(`  letter-spacing: ${style.letterSpacing};`);
+  }
+  if (style.textTransform !== undefined) {
+    if (style.name !== CAPS_STYLE || !TEXT_TRANSFORMS.has(style.textTransform)) {
+      fail(`type style ${style.name} has an unsupported textTransform: only ${CAPS_STYLE} draws capitals`);
+    }
+    lines.push(`  text-transform: ${style.textTransform};`);
   }
   if (style.fontVariantNumeric !== undefined) {
     if (!NUMERIC.has(style.fontVariantNumeric)) fail(`type style ${style.name} has an unsupported fontVariantNumeric`);
