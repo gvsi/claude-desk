@@ -76,7 +76,7 @@ from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
 from desk.kernel_service import activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, render, repo
-from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, quoted
+from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, claudes_note, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import CallUsage, ReviewAction, ReviewCard, ReviewFact, ReviewInput, Reviewed
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template
@@ -480,8 +480,6 @@ async def _business(ctx: KernelCtx, desk_id: str) -> Business:
 DECIDE_ROUTE = "POST /decide"
 TOOL_NAME_CHARS = 64                      # a refused call's name is stored cut to this
 CALL_ID_CHARS = 128                       # a longer call ID is refused: a long one can overflow the decisions index
-QUOTED_CHARS = 200                        # free text quoted to the owner is cut to this
-CLAUDES_NOTE = "Claude's note"            # the label on that text: Claude wrote it into the call, the visitor didn't
 BREAKER_STRIKES = 3
 BREAKER_ALERT = ("Claude paused a conversation after the reviewer flagged three requests as attempts to get "
                  "around your rules. It stays paused until you resume it.")
@@ -655,16 +653,6 @@ def _asked(subject: str, tool: str, action: NormalizedAction | None) -> str:
     if action is not None and action.discount_bp:
         what += f" with {_percent(action.discount_bp)} off"
     return f"{subject} asked to {what}."
-
-
-def _quoted(text: str, *, cut: bool = True) -> str:
-    """Text as the owner reads it (`adapters.base.quoted`: one line, inside quotes it can't close).
-    Untrusted free text is cut to `QUOTED_CHARS`; a rule's text (`cut=False`), the owner's own
-    words, is quoted whole."""
-    line = " ".join(text.split())
-    if cut:
-        line = line[:QUOTED_CHARS]
-    return quoted(line)
 
 
 @dataclass
@@ -869,7 +857,8 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
         if outcome == "hold" and deciding and all(card.is_default for card in deciding):
             parts.append(DEFAULT_ASK_PLAIN)
         elif deciding:
-            parts.append(f"{lead_in}: " + ", ".join(_quoted(card.reason, cut=False) for card in deciding))
+            # a rule's text is the owner's own words: quoted whole, never cut as free text is
+            parts.append(f"{lead_in}: " + ", ".join(quoted(card.reason) for card in deciding))
         elif outcome == "refuse":
             parts.append(BASELINE_PLAIN)
     if evaluation is not None and evaluation.needed_review:
@@ -881,7 +870,7 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
         else:
             parts.append(REVIEW_PLAIN["allow" if outcome == "allow" else "unsure"])
     if call.quotes:
-        parts.append(f"{CLAUDES_NOTE}: " + ", ".join(_quoted(text) for text in call.quotes.values()))
+        parts.append(claudes_note(call.quotes.values()))
     return " ".join(parts)
 
 

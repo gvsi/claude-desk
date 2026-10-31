@@ -1,9 +1,10 @@
 """`native.capture_lead`: the visitor's name, contact and note, saved for the owner to follow up.
 
-Every argument is the visitor's own text: the owner reads it quoted, the reviewer as untrusted
-data. `execute` writes a `leads` row whose note carries the contact the visitor gave, and alerts
-the owner per the Desk's notification defaults; the alert is read only from the Demo inbox, so
-the result's `inbox` stays empty. A lead is no fact: there is nothing for a card to render, and
+Every argument is text Claude writes into the call from what the visitor said, untrusted, and it
+may not match their words: the owner reads it quoted under "Claude's note", the reviewer as
+untrusted data. `execute` writes a `leads` row whose note carries the contact the visitor gave, and
+alerts the owner per the Desk's notification defaults; the alert is read only from the Demo inbox,
+so the result's `inbox` stays empty. A lead is no fact: there is nothing for a card to render, and
 Claude sees only that it was saved.
 """
 
@@ -15,7 +16,7 @@ from desk.contracts import NormalizedAction, ResourceRef, ToolProfile
 from desk.db.models import Lead
 from desk.kernel_service import demo_inbox, render
 from desk.kernel_service.adapters import register
-from desk.kernel_service.adapters.base import AdapterResult, ExecCtx, Normalized, NormalizeCtx, quoted
+from desk.kernel_service.adapters.base import AdapterResult, ExecCtx, Normalized, NormalizeCtx, claudes_note
 from desk.kernel_service.repo import new_id
 
 
@@ -62,7 +63,7 @@ class CaptureLeadAdapter:
                         created_at=ctx.clock.now()))
         await ctx.db.flush()
         await demo_inbox.alert_owner(ctx, action.desk_id, "lead", render.owner_preview("lead"),
-                                     f"From the visitor: {quoted(args.name, args.contact, args.note)}.")
+                                     claudes_note((args.name, args.contact, args.note)))
         return AdapterResult(model_view=model_view(lead_id))
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:

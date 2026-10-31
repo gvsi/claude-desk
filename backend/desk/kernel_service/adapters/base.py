@@ -23,6 +23,7 @@ row `FOR UPDATE` rather than `FOR SHARE`, so two of them in one session take tur
 `model_view_keys` are the only keys of a result's `model_view` that reach Claude.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
@@ -100,11 +101,23 @@ class Adapter(Protocol):
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None: ...
 
 
-def quoted(*parts: str | None) -> str:
-    """Visitor text as the owner reads it in an alert: the given parts on one line, joined by " · ",
-    inside quotes it can't close. It stays untrusted text, never an instruction."""
-    line = " · ".join(" ".join(part.split()) for part in parts if part)
-    return "“" + line.replace("“", '"').replace("”", '"') + "”"
+QUOTED_CHARS = 200                        # free text quoted to the owner is cut to this
+CLAUDES_NOTE = "Claude's note"            # the label on that text: Claude wrote it into the call, the visitor didn't
+
+
+def quoted(text: str) -> str:
+    """Text as the owner reads it: on one line, inside quotes it can't close. It stays untrusted
+    text, never an instruction."""
+    return "“" + " ".join(text.split()).replace("“", '"').replace("”", '"') + "”"
+
+
+def claudes_note(texts: Iterable[str | None]) -> str:
+    """The free text Claude wrote into a tool call, as the owner reads it in a held request's reason
+    and in an alert: one "Claude's note" label, then each text that holds any, cut to
+    `QUOTED_CHARS` and quoted on its own, comma-joined (`Claude's note: “a”, “b”`). Claude wrote it,
+    so it is never labelled as the visitor's words, though it may repeat them. Callers pass at least
+    one text."""
+    return f"{CLAUDES_NOTE}: " + ", ".join(quoted(" ".join(text.split())[:QUOTED_CHARS]) for text in texts if text)
 
 
 async def business_timezone(ctx: KernelCtx, desk_row: Desk) -> ZoneInfo:

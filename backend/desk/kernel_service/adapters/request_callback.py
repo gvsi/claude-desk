@@ -1,7 +1,8 @@
 """`native.request_callback`: the visitor asks the owner to call them back.
 
-The call names who to call, how to reach them and why, all the visitor's own text; it can't name
-a time. `execute` writes an `open` handoff whose reason carries that text for the owner and whose
+The call names who to call, how to reach them and why, all text Claude writes into the call from
+what the visitor said (untrusted, and the owner reads it under "Claude's note"); it can't name a
+time. `execute` writes an `open` handoff whose reason carries that text for the owner and whose
 window is the Desk's next open hour (`desks.next_open_window`), or none, and a `handoff:<id>`
 fact labelled for the session (the callback confirmed card) whose only claims are the window, so
 no visitor text reaches a card. The fact expires when its window ends, and when the owner closes
@@ -22,7 +23,7 @@ from desk.db.models import Handoff
 from desk.kernel_service import demo_inbox, desks, labels, render
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import (AdapterResult, ExecCtx, Normalized, NormalizeCtx, business_timezone,
-                                               quoted)
+                                               claudes_note)
 from desk.kernel_service.repo import new_id
 
 
@@ -54,13 +55,14 @@ def window_claims(window: tuple[datetime, datetime] | None) -> list[Claim]:
 
 
 def alert_body(window: tuple[datetime, datetime] | None, args: RequestCallbackArgs) -> str:
-    """The owner's alert: when to call back, in business time, then the visitor's text, quoted."""
+    """The owner's alert: when to call back, in business time, then the call's text, quoted under
+    "Claude's note" (`claudes_note`)."""
     if window is None:
         when = "No hour is open in the next two weeks, so no time was given."
     else:
         start, end = window
         when = f"Call back on {render.en.date(start)}, between {render.en.clock(start)} and {render.en.clock(end)}."
-    return f"{when} From the visitor: {quoted(args.name, args.contact, args.reason)}."
+    return f"{when} {claudes_note((args.name, args.contact, args.reason))}"
 
 
 def model_view(fact_id: str, handoff_id: str) -> dict[str, Any]:

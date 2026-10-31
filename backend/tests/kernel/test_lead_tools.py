@@ -79,9 +79,11 @@ async def test_lead_capture_saves_a_lead(app, client):
     # the note carries the contact the visitor gave, for the owner to follow up
     assert api_rows(copy.copy_id, "SELECT session_id, display_name, note FROM kernel_ro.leads") == [
         (visitor.session_id, "Sam Lee", "Wants a quote for a kitchen remodel · sam@example.com")]
+    # the alert quotes the same text, Claude's wording, under the same label: never as the visitor's own words
     [alert] = [entry for entry in await owner_alerts(client, copy) if entry not in seeded]
     assert (alert.to, alert.body) == (
-        "owner", "From the visitor: “Sam Lee · sam@example.com · Wants a quote for a kitchen remodel”.")
+        "owner", "Claude's note: “Sam Lee”, “sam@example.com”, “Wants a quote for a kitchen remodel”")
+    assert "From the visitor" not in alert.body
 
     # a name alone is a lead too; a contact without a note is the note
     for call_id, args, note in (("call-2", {"name": "Ana"}, None),
@@ -144,9 +146,11 @@ async def test_callback_window_comes_from_the_hours(app, client, frozen_clock):
         {"fact_id": fact.fact_id, "handoff_id": handoff.handoff_id}, [fact.fact_id], [])
     reconciled = await run(app, copy.copy_id, decision, "reconcile")
     assert (reconciled.facts, reconciled.model_view) == (result.facts, result.model_view)
+    # who to call and why is Claude's wording in the call, quoted under "Claude's note", never as the visitor's
     [alert] = [entry for entry in await owner_alerts(client, copy) if "Sam Lee" in entry.body]
     assert alert.body == ("Call back on Monday, November 2, between 8:00 am and 9:00 am. "
-                          "From the visitor: “Sam Lee · (510) 555-0100 · The water heater is leaking”.")
+                          "Claude's note: “Sam Lee”, “(510) 555-0100”, “The water heater is leaking”")
+    assert "From the visitor" not in alert.body
 
     # Tuesday at 10:20: the next whole hour
     frozen_clock.travel(datetime(2026, 11, 3, 10, 20, tzinfo=TZ))
@@ -214,7 +218,7 @@ async def test_callback_without_an_open_hour_has_no_window(app, client):
     assert api_rows(copy.copy_id, "SELECT callback_window, status FROM kernel_ro.handoffs") == [(None, "open")] * 2
     alerts = [entry.body for entry in await owner_alerts(client, copy) if "Sam Lee" in entry.body]
     assert alerts == ["No hour is open in the next two weeks, so no time was given. "
-                      "From the visitor: “Sam Lee · (510) 555-0100 · The water heater is leaking”."] * 2
+                      "Claude's note: “Sam Lee”, “(510) 555-0100”, “The water heater is leaking”"] * 2
 
     # the card says only that the owner will call
     verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact.fact_id)])
