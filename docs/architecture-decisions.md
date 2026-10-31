@@ -40,7 +40,7 @@ The choices that shape Claude Desk, each with the alternatives considered and wh
 
 ## 4. Typed cards, guarded prose and check then reveal
 
-**Status.** Accepted on 2026-10-28 (the spec's "Replies: typed cards plus guarded prose" and "Reply timing" decisions); the owner's decisions of 2026-10-30 let a booking claim stand beside a booking card, asked the model check only about promises the cards don't back and prose that denies being an AI, told it that Claude's offer of its own next step and a follow-up a card states aren't promises, and let Claude write links and email addresses.
+**Status.** Accepted on 2026-10-28 (the spec's "Replies: typed cards plus guarded prose" and "Reply timing" decisions); the owner's decisions of 2026-10-30 let a booking claim stand beside a booking card, asked the model check only about promises the cards don't back and prose that denies being an AI, told it that neither Claude offering, in the future or as a question, to take one of its own next steps nor a follow-up a card states is a promise, while a claim that such a step already happened, or anything an offer adds, still is, and let Claude write links and email addresses.
 
 **Context.** Much of what goes wrong with a public assistant is in what it says: a price it made up, a date it can't keep, a discount nobody approved, someone else's details. Judging free text for meaning is a model's call, and a model can miss.
 
