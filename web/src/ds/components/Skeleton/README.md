@@ -119,3 +119,5 @@ The signed boards (`UXC-P1201-After`, `#artboard-dec46cf506e4`, and `UXC-P1202-A
 - `Sweep`: the head of Today as shapes, sweeping as one band; a part mounts 300 ms later in step.
 - `Waits`, `FastLoad`, `Lands`, `Continues` and `Fails`: the states, as Customers loads.
 - `Spanish`: the visitor's chat as shapes at 390, with its status in Spanish.
+
+The wait starts after mount observers and checks a monotonic deadline before showing, so a browser timer that fires just short of 200 ms cannot expose an early frame. Unmounting or ending a fast load cancels the pending wait.

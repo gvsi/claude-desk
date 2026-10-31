@@ -113,8 +113,24 @@ export function SkeletonScreen({ loading, status, skeleton, children, className,
 
   useEffect(() => {
     if (phase !== 'waiting') return;
-    const timer = setTimeout(() => setPhase('shown'), SKELETON_DELAY_MS);
-    return () => clearTimeout(timer);
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Start after the mount's mutation observers have run. A timer can fire just before its
+    // requested fractional deadline, so check the clock rather than showing a frame early.
+    queueMicrotask(() => {
+      const deadline = performance.now() + SKELETON_DELAY_MS;
+      const showWhenDue = () => {
+        if (!live) return;
+        const remaining = deadline - performance.now();
+        if (remaining > 0) timer = setTimeout(showWhenDue, remaining);
+        else setPhase('shown');
+      };
+      if (live) timer = setTimeout(showWhenDue, SKELETON_DELAY_MS);
+    });
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
   }, [phase]);
 
   // A leaving layer goes when its own fade ends or is cancelled, or at the latest after the fallback.
