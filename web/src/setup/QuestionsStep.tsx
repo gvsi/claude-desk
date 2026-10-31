@@ -337,7 +337,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     };
     pane.addEventListener('scroll', notePlace, { passive: true });
     const observer = new ResizeObserver(() => {
-      if (pinned && !pane.contains(document.activeElement)) pane.scrollTop = pane.scrollHeight;
+      if (pinned) pane.scrollTop = pane.scrollHeight;
       previousEnd = pane.scrollHeight - pane.clientHeight;
     });
     observer.observe(pane);

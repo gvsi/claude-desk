@@ -57,7 +57,7 @@ function ConnectorCard({ proposal, live, disabled, busyAction, failed, onRetry, 
         <ConnectorIcon icon={view.icon} size="section" />
         <div className="cd-setup-c3__titles">
           <h3 className="cd-setup-c3__title cd-type-body"><ConnectorName connector={view} size="inline" />{!connector.connectable ? <Pill>{copy.later}</Pill> : null}</h3>
-          {proposal.state === 'proposed' ? <p className="cd-setup-c3__line cd-type-body">{connector.why}</p> : null}
+          {!connector.connectable || proposal.state === 'proposed' ? <p className="cd-setup-c3__line cd-type-body">{connector.why}</p> : null}
         </div>
         {connected || proposal.state === 'declined' ? <DecisionLine accepted={connected} connector /> : null}
       </div>

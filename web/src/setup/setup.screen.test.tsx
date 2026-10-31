@@ -2991,14 +2991,16 @@ describe('consultant setup', () => {
     expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
   });
 
-  it('keeps_unavailable_app_cards_read_only_with_coming_later', async () => {
+  it.each(['proposed', 'accepted', 'declined'] as const)('keeps_%s_unavailable_app_cards_read_only_with_their_explanation', async (decision) => {
     const state = await consultantAt('google_calendar');
     const proposal = structuredClone(state.messages.at(-1)!.card!);
     proposal.connector!.connectable = false;
+    proposal.state = decision;
     const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => { throw new Error('unavailable app must not decide'); }} />);
     await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Mock', { exact: true })).toBeVisible();
     await expect.element(screen.getByText(proposal.connector!.why, { exact: true })).toBeVisible();
+    expect(screen.getByText('Connected', { exact: true }).elements()).toHaveLength(0);
     expect(screen.getByRole('button').elements()).toHaveLength(0);
   });
 
@@ -3508,7 +3510,7 @@ describe('consultant setup', () => {
     scroll!.scrollTop = scroll!.scrollHeight;
   });
 
-  it('keeps_the_live_card_at_the_bottom_when_resizing_to_phone_without_pulling_a_reader_down', async () => {
+  it.each(['page', 'card button'] as const)('keeps_the_live_card_at_the_bottom_when_resizing_to_phone_with_%s_focus_without_pulling_a_reader_down', async (focus) => {
     const state = await consultantAt('intake');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'desktop', strict: true });
     const card = screen.getByRole('article', { name: 'Ask new clients three questions', exact: true });
@@ -3516,10 +3518,16 @@ describe('consultant setup', () => {
     const pane = screen.container.querySelector<HTMLElement>('.cd-setup-chat__scroll')!;
     expect(pane.scrollHeight).toBeGreaterThan(pane.clientHeight);
     const atBottom = () => pane.scrollHeight - pane.clientHeight - pane.scrollTop <= 1;
+    const focusedButton = card.getByRole('button', { name: 'Set it up', exact: true });
+    if (focus === 'card button') {
+      (focusedButton.element() as HTMLElement).focus({ preventScroll: true });
+      await expect.element(focusedButton).toHaveFocus();
+    }
     pane.scrollTop = pane.scrollHeight;
     await expect.poll(atBottom).toBe(true);
     await page.viewport(390, 844);
     await expect.poll(atBottom).toBe(true);
+    if (focus === 'card button') await expect.element(focusedButton).toHaveFocus();
     const rect = card.element().getBoundingClientRect();
     const bounds = pane.getBoundingClientRect();
     expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom + 1);
