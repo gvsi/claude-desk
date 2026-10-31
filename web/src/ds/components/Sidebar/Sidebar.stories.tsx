@@ -231,6 +231,46 @@ export const OnConnectors: Story = {
   },
 };
 
+const TEAM = { id: 'desk-rivera-team', name: 'Team' };
+
+/** A team Desk, as N-R2-Vision-TeamDesk draws it: its own people's word, and Answering in the team's words. */
+export const TeamDesk: Story = {
+  args: {
+    desks: [MAIN_LINE, TEAM],
+    currentDeskId: TEAM.id,
+    current: 'conversations',
+    peopleLabel: 'Teammates',
+    counts: { conversations: { n: 12, label: '12 team conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
+    answeringDescription: 'Claude answers your team under your rules',
+  },
+  parameters: { canvas: 'N-R2-Vision-TeamDesk' },
+  play: async ({ canvas, canvasElement }) => {
+    // answering_line_from_the_desk: the switch's line is the one the Desk passes, as its description.
+    const answering = canvas.getByRole('switch', { name: 'Answering' });
+    await expect(answering).toHaveAccessibleDescription('Claude answers your team under your rules');
+    await expect(canvas.queryByText('Claude answers under your rules')).toBeNull();
+    await expect(canvas.getByRole('button', { name: 'Switch Desk, current: Team' })).toBeVisible();
+    await expect(navRows(canvasElement).map((row) => row.text)).toEqual([
+      'Today',
+      'Conversations',
+      'Teammates',
+      'Rules',
+      'Connectors',
+      'Safety',
+      'Share',
+      'Settings',
+    ]);
+  },
+};
+
+/** Without its own line, Answering keeps the owner app's. */
+export const AnsweringLine: Story = {
+  parameters: { canvasNote: 'Only the Answering line is checked here; the rest is the board’s, as in TwoDesks.' },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('switch', { name: 'Answering' })).toHaveAccessibleDescription('Claude answers under your rules');
+  },
+};
+
 /** Where the rows go in an app with no Connectors page yet: every page but Connectors. */
 const { connectors: _noConnectorsPage, ...hrefsWithoutConnectors } = hrefs;
 

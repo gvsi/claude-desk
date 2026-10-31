@@ -74,9 +74,21 @@ export { PublicShell, type PublicBrand, type PublicOpenStatus, type PublicShellP
 export { PublicBrandHeader, type PublicBrandHeaderProps } from './components/PublicShell/PublicBrandHeader.tsx';
 export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
+// Vision pages
+export { VISION_LINE, VisionBar, type VisionBarProps } from './components/VisionBar/VisionBar.tsx';
+export {
+  PhoneFrame,
+  PhoneTabBar,
+  type PhoneFrameProps,
+  type PhoneTab,
+  type PhoneTabBarProps,
+} from './components/PhoneFrame/PhoneFrame.tsx';
+export { AccessPanel, type AccessPanelProps } from './components/AccessPanel/AccessPanel.tsx';
+
 // Settings
 export { DetailList, type DetailItem, type DetailListProps } from './components/DetailList/DetailList.tsx';
 export { AlertList, type AlertListItem, type AlertListProps } from './components/AlertList/AlertList.tsx';
+export { ChannelList, LATER_CHANNELS, type ChannelListProps, type ChannelView } from './components/ChannelList/ChannelList.tsx';
 
 // Navigation
 export {
@@ -150,6 +162,7 @@ export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
 export { CARD_CHROME, LINK_CANCELLED_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 export { LinkCancelledCard, type LinkCancelledCardProps } from './components/ReplyCard/LinkCancelledCard.tsx';
+export { FactCard, type FactCardProps } from './components/FactCard/FactCard.tsx';
 
 // Conversation
 export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';

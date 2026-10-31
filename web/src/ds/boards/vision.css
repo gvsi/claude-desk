@@ -1,0 +1,381 @@
+/* The vision pages' layouts (N-R2-Vision-*), composed for the Boards/Vision stories only, on the
+   design system's tokens, as boards.css composes the other pages. Classes start "board-vision-".
+   Nothing here moves. */
+
+/* An owner page on a vision Desk: it fills the main area under the vision bar and pads itself as
+   the main area pads a page (board-filled-page), its parts 20 px apart, the footer at its foot. */
+.board-vision-page {
+  flex: 1 0 auto;
+  gap: var(--space-20);
+}
+
+.board-vision-page > .cd-concept-footer {
+  margin-top: auto;
+}
+
+/* Claude's words and the fact card under them, 8 px apart, as one message. */
+.board-vision-reply {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+/* The city office: Live now at the left, the always-on lines and today's numbers in a 360 px
+   column 32 px to its right. */
+.board-vision-city {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-32);
+  min-width: 0;
+}
+
+.board-vision-city__live {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-10);
+  min-width: 0;
+}
+
+.board-vision-city__side {
+  display: flex;
+  flex: 0 0 360px;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.board-vision-city__title {
+  margin: 0;
+}
+
+.board-vision-city__caption {
+  margin: var(--space-2) 0 var(--space-8);
+}
+
+/* Each live conversation is a row under a hairline, not a card, so its fact card never sits in a card. */
+.board-vision-live {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-vision-live__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-14) 0;
+}
+
+.board-vision-live__item:first-child {
+  padding-top: var(--space-4);
+}
+
+.board-vision-live__item + .board-vision-live__item {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.board-vision-live__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.board-vision-live__action {
+  display: flex;
+}
+
+/* The city's always-on lines: a quiet lock, the line in control type, why in secondary meta. */
+.board-vision-always {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-vision-always__item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-10);
+  padding: var(--space-10) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.board-vision-always__lock {
+  flex: none;
+  margin-top: 3px;
+  color: var(--text-secondary);
+}
+
+.board-vision-always__title,
+.board-vision-always__detail {
+  display: block;
+}
+
+.board-vision-always__also {
+  margin: var(--space-8) 0 0;
+}
+
+.board-vision-today {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin: var(--space-8) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* The team Desk: the title and its line, then the teammates (220 px), Luis's conversation and his
+   access (260 px), 28 px apart; the day's line and the footer at the foot, 16 px apart. */
+.board-vision-team {
+  gap: var(--space-16);
+}
+
+.board-vision-team__lead {
+  margin: var(--space-8) 0 0;
+}
+
+.board-vision-team__columns {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-28);
+  min-width: 0;
+}
+
+.board-vision-team__people {
+  display: flex;
+  flex: 0 0 220px;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.board-vision-team__person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-8) var(--space-10);
+  border-radius: var(--radius-control);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.board-vision-team__person:hover {
+  background: var(--fill-hover);
+}
+
+.board-vision-team__person[aria-current='page'] {
+  background: var(--bg-selected);
+}
+
+.board-vision-team__avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-avatar);
+  height: var(--size-avatar);
+  border-radius: var(--radius-full);
+  background: var(--bg-selected);
+  color: var(--text-primary);
+}
+
+.board-vision-team__name,
+.board-vision-team__line {
+  display: block;
+}
+
+.board-vision-team__chat {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.board-vision-team__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.board-vision-team__head > h2 {
+  margin: 0;
+}
+
+.board-vision-team__actions {
+  display: flex;
+  gap: var(--space-8);
+  margin-left: auto;
+}
+
+.board-vision-team__access {
+  flex: 0 0 260px;
+  min-width: 0;
+}
+
+.board-vision-team__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  margin-top: auto;
+}
+
+.board-vision-team__foot > p {
+  margin: 0;
+}
+
+/* The phone page: the vision bar, then the title centered over the two phones, 64 px apart. */
+.board-vision-phone-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.board-vision-phone {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-24);
+  box-sizing: border-box;
+  padding: var(--space-28) var(--space-40) var(--space-16);
+}
+
+.board-vision-phone__head {
+  text-align: center;
+}
+
+.board-vision-phone__head > * {
+  margin: 0;
+}
+
+.board-vision-phone__head > p {
+  margin-top: var(--space-4);
+}
+
+.board-vision-phone__phones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--space-40) 64px;
+  max-width: 100%;
+}
+
+.board-vision-phone > .cd-concept-footer {
+  align-self: stretch;
+  margin-top: auto;
+}
+
+/* The owner's Today on the phone: 28 px from the top, 20 px at the sides, its parts 16 px apart. */
+.board-vision-phone__screen {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-height: 0;
+  padding: var(--space-28) var(--space-20) 0;
+  overflow: hidden;
+}
+
+.board-vision-phone__screen p {
+  margin: 0;
+}
+
+.board-vision-phone__greeting {
+  margin: var(--space-2) 0 0;
+}
+
+.board-vision-phone__live-title {
+  margin: 0 0 var(--space-6);
+}
+
+.board-vision-phone__live {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.board-vision-phone__live-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-8) 0;
+}
+
+.board-vision-phone__kind {
+  margin-left: auto;
+}
+
+/* The visitor's phone: the business's header in its own field, the chat, then the composer. */
+.board-vision-phone__brand {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-10);
+  padding: var(--space-24) var(--space-16) var(--space-12);
+}
+
+.board-vision-phone__monogram {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-control);
+  height: var(--size-control);
+  border-radius: var(--radius-control);
+  background: var(--fill-secondary);
+}
+
+.board-vision-phone__brand-name,
+.board-vision-phone__brand-line {
+  display: block;
+}
+
+.board-vision-phone__chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-16);
+  overflow: hidden;
+  --cd-row-max: 100%;
+}
+
+.board-vision-phone__composer {
+  flex: none;
+  padding: var(--space-10) var(--space-12) var(--space-24);
+  border-top: 1px solid var(--line-hairline);
+}
+
+.board-vision-phone__disclosure {
+  margin: var(--space-8) 0 0;
+  text-align: center;
+}
+
+/* Below a laptop's width the columns stack, as the owner app's pages do on a phone. */
+@media (max-width: 1023.98px) {
+  .board-vision-city,
+  .board-vision-team__columns {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .board-vision-city__side,
+  .board-vision-team__people,
+  .board-vision-team__access {
+    flex-basis: auto;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .board-vision-phone {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+}

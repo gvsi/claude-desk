@@ -1,0 +1,43 @@
+/* FactCard: a Card holding one fact under a label, as the vision boards draw it: at most 420 px
+   wide, padded 12 px 14 px, the label in a secondary caption beside a 14 px icon, the fact 6 px
+   under it in body type at weight 520, and each line 2 px under the last in secondary meta. No
+   date tile, no price column, no colored tile. */
+
+.cd-fact-card {
+  max-width: 420px;
+  min-width: 0;
+}
+
+.cd-fact-card__body {
+  padding: var(--space-12) var(--space-14);
+}
+
+.cd-fact-card__body > p {
+  margin: 0;
+}
+
+.cd-fact-card__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--text-secondary);
+}
+
+.cd-fact-card__label > svg {
+  flex: none;
+}
+
+.cd-fact-card__label > span {
+  min-width: 0;
+}
+
+.cd-fact-card__body > .cd-fact-card__title {
+  margin-top: var(--space-6);
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-fact-card__body > .cd-fact-card__line {
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}

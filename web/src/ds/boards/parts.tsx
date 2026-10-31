@@ -91,6 +91,8 @@ export interface RiveraFrameProps {
   connectors?: boolean;
   /** A panel beside the page, such as Ask Claude (`AppShell` `panel`). */
   panel?: ReactNode;
+  /** A line across the top in place of the reviewer bar, such as the vision bar (`AppShell` `banner`). */
+  banner?: ReactNode;
   onSwitchBusiness?: () => void;
   children: ReactNode;
 }
@@ -131,6 +133,7 @@ function OwnerFrame({
   fill = false,
   connectors = false,
   panel,
+  banner,
   onSwitchBusiness,
   children,
 }: OwnerFrameProps) {
@@ -139,7 +142,7 @@ function OwnerFrame({
       business={business}
       fill={fill}
       panel={panel}
-      banner={reviewer ? <ReviewerBar ownerName={ownerName} onStartOver={fn()} /> : undefined}
+      banner={reviewer ? <ReviewerBar ownerName={ownerName} onStartOver={fn()} /> : banner}
       sidebar={
         <Sidebar
           business={business}
@@ -1130,10 +1133,13 @@ export const ANSWERING_LINE = 'Claude answers under your rules.';
 /** Deleting a Desk, in the board's words: the line beside the button, and the dialog's body. */
 export const DELETE_DESK_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
 
-/** Settings for Rivera Plumbing on `current`: the title, SubNav, the section's content, and the footer. */
-export function SettingsPage({ current, children }: { current: string; children: ReactNode }) {
+/**
+ * Settings for Rivera Plumbing on `current`: the title, SubNav, the section's content, and the
+ * footer. `banner`, such as the vision bar, runs across the top of the app.
+ */
+export function SettingsPage({ current, banner, children }: { current: string; banner?: ReactNode; children: ReactNode }) {
   return (
-    <RiveraFrame current="settings" fill connectors counts={SETTINGS_COUNTS}>
+    <RiveraFrame current="settings" fill connectors counts={SETTINGS_COUNTS} banner={banner}>
       <div className="board-filled-page">
         <div className="board-settings">
           <PageHeader title="Settings" />

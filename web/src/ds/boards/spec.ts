@@ -382,7 +382,8 @@ export async function expectSettingsPage(root: HTMLElement, current: (typeof SET
   const titleBox = title.getBoundingClientRect();
   const navBox = nav.getBoundingClientRect();
   const contentBox = content.getBoundingClientRect();
-  await expect(Math.round(titleBox.top), 'the title at the top of the page').toBe(24);
+  // From the top of the main area, so a banner over the app (the vision bar) moves it down with the page.
+  await expect(Math.round(titleBox.top - main.getBoundingClientRect().top), 'the title at the top of the page').toBe(24);
   await expect(Math.round(navBox.top - titleBox.bottom), 'SubNav under the title').toBe(24);
   await expect(Math.round(navBox.width)).toBe(200);
   await expect(Math.round(contentBox.left - navBox.right), 'the content beside SubNav').toBe(40);
@@ -402,4 +403,24 @@ export async function expectAgentsDisclosure(root: HTMLElement): Promise<void> {
   expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
   const title = within(root).getByRole('heading', { level: 1 });
   await expect(Math.round(line.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(16);
+}
+
+/** The vision bar's line, word for word, as every vision board writes it. */
+export const VISION_BAR_LINE = 'Vision, not in the prototype. Nothing here is live.';
+
+/**
+ * vision_page_is_labelled: the vision bar first on the page, across the window's width at its top,
+ * 40 px tall on the panel, with the "Vision" pill, its line, and "Back to your Desk" to `backHref`.
+ */
+export async function expectVisionBar(root: HTMLElement, backHref: string): Promise<HTMLElement> {
+  const bar = within(root).getByRole('note', { name: 'Vision' });
+  const box = bar.getBoundingClientRect();
+  await expect([box.top, box.left, box.width]).toEqual([0, 0, document.documentElement.clientWidth]);
+  expectComputed(bar, { height: '40px', backgroundColor: 'rgb(34, 34, 32)', borderBottomColor: 'rgba(250, 249, 245, 0.12)' });
+  await expect(bar).toHaveTextContent(`Vision${VISION_BAR_LINE}Back to your Desk`);
+  await expect(within(bar).getByRole('link', { name: 'Back to your Desk' })).toHaveAttribute('href', backHref);
+  // Nothing on the page comes before it: it is the first thing a screen reader and the keyboard reach.
+  const first = root.querySelector('[role="note"], a[href], button, h1, h2, main, nav, aside, header');
+  await expect(bar.contains(first)).toBe(true);
+  return bar;
 }
