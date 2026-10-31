@@ -14,6 +14,7 @@ import type {
   CancelAccepted,
   CancelReason,
   MessageAccepted,
+  RulesDraft,
   ToolConfirmEntry,
   VerifyChecked,
   VisitorSession,
@@ -39,6 +40,7 @@ import {
 } from './readModels.ts';
 import { AFTER_VERIFY, EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, turnEnd, type Language, type Step } from './script.ts';
 import { seedWorld, type MockSeed } from './seed.ts';
+import { SETUP_ROUTES } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
 /** Plan 02's limit on a visitor's message and on the owner's words. */
@@ -99,6 +101,8 @@ export interface ErrorBody {
   state?: PaymentLinkState;
   /** With that state: `rules_changed` when a change to the business's rules cancelled the link. */
   cancel_reason?: CancelReason | null;
+  /** A setup confirm's 409: the same rules, drafted again on the rules now in force. */
+  draft?: RulesDraft;
 }
 
 /** A route's refusal: a 4xx or 5xx with an `{error}` body. */
@@ -117,7 +121,7 @@ export type Served<T> = ([T] extends [never] ? { status: 200; body?: undefined }
 export type AnyServed = { status: number; body?: unknown };
 
 /** The routes the mock answers from a copy, each one's answer checked against its route's model. */
-type ServedRoutes = { [K in RouteKey]?: (sv: Server, req: Req) => Served<RouteResponse<K>> };
+export type ServedRoutes = { [K in RouteKey]?: (sv: Server, req: Req) => Served<RouteResponse<K>> };
 
 /** The routes that answer without a copy. */
 type UnscopedRoutes = { [K in RouteKey]?: (req: Req) => Served<RouteResponse<K>> };
@@ -292,6 +296,8 @@ function linkClosed(link: LinkRecord): Failure {
 
 /** Every route the mock answers from a copy. Unserved ones fall through to the catch-all, which records them. */
 const SERVED: ServedRoutes = {
+  // The setup interview (setup.ts).
+  ...SETUP_ROUTES,
   copies(sv, req) {
     const passcode = isRecord(req.body) ? req.body.passcode : undefined;
     if (req.malformed || typeof passcode !== 'string' || passcode === '') return INVALID;

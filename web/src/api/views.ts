@@ -20,8 +20,10 @@ import type {
   Health,
   HoursWindow,
   KnowledgeItem,
+  Outcome,
   PaymentLinkView,
   PolicyVersion,
+  Probe,
   ProbeResult,
   ProofReport,
   RenderedBlock,
@@ -382,6 +384,16 @@ export interface RuleChatOut {
 
 export type SetupStep = 'questions' | 'tools' | 'rules' | 'situations' | 'safety_check' | 'preview' | 'live';
 
+/** The setup interview's seven questions (plan 02b Task 6, `QUESTION_KEYS`). */
+export type QuestionKey =
+  | 'what_you_do'
+  | 'hours_and_area'
+  | 'quote_limit'
+  | 'discounts'
+  | 'documents_and_payments'
+  | 'money_limit'
+  | 'contact_and_after_hours';
+
 export interface SetupMessage {
   role: 'claude' | 'owner' | 'tool_label';
   text: string;
@@ -393,6 +405,10 @@ export interface SetupState {
   slug: string;
   step: SetupStep;
   messages: SetupMessage[];
+  /** Whether the owner let Claude read their memory and website; null until asked. */
+  consent?: boolean | null; // pending: plan 02b Task 6; drop when the generated API types have it
+  /** The question waiting for an answer; null before consent and after the last one. */
+  question?: QuestionKey | null; // pending: plan 02b Task 6; drop when the generated API types have it
 }
 
 export interface SetupTools {
@@ -400,18 +416,30 @@ export interface SetupTools {
   connectable: 'mock_payments'[];
 }
 
+/** A situation Claude wrote from the owner's answers to try on the draft rules (plan 02b Task 7). */
+export interface Situation {
+  /** Claude's words, from the owner's answers. */
+  title: string;
+  who: 'public' | 'verified' | 'agent' | 'after_hours';
+  probe: Probe;
+  expected: Outcome;
+}
+
 export interface SituationResult {
-  situation: string;
+  situation: Situation;
   result: ProbeResult;
   /** False on another outcome or when the outcome depends on the reviewer. */
   matches: boolean;
 }
 
 export interface SafetyCheckRow {
+  /** The kind of trick: "Pretends to be you". */
   label: string;
-  tries: number;
+  /** What a bad actor would say, as they'd type it. Shown quoted, as their words. */
+  tries: string;
   result: ProbeResult;
-  blocked: number;
+  /** Refused, or held where that stops it; never when it depends on the reviewer. */
+  blocked: boolean;
 }
 
 export interface SafetyCheck {
