@@ -7,7 +7,7 @@ import type { BusinessOut } from '../../api/views.ts';
 import { Button, Card, DetailList, Dialog, Notice, SectionHeader, Switch, type DetailItem } from '../../ds/index.ts';
 import { hoursParts } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { desksQuery, findDesk, invalidateCopy, todayPath } from '../useDesks.ts';
+import { DESKS_KEY, findDesk, invalidateCopy, todayPath } from '../useDesks.ts';
 
 /** What Answering on means, under its switch: the short line, on a laptop as on a phone (owner decision, 2026-10-30). */
 const ANSWERING_LINE = 'Claude answers under your rules.';
@@ -85,17 +85,27 @@ export function GeneralPage() {
   /**
    * Reads the copy's Desks to settle a delete whose answer was lost: gone, the owner moves on;
    * still there, `stillThere` says so; unreadable, the delete stays unconfirmed until a read settles it.
+   *
+   * A read of its own, sent now, outside the shared Desks query: a read of that query already out
+   * went before the delete and can't say how it went, and a list without this Desk in that query
+   * would show "not found" before the owner has moved on.
    */
   const settle = async (stillThere: () => void) => {
-    const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
+    const read = await request('desks').catch(() => null);
     if (read === null) {
       setConfirming(false);
       setUnconfirmed(true);
       return;
     }
+    if (findDesk(read, desk.desk_id) === null) {
+      await leave(read);
+      return;
+    }
+    // Still there: the page shows the Desks as just read, and an earlier read still out can't undo that.
+    await queryClient.cancelQueries({ queryKey: DESKS_KEY });
+    queryClient.setQueryData(DESKS_KEY, read);
     setUnconfirmed(false);
-    if (findDesk(read, desk.desk_id) === null) await leave(read);
-    else stillThere();
+    stillThere();
   };
 
   const remove = useMutation({

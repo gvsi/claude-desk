@@ -4,12 +4,15 @@
  * the same control) and deleting a Desk; Notifications and Billing as vision; each as its signed
  * board draws it, on a laptop and on a phone.
  */
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
+import { ROUTES } from '../../api/routes.ts';
 import { SPEC, expectFooterAtFoot, one } from '../../ds/boards/spec.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
+import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
@@ -233,7 +236,7 @@ describe('Settings', () => {
     const unsure = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
     await expect.element(main(unsure.screen).getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
     mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
-    mockStore.inject({ route: 'desks', status: 'network', times: 2 });
+    mockStore.inject({ route: 'desks', status: 'network' });
     await main(unsure.screen).getByRole('button', { name: 'Delete this Desk' }).click();
     await unsure.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     const unconfirmed = main(unsure.screen).getByRole('region', { name: 'Delete this Desk' }).getByRole('alert');
@@ -264,6 +267,38 @@ describe('Settings', () => {
     await main(last.screen).getByRole('button', { name: 'Delete this Desk' }).click();
     await last.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => last.router.state.location.pathname).toBe('/app/setup');
+    expect(requests('deleteDesk')).toHaveLength(1);
+  });
+
+  it('lost_delete_reads_the_desks_again', async () => {
+    // A read of the copy's Desks is already out when the delete is sent (Answering's switch reads
+    // them again once its change saves), and its answer, the Desks as they were then, comes late.
+    const { screen, router } = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
+    const page = main(screen);
+    await expect.element(page.getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
+    const early = holdNextDesksRead();
+    const sawNotFound = watchFor("This page doesn't exist");
+    await page.getByRole('switch', { name: 'Answering' }).click();
+    await expect.poll(() => early.arrived()).toBe(true);
+    const reads = requests('desks').length;
+
+    // The delete goes through and its answer is lost. A read sent after it says the Desk is gone,
+    // so the owner moves on without waiting for the early read.
+    mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
+    await page.getByRole('button', { name: 'Delete this Desk' }).click();
+    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.poll(() => requests('desks').length).toBeGreaterThan(reads);
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+
+    // The early read's answer, let through now, puts nothing back: one Desk, no alert, never "not found".
+    early.release();
+    await expect.poll(() => early.answered()).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+    expect(screen.getByRole('button', { name: /^Switch Desk/ }).elements()).toEqual([]);
+    expect(screen.getByRole('alert').elements()).toEqual([]);
+    expect(sawNotFound()).toBe(false);
     expect(requests('deleteDesk')).toHaveLength(1);
   });
 });
@@ -403,7 +438,7 @@ describe('Settings against its boards', () => {
 
     // A delete it couldn't confirm.
     mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
-    mockStore.inject({ route: 'desks', status: 'network', times: 2 });
+    mockStore.inject({ route: 'desks', status: 'network' });
     await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
     await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.element(main(screen).getByRole('alert')).toHaveTextContent(`${UNCONFIRMED}Reload`);
@@ -462,6 +497,36 @@ async function expectSettingsColumns(screen: RenderResult, current: string): Pro
 const round = Math.round;
 const top = (el: Element) => el.getBoundingClientRect().top;
 const bottom = (el: Element) => el.getBoundingClientRect().bottom;
+
+/**
+ * Holds the next read of the copy's Desks: answered from the copy as it stands when the read
+ * arrives, but sent back only on `release()`, like a read that went out before a change and lands
+ * after it. `arrived()` and `answered()` say how far it got.
+ */
+function holdNextDesksRead(): { arrived: () => boolean; answered: () => boolean; release: () => void } {
+  let arrived = false;
+  let answered = false;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // Never left waiting past its test.
+  onTestFinished(() => release());
+  worker.use(
+    http.get(
+      ROUTES.desks.path,
+      async () => {
+        arrived = true;
+        const answer = await mockStore.dispatch('desks');
+        await released;
+        answered = true;
+        return 'network' in answer ? HttpResponse.error() : HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
+      },
+      { once: true },
+    ),
+  );
+  return { arrived: () => arrived, answered: () => answered, release };
+}
 
 /** Whether `text` showed anywhere on the page at any point from now until the test ends. */
 function watchFor(text: string): () => boolean {
