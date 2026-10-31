@@ -98,6 +98,25 @@ Before any adapter that acts outside the kernel (the mock payments server's tool
 - [ ] **Step 4: Run** `cd backend && uv run pytest tests/kernel/test_private_release.py tests/kernel/test_execute.py tests/kernel/test_session_recheck.py -q` → PASS (the 4 new functions, 10 cases), then `make evals-tier1-kernel`.
 - [ ] **Step 5: Commit** `git commit -m "fix(kernel): withhold a refused private result instead of failing what an adapter already did"`.
 
+### Task 0b: An over-limit agent charge's refusal says why
+
+A visiting agent that asks to charge more than is left on its signed mandate is refused by the baseline's `agent_charge_within_mandate`, and its receipt reads the generic refusal ("Not something I can do here"). The signed agents board draws "Refused: over the signed limit for this agent" for that case (#211). The receipt's line is the decision's signed `visitor_plain`, so the kernel gives it.
+
+**Files:**
+- Modify: `backend/desk/kernel_service/decide.py` (`_store`), `backend/desk/kernel_service/render/{en,es}.py` (`STATUS`)
+- Test: `backend/tests/kernel/test_mandates.py`; `evals/tier1/test_payments_and_agents.py` if a row pins the over-limit line
+
+**Interfaces:**
+- A new status key `refused_over_mandate`: en "Refused: over the signed limit for this agent", es "Rechazado: supera el límite firmado para este agente" ("Límite firmado" is the signed Spanish term).
+- `_store` gives a refusal that key only when all of these hold: the evaluation ran (no `reason`), its deciding policies are exactly `B.agent_charge_within_mandate`, the principal is an agent holding a mandate (`mandate_remaining_cents` is not None), and the action's `amount_cents` is above it. Any other refusal by that rule (no mandate, no amount), or one another policy also decided, keeps the state's generic line, so the line never names a cause that isn't the real one. The owner's `reason_plain` is unchanged.
+- The line is set when the decision is stored, so it is in the signed `visitor_plain` and the ledgered decision like every other status line, and it renders in the session's language.
+
+- [ ] **Step 1: Write the failing tests:** `test_an_agent_over_its_mandate_is_told_it_is_over_the_signed_limit` (2 cases, en and es: a $25 charge on a $20 mandate → `refused`, `visitor_plain` the new line); `test_other_mandate_refusals_keep_the_generic_line` (2 cases: an agent with no mandate, and a charge with no amount → the generic refusal line).
+- [ ] **Step 2: Run** them → FAIL (the generic line).
+- [ ] **Step 3: Implement**; update the tier 1 over-limit row's expected `visitor_plain` if it pins the line.
+- [ ] **Step 4: Run** the two tests, `tests/kernel/test_decide.py` and `make evals-tier1-kernel` → PASS.
+- [ ] **Step 5: Commit** `git commit -m "feat(kernel): tell an agent its charge was refused for being over its signed limit"`.
+
 ### Task 1: Mock payments server
 
 **Files:**
