@@ -10564,10 +10564,11 @@
           "cursor",
           "owner_translation",
           "triage",
-          "stopped_draft"
+          "stopped_draft",
+          "owner_plain"
         ],
         "title": "OwnerTranscriptItem",
-        "description": "The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each\ndraft of Claude's the reply check stopped.\n\n`cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto\nit, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest\none read). Items come in transcript order (`n`), each once per read.\n\nA `stopped_draft` item (Plan 02b) stands where the check stopped the draft, before the rewrite or the handoff that\nfollowed: its `stopped_draft` holds the draft and why it was stopped, and it has no `text` or `event`. Every other\nitem's `stopped_draft` is null."
+        "description": "The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each\ndraft of Claude's the reply check stopped.\n`owner_plain` is always present: the owner-only reason for this exact execution refusal, or null.\n\n`cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto\nit, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest\none read). Items come in transcript order (`n`), each once per read.\n\nA `stopped_draft` item (Plan 02b) stands where the check stopped the draft, before the rewrite or the handoff that\nfollowed: its `stopped_draft` holds the draft and why it was stopped, and it has no `text` or `event`. Every other\nitem's `stopped_draft` is null."
       },
       "PaymentConflict": {
         "properties": {
@@ -12805,6 +12806,7 @@
           "outcome",
           "state",
           "reason_plain",
+          "owner_plain",
           "created_at",
           "ledger_seq",
           "replayed"
