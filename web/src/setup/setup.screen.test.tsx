@@ -26,7 +26,7 @@ import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
-import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -375,7 +375,7 @@ describe('setup', () => {
     const consent = screen.getByText(/^Thanks, Maria\. Before I ask anything/);
     await expect.element(consent).toBeVisible();
     expect(inSerif(consent.element())).toBe(true);
-    await expect.element(screen.getByText("About seven. Answer in your own words; I'll turn them into rules you can check.", { exact: true })).toBeVisible();
+    expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
 
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     const first = SETUP_QUESTIONS[0]?.text ?? '';
@@ -383,7 +383,7 @@ describe('setup', () => {
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: true }]);
     await expect.element(screen.getByText(MEMORY_LABEL, { exact: true })).toBeVisible();
     expect(inSerif(screen.getByText(first, { exact: true }).element())).toBe(true);
-    await expect.element(screen.getByText('Question 1 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Yes, use it' }).elements()).toHaveLength(0);
     // The answer the owner gave shows as theirs.
@@ -1027,7 +1027,7 @@ describe('setup', () => {
     const box = screen.getByRole('textbox', { name: 'Your answer' });
     await box.click();
     await userEvent.keyboard('Leaks and drains.{Enter}');
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue('');
     await expect.element(box).toHaveFocus();
   });
@@ -1040,7 +1040,7 @@ describe('setup', () => {
     await box.click();
     for (let answer = 1; answer <= 6; answer += 1) {
       await userEvent.keyboard('Yes, that works.{Enter}');
-      await expect.element(screen.getByText(`Question ${answer + 1} of 7`, { exact: true })).toBeVisible();
+      await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[answer]?.text ?? ''}`, { exact: true })).toBeVisible();
       await expect.element(box).toHaveFocus();
       await expect.poll(() => {
         const rect = box.element().getBoundingClientRect();
@@ -1061,7 +1061,7 @@ describe('setup', () => {
     await box.click();
     for (let answer = 1; answer <= 4; answer += 1) {
       await userEvent.keyboard('Yes, that works.{Enter}');
-      await expect.element(screen.getByText(`Question ${answer + 1} of 7`, { exact: true })).toBeVisible();
+      await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[answer]?.text ?? ''}`, { exact: true })).toBeVisible();
       await expect.element(box).toHaveFocus();
     }
     mockStore.inject({ route: 'setupAnswer', status: 503 });
@@ -1073,7 +1073,7 @@ describe('setup', () => {
       return rect.top >= 0 && rect.bottom <= window.innerHeight;
     }, { message: 'The focused retry button fits in the viewport' }).toBe(true);
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByText('Question 6 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[5]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveFocus();
     await expect.poll(() => {
       const rect = box.element().getBoundingClientRect();
@@ -1091,7 +1091,7 @@ describe('setup', () => {
     const retry = screen.getByRole('button', { name: 'Try again' });
     await expect.element(retry).toHaveFocus();
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveFocus();
   });
 
@@ -1103,7 +1103,7 @@ describe('setup', () => {
     await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: 'what_you_do', text: 'Leaks.' } });
     await box.click();
     await userEvent.keyboard('Drains too.{Enter}');
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue('Drains too.');
     await expect.element(box).toHaveFocus();
   });
@@ -1128,7 +1128,7 @@ describe('setup', () => {
     const exit = screen.getByRole('link', { name: 'Save and exit' });
     (exit.element() as HTMLElement).focus();
     await expect.element(exit).toHaveFocus();
-    await screen.getByText('Question 1 of 7', { exact: true }).click();
+    await screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true }).click();
     expect(document.activeElement).toBe(document.body);
     release();
     await expect.element(box).toBeEnabled();
@@ -1149,11 +1149,11 @@ describe('setup', () => {
     await expect.element(screen.getByText(FAILED_LINE, { exact: true })).toBeVisible();
     await expect.element(keptAnswer(screen).getByText(answer, { exact: true })).toBeVisible();
     expect(box.elements()).toHaveLength(0);
-    await expect.element(screen.getByText('Question 1 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
 
     await screen.getByRole('button', { name: 'Try again' }).click();
     await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue('');
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
     // Each send names the question it answers.
@@ -1218,7 +1218,7 @@ describe('setup', () => {
     mockStore.inject({ route: 'setupAnswer', status: 'network', afterCommit: true });
     await screen.getByRole('button', { name: 'Send' }).click();
     await expect.element(screen.getByText(FOLLOW_UP, { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Question 1 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
     await expect.element(box).toHaveValue('');
     expect(requests('setupAnswer', mark)).toHaveLength(1);
@@ -1266,7 +1266,7 @@ describe('setup', () => {
     await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Leaks and drains.', { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue('Water heaters too.');
-    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     expect(requests('setupAnswer', mark).map((r) => r.body)).toEqual([{ question: 'what_you_do', text: 'Water heaters too.' }]);
     expect(requests('setup', mark).length).toBeGreaterThan(0);
     expect(screen.getByRole('log', { name: 'Setup questions' }).getByText('Water heaters too.', { exact: true }).elements()).toHaveLength(0);
@@ -1318,8 +1318,8 @@ describe('setup', () => {
       await expect.element(writing).toBeVisible();
       expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
       await expect.element(wait).toBeVisible();
-      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
-      await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).not.toBeInTheDocument();
+      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+      await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
       expect(writing.element().nextElementSibling).toBe(wait.element());
       const log = screen.getByRole('log', { name: 'Setup questions' }).element();
       expect(wait.element().getBoundingClientRect().left).toBe(log.getBoundingClientRect().left);
@@ -1348,7 +1348,7 @@ describe('setup', () => {
     }
   });
 
-  it('async_consent_waits_without_a_composer_then_focuses_the_first_question', async () => {
+  it('async_consent_docks_a_disabled_composer_then_focuses_the_first_question', async () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -1359,8 +1359,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await expect.element(box).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).not.toBeInTheDocument();
+    await expect.element(box).toBeDisabled();
+    await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
     expectNoHorizontalScroll();
     const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
     onTestFinished(() => scroll.mockRestore());
@@ -1369,7 +1369,7 @@ describe('setup', () => {
     await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     await expect.element(box).toBeEnabled();
     await expect.element(box).toHaveFocus();
-    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(scroll).not.toHaveBeenCalled();
     await expect.element(writing).not.toBeInTheDocument();
   });
 
@@ -1412,7 +1412,7 @@ describe('setup', () => {
       expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain(UNREACHABLE_COPY.en);
     });
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await expect.element(box).not.toBeInTheDocument();
+    await expect.element(box).toBeDisabled();
     finish('landed');
     await screen.getByRole('button', { name: 'Try again' }).click();
     await until(() => {
@@ -1439,7 +1439,7 @@ describe('setup', () => {
     await expect.element(writing).toBeVisible();
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
     finish('landed');
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
@@ -1460,7 +1460,7 @@ describe('setup', () => {
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     expect(requests('setup', mark)).toHaveLength(1);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
     finish('landed');
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
@@ -2910,5 +2910,343 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Turn it on' }).click();
     await expect.element(screen.getByRole('button', { name: 'Confirm and turn on' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
+  });
+});
+
+const CPA_DESCRIPTION = "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.";
+
+async function consultantAt(kind = 'opening'): Promise<SetupState> {
+  const start = await startInterview(null, CPA_DESCRIPTION);
+  const id = start.interview_id;
+  const call = async (key: 'setupConsent' | 'setupAnswer' | 'setupProposal', body: unknown, proposal_id?: string) => {
+    const response = await mockStore.dispatch(key, { params: { id, ...(proposal_id ? { proposal_id } : {}) }, query: { cards: '1' }, body });
+    if ('network' in response || response.status !== 200) throw new Error('fixture turn failed');
+    return response.body as SetupState;
+  };
+  let state = await call('setupConsent', { allow: true });
+  if (kind === 'opening') return state;
+  state = await call('setupAnswer', { question: state.question, text: 'Both, about evenly' });
+  while (state.pending_card) {
+    const card = state.messages.at(-1)!.card!;
+    if ((card.job?.job ?? card.connector?.app) === kind) return state;
+    state = await call('setupProposal', { accept: card.job?.job !== 'payment' }, card.proposal_id);
+  }
+  return state;
+}
+
+describe('consultant setup', () => {
+  it.each(['answer', 'suggestions'] as const)('disables_cards_choices_and_the_dock_during_an_%s_turn', async (action) => {
+    const state = await consultantAt('intake');
+    const id = state.interview_id;
+    let release: () => void;
+    if (action === 'answer') release = holdNextAnswer(mockStore.world, id);
+    else {
+      let open = () => {};
+      const gate = new Promise<void>((resolve) => { open = resolve; });
+      release = open;
+      onTestFinished(open);
+      worker.use(http.post(`/api/owner/setup/${id}/suggestions`, async () => { await gate; return undefined; }, { once: true }));
+    }
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    const key = action === 'answer' ? 'setupAnswer' : 'setupSuggestions';
+    const mark = requests(key).length;
+    if (action === 'answer') { await box.fill('Yes, please'); await screen.getByRole('button', { name: 'Send', exact: true }).click(); }
+    else await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(box).toBeDisabled();
+    await expect.element(screen.getByRole('article', { name: 'Take new-client details' }).getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
+    await expect.element(screen.getByRole('button', { name: 'Both, about evenly', exact: true })).toBeDisabled();
+    await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeDisabled();
+    if (action === 'answer') await expect.poll(() => requests(key).length).toBe(mark + 1);
+    release();
+    if (action === 'answer') await expect.element(screen.getByRole('article', { name: 'Take a retainer for new work' })).toBeVisible();
+    else await expect.element(screen.getByRole('button', { name: 'Continue', exact: true })).toBeVisible();
+  });
+
+  it('can_answer_a_failed_card_by_typing_and_keep_focus_for_the_next_turn', async () => {
+    const state = await consultantAt('schedule');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Book a free intro consult' });
+    mockStore.inject({ route: 'setupProposal', status: 503 });
+    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    await expect.element(card.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('Yes, please{Enter}');
+    await expect.element(card.getByText('Accepted', { exact: true })).toBeVisible();
+    await expect.element(box).toHaveFocus();
+  });
+
+  it('payment_changes_validate_the_name_and_amount_and_cancel_discards_edits', async () => {
+    const state = await consultantAt('payment');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Take a retainer for new work' });
+    const mark = requests('setupProposal').length;
+    await card.getByRole('button', { name: 'Change', exact: true }).click();
+    const name = card.getByRole('textbox', { name: 'Name', exact: true });
+    const amount = card.getByRole('textbox', { name: 'Amount', exact: true });
+    await amount.fill('750.00');
+    await name.fill('');
+    await card.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect.element(name).toHaveAttribute('aria-invalid', 'true');
+    expect(requests('setupProposal')).toHaveLength(mark);
+    await card.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    await expect.element(amount).toHaveValue('');
+    await expect.element(card.getByRole('heading', { name: 'Take a retainer for new work', exact: true })).toBeVisible();
+    await card.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await card.getByRole('button', { name: 'Change', exact: true }).click();
+    await amount.fill('750.00');
+    await name.fill('Engagement deposit');
+    await card.getByRole('radio', { name: 'Ask me first', exact: true }).click();
+    await card.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect.element(screen.getByRole('article', { name: 'Engagement deposit' }).getByText('Accepted', { exact: true })).toBeVisible();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true, title: 'Engagement deposit', autonomy: 'ask', amount_cents: 75000 });
+  });
+
+  it('a_page_opened_at_tools_skips_the_closing', async () => {
+    const state = await consultantAt('intake');
+    await mockStore.dispatch('setupSuggestions', { params: { id: state.interview_id }, query: { cards: '1' }, body: {} });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'A few questions', exact: true }).elements()).toHaveLength(0);
+    expect(screen.container.querySelector('.cd-setup-dock')).toBeNull();
+  });
+
+  it.each(['lost', 'error'] as const)('suggestions_recover_a_%s_reply_without_sending_blindly', async (outcome) => {
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const reads = requests('setup').length;
+    mockStore.inject(outcome === 'lost' ? { route: 'setupSuggestions', status: 'network', afterCommit: true } : { route: 'setupSuggestions', status: 503 });
+    await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    if (outcome === 'lost') {
+      await expect.element(screen.getByRole('button', { name: 'Continue', exact: true })).toBeVisible();
+      expect(requests('setupTools')).toHaveLength(0);
+    } else {
+      await expect.element(screen.getByRole('alert')).toHaveTextContent(UNREACHABLE_COPY.en);
+      await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeEnabled();
+    }
+    expect(requests('setup').length).toBeGreaterThan(reads);
+    expect(requests('setupSuggestions')).toHaveLength(1);
+  });
+
+  it.each([404, 409])('a_card_%s_rereads_and_shows_the_decision_the_server_holds', async (status) => {
+    const state = await consultantAt('schedule');
+    const id = state.interview_id;
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const card = screen.getByRole('article', { name: 'Book a free intro consult' });
+    await expect.element(card.getByRole('button', { name: 'Accept', exact: true })).toBeVisible();
+    await mockStore.dispatch('setupProposal', { params: { id, proposal_id: state.pending_card! }, query: { cards: '1' }, body: { accept: true } });
+    const reads = requests('setup').length;
+    mockStore.inject({ route: 'setupProposal', status });
+    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    await expect.element(card.getByText('Accepted', { exact: true })).toBeVisible();
+    expect(requests('setup').length).toBeGreaterThan(reads);
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+    expect(card.getByText('I couldn’t save that just now. Try again.', { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('only_the_latest_choices_are_live_and_money_limits_have_no_recommendation', async () => {
+    const state = await consultantAt('money');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Both, about evenly' })).toBeDisabled();
+    await screen.getByRole('button', { name: 'Set an amount now', exact: true }).click();
+    await expect.element(screen.getByRole('button', { name: 'Up to $100', exact: true })).toBeEnabled();
+    await expect.element(screen.getByRole('button', { name: 'Set an amount now', exact: true })).toBeDisabled();
+    await expect.element(screen.getByRole('button', { name: 'Set an amount now', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Recommended', { exact: true }).elements()).toHaveLength(0);
+    const live = screen.getByRole('group', { name: 'Choices', exact: true }).last();
+    expect(live.getByRole('button').elements()).toHaveLength(4);
+    expect(getComputedStyle(live.element()).getPropertyValue('--cd-touch-reach-block')).not.toBe('');
+  });
+
+  it('shows_coming_later_jobs_and_connectors_without_claiming_they_work', async () => {
+    const state = await consultantAt('google_calendar');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const status = screen.getByRole('article', { name: 'Answer “Where’s my return?”' });
+    await expect.element(status.getByText('Coming later', { exact: true })).toBeVisible();
+    expect(status.element().querySelector('.cd-setup-job__autonomy')).toBeNull();
+    const calendar = screen.getByRole('article', { name: 'Google Calendar' });
+    await expect.element(calendar.getByText('Coming soon in this demo.', { exact: true })).toBeVisible();
+    expect(calendar.getByRole('button').elements()).toHaveLength(0);
+    const stripe = screen.getByRole('article', { name: 'Stripe' });
+    await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
+    await expect.element(stripe.getByText('It connects when you reach Tools, and you review its tools there.', { exact: true })).toBeVisible();
+  });
+
+  it('declines_a_card_and_keeps_decided_cards_read_only', async () => {
+    const state = await consultantAt('schedule');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Book a free intro consult' });
+    await card.getByRole('button', { name: 'Not now', exact: true }).click();
+    await expect.poll(() => card.getByRole('button').elements().length).toBe(0);
+    await expect.element(card.getByText('Not now', { exact: true })).toBeVisible();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: false });
+    expect(card.element().querySelector('.cd-setup-job--declined')).not.toBeNull();
+  });
+
+  it('shows_the_signed_amount_error_when_the_server_requires_an_amount', async () => {
+    const state = await consultantAt('payment');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Take a retainer for new work' });
+    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    await card.getByRole('textbox', { name: 'Amount', exact: true }).fill('750');
+    mockStore.inject({ route: 'setupProposal', status: 422, body: { error: 'amount_required' } });
+    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+    await expect.element(card.getByRole('textbox', { name: 'Amount', exact: true })).toHaveValue('750');
+    expect(card.getByRole('button', { name: 'Try again', exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('a_202_decision_keeps_the_pressed_button_busy_and_polls_the_next_card', async () => {
+    const state = await consultantAt('schedule');
+    const release = holdNextDecision(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Book a free intro consult' });
+    const accept = card.getByRole('button', { name: 'Accept', exact: true });
+    const reads = requests('setup').length;
+    const posts = requests('setupProposal').length;
+    await accept.click();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(accept).toHaveAttribute('aria-busy', 'true');
+    await expect.element(card.getByRole('button', { name: 'Change', exact: true })).toBeDisabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+    await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeDisabled();
+    expect(screen.getByText('Putting together what I’d have your Desk do. This can take a minute or so.', { exact: true }).elements()).toHaveLength(0);
+    await expect.poll(() => requests('setupProposal').length).toBe(posts + 1);
+    release();
+    await expect.element(screen.getByRole('article', { name: 'Take new-client details' }).getByRole('button', { name: 'Accept', exact: true })).toBeVisible();
+    expect(requests('setup').length).toBeGreaterThan(reads);
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
+  });
+
+  it('suggestions_finish_a_pending_card_show_read_only_leftovers_and_wait_for_continue', async () => {
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByText('Here’s the rest, as I’d set it up.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('That’s everything I need, Linda. Here’s how your Desk will work.', { exact: true })).toBeVisible();
+    const payment = screen.getByRole('article', { name: 'Take a retainer for new work' });
+    await expect.element(payment.getByText('Not now', { exact: true })).toBeVisible();
+    expect(screen.getByRole('log').getByRole('button').elements().every((element) => (element as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getByRole('textbox', { name: 'Your answer' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Use your suggestions', exact: true }).elements()).toHaveLength(0);
+    const next = screen.getByRole('button', { name: 'Continue', exact: true });
+    await expect.element(next).toBeVisible();
+    expect(next.element().closest('.cd-setup-dock')).not.toBeNull();
+    expect(requests('setupSuggestions').at(-1)?.body).toEqual({});
+    await next.click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+  });
+
+  it('typing_answers_the_pending_card_and_returns_focus_to_the_composer', async () => {
+    const state = await consultantAt('schedule');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    await userEvent.keyboard('Yes, please{Enter}');
+    const consult = screen.getByRole('article', { name: 'Book a free intro consult' });
+    await expect.element(consult.getByText('Accepted', { exact: true })).toBeVisible();
+    expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: null, card: state.pending_card, text: 'Yes, please' });
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('');
+  });
+
+  it.each(['desktop', 'phone'] as const)('keeps_the_dock_in_the_%s_viewport_while_only_the_transcript_scrolls', async (viewport) => {
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
+    const scroll = screen.container.querySelector<HTMLElement>('.cd-setup-chat__scroll');
+    expect(scroll).not.toBeNull();
+    const dock = screen.container.querySelector<HTMLElement>('.cd-setup-dock')!;
+    const before = dock.getBoundingClientRect();
+    scroll!.scrollTop = 0;
+    expect(scroll!.scrollHeight).toBeGreaterThan(scroll!.clientHeight);
+    expect(dock.getBoundingClientRect().top).toBe(before.top);
+    expect(before.bottom).toBeLessThanOrEqual(window.innerHeight);
+    expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight);
+    expect(screen.getByRole('textbox', { name: 'Your answer' }).element().getBoundingClientRect().top).toBeGreaterThan(0);
+    expectNoHorizontalScroll();
+    scroll!.scrollTop = scroll!.scrollHeight;
+  });
+
+  it('retries_a_failed_card_decision_with_the_same_body', async () => {
+    const state = await consultantAt('schedule');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Book a free intro consult' });
+    const mark = requests('setupProposal').length;
+    mockStore.inject({ route: 'setupProposal', status: 503 });
+    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    await expect.element(card.getByText('I couldn’t save that just now. Try again.', { exact: true })).toBeVisible();
+    expect(card.getByRole('button', { name: 'Accept', exact: true }).elements()).toHaveLength(0);
+    await card.getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(card.getByText('Accepted', { exact: true })).toBeVisible();
+    expect(requests('setupProposal').slice(mark).map(({ body }) => body)).toEqual([{ accept: true }, { accept: true }]);
+  });
+
+  it('requires_a_payment_amount_and_sends_owner_dollars_as_integer_cents', async () => {
+    const state = await consultantAt('payment');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Take a retainer for new work' });
+    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    const amount = card.getByRole('textbox', { name: 'Amount', exact: true });
+    await expect.element(amount).toBeVisible();
+    const mark = requests('setupProposal').length;
+    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+    expect(requests('setupProposal')).toHaveLength(mark);
+    await amount.fill('750.00');
+    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    await expect.element(card.getByText('Engagement retainer, $750.00', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('Accepted', { exact: true })).toBeVisible();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true, amount_cents: 75000 });
+  });
+
+  it('changes_the_pending_job_name_and_outcome_with_an_accept_decision', async () => {
+    const state = await consultantAt('intake');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const card = screen.getByRole('article', { name: 'Take new-client details' });
+    await card.getByRole('button', { name: 'Change', exact: true }).click();
+    await card.getByRole('textbox', { name: 'Name', exact: true }).fill('Ask new clients three questions');
+    await card.getByRole('radio', { name: 'Ask me first', exact: true }).click();
+    await card.getByRole('button', { name: 'Save', exact: true }).click();
+    const decided = screen.getByRole('article', { name: 'Ask new clients three questions' });
+    await expect.element(decided.getByText('Accepted', { exact: true })).toBeVisible();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true, title: 'Ask new clients three questions', autonomy: 'ask' });
+
+    await expect.element(decided.getByText('Asks you', { exact: true })).toBeVisible();
+    expect(decided.getByRole('button').elements()).toHaveLength(0);
+  });
+
+  it('a_choice_answers_and_only_the_pending_card_has_actions', async () => {
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const choice = screen.getByRole('button', { name: 'Both, about evenly' });
+    await choice.click();
+    const consult = screen.getByRole('article', { name: 'Book a free intro consult' });
+    await expect.element(consult).toBeVisible();
+    await expect.element(choice).toBeDisabled();
+    await expect.element(choice).toHaveAttribute('aria-pressed', 'true');
+    expect(requests('setupAnswer').at(-1)?.body).toEqual({ question: 'what_you_do', text: 'Both, about evenly' });
+    expect([...screen.container.querySelectorAll('.cd-claude-message')].filter((node) => node.textContent === '')).toHaveLength(0);
+    await consult.getByRole('button', { name: 'Accept', exact: true }).click();
+    await expect.element(consult.getByText('Accepted', { exact: true })).toBeVisible();
+    expect(consult.getByRole('button').elements()).toHaveLength(0);
+    await expect.element(screen.getByRole('article', { name: 'Take new-client details' }).getByRole('button', { name: 'Accept', exact: true })).toBeVisible();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true });
+  });
+
+  it('opens_with_choices_and_no_cards_or_question_subtitle', async () => {
+    const state = await consultantAt();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { name: 'A few questions' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Both, about evenly' })).toBeVisible();
+    expect(screen.getByRole('article').elements()).toHaveLength(0);
+    expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
+    expect(screen.getByText(/Question \d of|About seven/).elements()).toHaveLength(0);
   });
 });

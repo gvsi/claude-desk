@@ -3,7 +3,7 @@
  * owner UI is English and plain. Words that come from the shared rules helpers (`ruleWords`,
  * `moneyLimitLine`, `checkStatus`, `RuleDraftReview`) aren't repeated here.
  */
-import type { QuestionKey, SetupStep } from '../api/views.ts';
+import type { SetupStep } from '../api/views.ts';
 import { SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, type CopyLanguage } from '../ds/index.ts';
 
 /**
@@ -141,17 +141,6 @@ export const STEP_INDEX: Readonly<Record<SetupStep, number>> = {
   live: 4,
 };
 
-/** The interview's questions in the order the API asks them (plan 02b Task 6, `QUESTION_KEYS`). */
-export const QUESTION_ORDER: readonly QuestionKey[] = [
-  'what_you_do',
-  'hours_and_area',
-  'quote_limit',
-  'discounts',
-  'documents_and_payments',
-  'money_limit',
-  'contact_and_after_hours',
-];
-
 export const SETUP_COPY = {
   stepsLabel: 'Set up your Desk',
   /** Stands in for the business's name until the API names it. */
@@ -169,8 +158,10 @@ export const SETUP_COPY = {
 
   questions: {
     title: 'A few questions',
-    beforeConsent: "About seven. Answer in your own words; I'll turn them into rules you can check.",
-    counter: (n: number, of: number) => `Question ${n} of ${of}`,
+    suggestions: 'Use your suggestions',
+    suggestionsLine: 'Skip the rest. I’ll fill it in from what I’ve proposed, and every limit asks you first.',
+    choices: 'Choices',
+    recommended: 'Recommended',
     allow: 'Yes, use it',
     decline: "No, I'll type it",
     composerLabel: 'Your answer',
@@ -180,6 +171,17 @@ export const SETUP_COPY = {
     conversation: 'Setup questions',
     putting: 'Putting together what I’d have your Desk do. This can take a minute or so.',
     loading: 'Opening your setup',
+  },
+
+  proposal: {
+    amount: 'Amount', amountHint: 'In dollars. The payment link asks for this amount.', amountError: 'Enter an amount to accept this.',
+    failed: 'I couldn’t save that just now. Try again.', tryAgain: 'Try again',
+    name: 'Name', nameHint: 'Up to 60 characters.', outcome: 'Outcome', save: 'Save', cancel: 'Cancel',
+    accept: 'Accept', change: 'Change', decline: 'Not now', accepted: 'Accepted', later: 'Coming later',
+    connect: (label: string) => `Connect ${label}`,
+    connected: 'It connects when you reach Tools, and you review its tools there.',
+    appointment: 'Appointment', questions: 'Questions', payment: 'Payment', urgent: 'Urgent', minutes: 'minutes',
+    unpriced: (purpose: string) => `${purpose}. You set the amount when you accept.`,
   },
 
   tools: {

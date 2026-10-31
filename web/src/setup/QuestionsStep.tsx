@@ -1,10 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
-import type { QuestionKey, SetupMessage, SetupState } from '../api/views.ts';
-import { Button, ClaudeMessage, Composer, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
+import type { SetupAnswerBody, SetupMessage, SetupState } from '../api/views.ts';
+import { Button, ClaudeMessage, Composer, ConceptFooter, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
-import { QUESTION_ORDER, SETUP_COPY, stillCheckingLine } from './copy.ts';
+import { SETUP_COPY, stillCheckingLine } from './copy.ts';
+import { ProposalCard, type CardDecision } from './ProposalCard.tsx';
+import { isCard, liveChoices } from './conversation.ts';
+import { SetupChoices } from './SetupChoices.tsx';
+import './SetupConversation.css';
 import { useSetupWork } from './useSetupWork.ts';
 
 /** Plan 02's limit on an answer. */
@@ -14,6 +18,7 @@ const copy = SETUP_COPY.questions;
 
 export interface QuestionsStepProps {
   state: SetupState;
+  onContinue: () => void;
   /** The API answered with the interview as it stands. */
   onState: (state: SetupState) => void;
   /** Reads the interview again after a write whose answer was lost; null when it can't be read. */
@@ -29,9 +34,7 @@ function awaitsConsent(state: SetupState): boolean {
  * An answer as sent: the question it answers, the words, and how many messages the interview held
  * when it was sent, so a read can tell what came after.
  */
-interface Answer {
-  question: QuestionKey;
-  text: string;
+type Answer = SetupAnswerBody & {
   seen: number;
   /** The API refused it (a 409 to its first send): final, whatever a later read holds. */
   refused?: true;
@@ -48,25 +51,13 @@ function outcomeOf(now: SetupState, answer: Answer): 'taken' | 'refused' | 'unkn
   const since = now.messages.slice(answer.seen);
   const words = answer.text.trim();
   if (since.some((message) => message.role === 'owner' && message.text.trim() === words)) return 'taken';
-  const movedPast = now.step !== 'questions' || now.question !== answer.question;
+  const movedPast = now.step !== 'questions' || now.question !== answer.question || (answer.question === null && now.pending_card !== answer.card);
   return since.length > 0 || movedPast ? 'refused' : 'unknown';
-}
-
-/**
- * The question in view, counted from 1: the API's own (`question`), else the questions Claude has
- * asked since the consent question. Null before consent.
- */
-function questionNumber(state: SetupState): number | null {
-  if (awaitsConsent(state)) return null;
-  const at = state.question == null ? -1 : QUESTION_ORDER.indexOf(state.question);
-  if (at !== -1) return at + 1;
-  const asked = state.messages.filter((message) => message.role === 'claude').length - 1;
-  return Math.min(Math.max(asked, 1), QUESTION_ORDER.length);
 }
 
 /** One line of the conversation: Claude's in its serif, the owner's as theirs, a read as its label. */
 function Line({ message }: { message: SetupMessage }) {
-  if (message.role === 'claude') return <ClaudeMessage blocks={[{ kind: 'prose', text: message.text }]} language="en" ownerName="" />;
+  if (message.role === 'claude') return <ClaudeMessage blocks={message.text.split(/\n\s*\n/).map((text) => ({ kind: 'prose' as const, text }))} language="en" ownerName="" />;
   if (message.role === 'owner') return <VisitorMessage text={message.text} />;
   return <ToolLabel text={message.text} />;
 }
@@ -77,8 +68,9 @@ function Line({ message }: { message: SetupMessage }) {
  * owner's Claude memory ("Yes, use it" or "No, I'll type it"); then each answer goes to the API,
  * which asks the next question. An answer that didn't go through stays in the composer.
  */
-export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
+export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsStepProps) {
   const step = useRef<HTMLDivElement>(null);
+  const scroll = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLDivElement>(null);
   const returnFocus = useRef(false);
   const [consenting, setConsenting] = useState<boolean | null>(null);
@@ -92,32 +84,37 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   const [consentUnknown, setConsentUnknown] = useState(false);
   /** Words to put back in the composer once it takes text again. */
   const [refill, setRefill] = useState<{ text: string } | null>(null);
+  const [amountRequired, setAmountRequired] = useState<string | null>(null);
+  const [decisionFailed, setDecisionFailed] = useState<CardDecision | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [deciding, setDeciding] = useState<CardDecision | null>(null);
   const id = state.interview_id;
   const asking = awaitsConsent(state);
-  const number = questionNumber(state);
+  const closing = state.step !== 'questions';
+  const live = liveChoices(state);
   const busy = state.busy === true;
-  const consentBusy = busy && !asking && state.question === null && state.step === 'questions' && sending === null;
+  const consentBusy = busy && !asking && state.question === null && !state.pending_card && state.messages.filter(({ role }) => role === 'claude').length === 1;
+  const blocked = busy || sending !== null || deciding !== null || suggesting || retrying || consenting !== null;
+  useEffect(() => { if (!busy) setDeciding(null); }, [busy]);
   const work = useSetupWork(state, reread);
   const wasBusy = useRef(busy);
   useEffect(() => {
     if (wasBusy.current && !busy && asking) setConsentError(stillCheckingLine());
     wasBusy.current = busy;
   }, [busy, asking]);
-  const waitingForFirstQuestion = useRef(asking || (busy && state.question === null));
+  const waitingForFirstQuestion = useRef(asking || consentBusy);
 
   useEffect(() => {
-    if (asking || busy) {
-      if (asking || state.question === null) waitingForFirstQuestion.current = true;
-      return;
-    }
+    if (asking || consentBusy) waitingForFirstQuestion.current = true;
+    if (asking || busy) return;
     if (!waitingForFirstQuestion.current || state.question === null) return;
     waitingForFirstQuestion.current = false;
     const box = composer.current?.querySelector('textarea');
     const focus = document.activeElement;
     if (!box || box.disabled || (focus !== document.body && !step.current?.contains(focus))) return;
     box.focus();
-    box.scrollIntoView({ block: 'nearest' });
-  }, [asking, busy, state.question]);
+  }, [asking, busy, consentBusy, state.question]);
 
   /**
    * The consent, sent once. A lost reply, or a 409 (it was given already), reads the interview,
@@ -162,8 +159,11 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     returnFocus.current = returnFocus.current || (composer.current?.contains(document.activeElement) ?? false);
     setSending(answer.text);
     setFailed(null);
+    setDecisionFailed(null);
+    setAmountRequired(null);
+    setSuggestionsError(null);
     try {
-      onState(await request('setupAnswer', { params: { id }, body: { question: answer.question, text: answer.text } }));
+      onState(await request('setupAnswer', { params: { id }, body: answer.question === null ? { question: null, card: answer.card, text: answer.text } : { question: answer.question, text: answer.text } }));
       setSending(null);
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
@@ -216,17 +216,63 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     if (outcome === 'refused') setRefill({ text: kept.text });
   };
 
+  const suggestions = async () => {
+    if (suggesting || busy || sending !== null || deciding !== null) return;
+    setSuggesting(true);
+    setSuggestionsError(null);
+    try {
+      onState(await request('setupSuggestions', { params: { id }, body: {} }));
+    } catch (err) {
+      if (err instanceof ApiError && err.kind === 'unauthorized') return;
+      if (isUncertain(err)) {
+        const now = await reread();
+        if (now !== null && (now.step !== 'questions' || now.busy === true)) return;
+      }
+      setSuggestionsError(ownerErrorCopy(err));
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const decide = async (decision: CardDecision) => {
+    if (deciding !== null || busy || sending !== null) return;
+    returnFocus.current = true;
+    setDeciding(decision);
+    setDecisionFailed(null);
+    setAmountRequired(null);
+    let background = false;
+    try {
+      const next = await request('setupProposal', { params: { id, proposal_id: decision.proposal_id }, body: decision.body });
+      background = next.busy === true;
+      onState(next);
+    } catch (err) {
+      if (err instanceof ApiError && err.kind === 'unauthorized') return;
+      if (err instanceof ApiError && err.status === 422 && err.code === 'amount_required') {
+        setAmountRequired(decision.proposal_id);
+        return;
+      }
+      if (err instanceof ApiError && (err.kind === 'not_found' || err.kind === 'conflict')) {
+        if (await reread() !== null) return;
+      }
+      setDecisionFailed(decision);
+    } finally {
+      if (!background) setDeciding(null);
+    }
+  };
+
   /** The composer's words: the answer to the question the page shows. */
   const send = (text: string) => {
     // While an answer is unsettled the composer shows it with "Try again", which reads first; nothing posts blind.
     if (failed !== null || retrying) return;
-    if (state.question === null) {
+    if (state.question === null && !state.pending_card) {
       // No question is waiting here: read where the interview stands, and keep the words.
       setRefill({ text });
       void reread();
       return;
     }
-    void submit({ question: state.question, text, seen: state.messages.length });
+    void submit(state.question === null
+      ? { question: null, card: state.pending_card!, text, seen: state.messages.length }
+      : { question: state.question, text, seen: state.messages.length });
   };
 
   useEffect(() => {
@@ -251,23 +297,48 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   }, []);
 
   useEffect(() => {
-    if (sending !== null || retrying || !returnFocus.current) return;
+    if (blocked || !returnFocus.current) return;
     returnFocus.current = false;
     // A failed answer replaces the field with "Try again" until it can be settled.
-    const target = composer.current?.querySelector<HTMLElement>('textarea:not(:disabled), button:not(:disabled)');
+    const target = decisionFailed
+      ? step.current?.querySelector<HTMLElement>('.cd-setup-job__failed button:not(:disabled)')
+      : closing ? step.current?.querySelector<HTMLElement>('.cd-setup-dock button')
+      : composer.current?.querySelector<HTMLElement>('textarea:not(:disabled), button:not(:disabled)');
     target?.focus({ preventScroll: true });
-    target?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-  }, [sending, retrying, failed]);
+  }, [blocked, failed, decisionFailed, closing]);
+
+  useLayoutEffect(() => {
+    const pane = scroll.current;
+    if (pane) pane.scrollTop = pane.scrollHeight;
+  }, [state.messages.length, busy, sending, deciding]);
 
   return (
-    <div className="cd-setup-step" ref={step}>
-      <PageHeader title={copy.title} subtitle={number === null ? copy.beforeConsent : copy.counter(number, QUESTION_ORDER.length)} />
+    <div className="cd-setup-chat" ref={step}>
+      <div className="cd-setup-chat__scroll" ref={scroll}>
+      <div className="cd-setup-chat__column cd-setup-step">
+      <PageHeader title={copy.title} />
       <Transcript label={copy.conversation}>
         {state.messages.map((message, index) => (
-          <Line key={`${index}-${message.role}`} message={message} />
+          <Fragment key={`${index}-${message.role}`}>
+            {isCard(message) ? <ProposalCard proposal={message.card!}
+              amountRequired={amountRequired === message.card!.proposal_id}
+              failed={decisionFailed?.proposal_id === message.card!.proposal_id}
+              onRetry={() => { if (decisionFailed) void decide(decisionFailed); }}
+              live={state.step === 'questions' && state.pending_card === message.card!.proposal_id && message.card!.state === 'proposed'}
+              busyAction={deciding?.proposal_id === message.card!.proposal_id ? deciding.action : null}
+              disabled={blocked || failed !== null}
+              onDecision={(decision) => void decide(decision)}
+            /> : <Line message={message} />}
+            {message.role === 'claude' && message.choices?.length ? <SetupChoices
+              choices={message.choices}
+              picked={state.messages[index + 1]?.role === 'owner' ? state.messages[index + 1]?.text : undefined}
+              disabled={live?.index !== index || blocked || failed !== null}
+              onChoose={(text) => { returnFocus.current = true; send(text); }}
+            /> : null}
+          </Fragment>
         ))}
         {sending !== null ? <VisitorMessage text={sending} /> : null}
-        {sending !== null || busy ? <WritingIndicator language="en" /> : null}
+        {sending !== null || busy || deciding !== null || suggesting ? <WritingIndicator language="en" /> : null}
         {consentBusy ? (
           <p className="cd-setup-step__line cd-type-meta">{copy.putting}</p>
         ) : null}
@@ -284,7 +355,9 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
           {stillCheckingLine()}
         </Notice>
       ) : null}
-      {asking && !busy ? (
+      </div></div>
+      <div className="cd-setup-dock"><div className="cd-setup-dock__column">
+      {closing ? <div className="cd-setup-step__actions"><Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button></div> : asking && !busy ? (
         <>
           {consentError === null ? null : <Notice tone="error">{consentError}</Notice>}
           <div className="cd-setup-step__actions">
@@ -296,19 +369,26 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
             </Button>
           </div>
         </>
-      ) : consentBusy ? null : (
+      ) : (
         <div ref={composer}>
           <Composer
             variant="owner"
             label={copy.composerLabel}
             placeholder={copy.placeholder}
             maxLength={ANSWER_MAX}
-            disabled={busy || sending !== null || retrying}
+            disabled={blocked}
             onSend={send}
             {...(failed === null ? {} : { failed: { text: failed.text, line: copy.failed, onRetry: () => void retry() } })}
           />
         </div>
       )}
+      {!closing && !asking ? <div className="cd-setup-suggestions">
+        <Button variant="ghost" busy={suggesting} disabled={blocked || failed !== null} onClick={() => void suggestions()}>{copy.suggestions}</Button>
+        <p className="cd-setup-suggestions__line cd-type-meta">{copy.suggestionsLine}</p>
+      </div> : null}
+      {suggestionsError ? <Notice tone="error">{suggestionsError}</Notice> : null}
+      <ConceptFooter />
+      </div></div>
     </div>
   );
 }
