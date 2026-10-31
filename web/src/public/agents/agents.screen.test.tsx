@@ -315,6 +315,31 @@ describe('agents page', () => {
     await expectScreenBasics(gone.screen.container, { owner: false });
   });
 
+  it('agents_page_names_the_tab', async () => {
+    // The tab carries the page's title, in the page's language; before the Desk shows, and for a
+    // Desk that isn't there, the app's own name.
+    document.title = 'Claude Desk';
+    const en = await renderRoute(PAGE);
+    await expect.element(en.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
+    expect(document.title).toBe('Rivera Plumbing for AI agents');
+
+    const es = await renderRoute(PAGE, { language: 'es-MX' });
+    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing para agentes de IA' })).toBeVisible();
+    expect(document.title).toBe('Rivera Plumbing para agentes de IA');
+
+    mockStore.inject({ route: 'agentCard', status: 503 });
+    const down = await renderRoute(PAGE);
+    await expect.element(down.screen.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+    await down.screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(down.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
+    expect(document.title).toBe('Rivera Plumbing for AI agents');
+
+    const gone = await renderRoute('/d/no-such-desk/agents');
+    await expect.element(gone.screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+  });
+
   it('agents_document_language_follows_the_page', async () => {
     // The document's language, as index.html sets it (the test browser's page has its own).
     document.documentElement.lang = 'en';

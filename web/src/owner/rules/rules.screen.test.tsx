@@ -328,6 +328,8 @@ describe('rules page', () => {
     const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element().getBoundingClientRect();
     expect(preset.left).toBeGreaterThan(title.right);
     expect(Math.round(preset.top - title.top)).toBe(4);
+    // The review inside the panel has no title of its own, so the tab stays the page's.
+    expect(document.title).toBe('Rules · Claude Desk');
     // Nothing applied yet.
     expect(desk().policy.version).toBe(7);
 

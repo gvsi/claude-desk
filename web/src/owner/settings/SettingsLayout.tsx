@@ -2,12 +2,15 @@ import type { ReactNode } from 'react';
 import { Outlet, useLocation } from 'react-router';
 
 import { ConceptFooter, PageHeader, SubNav, type SubNavItem } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { BillingPage } from './BillingPage.tsx';
 import { GeneralPage } from './GeneralPage.tsx';
 import { NotificationsPage } from './NotificationsPage.tsx';
 
 import './Settings.css';
+
+const TITLE = 'Settings';
 
 /** One of Settings' sections: its SubNav row and its route. */
 export interface SettingsSection {
@@ -44,6 +47,8 @@ export const FIRST_SETTINGS_SECTION = SETTINGS_SECTIONS[0]?.path ?? '';
 export function SettingsLayout() {
   const context = useOwnerDesk();
   const { pathname } = useLocation();
+  // Its sections have no heading of their own, so each one's tab is Settings'.
+  useDocumentTitle(inApp(TITLE));
   const base = `/app/${encodeURIComponent(context.desk.desk_id)}/settings`;
   const items: SubNavItem[] = SETTINGS_SECTIONS.map(({ key, label, path }) => ({ key, label, href: `${base}/${path}` }));
   // The segment after `settings`: the section the owner is on.
@@ -53,10 +58,10 @@ export function SettingsLayout() {
   return (
     <div className="cd-settings">
       <div className="cd-settings__page">
-        <PageHeader title="Settings" />
+        <PageHeader title={TITLE} />
         <div className="cd-settings__columns">
           <div className="cd-settings__nav">
-            <SubNav label="Settings" items={items} current={current} linkComponent={RouterLink} />
+            <SubNav label={TITLE} items={items} current={current} linkComponent={RouterLink} />
           </div>
           <div className="cd-settings__content">
             <Outlet context={context} />

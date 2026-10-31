@@ -145,6 +145,22 @@ describe('public chat page', () => {
     await expectScreenBasics(es.screen.container, { owner: false });
   });
 
+  it('the_tab_names_the_business_on_each_public_page', async () => {
+    // The chat's tab names the business as its header does; the page for AI agents, which the about
+    // column links to, takes that page's title; Back names the business again.
+    document.title = APP_TITLE;
+    const { screen, router } = await renderRoute(PAGE);
+    await ready(screen);
+    expect(document.title).toBe('Rivera Plumbing');
+    const agents = screen.getByRole('complementary', { name: 'About Rivera Plumbing' }).getByRole('link', { name: 'What agents can do here' });
+    await router.navigate(agents.element().getAttribute('href') ?? '');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
+    expect(document.title).toBe('Rivera Plumbing for AI agents');
+    await router.navigate(-1);
+    await ready(screen);
+    expect(document.title).toBe('Rivera Plumbing');
+  });
+
   it('document_language_follows_the_page', async () => {
     // The document's language, as index.html sets it (the test browser's page has its own).
     document.documentElement.lang = 'en';

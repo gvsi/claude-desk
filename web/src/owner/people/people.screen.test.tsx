@@ -408,6 +408,35 @@ describe('customers', () => {
     await expect.element(none.getByRole('link', { name: 'Change them on Rules' })).toBeVisible();
   });
 
+  it('person_page_names_the_tab', async () => {
+    // Their name, as the page's title; while the list is on its way, the page they are under.
+    document.title = 'Claude Desk';
+    const list = held();
+    const answer = await mockStore.dispatch('people', { params: { desk_id: RIVERA.deskId } });
+    mockStore.inject({ route: 'people', status: 200, until: list.until, body: (answer as { body: unknown }).body });
+    const { screen, router } = await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100 });
+    await expect.element(screen.getByRole('status').filter({ hasText: /^Loading this customer$/ })).toBeVisible();
+    expect(document.title).toBe('Customers · Claude Desk');
+    list.release();
+    await expect.element(screen.getByRole('heading', { level: 1, name: dana.name })).toBeVisible();
+    expect(document.title).toBe(`${dana.name} · Claude Desk`);
+
+    // Back to the list by the breadcrumb, then to someone else's page from it.
+    await screen.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Customers' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Customers' })).toBeVisible();
+    expect(document.title).toBe('Customers · Claude Desk');
+    await screen.getByRole('link', { name: new RegExp(`^${bob.name}`) }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: bob.name })).toBeVisible();
+    expect(document.title).toBe(`${bob.name} · Claude Desk`);
+
+    // Someone outside the copy: the not-found screen, under the app's own name. (React reports the
+    // page's error on the console, as it does for any page that hands one to its route.)
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await router.navigate(`${PEOPLE}/per-someone-else`);
+    await expect.element(screen.getByRole('main', { name: "This page doesn't exist" })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+  });
+
   it('person_page_states_name_a_next_step', async () => {
     // Someone outside this copy's list: the app's not-found screen in place of the owner frame, as
     // for a Desk outside the copy, with its way back, no retry and nothing of anyone's. (React

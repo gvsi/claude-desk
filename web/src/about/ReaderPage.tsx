@@ -11,6 +11,7 @@ import { Fragment, useContext, useLayoutEffect, useRef, useSyncExternalStore } f
 import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
 
 import { Card, ConceptFooter, Icon, Mark, MarkAppIcon, Wordmark } from '../ds/index.ts';
+import { inApp, useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { ABOUT_DOCUMENTS, readingMinutes, type AboutDocument, type Block, type FigureName } from './documents.ts';
 import { ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
@@ -385,8 +386,9 @@ export function ReaderPage({ id }: ReaderPageProps) {
   useReadingPlace(id, hash);
 
   // Search engines are asked not to list the page while it is open. A best effort: the app serves one
-  // index.html for every address, so the tag exists only once the page has drawn. Both this and the title are
-  // set and taken back in the commit that draws or leaves the page, so the next page never inherits them.
+  // index.html for every address, so the tag exists only once the page has drawn. Both this and the title
+  // (useDocumentTitle) are set and taken back in the commit that draws or leaves the page, so the next page
+  // never inherits them.
   useLayoutEffect(() => {
     const robots = document.createElement('meta');
     robots.name = 'robots';
@@ -396,13 +398,7 @@ export function ReaderPage({ id }: ReaderPageProps) {
   }, []);
 
   // The tab names the document while it is open, and goes back to what it said when it closes.
-  useLayoutEffect(() => {
-    const before = document.title;
-    document.title = `${about.title} · Claude Desk`;
-    return () => {
-      document.title = before;
-    };
-  }, [about.title]);
+  useDocumentTitle(inApp(about.title));
 
   return (
     <div className={`cd-about-page${compact ? ' cd-about-page--compact' : ''}`}>

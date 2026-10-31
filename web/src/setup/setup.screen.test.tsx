@@ -397,6 +397,25 @@ describe('setup', () => {
     expect(mockStore.world.desks.length).toBe(desks + 1);
   });
 
+  it('setup_names_the_tab', async () => {
+    // Setup's own name, as its steps are labelled, at every step: the owner's preview of the public
+    // page included, which names the business only on a page of its own.
+    document.title = 'Claude Desk';
+    const start = await renderRoute('/app/setup');
+    await expect.element(start.screen.getByRole('heading', { level: 1, name: 'Tell me about your business' })).toBeVisible();
+    expect(document.title).toBe('Set up your Desk · Claude Desk');
+
+    const state = await interviewAtPreview();
+    const preview = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(preview.screen.getByText(DISCLOSURE)).toBeVisible();
+    expect(document.title).toBe('Set up your Desk · Claude Desk');
+
+    // An interview outside the copy: the not-found screen, under the app's own name.
+    const gone = await renderRoute('/app/setup/setup-not-in-this-copy');
+    await expect.element(gone.screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+  });
+
   it('interview_outside_the_copy_is_not_found', async () => {
     // An interview this copy doesn't hold: the not-found screen, never a retry.
     const { screen } = await renderRoute('/app/setup/setup-not-in-this-copy');

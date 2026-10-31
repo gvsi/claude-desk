@@ -96,6 +96,28 @@ describe('mock checkout', () => {
     expectNoHorizontalScroll();
   });
 
+  it('checkout_names_the_tab', async () => {
+    // What the payment is for, as the card's title says it, then the business as the card names it.
+    document.title = 'Claude Desk';
+    const en = await renderRoute(`/pay/${issueLink('en')}`);
+    await expect.element(en.screen.getByRole('heading', { name: 'Service call deposit' })).toBeVisible();
+    expect(document.title).toBe('Service call deposit · Rivera Plumbing');
+    const es = await renderRoute(`/pay/${issueLink('es')}`, { language: 'en-US' });
+    await expect.element(es.screen.getByRole('heading', { name: 'Depósito de visita de servicio' })).toBeVisible();
+    expect(document.title).toBe('Depósito de visita de servicio · Rivera Plumbing');
+
+    // Without the business's name, the payment's alone; before a link shows, the app's own name.
+    const token = issueLink('en');
+    const asTheApiSendsIt: PaymentLinkOut = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
+    mockStore.inject({ route: 'paymentLink', status: 200, times: 1, body: asTheApiSendsIt });
+    const unnamed = await renderRoute(`/pay/${token}`);
+    await expect.element(unnamed.screen.getByRole('heading', { name: 'Service call deposit' })).toBeVisible();
+    expect(document.title).toBe('Service call deposit');
+    const missing = await renderRoute('/pay/no-such-link');
+    await expect.element(missing.screen.getByText("This payment link doesn't exist. Ask in the chat for a new one.", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+  });
+
   it('checkout_document_language_follows_the_page', async () => {
     // The document's language, as index.html sets it (the test browser's page has its own).
     document.documentElement.lang = 'en';

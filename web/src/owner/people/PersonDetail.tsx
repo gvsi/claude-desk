@@ -14,6 +14,7 @@ import { OutsideTheCopy } from '../../app/NotFound.tsx';
 import { pollMs } from '../../app/poll.ts';
 import { Breadcrumb, Card, LoadingLine, PageHeader, PersonRules, type PersonRuleView, type RulesLinkProps } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { rulesQuery } from '../rules/RuleDraftReview.tsx';
@@ -75,6 +76,9 @@ export function PersonDetail() {
   const navigate = useNavigate();
   const people = usePeople(deskId);
   const failure = useReadFailure(people);
+  const person = people.data?.people.find((p) => p.person_id === personId);
+  // The tab names them as the page's title does, and the page they are under until the list says who they are.
+  useDocumentTitle(inApp(person?.display_name ?? PEOPLE_LABEL));
 
   if (people.data === undefined) {
     return <div className="cd-person">{failure === null ? <LoadingLine>Loading this customer</LoadingLine> : <ReadFailed failure={failure} />}</div>;
@@ -83,7 +87,6 @@ export function PersonDetail() {
   // Someone the copy's list doesn't hold: the not-found screen, never anyone else's page. Only a
   // read made since the page opened decides that, since a list read earlier may not have them yet;
   // until it lands, the page is loading, and if it fails, it says so with Try again.
-  const person = people.data.people.find((p) => p.person_id === personId);
   if (person === undefined) {
     const fresh = people.isFetchedAfterMount && !people.isFetching && failure === null;
     if (fresh) throw new OutsideTheCopy();

@@ -16,6 +16,7 @@ import {
   type RuleRowProps,
   type RulesLinkProps,
 } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -23,8 +24,11 @@ import { useReadFailure } from '../useReadFailure.ts';
 import { DEFAULT_SIDE } from './changeRows.ts';
 import { hubSections, toolFallback, toolRuleRows, type HubSection } from './hub.ts';
 import { peopleQuery, rulesQuery } from './RuleDraftReview.tsx';
+import { RULES_TITLE } from './RulesPage.tsx';
 
 import './HouseRules.css';
+
+const TITLE = 'All rules';
 
 const deskPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}`;
 
@@ -76,6 +80,7 @@ function ConnectorRules({ deskId, section, view, people }: { deskId: string; sec
  */
 export function HouseRules() {
   const { desk } = useOwnerDesk();
+  useDocumentTitle(inApp(TITLE));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
@@ -124,8 +129,8 @@ export function HouseRules() {
   return (
     <div className="cd-house-rules" onClick={followInAppLinks(navigate)}>
       <div className="cd-house-rules__header">
-        <Breadcrumb items={[{ label: 'Rules', href: `${deskPath(deskId)}/rules` }, { label: 'All rules' }]} linkComponent={RouterLink} />
-        <PageHeader title="All rules" subtitle="Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules." />
+        <Breadcrumb items={[{ label: RULES_TITLE, href: `${deskPath(deskId)}/rules` }, { label: TITLE }]} linkComponent={RouterLink} />
+        <PageHeader title={TITLE} subtitle="Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules." />
       </div>
       {body}
       <AlwaysOnList />

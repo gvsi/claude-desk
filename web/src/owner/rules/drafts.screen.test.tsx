@@ -347,6 +347,44 @@ describe('rule draft review', () => {
     await expectScreenBasics(gone.screen.container, { owner: true });
   });
 
+  it('review_names_the_tab', async () => {
+    // The tab names the review as its title does: a preset's name, the payment limit's own, or the plain one.
+    document.title = 'Claude Desk';
+    const preset = mockStore.world.draftCards(desk(), PRESETS.ask_first);
+    const handed: RuleDraftState = { draft: draftFromDiff(preset, desk().policy, 'ask_first'), title: 'Ask me first' };
+    const named = await openDraft(preset.version, handed);
+    await expect.element(named.screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    expect(document.title).toBe('Ask me first · Claude Desk');
+
+    const limit = mockStore.world.draftCards(desk(), desk().policy.cards, { cap: 500_000 });
+    const raised = await openDraft(limit.version);
+    await expect.element(raised.screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    expect(document.title).toBe('Change your payment limit · Claude Desk');
+
+    // While a reload reads the draft, the page shows no title yet, and the tab names Rules, the page
+    // the review is under; once the draft is read, the review's own.
+    let release = () => {};
+    const until = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const read = await mockStore.dispatch('ruleDraft', { params: { desk_id: RIVERA.deskId, version: String(preset.version) } });
+    mockStore.inject({ route: 'ruleDraft', status: 200, until, body: (read as { body: unknown }).body });
+    const reloaded = await openDraft(preset.version);
+    await expect.element(reloaded.screen.getByText('Reading the change', { exact: true })).toBeVisible();
+    expect(document.title).toBe('Rules · Claude Desk');
+    release();
+    await expect.element(reloaded.screen.getByRole('heading', { level: 1, name: 'Review the change' })).toBeVisible();
+    expect(document.title).toBe('Review the change · Claude Desk');
+
+    // A draft that isn't open anymore keeps the plain title, and leaving hands the tab back.
+    const gone = await openDraft(99);
+    await expect.element(gone.screen.getByText("This draft isn't open anymore. Ask for the change again from Rules.", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Review the change · Claude Desk');
+    await gone.router.navigate('/no/such/page');
+    await expect.element(gone.screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.title).toBe('Claude Desk');
+  });
+
   it('confirm_shows_the_cap_change_in_words_both_ways', async () => {
     const link = rivera.ruleCards['rv-link'];
     const withLink = (cents: number) => desk().policy.cards.map((card) => (card.card_id === link.card_id ? { ...card, max_amount_cents: cents } : card));

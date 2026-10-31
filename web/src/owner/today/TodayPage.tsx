@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { ownerErrorCopy } from '../../api/http.ts';
-import { Greeting } from '../../ds/index.ts';
+import { Greeting, NAV_LABELS } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
@@ -39,6 +40,8 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
  */
 export function TodayPage() {
   const { business, desk } = useOwnerDesk();
+  // The page's heading greets the owner, so the tab takes the sidebar's row.
+  useDocumentTitle(inApp(NAV_LABELS.today));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const location = useLocation();
