@@ -385,10 +385,14 @@ export const HeldWithCardBelow: Story = {
     await expect(canvas.getAllByText(hold.reason_plain)).toHaveLength(1);
     await expect(card).toHaveTextContent(hold.reason_plain);
 
-    // The card is drawn right under the receipt's row.
+    // The card is drawn right under the receipt's row: the row's next element is the ApprovalCard
+    // itself (its outer box, which eases its height as an answer lands, holds the card), with
+    // nothing between them.
     const row = receipt.closest<HTMLElement>('.cd-transcript-row');
     if (!row) throw new Error('the receipt is not in a row');
-    await expect(row.nextElementSibling).toBe(card);
+    const approvalCard = card.closest('.cd-approval-card');
+    await expect(approvalCard).not.toBeNull();
+    await expect(row.nextElementSibling).toBe(approvalCard);
     await expect(card.getBoundingClientRect().top).toBeGreaterThanOrEqual(receipt.getBoundingClientRect().bottom);
     await expect(canvasElement.querySelectorAll('.cd-margin-receipt')).toHaveLength(1);
   },
