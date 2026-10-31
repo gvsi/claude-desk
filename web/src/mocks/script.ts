@@ -218,12 +218,6 @@ export const LINK_CANCELLED: Record<Language, string> = {
   es: `Este enlace de pago se canceló porque cambiaron las reglas de ${OWNER}. Pídelo de nuevo si todavía quieres pagar.`,
 };
 
-/** An amount as the kernel's cards write it, in both languages: "$1,234.56". */
-function kernelMoney(cents: number): string {
-  const dollars = Math.floor(cents / 100).toLocaleString('en-US');
-  return `$${dollars}.${String(cents % 100).padStart(2, '0')}`;
-}
-
 /**
  * The `link_cancelled` card as the kernel renders it from the cancelled link's own `payment_link`
  * fact, in the chat's language: the link's amount as its title, then what the link was for and the
@@ -232,7 +226,7 @@ function kernelMoney(cents: number): string {
 export function linkCancelledBlock(link: Pick<PaymentLinkView, 'title' | 'amount_cents'>, language: Language): CardBlock {
   return cardBlock('link_cancelled', {
     fact_id: blocks.payment_link[language].fact_id ?? null,
-    title: kernelMoney(link.amount_cents),
+    title: moneyText(link.amount_cents),
     lines: [link.title, LINK_CANCELLED[language]],
   });
 }
