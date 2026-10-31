@@ -167,6 +167,19 @@ export const Idle: Story = {
     document.execCommand('insertText', false, '48 29 13 77');
     await expect(field).toHaveValue('482913');
     await userEvent.clear(field);
+    // keeps_a_whole_code: a digit typed into six digits, at the start, in the middle or at the end,
+    // is refused, and the six stay as they were. A longer paste over them still keeps its first six.
+    await userEvent.type(field, '482913');
+    await userEvent.type(field, '7', { initialSelectionStart: 0, initialSelectionEnd: 0 });
+    await expect(field).toHaveValue('482913');
+    await userEvent.type(field, '7', { initialSelectionStart: 3, initialSelectionEnd: 3 });
+    await expect(field).toHaveValue('482913');
+    await userEvent.type(field, '7');
+    await expect(field).toHaveValue('482913');
+    (field as HTMLInputElement).select();
+    document.execCommand('insertText', false, '61 52 04 99');
+    await expect(field).toHaveValue('615204');
+    await userEvent.clear(field);
     await expect(args.onSubmit).not.toHaveBeenCalled();
 
     // submits_six_digits: nothing goes until all six digits are in, by Enter or by the button.

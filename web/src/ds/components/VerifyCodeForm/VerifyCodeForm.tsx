@@ -76,6 +76,11 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: Ver
   };
 
   const change = (next: string) => {
+    // The field always shows the code, so a value one character longer is one character added to
+    // it. A whole code takes none, wherever it is typed: the six digits stay as they were, rather
+    // than the last one being pushed out. A longer paste or insertion still keeps its first six
+    // digits, and typing over a selection replaces it as usual.
+    if (whole && next.length === code.length + 1) return;
     sent.current = false;
     setCode(digitsOf(next));
   };
