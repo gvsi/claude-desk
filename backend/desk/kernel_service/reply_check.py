@@ -455,12 +455,14 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
                 if match.end() == match.start():
                     continue
                 start, end = origin[match.start()], origin[match.end() - 1] + 1
-                if (rule_id, start, end) in seen:
-                    continue
-                seen.add((rule_id, start, end))
+                # Expressions with the same consumed span can require different right
+                # context. Preserve every dependency before deduplicating display hits.
                 if right_context is not None and "(?=" in pattern.pattern:
                     right_context.setdefault((start, end, rule_id), []).append(
                         _Lookahead(reading, origin, pattern, match.start(), match.end()))
+                if (rule_id, start, end) in seen:
+                    continue
+                seen.add((rule_id, start, end))
                 hits.append((start, end, rule_id, Violation(kind=CATEGORIES[category], span=_span(text[start:end]),
                                                            rule_id=rule_id)))
     return sorted(hits, key=lambda hit: (hit[0], hit[2]))
@@ -536,10 +538,11 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
         match_end = end
         # Ordinary matches already carry their full range from the single combined scan.
         # Only a positive lookahead may depend on text beyond that range ("libres" /
-        # "para todos"). Find its shortest preserving right context at a card boundary.
+        # "para todos"). Find the first card boundary preserving every expression's
+        # dependency, so an allowance cannot hide a longer cross-key dependency.
         if (start, end, rule) in right_context:
             for boundary in boundaries[bisect_left(boundaries, end):]:
-                if any(match.holds_at(boundary) for match in right_context[start, end, rule]):
+                if all(match.holds_at(boundary) for match in right_context[start, end, rule]):
                     end = boundary
                     break
         contributors = ranges[bisect_right(boundaries, start):bisect_left(starts, end)]

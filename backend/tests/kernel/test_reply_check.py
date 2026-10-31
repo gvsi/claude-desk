@@ -1846,6 +1846,13 @@ PUBLIC_ALLOW_WORD_CASES = [
     ({"b:type": "free"}, {"b:type": ["lex.en.promise"]}),
     ({"a:title": "Free", "b:type": "to all new clients"},
      {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
+    *[({"a:title": title, "b:type": audience},
+       {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]})
+      for title, audience in [
+          ("Free to", "all clients"), ("Free", "-to all clients"),
+          ("Frée to", "all clients"), ("Frée", "-to all clients"),
+          ("Ｆｒｅｅ ｔｏ", "ａｌｌ ｃｌｉｅｎｔｓ"), ("Ｆｒｅｅ", "－ｔｏ ａｌｌ ｃｌｉｅｎｔｓ"),
+      ]],
     ({"a:title": "Intro consult no", "b:type": "charge"},
      {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
     ({"a:title": "discount"}, {"a:title": ["lex.en.promise"]}),
