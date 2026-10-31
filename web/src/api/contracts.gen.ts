@@ -876,6 +876,14 @@ export interface ToolsSimulateChangeRequest {
     | "payments.list_charges"
     | "payments.create_refund";
 }
+export interface TurnRequest {
+  generation: number;
+  text: string;
+  desk_id?: string | null;
+}
+export interface TurnStarted {
+  language: "en" | "es";
+}
 export interface VerifyCheckRequest {
   session_id: string;
   code: string;

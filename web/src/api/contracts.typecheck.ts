@@ -28,7 +28,8 @@ export type Models = [
   C.ReplyDraft, C.ReplyVerdict, C.ResourceRef, C.Review, C.ReviewThresholds, C.RuleCard, C.SeedDocument,
   C.SeedPerson, C.SessionContext, C.SessionCreated, C.SessionState, C.SseEvent, C.ToolCall,
   C.ToolConfirmed, C.ToolProfile, C.ToolsConfirmRequest, C.ToolsConnectRequest,
-  C.ToolsSimulateChangeRequest, C.VerifyCheckRequest, C.VerifyStartRequest, C.VerifyStarted,
+  C.ToolsSimulateChangeRequest, C.TurnRequest, C.TurnStarted, C.VerifyCheckRequest, C.VerifyStartRequest,
+  C.VerifyStarted,
   C.Violation, C.WhoAmI,
 ];
 
