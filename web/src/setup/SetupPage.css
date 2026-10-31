@@ -13,13 +13,15 @@
 
 .cd-setup__bar {
   display: grid;
-  /* The steps lay out by their own width, so their column has one: room for all five on a line. */
+  /* The steps lay out by their own width, so their column has one: room for all five on a line.
+     No size token fits it, as none fits the 720 px column below. */
   grid-template-columns: minmax(0, 1fr) minmax(0, 600px) minmax(0, 1fr);
   grid-template-areas: 'brand steps exit';
   align-items: center;
   column-gap: var(--space-16);
   box-sizing: border-box;
-  min-height: 65px;
+  /* "Save and exit" with 16 px above and below it, and the hairline. */
+  min-height: calc(var(--size-control) + 2 * var(--space-16) + 1px);
   padding: 0 var(--space-40);
   border-bottom: 1px solid var(--line-hairline);
 }
@@ -112,20 +114,6 @@
 .cd-setup-step__line {
   margin: 0;
   color: var(--text-secondary);
-}
-
-/* The questions: Claude's words at the column's width, the owner's at the right. */
-.cd-setup-questions__log {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-20);
-  min-width: 0;
-}
-
-.cd-setup-questions__owner {
-  display: flex;
-  justify-content: flex-end;
-  min-width: 0;
 }
 
 /* The safety check's count, in Claude's serif, with the line under it. */

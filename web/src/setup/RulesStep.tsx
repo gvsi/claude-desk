@@ -64,8 +64,8 @@ function groupRows(cards: readonly RuleCard[], people: PeopleOut | null | undefi
 const CHECK_TONES: Readonly<Record<CheckStatus['status'], StatusTone>> = { checked: 'handled', failed: 'refused', unavailable: 'held' };
 
 /**
- * The payment limit, leading the rules under it, in its signed words. "Change" is left out until
- * setup has a way to draft the limit again; the line's place keeps room for it.
+ * The payment limit, leading the rules under it, in its signed words. It has no "Change" in setup,
+ * by the owner's ruling of 2026-10-30.
  */
 function MoneyLimitLine({ cents }: { cents: number }) {
   return <p className="cd-setup-rules__limit cd-type-body">{moneyLimitLine(cents)}</p>;
