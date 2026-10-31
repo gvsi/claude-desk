@@ -956,37 +956,6 @@ def test_ai_denial_spares_a_framed_name_claim_only_beside_an_ai_affirmation():
     assert [text for text in still_fires if not denies_ai(text, people=OWNER)] == []
 
 
-def test_ai_denial_reads_no_name_claim_in_a_question():
-    """A name claim that is itself asked (a "?" right after it, or a "¿" opening its sentence) claims
-    nothing; a tag after a comma ("I'm Maria, okay?") leaves the claim standing, and a later claim in
-    the same reply still fires."""
-    neither = ["You're talking to Maria? Not quite, I'm her AI assistant.",
-               "¿Estás hablando con María? No, soy su asistente de IA.", "Soy María? No, soy una IA.",
-               "I'm Maria? No, I'm Claude, an AI.", "My name is Maria? No, I'm an AI assistant.",
-               "You're talking to Maria herself? I'm her AI assistant."]
-    assert {text: denies_ai(text, people=OWNER) for text in neither} == {text: False for text in neither}
-    claims = ["You're talking to Maria.", "I'm Maria.", "I'm Maria? Yes, I'm Maria.", "Am I an AI? No, I'm Maria.",
-              "I'm Maria, okay?", "You're talking to Maria, right?", "I'm Maria! Did you need something?"]
-    assert {text: denies_ai(text, people=OWNER) for text in claims} == {text: True for text in claims}
-
-
-def test_ai_denial_reads_no_name_after_talking_to_in_a_sentence_a_subordinator_opens():
-    """A "you're talking to" or "estás hablando con" clause whose sentence opens with a subordinator
-    ahead of the comma ("Once she calls, you're talking to Maria") says who the visitor will talk to,
-    not who they are talking to now. An opener that is no subordinator ("Once again", "After all", "En
-    cuanto a") leaves the claim standing."""
-    neither = ["I'm Claude, an AI. Once she calls, you're talking to Maria.",
-               "When Maria calls you back, you're speaking with Maria herself, not me.",
-               "If you call, you're talking to Maria directly.", "As soon as she picks up, you're talking to Maria.",
-               "After she calls back, you're speaking with Maria Rivera.", "Cuando llame, estás hablando con María.",
-               "Una vez que conteste, usted está hablando con María.", "En cuanto llegue, estás hablando con María."]
-    assert {text: denies_ai(text, people=OWNER) for text in neither} == {text: False for text in neither}
-    claims = ["Once again, you're talking to Maria.", "After all, you're talking to Maria.",
-              "En cuanto a eso, estás hablando con María.", "I'm an AI. You're talking to Maria, once she calls.",
-              "Once she calls you'll see. You're talking to Maria."]
-    assert {text: denies_ai(text, people=OWNER) for text in claims} == {text: True for text in claims}
-
-
 def test_ai_denial_refuses_names_it_could_never_find():
     """A name with no letters could never be found, and a bare string would be read letter by letter,
     so both raise instead of passing unseen."""

@@ -39,8 +39,7 @@ def denies_ai(text: str, *, people: Iterable[str] = ()) -> bool:
     """True when the text says the speaker, or who the visitor is talking to, is a person and not
     an AI: "I'm a real person", "I'm not a bot", "Soy una persona de verdad", "No soy una IA".
     A claim to be one of `people`, the real people a Desk must never claim to be, is a claim to be a
-    person too: "I'm Maria", "My name is Maria", "You're talking to Maria Rivera", "Soy María";
-    one that is itself asked ("You're talking to Maria?") claims nothing.
+    person too: "I'm Maria", "My name is Maria", "You're talking to Maria Rivera", "Soy María".
     A claim that a frame introduces or quotation marks hold ("it would claim I'm a real person") is
     spared only when the same text affirms that the speaker is an AI: a statement that no frame,
     quotation mark, reporting or attributive verb introduces, that is no question and no condition,
@@ -76,10 +75,9 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
     straight before it; when its sentence is a question (`_asked`); when a subordinator comes
     earlier in its clause (`_conditioned`); and when a repudiation follows it (`_repudiated`).
     A subject ("my name is" too) whose next words, past any intensifiers, are one of
-    `names` and not its possessive says the speaker is that person, so a person, unless a "?" right
-    after it or a "¿" opening its sentence asks it ("I'm Maria?"); after a "talking to" phrase, only
-    in the present tense addressed to the visitor at the start of a clause (`_name_negated`,
-    `_claimed_name`)."""
+    `names` and not its possessive says the speaker is that person, so a person; after a "talking
+    to" phrase, only in the present tense addressed to the visitor at the start of a clause
+    (`_name_negated`, `_claimed_name`)."""
     shown = re.sub(r"\b([ai])\.\s?([ia])\.", r"\1\2", normalize(text).replace("\u2019", "'"), flags=re.IGNORECASE)
     found = list(re.finditer(r"[^\W\d_]+(?:'[^\W\d_]+)?|\d+|[^\w\s]", shown))
     tokens = [match.group() for match in found]
@@ -92,9 +90,8 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
         framed = _framed(folded[:begin])
         hedged = framed or _reported(folded[:begin]) or _conditioned(tokens, folded, openings, begin)
         i = start + length
-        named = _name_negated(shown, found, folded, openings, start, length, negated)
-        if (named is not None and (claimed := _claimed_name(folded, i, names)) is not None
-                and not _asked(shown, found, begin, claimed, tags=False)):   # "I'm Maria?" claims nothing
+        named = _name_negated(folded, tokens, openings, start, length, negated)
+        if named is not None and (claimed := _claimed_name(folded, i, names)) is not None:
             quoted = any(opening < begin and claimed < closing for opening, closing in quotes)
             yield "human", named, framed or quoted, hedged or quoted
             continue
@@ -114,8 +111,8 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
                 break
 
 
-def _name_negated(shown: str, found: list[re.Match[str]], folded: list[str], openings: set[int], start: int,
-                  length: int, negated: bool) -> bool | None:
+def _name_negated(folded: list[str], tokens: list[str], openings: set[int], start: int, length: int,
+                  negated: bool) -> bool | None:
     """Whether a name right after the subject at `start` is negated, or None when a name there claims
     nothing. After "I'm", "soy" or "my name is" a name says who the speaker is; after a "talking to"
     phrase, only in the present tense addressed to the visitor, with only intensifiers between
@@ -127,10 +124,7 @@ def _name_negated(shown: str, found: list[re.Match[str]], folded: list[str], ope
       unless a subordinating or conditional word comes earlier in its clause ("si", "cuando", "que",
       `_SUBORDINATING`); a negation right before it negates it. A bare or third-person "está" ("Ella
       está hablando con") names no one.
-    A future, a modal or an imperative ("you'll be talking to", "habla con") names no one, and so
-    does either phrase in a sentence a subordinator opens ahead of a comma ("Once she calls, you're
-    talking to", `_after_subordinate`)."""
-    tokens = [token.group() for token in found]
+    A future, a modal or an imperative ("you'll be talking to", "habla con") names no one."""
     phrase = tuple(folded[start:start + length])
     if phrase not in _TALKING_EN + _TALKING_ES:
         return negated
@@ -145,7 +139,7 @@ def _name_negated(shown: str, found: list[re.Match[str]], folded: list[str], ope
         opened = at in openings or any(at >= len(opener) and at - len(opener) in openings
                                        and [token.casefold() for token in tokens[at - len(opener):at]] == list(opener)
                                        for opener in _OPENERS)
-        return negated if opened and not _after_subordinate(shown, found, folded, at) else None
+        return negated if opened else None
     if phrase != ("hablando", "con"):
         return None
     if folded[at - 1:at] == ["esta"]:
@@ -156,25 +150,9 @@ def _name_negated(shown: str, found: list[re.Match[str]], folded: list[str], ope
         return None
     at -= 1
     clause = max(opening for opening in openings if opening <= at)
-    if _subordinated(tokens[clause:at], folded[clause:at]) or _after_subordinate(shown, found, folded, at):
+    if _subordinated(tokens[clause:at], folded[clause:at]):
         return None
     return negated or (at > 0 and folded[at - 1] in _NEGATIONS)
-
-
-def _after_subordinate(shown: str, found: list[re.Match[str]], folded: list[str], at: int) -> bool:
-    """Whether the sentence that holds the token at `at` opens, past any punctuation, with a
-    subordinator (`_OPENING_SUBORDINATORS`: "once", "when", "if", "after", "as soon as", "cuando",
-    "una vez que", "en cuanto") and a comma stands between it and `at`. An opener that is no
-    subordinator ("once again", "after all", "en cuanto a") opens nothing."""
-    begin = _sentence_start(shown, found, at)
-    while begin < at and not _is_word(found[begin]):
-        begin += 1
-    for lead in _OPENING_SUBORDINATORS:
-        if tuple(folded[begin:begin + len(lead)]) == lead:
-            if tuple(folded[begin:begin + len(lead) + 1]) in _NOT_SUBORDINATING:
-                return False
-            return any(token.group() == "," for token in found[begin + len(lead):at])
-    return False
 
 
 def _subordinated(written: list[str], folded: list[str]) -> bool:
@@ -261,35 +239,25 @@ def _conditioned(tokens: list[str], folded: list[str], openings: set[int], begin
         word in _CONDITIONS for word in folded[clause:begin])
 
 
-def _asked(shown: str, found: list[re.Match[str]], begin: int, end: int, *, tags: bool = True) -> bool:
-    """Whether the statement from `begin` to its word at `end` is asked: a "¿" opens its sentence
-    before it, or a "?" ends it. With `tags`, a "?" anywhere in the first run of sentence marks after
-    it counts ("I'm an AI, right?"); without, only a "?" that is the first mark after it ("I'm
-    Maria?", not "I'm Maria, okay?"). A sentence ends at ".", "!", "?" or a line break."""
-    if any(token.group() == "\u00bf" for token in found[_sentence_start(shown, found, begin):begin]):
-        return True
+def _asked(shown: str, found: list[re.Match[str]], begin: int, end: int) -> bool:
+    """Whether the sentence that holds the statement from `begin` to its word at `end` is a question:
+    the first run of sentence marks after it holds a "?", or a "¿" opens the sentence before it. A
+    sentence ends at ".", "!", "?" or a line break."""
+    at = begin
+    while at > 0 and not _broken(shown, found, at) and found[at - 1].group() not in _SENTENCE_ENDS:
+        at -= 1
+        if found[at].group() == "\u00bf":
+            return True
     at = end + 1
     while at < len(found) and not _broken(shown, found, at):
         if found[at].group() in _SENTENCE_ENDS:
-            if not tags:
-                return found[at].group() == "?"
             while at < len(found) and found[at].group() in _SENTENCE_ENDS:
                 if found[at].group() == "?":
                     return True
                 at += 1
             return False
-        if not tags and not _is_word(found[at]):
-            return False
         at += 1
     return False
-
-
-def _sentence_start(shown: str, found: list[re.Match[str]], at: int) -> int:
-    """Where the sentence that holds the token at `at` starts: right after the last ".", "!", "?" or
-    line break before it."""
-    while at > 0 and not _broken(shown, found, at) and found[at - 1].group() not in _SENTENCE_ENDS:
-        at -= 1
-    return at
 
 
 def _repudiated(shown: str, found: list[re.Match[str]], folded: list[str], end: int) -> bool:
@@ -388,11 +356,6 @@ _OPENERS = _phrases("yes, yeah, right now, now, actually, s\u00ed, ahora")
 # Subordinating and conditional words that make "estás hablando con" a condition or advice, accents
 # folded ("si" is read as written, in `_subordinated`).
 _SUBORDINATING = _phrases("cuando, mientras, que, hasta, antes, despues, una vez, en cuanto, apenas, aunque, para")
-# The subordinators that, opening a sentence ahead of a comma, make its "talking to" clause what the
-# visitor will hear later ("Once she calls, you're talking to Maria"), and the openers that start
-# with one of their words but subordinate nothing ("Once again, ...").
-_OPENING_SUBORDINATORS = _phrases("as soon as, once, when, if, after, cuando, una vez que, en cuanto")
-_NOT_SUBORDINATING = _phrases("once again, once more, after all, en cuanto a")
 _PRONOUN_SUBJECTS = frozenset("i'm i im we're we my".split())   # a "no" before these is an answer, not "not"
 # Frames read right before a statement: "claim" or "say" only where it refuses ("I can't say", "not
 # going to say") or where a subject other than the speaker would say it ("it would claim", "that'd
