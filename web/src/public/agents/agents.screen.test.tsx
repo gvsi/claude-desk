@@ -908,6 +908,91 @@ describe('agents page', () => {
     expect(clickedTitle.element().matches(':focus-visible')).toBe(false);
   });
 
+  it('try_again_by_keyboard_keeps_the_place', async () => {
+    // The page can't be read, and the read "Try again" starts is held until the test lets it fail too.
+    let land: (value?: unknown) => void = () => {};
+    const landed = new Promise((resolve) => {
+      land = resolve;
+    });
+    mockStore.inject({ route: 'agentCard', status: 503 });
+    mockStore.inject({ route: 'agentCard', status: 503, until: landed });
+    const { screen } = await renderRoute(PAGE);
+    const tryAgain = screen.getByRole('button', { name: 'Try again' });
+    await expect.element(tryAgain).toBeVisible();
+    // Opening the page moves no focus.
+    expect(document.activeElement).toBe(document.body);
+
+    // Enter on "Try again": the opening line takes the notice's place while the page is read again,
+    // and the button goes with the notice.
+    tryAgain.element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+
+    // The read fails again: focus moves to the new "Try again" rather than falling to the page, so
+    // the next Enter tries once more. The notice is still an alert, read out at once.
+    land();
+    await expect.element(tryAgain).toHaveFocus();
+    expect(tryAgain.element().matches(':focus-visible')).toBe(true);
+    await expect.element(screen.getByRole('alert').getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+
+    // Enter on it, and the page is read: it draws in the notice's place, and focus is at its start.
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing for AI agents' })).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+
+    // Focus put somewhere else while the page is read again stays there when the read fails. Nothing
+    // on the opening line takes focus, so here it is a control the test puts outside the page.
+    let fail: (value?: unknown) => void = () => {};
+    const failed = new Promise((resolve) => {
+      fail = resolve;
+    });
+    mockStore.inject({ route: 'agentCard', status: 503 });
+    mockStore.inject({ route: 'agentCard', status: 503, until: failed });
+    const moved = await renderRoute(PAGE);
+    const movedTryAgain = moved.screen.getByRole('button', { name: 'Try again' });
+    await expect.element(movedTryAgain).toBeVisible();
+    movedTryAgain.element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(moved.screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    const elsewhere = document.body.appendChild(document.createElement('button'));
+    onTestFinished(() => elsewhere.remove());
+    elsewhere.focus();
+    fail();
+    await expect.element(movedTryAgain).toBeVisible();
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+
+    // "Try again" pressed without focus on it, as a script's click or a browser that doesn't focus
+    // what is clicked does: focus stays on the page when the read fails, as it was.
+    let drop: (value?: unknown) => void = () => {};
+    const dropped = new Promise((resolve) => {
+      drop = resolve;
+    });
+    mockStore.inject({ route: 'agentCard', status: 503 });
+    mockStore.inject({ route: 'agentCard', status: 503, until: dropped });
+    const unfocused = await renderRoute(PAGE);
+    const unfocusedTryAgain = unfocused.screen.getByRole('button', { name: 'Try again' });
+    await expect.element(unfocusedTryAgain).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+    (unfocusedTryAgain.element() as HTMLButtonElement).click();
+    await expect.element(unfocused.screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    drop();
+    await expect.element(unfocusedTryAgain).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+
+    // "Try again" clicked moves focus the same way, with no focus ring for the pointer to see.
+    mockStore.inject({ route: 'agentCard', status: 503, times: 2 });
+    const clicked = await renderRoute(PAGE);
+    const clickedTryAgain = clicked.screen.getByRole('button', { name: 'Try again' });
+    await expect.element(clickedTryAgain).toBeVisible();
+    const read = requests('agentCard').length;
+    await clickedTryAgain.click();
+    await until(() => expect(requests('agentCard')).toHaveLength(read + 1));
+    await expect.element(clickedTryAgain).toHaveFocus();
+    expect(clickedTryAgain.element().matches(':focus-visible')).toBe(false);
+  });
+
   it('public_page_links_to_agents', async () => {
     // The public page's about column, under "For AI agents": both links lead to the agents page,
     // "Send an agent" to its panel. The about blocks stay the charter's.
