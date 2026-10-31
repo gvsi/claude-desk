@@ -336,21 +336,60 @@ describe('Vision pages', () => {
       expect(mockStore.requests, path).toEqual([]);
     }
 
+    // "Ask for …" on each public page: a press asks for no one, adds no message and keeps the focus,
+    // and the first says why, once, 8 px under the chat's head, in a line that is announced.
+    for (const [path, business, asked] of [
+      [CLAUDE_ACCOUNT, 'Rivera Plumbing', 'Maria Rivera'],
+      [CITY_OFFICE, 'Meridian Bay Permits', 'Permit Center staff'],
+    ] as const) {
+      const { screen } = await renderRoute(path);
+      const log = screen.getByRole('log', { name: `Conversation with ${business}` });
+      await expect.element(log).toBeVisible();
+      const bubbles = some(log.element() as HTMLElement, '.cd-visitor-message__bubble').length;
+      const ask = screen.getByRole('button', { name: `Ask for ${asked}` });
+      const head = one(screen.container, '.cd-public-shell__chat-head');
+      expect(head.contains(ask.element()), path).toBe(true);
+      expect(screen.getByText(VISION_INERT_LINE, { exact: true }).elements(), path).toHaveLength(0);
+      await ask.click();
+      const line = screen.getByText(VISION_INERT_LINE, { exact: true });
+      await expect.element(line).toBeVisible();
+      expect(line.element().getAttribute('role'), path).toBe('status');
+      expect(round(top(line.element()) - bottom(head)), path).toBe(8);
+      await ask.click();
+      await wait(300);
+      expect(screen.getByText(VISION_INERT_LINE, { exact: true }).elements(), path).toHaveLength(1);
+      expect(document.activeElement, path).toBe(ask.element());
+      expect(some(log.element() as HTMLElement, '.cd-visitor-message__bubble'), path).toHaveLength(bubbles);
+      expect(mockStore.requests, path).toEqual([]);
+      expect(mockStore.unhandled, path).toEqual([]);
+    }
+
     // The city office's suggestions: a pick asks nothing, adds no message, fills nothing in and goes
-    // nowhere, not even to a place on the page.
+    // nowhere, not even to a place on the page. The first says why, once, 8 px under the chips, in a
+    // line that is announced.
     const city = await renderRoute(CITY_OFFICE);
     const log = city.screen.getByRole('log', { name: 'Conversation with Meridian Bay Permits' });
     await expect.element(log).toBeVisible();
     const bubbles = some(log.element() as HTMLElement, '.cd-visitor-message__bubble').length;
     const composer = city.screen.getByRole('textbox', { name: 'Message Meridian Bay Permits' });
     const here = window.location.href;
-    const chips = city.screen.getByRole('group', { name: 'Try asking' }).getByRole('button');
+    const group = city.screen.getByRole('group', { name: 'Try asking' });
+    const chips = group.getByRole('button');
     expect(chips.elements()).toHaveLength(3);
-    for (const chip of chips.elements() as HTMLElement[]) {
+    expect(city.screen.getByText(VISION_INERT_LINE, { exact: true }).elements()).toHaveLength(0);
+    const [firstChip, ...otherChips] = chips.elements() as HTMLElement[];
+    firstChip?.click();
+    const chipsLine = city.screen.getByText(VISION_INERT_LINE, { exact: true });
+    await expect.element(chipsLine).toBeVisible();
+    expect(chipsLine.element().getAttribute('role')).toBe('status');
+    expect(chipsLine.element().previousElementSibling).toBe(group.element());
+    expect(round(top(chipsLine.element()) - bottom(group.element()))).toBe(8);
+    for (const chip of otherChips) {
       chip.click();
       await wait(100);
     }
     await wait(200);
+    expect(city.screen.getByText(VISION_INERT_LINE, { exact: true }).elements()).toHaveLength(1);
     await expect.element(composer).toHaveValue('');
     expect(some(log.element() as HTMLElement, '.cd-visitor-message__bubble')).toHaveLength(bubbles);
     expect(city.router.state.location.pathname).toBe(CITY_OFFICE);

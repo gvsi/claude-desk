@@ -36,6 +36,7 @@ export function CityOfficePage() {
           language="en"
           openStatus={CITY_DESK.open_status}
           onAskForOwner={noop}
+          inertAsk
           about={CITY_DESK.charter}
           composer={<Composer variant="visitor" label={composerLabel} placeholder={composerLabel} maxLength={2000} onSend={noop} inertSend />}
         >
@@ -69,9 +70,9 @@ export function CityOfficePage() {
               <ClaudeWords text={t.staffDecides} ownerName={ownerName} />
             </TranscriptRow>
           </Transcript>
-          {/* A vision page makes no requests: a suggestion goes nowhere. */}
+          {/* A vision page makes no requests: a suggestion goes nowhere, and its first pick says so. */}
           <div className="cd-vision-city__suggestions">
-            <SuggestionChips label="Try asking" suggestions={CITY_SUGGESTIONS} onPick={noop} />
+            <SuggestionChips label="Try asking" suggestions={CITY_SUGGESTIONS} onPick={noop} inertSuggestions />
           </div>
         </PublicShell>
       )}

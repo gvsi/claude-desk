@@ -33,6 +33,7 @@ export function ClaudeAccountPage() {
           ownerName={ownerName}
           language="en"
           onAskForOwner={noop}
+          inertAsk
           about={CLAUDE_ACCOUNT_ABOUT}
           composer={<Composer variant="visitor" label={composerLabel} placeholder={composerLabel} maxLength={2000} onSend={noop} inertSend />}
         >
