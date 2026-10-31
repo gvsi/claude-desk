@@ -417,23 +417,11 @@
   gap: var(--space-6);
 }
 
-/* An agent's signed limit: the card look, compact as the board draws it, 12 px 16 px, and 10 px
-   under the conversation's head where the page's rows are 16 px apart. */
+/* An agent's signed limit (SignedLimitPanel): 10 px under the conversation's head where the page's
+   rows are 16 px apart, and as wide as the reading column the board's head sits in. */
 .board-limit {
+  max-width: var(--size-reading);
   margin-top: calc(var(--space-10) - var(--space-16));
-  padding: var(--space-12) var(--space-16);
-  border: 1px solid var(--line-card);
-  border-radius: var(--radius-card);
-  background: var(--fill-card);
-}
-
-.board-limit__title {
-  margin: 0;
-  font-weight: 520;
-}
-
-.board-limit__title + p {
-  margin: var(--space-2) 0 0;
 }
 
 /* Sign-off sheets: labelled panels on the app ground, each a screen or a part of one, at the

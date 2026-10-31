@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { Composer } from '../components/Composer/Composer.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
+import { SignedLimitPanel } from '../components/SignedLimitPanel/SignedLimitPanel.tsx';
 import { StatusDot } from '../components/StatusDot/StatusDot.tsx';
 import { TakeOverBar } from '../components/TakeOverBar/TakeOverBar.tsx';
 import { Transcript } from '../components/Transcript/Transcript.tsx';
@@ -16,6 +17,9 @@ import { SPEC, expectConversationType, expectFooter, expectOwnerFrame, expectRec
 const alex = rivera.conversations.alexAgent;
 const SIGNED_NOTE = 'Signed with the assistant’s own key, checked before anything else.';
 const firstRequest = alex.turns.findIndex((turn) => turn.kind === 'agent');
+
+/** The screen's words for the agent's signed limit and what it has used, as the board writes them. */
+const LIMIT = { perCharge: '$20', total: '$100', used: '$20', duration: 'One hour', source: 'Signed limit from Alex Kim’s demo wallet' } as const;
 
 /** Alex Kim's assistant's signed requests as Maria reads them: its limit on top, each request on the right. */
 function ConversationAgent() {
@@ -38,11 +42,10 @@ function ConversationAgent() {
             </Pill>
             <p className="board-conversation-head__latest cd-type-meta">Latest: Deposit paid</p>
           </header>
-          {/* The signed limit, in the screen's words from the mandate; nothing here computes it. */}
-          <section className="board-limit" aria-label="Signed limit">
-            <p className="board-limit__title cd-type-control">Can pay up to $20 a charge, $100 in total, for an hour.</p>
-            <p className="board-quiet cd-type-meta">$20 of $100 used. Limit signed by the demo wallet for Alex Kim.</p>
-          </section>
+          {/* The signed limit, in the screen's words from the mandate and the charges made on it; nothing here computes it. */}
+          <div className="board-limit">
+            <SignedLimitPanel {...LIMIT} language="en" />
+          </div>
           <Transcript label={`Conversation with ${alex.name}`}>
             <TranscriptHeader
               left={`Today at 11:42 am, signed requests from ${alex.name}`}
@@ -68,7 +71,7 @@ const meta = {
     canvasNote: [
       "The conversation is the Rivera fixture's agent chat: a quote for the deposit, then the charge to the signed limit, where the board adds a request for open times and a booking between them.",
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
-      'The limit card is page layout the web app (plan 04) owns, composed on the card tokens, padded 12 px 16 px as on the board, in the screen’s words from the mandate; it says “for an hour” where the board writes the clock time it ends.',
+      'The signed limit is SignedLimitPanel, as the board draws it: per charge, in total, what the agent has used and for how long, in the screen’s words from the mandate, with whose wallet signed it at the right.',
       'The list column and the conversation head are composed as on the live conversation board (AppShell fill).',
       'The sidebar is the panel with its seam and the Answering switch at its foot, as on Today (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar).',
     ].join(' '),
@@ -88,9 +91,22 @@ export const Board: Story = {
     const list = canvas.getByRole('navigation', { name: 'Conversations' });
     await expect(within(list).getByRole('link', { current: true })).toHaveTextContent(alex.name);
 
-    // The signed limit sits above the requests, in the card look, padded 12 px 16 px as the board draws it.
+    // The signed limit sits above the requests, in the card look, padded 12 px 16 px as the board draws it,
+    // with what the agent has used among its terms and whose wallet signed it at the right.
     const limit = canvas.getByRole('region', { name: 'Signed limit' });
     expectComputed(limit, { ...SPEC.card, paddingTop: '12px', paddingBottom: '12px', paddingLeft: '16px', paddingRight: '16px' });
+    const limitTerms = [...limit.querySelectorAll('dl > div')].map((term) => [term.querySelector('dt')?.textContent, term.querySelector('dd')?.textContent]);
+    await expect(limitTerms).toEqual([
+      ['Per charge', '$20'],
+      ['In total', '$100'],
+      ['Used', '$20'],
+      ['For', 'One hour'],
+    ]);
+    await expect(within(limit).getByText(LIMIT.source)).toBeVisible();
+    // 10 px under the conversation's head, and no wider than the 640 px column, as on the board.
+    const head = one(canvasElement, '.board-conversation-head');
+    await expect(Math.round(limit.getBoundingClientRect().top - head.getBoundingClientRect().bottom)).toBe(10);
+    await expect(Math.round(limit.getBoundingClientRect().width)).toBe(640);
 
     // Each signed request is on the right, its receipts under it ending at its edge; Claude's replies on the left.
     const log = canvas.getByRole('log', { name: `Conversation with ${alex.name}` });
