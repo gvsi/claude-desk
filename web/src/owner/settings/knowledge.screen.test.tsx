@@ -24,6 +24,7 @@ const KNOWLEDGE = `/app/${RIVERA.deskId}/settings/knowledge`;
 
 /** The note as the board writes it. */
 const NOTE = 'We don’t service tankless water heaters older than 15 years. Suggest a replacement quote instead.';
+const NOTE_TITLE = 'We don’t service tankless water heaters older than 15…';
 
 const LEAD = 'Knowledge is what I answer from. It never changes your rules.';
 const ADDED = 'Added. Only you can see it until you make it public.';
@@ -95,6 +96,27 @@ function answered(item: KnowledgeItem, readers: string[]): KnowledgeItem {
 }
 
 describe('knowledge', () => {
+  it('knowledge_note_titles_end_at_a_word_within_60_characters', async () => {
+    const { screen } = await renderRoute(KNOWLEDGE);
+    const field = main(screen).getByRole('textbox', { name: 'A note' });
+    const addButton = main(screen).getByRole('button', { name: 'Add a note' });
+    const cases = [
+      ['We service tankless water heaters from Rinnai and Navien. Saturday appointments are available.', 'We service tankless water heaters from Rinnai and Navien.…'],
+      ['Parking is on the street.', 'Parking is on the street.'],
+      ['🔧'.repeat(60), '🔧'.repeat(60)],
+      ['🔧'.repeat(61), `${'🔧'.repeat(59)}…`],
+    ] as const;
+
+    for (const [text, title] of cases) {
+      await field.fill(text);
+      await addButton.click();
+      const list = main(screen).getByRole('list', { name: 'What I know now' });
+      await expect.element(list.getByText(title, { exact: true })).toBeVisible();
+      expect(posts().at(-1)?.title).toBe(title);
+      expect([...posts().at(-1)!.title].length).toBeLessThanOrEqual(60);
+    }
+  });
+
   it('knowledge_note_then_public', async () => {
     const { screen } = await renderRoute(KNOWLEDGE);
     // Settings, on Knowledge, led by Claude's line.
@@ -103,13 +125,13 @@ describe('knowledge', () => {
     await expect.element(main(screen).getByText(LEAD, { exact: true })).toBeVisible();
     expect(switchOf(screen).query()).toBeNull();
 
-    // A note, added for the owner only: an id of its own, its first 60 characters as its title.
+    // A note, added for the owner only: an id of its own and a title shortened at a word.
     await main(screen).getByRole('textbox', { name: 'A note' }).fill(NOTE);
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
     await expect.element(main(screen).getByText(ADDED, { exact: true })).toBeVisible();
     const [added] = posts();
     expect(added?.item_id).toMatch(/^note-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(added).toEqual({ item_id: added?.item_id, source: 'setup', title: NOTE.slice(0, 60), text: NOTE, label: { readers: ['owner'] } });
+    expect(added).toEqual({ item_id: added?.item_id, source: 'setup', title: NOTE_TITLE, text: NOTE, label: { readers: ['owner'] } });
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
     // Once added, the field clears; pressing Add again asks for words without posting a duplicate.
     await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toHaveValue('');
@@ -229,7 +251,7 @@ describe('knowledge', () => {
     // While the add is out: it spins, and "Add a file" waits.
     await field.fill(NOTE);
     const answer = held();
-    const stored: KnowledgeItem = answered({ item_id: 'note-held', source: 'setup', title: NOTE.slice(0, 60), text: NOTE, label: {} }, ['owner']);
+    const stored: KnowledgeItem = answered({ item_id: 'note-held', source: 'setup', title: NOTE_TITLE, text: NOTE, label: {} }, ['owner']);
     mockStore.inject({ route: 'addKnowledge', status: 200, until: answer.until, body: stored });
     await addButton.click();
     await expect.element(addButton).toHaveAttribute('aria-busy', 'true');
@@ -289,7 +311,7 @@ describe('knowledge', () => {
     // An add lost the same way: not known either way. Adding it again posts the same item, which
     // replaces it rather than adding a second.
     const fresh = (await renderRoute(KNOWLEDGE, { retryScale: 0 })).screen;
-    const other = 'Parking is on the street. Ring the side door.';
+    const other = 'Parking is on the street. Ring the side door when you arrive for your appointment.';
     await main(fresh).getByRole('textbox', { name: 'A note' }).fill(other);
     mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
     mockStore.inject({ route: 'knowledge', status: 503, times: 2 });
@@ -315,7 +337,7 @@ describe('knowledge', () => {
 
     // 1. The list read the add sets off is held in flight, answering the note as the owner's alone.
     const stale = held();
-    const ownerOnly = { item_id: id, source: 'setup', title: NOTE.slice(0, 60), text: NOTE, label: { readers: ['owner'], record_owner: null }, created_at: new Date().toISOString() };
+    const ownerOnly = { item_id: id, source: 'setup', title: NOTE_TITLE, text: NOTE, label: { readers: ['owner'], record_owner: null }, created_at: new Date().toISOString() };
     mockStore.inject({ route: 'knowledge', status: 200, until: stale.until, body: [ownerOnly] });
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
     await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
@@ -423,10 +445,10 @@ describe('knowledge', () => {
     await main(screen).getByRole('textbox', { name: 'A note' }).fill(NOTE);
     await main(screen).getByRole('button', { name: 'Add a note' }).click();
     await expect.poll(() => list.getByRole('listitem').elements().length).toBe(4);
-    expect(list.getByRole('listitem').elements()[3]?.textContent).toBe(`${NOTE.slice(0, 60)}Added Oct 30Only you`);
+    expect(list.getByRole('listitem').elements()[3]?.textContent).toBe(`${NOTE_TITLE}Added Oct 30Only you`);
     // Made public with its switch, its row says so.
     await switchOf(screen).click();
-    await expect.poll(() => list.getByRole('listitem').elements()[3]?.textContent).toBe(`${NOTE.slice(0, 60)}Added Oct 30Customers can see this`);
+    await expect.poll(() => list.getByRole('listitem').elements()[3]?.textContent).toBe(`${NOTE_TITLE}Added Oct 30Customers can see this`);
   });
 
   it('knowledge_list_loads_fails_and_is_left_out_when_empty', async () => {

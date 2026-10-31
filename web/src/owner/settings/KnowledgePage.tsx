@@ -26,7 +26,7 @@ export const MAX_FILE_BYTES = 100 * 1024;
 /** The files "Add a file" takes, by name: text and Markdown. */
 const TEXT_FILE = /\.(?:txt|md)$/i;
 
-/** An item's title: its first 60 characters. */
+/** The maximum title length, including an ellipsis when shortened. */
 const TITLE_LENGTH = 60;
 
 export const KNOWLEDGE_COPY = {
@@ -105,9 +105,13 @@ function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
   );
 }
 
-/** The first `TITLE_LENGTH` characters of `text`, by character rather than code unit. */
+/** A title within `TITLE_LENGTH` characters, shortened at a word when possible. */
 function titleOf(text: string): string {
-  return [...text].slice(0, TITLE_LENGTH).join('');
+  const characters = [...text];
+  if (characters.length <= TITLE_LENGTH) return text;
+  const prefix = characters.slice(0, TITLE_LENGTH - 1);
+  const space = prefix.lastIndexOf(' ');
+  return `${(space === -1 ? prefix : prefix.slice(0, space)).join('')}…`;
 }
 
 /**
