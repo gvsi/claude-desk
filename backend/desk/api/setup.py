@@ -1892,6 +1892,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
     async def run(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
         interview.business_tools_enabled = business_tools_enabled
         if card is not None:
+            if not interview.business_tools_enabled:
+                _clear_configs(interview)
             await card_turn(ctx, engine, model, interview, card, text=text)
             return
         since = len(interview.transcript)

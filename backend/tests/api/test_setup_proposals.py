@@ -877,3 +877,27 @@ async def test_disabling_business_tools_clears_hidden_plan_configs_before_a_late
     reply = await owner.browser.post(f'/api/owner/setup/{interview_id}/suggestions?cards=1', json={})
     assert reply.status_code == 200, reply.text
     assert all(card['job']['config'] is None for card in shown(reply) if card['job'])
+
+
+async def test_typing_accept_after_business_tools_are_disabled_uses_the_visible_card(proposals, app, model, engine):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_card(engine, interview_id, ids[1])
+    before = await stored(engine, interview_id)
+    payment = before["transcript"][-1]["card"]
+    assert payment["job"]["config"]["amount_cents"] is None
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=False)
+    model.add(card_answer("accept", reply="Accepted.", next=next_ask("hours_and_area"), question="Where do you work?"))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1", json={"card": ids[1], "text": "Yes"})
+    assert reply.status_code == 200, reply.text
+    payment = next(card for card in shown(reply) if card["proposal_id"] == ids[1])
+    assert payment["state"] == "accepted" and payment["job"]["config"] is None
+    assert reply.json()["pending_card"] is None and reply.json()["question"] == "hours_and_area"
+    saved = await stored(engine, interview_id)
+    assert all(card["job"]["config"] is None for entry in saved["transcript"]
+               for card in [*entry.get("planned", []), *([entry["card"]] if entry.get("card") else [])] if card["job"])
+    assert not any(entry.get("owner_decided") for entry in saved["transcript"])
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    reloaded = await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")
+    payment = next(card for card in shown(reloaded) if card["proposal_id"] == ids[1])
+    assert payment["state"] == "accepted" and payment["job"]["config"] is None
