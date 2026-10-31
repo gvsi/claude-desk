@@ -795,8 +795,13 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
             if spent():
                 left.append((copy_id, desk_id))
                 continue
-            done = await _bring_up(runtime, copy_id, desk_id, prove=False,
-                                   lock_s=STARTUP_REBUILD_S - (monotonic() - started))
+            left_s = STARTUP_REBUILD_S - (monotonic() - started)
+            try:                              # the whole bring-up gets only what is left: its lock waits add up
+                done = await asyncio.wait_for(_bring_up(runtime, copy_id, desk_id, prove=False, lock_s=left_s),
+                                              left_s)
+            except TimeoutError:
+                log.info("rebuild_bring_up_cut_off copy_id=%s desk_id=%s", copy_id, desk_id)
+                done = FAILED
             if done == FAILED or (done is not None and done[1] == NEEDS_PROOF):
                 left.append((copy_id, desk_id))
             elif done is not None:

@@ -811,6 +811,42 @@ async def test_a_waiting_alert_for_a_desk_deleted_after_it_was_found_writes_noth
     assert await rules_alerts(app, copy) == []
 
 
+async def test_startup_returns_within_its_budget_through_successive_lock_waits(app, client, monkeypatch):
+    # the Desk row held for most of the budget, then the versions lock held past it: each wait alone fits the
+    # budget, but together they would overrun it; startup still returns within it and leaves the Desk to the
+    # background
+    from time import monotonic
+    from .helpers import kernel_ctx
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    row_held, versions_held, done = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def holding_the_row():
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            await ctx.db.execute(select(Desk.desk_id).where(Desk.desk_id == copy.desk_id).with_for_update())
+            row_held.set()
+            await asyncio.sleep(0.8)
+
+    async def holding_the_versions_lock():
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            await activation._lock(ctx, "versions", copy.desk_id)
+            versions_held.set()
+            await done.wait()
+
+    holders = [asyncio.create_task(holding_the_row()), asyncio.create_task(holding_the_versions_lock())]
+    await asyncio.wait_for(asyncio.gather(row_held.wait(), versions_held.wait()), timeout=5)
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 1.0)
+    started = monotonic()
+    startup = await asyncio.wait_for(activation.rebuild_at_startup(app.state.kernel), timeout=10)
+    elapsed = monotonic() - started
+    done.set()
+    await asyncio.gather(*holders)
+    assert elapsed < 1.5, f"startup took {elapsed:.2f} s against a 1 s budget"
+    assert (startup.results, startup.left) == ({}, [(copy.copy_id, copy.desk_id)])
+
+
 async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
     # in symcc mode no shipped report covers the kernel core's tools, so only a live proof answers its version
     copy = await rivera(app, client)
