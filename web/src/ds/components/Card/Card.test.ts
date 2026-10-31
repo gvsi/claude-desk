@@ -20,9 +20,14 @@ describe('Card', () => {
     // Only one level: a card inside the held card still fails.
     const deeper = frame(createElement(Card, null, createElement(Card, null, 'Inner')));
     expect(() => renderToStaticMarkup(deeper)).toThrow(/A Card is inside another Card/);
-    // And the frame is still a card: it can't sit inside another one.
+    // A frame is legal only at the top level: not inside a card, and not inside another frame.
     const framed = createElement(Card, null, frame(createElement('p', null, 'Run')));
-    expect(() => renderToStaticMarkup(framed)).toThrow(/A Card is inside another Card/);
+    expect(() => renderToStaticMarkup(framed)).toThrow(/A Card that holds cards is inside another Card/);
+    const nestedFrames = frame(frame(createElement(Card, null, 'Reply card')));
+    expect(() => renderToStaticMarkup(nestedFrames)).toThrow(/A Card that holds cards is inside another Card/);
+    // Nor inside a card that a frame holds.
+    const frameInHeldCard = frame(createElement(Card, null, frame(createElement('p', null, 'Run'))));
+    expect(() => renderToStaticMarkup(frameInHeldCard)).toThrow(/A Card that holds cards is inside another Card/);
   });
 
   it('padding_zero_for_rows_that_reach_the_edge', () => {

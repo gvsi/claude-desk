@@ -71,7 +71,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Show prices, dates, times, discounts and bookings only in typed reply cards rendered from checked facts. Claude's own words can't state a price, date or discount, can't make a promise the cards don't back, and can confirm a booking only next to a booking card. A card shows exactly the fields it receives; nothing in the design system computes or formats money or dates.
 - The one clock time a visitor reads outside a card is the public page's open status: "Open now, until 6:00 pm", the kernel's own words in the business's time zone, shown verbatim in the header. The page never works out a time itself.
 - Give each card template fixed English and Spanish chrome with no amounts, dates or promises. Every card about money moving (a payment link, a paid link, a charge or a refund) and the checkout always say "Test payment, no money moves" / "Pago de prueba, no se mueve dinero".
-- Draw a card as `fill-card` with a `line-card` border at `radius-card`, at most 520 px wide, and never put a card inside another card.
+- Draw a card as `fill-card` with a `line-card` border at `radius-card`, at most 520 px wide, and never put a card inside another card. The one exception is the agents page's "Send an agent" card, which holds the agent's run and so the Desk's reply cards: `Card`'s `holdsCards`, at the top level only, one level deep, and allowed in the web app only in its `SendAgentPanel` (the guard `only_the_send_agent_panel_holds_cards`).
 
 ## Iconography
 
@@ -155,7 +155,7 @@ On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illu
 
 - No glows, gradients, orbs, shimmer or gradient washes.
 - No all-caps eyebrows or labels, and no letter-spaced capitals.
-- No card on card, no colored tiles and no colored left borders on cards.
+- No card on card (the agents page's "Send an agent" card, `holdsCards`, is the one exception), no colored tiles and no colored left borders on cards.
 - No large areas of status color: dots and thin bars only.
 - No staggered page-entrance cascades.
 - No emoji, sparkles or "AI" icons, and no Claude or Anthropic logos.
