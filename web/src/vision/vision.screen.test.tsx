@@ -353,9 +353,10 @@ describe('Vision pages against their boards', () => {
     ]);
     const facts = some(log, '.cd-fact-card');
     expect(facts.map((fact) => one(fact, '.cd-fact-card__label').textContent)).toEqual(['Customer history', 'Document, only for Luis']);
-    expect(
-      [...log.querySelectorAll('p')].find((line) => line.textContent === 'Water heater replaced, March 2024; under warranty until 2030')?.closest('.cd-fact-card'),
-    ).not.toBeNull();
+    // Ana's history is there, word for word, and it is in her card.
+    const history = chat.getByText('Water heater replaced, March 2024; under warranty until 2030', { exact: true });
+    await expect.element(history).toBeVisible();
+    expect(history.element().closest('.cd-fact-card')).toBe(facts[0]);
     // The payroll answer declines with no card, and its receipt says it was refused.
     expect(some(log, '.cd-margin-line').map((receipt) => one(receipt, '.cd-status-dot').className.replace('cd-status-dot cd-status-dot--', ''))).toEqual([
       'handled',
