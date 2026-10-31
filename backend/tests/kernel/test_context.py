@@ -26,7 +26,7 @@ from desk.kernel_service.sessions import principal_for
 from .fakes import FakeAdapter
 from .helpers import CopyRows, kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
 from .test_adapters import Rivera, add_slot, book, objects, quote_args, visitor_of
-from .test_approvals import answered
+from .test_approvals import add_person, answered
 from .test_compiler import card
 from .test_decide import add_desk, decided, desk_with, open_visitor, set_mode, set_session
 from .test_execute import executed
@@ -81,13 +81,21 @@ STANDING_FAKES = {
 
 
 async def test_tools_follow_the_session_kind(app, client, registry):
-    # a stranger on Rivera Plumbing gets this plan's three native tools, all declared
+    # a stranger on Rivera Plumbing gets every native tool a stranger is given, all declared
     copy, stranger = await visitor_of(app, client)
     seen = await context_of(client, stranger.session_id, stranger.headers)
-    assert tools(seen.tools) == ["native.book", "native.find_slots", "native.quote"]
+    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.quote",
+                                 "native.request_callback", "native.start_verification"]
     assert {profile.status for profile in seen.tools} == {"enabled"}
     declared = {profile.tool: profile for profile in seen.tools_declared}
     assert all(declared[profile.tool] == profile for profile in seen.tools)
+    # verified as Dana, the same visitor asks for her own documents instead of a code
+    [dana] = await rows_of(app, copy.copy_id, select(Person).where(Person.ref == "dana"))
+    await verify_session(app, copy.copy_id, stranger.session_id, dana.person_id)
+    seen = await context_of(client, stranger.session_id, stranger.headers)
+    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.quote",
+                                 "native.release_document", "native.request_callback"]
+    assert {profile.status for profile in seen.tools} == {"enabled"}
     # the owner has no setup tool on this Desk yet
     owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
     assert (owner.tools, owner.tools_declared) == ([], [])
@@ -104,7 +112,8 @@ async def test_tools_follow_the_session_kind(app, client, registry):
     assert tools(seen.tools_declared) == visitor_declared
     assert {p.tool: p.status for p in seen.tools_declared}["payments.create_refund"] == "needs_review"
     dana = await open_visitor(client, rows)
-    await verify_session(app, rows.copy_id, dana.session_id, "person-dana")
+    # verified as one of the Desk's people, as a right code binds a session
+    await verify_session(app, rows.copy_id, dana.session_id, await add_person(app, rows, "dana", "Dana Whitfield"))
     seen = await context_of(client, dana.session_id, dana.headers)
     assert tools(seen.tools) == ["native.capture_lead", "native.release_document"]
     assert tools(seen.tools_declared) == visitor_declared

@@ -41,7 +41,6 @@ class Card:
     title: str
     lines: tuple[str, ...] = ()
     options: tuple[tuple[str, str], ...] = ()
-    href: str | None = None
 
 
 def claims(fact: Fact | None) -> dict[str, int | str]:
@@ -76,11 +75,20 @@ def percent_text(bp: int, decimal_mark: str) -> str:
 
 
 def text_claim(fact: Fact) -> str:
-    """The one text claim of a charter fact (a policy, the contact), as the owner wrote it."""
+    """The one text claim of a charter fact (a policy, the contact) or of an owner's statement, as
+    the owner wrote it."""
     [claim] = fact.claims
     if claim.kind != "text" or not isinstance(claim.value, str):
-        raise TypeError("a charter fact holds one text claim")
+        raise TypeError("a charter fact or an owner's statement holds one text claim")
     return claim.value
+
+
+def title_claim(fact: Fact | None) -> str:
+    """A document link's `title` claim: the document's title, as the owner wrote it."""
+    title = claims(fact)["title"]
+    if not isinstance(title, str):
+        raise TypeError("a document's title is text")
+    return title
 
 
 def booking_window(fact: Fact, desk: DeskInfo) -> tuple[datetime, datetime]:
@@ -90,6 +98,15 @@ def booking_window(fact: Fact, desk: DeskInfo) -> tuple[datetime, datetime]:
     start = local(found["starts_at"], desk)
     minutes = int(str(found["minutes"]))
     return start, (start.astimezone(UTC) + timedelta(minutes=minutes)).astimezone(desk.tz)
+
+
+def callback_window(fact: Fact | None, desk: DeskInfo) -> tuple[datetime, datetime] | None:
+    """A handoff's window in the business's time zone, from its `window_start` and `window_end`
+    claims; None when it has neither (no hour was open). One without the other is an error."""
+    found = claims(fact)
+    if "window_start" not in found and "window_end" not in found:
+        return None
+    return local(found["window_start"], desk), local(found["window_end"], desk)
 
 
 def slot_claims(fact: Fact) -> list[tuple[str, str]]:

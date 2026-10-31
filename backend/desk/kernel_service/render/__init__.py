@@ -1,36 +1,60 @@
 """Visitor-visible text the kernel writes itself, in English and Spanish.
 
-Status lines (`status`) are fixed templates, one per decision state plus the reply receipts;
+Status lines (`status`) are fixed templates, one per decision state plus the reply receipts
+(an owner's say has its own two: written by the owner, or not sent, which only the owner sees);
 they name the business's owner and nothing else, so they never carry an amount, a date or a
-limit. A session reads them in its `last_language`, else English (`language`). Owner alert
-previews (`owner_preview`) are English and owner-only.
+limit. An action a visitor or agent asked for that ran says what was done, one line per tool
+(`executed_status`), in place of the generic executed line, which only the owner's own setup
+actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
+messages and the Demo inbox's code entry, the one text that carries a code. A session reads them
+in its `last_language`, else English (`language`). Owner alert previews (`owner_preview`) are
+English and owner-only.
 
 Clause cards (`render_clause`) are the only visitor text that carries amounts and dates, and
-they are rendered by code from a fact, never from text a model wrote. Each template is registered
-once (`register_template`) with the fact kinds it renders, the fact ID (or ID prefix) it reads,
-the fact statuses that count as current, and a renderer per language that returns the card's
-headline (`title`) and details (`lines`), plus a choice per open time on a booking options card.
+they are rendered by code from a fact, never from text a model wrote; the `owner_said` card holds
+the owner's own words, and only the kernel issues it. Each template is registered once
+(`register_template`) with the fact kinds it renders, the fact ID (or ID prefix) it reads, the
+fact statuses that count as current, and a renderer per language that returns the card's headline
+(`title`) and details (`lines`), plus a choice per open time on a booking options card.
 A card's `text` is the headline and then the details, one per line. A template that names no fact
 kinds (handoff, verify_prompt) renders without one. `Template.current` says whether a fact may
 still be shown (a status the template renders, not expired), and a fact with nothing to render,
 such as hours with no windows, raises `NothingToShow` rather than make an empty card.
+
+A card that links somewhere (a document or payment link) registers `href_for`, which the reply
+check awaits once the cited fact has passed its checks, and passes to `render_clause` as the card's
+`href`: the link's path, looked up from the fact by the kernel, so the link's token is in no fact,
+and the `href` is the only field of the card that carries it.
 """
 
-from collections.abc import Callable, Collection
+from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Literal
+from datetime import datetime, tzinfo
+from typing import TYPE_CHECKING, Literal
 
 from desk.contracts import CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
 from desk.kernel_service.render import en, es
 from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow
 
+if TYPE_CHECKING:
+    from desk.kernel_service.repo import KernelCtx
+
 Language = Literal["en", "es"]
 LANGUAGES: dict[str, dict[str, str]] = {"en": en.STATUS, "es": es.STATUS}
 STATUS_KEYS = frozenset(en.STATUS)
+MESSAGES: dict[str, dict[str, str]] = {"en": en.MESSAGES, "es": es.MESSAGES}
+MESSAGE_KEYS = frozenset(en.MESSAGES)
+EXECUTED: dict[str, dict[str, str]] = {"en": en.EXECUTED, "es": es.EXECUTED}
+OPEN_STATUS: dict[str, Callable[[bool, datetime | None, datetime], str]] = {"en": en.open_status,
+                                                                            "es": es.open_status}
 
 if any(set(templates) != STATUS_KEYS for templates in LANGUAGES.values()):
     raise RuntimeError("every language has a template for every status line")
+if any(set(templates) != MESSAGE_KEYS for templates in MESSAGES.values()) or MESSAGE_KEYS & STATUS_KEYS:
+    raise RuntimeError("every language has every message, and no message shares a status line's key")
+if any(set(lines) != set(en.EXECUTED) for lines in EXECUTED.values()):
+    # so a tool with a line has one in whatever language the session reads by the time it runs
+    raise RuntimeError("every language has an executed line for the same tools")
 
 
 def language(last_language: str | None) -> Language:
@@ -39,10 +63,28 @@ def language(last_language: str | None) -> Language:
     return "es" if last_language == "es" else "en"
 
 
-def status(key: str, lang: str, *, owner: str) -> str:
-    """The status line `key` ("allowed", "held", ...) in `lang`, naming `owner`. An unknown key or
-    language raises KeyError: there is no free-text fallback."""
-    return LANGUAGES[lang][key].format(owner=owner)
+def status(key: str, lang: str, *, owner: str | None = None, **fields: str) -> str:
+    """The status line `key` ("allowed", "held", ...) in `lang`, naming `owner`, or the message
+    `key` ("verify_started", "inbox_code_body", ...) filled with its `fields`. An unknown key or
+    language, or a field the template names and the call doesn't give, raises KeyError: there is
+    no free-text fallback."""
+    template = LANGUAGES[lang][key] if key in STATUS_KEYS else MESSAGES[lang][key]
+    return template.format(**fields, **({"owner": owner} if owner is not None else {}))
+
+
+def executed_status(tool: str, lang: str, *, owner: str) -> str:
+    """What an executed `tool` did, in `lang`, naming `owner`: the receipt a visitor or agent sees
+    for an action that ran ("Quoted from Maria Rivera's price list"). A tool without a line raises
+    KeyError: there is no generic fallback, so execution checks for the line before anything runs."""
+    return EXECUTED[lang][tool].format(owner=owner)
+
+
+def open_status_text(is_open: bool, boundary: datetime | None, as_of: datetime, lang: str, tz: tzinfo) -> str:
+    """The public header's open-now line in `lang` ("Open status"), shown verbatim: `boundary` is
+    when an open business closes (None: open through the week ahead) or a closed one opens, both it
+    and `as_of` read in the business's time zone `tz`, with the cards' time formats."""
+    local = boundary.astimezone(tz) if boundary is not None else None
+    return OPEN_STATUS[lang](is_open, local, as_of.astimezone(tz))
 
 
 def owner_preview(kind: str) -> str:
@@ -53,6 +95,7 @@ def owner_preview(kind: str) -> str:
 # ---- Clause cards ---------------------------------------------------------------------------------
 
 Renderer = Callable[[Fact | None, DeskInfo], Card]
+HrefFor = Callable[["KernelCtx", Fact], Awaitable[str]]   # the card's link, from its fact
 
 
 @dataclass(frozen=True)
@@ -62,6 +105,7 @@ class Template:
     key: str | None                       # the fact ID it reads, or the ID's prefix when it ends in ":"
     statuses: frozenset[str]              # the fact statuses it renders as current
     renderers: dict[str, Renderer]        # by language
+    href_for: HrefFor | None = None       # a card that links: its `href`, awaited once the fact passes its checks
 
     def reads(self, fact: Fact) -> bool:
         """Whether the fact is of a kind and ID this template renders."""
@@ -81,24 +125,32 @@ TEMPLATES: dict[str, Template] = {}
 
 def register_template(template: ClauseTemplate, fact_kinds: Collection[str], renderer_en: Renderer,
                       renderer_es: Renderer, *, key: str | None = None,
-                      statuses: Collection[str] = ("available",)) -> Template:
-    """Registers how the clause `template` renders, once per template."""
+                      statuses: Collection[str] = ("available",), href_for: HrefFor | None = None) -> Template:
+    """Registers how the clause `template` renders, once per template. `href_for` gives a linking
+    card its `href` from its fact; it raises `NothingToShow` when the link can't be followed."""
     if template in TEMPLATES:
         raise ValueError(f"the {template} template is already registered")
+    if href_for is not None and not fact_kinds:
+        raise ValueError("a card links only from a fact")
     registered = Template(name=template, fact_kinds=frozenset(fact_kinds), key=key, statuses=frozenset(statuses),
-                          renderers={"en": renderer_en, "es": renderer_es})
+                          renderers={"en": renderer_en, "es": renderer_es}, href_for=href_for)
     TEMPLATES[template] = registered
     return registered
 
 
-def render_clause(clause: Clause, fact: Fact | None, lang: Language, desk: DeskInfo) -> RenderedBlock:
+def render_clause(clause: Clause, fact: Fact | None, lang: Language, desk: DeskInfo, *,
+                  href: str | None = None) -> RenderedBlock:
     """The card for `clause`, rendered from `fact` (None for a template that names no fact) in
-    `lang`. The caller has checked that the template is registered and reads this fact. A fact
-    with nothing to render raises `NothingToShow`; one that lacks a claim its template needs
-    raises any other error, which the caller answers as an internal error."""
-    card = TEMPLATES[clause.template].renderers[lang](fact, desk)
+    `lang`, with `href` as its link (what the template's `href_for` gave). The caller has checked
+    that the template is registered and reads this fact, and gives `href` exactly when the
+    template links. A fact with nothing to render raises `NothingToShow`; one that lacks a claim
+    its template needs raises any other error, which the caller answers as an internal error."""
+    template = TEMPLATES[clause.template]
+    if (href is None) != (template.href_for is None):
+        raise ValueError(f"the {clause.template} card links exactly when its template has href_for")
+    card = template.renderers[lang](fact, desk)
     return RenderedBlock(kind="card", template=clause.template, text="\n".join([card.title, *card.lines]),
-                         fact_id=clause.fact_id, title=card.title, lines=list(card.lines), href=card.href,
+                         fact_id=clause.fact_id, title=card.title, lines=list(card.lines), href=href,
                          options=[CardOption(option_id=option_id, label=label) for option_id, label in card.options])
 
 
@@ -109,5 +161,8 @@ register_template("booking_confirmed", {"booking"}, en.booking_confirmed, es.boo
 register_template("hours", {"charter"}, en.hours, es.hours, key="charter:hours")
 register_template("policy", {"charter"}, en.charter_text, es.charter_text, key="charter:policy:")
 register_template("contact", {"charter"}, en.charter_text, es.charter_text, key="charter:contact")
+register_template("callback_confirmed", {"handoff"}, en.callback_confirmed, es.callback_confirmed, key="handoff:",
+                  statuses=("committed",))
+register_template("owner_said", {"owner_statement"}, en.owner_said, es.owner_said, key="owner:")
 register_template("handoff", (), en.handoff, es.handoff)
 register_template("verify_prompt", (), en.verify_prompt, es.verify_prompt)

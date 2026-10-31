@@ -29,7 +29,7 @@ from desk.kernel_service import sessions
 from desk.kernel_service.repo import KernelCtx
 from desk.presets import PRESETS
 
-__all__ = ["PRESETS", "RIVERA_CARDS", "rivera_seed", "seed_held_request"]
+__all__ = ["PRESETS", "RIVERA_CARDS", "RIVERA_MONEY_CAP_CENTS", "rivera_seed", "seed_held_request"]
 
 TIMEZONE = "America/Los_Angeles"
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
@@ -42,6 +42,10 @@ SLOT_STARTS = {                             # by weekday (Monday 0), in business
     **{weekday: (time(8), time(10), time(12), time(14), time(16)) for weekday in range(5)},
     5: (time(9), time(11)),
 }
+
+# The money cap of the seed's rules version: $500, the most Claude takes or pays out in one action
+# without asking Maria (master plan, "Money cap"), so the demo keeps its numbers.
+RIVERA_MONEY_CAP_CENTS = 50_000
 
 RIVERA_CARDS: list[RuleCard] = [
     *(card for card in PRESETS["ask_first"] if card.mode == "auto"),
@@ -78,6 +82,7 @@ def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
                   value="The service call deposit is credited to the repair if you go ahead."),
             Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives."),
         ],
+        auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS,
         hours=[WEEKDAY_HOURS, SATURDAY_HOURS],
         price_items=[
             PriceItem(item_id="deposit", title="Service call deposit", unit_cents=2000),

@@ -31,8 +31,7 @@ contract test, before the task that first uses them.
 - Verification (Plan 01b): `/verify/start` sends a fresh code only to a contact on record (a Demo inbox entry
   and its code-free notice) and answers every contact with one message; `/verify/check` takes the session's live
   challenge's code within ten minutes and five attempts, else 422 `invalid`; a session reads only the code entries
-  of the people whose challenges it, or a demo agent it minted (Plan 01c), started. Codes are kept in memory, never
-  mirrored.
+  of the challenges it, or a demo agent it minted (Plan 01c), started. Codes are kept in memory, never mirrored.
 - Single-use links (Plans 01b and 01c): `native.release_document` and `native.payment_link` mint a random token
   that only the link card's `href` carries (`/api/d/{token}`, `/pay/{token}`), never a fact, `model_view` or ledger
   summary. A document link serves its bytes once within a day. A payment link, for the session's own current quote at
@@ -166,6 +165,8 @@ from desk.contracts import (
     ToolName,
     ToolProfile,
     Violation,
+    money_tool,
+    moves_money,
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
@@ -277,6 +278,7 @@ OWNER_NAME = re.compile(r"[A-Za-zÀ-ÿ' -]{1,40}")   # Plan 01a's owner_display_
 # A fetched page (the kernel's fetch guard reads the real one): here any `.example` site reads as this, and any
 # other address is refused.
 WEBSITE_TEXT = "{host}: leak repair, drain clearing and water heaters. Call us any weekday."
+RIVERA_MONEY_CAP_CENTS = 50_000   # the money cap of the seed's rules ($500, `DeskSeed.auto_money_cap_cents`)
 
 
 def _card(card_id: str, applies_to: str, mode: str, who: str, reason: str, **limits) -> RuleCard:
@@ -988,7 +990,7 @@ class PaymentLink:
 @dataclass
 class VersionRecord:
     """A rules version the owner drafted: its cards (the owner's, then the compiler's default asks), its parent, its
-    proof and status, and the key a repeat of the same draft finds it by."""
+    proof and status, the key a repeat of the same draft finds it by, and its money cap (Plan 01b)."""
 
     version: int
     parent: int | None
@@ -997,6 +999,7 @@ class VersionRecord:
     proof: ProofReport
     key: tuple
     created_at: datetime
+    auto_money_cap_cents: int = 0               # the most its auto money cards take or pay out per action
 
 
 @dataclass
@@ -1024,6 +1027,7 @@ class Desk:
     cards: list[RuleCard] = field(default_factory=list)
     policy_version: int = 1
     versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
+    auto_money_cap_cents: int = 0       # the active version's money cap: 0 for a Desk `POST /desks` makes
     ledger: list[LedgerEntry] = field(default_factory=list)
     booked: set[str] = field(default_factory=set)                     # slot_ids with a confirmed booking
 
@@ -1454,14 +1458,16 @@ class FakeKernelState:
             "cedar_sha256": sha256_hex(canonical(cards)), "schema_sha256": sha256_hex("schema"),
             "baseline_sha256": sha256_hex("baseline"),
             "profiles_sha256": sha256_hex(canonical(sorted(desk.tools))), "invariants_sha256": sha256_hex("invariants"),
-            "review_thresholds_version": 1, "created_at": desk.created_at})
+            "review_thresholds_version": 1, "auto_money_cap_cents": desk.auto_money_cap_cents,
+            "created_at": desk.created_at})
 
     def _put_version(self, desk: Desk, record: VersionRecord) -> None:
         version = self._policy_version(desk, record)
         self._put("policy_versions", (desk.desk_id, record.version), {
             **version.model_dump(mode="json", include={"desk_id", "version", "cards", "status", "proof", "cedar_sha256",
                                                        "schema_sha256", "baseline_sha256", "profiles_sha256",
-                                                       "invariants_sha256", "review_thresholds_version"}),
+                                                       "invariants_sha256", "review_thresholds_version",
+                                                       "auto_money_cap_cents"}),
             "copy_id": desk.copy_id, "parent_version": record.parent, "created_at": record.created_at})
 
     def _policy_version(self, desk: Desk, record: VersionRecord) -> PolicyVersion:
@@ -1471,7 +1477,7 @@ class FakeKernelState:
                              schema_sha256=sha256_hex("schema"), baseline_sha256=sha256_hex("baseline"),
                              profiles_sha256=sha256_hex(canonical(list(record.key[2]))),
                              invariants_sha256=sha256_hex("invariants"), review_thresholds_version=1,
-                             status=record.status, proof=record.proof)
+                             auto_money_cap_cents=record.auto_money_cap_cents, status=record.status, proof=record.proof)
 
     def _supersede_active(self, desk: Desk) -> None:
         """The active version's row becomes `superseded`, as an activation leaves it."""
@@ -1526,7 +1532,8 @@ class FakeKernelState:
             people=[SeedPerson(ref=ref, display_name=name, contact=contact) for ref, name, contact in RIVERA_PEOPLE],
             documents=[SeedDocument(ref=ref, title=title, body=body, record_owner_ref=owner_ref)
                        for ref, title, owner_ref, body in RIVERA_DOCUMENTS],
-            notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"])
+            notifications=NotificationDefaults(**NOTIFICATIONS), connections=["mock_payments"],
+            auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
         return self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
@@ -1547,7 +1554,8 @@ class FakeKernelState:
         desk = Desk(desk_id=new_id("desk"), copy_id=copy_id, business_id=business.existing_business_id or new_id("biz"),
                     business_name=business.name, owner_display_name=business.owner_display_name,
                     brand=dict(business.brand), timezone=business.timezone, name=seed.name,
-                    slug=f"{slugify(business.name)}-{suffix}", hours=list(seed.hours), created_at=self.now)
+                    slug=f"{slugify(business.name)}-{suffix}", hours=list(seed.hours), created_at=self.now,
+                    auto_money_cap_cents=seed.auto_money_cap_cents)
         self.desks[desk.desk_id] = desk
         ids = {"copy_id": copy_id, "desk_id": desk.desk_id}
         if business.existing_business_id is None:
@@ -2181,12 +2189,16 @@ class FakeKernelState:
             if session.person_id is not None and session.person_id == action.resource.owner_person_id:
                 return "allow", ["rv-docs"]
             return "refuse", []                 # the baseline: private data only to its verified record owner
+        if money_tool(tool, action.effects) and not 0 < (action.amount_cents or 0) <= AUTO_MONEY_HARD_CAP_CENTS:
+            return "refuse", []                 # the baseline: money always carries an amount, at most $10,000
         if tool == "native.charge_mandate" and not self._room_for(session, action):
             return "refuse", []                 # the baseline: an agent's charge stays within its mandate
         if tool in ("native.payment_link", "native.charge_mandate"):
             card = next((card for card in desk.cards if card.applies_to == tool and card.mode == "auto"), None)
             if card is not None:
-                return ("allow" if action.amount_cents <= card.max_amount_cents else "hold"), [card.card_id]
+                # within the card's limit and the active version's money cap, else it asks (the baseline's cap)
+                within = action.amount_cents <= min(card.max_amount_cents, desk.auto_money_cap_cents)
+                return ("allow" if within else "hold"), [card.card_id]
         preset = next((card.card_id for card in desk.cards if card.applies_to == tool and card.mode == "auto"
                        and card.who == "anyone" and card.card_id.startswith("preset-")), None)
         if preset is not None:
@@ -2207,12 +2219,16 @@ class FakeKernelState:
         expires_at = self.now + {"allow": ALLOW_FOR, "hold": HOLD_FOR, "refuse": timedelta(0)}[outcome]
         answers, inbox = [], []
         if outcome == "hold":
-            money = action.tool in MONEY_TOOLS and (action.amount_cents or 0) > AUTO_MONEY_HARD_CAP_CENTS
+            # allow_person on money only within the Desk's cap (`compiler.capped`), and never with no amount, as
+            # the kernel's `answers_for` offers it
+            cap = min(desk.auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS)
+            past_cap = money_tool(action.tool, action.effects) and (action.amount_cents is None
+                                                                    or action.amount_cents > cap)
             # a limit hold, through an auto card's hold twin, offers no "Deny always"; a scripted hold stands for an
             # ask card's and keeps it (master "Decision lifecycle")
             limit_hold = not scripted and self._decided_by_auto_card(desk, card_ids)
             answers = [answer for answer in HELD_ANSWERS
-                       if (answer != "allow_person" or (session.person_id is not None and not money))
+                       if (answer != "allow_person" or (session.person_id is not None and not past_cap))
                        and (answer != "deny_always" or not limit_hold)]
             inbox = [self._alert_owner(desk, "A request is waiting for you.", decision_id=decision_id)]
         tier = {"allow": "A", "hold": "H", "refuse": "B"}[outcome]
@@ -2838,10 +2854,10 @@ class FakeKernelState:
 
     def create_desk(self, request: Request, body: CreateDeskRequest) -> DeskCreated:
         """A new Desk in the owner's copy, through the seed path, with the `ask_first` preset active; its tools are
-        native only, so a `connections` list is refused (422), as are an owner name outside the pattern and an
-        unknown time zone."""
+        native only, so a `connections` list is refused (422), as are an owner name outside the pattern, an
+        unknown time zone and a money cap other than 0 (the presets are proved at 0; the owner raises it by a draft)."""
         copy, _ = self.owner_of(request)
-        if body.desk.connections:
+        if body.desk.connections or body.desk.auto_money_cap_cents != 0:
             raise Refusal(422, "invalid")
         self._check_business(body.business.owner_display_name, body.business.timezone)
         native = tuple(tool for tool in TOOL_FACTS if tool_profile(tool).source == "native")
@@ -3034,17 +3050,22 @@ class FakeKernelState:
         """The owner's cards compiled and proved against the active version (`expected_parent`, else 409): a new
         version with the compiler's default asks, `proved` or `rejected` (or `draft` when bounded), ledgered `policy`.
         The same cards on the same parent and tools return that version, except that a timed-out rejection proves
-        again. A card id given twice, a default card among the owner's, or a card that could change starting a
-        verification (`changes_always_on`) is 422 `invalid`, with nothing drafted or ledgered."""
+        again. A card id given twice, a default card among the owner's, a card that could change starting a
+        verification (`changes_always_on`), or an auto money card above the draft's money cap (the one it names,
+        else the active version's) is 422 `invalid`, with nothing drafted or ledgered."""
         desk = self._owners_desk(request, body.desk_id)
         if body.expected_parent != desk.policy_version:
             raise Refusal(409, "conflict")
+        cap = desk.auto_money_cap_cents if body.auto_money_cap_cents is None else body.auto_money_cap_cents
         ids = [card.card_id for card in body.cards]
-        if len(set(ids)) != len(ids) or any(card.is_default or changes_always_on(card) for card in body.cards):
+        if len(set(ids)) != len(ids) or any(
+                card.is_default or changes_always_on(card)
+                or (card.mode == "auto" and moves_money(card) and (card.max_amount_cents or 0) > cap)
+                for card in body.cards):
             raise Refusal(422, "invalid")
         enabled = tuple(sorted(tool for tool, profile in desk.tools.items() if profile.status == "enabled"))
         key = (body.expected_parent, sha256_hex(canonical([card.model_dump(mode="json") for card in body.cards])),
-               enabled)
+               enabled, cap)
         record = next((record for record in desk.versions.values() if record.key == key), None)
         if record is not None and not (record.status == "rejected" and record.proof.timed_out):
             return self._policy_version(desk, record)
@@ -3053,7 +3074,7 @@ class FakeKernelState:
         if record is None:
             record = VersionRecord(version=self._next_version(desk), parent=body.expected_parent,
                                    cards=[*body.cards, *self._default_cards(desk, body.cards)], status=status,
-                                   proof=proof, key=key, created_at=self.now)
+                                   proof=proof, key=key, created_at=self.now, auto_money_cap_cents=cap)
             desk.versions[record.version] = record
         else:
             record.status, record.proof = status, proof
@@ -3062,8 +3083,8 @@ class FakeKernelState:
         return self._policy_version(desk, record)
 
     def policy_confirm(self, request: Request, body: PolicyConfirmRequest) -> PolicyVersion:
-        """Activate a proved draft whose parent is still the active version, superseding it (ledgered `policy`);
-        anything else is 409, ledgered as refused. An unknown version is 404."""
+        """Activate a proved draft whose parent is still the active version, superseding it (ledgered `policy`), so
+        its money cap becomes the Desk's; anything else is 409, ledgered as refused. An unknown version is 404."""
         desk = self._owners_desk(request, body.desk_id)
         record = desk.versions.get(body.version)
         if record is None:
@@ -3074,8 +3095,10 @@ class FakeKernelState:
             raise Refusal(409, "conflict")
         self._supersede_active(desk)
         desk.cards, desk.policy_version, record.status = list(record.cards), record.version, "active"
+        desk.auto_money_cap_cents = record.auto_money_cap_cents
         self._put_version(desk, record)
-        self.append(desk, "policy", {"version": record.version, "activated": True})
+        self.append(desk, "policy", {"version": record.version, "activated": True,
+                                     "auto_money_cap_cents": record.auto_money_cap_cents})
         return self._policy_version(desk, record)
 
     def policy_probe(self, request: Request, body: PolicyProbeRequest) -> list[ProbeResult]:
@@ -3309,16 +3332,15 @@ class FakeKernelState:
         return session.state()
 
     def session_inbox(self, request: Request, body: Any) -> list[DemoInboxEntry]:
-        """The session's Demo inbox: `verification_code` entries for the people whose challenges it started, or an
-        agent session opened with a demo agent's key it minted started (the kernel's `agents.minted_sessions`), oldest
-        first; never an alert or a head checkpoint, nor the codes of an agent another session or the owner minted."""
+        """The session's Demo inbox: the `verification_code` entries of the challenges it started, or an agent
+        session opened with a demo agent's key it minted started (the kernel's `agents.minted_sessions`), oldest
+        first; never another session's code for the same person, an alert or a head checkpoint, nor the codes of an
+        agent another session or the owner minted."""
         session, _ = self.session_call(request, self._query(request, "session_id"))
         minted = {key.agent_key_id for key in self.agent_keys.values() if key.minted_by == session.session_id}
         started_by = {session.session_id} | {agent.session_id for agent in self.sessions.values()
                                               if agent.kind == "agent" and agent.agent_key_id in minted}
-        people = {challenge.person_id for challenge in self.challenges.values()
-                  if challenge.session_id in started_by}
-        entries = {challenge.entry_id for challenge in self.challenges.values() if challenge.person_id in people}
+        entries = {challenge.entry_id for challenge in self.challenges.values() if challenge.session_id in started_by}
         return [entry for copy_id, entry in self.inbox
                 if copy_id == session.copy_id and entry.kind == "verification_code" and entry.entry_id in entries]
 

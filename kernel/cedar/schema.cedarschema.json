@@ -43,6 +43,9 @@
               }
             },
             "required": false
+          },
+          "auto_money_cap_cents": {
+            "type": "Long"
           }
         }
       }

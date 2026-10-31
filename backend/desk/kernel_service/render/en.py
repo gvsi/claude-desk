@@ -5,11 +5,12 @@ percentages: only clause cards rendered from facts do. Cards read datetimes in t
 time zone ("Tuesday, November 3, 2:00 pm"), money as `$1,234.56` and percentages as "10%".
 """
 
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 
 from desk.contracts import Fact, HoursWindow
-from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, claims, day_groups, hours_windows, local,
-                                              money, percent_text, slot_claims, text_claim)
+from desk.kernel_service.render.cards import (Card, DeskInfo, booking_window, callback_window, claims, day_groups,
+                                              hours_windows, local, money, percent_text, slot_claims, text_claim,
+                                              title_claim)
 
 STATUS: dict[str, str] = {
     "allowed": "Checked against {owner}'s rules",
@@ -25,6 +26,38 @@ STATUS: dict[str, str] = {
     "refused_at_execution": "The rules changed, so this didn't go ahead",
     "reply_checked": "Reply checked against {owner}'s rules",
     "reply_handed_off": "Passed to {owner} to answer",
+    "owner_said": "Written by {owner}",
+    "owner_say_blocked": "Not sent: it included text from a private document",   # shown to the owner alone
+    # an approved release of private data whose session no longer stands for its person (shown to the owner)
+    # Why an approved private release was refused, for the owner: unused until an owner-facing field carries
+    # it, since a decision's status line reaches the visitor, who mustn't read why their session ended.
+    "refused_contact_changed": "Not shared: their session ended when their contact changed",
+    "refused_person_removed": "Not shared: they were removed from your records",
+    "refused_session_closed": "Not shared: their session ended before your answer",
+}
+
+# What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a
+# visitor or another agent sees instead of the generic "executed" line. Like the status lines they
+# name the owner and nothing else, so they never carry an amount, a time or a date.
+EXECUTED: dict[str, str] = {
+    "native.quote": "Quoted from {owner}'s price list",
+    "native.find_slots": "Times read from {owner}'s calendar",
+    "native.book": "Booked on {owner}'s calendar",
+    "native.capture_lead": "Details saved for {owner}",
+    "native.request_callback": "Callback request saved for {owner}",
+    "native.start_verification": "Verification started",
+    "native.release_document": "Document shared from {owner}'s records",
+}
+
+# The kernel's other visitor texts, key for key with `es.MESSAGES`: the verify card's messages,
+# the same whether or not a contact is on record, and the Demo inbox's code entry, whose body is the
+# only kernel text that carries a code.
+MESSAGES: dict[str, str] = {
+    "verify_started": "If that contact is on record, a code is on its way. Enter it below to confirm it's you.",
+    "verify_already": "You're already confirmed in this chat.",
+    "inbox_code_preview": "New verification code",
+    "inbox_code_body": ("Your {business} code is {code}. It expires in ten minutes. "
+                        "If you didn't ask for it, ignore this message."),
 }
 
 # Owner-only, in English: the preview line of a Demo inbox alert.
@@ -32,6 +65,11 @@ OWNER_PREVIEWS: dict[str, str] = {
     "approval": "A request needs your answer",
     "breaker": "A conversation was paused",
     "booking": "New booking",
+    "lockout": "Verification paused for a contact",
+    "lead": "New lead",
+    "callback": "Callback requested",
+    "rules": "Your rules need checking",
+    "public_page": "Hidden from your public page",
 }
 
 
@@ -120,3 +158,64 @@ def charter_text(fact: Fact | None, desk: DeskInfo) -> Card:
 
 def verify_prompt(fact: Fact | None, desk: DeskInfo) -> Card:
     return Card(title="I'll send a code to the contact on record.")
+
+
+def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{owner} will call you back on {day}, between {start} and {end}`; without a window
+    `{owner} will call you back`. The fact holds only the window, never the visitor's text."""
+    owner = desk.owner_display_name
+    window = callback_window(fact, desk)
+    if window is None:
+        return Card(title=f"{owner} will call you back")
+    start, end = window
+    return Card(title=f"{owner} will call you back on {date(start)}, between {clock(start)} and {clock(end)}")
+
+
+def owner_said(fact: Fact | None, desk: DeskInfo) -> Card:
+    """The owner's words, as the owner wrote them."""
+    return Card(title=text_claim(fact))
+
+
+def document_link(fact: Fact | None, desk: DeskInfo) -> Card:
+    """The document's title; the link itself is the card's `href`, which the reply check fills."""
+    return Card(title=title_claim(fact))
+
+
+# ---- The public header's open-now line ("Open status") ----------------------------------------------
+
+def _day(moment: datetime, as_of: datetime) -> str:
+    """`moment`'s date as `as_of` reads it: "today", "tomorrow", "next Monday" for today's weekday a
+    week ahead, else the weekday. Both are in the business's time zone; a date more than a week
+    ahead, or already past, has no word and raises ValueError."""
+    ahead = (moment.date() - as_of.date()).days
+    if ahead == 0:
+        return "today"
+    if ahead == 1:
+        return "tomorrow"
+    if 2 <= ahead <= 7:
+        return f"next {WEEKDAYS[moment.weekday()]}" if ahead == 7 else WEEKDAYS[moment.weekday()]
+    raise ValueError("an open-now day is within the week ahead")
+
+
+def _until(moment: datetime, as_of: datetime) -> str:
+    """When an open business closes: "6:00 pm", "2:00 am tomorrow", "Saturday at 2:00 am". A close
+    at 00:00 is midnight at the end of the day before, which takes the day word: "midnight",
+    "tomorrow at midnight", "Friday at midnight"."""
+    if (moment.hour, moment.minute) == (0, 0):
+        day = _day(moment - timedelta(days=1), as_of)
+        return "midnight" if day == "today" else f"{day} at midnight"
+    day = _day(moment, as_of)
+    if day == "today":
+        return clock(moment)
+    return f"{clock(moment)} tomorrow" if day == "tomorrow" else f"{day} at {clock(moment)}"
+
+
+def open_status(is_open: bool, boundary: datetime | None, as_of: datetime) -> str:
+    """"Open now, until 6:00 pm", "Open now" (open through the week ahead), "Closed now. Opens
+    Monday at 8:00 am": `boundary` is when it closes or opens, and it and `as_of` are in the
+    business's time zone. An opening at 00:00 is on its own date ("Opens Monday at 12:00 am")."""
+    if is_open:
+        return "Open now" if boundary is None else f"Open now, until {_until(boundary, as_of)}"
+    if boundary is None:
+        raise ValueError("a closed business names when it opens")
+    return f"Closed now. Opens {_day(boundary, as_of)} at {clock(boundary)}"

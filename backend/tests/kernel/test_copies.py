@@ -109,7 +109,9 @@ async def test_copy_seeds_rivera_plumbing(app, client, frozen_clock):
     assert [(e.desk_id, e.seq, e.event.kind) for e in entries] == [
         (desk_id, 1, "desk_data"), (desk_id, 2, "policy"), (desk_id, 3, "session"), (desk_id, 4, "decide")]
     assert [e.event.summary for e in entries[:2]] == [{"part": "desk", "created": True},
-                                                      {"version": 1, "status": "active", "preset": "rivera"}]
+                                                      {"version": 1, "status": "active", "preset": "rivera",
+                                                       "activated": True, "from": None,
+                                                       "auto_money_cap_cents": 50_000}]
     # the seed's cards: the starter preset's utility cards plus Rivera's own
     ask_first = seed.PRESETS["ask_first"]
     assert all(card.card_id.startswith("preset-") and card.mode == "auto" for card in ask_first)

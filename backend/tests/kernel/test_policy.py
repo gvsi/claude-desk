@@ -9,6 +9,7 @@ against is still current. Each failing check reads in the owner's words.
 import asyncio
 import dataclasses
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,9 +25,14 @@ from desk.db.models import LedgerEntry, Person, Tool
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import activation, compiler, desks, ledger
 from desk.kernel_service.repo import new_id
+from desk.kernel_service.seed import RIVERA_CARDS
 
-from .helpers import CopyRows, draft_and_confirm, kernel_ctx, make_copy_rows, rows_of
+from .helpers import (TEST_CAP, CopyRows, compile_at, draft_and_confirm, draft_refusals, kernel_ctx, make_copy_rows,
+                      rows_of)
+from .test_adapters import visitor_of
 from .test_compiler import NATIVE, card, req
+from .test_decide import decided
+from .test_execute import executed
 
 STUBS = Path(__file__).parent / "stubs"
 
@@ -47,7 +53,7 @@ STARTER = [card("slots", "native.find_slots")]   # version 1: open times for any
 
 async def desk_with_tools(app: FastAPI, profiles: list[ToolProfile] = NATIVE) -> DeskRows:
     """A Desk with the tools in `profiles` enabled, a person named Dana, and version 1 compiled
-    from `STARTER` and active, ledgered as a new Desk's first version is."""
+    from `STARTER` at a $500 money cap and active, ledgered as a new Desk's first version is."""
     rows = await make_copy_rows(app)
     dana = new_id("person")
     async with kernel_ctx(app) as ctx:
@@ -58,12 +64,12 @@ async def desk_with_tools(app: FastAPI, profiles: list[ToolProfile] = NATIVE) ->
                           masked_contact=desks.mask_contact("dana@example.com"), created_at=now))
         ctx.db.add_all(desks.tool_row(rows.copy_id, rows.desk_id, profile) for profile in profiles)
         schema = compiler.desk_schema(profiles)
-        compiled = compiler.compile_cards(STARTER, profiles)
+        compiled = compile_at(STARTER, profiles)
         ctx.db.add(activation.version_row(
             copy_id=rows.copy_id, desk_id=rows.desk_id, version=1, parent_version=None, compiled=compiled,
-            a0=compiler.compile_cards(STARTER, profiles, review=False).A, schema=schema,
-            hashes=activation.version_hashes(compiled, schema, profiles, cards=STARTER), status="active", proof=None,
-            created_at=now))
+            a0=compile_at(STARTER, profiles, review=False).A, schema=schema,
+            hashes=activation.version_hashes(compiled, schema, profiles, cards=STARTER, auto_money_cap_cents=TEST_CAP),
+            auto_money_cap_cents=TEST_CAP, status="active", proof=None, created_at=now))
         await ctx.db.flush()
         await ledger.append(ctx, copy_id=rows.copy_id, desk_id=rows.desk_id, event=LedgerEvent(
             kind="policy", origin="kernel", summary={"version": 1, "status": "active"}))
@@ -115,12 +121,14 @@ async def test_draft_is_proved_with_every_obligation(desk_prove, app, client):
         (name, True, None) for name in activation.PROOF_CHECKS]
     # what was stored: the cards with their default asks, the Cedar and what it was proved against
     [_, row] = await versions(app, desk)
-    compiled = compiler.compile_cards(BOOK_AND_ASK_CHARGES, NATIVE)
+    compiled = compile_at(BOOK_AND_ASK_CHARGES, NATIVE)                         # at the active version's cap
     assert row.cards == version.cards == compiled.cards
+    assert row.auto_money_cap_cents == version.auto_money_cap_cents == TEST_CAP
     assert any(c.is_default for c in row.cards)
-    assert row.cedar == {**compiled.sets(), "A0": compiler.compile_cards(BOOK_AND_ASK_CHARGES, NATIVE, review=False).A}
+    assert row.cedar == {**compiled.sets(), "A0": compile_at(BOOK_AND_ASK_CHARGES, NATIVE, review=False).A}
     schema = compiler.desk_schema(NATIVE)
-    assert hashes_of(row) == activation.version_hashes(compiled, schema, NATIVE, cards=BOOK_AND_ASK_CHARGES)
+    assert hashes_of(row) == activation.version_hashes(compiled, schema, NATIVE, cards=BOOK_AND_ASK_CHARGES,
+                                                       auto_money_cap_cents=TEST_CAP)
     assert row.draft_key_sha256 is not None and row.proof == proof and row.status == "proved"
     assert await policy_entries(app, desk) == [{"version": 1, "status": "active"},
                                                 {"version": 2, "status": "proved", "method": "symcc"}]
@@ -260,6 +268,73 @@ async def test_invalid_cards_are_422(app, client, monkeypatch):
     assert (await drafted(client, desk, [card("dana", "native.book", who="person", person_id=desk.dana)])).version == 2
 
 
+async def test_a_draft_with_a_card_on_verification_is_422(app, client, monkeypatch, caplog):
+    """Verification is always on: a draft holding an `ask`, a `never` or an `auto` card on
+    `native.start_verification`, alone or among valid cards, is refused whole as `invalid_cards`
+    before anything is proved or written. The presets' own card for it, unchanged, drafts."""
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    desk = await desk_with_tools(app)
+    runs = count_prover_runs(monkeypatch)
+    use_prover(monkeypatch, "desk_prove_slow_ok.sh")
+    verify = [card("verify", "native.start_verification", mode="ask"),
+              card("verify", "native.start_verification", mode="never", who="person", person_id=desk.dana),
+              card("verify", "native.start_verification")]
+    for cards in ([one] for one in verify):
+        response = await post_draft(client, desk, cards)
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), cards
+    for one in verify:
+        response = await post_draft(client, desk, [*BOOK_AND_ASK_CHARGES, one])
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), one
+    assert draft_refusals(caplog) == ["invalid_cards"] * 6
+    assert runs == [] and [row.version for row in await versions(app, desk)] == [1]
+    assert await policy_entries(app, desk) == [{"version": 1, "status": "active"}]
+    # the same valid cards draft with the presets' own card for it
+    [shipped] = compiler.ALWAYS_ON_CARDS
+    assert (await drafted(client, desk, [*BOOK_AND_ASK_CHARGES, shipped])).version == 2
+
+
+async def test_a_draft_with_an_effect_card_over_verification_is_422(app, client, monkeypatch, caplog):
+    """A card on `effect:send_message` covers `native.start_verification` too: a `never` one for
+    anyone, an `ask` one for Dana, or an `auto` one for Dana behind the reviewer would refuse or
+    hold starts, so a draft holding one beside the presets' own card is refused whole as
+    `invalid_cards` before anything is proved or written. An `auto` one for anyone drafts."""
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    desk = await desk_with_tools(app)
+    runs = count_prover_runs(monkeypatch)
+    use_prover(monkeypatch, "desk_prove_slow_ok.sh")
+    [shipped] = compiler.ALWAYS_ON_CARDS
+    dana = {"who": "person", "person_id": desk.dana}
+    for send in (card("send", "effect:send_message", mode="never"),
+                 card("send", "effect:send_message", mode="ask", **dana),
+                 card("send", "effect:send_message", review=True, **dana)):
+        response = await post_draft(client, desk, [*BOOK_AND_ASK_CHARGES, shipped, send])
+        assert (response.status_code, response.json()) == (422, {"code": "invalid"}), send
+    assert draft_refusals(caplog) == ["invalid_cards"] * 3
+    assert runs == [] and [row.version for row in await versions(app, desk)] == [1]
+    assert await policy_entries(app, desk) == [{"version": 1, "status": "active"}]
+    send = card("send", "effect:send_message", review=True)
+    assert (await drafted(client, desk, [*BOOK_AND_ASK_CHARGES, shipped, send])).version == 2
+
+
+@pytest.mark.solver
+async def test_a_draft_without_the_verification_card_keeps_starts_allowed(desk_prove, app, client):
+    """A draft that leaves out the presets' card for `native.start_verification` can't switch
+    verification to asking: the compiler adds the card, so the version proves and lists it, and
+    once it is confirmed a visitor naming a contact on record gets a code without the owner being
+    asked."""
+    copy, visitor = await visitor_of(app, client)
+    [shipped] = compiler.ALWAYS_ON_CARDS
+    without = [c for c in RIVERA_CARDS if c != shipped]
+    assert len(without) == len(RIVERA_CARDS) - 1
+    confirmed = await draft_and_confirm(client, copy.owner_token, copy.desk_id, without)
+    assert shipped in confirmed.cards
+    assert "default:native.start_verification" not in {c.card_id for c in confirmed.cards}
+    allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
+    assert (allowed.outcome, allowed.policy_version, allowed.card_ids) == (
+        "allow", confirmed.version, [shipped.card_id]), allowed.reason_plain
+    assert (await executed(client, visitor, allowed)).state == "succeeded"
+
+
 async def post_confirm(client: httpx.AsyncClient, desk: DeskRows, version: int) -> httpx.Response:
     return await client.post("/policy/confirm", headers=desk.rows.owner,
                              json={"desk_id": desk.desk_id, "version": version})
@@ -285,7 +360,8 @@ async def test_confirm_activates_and_supersedes(desk_prove, app, client):
     assert response.status_code == 200, response.text
     assert PolicyVersion.model_validate(response.json()) == draft.model_copy(update={"status": "active"})
     assert [(row.version, row.status) for row in await versions(app, desk)] == [(1, "superseded"), (2, "active")]
-    assert (await policy_entries(app, desk))[-1] == {"version": 2, "activated": True, "from": 1}
+    assert (await policy_entries(app, desk))[-1] == {"version": 2, "activated": True, "from": 1,
+                                                     "auto_money_cap_cents": TEST_CAP}
     assert await decides(app, desk, req("native.book")) == "allow"               # version 2 books without asking
     # confirming it again changes nothing
     response = await post_confirm(client, desk, draft.version)
@@ -315,7 +391,7 @@ async def test_wider_set_is_rejected_and_cannot_be_confirmed(desk_prove, app, cl
     who = compiler._who
     monkeypatch.setattr(compiler, "_who", lambda c: "principal has person_id" if c.who == "person" else who(c))
     cards = [card("dana-books", "native.book", who="person", person_id=desk.dana)]
-    assert "principal.person_id ==" not in compiler.compile_cards(cards, NATIVE).A
+    assert "principal.person_id ==" not in compile_at(cards, NATIVE).A
     version = await drafted(client, desk, cards)
     assert (version.status, version.proof.ok, version.proof.method, version.proof.timed_out) == (
         "rejected", False, "symcc", False)
@@ -351,7 +427,7 @@ async def test_or_gate_past_a_broken_lint_is_rejected_by_proof(desk_prove, app, 
     desk = await desk_with_tools(app)
     cards = [card("verified-books", "native.book", who="verified", review=True)]
     or_the_review_gate(monkeypatch)
-    compiled = compiler.compile_cards(cards, NATIVE)
+    compiled = compile_at(cards, NATIVE)
     assert ") || (context has review" in compiled.A
     assert desk_kernel.lint_policies(json.dumps(compiled.sets()))              # the lint refuses this shape,
     linted = await drafted(client, desk, [card("verified-books-too", "native.book", who="verified", review=True)])

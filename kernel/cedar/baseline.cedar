@@ -4,8 +4,8 @@
 // Each condition is guarded so it can't error (Cedar skips an erroring forbid)
 // and passes strict validation: an optional attribute is read only behind `has`,
 // in `&&` or `if ... then ... else`. The invariants in invariants/ restate four
-// of these word for word, and the auto money cap over the auto set, so a proof
-// at activation fails if any of them is weakened here.
+// of these word for word, and the money cap and the platform ceiling over the
+// auto set, so a proof at activation fails if any of them is weakened here.
 
 // A session acts only on records of its own copy.
 @id("same_copy")
@@ -67,8 +67,9 @@ unless {
   context.amount_cents <= 1000000
 };
 
-// Without the owner's approval, no action moves more than
-// AUTO_MONEY_HARD_CAP_CENTS ($500).
+// Without the owner's approval, no action moves more than the money cap of the
+// rules version being evaluated (context.auto_money_cap_cents, which the kernel
+// sets on every request), or more than AUTO_MONEY_HARD_CAP_CENTS ($10,000).
 @id("auto_money_cap")
 @card("baseline")
 @tier("baseline")
@@ -76,5 +77,7 @@ unless {
 forbid (principal, action in [Action::"effect:charge", Action::"effect:pay_out"], resource)
 when {
   !context.owner_approved &&
-  (if context has amount_cents then context.amount_cents > 50000 else true)
+  (if context has amount_cents
+   then context.amount_cents > context.auto_money_cap_cents || context.amount_cents > 1000000
+   else true)
 };

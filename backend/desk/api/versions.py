@@ -42,10 +42,13 @@ def version_cap(version: Mapping[str, Any] | BaseModel) -> int:
     return fields["auto_money_cap_cents"]
 
 
-async def post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], expected_parent: int) -> PolicyVersion:
-    """The kernel's draft of `cards` on `expected_parent`, compiled and proved. A kernel that doesn't answer in time
-    is 409 `rules_cannot_be_checked`, as a proof that timed out or ran bounded is (`checkable`)."""
-    request = PolicyDraftRequest(desk_id=desk_id, cards=cards, expected_parent=expected_parent)
+async def post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], expected_parent: int, *,
+                     auto_money_cap_cents: int | None = None) -> PolicyVersion:
+    """The kernel's draft of `cards` on `expected_parent`, compiled and proved, at `auto_money_cap_cents` (None keeps
+    the active version's money cap, as the kernel does). A kernel that doesn't answer in time is 409
+    `rules_cannot_be_checked`, as a proof that timed out or ran bounded is (`checkable`)."""
+    request = PolicyDraftRequest(desk_id=desk_id, cards=cards, expected_parent=expected_parent,
+                                 auto_money_cap_cents=auto_money_cap_cents)
     try:
         return await owner.kernel.call("POST /policy/draft", request)
     except KernelUnavailable as unavailable:

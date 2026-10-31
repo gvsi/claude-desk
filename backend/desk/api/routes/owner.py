@@ -461,7 +461,8 @@ async def needs_you(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)
 async def handoff_done(handoff_id: Annotated[str, Path(max_length=128)],
                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DeskUpdated:
     """Mark a callback request done, through the kernel with the owner's credential. A handoff that isn't on one of
-    the copy's Desks is 404 and never sent; one already done is the kernel's 409 `conflict`."""
+    the copy's Desks is 404 and never sent. The kernel answers 409 `conflict` for one already done, and 409 `closed`
+    for one whose Desk was deleted after the copy's Desks were read; the route passes either on."""
     row = await ctx.ro.one("handoffs", handoff_id=handoff_id)
     if row is None or row["desk_id"] not in ctx.desk_ids:
         raise ApiProblem(404, "not_found")

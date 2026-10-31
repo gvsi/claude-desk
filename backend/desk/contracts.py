@@ -4,6 +4,7 @@ The models below are the master plan's "Shared contracts v2" block, verbatim and
 order (each class is defined before it is used). Field comments are part of the contract.
 """
 
+from collections.abc import Iterable
 from datetime import datetime, time
 from typing import Annotated, Literal, Self, get_args
 
@@ -132,9 +133,18 @@ class HoursWindow(BaseModel):
             raise ValueError("end is after start, or 00:00 for midnight; a window past midnight is two windows")
         return self
 
+AUTO_MONEY_HARD_CAP_CENTS = 1_000_000     # $10,000: the platform ceiling, the most any version's money cap or auto card may allow per action,
+                                          # the same as the per-payment limit (`PriceItem.unit_cents`, `NormalizedAction.amount_cents`,
+                                          # the baseline's `money_has_amount`); Plan 01b raises it from Plan 01a's 50_000 and moves it
+                                          # here ("Money cap")
+
 class DeskSeed(BaseModel):
     name: str                             # "Main line"
     charter: list[Claim]                  # service area, policies, contact: charter facts labelled ["public"], rendered only, never computed from
+    auto_money_cap_cents: StrictInt = Field(0, ge=0, le=AUTO_MONEY_HARD_CAP_CENTS)   # the money cap of the Desk's first rules version only
+                                          # (Plan 01b): the most an auto rule takes or pays out per action without asking; 0 = every charge
+                                          # and payout asks; afterwards the Desk's cap is its active version's; owner-only, never a public
+                                          # claim; POST /desks takes only 0 ("Money cap")
     hours: list[HoursWindow]              # the kernel writes fact "charter:hours" from these (again on PUT hours); the hours clause formats
                                           # the windows in the reply's language, and callback windows are computed from them
     price_items: list[PriceItem]
@@ -153,8 +163,9 @@ ToolName = Literal["native.quote", "native.find_slots", "native.book", "native.r
                    "native.fetch_website", "native.read_memory",
                    "payments.list_charges", "payments.create_refund"]
 MONEY_TOOLS: frozenset[str] = frozenset({"native.payment_link", "native.charge_mandate", "payments.create_refund"})
+MONEY_EFFECTS: frozenset[str] = frozenset({"charge", "pay_out"})   # the effects that take or pay out money: the one set
+                                          # every money check reads, for cards (`moves_money`) and tools (`money_tool`)
 MCP_TOOLS: frozenset[str] = frozenset({"payments.list_charges", "payments.create_refund"})   # pinned by definition hash
-AUTO_MONEY_HARD_CAP_CENTS = 50_000        # $500: the most any auto card may allow per action
 
 class ToolProfile(BaseModel):
     tool: ToolName
@@ -244,7 +255,8 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
     who: Literal["anyone", "verified", "record_owner", "person", "agent"]
     person_id: str | None = None          # required iff who == "person"
     agent_key_id: str | None = None       # required iff who == "agent"
-    max_amount_cents: StrictInt | None = Field(None, ge=0)   # auto only; required and <= AUTO_MONEY_HARD_CAP_CENTS when applies_to is in MONEY_TOOLS or effect:charge|pay_out
+    max_amount_cents: StrictInt | None = Field(None, ge=0)   # auto only; required and <= AUTO_MONEY_HARD_CAP_CENTS when applies_to is in MONEY_TOOLS or effect:charge|pay_out;
+                                          # the kernel also holds it to its version's auto_money_cap_cents ("Money cap")
     max_discount_bp: StrictInt = Field(0, ge=0, le=10_000)   # auto only; a larger requested discount asks
     hours: HoursWindow | None = None      # auto only
     review: bool = False                  # auto only: gate on the reviewer, thresholds from review_thresholds.py
@@ -258,8 +270,7 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
         limited = self.max_amount_cents is not None or self.max_discount_bp != 0 or self.hours is not None
         if self.mode != "auto" and (self.review or limited):
             raise ValueError("review and limits apply only to auto cards")
-        moves_money = self.applies_to in MONEY_TOOLS or self.applies_to in ("effect:charge", "effect:pay_out")
-        if self.mode == "auto" and moves_money and (
+        if self.mode == "auto" and moves_money(self) and (
             self.max_amount_cents is None or self.max_amount_cents > AUTO_MONEY_HARD_CAP_CENTS
         ):
             raise ValueError(f"an auto money card needs max_amount_cents of at most {AUTO_MONEY_HARD_CAP_CENTS}")
@@ -270,6 +281,19 @@ class RuleCard(BaseModel):                # Claude drafts, code compiles, the ow
         if self.is_default and (self.mode != "ask" or self.who != "anyone"):
             raise ValueError('a default card is the compiler\'s "ask" card for anyone')
         return self
+
+def moves_money(card: RuleCard) -> bool:
+    """Does the card take or pay out money: on a money tool, or on an effect in `MONEY_EFFECTS`.
+    Defined here alone: `RuleCard` holds an auto money card to an amount with it, and the money cap
+    (`desk.money_cap`) and the kernel's compiler read it too."""
+    return card.applies_to in MONEY_TOOLS or card.applies_to in {f"effect:{effect}" for effect in MONEY_EFFECTS}
+
+def money_tool(tool: str, effects: Iterable[str]) -> bool:
+    """Does a tool with these effects take or pay out money: a money tool, or one with an effect in
+    `MONEY_EFFECTS`. Defined here alone: the kernel's compiler requires and caps the amount of every
+    auto permit on such a tool with it, and the reference generator, the bounded check and decide
+    read it too."""
+    return tool in MONEY_TOOLS or not MONEY_EFFECTS.isdisjoint(effects)
 
 class ProofCheck(BaseModel):
     name: str                             # see "Proof obligations"
@@ -296,6 +320,7 @@ class PolicyVersion(BaseModel):
                                           # each with its definition_sha256, no status or pending fields
     invariants_sha256: str                # the invariant files, the check list and the desk-prove version
     review_thresholds_version: int
+    auto_money_cap_cents: int = Field(0, ge=0, le=AUTO_MONEY_HARD_CAP_CENTS)  # this version's money cap, compiled and proved at; the active version's is the Desk's cap (Plan 01b)
     status: Literal["draft", "proved", "rejected", "active", "superseded"]
     proof: ProofReport | None = None
 

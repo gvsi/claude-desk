@@ -93,6 +93,7 @@ class QuoteAdapter:
     Args = QuoteArgs
     free_text_fields = frozenset({"note"})
     model_view_keys = frozenset({"fact_id", "quote_id", "items", "status"})
+    releases_private_data = False         # the session's own quote from the price list
 
     async def normalize(self, nctx: NormalizeCtx, args: QuoteArgs) -> Normalized:
         desk_id = nctx.desk_row.desk_id
