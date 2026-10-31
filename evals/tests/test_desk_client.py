@@ -59,6 +59,17 @@ def test_a_refusals_message_masks_credentials_before_its_cuts():
     assert "Zq9" not in str(text_body) and "Zq9" not in text_body.body and len(text_body.body) <= 80
 
 
+def test_a_refusals_message_masks_a_json_bodys_values_before_serializing_them():
+    """A JSON body's values are masked before it is serialized: serializing escapes a quoted password's
+    quotes, which the masking would misread, so an escaped quote inside a password would show its tail.
+    A password key's value is masked whatever its type; the body itself stays as the API sent it."""
+    body = {"error": "internal", "detail": 'connect failed: password="fake\\"tail-secret" host=db',
+            "db": {"password": ["fake-list-secret"]}}
+    refused = ApiCallFailed("send", 503, body)
+    assert "tail-secret" not in str(refused) and "fake-list-secret" not in str(refused)
+    assert "host=db" in str(refused) and refused.body == body   # the rest shown; the body as it came
+
+
 def test_a_route_fills_and_encodes_its_parameters():
     assert ROUTES["owner_take_over"].url(session_id="s/1 ?x") == "/api/owner/conversations/s%2F1%20%3Fx/takeover"
     assert ROUTES["send"].url(desk_slug="rivera") == "/api/public/desks/rivera/messages"
