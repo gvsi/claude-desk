@@ -89,6 +89,46 @@ async def test_memory_caps_and_ids_are_validated(app, client, invalid):
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
 
 
+@pytest.mark.parametrize("topics,accepted", [
+    pytest.param(["x" * 60] * 10, True, id="ten-sixty-character-topics"),
+    pytest.param(["x"] * 11, False, id="eleven-topics"),
+    pytest.param(["x" * 61], False, id="sixty-one-character-topic"),
+    pytest.param([""], False, id="empty-topic"),
+])
+async def test_memory_topic_boundaries(app, client, topics, accepted):
+    copy = await rivera(app, client)
+    body = copying.deepcopy(CPA_MEMORY)
+    body["items"][0]["topics"] = topics
+    before = len(await entries(app, copy.copy_id, copy.desk_id))
+    response = await client.put(f"/desks/{copy.desk_id}/memory", headers=copy.owner, json=body)
+    assert (response.status_code, response.json() if not accepted else None) == (
+        (200, None) if accepted else (422, {"code": "invalid"}))
+    [desk] = await rows_of(app, copy.copy_id, select(Desk).where(Desk.desk_id == copy.desk_id))
+    assert desk.simulated_memory == (body if accepted else None)
+    added = (await entries(app, copy.copy_id, copy.desk_id))[before:]
+    assert [(entry.event.kind, entry.event.summary) for entry in added] == [
+        ("desk_data", {"part": "memory", "refs": ["business", "hours"]} if accepted else
+         {"part": "memory", "refused": "invalid"})]
+
+
+@pytest.mark.parametrize("field", ["about", "title", "topics", "text"])
+async def test_memory_nul_is_refused_before_storage(app, client, field):
+    copy = await rivera(app, client)
+    body = copying.deepcopy(CPA_MEMORY)
+    if field == "about":
+        body[field] = "before\0after"
+    else:
+        body["items"][0][field] = ["before\0after"] if field == "topics" else "before\0after"
+    before = len(await entries(app, copy.copy_id, copy.desk_id))
+    response = await client.put(f"/desks/{copy.desk_id}/memory", headers=copy.owner, json=body)
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    [desk] = await rows_of(app, copy.copy_id, select(Desk).where(Desk.desk_id == copy.desk_id))
+    assert desk.simulated_memory is None
+    added = (await entries(app, copy.copy_id, copy.desk_id))[before:]
+    assert [(entry.event.kind, entry.event.summary) for entry in added] == [
+        ("desk_data", {"part": "memory", "refused": "invalid"})]
+
+
 async def test_memory_write_requires_the_live_desks_owner_alone(app, client):
     copy, other = await rivera(app, client), await rivera(app, client)
     visitor = await open_visitor(client, copy)

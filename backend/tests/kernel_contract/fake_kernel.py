@@ -746,6 +746,15 @@ def in_hours(moment: datetime, windows: list[HoursWindow], tz: ZoneInfo = RIVERA
 _JSON_TYPES = {"object": dict, "array": list, "string": str, "null": type(None)}
 
 
+def storable(text: str) -> bool:
+    """Mirror repo.storable: Postgres text and JSONB require valid UTF-8 without NUL."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return "\0" not in text
+
+
 def matches(schema: dict, value: Any) -> bool:
     """Whether `value` fits one of the closed input schemas above (the subset of JSON Schema they use).
     Integers are strict: `"1"`, `1.0` and `true` are not integers."""
@@ -3158,12 +3167,18 @@ class FakeKernelState:
                                       source="kernel", claims=[claim], label=Label(readers=["public"])))
         return self._part_updated(desk, "charter")
 
-    def desk_memory(self, request: Request, body: DeskMemoryRequest) -> DeskUpdated:
+    def _memory_desk(self, request: Request) -> Desk:
         if "x-session-token" in request.headers:
             raise Refusal(401, "auth")
-        desk = self._owners_desk(request, request.path_params["id"])
+        return self._owners_desk(request, request.path_params["id"])
+
+    def desk_memory(self, request: Request, body: DeskMemoryRequest) -> DeskUpdated:
+        desk = self._memory_desk(request)
         values = {"about": body.about, "items": " ".join(
             value for item in body.items for value in (item.id, item.title, *item.topics, item.text))}
+        if not all(storable(value) for value in values.values()):
+            self.append(desk, "desk_data", {"part": "memory", "refused": "invalid"})
+            raise Refusal(422, "invalid")
         canaries = self._canaries(desk.copy_id)
         fields = [name for name, value in values.items() if canary_spans(value, canaries)]
         rest = " ".join(value for name, value in values.items() if name not in fields)
@@ -4045,8 +4060,14 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
         if failure is not None:
             return _error(int(failure), FAILURE_CODES[failure])
         try:
-            body = _parse(request_model, raw)
             state._route = route_template(key)     # handlers don't await, so no other call answers meanwhile
+            try:
+                body = _parse(request_model, raw)
+            except Refusal:
+                if key == "PUT /desks/{id}/memory":
+                    desk = state._memory_desk(request)
+                    state.append(desk, "desk_data", {"part": "memory", "refused": "invalid"})
+                raise
             result = handler(request, body)
         except Refusal as refusal:
             result = refusal

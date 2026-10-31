@@ -2451,6 +2451,29 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     assert await refused(elsewhere) == (404, "not_found")
 
 
+@pytest.mark.kernel_plan("01c")
+async def test_memory_nul_item_is_refused(kernel):
+    from desk.kernel_api import DeskMemoryRequest
+
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    memory = DeskMemoryRequest.model_validate({"about": "Simulated CPA notes.", "items": [
+        {"id": "business", "title": "Chen CPA", "topics": ["business"], "text": "before\0after"}]})
+    start = (await ledger_page(owner, created.desk_id)).entries[-1].seq
+    assert await refused(owner.call("PUT /desks/{id}/memory", memory, path={"id": created.desk_id})) == (
+        422, "invalid")
+    assert [(entry.event.kind, entry.event.summary)
+            for entry in (await ledger_page(owner, created.desk_id)).entries if entry.seq > start] == [
+        ("desk_data", {"part": "memory", "refused": "invalid"})]
+    session = (await owner.whoami()).session
+    decision = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=created.desk_id,
+        call=ToolCall(call_id="refused-memory", tool="native.read_memory", args={"query": "business"})))
+    assert (await execute(owner, decision, session.generation)).model_view == {"simulated": True, "items": []}
+
+
 # Setup: a new Desk's parts, rules drafts, probes and connected tools (Plans 01a, 01b and 01c) -------------------------
 
 HOURS = [HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(8), end=time(17))]

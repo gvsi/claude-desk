@@ -712,7 +712,21 @@ export interface DeskMemoryRequest {
 export interface MemoryItem {
   id: string;
   title: string;
-  topics: string[];
+  /**
+   * @maxItems 10
+   */
+  topics:
+    | []
+    | [string]
+    | [string, string]
+    | [string, string, string]
+    | [string, string, string, string]
+    | [string, string, string, string, string]
+    | [string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string]
+    | [string, string, string, string, string, string, string, string, string, string];
   text: string;
 }
 export interface DeskNotificationsRequest {

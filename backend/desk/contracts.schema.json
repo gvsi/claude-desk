@@ -2288,8 +2288,11 @@
         },
         "topics": {
           "items": {
+            "maxLength": 60,
+            "minLength": 1,
             "type": "string"
           },
+          "maxItems": 10,
           "title": "Topics",
           "type": "array"
         },

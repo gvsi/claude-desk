@@ -478,6 +478,11 @@ async def put_charter(ctx: KernelCtx, desk_row: Desk, body: DeskCharterRequest) 
 
 async def put_memory(ctx: KernelCtx, desk_row: Desk, body: DeskMemoryRequest) -> list[str]:
     """Replace the Desk's simulated owner notes. Even private notes must not import document canaries."""
+    if not storable(body.about) or any(not storable(value) for item in body.items
+                                     for value in (item.id, item.title, *item.topics, item.text)):
+        raise KernelFailure(422, "invalid", "memory_text", persist=partial(
+            _ledger_refusal, copy_id=ctx.copy_id, desk_ids=[desk_row.desk_id],
+            summary={"part": "memory", "refused": "invalid"}))
     await refuse_public_canaries(ctx, "memory", {
         "about": body.about, "items": [item.model_dump() for item in body.items]}, desk_row.desk_id)
     desk_row.simulated_memory = body.model_dump(mode="json")

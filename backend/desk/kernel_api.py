@@ -87,7 +87,7 @@ class MemoryItem(BaseModel):
 
     id: str = Field(pattern=r"^[a-z][a-z-]{0,59}$")
     title: str = Field(min_length=1, max_length=200)
-    topics: list[str]
+    topics: list[Annotated[str, StringConstraints(min_length=1, max_length=60)]] = Field(max_length=10)
     text: str = Field(min_length=1, max_length=2000)
 
 class DeskMemoryRequest(KernelRequest):       # PUT /desks/{id}/memory
