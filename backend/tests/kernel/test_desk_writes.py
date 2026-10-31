@@ -506,9 +506,13 @@ async def test_one_write_closes_sessions_for_a_removal_and_a_new_contact(app, cl
     await updated(client, copy, "people", {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
                                                        "contact": "dana.w@example.net"}], "remove": ["bob"]})
     reasons = {dana.session_id: "contact_changed", bob.session_id: "person_removed"}
+    # session-ID order is the database's, as the kernel locks the sessions (`ORDER BY session_id`),
+    # which needn't be Python's: the IDs mix cases, and a collation may sort "hd…" before "WG…"
+    in_id_order = await rows_of(app, copy.copy_id, select(ActorSession.session_id).where(
+        ActorSession.session_id.in_(reasons)).order_by(ActorSession.session_id))
     assert [(e.event.kind, e.event.session_id, e.event.summary) for e in (await entries_of(app, copy))[before:]] == [
         *(("session", session_id, {"session_id": session_id, "closed": True, "reason": reasons[session_id]})
-          for session_id in sorted(reasons)),
+          for session_id in in_id_order),
         ("desk_data", None, {"part": "people", "refs": ["bob", "dana"]})]
     for visitor in (dana, bob):
         response = await get_context(client, visitor.session_id, visitor.headers)
