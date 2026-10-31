@@ -14,7 +14,7 @@ import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
 import { conversationsKey } from '../conversations/ConversationsPage.tsx';
 import { conversationKey } from '../conversations/useTakeOver.ts';
-import { desksQuery } from '../useDesks.ts';
+import { useDesks } from '../useDesks.ts';
 import {
   NOTHING_DONE,
   THINGS,
@@ -66,8 +66,8 @@ function worked<T>(read: { status: 'pending' | 'error' | 'success'; data: T | un
 
 export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOptions): DoneSignals {
   const [memory, setMemory] = useState(NOTHING_DONE);
-  // The copy's Desks as the owner's frame keeps them, never read again here.
-  const desks = useQuery({ ...desksQuery(), enabled: false });
+  // The copy's Desks as the owner's frame reads them, never read again here.
+  const desks = useDesks(deskId, { passive: true });
   const businesses = desks.data;
 
   // The Desk the copy started with: the first one listed when this view first read the copy, and

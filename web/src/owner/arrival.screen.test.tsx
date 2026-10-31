@@ -1241,6 +1241,23 @@ describe('Things to try ticks off', () => {
     expect(requests('ledger').length).toBeGreaterThan(reads.ledger);
   });
 
+  it('coming_back_to_today_reads_the_copys_desks_no_more', async () => {
+    const { screen, router } = await renderRoute(TODAY);
+    await expect.element(thingsToTry(screen)).toBeVisible();
+    await router.navigate(`/app/${RIVERA.deskId}/conversations`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+
+    // Later, once the copy's Desks read is no longer fresh, the owner comes back to Today: the list
+    // follows the Desks the frame keeps, and reads them no more than Today did before it.
+    const realNow = Date.now.bind(Date);
+    vi.spyOn(Date, 'now').mockImplementation(() => realNow() + 60_000);
+    const reads = { desks: requests('desks').length, today: requests('today').length };
+    await router.navigate(TODAY);
+    await expect.element(thingsToTry(screen)).toBeVisible();
+    await expect.poll(() => requests('today').length, { timeout: 5_000 }).toBeGreaterThan(reads.today + 2);
+    expect(requests('desks')).toHaveLength(reads.desks);
+  });
+
   it('a_ticked_row_shown_again_is_drawn_still', async () => {
     const { screen } = await renderRoute(TODAY);
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
