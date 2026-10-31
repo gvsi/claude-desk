@@ -5,7 +5,9 @@ reads) and the pinned MCP tools' (`payments_mcp`) are imported at the end of thi
 
 `register` refuses an adapter whose args model isn't strict and closed, or whose profile's
 `input_schema` isn't exactly that model's JSON Schema, so the schema Claude sees is the one the
-kernel enforces.
+kernel enforces. It also refuses one whose `releases_private_data` disagrees with its profile: the
+declaration is True exactly when the profile has the `private_data` effect, which the rules decide
+the tool by, so the execution's checks and the rules never read the tool differently.
 """
 
 import hashlib
@@ -62,6 +64,9 @@ def _check(adapter: Adapter) -> None:
         raise ValueError(f"{profile.tool}: model_view_keys is a frozenset")
     if not isinstance(getattr(adapter, "releases_private_data", None), bool):
         raise ValueError(f"{profile.tool}: an adapter declares releases_private_data, True or False")
+    if adapter.releases_private_data != ("private_data" in profile.effects):
+        raise ValueError(f"{profile.tool}: releases_private_data is True exactly when the profile has the "
+                         "private_data effect")
 
 
 # The native adapters register themselves when imported, so importing this package gives the kernel

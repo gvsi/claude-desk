@@ -8,8 +8,10 @@ them, would hand the person's document to whoever verified through the old conta
 checks its session again, before anything runs: the answer's own re-check, and T2's under the session
 row it holds. A session that no longer stands releases nothing; the decision ends
 `refused_at_execution` with a plain reason the owner reads. Every adapter declares whether it
-releases private data (`releases_private_data`), and an adapter declared not to that returns data
-the session reads only as its person fails closed.
+releases private data (`releases_private_data`), in step with its profile's `private_data` effect,
+and an adapter declared not to that returns data the session reads only as its person is withheld:
+what it did stands, since it may have acted outside the kernel, but nothing it returned reaches the
+session, now or on a later read.
 """
 
 import logging
@@ -17,12 +19,13 @@ import logging
 import pytest
 from sqlalchemy import select
 
-from desk.contracts import Claim, Fact, Label
+from desk.contracts import Claim, Fact, Label, NormalizedAction
 from desk.db.models import Approval, DocumentLink, Execution, Quote
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
-from desk.kernel_service import adapters, execute
-from desk.kernel_service.adapters.base import AdapterResult
+from desk.kernel_api import SessionContext
+from desk.kernel_service import adapters, execute, labels
+from desk.kernel_service.adapters.base import AdapterResult, AdapterUnknown, ExecCtx
 from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FakeAdapter
@@ -30,6 +33,7 @@ from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of, verify_se
 from .test_adapters import quote_args, rivera
 from .test_approvals import add_person, answered
 from .test_compiler import card
+from .test_context import context_of, fact_ids, owner_session_id
 from .test_decide import decided, desk_with, open_visitor, set_session
 from .test_desk_writes import updated
 from .test_execute import executed, read
@@ -38,6 +42,8 @@ from .test_release_document import DANA, TOOL, confirmed, documents
 
 ASK_FOR_DOCUMENTS = card("ask-docs", TOOL, mode="ask", who="record_owner")
 SECRET = "Dana Whitfield, account 4471"                 # what a misdeclared adapter returns
+QUOTED = "Quoted from Maria Rivera's price list"        # the stand-in's executed line, its tool being the quote's
+CHECKED = {"policy_version": 1, "auto_money_cap_cents": 50_000}   # the rules a stand-in Desk's step 6 ran under
 
 
 async def held_release(app, client):
@@ -180,6 +186,23 @@ def test_every_adapter_declares_whether_it_releases_private_data(registry):
         adapters.register(undecided, replace=True)
 
 
+@pytest.mark.parametrize(("tool", "effects", "declared"), [
+    ("native.quote", ["change"], True),
+    ("payments.list_charges", ["private_data"], False),
+], ids=["declared_without_the_effect", "effect_without_the_declaration"])
+def test_an_adapter_whose_declaration_contradicts_its_profile_is_refused(registry, tool, effects, declared):
+    """An adapter's declaration and its profile say the same thing: it releases private data exactly
+    when its profile has the `private_data` effect, which the rules decide it by. One that says it
+    does with no such effect (a native stand-in), or has the effect and says it doesn't (a connected
+    one), isn't registered, and the tool keeps the adapter it had."""
+    adapter = FakeAdapter(tool, effects=effects)
+    adapter.releases_private_data = declared
+    before = adapters.ADAPTERS.get(tool)
+    with pytest.raises(ValueError, match=tool):
+        adapters.register(adapter, replace=True)
+    assert adapters.ADAPTERS.get(tool) is before
+
+
 def undeclared_fact(fact_kind: str, session_id: str, dana: str, bob: str) -> Fact:
     """A fact an adapter declared not to release private data must never return, for a session
     verified as Dana: one she reads only as her person, a document's, one Bob reads as well as her
@@ -195,37 +218,80 @@ def undeclared_fact(fact_kind: str, session_id: str, dana: str, bob: str) -> Fac
                 label=Label(readers=readers, record_owner=record_owner))
 
 
+def stores(fact: Fact):
+    """An `execute` or `reconcile` that writes `fact`'s row, as an adapter stores what it made, and
+    returns it."""
+    async def hook(xctx: ExecCtx, action: NormalizedAction, *args) -> AdapterResult:
+        ctx = xctx.ctx
+        ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, ctx.clock.now(),
+                                   session_id=action.session_id, action_id=action.action_id))
+        await ctx.db.flush()
+        return AdapterResult(facts=[fact], model_view={"ok": True})
+    return hook
+
+
+async def withheld_everywhere(app, client, rows, visitor, decision, fact: Fact) -> None:
+    """Nothing of `fact` reaches the session on a later read: its decision carries the executed line
+    and none of the data, and its context leaves the fact out, now narrowed to the owner (its record
+    owner kept), whose own context still has it."""
+    [row] = await rows_of(app, rows.copy_id, select(FactRow).where(FactRow.fact_id == fact.fact_id))
+    assert (row.readers, row.record_owner, row.action_id) == (
+        ["owner"], fact.label.record_owner, decision.action.action_id)
+    later = await client.get(f"/decisions/{decision.decision_id}", headers=visitor.headers)
+    assert later.status_code == 200, later.text
+    assert SECRET not in later.text
+    assert (later.json()["state"], later.json()["visitor_plain"]) == ("executed", QUOTED)
+    seen = await client.get(f"/context/{visitor.session_id}", headers=visitor.headers)
+    assert seen.status_code == 200, seen.text
+    assert SECRET not in seen.text and fact.fact_id not in fact_ids(SessionContext.model_validate(seen.json()).facts)
+    owners = await context_of(client, await owner_session_id(client, rows.owner), rows.owner, desk_id=rows.desk_id)
+    assert fact.fact_id in fact_ids(owners.facts)
+
+
+def logged_by_tool_and_action(caplog, action_id: str) -> None:
+    logged = [record.getMessage() for record in caplog.records]
+    assert f"adapter_undeclared_private_data tool=native.quote action_id={action_id}" in logged
+    assert not any(SECRET in message for message in logged)
+
+
+@pytest.mark.parametrize("path", ["allow", "approved"])
 @pytest.mark.parametrize("fact_kind", ["person_only", "document", "another_persons", "another_persons_record"])
-async def test_an_adapter_that_releases_undeclared_private_data_fails_closed(app, client, registry, caplog, fact_kind):
+async def test_an_adapter_that_releases_undeclared_private_data_is_withheld(app, client, registry, caplog, fact_kind,
+                                                                           path):
     """An adapter declared not to release private data whose result carries a fact the session reads
-    only as its person, a document's, or one naming another person as a reader or its owner, fails
-    closed: the action is settled failed, nothing is delivered, and the log names the tool and the
-    action, never the data. Only the session's own verified person may join a fact the session
-    reads as itself (as a quote's label does)."""
+    only as its person, a document's, or one naming another person as a reader or its owner. What it
+    did stands, since it may have acted outside the kernel (a charge made is never recorded as not
+    made), but nothing it returned reaches the session: on an allow and an approved hold alike, the
+    action is executed with an empty result and the executed line, and no undo runs. The fact row it
+    wrote stays, narrowed to the owner, since its labels can't be trusted, so no later read in the
+    session shows it; the entry names the violation and how many rows were narrowed; the log names
+    the tool and the action, never the data. Only the session's own verified person may join a fact
+    the session reads as itself (as a quote's label does)."""
     caplog.set_level(logging.INFO, logger="desk.kernel_service")
     quote = FakeAdapter("native.quote")                          # declared not to release private data
-    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
-    visitor = await open_visitor(client, rows)
-    person_id = await add_person(app, rows, "dana", "Dana Whitfield")
-    bob = await add_person(app, rows, "bob", "Bob Okafor")
-    await verify_session(app, rows.copy_id, visitor.session_id, person_id)
-    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
-    assert allowed.outcome == "allow", allowed.reason_plain
-    secret = undeclared_fact(fact_kind, visitor.session_id, person_id, bob)
-    quote.script["execute"] = AdapterResult(facts=[secret], model_view={"ok": True})
+    rule = card("quote", "native.quote") if path == "allow" else card("ask-quote", "native.quote", mode="ask")
+    rows, visitor, dana, bob = await verified_fake_desk(app, client, quote, [rule])
+    decision = await decided(client, visitor, "native.quote", {"qty": 1})
+    secret = undeclared_fact(fact_kind, visitor.session_id, dana, bob)
+    quote.script["execute"] = stores(secret)
 
-    result = await executed(client, visitor, allowed)
+    if path == "allow":
+        assert decision.outcome == "allow", decision.reason_plain
+        result = await executed(client, visitor, decision)
+    else:
+        assert decision.state == "held", decision.reason_plain
+        result = (await answered(client, rows.owner, decision.decision_id, "allow_once")).execution
 
-    assert (result.state, result.facts, result.model_view) == ("failed", [], {})
+    assert (result.state, result.facts, result.model_view, result.inbox) == ("succeeded", [], {}, [])
+    assert "on_failed" not in quote.calls
     [execution] = await rows_of(app, rows.copy_id, select(Execution).where(
-        Execution.decision_id == allowed.decision_id))
-    assert execution.state == "failed"
-    assert await rows_of(app, rows.copy_id, select(FactRow).where(FactRow.fact_id == "quote:fake-1")) == []
-    failed = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"][-1]
-    assert (failed.summary["state"], failed.summary["reason"]) == ("failed", "undeclared_private_data")
-    logged = [record.getMessage() for record in caplog.records]
-    assert f"adapter_undeclared_private_data tool=native.quote action_id={allowed.action.action_id}" in logged
-    assert not any(SECRET in message for message in logged)
+        Execution.decision_id == decision.decision_id))
+    assert (execution.state, execution.result) == ("succeeded", result)
+    await withheld_everywhere(app, client, rows, visitor, decision, secret)
+    withheld = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"][-1]
+    assert withheld.summary == {"decision_id": decision.decision_id, "action_id": decision.action.action_id,
+                                "state": "executed", **CHECKED, "violation": "undeclared_private_data", "narrowed": 1}
+    logged_by_tool_and_action(caplog, decision.action.action_id)
 
 
 async def test_a_session_may_read_its_own_persons_fact_as_itself(app, client, registry):
@@ -274,41 +340,51 @@ async def verified_fake_desk(app, client, fake: FakeAdapter, cards):
     return rows, visitor, dana, bob
 
 
-async def test_a_reconciled_result_with_undeclared_private_data_settles_failed_once(app, client, registry, caplog):
-    """An outcome nobody knew, reconciled into a result an adapter declared not to release private
-    data mustn't carry (a fact Bob reads): the action settles `failed` with nothing in it, ledgered
-    with the reason, and stays settled: the next read asks the adapter nothing."""
+@pytest.mark.parametrize("entry", ["read", "startup"])
+async def test_a_reconciled_result_with_undeclared_private_data_is_withheld_once(app, client, registry, caplog,
+                                                                                entry):
+    """An outcome nobody knew, reconciled on a read or at startup into a result an adapter declared
+    not to release private data mustn't carry (a fact Bob reads as well as the session): what the
+    adapter says it did stands, but nothing it returned reaches the session. The action is executed
+    with an empty result and no undo, the violation and the narrowed count on the reconciled entry,
+    and the fact row `reconcile` wrote narrowed to the owner. It stays settled: the next read asks
+    the adapter nothing."""
     caplog.set_level(logging.INFO, logger="desk.kernel_service")
     quote = FakeAdapter("native.quote")
     rows, visitor, dana, bob = await verified_fake_desk(app, client, quote, [card("quote", "native.quote")])
     allowed = await decided(client, visitor, "native.quote", {"qty": 1})
     quote.script["execute"] = RuntimeError("the provider's answer was lost")
     assert (await executed(client, visitor, allowed)).state == "unknown"
-    quote.script["reconcile"] = AdapterResult(facts=[undeclared_fact("another_persons", visitor.session_id, dana, bob)],
-                                              model_view={"ok": True})
+    secret = undeclared_fact("another_persons", visitor.session_id, dana, bob)
+    quote.script["reconcile"] = stores(secret)
 
+    if entry == "startup":
+        await execute.reconcile_at_startup(app.state.kernel)
     first, again = await read(client, rows.owner, allowed), await read(client, rows.owner, allowed)
 
-    assert (first.state, again.state) == ("failed", "failed")
-    assert quote.calls.count("reconcile") == 1
+    assert (first.state, again.state) == ("executed", "executed")
+    assert quote.calls.count("reconcile") == 1 and "on_failed" not in quote.calls
     [execution] = await rows_of(app, rows.copy_id, select(Execution).where(
         Execution.decision_id == allowed.decision_id))
-    assert (execution.state, execution.result.facts, execution.result.model_view) == ("failed", [], {})
+    assert (execution.state, execution.result.facts, execution.result.model_view, execution.result.inbox) == (
+        "succeeded", [], {}, [])
+    await withheld_everywhere(app, client, rows, visitor, allowed, secret)
     settled = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"][-1]
-    assert (settled.summary["state"], settled.summary["reason"], settled.summary.get("reconciled")) == (
-        "failed", "undeclared_private_data", True)
-    logged = [record.getMessage() for record in caplog.records]
-    assert f"adapter_undeclared_private_data tool=native.quote action_id={allowed.action.action_id}" in logged
-    assert not any(SECRET in message for message in logged)
+    assert settled.summary == {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id,
+                               "state": "executed", **CHECKED, "reconciled": True,
+                               "violation": "undeclared_private_data", "narrowed": 1}
+    logged_by_tool_and_action(caplog, allowed.action.action_id)
 
 
 @pytest.mark.parametrize("entry", ["read", "startup", "approved_reconciliation"])
 async def test_a_private_result_is_never_recovered_into_a_session_that_ended(app, client, registry, frozen_clock,
                                                                               entry):
     """An approved release whose outcome nobody knew, reconciled after its session closed: the
-    reconciliation checks the session as T2 does, holding its row first, and settles the action
-    `refused_at_execution` with the plain reason, exposing nothing; the adapter isn't asked. So for a
-    read of the decision, startup reconciliation, and the approval form of `/execute`."""
+    reconciliation checks the session as T2 does, holding its row first, asks the adapter once,
+    which answers that the release never went through, and settles the action
+    `refused_at_execution` with the plain reason, exposing nothing. So for a read of the decision,
+    startup reconciliation, and the approval form of `/execute`. What a release that did go through
+    records instead is `test_a_refused_private_recovery_asks_the_adapter_once_and_delivers_nothing`'s."""
     release = FakeAdapter("native.quote", releases_private_data=True)     # stands in for a private release
     rows, visitor, dana, bob = await verified_fake_desk(app, client, release,
                                                         [card("ask-quote", "native.quote", mode="ask")])
@@ -317,10 +393,7 @@ async def test_a_private_result_is_never_recovered_into_a_session_that_ended(app
     release.script["execute"] = RuntimeError("the provider's answer was lost")
     answered_now = await answered(client, rows.owner, held.decision_id, "allow_once")
     assert answered_now.execution.state == "unknown"
-    mine = Fact(fact_id="quote:fake-1", kind="quote", status="available", source="kernel",
-                claims=[Claim(key="title", kind="text", value=SECRET)],
-                label=Label(readers=["owner", f"person:{dana}"], record_owner=dana))
-    release.script["reconcile"] = AdapterResult(facts=[mine], model_view={"ok": True})
+    release.script["reconcile"] = None                                    # the release never went through
     await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())     # a contact change, say
 
     if entry == "read":
@@ -334,7 +407,7 @@ async def test_a_private_result_is_never_recovered_into_a_session_that_ended(app
         assert response.status_code == 200, response.text
         assert (response.json()["state"], response.json()["facts"], response.json()["model_view"]) == ("failed", [], {})
 
-    assert "reconcile" not in release.calls
+    assert release.calls.count("reconcile") == 1
     [decision] = await rows_of(app, rows.copy_id, select(DecisionRow).where(
         DecisionRow.decision_id == held.decision_id))
     assert (decision.state, decision.visitor_plain) == (
@@ -344,3 +417,53 @@ async def test_a_private_result_is_never_recovered_into_a_session_that_ended(app
     settled = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"][-1]
     assert (settled.summary["state"], settled.summary["reason"], settled.summary["check"],
             settled.summary.get("reconciled")) == ("refused_at_execution", "session_ended", "contact_changed", True)
+
+
+# The decision's state, its visitor line, the execution's state and the entry that settles it, for each answer
+# the adapter gives a recovery its session ended for: never why the session ended in the visitor's line.
+RECOVERED = {
+    "result": ("executed", QUOTED, "succeeded",
+               {"state": "executed", "reconciled": True, "withheld": "session_ended", "check": "contact_changed"}),
+    "none": ("refused_at_execution", RULES_CHANGED, "failed",
+             {"state": "refused_at_execution", "reason": "session_ended", "check": "contact_changed",
+              "reconciled": True}),
+    "unknown": ("unknown", "Still confirming this", "unknown", {"state": "unknown"}),
+}
+
+
+@pytest.mark.parametrize("answer", ["result", "none", "unknown"])
+async def test_a_refused_private_recovery_asks_the_adapter_once_and_delivers_nothing(app, client, registry,
+                                                                                     frozen_clock, answer):
+    """An approved private release whose outcome nobody knew, recovered after its session closed:
+    the adapter is asked once what happened, since a release that went through outside the kernel
+    must never read as not made, and whatever it answers nothing reaches the session. It went
+    through: `executed`, with an empty result and the executed line, no undo, the entry saying it was
+    withheld because the session ended, with nothing narrowed. It didn't: undone once, then
+    `refused_at_execution` with the plain reason. It can't say: still `unknown`, nothing delivered,
+    for the next try."""
+    release = FakeAdapter("native.quote", releases_private_data=True)     # stands in for a private release
+    rows, visitor, dana, bob = await verified_fake_desk(app, client, release,
+                                                        [card("ask-quote", "native.quote", mode="ask")])
+    held = await decided(client, visitor, "native.quote", {"qty": 1})
+    assert held.state == "held", held.reason_plain
+    release.script["execute"] = RuntimeError("the provider's answer was lost")
+    assert (await answered(client, rows.owner, held.decision_id, "allow_once")).execution.state == "unknown"
+    mine = Fact(fact_id="quote:fake-1", kind="quote", status="available", source="kernel",
+                claims=[Claim(key="title", kind="text", value=SECRET)],
+                label=Label(readers=["owner", f"person:{dana}"], record_owner=dana))
+    release.script["reconcile"] = {"result": AdapterResult(facts=[mine], model_view={"ok": True}), "none": None,
+                                   "unknown": AdapterUnknown("the provider can't say yet")}[answer]
+    await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())     # a contact change, say
+
+    decision = await read(client, rows.owner, held)
+
+    state, line, execution_state, settled = RECOVERED[answer]
+    assert release.calls.count("reconcile") == 1
+    assert release.calls.count("on_failed") == (1 if answer == "none" else 0)
+    assert (decision.state, decision.visitor_plain) == (state, line)
+    [execution] = await rows_of(app, rows.copy_id, select(Execution).where(Execution.decision_id == held.decision_id))
+    assert (execution.state, execution.result.facts, execution.result.model_view, execution.result.inbox) == (
+        execution_state, [], {}, [])
+    last = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"][-1]
+    assert last.summary == {"decision_id": held.decision_id, "action_id": held.action.action_id, **CHECKED,
+                            **settled}

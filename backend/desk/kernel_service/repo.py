@@ -38,7 +38,9 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
     4 to 9 the same transaction takes;
 11. facts: an open expires its link's, voiding expires the links', a removal relabels its
     person's documents', a right code relabels the session's (`labels.relabel_on_verify`), closing
-    a handoff expires its own, an hours write rewrites the Desk's;
+    a handoff expires its own, an hours write rewrites the Desk's, an execution or reconciliation
+    that withholds a result narrows the ones it names (`execute._narrow_to_owner`), after the
+    adapter's hook wrote them;
 12. the Desk's ledger head (`ledger.append`, `FOR UPDATE`, where every entry ends; `ledger.page`
     reads it `FOR SHARE`).
 
@@ -53,12 +55,13 @@ asks for a Desk or business row.
 A transaction that holds a later lock never asks for an earlier one: a refusal's `persist` locks
 the decision before it appends, nothing holds a payment link and then asks for the policy row,
 and every step runs its adapter's hooks before it appends (T1 `prepare`, T2 `execute`, T3
-`on_failed`, reconciliation `reconcile` and then `on_failed`, or `on_failed` alone when it
-refuses a private action whose session no longer stands, activation its `ON_ACTIVATE` hooks), so
-a hook may wait for the rows it locks like any other step. An insert under a fresh key
-waits for nothing, so it may come after a later step: T1 and an approved answer run `prepare`
-(step 10) before they insert the intent row (step 3), since a new `action_id` could wait only on
-another uncommitted insert of the same action, which the decision's lock (step 2) rules out, and
+`on_failed`, reconciliation `reconcile` and then, when it answers that nothing happened,
+`on_failed`, also for a private action whose session no longer stands, activation its
+`ON_ACTIVATE` hooks), so a hook may wait for the rows it locks like any other step. An insert
+under a fresh key waits for nothing, so it may come after a later step: T1 and an approved
+answer run `prepare` (step 10) before they insert the intent row (step 3), since a new
+`action_id` could wait only on another uncommitted insert of the same action, which the
+decision's lock (step 2) rules out, and
 Plan 01c's new payment link (step 7) may follow a mandate reservation (step 10). A row is taken
 the first time in the strongest mode the transaction will need, since going from `FOR SHARE` to
 `FOR UPDATE` waits like a new lock. Reading a row without a lock (the session a decision names,

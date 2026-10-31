@@ -243,9 +243,9 @@ async def hold_the_active_version_and_fail(xctx: ExecCtx, action: NormalizedActi
 async def test_a_private_actions_refused_recovery_undoes_before_it_ledgers(app, client, registry, frozen_clock,
                                                                          monkeypatch, on_failed, state):
     """An approved hold of an action that releases private data, its intent left by a kernel that
-    died after the answer, recovered once its session closed: the adapter isn't asked, and the rows
-    its `on_failed` locks come before the ledger head, as in every other step. If it can't undo,
-    the action stays `unknown`, with nothing in its result."""
+    died after the answer, recovered once its session closed: the adapter is asked once and answers
+    that nothing happened, and the rows its `on_failed` locks come before the ledger head, as in
+    every other step. If it can't undo, the action stays `unknown`, with nothing in its result."""
     release = FakeAdapter("native.quote", releases_private_data=True)     # stands in for a private release
     rows, visitor, _, _ = await verified_fake_desk(app, client, release,
                                                    [card("ask-quote", "native.quote", mode="ask")])
@@ -264,7 +264,7 @@ async def test_a_private_actions_refused_recovery_undoes_before_it_ledgers(app, 
     # the reconciliation commits at once, and the read goes on in a new transaction holding the decision again
     assert log.transactions == [["sessions", "decisions", "executions", "policy_versions", "ledger_heads"],
                                 ["decisions"]]
-    assert "reconcile" not in release.calls and release.calls[-1] == "on_failed"
+    assert release.calls.count("reconcile") == 1 and release.calls[-2:] == ["reconcile", "on_failed"]
     [execution] = await rows_of(app, rows.copy_id, select(Execution).where(Execution.decision_id == held.decision_id))
     assert (execution.state, execution.result.facts, execution.result.model_view) == (
         "failed" if state == "refused_at_execution" else "unknown", [], {})

@@ -27,10 +27,14 @@ row `FOR UPDATE` rather than `FOR SHARE`, so two of them in one session take tur
 
 `releases_private_data` (required, a bool every adapter class sets itself) says whether its result
 gives the session data that only a verified, entitled person may see, data it reads only as its
-person (a document link). An approved hold of such an action runs only while its session still
-stands for that person (`execute.session_ended`); every other approved hold runs for a closed
-session too, as step 6 lets it. The execute path holds an adapter to its word: one declared not to
-release private data whose result carries some fails closed (`execute.undeclared_private_data`).
+person (a document link). It is True exactly when the profile has the `private_data` effect, which
+registration checks (`adapters.register`). An approved hold of such an action runs only while its
+session still stands for that person (`execute.session_ended`); every other approved hold runs for
+a closed session too, as step 6 lets it. Recovered once that session no longer stands, it is still
+reconciled, and nothing it answers is delivered. The execute path holds an adapter to its word: one
+declared not to release private data whose result carries some is withheld, never failed, since
+it may have acted outside the kernel: nothing it returned reaches the session, and the fact rows
+the result names are narrowed to the owner (`execute.undeclared_private_data`).
 """
 
 from collections.abc import Iterable

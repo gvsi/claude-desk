@@ -52,7 +52,11 @@ class FakeAdapter:
     class) is raised, a callable is called with the hook's arguments (and awaited if it returns an
     awaitable), anything else is returned. Unscripted hooks resolve the Desk itself, prepare and
     undo nothing, execute with `model_view {"ok": True}` and reconcile to failed. `calls` lists the
-    hooks run, in order."""
+    hooks run, in order.
+
+    It declares whether it releases private data as every adapter must, in step with its profile
+    (`adapters.register`): `releases_private_data=True` adds the `private_data` effect, and a
+    stand-in given that effect declares it."""
 
     Args: type[BaseModel] = FakeArgs
     free_text_fields = frozenset({"note"})
@@ -60,12 +64,16 @@ class FakeAdapter:
 
     def __init__(self, tool: ToolName = "native.quote", *, effects: Iterable[Effect] = ("change",),
                  resource_kind: str = "desk", reversible: bool = True, status: str = "enabled",
-                 releases_private_data: bool = False):
+                 releases_private_data: bool | None = None):
         mcp = tool in MCP_TOOLS
+        effects = list(effects)
+        if releases_private_data and "private_data" not in effects:
+            effects.append("private_data")
         # declared as every adapter declares it: a stand-in that releases a person's data says so
-        self.releases_private_data = releases_private_data
+        self.releases_private_data = ("private_data" in effects if releases_private_data is None
+                                      else releases_private_data)
         self.profile = ToolProfile(
-            tool=tool, source="mcp" if mcp else "native", effects=list(effects), reversible=reversible,
+            tool=tool, source="mcp" if mcp else "native", effects=effects, reversible=reversible,
             adapter="tests.kernel.fakes.FakeAdapter", resource_kind=resource_kind,
             description_confirmed=f"A test stand-in for {tool}.", input_schema=self.Args.model_json_schema(),
             definition_sha256="f" * 64 if mcp else None, status=status,
