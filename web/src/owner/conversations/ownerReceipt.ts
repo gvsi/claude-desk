@@ -26,6 +26,25 @@ const REASON_STATES: ReadonlySet<DecisionState> = new Set<DecisionState>(OWNER_R
 /** A decision as the owner reads it, by id: read once and kept, never polled. */
 export const decisionKey = (decisionId: string) => ['decision', decisionId] as const;
 
+/**
+ * The owner's read of a decision by id, shared by every screen that reads one: written once, at
+ * decide time, so one read is the answer for as long as the app runs. A read that failed is tried
+ * again only when a screen turns it on again.
+ */
+export function decisionQuery(decisionId: string) {
+  return {
+    queryKey: decisionKey(decisionId),
+    queryFn: () => request('decision', { params: { decision_id: decisionId } }),
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: Number.POSITIVE_INFINITY,
+    retry: false,
+    retryOnMount: false,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  } as const;
+}
+
 /** A receipt on an owner screen: `MarginReceipt`'s data, with the decision's reason where the kernel decided. */
 export interface OwnerReceiptView extends ReceiptView {
   /** The decision's `reason_plain`, once read, on the receipt that reports what the kernel decided. */
@@ -40,19 +59,7 @@ export function useOwnerReceipt(ev: StatusEvent | EvMessage, first: boolean): Ow
   const view = receiptFromEvent(ev);
   const decisionId = ev.type === 'message' ? null : ev.decision_id;
   const wanted = decisionId !== null && first && ev.type !== 'message' && REASON_STATES.has(ev.state);
-  const read = useQuery({
-    queryKey: decisionKey(decisionId ?? ''),
-    queryFn: () => request('decision', { params: { decision_id: decisionId ?? '' } }),
-    enabled: wanted,
-    // Written once, at decide time: one read is the answer for as long as the app runs.
-    staleTime: Number.POSITIVE_INFINITY,
-    gcTime: Number.POSITIVE_INFINITY,
-    retry: false,
-    retryOnMount: false,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-  });
+  const read = useQuery({ ...decisionQuery(decisionId ?? ''), enabled: wanted });
   const decision = read.data;
   if (!wanted || decision === undefined || decision.decision_id !== decisionId) return view;
   return { ...view, reason: decision.reason_plain };

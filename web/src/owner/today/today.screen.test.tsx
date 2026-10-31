@@ -3,15 +3,18 @@
  * place, callbacks to join), who is live now, what happened since last night with its full list,
  * and the last 7 days, every figure as the API reads it.
  */
+import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { page, type Locator } from 'vitest/browser';
+import { page, userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
-import type { Decision } from '../../api/contracts.ts';
+import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
+import { ROUTES } from '../../api/routes.ts';
 import type { BriefingItem, BriefingList, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { worker } from '../../mocks/browser.ts';
 import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -861,5 +864,438 @@ describe('Today', () => {
       .toBeVisible();
     expect(document.body.textContent).not.toContain("That didn't go through. Check it and try again.");
     expect(router.state.location.pathname).toBe(TODAY);
+  });
+});
+
+describe("Today's Demo inbox", () => {
+  /** The sheet's button, with its count. */
+  const inboxButton = (screen: RenderResult) => screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
+
+  /** Where a held request's alert links to: its card on Today. */
+  const requestLink = (decisionId: string) => `${TODAY}#request-${encodeURIComponent(decisionId)}`;
+
+  /** The owner's read of one decision, as the app sends it. */
+  const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
+
+  /**
+   * Holds every read of `path` until the test lets them through to the mock: `held()` counts the
+   * reads waiting, and `release()` sends them on.
+   */
+  function holdReads(path: string): { held: () => number; release: () => void } {
+    let waiting = 0;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    worker.use(
+      http.get(path, async () => {
+        waiting += 1;
+        await released;
+        return undefined;
+      }),
+    );
+    return { held: () => waiting, release };
+  }
+
+  /** Two animation frames: long enough for a navigation's transition to be drawn. */
+  const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
+  /** The main Desk's Needs you, as the app reads it. */
+  const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
+
+  /** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
+  function failReads(path: string): { count: () => number; stop: () => void } {
+    let failing = true;
+    let count = 0;
+    worker.use(
+      http.get(path, () => {
+        if (!failing) return undefined;
+        count += 1;
+        return HttpResponse.json({ error: 'kernel', code: 'kernel_unavailable' }, { status: 503 });
+      }),
+    );
+    return {
+      count: () => count,
+      stop: () => {
+        failing = false;
+      },
+    };
+  }
+
+  /** The top of `el` is inside the window, where the owner can see it. */
+  function expectInView(el: Element): void {
+    const box = el.getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.top).toBeLessThan(window.innerHeight);
+  }
+
+  it.each(['desktop', 'phone'] as const)('inbox_alert_opens_the_held_request_%s', async (viewport) => {
+    // The seeded hold's alert, as the kernel wrote it, beside entries that name no request: a code,
+    // an alert about something else, and a ledger checkpoint.
+    const held = seededHold();
+    const alert = mockStore.world.inbox.find((record) => record.entry.decision_id === held.decision_id)?.entry;
+    if (!alert) throw new Error("the seeded hold alerted the owner, naming it");
+    const others: DemoInboxEntry[] = [
+      {
+        entry_id: 'inbox-code',
+        to: rivera.people.dana.maskedContact,
+        kind: 'verification_code',
+        body: 'Your Rivera Plumbing code is 482913. It expires in ten minutes.',
+        created_at: minutesAgo(5),
+        decision_id: null,
+      },
+      {
+        entry_id: 'inbox-paused',
+        to: 'owner',
+        kind: 'alert',
+        body: 'Bookings paused after three refused tries in a minute.',
+        created_at: minutesAgo(4),
+        decision_id: null,
+      },
+      { entry_id: 'inbox-head', to: 'owner', kind: 'head_checkpoint', body: 'Ledger head 412, signed.', created_at: minutesAgo(3), decision_id: null },
+    ];
+    mockStore.inject({ route: 'ownerInbox', status: 200, times: 10_000, body: [alert, ...others] });
+    const { screen, router } = await renderRoute(TODAY, { viewport });
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeInTheDocument();
+
+    const open = inboxButton(screen);
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByText(alert.body)).toBeVisible();
+    await expect.element(sheet.getByText(others[0]?.body ?? '')).toBeVisible();
+    // "Open the request" under the hold's alert only, once its request is read.
+    const links = sheet.getByRole('link', { name: 'Open the request' });
+    await expect.element(links.first()).toBeVisible();
+    expect(links.elements()).toHaveLength(1);
+    const link = links.first();
+    expect(link.element().closest('li')?.textContent).toContain(alert.body);
+    expect(link.element().getAttribute('href')).toBe(requestLink(held.decision_id));
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Following it closes the sheet and lands on the held request's card, in view.
+    await link.click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(TODAY);
+    expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expectInView(card.element());
+    // Focus stays there, and the closed sheet reads no more.
+    const reads = requests('ownerInbox').length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(focusIsOn(card.element())).toBe(true);
+    expect(requests('ownerInbox')).toHaveLength(reads);
+  });
+
+  it('inbox_alert_links_to_its_own_desk', async () => {
+    // The Demo inbox is the whole copy's. On Emergencies, Main line's hold alert links to Main
+    // line's Today, as the held decision itself says, and following it lands on that card.
+    const { screen, router } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
+    const held = seededHold();
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    // Nothing is read about the alert's request while the sheet is closed.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(requests('decision')).toEqual([]);
+
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    const link = sheet.getByRole('link', { name: 'Open the request' });
+    await expect.element(link).toHaveAttribute('href', requestLink(held.decision_id));
+    expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
+
+    await link.click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expectInView(card.element());
+  });
+
+  it('inbox_alert_links_only_once_its_request_is_read', async () => {
+    const held = seededHold();
+    const alert = mockStore.world.inbox.find((record) => record.entry.decision_id === held.decision_id)?.entry;
+    if (!alert) throw new Error('the seeded hold alerted the owner, naming it');
+    const openSheet = async (screen: RenderResult) => {
+      await inboxButton(screen).click();
+      const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+      await expect.element(sheet.getByText(alert.body)).toBeVisible();
+      return sheet;
+    };
+
+    // While the request is read, the alert shows no link; once it answers, it does.
+    const read = holdReads(decisionPath(held.decision_id));
+    const first = await renderRoute(TODAY);
+    let sheet = await openSheet(first.screen);
+    await vi.waitFor(() => expect(read.held()).toBe(1));
+    expect(sheet.getByRole('link').elements()).toHaveLength(0);
+    read.release();
+    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toBeVisible();
+
+    // A read that fails shows none.
+    const second = await renderRoute(TODAY, { seed: 'rivera' });
+    mockStore.inject({ route: 'decision', status: 503 });
+    sheet = await openSheet(second.screen);
+    await vi.waitFor(() => expect(requests('decision')).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sheet.getByRole('link').elements()).toHaveLength(0);
+
+    // Nor does a decision that names no action, so no Desk.
+    const third = await renderRoute(TODAY, { seed: 'rivera' });
+    mockStore.inject({ route: 'decision', status: 200, body: { ...seededHold(), action: null } });
+    sheet = await openSheet(third.screen);
+    await vi.waitFor(() => expect(requests('decision')).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sheet.getByRole('link').elements()).toHaveLength(0);
+  });
+
+  it('request_link_waits_for_a_read_that_works', async () => {
+    // Needs you was read before the request was held, and its reads now fail. The address waits for
+    // a read that works rather than spending itself on the list read before, then lands.
+    const { screen, router } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const failing = failReads(needsYouPath);
+    const refund = mockStore.world.addHeldRefund();
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Try again' }), { timeout: 4_000 }).toBeVisible();
+
+    await router.navigate(requestLink(refund.decision_id));
+    const failed = failing.count();
+    await vi.waitFor(() => expect(failing.count()).toBeGreaterThanOrEqual(failed + 2), { timeout: 4_000 });
+    expect(document.activeElement).toBe(document.body);
+    expect(screen.getByRole('article', { name: `Held for you: ${REFUND_REASON}`, exact: true }).elements()).toHaveLength(0);
+
+    failing.stop();
+    const card = heldCard(screen, REFUND_REASON);
+    await expect.element(card, { timeout: 4_000 }).toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+  });
+
+  it('request_link_lands_again_after_back_and_forward', async () => {
+    // Each arrival at a request's address lands once, Back and Forward included.
+    const held = seededHold();
+    const { screen, router } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    await router.navigate(requestLink(held.decision_id));
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+
+    // Today from the sidebar, then Back.
+    const todayLink = screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Today' });
+    await todayLink.click();
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(''));
+    expect(focusIsOn(card.element())).toBe(false);
+    await router.navigate(-1);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(`#request-${held.decision_id}`));
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+
+    // Back to plain Today, shown before Forward: the router's state changes at once, but the page
+    // draws it in a transition, a frame or two later.
+    await router.navigate(-1);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(''));
+    await nextFrames();
+    (todayLink.element() as HTMLElement).focus();
+    await router.navigate(1);
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(`#request-${held.decision_id}`));
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+  });
+
+  it('request_link_waits_for_the_sheet_to_close', async () => {
+    // An address that changes under the open sheet lands once the sheet has closed and handed focus
+    // back to its button, not while the page behind it is out of reach.
+    const held = seededHold();
+    const { screen, router } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    await inboxButton(screen).click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet).toBeVisible();
+
+    await router.navigate(requestLink(held.decision_id), { flushSync: true });
+    await nextFrames();
+    expect(focusIsOn(card.element())).toBe(false);
+    await userEvent.keyboard('{Escape}');
+    await expect.element(sheet).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+  });
+
+  it('request_link_spent_by_the_owner_while_reads_fail', async () => {
+    // Needs you can't be read as the owner arrives at a request's address. Their first pointer or
+    // key press spends it, so a read that works later doesn't pull focus from what they're doing.
+    const { screen, router } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const failing = failReads(needsYouPath);
+    const refund = mockStore.world.addHeldRefund();
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Try again' }), { timeout: 4_000 }).toBeVisible();
+
+    // A pointer press.
+    await router.navigate(requestLink(refund.decision_id));
+    const ideas = region(screen, 'Things to try').getByRole('button', { name: 'Show me ideas' });
+    await ideas.click();
+    const hide = region(screen, 'Things to try').getByRole('button', { name: 'Hide ideas' });
+    await expect.element(hide).toHaveFocus();
+    failing.stop();
+    const card = heldCard(screen, REFUND_REASON);
+    await expect.element(card, { timeout: 4_000 }).toBeInTheDocument();
+    await readsMore('needsYou', 2);
+    await expect.element(hide).toHaveFocus();
+
+    // A key press, on another arrival while reads fail.
+    const again = failReads(needsYouPath);
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Try again' }), { timeout: 4_000 }).toBeVisible();
+    await router.navigate(TODAY);
+    await nextFrames();
+    await router.navigate(requestLink(refund.decision_id));
+    await nextFrames();
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    const focused = document.activeElement;
+    again.stop();
+    await readsMore('needsYou', 2);
+    expect(document.activeElement).toBe(focused);
+    expect(focusIsOn(card.element())).toBe(false);
+  });
+
+  it('request_link_falls_back_to_the_answered_card', async () => {
+    // Answered here a moment ago, the request's card is under "Answered just now": that is where its
+    // address lands.
+    const held = seededHold();
+    const { screen, router } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await card.getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: 'Answered just now' })).toBeVisible();
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    await router.navigate(requestLink(held.decision_id));
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expect(card.element().closest('.cd-needs-you__answered')).not.toBeNull();
+  });
+
+  it('request_link_reads_needs_you_once_more_before_giving_up', async () => {
+    // Held since Needs you was last read, the request isn't in the list Today has. Its address reads
+    // Needs you once more before giving up, and lands on the card that read brings.
+    const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const reads = requests('needsYou').length;
+    const refund = mockStore.world.addHeldRefund();
+
+    await router.navigate(requestLink(refund.decision_id));
+    const card = heldCard(screen, REFUND_REASON);
+    await expect.element(card).toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expect(requests('needsYou')).toHaveLength(reads + 1);
+  });
+
+  it('request_link_without_its_card_leaves_focus_alone', async () => {
+    // A request with no card here (answered, or another Desk's): Today opens as it would without
+    // the address, with no error, and focus stays where it was.
+    const { screen, router } = await renderRoute(requestLink('dec-not-here'));
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await readsMore('needsYou', 2);
+    expect(document.activeElement).toBe(document.body);
+
+    // A request held later under that id isn't jumped to: the address was spent when Needs you read.
+    const [seeded] = await heldItems();
+    if (!seeded?.decision) throw new Error('the seed holds a request');
+    const later: NeedsYouItem = {
+      ...seeded,
+      decision: { ...seeded.decision, decision_id: 'dec-not-here', reason_plain: 'A visitor asked to book Sunday at 10:00 pm.' },
+      held_at: new Date().toISOString(),
+    };
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [seeded, later] });
+    await expect.element(heldCard(screen, 'A visitor asked to book Sunday at 10:00 pm.')).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+
+    // An address whose request can't be read does nothing either.
+    await router.navigate(`${TODAY}#request-%E0%A4%A`);
+    await readsMore('needsYou', 2);
+    expect(document.activeElement).toBe(document.body);
+    await expect.element(region(screen, 'Needs you')).toBeVisible();
+  });
+
+  it('inbox_read_that_fails_while_open_says_so_in_the_sheet', async () => {
+    // The page behind an open sheet is out of reach, so a read that fails while it is open says so
+    // inside it, under its subtitle and above the entries, with its own Try again.
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    // The read as it opens fails, and so does its one retry.
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    const line = sheet.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    const subtitle = sheet.getByText('What Claude would have sent you by text or email. Nothing is really sent.').element();
+    const entries = sheet.getByRole('list').element();
+    expect(subtitle.compareDocumentPosition(line.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.element().compareDocumentPosition(entries) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Its Try again is busy while it reads; once a read works the line goes and the sheet stays open.
+    const retry = holdReads(ROUTES.ownerInbox.path);
+    const again = sheet.getByRole('button', { name: 'Try again', exact: true });
+    await again.click();
+    await vi.waitFor(() => expect(retry.held()).toBe(1));
+    await expect.element(again).toHaveAttribute('aria-busy', 'true');
+    await expect.element(line).toBeVisible();
+    retry.release();
+    await expect.element(line).not.toBeInTheDocument();
+    await expect.element(sheet).toBeVisible();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    expect(screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('request_link_lands_on_the_card_once_needs_you_reads', async () => {
+    // Opened fresh (a reload, or the link from elsewhere), the page lands on the held request once
+    // Needs you has read, here slowly, at the phone's size where the card starts below the fold.
+    const held = seededHold();
+    const needsYouRead = holdReads(needsYouPath);
+    const { screen, router } = await renderRoute(requestLink(held.decision_id), { viewport: 'phone' });
+    await expect.element(region(screen, 'Things to try')).toBeVisible();
+    await vi.waitFor(() => expect(needsYouRead.held()).toBeGreaterThanOrEqual(1));
+    // Nothing to land on yet: focus stays where it was.
+    const card = heldCard(screen, SEEDED_REASON);
+    expect(card.elements()).toHaveLength(0);
+    expect(document.activeElement).toBe(document.body);
+
+    needsYouRead.release();
+    await expect.element(card).toBeInTheDocument();
+    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expectInView(card.element());
+    expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
+  });
+
+  it('inbox_polls_only_while_the_sheet_is_open', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const open = inboxButton(screen);
+    await expect.element(open).toBeVisible();
+    // Read once as Today opens, and not again while the sheet is closed.
+    expect(requests('ownerInbox')).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(requests('ownerInbox')).toHaveLength(1);
+
+    // Read as it opens, and every few seconds while it is open.
+    await open.click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet).toBeVisible();
+    await readsMore('ownerInbox', 3);
+
+    // Close stops it.
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect.element(sheet).not.toBeInTheDocument();
+    await expect.element(open).toHaveFocus();
+    let reads = requests('ownerInbox').length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(requests('ownerInbox')).toHaveLength(reads);
+
+    // Opened again, it reads again at once, and stops again once Escape closes it.
+    await open.click();
+    await expect.element(sheet).toBeVisible();
+    await readsMore('ownerInbox', 2);
+    await userEvent.keyboard('{Escape}');
+    await expect.element(sheet).not.toBeInTheDocument();
+    reads = requests('ownerInbox').length;
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(requests('ownerInbox')).toHaveLength(reads);
   });
 });

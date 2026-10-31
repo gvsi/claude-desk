@@ -1,9 +1,10 @@
-import { useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 
 import { ownerErrorCopy } from '../../api/http.ts';
 import { Greeting } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
+import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
 import { publicLink } from '../customerLink.ts';
@@ -14,6 +15,7 @@ import { firstName, heldOldestFirst, useNeedsYou, useToday } from '../useDesks.t
 import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem, type ReadFailure } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
+import { requestInHash } from './requestLink.ts';
 import { SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
 
@@ -32,17 +34,23 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
  * "Things to try", then, in this order, "Needs you" and "Live now" when they have something, and
  * "Since last night" always; the right column has the public page a new tab away and the last 7
  * days. Today opens no visitor chat itself, and has no composer: changing a rule by asking Claude
- * lives on Rules.
+ * lives on Rules. An address that names a held request (`#request-<id>`, as the Demo inbox links an
+ * owner's alert) brings that request's card into view and focus.
  */
 export function TodayPage() {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const navigate = useNavigate();
+  const location = useLocation();
   const today = useToday(deskId);
   const needsYou = useNeedsYou(deskId);
   const answers = useAnswer(deskId);
+  // An answered card moves to "Answered just now", and focus that fell to the page follows it.
+  const answeredFocus = useAnsweredFocus(answers.answered);
   const [linkCopy, setLinkCopy] = useState<LinkCopy>('idle');
   const cards = useRef(new Map<string, HTMLElement>());
+  // Whether the Demo inbox's sheet is open, as it says once it has opened or closed.
+  const [inboxOpen, setInboxOpen] = useState(false);
 
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
   const link = publicLink(desk.slug);
@@ -78,9 +86,59 @@ export function TodayPage() {
     if (el) cards.current.set(decisionId, el);
     else cards.current.delete(decisionId);
   }, []);
+  // Focus brings the card into view too. A request with no card here is left alone.
+  const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
   const focusFirstHeld = () => {
-    if (firstHeld !== null) cards.current.get(firstHeld.decision.decision_id)?.focus();
+    if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
   };
+
+  // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: on the held
+  // request's card, or under "Answered just now" if it was answered here. It lands once the latest
+  // read of Needs you has worked (a list kept from before a failed read may be missing the request),
+  // and once the Demo inbox's sheet, whose link it may be, has closed and handed focus back to its
+  // button. A request that isn't in the list gets one more read of Needs you, as it may have been
+  // held since the last; if it still isn't here (answered elsewhere, or another Desk's), focus stays
+  // as it is. Every change of address starts a new visit, Back and Forward included, each with one
+  // landing.
+  const [visit, setVisit] = useState<{ key: string; spent: boolean; rereadAfter: number | null }>({
+    key: location.key,
+    spent: false,
+    rereadAfter: null,
+  });
+  if (visit.key !== location.key) setVisit({ key: location.key, spent: false, rereadAfter: null });
+  const requested = visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
+  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt;
+  const { cardFor: answeredCardFor } = answeredFocus;
+  const { refetch: readNeedsYou } = needsYou;
+  useEffect(() => {
+    if (requested === null || inboxOpen || !readWorked) return;
+    const key = location.key;
+    const card = cards.current.get(requested) ?? answeredCardFor(requested);
+    if (card === undefined && visit.rereadAfter === null) {
+      setVisit((now) => (now.key === key ? { ...now, rereadAfter: readAt } : now));
+      void readNeedsYou();
+      return;
+    }
+    // Still waiting for that read.
+    if (card === undefined && visit.rereadAfter !== null && readAt <= visit.rereadAfter) return;
+    setVisit((now) => (now.key === key ? { ...now, spent: true } : now));
+    card?.focus();
+  }, [requested, inboxOpen, readWorked, readAt, visit.rereadAfter, location.key, answeredCardFor, readNeedsYou]);
+  // While it waits because Needs you can't be read, the owner's first pointer or key press spends
+  // it: a read that works later doesn't pull focus from what they're doing by then.
+  const readFailing = needsYou.errorUpdatedAt > needsYou.dataUpdatedAt;
+  const waitsOnFailure = requested !== null && readFailing;
+  useEffect(() => {
+    if (!waitsOnFailure) return undefined;
+    const key = location.key;
+    const spend = () => setVisit((now) => (now.key === key ? { ...now, spent: true } : now));
+    document.addEventListener('pointerdown', spend, true);
+    document.addEventListener('keydown', spend, true);
+    return () => {
+      document.removeEventListener('pointerdown', spend, true);
+      document.removeEventListener('keydown', spend, true);
+    };
+  }, [waitsOnFailure, location.key]);
 
   const copyLink = () => {
     setLinkCopy('idle');
@@ -113,13 +171,14 @@ export function TodayPage() {
             answers={answers}
             readAt={readAt}
             registerCard={registerCard}
+            answeredFocus={answeredFocus}
             readFailure={readFailure}
           />
         ) : null}
         {live.length > 0 ? <LiveNow live={live} /> : null}
         <SinceLastNight />
       </div>
-      <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} />} />
+      <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
     </div>
   );
 }

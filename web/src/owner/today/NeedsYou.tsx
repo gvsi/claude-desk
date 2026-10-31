@@ -6,7 +6,7 @@ import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Notice, SectionHeader, StatusLabel } from '../../ds/index.ts';
 import { callbackLine } from '../../lib/format.ts';
-import { AnsweredRequest, HeldRequest, useAnsweredFocus } from '../approvals/HeldRequest.tsx';
+import { AnsweredRequest, HeldRequest, type AnsweredFocus } from '../approvals/HeldRequest.tsx';
 import type { HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
 import { conversationPath, type ConversationArrival } from '../conversations/status.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -38,6 +38,8 @@ export interface NeedsYouProps {
   readAt: number;
   /** Called with each held request's card as it mounts and unmounts, so "Open the request" can focus it. */
   registerCard: (decisionId: string, el: HTMLElement | null) => void;
+  /** `useAnsweredFocus` over `answers.answered`, kept by the page so a request's address can find its answered card. */
+  answeredFocus: AnsweredFocus;
   /** The latest read failed: said first, over whatever was read before it. */
   readFailure: ReadFailure | null;
 }
@@ -47,13 +49,11 @@ export interface NeedsYouProps {
  * an approval card answered in place, then each open callback, then what was answered here with
  * its final line until the owner dismisses it.
  */
-export function NeedsYou({ held, callbacks, answers, readAt, registerCard, readFailure }: NeedsYouProps) {
+export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure }: NeedsYouProps) {
   const titleId = useId();
   const now = new Date();
   const open = held.length + callbacks.length;
   const answered = [...answers.answered.values()].reverse();
-  // An answered card moves to "Answered just now", and focus that fell to the page follows it.
-  const answeredFocus = useAnsweredFocus(answers.answered);
 
   const dismiss = (id: string) => {
     // Focus goes to the next answered card, else the one before, else the section.
