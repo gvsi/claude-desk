@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
+import { pairContrast } from '../../contrast.ts';
+import { faintestOpacity, paintedGroundOf } from '../../test/breath.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { lineWords } from '../../test/lineWords.ts';
 import { Greeting } from './Greeting.tsx';
@@ -62,6 +64,16 @@ export const WithPresence: Story = {
       expectComputed(glyph, { animationName: /^(?!none$).+/, animationDuration: '5s', animationIterationCount: 'infinite' });
     }
     await expect(getComputedStyle(glyphs[1] as HTMLElement).animationDelay).not.toBe(getComputedStyle(glyphs[0] as HTMLElement).animationDelay);
+    // presence_glyphs_keep_their_contrast: at the breath's faintest point each glyph, faded as one
+    // over the page, still reads against its own circle: its initials as text (4.5:1), its icon as
+    // a mark (3:1).
+    for (const glyph of glyphs) {
+      const faintest = faintestOpacity(glyph);
+      await expect(faintest).toBeLessThan(1);
+      const style = getComputedStyle(glyph);
+      const ratio = pairContrast({ fg: style.color, ground: style.backgroundColor, over: paintedGroundOf(glyph), opacity: faintest });
+      await expect(ratio).toBeGreaterThanOrEqual(glyph.querySelector('svg') === null ? 4.5 : 3);
+    }
 
     // The public link, and a button that copies it.
     await expect(canvas.getByText(PUBLIC_LINK)).toBeVisible();
