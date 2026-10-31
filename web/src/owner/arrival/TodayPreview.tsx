@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { Component, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { AppShell, ReviewerBar } from '../../ds/index.ts';
 import { OwnerDeskProvider, OwnerSidebar, type OwnerDeskContext } from '../OwnerLayout.tsx';
@@ -18,9 +18,32 @@ const ignore = () => undefined;
  * showed: every part is where Today puts it. Today reads from a client of its own that holds a new
  * copy's reads and never asks the API (`StillQueryClient`): the picture is shown before any copy
  * exists. It is inert and hidden from assistive tech, and has no footer of its own: the dialog in
- * front of it carries the page's one.
+ * front of it carries the page's one. It is only a backdrop: if drawing it throws, the page behind
+ * the dialog is left empty, and the dialog, the one way in, stays.
  */
 export function TodayPreview() {
+  return (
+    <NothingIfItThrows>
+      <StillToday />
+    </NothingIfItThrows>
+  );
+}
+
+/** Draws its children, or nothing once drawing them has thrown. */
+class NothingIfItThrows extends Component<{ children: ReactNode }, { threw: boolean }> {
+  override state = { threw: false };
+
+  static getDerivedStateFromError(): { threw: boolean } {
+    return { threw: true };
+  }
+
+  override render() {
+    return this.state.threw ? null : this.props.children;
+  }
+}
+
+/** The picture itself. */
+function StillToday() {
   const ref = useRef<HTMLDivElement>(null);
   const [still] = useState(() => {
     const { business, desk, liveCount, reads } = stillToday(new Date());

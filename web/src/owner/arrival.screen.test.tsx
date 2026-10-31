@@ -762,6 +762,36 @@ describe('The preview behind the intro dialog', () => {
     });
   }
 
+  it('a_preview_that_throws_leaves_the_dialog_usable', async () => {
+    // React reports the error on the console, as it should; only the page must not show it.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // A browser that can't keep the business's time zone: the preview can't draw at all.
+    const restoreIntl = intlRefusing((options) => options?.timeZone === 'America/Los_Angeles');
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+
+    // The dialog stays, over an empty page, never an error page in its place.
+    await expect.element(introDialog(screen)).toBeVisible();
+    expect(document.querySelector('.cd-standalone-page')).toBeNull();
+    expect(document.querySelector('.cd-today-preview')).toBeNull();
+
+    // The passcode still opens the demo.
+    restoreIntl();
+    await startTheDemo(screen);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+  });
+
+  it('preview_draws_where_offset_names_are_unknown', async () => {
+    // Older Safari refuses `timeZoneName: 'longOffset'`, so the preview never asks for it.
+    intlRefusing((options) => options?.timeZoneName === 'longOffset');
+    const { screen } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    await expect.element(introDialog(screen)).toBeVisible();
+    const preview = document.querySelector('.cd-today-preview');
+    expect(preview?.querySelector('h1')?.textContent).toMatch(/, Maria$/);
+    expect(preview?.querySelectorAll('.cd-today__main > *').length).toBeGreaterThan(0);
+    expect(preview?.querySelectorAll('.cd-today-aside > *').length).toBeGreaterThan(0);
+  });
+
   it('preview_makes_no_request', async () => {
     const { screen } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
     await expect.element(introDialog(screen)).toBeVisible();
@@ -1455,6 +1485,35 @@ function nextAnswerTo(key: RouteKey): { came: () => boolean; settled: Promise<vo
   });
   onTestFinished(() => stop());
   return { came: () => came, settled };
+}
+
+/**
+ * Until the test ends or the returned function is called, `Intl.DateTimeFormat` refuses with a
+ * `RangeError`, as a browser does with options it can't keep, every formatter whose options
+ * `refuses` picks; every other formatter is the browser's own.
+ */
+function intlRefusing(refuses: (options: Intl.DateTimeFormatOptions | undefined) => boolean): () => void {
+  const own = Intl.DateTimeFormat;
+  const check = (args: unknown[]) => {
+    if (refuses(args[1] as Intl.DateTimeFormatOptions | undefined)) throw new RangeError('Invalid option');
+  };
+  const refusing = new Proxy(own, {
+    construct: (target, args) => {
+      check(args);
+      return Reflect.construct(target, args) as object;
+    },
+    apply: (target, self, args) => {
+      check(args);
+      return Reflect.apply(target, self, args) as unknown;
+    },
+  });
+  const put = (value: typeof Intl.DateTimeFormat): void => {
+    Object.defineProperty(Intl, 'DateTimeFormat', { value, configurable: true, writable: true });
+  };
+  put(refusing);
+  const restore = () => put(own);
+  onTestFinished(restore);
+  return restore;
 }
 
 /**

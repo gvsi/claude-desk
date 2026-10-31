@@ -25,6 +25,9 @@ const HELD_MINUTES_AGO = 12;
 /** The booking Dana made in her chat, in the kernel's words for the owner. */
 const DANA_BOOKED = 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.';
 
+/** The offset written on the briefing's start, which the preview never draws. */
+const SINCE_OFFSET = '-07:00';
+
 /** A preview's own ids: a copy's are only known once it exists. */
 const DESK_ID = 'preview-desk';
 
@@ -45,14 +48,6 @@ function localDate(ms: number): string {
 /** The local date `days` after `date`. */
 function addDays(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
-}
-
-/** The business's offset from UTC at `ms`, as the API writes it: `-07:00`. */
-function offsetAt(ms: number): string {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, timeZoneName: 'longOffset' }).formatToParts(ms);
-  const name = parts.find((p) => p.type === 'timeZoneName');
-  const offset = name?.value.replace('GMT', '') ?? '';
-  return offset === '' ? '+00:00' : offset;
 }
 
 /** Rivera's Today, Needs you and Demo inbox as a new copy opened at `now` reads them. */
@@ -98,8 +93,10 @@ export function stillToday(now: Date): StillToday {
     needs_you_count: 1,
     live: [dana],
     briefing: {
-      // From 18:00 yesterday; drawn only on a night with nothing in it, which this isn't.
-      since: `${addDays(today, -1)}T18:00:00${offsetAt(at)}`,
+      // From 18:00 yesterday. It is drawn only on a night with nothing in it, which this isn't, so
+      // the offset is Pacific daylight time's, fixed, rather than one the browser is asked to name:
+      // older Safari can't name one.
+      since: `${addDays(today, -1)}T18:00:00${SINCE_OFFSET}`,
       conversations: 3,
       bookings: 1,
       leads: 0,
