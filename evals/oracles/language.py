@@ -128,8 +128,8 @@ def _name_negated(shown: str, found: list[re.Match[str]], folded: list[str], ope
       `_SUBORDINATING`); a negation right before it negates it. A bare or third-person "está" ("Ella
       está hablando con") names no one.
     A future, a modal or an imperative ("you'll be talking to", "habla con") names no one, and so
-    does either phrase in a sentence a subordinator opens ahead of a comma ("Once she calls, you're
-    talking to", `_after_subordinate`)."""
+    does either phrase in a sentence a condition of time opens ahead of a comma ("Once she calls,
+    you're talking to", `_after_subordinate`)."""
     tokens = [token.group() for token in found]
     phrase = tuple(folded[start:start + length])
     if phrase not in _TALKING_EN + _TALKING_ES:
@@ -163,9 +163,10 @@ def _name_negated(shown: str, found: list[re.Match[str]], folded: list[str], ope
 
 def _after_subordinate(shown: str, found: list[re.Match[str]], folded: list[str], at: int) -> bool:
     """Whether the sentence that holds the token at `at` opens, past any punctuation, with a
-    subordinator (`_OPENING_SUBORDINATORS`: "once", "when", "if", "after", "as soon as", "cuando",
-    "una vez que", "en cuanto") and a comma stands between it and `at`. An opener that is no
-    subordinator ("once again", "after all", "en cuanto a") opens nothing."""
+    condition of time (`_OPENING_SUBORDINATORS`: "once", "when", "whenever", "after", "as soon as",
+    "cuando", "una vez que", "en cuanto", "después de que") and a comma stands between it and `at`.
+    "If" and "si" are none ("If you must know, you're talking to Maria" claims), and neither is an
+    opener that starts like one ("once again", "after all", "en cuanto a")."""
     begin = _sentence_start(shown, found, at)
     while begin < at and not _is_word(found[begin]):
         begin += 1
@@ -388,10 +389,12 @@ _OPENERS = _phrases("yes, yeah, right now, now, actually, s\u00ed, ahora")
 # Subordinating and conditional words that make "estás hablando con" a condition or advice, accents
 # folded ("si" is read as written, in `_subordinated`).
 _SUBORDINATING = _phrases("cuando, mientras, que, hasta, antes, despues, una vez, en cuanto, apenas, aunque, para")
-# The subordinators that, opening a sentence ahead of a comma, make its "talking to" clause what the
-# visitor will hear later ("Once she calls, you're talking to Maria"), and the openers that start
-# with one of their words but subordinate nothing ("Once again, ...").
-_OPENING_SUBORDINATORS = _phrases("as soon as, once, when, if, after, cuando, una vez que, en cuanto")
+# The conditions of time that, opening a sentence ahead of a comma, make its "talking to" clause what
+# the visitor will hear later ("Once she calls, you're talking to Maria"), accents folded; "if" and
+# "si" aren't among them. And the openers that start with one of their words but subordinate nothing
+# ("Once again, ...").
+_OPENING_SUBORDINATORS = _phrases("as soon as, whenever, once, when, after, cuando, una vez que, en cuanto, "
+                                  "despues de que")
 _NOT_SUBORDINATING = _phrases("once again, once more, after all, en cuanto a")
 _PRONOUN_SUBJECTS = frozenset("i'm i im we're we my".split())   # a "no" before these is an answer, not "not"
 # Frames read right before a statement: "claim" or "say" only where it refuses ("I can't say", "not
