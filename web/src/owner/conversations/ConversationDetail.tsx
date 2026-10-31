@@ -27,7 +27,7 @@ import {
 } from '../../ds/index.ts';
 import { fillComposer } from '../../lib/composer.ts';
 import { formatStarted } from '../../lib/format.ts';
-import { AnsweredRequest, HeldRequest, useAnsweredFocus } from '../approvals/HeldRequest.tsx';
+import { HeldRequest, useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -217,21 +217,15 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   const heldIds = [...new Set([...held, ...kept].map((item) => item.decision.decision_id).concat(answered.map((a) => a.decision.decision_id)))];
   const readAt = needsYou.dataUpdatedAt;
 
-  // Each held request answered in place, as Today answers it; once answered, it stays with its final line.
+  // Each held request answered in place, as Today answers it: one card from held to answered, so the
+  // answer lands in its slot, and once answered it stays with its final line.
   const renderHeld = (decisionId: string) => {
-    const done = answers.answered.get(decisionId);
-    if (done !== undefined) {
-      return (
-        <div className="cd-conversation__held">
-          <AnsweredRequest entry={done} now={now} registerCard={answeredFocus.register} />
-        </div>
-      );
-    }
-    const item = held.find((h) => h.decision.decision_id === decisionId) ?? answers.kept.get(decisionId);
+    const item =
+      answers.answered.get(decisionId)?.item ?? held.find((h) => h.decision.decision_id === decisionId) ?? answers.kept.get(decisionId);
     if (item === undefined) return null;
     return (
       <div className="cd-conversation__held">
-        <HeldRequest item={item} answers={answers} readAt={readAt} now={now} />
+        <HeldRequest item={item} answers={answers} readAt={readAt} now={now} registerCard={answeredFocus.register} />
       </div>
     );
   };

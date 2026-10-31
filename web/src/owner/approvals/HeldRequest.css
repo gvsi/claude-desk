@@ -1,4 +1,0 @@
-/* A held or answered request's card, which takes focus when the button that had it goes away. */
-.cd-held-request {
-  border-radius: var(--radius-card);
-}

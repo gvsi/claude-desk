@@ -236,9 +236,9 @@
   color: var(--text-primary);
 }
 
-/* Needs you: held requests, then callbacks, then what was answered here. Each card sits in its
-   own wrapper, which takes focus for "Open the request", so nothing here depends on how the
-   approval card is built. */
+/* Needs you: held requests and those answered here, in one list, then callbacks. An answered
+   request keeps its place, with Dismiss under its card. The approval card's own box takes focus
+   for "Open the request". */
 
 .cd-today__section[tabindex='-1']:focus:not(:focus-visible) {
   outline: none;
@@ -258,18 +258,6 @@
   flex-direction: column;
   gap: var(--space-8);
   min-width: 0;
-}
-
-.cd-needs-you__answered {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-12);
-  padding-top: var(--space-8);
-}
-
-.cd-needs-you__answered-title {
-  margin: 0;
-  color: var(--text-secondary);
 }
 
 .cd-needs-you__dismiss {

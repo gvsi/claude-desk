@@ -51,7 +51,7 @@ export function TodayPage() {
   const today = useToday(deskId);
   const needsYou = useNeedsYou(deskId);
   const answers = useAnswer(deskId);
-  // An answered card moves to "Answered just now", and focus that fell to the page follows it.
+  // An answered card stays where it was answered, and focus that fell to the page follows it.
   const answeredFocus = useAnsweredFocus(answers.answered);
   const [linkCopy, setLinkCopy] = useState<LinkCopy>('idle');
   // The pill says "Copied" while this is set: a count of the copies that worked since it last cleared,
@@ -70,8 +70,9 @@ export function TodayPage() {
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
-  // Held requests oldest first, whatever order the API lists them in, with any whose answer is
-  // still out or was lost kept in place; the ones answered here move to "Answered just now".
+  // The held requests still open, oldest first, whatever order the API lists them in, with any whose
+  // answer is still out or was lost kept in place. Needs you keeps the ones answered here in their
+  // places among them, but they no longer count as open.
   const items = needsYou.data ?? [];
   const listed = heldOldestFirst(items);
   const listedIds = new Set(listed.map((item) => item.decision.decision_id));
@@ -107,7 +108,7 @@ export function TodayPage() {
   };
 
   // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: on the held
-  // request's card, or under "Answered just now" if it was answered here. It lands once the latest
+  // request's card, whether it is still held or was answered here. It lands once the latest
   // read of Needs you has worked (a list kept from before a failed read may be missing the request),
   // and once the Demo inbox's sheet, whose link it may be, has closed and handed focus back to its
   // button. A request that isn't in the list gets one more read of Needs you, as it may have been

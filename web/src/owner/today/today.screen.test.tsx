@@ -16,10 +16,12 @@ import { pollMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { writeLocal } from '../../lib/storage.ts';
 import { worker } from '../../mocks/browser.ts';
 import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { expectLandedInPlace, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import {
   aPollPasses,
@@ -947,6 +949,72 @@ describe('Today', () => {
     expect(card.getByRole('alert').elements()).toHaveLength(0);
   });
 
+  it('answer_lands_in_its_slot', async () => {
+    // Things to try hidden, as the board draws it, so only the card is in play.
+    writeLocal('thingsToTryHidden', 'true');
+    const { screen } = await renderRoute(TODAY);
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    const allow = card.getByRole('button', { name: 'Allow this time' });
+    await expect.element(allow).toBeVisible();
+    const live = region(screen, 'Live now');
+    await expect.element(live).toBeVisible();
+    const element = card.element();
+    const item = element.closest('li');
+    if (!item) throw new Error('the card sits in an item of Needs you');
+
+    const watching = watchAnswerLanding(element, item, live.element());
+    await allow.click();
+    const frames = await watching;
+
+    // The same card, in the same place, with its final line and Dismiss under it: no heading of its own.
+    expect(heldCard(screen, SEEDED_REASON).element()).toBe(element);
+    expect(element.closest('li')).toBe(item);
+    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    const dismiss = needs.getByRole('button', { name: 'Dismiss' }).element();
+    expect(item.contains(dismiss)).toBe(true);
+    expect(element.compareDocumentPosition(dismiss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Answered just now' }).elements()).toHaveLength(0);
+    // Live now glides up by what the item lost (the answers, against Dismiss), and never down.
+    expect(expectLandedInPlace(frames)).toBeGreaterThan(0);
+    // The count counts only what's still open.
+    expect(needs.getByRole('img', { name: /needs? you$/ }).elements()).toHaveLength(0);
+  });
+
+  it('always_answer_lands_with_its_rule', async () => {
+    writeLocal('thingsToTryHidden', 'true');
+    mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(TODAY);
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, REFUND_REASON);
+    const deny = card.getByRole('button', { name: 'Deny', exact: true });
+    await expect.element(deny).toBeVisible();
+    const element = card.element();
+    const item = element.closest('li');
+    if (!item) throw new Error('the card sits in an item of Needs you');
+
+    await deny.click();
+    const watching = watchAnswerLanding(element, item, region(screen, 'Live now').element());
+    await screen.getByRole('menuitem', { name: 'Always' }).click();
+    const frames = await watching;
+
+    // The same card, settled in its place, with the rule the answer drafted under it, then Dismiss.
+    expect(heldCard(screen, REFUND_REASON).element()).toBe(element);
+    await expect.element(card.getByText('You denied this.', { exact: true })).toBeVisible();
+    const notice = needs.getByText(DRAFTED, { exact: true }).element();
+    const dismiss = needs.getByRole('button', { name: 'Dismiss' }).element();
+    expect(item.contains(notice)).toBe(true);
+    expect(item.contains(dismiss)).toBe(true);
+    expect(element.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.compareDocumentPosition(dismiss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // What follows moves one way only, to where the settled card, rule and Dismiss put it.
+    expectLandedInPlace(frames);
+    // The seeded request still waits, before it, and the count says so.
+    await expect.element(needs.getByRole('img', { name: '1 needs you' })).toBeVisible();
+    const order = needs.getByRole('article').elements().map((a) => a.getAttribute('aria-label'));
+    expect(order).toEqual([`Held for you: ${SEEDED_REASON}`, `Held for you: ${REFUND_REASON}`]);
+  });
+
   it('answered_card_survives_refetch', async () => {
     const { screen } = await renderRoute(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
@@ -954,7 +1022,7 @@ describe('Today', () => {
     await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
     await readsMore('needsYou', 2);
     await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('heading', { name: 'Answered just now' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Answered just now' }).elements()).toHaveLength(0);
 
     // Dismissed, it goes.
     await region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).click();
@@ -1500,19 +1568,19 @@ describe("Today's Demo inbox", () => {
   });
 
   it('request_link_falls_back_to_the_answered_card', async () => {
-    // Answered here a moment ago, the request's card is under "Answered just now": that is where its
-    // address lands.
+    // Answered here a moment ago, the request's card stays where it was answered in Needs you: that
+    // is where its address lands.
     const held = seededHold();
     const { screen, router } = await renderRoute(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
     await card.getByRole('button', { name: 'Allow this time' }).click();
     await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('heading', { name: 'Answered just now' })).toBeVisible();
     (document.activeElement as HTMLElement | null)?.blur();
 
     await router.navigate(requestLink(held.decision_id));
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
-    expect(card.element().closest('.cd-needs-you__answered')).not.toBeNull();
+    expect(region(screen, 'Needs you').element().contains(card.element())).toBe(true);
+    expect(screen.getByRole('heading', { name: 'Answered just now' }).elements()).toHaveLength(0);
   });
 
   it('request_link_reads_needs_you_once_more_before_giving_up', async () => {
