@@ -1924,7 +1924,7 @@
     "/api/owner/handoffs/{handoff_id}/done": {
       "post": {
         "summary": "Handoff Done",
-        "description": "Mark a callback request done, through the kernel with the owner's credential. A handoff that isn't on one of\nthe copy's Desks is 404 and never sent; one already done is the kernel's 409 `conflict`.",
+        "description": "Mark a callback request done, through the kernel with the owner's credential. A handoff that isn't on one of\nthe copy's Desks is 404 and never sent. The kernel answers 409 `conflict` for one already done, and 409 `closed`\nfor one whose Desk was deleted after the copy's Desks were read; the route passes either on.",
         "operationId": "owner_handoff_done",
         "parameters": [
           {
