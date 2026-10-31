@@ -117,6 +117,9 @@ class Desk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Private setup notes; never included in kernel_ro.desks.
+    simulated_memory: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+
 
 class Person(Base):
     __tablename__ = "people"

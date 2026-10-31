@@ -2410,6 +2410,18 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     session = (await owner.whoami()).session
     assert tools(await context(owner, session.session_id, created.desk_id)) == (SETUP_TOOLS, SETUP_TOOLS)
 
+    from desk.kernel_api import DeskMemoryRequest
+
+    empty = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=created.desk_id,
+        call=ToolCall(call_id="empty-memory", tool="native.read_memory", args={"query": "business hours"})))
+    assert (await execute(owner, empty, session.generation)).model_view == {"simulated": True, "items": []}
+
+    memory = DeskMemoryRequest.model_validate({"about": "Simulated CPA notes.", "items": [
+        {"id": "business", "title": "Chen CPA", "topics": ["business"], "text": "Chen CPA prepares tax returns."}]})
+    updated = await owner.call("PUT /desks/{id}/memory", memory, path={"id": created.desk_id})
+    assert isinstance(updated, DeskUpdated) and updated.desk_id == created.desk_id
+
     call = ToolCall(call_id="setup-memory", tool="native.read_memory", args={"query": "business hours"})
     decision = await owner.call("POST /decide", DecideRequest(session_id=session.session_id,
                                                               generation=session.generation, call=call,
@@ -2417,7 +2429,8 @@ async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
     assert decision.outcome == "allow" and decision.session_id == session.session_id
     assert decision.action.desk_id == created.desk_id and decision.action.resource.kind == "desk"
     result = await execute(owner, decision, session.generation)
-    assert result.state == "succeeded" and result.model_view["simulated"] is True and result.model_view["items"]
+    assert result.state == "succeeded" and result.model_view == {"simulated": True, "items": [
+        {"title": "Chen CPA", "text": "Chen CPA prepares tax returns."}]}
     knowledge = ro_read(ro_schema, copy.copy_id, "SELECT source, readers FROM {ro}.knowledge_items"
                                                  " WHERE desk_id = %s", (created.desk_id,))
     assert knowledge and all(row == {"source": "memory_import", "readers": ["owner"]} for row in knowledge)

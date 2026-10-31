@@ -1020,6 +1020,31 @@
       "title": "DeskHoursRequest",
       "type": "object"
     },
+    "DeskMemoryRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "about": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "About",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/MemoryItem"
+          },
+          "maxItems": 20,
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "about",
+        "items"
+      ],
+      "title": "DeskMemoryRequest",
+      "type": "object"
+    },
     "DeskNotificationsRequest": {
       "additionalProperties": false,
       "properties": {
@@ -2244,6 +2269,44 @@
         "sig"
       ],
       "title": "Mandate",
+      "type": "object"
+    },
+    "MemoryItem": {
+      "additionalProperties": false,
+      "description": "An untrusted simulated owner note, shared by the write contract and memory reader.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-z][a-z-]{0,59}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "topics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Topics",
+          "type": "array"
+        },
+        "text": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "topics",
+        "text"
+      ],
+      "title": "MemoryItem",
       "type": "object"
     },
     "ModeRequest": {
