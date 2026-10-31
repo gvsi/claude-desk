@@ -854,6 +854,25 @@ class _Judge:
         except (ZoneInfoNotFoundError, ValueError, KeyError):
             return None
 
+    def _business(self, desk_id: str | None) -> dict[str, Any] | None:
+        """The business row of the Desk, if the records hold both."""
+        desk = next((row for row in self.a.records["desks"] if row.get("desk_id") == desk_id), None)
+        return next((row for row in self.a.records["businesses"]
+                     if desk and row.get("business_id") == desk.get("business_id")), None)
+
+    def _owner_names(self) -> tuple[list[str], list[str]]:
+        """The owner of each of the run's Desks, as its business's `owner_display_name` names them, and
+        the run's Desks whose business is missing or names no owner (a name with no letters)."""
+        names, unnamed = [], []
+        for desk_id in self.a.desk_ids:
+            business = self._business(desk_id)
+            name = business.get("owner_display_name") if business else None
+            if isinstance(name, str) and re.search(r"[^\W\d_]", name):
+                names.append(name)
+            else:
+                unnamed.append(desk_id)
+        return names, unnamed
+
     # Disclosure
 
     def _disclosure_denial(self) -> Iterator[tuple[str, str]]:
