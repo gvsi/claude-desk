@@ -35,7 +35,8 @@ version is rebuilt over the tools a Desk made now has, and a seed's from its shi
 serving, startup does this from cached reports only, finding the Desks one copy at a time, within
 `STARTUP_REBUILD_S` finding included (`rebuild_at_startup`); the copies and Desks it leaves, and
 every version that needs a live proof, are found and rebuilt one at a time in the background while
-the kernel serves (`rebuild_in_background`), and refuse until then.
+the kernel serves (`rebuild_in_background`), and refuse until then. The owner of each version
+left waiting is told so before the background starts rebuilding, at most once an hour.
 
 Loaded versions. A stored version loads into the policy engine on its first use
 (`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first,
@@ -65,7 +66,7 @@ from collections import OrderedDict
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Any, Literal, NamedTuple
@@ -85,6 +86,7 @@ from desk.contracts import (
     money_tool,
 )
 from desk.db.models import AgentKey, Person
+from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain, ledger, reference, render,
                                  review_thresholds, seed)
@@ -699,7 +701,7 @@ async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | Non
 # over are those a Desk made now has. Startup does what it can from cached reports within its
 # budget, finding the Desks included, before the kernel serves (`rebuild_at_startup`); the rest,
 # finding and live proofs included, goes on in the background (`rebuild_in_background`), and a
-# version not yet rebuilt refuses meanwhile.
+# version not yet rebuilt refuses meanwhile, its owner told so (`WAITING_ALERT`).
 
 # What a rebuild rewrites: the compiled sets, what they were proved against and the proof.
 _REBUILT_COLUMNS = ("cards", "cedar", "schema_json", *VersionHashes._fields, "proof")
@@ -713,6 +715,12 @@ NEEDS_PROOF = "needs_proof"
 # The owner's alert when a version can't be rebuilt (owner-only, in English, like every alert).
 REBUILD_ALERT = ("After an update, Claude couldn't check your rules again, so it won't act on any request until "
                  "they're checked. Confirm your rules again to turn them back on.")
+# The owner's alert while a version waits for the background rebuild, under the same preview. Its
+# own words, since `REBUILD_ALERT`'s would say the check failed and ask for a confirm it doesn't
+# need; at most once an hour per Desk, so a kernel that restarts often doesn't repeat it each time.
+WAITING_ALERT = ("After an update, Claude is checking your rules again, so it won't act on any request until "
+                 "they're checked. You don't need to do anything.")
+WAITING_ALERT_EVERY = timedelta(hours=1)
 
 
 def outdated(row: PolicyVersionRow) -> bool:
@@ -777,14 +785,18 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
 
 async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild) -> Rebuilt:
     """Finishes what startup left (`StartupRebuild`) while the kernel serves: finds the Desks of
-    the copies it didn't look at, then brings up those and the Desks it left, one at a time,
-    proving live in `symcc` mode, and returns what became of each outdated version. As at startup,
-    a version it can't rebuild is ledgered and alerts the owner, and one it hasn't reached yet
-    keeps refusing. The app cancels it at shutdown: the Desk in hand rolls back, its prover is
-    killed, and the next start takes it up again."""
+    the copies it didn't look at, tells the owner of each Desk whose version waits that it refuses
+    until it is checked (`_alert_waiting`), then brings them up one at a time, proving live in
+    `symcc` mode, and returns what became of each outdated version. Every owner in the queue is
+    told before the first rebuild starts, not when the queue reaches their Desk. As at startup, a
+    version it can't rebuild is ledgered and alerts the owner, and one it hasn't reached yet keeps
+    refusing. The app cancels it at shutdown: the Desk in hand rolls back, its prover is killed,
+    and the next start takes it up again."""
     work = list(startup.left)
     for copy_id in startup.unscanned:
         work += [(copy_id, desk_id) for desk_id in await _desks_of(runtime, copy_id) or []]
+    for copy_id, desk_id in work:
+        await _alert_waiting(runtime, copy_id, desk_id)
     results: Rebuilt = {}
     for copy_id, desk_id in work:
         done = await _bring_up(runtime, copy_id, desk_id, prove=True)
@@ -803,6 +815,31 @@ async def _desks_of(runtime: KernelRuntime, copy_id: str) -> list[str] | None:
     except Exception as exc:
         log_error(log, exc, "rebuild_lookup_failed copy_id=%s", copy_id)
         return None
+
+
+async def _alert_waiting(runtime: KernelRuntime, copy_id: str, desk_id: str) -> None:
+    """Tells the owner, in the Demo inbox whatever their notification defaults, that the Desk's
+    active version, stored by an earlier kernel and left to the background rebuild, refuses every
+    call until it is checked (`WAITING_ALERT`), unless it did within `WAITING_ALERT_EVERY`. Nothing
+    is written for a Desk whose version is current, which refuses nothing meanwhile. In a
+    transaction of its own; a failure is logged, and the version refuses all the same."""
+    try:
+        async with kernel_transaction(runtime) as ctx:
+            ctx.bind(copy_id)
+            row = await active_version(ctx, desk_id)
+            if row is None or not outdated(row):
+                return
+            preview, now = render.owner_preview("rules"), ctx.clock.now()
+            recent = await ctx.db.scalars(ctx.repo.scoped(select(DemoInboxRow.entry_id).where(
+                DemoInboxRow.desk_id == desk_id, DemoInboxRow.to == "owner", DemoInboxRow.kind == "alert",
+                DemoInboxRow.preview == preview, DemoInboxRow.body == WAITING_ALERT,
+                DemoInboxRow.created_at > now - WAITING_ALERT_EVERY).limit(1)))
+            if recent.first() is not None:
+                return
+            await demo_inbox.deliver(ctx, copy_id=copy_id, desk_id=desk_id, to="owner", person_id=None,
+                                     kind="alert", body=WAITING_ALERT, preview=preview)
+    except Exception as exc:
+        log_error(log, exc, "rebuild_alert_failed copy_id=%s desk_id=%s", copy_id, desk_id)
 
 
 async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *,

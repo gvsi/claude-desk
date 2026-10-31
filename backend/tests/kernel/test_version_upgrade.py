@@ -8,7 +8,8 @@ money cap the money cap revision kept for it, and puts the rebuild in its place 
 of all seven obligations; a version it can't rebuild and prove refuses every call, and the owner
 is alerted. Startup does this from cached reports within a budget before the kernel serves,
 finding the Desks included, and leaves the rest, finding and live proofs included, to a background
-rebuild while the kernel serves; a version not yet rebuilt refuses meanwhile.
+rebuild while the kernel serves; a version not yet rebuilt refuses meanwhile, and its owner is told
+so before the background starts, at most once an hour.
 
 `fixtures/kernel_core_version.json` is a version exactly as the kernel core stored it, with the
 tools it was compiled over: Rivera's cards plus an auto payment link card up to $100, over the
@@ -45,6 +46,9 @@ KERNEL_CORE = json.loads((Path(__file__).parent / "fixtures" / "kernel_core_vers
 KERNEL_CORE_CAP = 50_000          # the cap the money cap revision gives a version stored before it
 REFUSED = "Your rules haven't been checked since an update, so it was refused."
 ALERT_PREVIEW = "Your rules need checking"
+# The owner's alert while a version waits for the background rebuild.
+WAITING_ALERT = ("After an update, Claude is checking your rules again, so it won't act on any request until "
+                 "they're checked. You don't need to do anything.")
 # A card the kernel core took and this kernel refuses: it could stop a verification start.
 NO_MESSAGES = RuleCard(card_id="no-messages", applies_to="effect:send_message", mode="never", who="anyone",
                        reason="Claude never sends messages.")
@@ -140,6 +144,12 @@ async def owner_alerts(app: FastAPI, copy: Rivera) -> list[InboxRow]:
     return await rows_of(app, copy.copy_id, select(InboxRow).where(
         InboxRow.desk_id == copy.desk_id, InboxRow.to == "owner", InboxRow.kind == "alert",
     ).order_by(InboxRow.created_at))
+
+
+async def rules_alerts(app: FastAPI, copy: Rivera) -> list[str]:
+    """The bodies of the owner's alerts about their rules, oldest first (the seed's held request
+    alerts the owner too)."""
+    return [alert.body for alert in await owner_alerts(app, copy) if alert.preview == ALERT_PREVIEW]
 
 
 async def test_a_version_that_cant_be_proved_again_refuses_and_alerts_the_owner(app, client, registry, frozen_clock,
@@ -280,16 +290,53 @@ async def test_startup_starts_no_desk_past_its_budget(app, client, monkeypatch):
     # the first copy's rebuild took the whole budget, so startup never looked at the second copy
     assert startup == activation.StartupRebuild(results={(first.desk_id, 1): None}, left=[],
                                                 unscanned=[second.copy_id])
-    # the Desk left refuses until the background rebuilds it, with nothing ledgered or alerted for it before
+    # the Desk left refuses until the background rebuilds it, with nothing ledgered for it before
     visitor = await open_visitor(client, second)
     refused = await decided(client, visitor, "native.find_slots", call_id="slots")
     assert (refused.outcome, refused.policy_version) == ("refuse", 1) and REFUSED in refused.reason_plain
     assert all("rebuilt" not in entry for entry in await entries_of(client, second, "policy"))
-    assert activation.REBUILD_ALERT not in [alert.body for alert in await owner_alerts(app, second)]
+    # and its owner is told, before the background reaches it, that their rules are being checked
+    alerted_before = []
+
+    async def noting_the_alerts(ctx, desk_id, *args, **kwargs):
+        alerted_before.append(await rules_alerts(app, second))
+        return await rebuild(ctx, desk_id, *args, **kwargs)
+
+    monkeypatch.setattr(activation, "rebuild_version", noting_the_alerts)
     assert await activation.rebuild_in_background(app.state.kernel, startup) == {(second.desk_id, 1): None}
+    assert alerted_before == [[WAITING_ALERT]]
     allowed = await decided(client, visitor, "native.find_slots", call_id="slots-rebuilt")
     assert (allowed.outcome, allowed.policy_version) == ("allow", 1)
     assert (await entries_of(client, second, "policy"))[-1]["rebuilt"] is True
+    # the Desk startup rebuilt never refused, so its owner isn't told anything; nor, once rebuilt, is the second's
+    assert await rules_alerts(app, first) == []
+    assert await rules_alerts(app, second) == [WAITING_ALERT]
+
+
+async def test_a_version_waiting_for_its_rebuild_alerts_the_owner_at_most_once_an_hour(app, client, frozen_clock,
+                                                                                       monkeypatch):
+    copy, current = await rivera(app, client), await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    await without_new_native_tools(app, current)                       # left for its tools, its version current
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.0)          # startup leaves every Desk to the background
+
+    async def not_reached(*args, **kwargs):                            # the background never gets to it either
+        return None
+
+    monkeypatch.setattr(activation, "_bring_up", not_reached)
+    visitor = await open_visitor(client, copy)
+    alerts = []
+    for minutes in (0, 30, 31):                                        # starts at 0, 30 and 61 minutes
+        frozen_clock.advance(minutes * 60)
+        startup = await activation.rebuild_at_startup(app.state.kernel)
+        assert sorted(startup.unscanned) == sorted([copy.copy_id, current.copy_id])
+        await activation.rebuild_in_background(app.state.kernel, startup)
+        refused = await decided(client, visitor, "native.find_slots", call_id=f"slots-{minutes}")
+        assert (refused.outcome, refused.policy_version) == ("refuse", 1) and REFUSED in refused.reason_plain
+        alerts.append(await rules_alerts(app, copy))
+    assert alerts == [[WAITING_ALERT]] * 2 + [[WAITING_ALERT] * 2]
+    # a Desk the background brings up only for its tools refuses nothing meanwhile, so its owner isn't told
+    assert await rules_alerts(app, current) == []
 
 
 async def test_startup_discovery_counts_against_its_budget(app, client, monkeypatch):
@@ -306,11 +353,12 @@ async def test_startup_discovery_counts_against_its_budget(app, client, monkeypa
         elapsed[0] += 120.0
         return await discover(*args, **kwargs)
 
-    started = []
+    started, told = [], []
     rebuild = activation.rebuild_version
 
     async def counted(ctx, desk_id, *args, **kwargs):
         started.append(desk_id)
+        told.append([await rules_alerts(app, copy) for copy in (first, second)])
         return await rebuild(ctx, desk_id, *args, **kwargs)
 
     monkeypatch.setattr(activation, "monotonic", lambda: elapsed[0])
@@ -326,6 +374,8 @@ async def test_startup_discovery_counts_against_its_budget(app, client, monkeypa
     background = await activation.rebuild_in_background(app.state.kernel, startup)
     assert background == {(first.desk_id, 1): None, (second.desk_id, 1): None}
     assert started == [first.desk_id, second.desk_id]
+    # every owner whose Desk waits in the queue is told before the first rebuild starts, not when it is reached
+    assert told == [[[WAITING_ALERT], [WAITING_ALERT]]] * 2
 
 
 async def test_a_copy_whose_lookup_fails_at_startup_is_looked_at_again_in_the_background(app, client, monkeypatch):
