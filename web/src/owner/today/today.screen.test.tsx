@@ -23,6 +23,7 @@ import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { CARD_REASON } from '../../mocks/world.ts';
 import { START_EXAMPLES } from '../../setup/copy.ts';
 import { expectLandedInPlace, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
@@ -89,6 +90,13 @@ async function heldItems(): Promise<NeedsYouItem[]> {
   const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
   if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Needs you');
   return (answer.body as NeedsYouItem[]).filter((item) => item.decision != null);
+}
+
+/** Everything the mock's Needs you holds for the main Desk now. */
+async function needsYouRead(): Promise<NeedsYouItem[]> {
+  const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Needs you');
+  return answer.body as NeedsYouItem[];
 }
 
 /** The seeded hold as the kernel has it now. */
@@ -1645,9 +1653,11 @@ describe('Today', () => {
     await expect.element(wants.first().getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
     expect(wants.first().getByText(CALLBACK_REASON).element().closest('[data-copy="user"]')).not.toBeNull();
     await expect.element(wants.first().getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true })).toBeVisible();
+    // A chat holds one open handoff, as the kernel keeps it: a second call-back closes the first and
+    // opens its own, so the owner keeps one item, which shows what is promised now.
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Please call me tonight' } });
-    await expect.poll(() => wants.elements().length, { timeout: 2_000 }).toBe(2);
-    await expect.element(wants.nth(1).getByText("You'll call back. No time was promised.", { exact: true })).toBeVisible();
+    await expect.element(wants.first().getByText("You'll call back. No time was promised.", { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(wants.elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Joining reads the chat, takes it over at the generation read, and opens it.
@@ -1724,6 +1734,98 @@ describe('Today', () => {
     expect(screen.getByRole('alert').elements()).toHaveLength(0);
   });
 
+  it('card_handoff_draws_no_callback_line', async () => {
+    // The handoff card handed the chat to Maria: no call back was promised, so its card says the
+    // Desk's own reason and no call-back time, and joins and closes as a call-back request does.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can I talk to Maria?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants, { timeout: 2_000 }).toBeVisible();
+    await expect.element(wants.getByText(CARD_REASON, { exact: true })).toBeVisible();
+    expect(wants.element().textContent).not.toMatch(/call back/i);
+    await expect.element(wants.getByRole('button', { name: 'Join the chat' })).toBeVisible();
+    await expect.element(wants.getByRole('button', { name: 'Mark done' })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Once it's done, a call-back request in its place still says when.
+    await mockStore.dispatch('handoffDone', { params: { handoff_id: [...mockStore.world.handoffs.keys()][0] ?? '' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(wants.elements()).toHaveLength(1);
+  });
+
+  it('card_handoff_quotes_the_visitor', async () => {
+    // As a held request's card does: the visitor's last words, set off as theirs, under the Desk's
+    // reason. A call-back request's reason is already what they typed, so it quotes nothing more.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can I talk to Maria?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    const words = wants.getByText('Can I talk to Maria?', { exact: true });
+    await expect.element(words, { timeout: 2_000 }).toBeVisible();
+    expect(words.element().closest('[data-copy="user"]')).not.toBeNull();
+    expect(words.element().parentElement?.textContent).toBe('From the visitor: “Can I talk to Maria?”');
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Nothing to quote: no line.
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => ({ ...item, from_the_visitor: null })) });
+    const quiet = await renderRoute(TODAY);
+    await expect.element(quiet.screen.getByRole('article', { name: 'Wants you' }).getByText(CARD_REASON, { exact: true })).toBeVisible();
+    expect(quiet.screen.getByRole('article', { name: 'Wants you' }).element().textContent).not.toContain('From the visitor');
+
+    // A call-back request quotes nothing more.
+    const callback = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can you call me back?');
+    const asked = callback.screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(asked.getByText(CALLBACK_REASON, { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(asked.element().textContent).not.toContain('From the visitor');
+  });
+
+  it('callback_without_a_kind_keeps_its_line', async () => {
+    // An API that doesn't send `kind` yet: a handoff without one is a call-back request, and still
+    // says when Maria will call back.
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const withoutKind = (await needsYouRead()).map((item) => {
+      if (item.handoff == null) return item;
+      const handoff = { ...item.handoff };
+      delete handoff.kind;
+      return { ...item, handoff };
+    });
+    expect(withoutKind.filter((item) => item.handoff != null).map((item) => item.handoff && 'kind' in item.handoff)).toEqual([false]);
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: withoutKind });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants.getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
+    await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true })).toBeVisible();
+  });
+
+  it('unknown_handoff_kind_promises_no_call_back', async () => {
+    // Only a call-back request promises a call back: a handoff whose kind is null, or one this build
+    // doesn't know, says its reason and nothing about calling back.
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    const callback = items.find((item) => item.handoff != null);
+    if (callback?.handoff == null) throw new Error('the call-back request is in Needs you');
+    const as = (kind: unknown, id: string): NeedsYouItem => ({ ...callback, handoff: { ...callback.handoff, handoff_id: id, kind: kind as 'callback' } });
+    mockStore.inject({
+      route: 'needsYou',
+      status: 200,
+      times: 10_000,
+      body: [...items.filter((item) => item.handoff == null), as(null, 'handoff-null'), as('meeting', 'handoff-meeting')],
+    });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.poll(() => wants.elements().length).toBe(2);
+    for (const card of wants.elements()) {
+      expect(card.textContent).toContain(CALLBACK_REASON);
+      expect(card.textContent).not.toMatch(/call back/i);
+    }
+  });
+
   it('allow_person_above_the_limit_says_so', async () => {
     mockStore.world.addHeldRefund();
     const { screen } = await renderRoute(TODAY);
@@ -1787,12 +1889,12 @@ describe('Today', () => {
 });
 
 describe("Today's unfinished setup", () => {
-  /** The start step's first example: Okafor Plumbing, whose owner is Daniel. */
-  const OKAFOR = START_EXAMPLES.en.examples[0]?.description ?? '';
+  /** The start step's first example: Juniper Hair Studio, whose owner is Priya Shah. */
+  const JUNIPER = START_EXAMPLES.en.examples[0]?.description ?? '';
 
   /** A Desk the mock's setup made, its questions answered, then left at its tools. */
   async function deskAtTools(): Promise<SetupState> {
-    const started = await mockStore.dispatch('startSetup', { body: { description: OKAFOR, timezone: LA, idempotency_key: newIdempotencyKey() } });
+    const started = await mockStore.dispatch('startSetup', { body: { description: JUNIPER, timezone: LA, idempotency_key: newIdempotencyKey() } });
     if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
     const state = started.body as SetupState;
     const id = state.interview_id;
@@ -1809,18 +1911,18 @@ describe("Today's unfinished setup", () => {
   }
 
   it('unfinished_setup_leads_back_into_it', async () => {
-    // Daniel left his new Desk's setup at its rules. Its Today says it isn't live yet, at the top of
+    // Priya left her new Desk's setup at its rules. Its Today says it isn't live yet, at the top of
     // the page, and leads back into the interview at that step.
     const state = await deskAtRules();
     const { screen, router } = await renderRoute(`/app/${state.desk_id}/today`);
-    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect.element(card).toBeVisible();
     await expect.element(card.getByText('Not live yet', { exact: true })).toBeVisible();
     expect(card.element().querySelector('.cd-status-dot--held')).not.toBeNull();
-    const title = card.getByRole('heading', { level: 2, name: 'Finish setting up Okafor Plumbing' });
+    const title = card.getByRole('heading', { level: 2, name: 'Finish setting up Juniper Hair Studio' });
     await expect.element(title).toBeVisible();
     // The business's name is the owner's own words.
-    expect(title.element().querySelector('[data-copy="user"]')?.textContent).toBe('Okafor Plumbing');
+    expect(title.element().querySelector('[data-copy="user"]')?.textContent).toBe('Juniper Hair Studio');
     await expect
       .element(
         card.getByText(
@@ -1855,7 +1957,7 @@ describe("Today's unfinished setup", () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
-    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect
       .element(
         card.getByText(
@@ -1881,7 +1983,7 @@ describe("Today's unfinished setup", () => {
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
     // The bar names the business once the copy's Desks are read, at the tools.
-    await expect.element(screen.getByText('Okafor Plumbing', { exact: true }).first()).toBeVisible();
+    await expect.element(screen.getByText('Juniper Hair Studio', { exact: true }).first()).toBeVisible();
     meanwhile();
     const startedAt = performance.now();
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
@@ -1899,7 +2001,7 @@ describe("Today's unfinished setup", () => {
 
   /** The card names the rules, with the steps at Rules. */
   async function expectCardAtRules(screen: RenderResult): Promise<void> {
-    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect.element(card.getByText(AT_RULES, { exact: true })).toBeVisible();
     expect(card.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('3Rules');
   }
@@ -1953,12 +2055,12 @@ describe("Today's unfinished setup", () => {
   });
 
   it('with_answering_on_the_line_says_nothing_of_answering', async () => {
-    // The Answering switch is separate from setup: Daniel turned Answering on before finishing his
-    // setup, so the card names where he picks up, and says nothing of Answering staying off.
+    // The Answering switch is separate from setup: Priya turned Answering on before finishing her
+    // setup, so the card names where she picks up, and says nothing of Answering staying off.
     const state = await deskAtRules();
     await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: true } });
     const { screen } = await renderRoute(`/app/${state.desk_id}/today`);
-    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect
       .element(card.getByText("Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.", { exact: true }))
       .toBeVisible();
@@ -1987,7 +2089,7 @@ describe("Today's unfinished setup", () => {
     await expect.element(screen.getByText('Drafting your rules', { exact: true })).toBeVisible();
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
-    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect
       .element(card.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
       .toBeVisible();
@@ -2009,7 +2111,7 @@ describe("Today's unfinished setup", () => {
     const state = await deskAtTools();
     mockStore.inject({ route: 'setupRules', status: 409, body: { error: 'rules_cannot_be_checked' } });
     const { screen, router } = await renderRoute(`/app/${state.desk_id}/today`);
-    const first = region(screen, 'Finish setting up Okafor Plumbing');
+    const first = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect.element(first.getByText(AT_TOOLS, { exact: true })).toBeVisible();
     await first.getByRole('link', { name: 'Continue setup' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
@@ -2026,7 +2128,7 @@ describe("Today's unfinished setup", () => {
     // The API keeps setup at its tools when its rules can't be checked: Today names the tools, and
     // never the rules the page went on to, not even for a moment.
     const { screen, sawRules } = await leaveAfterACheckThatCannotRun();
-    await expect.element(region(screen, 'Finish setting up Okafor Plumbing').getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    await expect.element(region(screen, 'Finish setting up Juniper Hair Studio').getByText(AT_TOOLS, { exact: true })).toBeVisible();
     expect(sawRules()).toBe(false);
   });
 
@@ -2036,7 +2138,7 @@ describe("Today's unfinished setup", () => {
     const { screen, router, state, sawRules } = await leaveAfterACheckThatCannotRun(() => {
       mockStore.inject({ route: 'desks', status: 503, times: 10_000 });
     });
-    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect.element(card.getByText(AT_TOOLS, { exact: true })).toBeVisible();
     expect(sawRules()).toBe(false);
     await card.getByRole('link', { name: 'Continue setup' }).click();
@@ -2058,7 +2160,7 @@ describe("Today's unfinished setup", () => {
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
 
     needsYou.release();
-    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
     await expect.element(card).toBeVisible();
     const things = screen.getByRole('heading', { level: 2, name: 'Things to try' }).element();
     expect(card.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -2070,7 +2172,7 @@ describe("Today's unfinished setup", () => {
     // other rows do. Nothing scrolls sideways at either width.
     const state = await deskAtRules();
     const parts = (screen: RenderResult) => {
-      const card = region(screen, 'Finish setting up Okafor Plumbing');
+      const card = region(screen, 'Finish setting up Juniper Hair Studio');
       return {
         card: card.element().getBoundingClientRect(),
         // The "Not live yet" line, the words' first.
@@ -2084,7 +2186,7 @@ describe("Today's unfinished setup", () => {
     };
 
     const laptop = await renderRoute(`/app/${state.desk_id}/today`);
-    await expect.element(region(laptop.screen, 'Finish setting up Okafor Plumbing')).toBeVisible();
+    await expect.element(region(laptop.screen, 'Finish setting up Juniper Hair Studio')).toBeVisible();
     const wide = parts(laptop.screen);
     expect(wide.button.left).toBeGreaterThanOrEqual(wide.line.right);
     expect(Math.abs(wide.button.top - wide.status.top)).toBeLessThanOrEqual(1);
@@ -2093,7 +2195,7 @@ describe("Today's unfinished setup", () => {
     expectNoHorizontalScroll();
 
     const phone = await renderRoute(`/app/${state.desk_id}/today`, { viewport: 'phone' });
-    await expect.element(region(phone.screen, 'Finish setting up Okafor Plumbing')).toBeVisible();
+    await expect.element(region(phone.screen, 'Finish setting up Juniper Hair Studio')).toBeVisible();
     const narrow = parts(phone.screen);
     expect(narrow.card.bottom).toBeLessThanOrEqual(narrow.things.top);
     expect(narrow.button.top).toBeGreaterThanOrEqual(narrow.line.bottom);
@@ -2138,7 +2240,7 @@ describe("Today's unfinished setup", () => {
     const id = state.interview_id;
     const lineAt = async (step: string, line: string) => {
       const { screen } = await renderRoute(`/app/${state.desk_id}/today`);
-      const card = region(screen, 'Finish setting up Okafor Plumbing');
+      const card = region(screen, 'Finish setting up Juniper Hair Studio');
       await expect.element(card.getByText(line, { exact: true }), { timeout: 5_000 }).toBeVisible();
       const current = card.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]');
       expect(current?.textContent, step).toBe(step);
@@ -2167,18 +2269,18 @@ describe("Today's unfinished setup", () => {
     expect(live.screen.getByRole('link', { name: 'Continue setup' }).elements()).toHaveLength(0);
 
     // A Desk left at its questions, and one left at its tools.
-    const started = await mockStore.dispatch('startSetup', { body: { description: OKAFOR, timezone: LA, idempotency_key: newIdempotencyKey() } });
+    const started = await mockStore.dispatch('startSetup', { body: { description: JUNIPER, timezone: LA, idempotency_key: newIdempotencyKey() } });
     if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
     const next = started.body as SetupState;
     const atQuestions = await renderRoute(`/app/${next.desk_id}/today`);
-    const first = region(atQuestions.screen, 'Finish setting up Okafor Plumbing');
+    const first = region(atQuestions.screen, 'Finish setting up Juniper Hair Studio');
     await expect
       .element(first.getByText('Your answers are saved. Pick up at the questions. Answering stays off until your Desk is live.', { exact: true }))
       .toBeVisible();
     expect(first.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
     const tools = await deskAtTools();
     const atTools = await renderRoute(`/app/${tools.desk_id}/today`);
-    const second = region(atTools.screen, 'Finish setting up Okafor Plumbing');
+    const second = region(atTools.screen, 'Finish setting up Juniper Hair Studio');
     await expect
       .element(second.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
       .toBeVisible();

@@ -38,3 +38,14 @@ export const NoConversations: Story = {
     await expect(canvas.queryByRole('button')).toBeNull();
   },
 };
+
+export const WithoutTitle: Story = {
+  args: { title: undefined, body: 'When a request is turned down or a reply is stopped, you’ll see here what was asked and why.' },
+  parameters: { canvasNote: 'Safety on an empty week, where the headline above already says nothing was turned down.' },
+  play: async ({ canvasElement, canvas }) => {
+    // With the page's own line above saying it, the title is left out: no empty line holds its place.
+    await expect(canvas.getByText(/you’ll see here what was asked and why/)).toBeVisible();
+    await expect(canvasElement.querySelector('.cd-empty-state__title')).toBeNull();
+    await expect(canvasElement.querySelector('.cd-empty-state')?.firstElementChild?.className).toContain('cd-empty-state__body');
+  },
+};

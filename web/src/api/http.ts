@@ -369,8 +369,8 @@ export async function request<K extends RouteKey>(key: K, ...[opts]: RequestArgs
     let answer = await send(key, route.method, path, options.body, timeoutFor(route));
     if (answer.status === 202 && route.proving) answer = await followRetry(key, answer, startedAt);
     if (answer.status < 200 || answer.status > 299) throw errorFrom(key, route.method, answer);
-    // A body that isn't JSON, or none where only a 202 or 204 may answer without one, isn't an answer.
-    const empty = answer.body === undefined && answer.status !== 202 && answer.status !== 204;
+    // Consent always carries an interview. Other routes may answer an empty 202 or 204.
+    const empty = answer.body === undefined && (key === 'setupConsent' || (answer.status !== 202 && answer.status !== 204));
     if (answer.unreadable || empty) throw new ApiError('unavailable', { route: key, method: route.method, status: answer.status });
     notify({ key, ok: true });
     return answer.body as RouteResponse<K>;

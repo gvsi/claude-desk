@@ -1,6 +1,5 @@
-/* TakeOverBar: who is answering, above the composer: the lines in a size-reading column, and the
-   controls and what the visitor sees in a size-margin column beside them. Below the two columns'
-   width the controls wrap under the lines. */
+/* TakeOverBar: the lines in a size-reading column, controls beside them when they fit.
+   The controls and hint grow into the available width, including after wrapping below the lead. */
 
 .cd-take-over {
   display: flex;
@@ -22,7 +21,7 @@
 
 .cd-take-over__action {
   display: flex;
-  flex: 0 1 var(--size-margin);
+  flex: 1 1 var(--size-margin);
   flex-direction: column;
   gap: var(--space-8);
   min-width: 0;
