@@ -377,7 +377,8 @@ async def test_a_deploy_that_changes_the_prompt_mid_turn_lets_claude_read_what_r
     assert await pending(caller, model, engine, locks) == "done"
     (fresh,) = model.requests
     assert fresh.system == conversation_system(RIVERA) != opened_with and thinking_blocks(fresh) == []
-    opens_from_the_summary(fresh, "visitor: Book me the earliest visit.", "claude (shown to the visitor): You're booked.")
+    opens_from_the_summary(fresh, "visitor: Book me the earliest visit.",
+                           "claude (shown to the visitor): You're booked.")
     assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
     assert len(fake.called("/decide")) == 1 and len(fake.desks[caller.desk_id].booked) == 1
 
