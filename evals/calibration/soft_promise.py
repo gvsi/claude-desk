@@ -27,20 +27,25 @@ Before any call it refuses, saying why:
 
 Whether the kernel's code check (`reply_check.scan_prose`, offline) blocks each case is computed here
 on every run, never read from the case file. Then the calls, `--concurrency` at a time, one sample of
-every case before the next sample of any. A call starts only while the spend so far, with each call in
-flight counted at its estimate, leaves room under `--max-usd` for its own estimate: at the cap no call
-starts, and the run says so and exits 1.
+every case before the next sample of any. Each call reserves an upper bound on its cost before it
+starts (`call_bound`): one input token for every `CHARS_PER_TOKEN` characters of the system prompt and
+of the case's request, plus a margin of `REQUEST_TOKENS`, at the higher of the input and cache-write
+prices, and the most the check may answer, `SOFT_PROMISE_MAX_TOKENS` output tokens. A call starts only
+while the spend so far and the bounds of the calls in flight leave room under `--max-usd` for its own
+bound: at the cap no call starts, and the run says so and exits 1. Should a call still cost more than
+its bound and take the spend past `--max-usd`, the run says so too and exits 1.
 
 Spend. A call is charged its usage at its model's list prices (`PRICES`, Haiku 5.5's from the master
-plan's "Model cost and latency budget"), or its estimate when its usage can't be priced: it left none
+plan's "Model cost and latency budget"), or its bound when its usage can't be priced: it left none
 (a timeout or an error) or another model answered. The run appends one row to the shared eval spend
 file, with tier 2's columns and `append_spend`: pass_id `calibration-soft-promise-<label>-<time>`,
-ending `-estimated` when any call was charged its estimate; provider `anthropic`; runs, the calls
-made; and the spend as the Desk's and the Claude API's. A calibration's row counts against the monthly
+ending `-estimated` when any call was charged its bound; provider `anthropic`; runs, the calls made;
+and the spend as the Desk's and the Claude API's. A calibration's row counts against the monthly
 limit but never measures what a tier 2 run costs (`passes.CALIBRATION_PREFIX`).
 
 Results. `evals/out/soft-promise/<label>-<time>.json` holds the run (the prompt, where it came from and
-its sha256, the commit, the model, samples, estimate, spend, calls and whether the cap stopped it) and,
+its sha256, the commit, the model, samples, estimate, spend, calls, whether the cap stopped it and
+whether the spend went past it) and,
 per case, its expectation, whether the code check blocks it, the samples asked for (`requested`), the
 count of each verdict over the samples taken (`pass`; `flag`, promises_beyond_cards alone; `flag_ai`,
 denies_being_ai alone; `flag_both`; and `error`, no verdict) and its errors by status. A sample meets
@@ -58,6 +63,8 @@ import argparse
 import ast
 import asyncio
 import hashlib
+import json
+import math
 import os
 import re
 import sys
@@ -90,6 +97,11 @@ CASES_FILE = Path(__file__).with_name("soft_promise.yaml")
 OUT_DIR = REPO_ROOT / "evals" / "out" / "soft-promise"
 DECISIONS_PATH = "backend/desk/kernel_service/decisions.py"
 PER_CALL_USD = 0.0005
+# A call's bound (`call_bound`) counts one input token for every 2 characters of its text, half the
+# about 4 characters a token holds in English and Spanish prose, so it errs high, and 1,000 more as a
+# margin for the request's own framing and the output schema the API adds to it.
+CHARS_PER_TOKEN = 2
+REQUEST_TOKENS = 1_000
 # List prices in US dollars per million tokens, by model: input, cache read, 5-minute cache write and
 # output (the master plan's "Model cost and latency budget").
 PRICES: dict[str, dict[str, float]] = {
@@ -101,7 +113,7 @@ VERDICTS = ("pass", "flag", "flag_ai", "flag_both", "error")
 MEETS = {"pass": {"pass"}, "flag": {"flag", "flag_both"}, "flag_ai": {"flag_ai", "flag_both"}}
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 API_KEY = re.compile(r"[!-~]+")          # one run of printable ASCII, as the kernel takes a key
-EPSILON = 1e-9                            # dollars: sums of estimates compared with a cap
+EPSILON = 1e-9                            # dollars: sums of spend, bounds and estimates compared with a cap
 
 
 class Refused(RuntimeError):
@@ -258,28 +270,52 @@ def priced(usage: CallUsage | None) -> float | None:
             + usage.cache_write_tokens * rates["cache_write"] + usage.output_tokens * rates["output"]) / 1_000_000
 
 
+def call_input(case: Case) -> SoftPromiseInput:
+    """What the kernel's check reads for the case: its language, its prose as the scan reads it, and
+    its cards' texts."""
+    return SoftPromiseInput(language=case.language, prose=reply_check.shown(case.prose), cards=list(case.cards))
+
+
+def call_bound(system: str, data: SoftPromiseInput) -> float:
+    """An upper bound on one call's cost, in dollars: at most one input token for every
+    `CHARS_PER_TOKEN` characters of the system prompt and of the request's one message (`data` as
+    the kernel sends it), plus `REQUEST_TOKENS`, all at the higher of the input and cache-write
+    prices, and the most the check may answer, `SOFT_PROMISE_MAX_TOKENS` at the output price."""
+    message = json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    input_tokens = math.ceil((len(system) + len(message)) / CHARS_PER_TOKEN) + REQUEST_TOKENS
+    rates = PRICES[decisions.SOFT_PROMISE_MODEL]
+    return (input_tokens * max(rates["input"], rates["cache_write"])
+            + decisions.SOFT_PROMISE_MAX_TOKENS * rates["output"]) / 1_000_000
+
+
 class _Meter:
-    """The run's spend against its cap: a call reserves its estimate before it starts and is charged
-    its priced usage, else the estimate, when it ends."""
+    """The run's spend against its cap: a call reserves its bound before it starts and is charged
+    its priced usage, else that bound, when it ends."""
 
     def __init__(self, cap: float):
-        self.cap, self.spent, self.in_flight, self.calls, self.estimated = cap, 0.0, 0, 0, 0
+        self.cap, self.spent, self.reserved, self.calls, self.estimated = cap, 0.0, 0.0, 0, 0
 
-    def start(self) -> bool:
-        """Whether a call may start; a worker turned away stops, and the last one only once no call is
-        in flight and the cap leaves no room."""
-        if self.spent + (self.in_flight + 1) * PER_CALL_USD > self.cap + EPSILON:
+    def start(self, bound: float) -> bool:
+        """Whether a call with this bound may start: the spend so far, the bounds of the calls in
+        flight and its own must fit the cap. A worker turned away stops, and the last one only once
+        no call is in flight and the cap leaves no room."""
+        if self.spent + self.reserved + bound > self.cap + EPSILON:
             return False
-        self.in_flight += 1
+        self.reserved += bound
         self.calls += 1
         return True
 
-    def end(self, usage: CallUsage | None) -> None:
-        self.in_flight -= 1
+    def end(self, bound: float, usage: CallUsage | None) -> None:
+        self.reserved -= bound
         usd = priced(usage)
         if usd is None:
-            usd, self.estimated = PER_CALL_USD, self.estimated + 1
+            usd, self.estimated = bound, self.estimated + 1
         self.spent += usd
+
+    @property
+    def over(self) -> bool:
+        """Whether the spend went past the cap: a call cost more than its bound."""
+        return self.spent > self.cap + EPSILON
 
 
 def verdict_name(verdict: SoftPromiseVerdict | None) -> str:
@@ -351,8 +387,9 @@ class RunResult(BaseModel):
     estimate_usd: float
     spend_usd: float
     calls: int
-    estimated_calls: int
-    stopped_by_cap: bool
+    estimated_calls: int        # calls with no usage to price, charged their bound
+    stopped_by_cap: bool        # a call was turned away at the cap
+    over_cap: bool              # the spend went past --max-usd: a call cost more than its bound
     spend_row: str
     cases: list[CaseResult]
 
@@ -443,19 +480,20 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
                                    code_blocked=code_blocked(case), requested=config.samples) for case in cases}
     checker = AnthropicDecisions(_WithSystem(deps.client(key), prompt.text))
     meter = _Meter(config.max_usd)
+    inputs = {case.id: call_input(case) for case in cases}
+    bounds = {case.id: call_bound(prompt.text, inputs[case.id]) for case in cases}
     jobs = [case for _ in range(config.samples) for case in cases]   # every case's sample before the next
     position = 0
 
     async def worker() -> None:
         nonlocal position
-        while position < len(jobs) and meter.start():
+        while position < len(jobs) and meter.start(bounds[jobs[position].id]):
             case, position = jobs[position], position + 1
             verdict, usage = None, None
             try:
-                verdict, usage = await checker.soft_promise(SoftPromiseInput(
-                    language=case.language, prose=reply_check.shown(case.prose), cards=list(case.cards)))
-            finally:   # a call cut short is charged its estimate
-                meter.end(usage)
+                verdict, usage = await checker.soft_promise(inputs[case.id])
+            finally:   # a call cut short is charged its bound
+                meter.end(bounds[case.id], usage)
             tallies[case.id].count(verdict, usage)
 
     row_id = f"{CALIBRATION_PREFIX}soft-promise-{label}-{stamp}"
@@ -479,7 +517,8 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
         model=decisions.SOFT_PROMISE_MODEL, samples=config.samples, concurrency=config.concurrency,
         max_usd=config.max_usd, per_call_usd=PER_CALL_USD, estimate_usd=estimate, spend_usd=round(meter.spent, 6),
         calls=meter.calls, estimated_calls=meter.estimated, stopped_by_cap=meter.calls < len(jobs),
-        spend_row=row_id + ("-estimated" if meter.estimated else ""), cases=list(tallies.values()),
+        over_cap=meter.over, spend_row=row_id + ("-estimated" if meter.estimated else ""),
+        cases=list(tallies.values()),
     )
     deps.out_dir.mkdir(parents=True, exist_ok=True)
     path = deps.out_dir / f"{label}-{stamp}.json"
@@ -541,12 +580,15 @@ def report(outcome: RunResult, path: Path) -> list[str]:
     lines = [
         f"soft-promise: {outcome.calls} calls to {outcome.model}, {outcome.samples} samples of {len(outcome.cases)} "
         f"cases, with the prompt in {outcome.prompt.source} (sha256 {outcome.prompt.sha256[:12]})",
-        f"spend: ${outcome.spend_usd:.4f}" + (f", {outcome.estimated_calls} calls charged their estimate"
+        f"spend: ${outcome.spend_usd:.4f}" + (f", {outcome.estimated_calls} calls charged their bound"
                                               if outcome.estimated_calls else "") + f"; spend row {outcome.spend_row}",
     ]
     if outcome.stopped_by_cap:
         lines.append(f"stopped at the cap: no call starts past --max-usd ${outcome.max_usd:.4f}; {outcome.calls} of "
                      f"{planned} calls made")
+    if outcome.over_cap:
+        lines.append(f"over the cap: spent ${outcome.spend_usd:.4f}, past --max-usd ${outcome.max_usd:.4f}, since a "
+                     "call cost more than its bound")
     lines += ["", *render(table(outcome.cases), samples=outcome.samples)]
     missed = [result for result in outcome.cases if result.outcome != "all"]
     if missed:
@@ -588,7 +630,7 @@ def main(argv: Sequence[str] | None = None, deps: Deps | None = None) -> int:
         print(f"soft-promise: {refusal}", file=sys.stderr)
         return 1
     print("\n".join(report(outcome, path)))
-    return 1 if outcome.stopped_by_cap else 0
+    return 1 if outcome.stopped_by_cap or outcome.over_cap else 0
 
 
 if __name__ == "__main__":

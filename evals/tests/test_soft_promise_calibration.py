@@ -21,16 +21,21 @@ import pytest
 import yaml
 
 from desk.kernel_service import decisions, reply_check
-from desk.kernel_service.decisions import AnthropicDecisions, SoftPromiseInput
+from desk.kernel_service.decisions import AnthropicDecisions, CallUsage, SoftPromiseInput
 from evals.calibration.soft_promise import (
     CASES_FILE,
     DECISIONS_PATH,
     PER_CALL_USD,
     PRICES,
+    CHARS_PER_TOKEN,
+    REQUEST_TOKENS,
     Case,
     CaseResult,
     Deps,
     Refused,
+    _Meter,
+    call_bound,
+    call_input,
     code_blocked,
     load_cases,
     load_prompt,
@@ -268,6 +273,45 @@ def test_it_stops_starting_calls_at_the_cap(deps: Deps, tmp_path: Path, capsys: 
     assert spend_row(deps)["runs"] == "3"
 
 
+def test_a_call_that_costs_more_than_the_cap_fails_the_run(deps: Deps, tmp_path: Path,
+                                                           capsys: pytest.CaptureFixture[str]):
+    deps.cases = write_cases(tmp_path / "one.yaml", case("offer-one", "Want me to take a message?"))
+    deps.client = Factory(FakeClient(usage=(100_000, 0)))               # $0.0100, past any bound
+    # its bound fits the cap, so the call starts; its usage then takes the spend past the cap
+    assert main(["--samples", "1", "--max-usd", "0.002"], deps) == 1
+    data = results_file(deps)
+    assert (data["calls"], data["stopped_by_cap"], data["over_cap"]) == (1, False, True)
+    assert data["spend_usd"] == pytest.approx(0.01)
+    assert "over the cap: spent $0.0100, past --max-usd $0.0020" in capsys.readouterr().out
+    assert float(spend_row(deps)["claude_api_usd"]) == pytest.approx(0.01)
+
+
+def test_a_call_starts_only_while_the_spend_and_the_calls_in_flight_leave_room_for_its_bound():
+    meter = _Meter(0.003)
+    assert meter.start(0.001) and meter.start(0.001) and meter.start(0.001)
+    assert not meter.start(0.0001)                       # three calls in flight hold the whole cap
+    meter.end(0.001, None)                               # no usage to price: charged its whole bound
+    assert meter.spent == pytest.approx(0.001) and not meter.start(0.0001)
+    # one priced at $0.0002 frees the rest of its bound for the next call, and no more
+    meter.end(0.001, CallUsage(model=HAIKU, status="ok", input_tokens=2_000, latency_ms=1))
+    assert meter.spent == pytest.approx(0.0012) and not meter.start(0.00081) and meter.start(0.0008)
+    assert (meter.calls, meter.estimated, meter.over) == (4, 1, False)
+
+
+def test_a_calls_bound_counts_its_prompt_its_request_and_the_longest_answer():
+    data = SoftPromiseInput(language="es", prose="Elija el horario y se lo reservo.", cards=[OPEN_TIMES])
+    message = json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    rates = PRICES[HAIKU]
+    tokens = -(-(len("Check one reply.") + len(message)) // CHARS_PER_TOKEN) + REQUEST_TOKENS
+    assert call_bound("Check one reply.", data) == pytest.approx(
+        (tokens * rates["cache_write"] + decisions.SOFT_PROMISE_MAX_TOKENS * rates["output"]) / 1_000_000)
+    # a longer prompt or reply raises it, and the longest answer alone is in every bound
+    assert call_bound("Check one reply." * 100, data) > call_bound("Check one reply.", data)
+    assert call_bound("", data) > decisions.SOFT_PROMISE_MAX_TOKENS * rates["output"] / 1_000_000
+    # each case's bound on this tree's prompt is over the per-call estimate the run is refused by
+    assert min(call_bound(decisions.SOFT_PROMISE_SYSTEM, call_input(c)) for c in load_cases(CASES_FILE)) > PER_CALL_USD
+
+
 def test_each_call_is_the_kernels_own_with_only_the_system_prompt_swapped(deps: Deps, tmp_path: Path):
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("Check one reply.\n")
@@ -384,7 +428,7 @@ def test_a_flag_case_is_met_by_its_own_flag_whatever_the_other_says(deps: Deps, 
 
 
 def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: pytest.CaptureFixture[str]):
-    # the promise is flagged once and times out once; the timeout left no usage, so it is charged its estimate
+    # the promise is flagged once and times out once; the timeout left no usage, so it is charged its bound
     answers = iter(["flag", TimeoutError()])
     deps.client = Factory(FakeClient(lambda prose: "pass" if "book" in prose else next(answers)))
     assert main(["--samples", "2", "--max-usd", "1", "--label", "trial"], deps) == 0
@@ -395,15 +439,17 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
     assert (row["date"], row["provider"], row["runs"]) == ("2026-10-30", "anthropic", "4")
     rates = PRICES[HAIKU]
     priced = 3 * (900 * rates["input"] + 12 * rates["output"]) / 1_000_000
-    total = priced + PER_CALL_USD
-    assert float(row["desk_usd"]) == float(row["claude_api_usd"]) == float(row["total_usd"]) == pytest.approx(total)
+    [promise] = [c for c in load_cases(deps.cases) if c.id == "promise-sort"]
+    total = pytest.approx(priced + call_bound(decisions.SOFT_PROMISE_SYSTEM, call_input(promise)),
+                          abs=5e-7)                              # written to the millionth of a dollar
+    assert float(row["desk_usd"]) == float(row["claude_api_usd"]) == float(row["total_usd"]) == total
     assert float(row["simulator_usd"]) == 0
     # a calibration's calls count against the month, but they are no tier 2 run, so they measure none
     assert measured_per_run(read_spend(deps.spend_file), "anthropic") is None
 
     data = results_file(deps)
     assert (data["label"], data["samples"], data["calls"], data["estimated_calls"]) == ("trial", 2, 4, 1)
-    assert data["spend_usd"] == pytest.approx(total) and not data["stopped_by_cap"]
+    assert data["spend_usd"] == total and not data["stopped_by_cap"] and not data["over_cap"]
     assert (data["prompt"]["source"], data["prompt"]["text"]) == ("this tree", decisions.SOFT_PROMISE_SYSTEM)
     assert data["model"] == HAIKU and data["per_call_usd"] == PER_CALL_USD
     assert [(c["id"], c["expected"], c["code_blocked"], c["verdicts"], c["errors"], c["outcome"])
