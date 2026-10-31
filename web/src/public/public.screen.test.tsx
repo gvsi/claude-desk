@@ -599,15 +599,29 @@ describe('public chat page', () => {
         await page.viewport(VIEWPORTS.phone.width, VIEWPORTS.phone.height);
         await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
         await page.viewport(VIEWPORTS.desktop.width, VIEWPORTS.desktop.height);
+        // The page sees the window's new size with the browser's next frame, and takes a scroll
+        // before then for the browser's own (its scroll anchoring as the rows rewrap), so the
+        // visitor reads back once it has: the about column back beside the chat, the end above the
+        // composer, and a frame drawn after that.
+        const about = screen.getByRole('complementary', { name: 'About Rivera Plumbing' }).element();
+        await vi.waitFor(
+          () => {
+            expect(innerWidth).toBe(VIEWPORTS.desktop.width);
+            expect(chatScroller().contains(about), 'the about column is beside the chat').toBe(false);
+            expectEndAboveTheComposer(screen);
+          },
+          { timeout: 1_000 },
+        );
+        await frames();
       }
 
       // A visitor reading back up stays where they are while the chat goes on...
       const region = chatScroller();
       region.scrollTo({ top: 0, behavior: 'instant' });
-      await sleep(100);
+      await frames();
       mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
       await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
-      await sleep(100);
+      await frames();
       expect(region.scrollTop, viewport).toBe(0);
 
       // ...until they send: then the end of the conversation comes back into view.
@@ -645,7 +659,7 @@ describe('public chat page', () => {
     });
     expect(movedTo, 'focus moved the conversation up').toBeLessThan(atTheEnd);
     await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
-    await sleep(100);
+    await frames();
     expect(document.activeElement).toBe(cancel);
     expect(region.scrollTop).toBe(movedTo);
     expect(cancelInView(), '"Cancel this request", where the visitor moved to, stays in view').toBe(true);
@@ -818,14 +832,14 @@ describe('public chat page', () => {
     // At the end: the switch leaves the conversation at its start, and the shell's event follows.
     chatScroller().scrollTo({ top: 0, behavior: 'instant' });
     switched();
-    await sleep(200);
+    await frames();
     expectEndAboveTheComposer(screen);
 
     // Read back up, then a switch: the visitor stays where they moved to.
     chatScroller().scrollTo({ top: 0, behavior: 'instant' });
-    await sleep(200);
+    await frames();
     switched();
-    await sleep(200);
+    await frames();
     expect(chatScroller().scrollTop).toBe(0);
   });
 
@@ -862,7 +876,7 @@ describe('public chat page', () => {
     // sits above the composer.
     const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
     await ready(screen);
-    await sleep(200);
+    await frames();
     const region = chatScroller();
     const heading = screen.getByRole('heading', { name: 'About Rivera Plumbing' }).element();
     const composer = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element();
@@ -1611,6 +1625,20 @@ async function readyNow(screen: RenderResult): Promise<void> {
 /** Real time, kept before any test fakes the timers. */
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 const sleep = (ms: number) => new Promise<void>((resolve) => realSetTimeout(resolve, ms));
+
+/**
+ * Resolves once the browser has drawn `count` more frames, by when its scroll events and resize
+ * observers for what came before have run: a wait that follows the page rather than the clock.
+ */
+function frames(count = 2): Promise<void> {
+  return new Promise((resolve) => {
+    const next = (left: number): void => {
+      if (left === 0) resolve();
+      else requestAnimationFrame(() => next(left - 1));
+    };
+    next(count);
+  });
+}
 
 /** How far a timing check stays from the page's own timer, in fake time. */
 const MARGIN_MS = 1_000;
