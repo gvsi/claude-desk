@@ -9,7 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
-import { clickedControl } from '../../ds/components/AskClaudePanel/clickedControl.ts';
+import { clickedControl } from '../../ds/index.ts';
 import { DRAFT_FAILED, RuleChat, chatTurn, type ChatTurn } from './RuleChat.tsx';
 
 /** What a page under a Desk can do with the panel. */
