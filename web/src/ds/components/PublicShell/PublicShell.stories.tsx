@@ -1,14 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import type { ReactNode } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
 import type { EvMessage, PublicDesk, SseEvent, StatusEvent } from '../../../api/contracts.ts';
 import { contrastRatio } from '../../contrast.ts';
-import { rivera } from '../../fixtures/index.ts';
+import { rivera, type TranscriptTurn } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { FollowTheChat } from '../../test/followTheChat.tsx';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { Composer } from '../Composer/Composer.tsx';
 import { MarginReceipt } from '../MarginReceipt/MarginReceipt.tsx';
 import { receiptFromEvent } from '../MarginReceipt/receiptTone.ts';
+import { PersonMessage } from '../PersonMessage/PersonMessage.tsx';
+import { initialsOf } from '../Sidebar/Sidebar.tsx';
+import { SystemLine } from '../SystemLine/SystemLine.tsx';
 import { Transcript } from '../Transcript/Transcript.tsx';
 import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
 import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
@@ -783,5 +788,171 @@ export const HalfWidth: Story = {
     await expect(status.getBoundingClientRect().left).toBeGreaterThan(name.getBoundingClientRect().right);
     await expect(status.getBoundingClientRect().bottom).toBeLessThanOrEqual(header.getBoundingClientRect().bottom);
     await expect(canvas.getByTestId('half').scrollWidth).toBeLessThanOrEqual(HALF);
+  },
+};
+
+// The owner in the chat: take-over option A, signed on 2026-10-30.
+
+/** The chat head's line while Maria is in the chat, in place of the disclosure. */
+const OWNER_IN_CHAT = {
+  en: 'Maria Rivera is in this chat. Claude, an AI, is paused until Maria Rivera hands it back.',
+  es: 'Maria Rivera está en este chat. Claude, una IA, está en pausa hasta que Maria Rivera le devuelva el chat.',
+};
+
+/**
+ * The line the page writes in the chat as the owner joins, in the visitor's language: a stand-in for
+ * `joined` in web/src/public/copy.ts, which the design system doesn't import.
+ */
+const JOINED = { en: (name: string) => `${name} joined the chat`, es: (name: string) => `${name} se unió al chat` };
+
+/**
+ * Maria in the chat, from the Rivera fixture. In English: Dana asks for her, the kernel's handoff
+ * card, then the take-over's events as the stream delivers them, less her hand-back. In Spanish:
+ * Lucía's chat from her ask for Maria to Maria's words.
+ */
+const TAKE_OVER: Record<'en' | 'es', TranscriptTurn[]> = {
+  en: [
+    { kind: 'visitor', text: `I'd like to talk to ${ownerName}.` },
+    required(
+      rivera.events.heldTurn.flatMap((event): TranscriptTurn[] => (event.type === 'message' ? [{ kind: 'event', event }] : []))[0],
+      'handoff reply',
+    ),
+    ...rivera.events.takeOver.flatMap((event): TranscriptTurn[] => (event.type === 'owner_left' ? [] : [{ kind: 'event', event }])),
+  ],
+  es: (() => {
+    const turns = rivera.conversations.lucia.turns;
+    const ask = turns.findIndex((turn) => turn.kind === 'visitor' && turn.text.includes('hablar con Maria'));
+    const said = turns.findIndex((turn) => turn.kind === 'event' && turn.event.type === 'message' && turn.event.author === 'owner');
+    if (ask < 0 || said < ask) throw new Error("the Rivera fixture has no Spanish take-over in Lucía's chat");
+    return turns.slice(ask, said + 1);
+  })(),
+};
+
+/**
+ * The take-over's rows, as the public page draws them: the visitor's words, Claude's and Maria's
+ * messages with their receipts under them, and the line that says Maria joined; the chat's end is
+ * kept above the composer. Not the boards' `TurnRows`: that is for the `Boards/*` stories only, and
+ * writes the joined line in English only.
+ */
+function TakeOverConversation({ language }: { language: 'en' | 'es' }) {
+  const rows: ReactNode[] = [];
+  let pending: StatusEvent[] = [];
+  TAKE_OVER[language].forEach((turn, index) => {
+    if (turn.kind === 'visitor') {
+      rows.push(
+        <TranscriptRow key={index}>
+          <VisitorMessage text={turn.text} />
+        </TranscriptRow>,
+      );
+      return;
+    }
+    if (turn.kind !== 'event') return;
+    const { event } = turn;
+    if (event.type === 'receipt' || event.type === 'held' || event.type === 'resolved') {
+      pending.push(event);
+    } else if (event.type === 'owner_joined') {
+      rows.push(
+        <TranscriptRow key={index}>
+          <SystemLine text={JOINED[language](event.name)} initials={initialsOf(event.name)} />
+        </TranscriptRow>,
+      );
+    } else if (event.type === 'message') {
+      const margin = [...pending, event].map((each) => {
+        const view = receiptFromEvent(each);
+        return <MarginReceipt key={view.ledgerSeq} {...view} />;
+      });
+      pending = [];
+      rows.push(
+        <TranscriptRow key={index} margin={margin}>
+          {event.author === 'owner' ? (
+            <PersonMessage name={ownerName} blocks={event.blocks} language={event.language} />
+          ) : (
+            <ClaudeMessage blocks={event.blocks} language={event.language} ownerName={ownerName} />
+          )}
+        </TranscriptRow>,
+      );
+    }
+  });
+  return (
+    <>
+      <Transcript label={language === 'en' ? 'Conversation with Rivera Plumbing' : 'Conversación con Rivera Plumbing'}>{rows}</Transcript>
+      <FollowTheChat />
+    </>
+  );
+}
+
+/**
+ * owner_in_chat_line: the chat's head says Maria is in the chat and Claude, an AI, is paused, on the
+ * disclosure's own line and in its type, both of her names marked as written by someone; the usual
+ * disclosure and "Ask for Maria Rivera" aren't there. Under the head, the line that says she joined,
+ * then her words, in view above the composer.
+ */
+async function expectOwnerInChat(root: HTMLElement, language: 'en' | 'es'): Promise<void> {
+  const head = root.querySelector<HTMLElement>('.cd-public-shell__chat-head');
+  if (!head) throw new Error('no chat head');
+  const line = lineReading(head, OWNER_IN_CHAT[language]);
+  await expect(line).toHaveClass('cd-public-shell__disclosure', 'cd-type-meta');
+  expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+  await expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual([ownerName, ownerName]);
+  await expect(root).not.toHaveTextContent(DISCLOSURE[language]);
+  await expect(head.querySelectorAll('button')).toHaveLength(0);
+  const joined = [...root.querySelectorAll<HTMLElement>('[role="status"]')].find(
+    (status) => status.querySelector('.cd-system-line__text')?.textContent === JOINED[language](ownerName),
+  );
+  const said = root.querySelector<HTMLElement>('.cd-person-message');
+  if (!joined || !said) throw new Error('no line that says Maria joined, or no words of hers');
+  await expect(joined.getBoundingClientRect().top).toBeGreaterThanOrEqual(head.getBoundingClientRect().bottom);
+  await expect(said.getBoundingClientRect().top).toBeGreaterThan(joined.getBoundingClientRect().bottom);
+  await expect(said).toHaveTextContent(ownerName);
+  // Both in view, between the head and the composer, where the page keeps the end of the chat.
+  const composerArea = root.querySelector<HTMLElement>('.cd-public-shell__composer');
+  await expect(said.getBoundingClientRect().bottom).toBeLessThanOrEqual(composerArea?.getBoundingClientRect().top ?? 0);
+}
+
+const ownerInChatNote =
+  'The chat head of take-over option A: while Maria is in the chat it says so and that Claude, an AI, is paused until she hands it back, and Ask for Maria isn’t shown. Built from the signed option; its render and the by-eye comparison are tracked in issue #230. The conversation is the fixture’s take-over, its end kept above the composer as the page keeps it, and the about column shows the charter’s cards.';
+
+export const OwnerInChat: Story = {
+  args: { ownerInChat: true, openStatus: OPEN_EN, children: <TakeOverConversation language="en" /> },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: { canvas: 'N-R2-TakeOver-A-1512-EN', canvasNote: ownerInChatNote },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(window.innerWidth).toBe(1512);
+    await expectOwnerInChat(canvas.getByRole('main'), 'en');
+    await expect(canvas.queryByRole('button', { name: 'Ask for Maria Rivera' })).toBeNull();
+    // The rest of the page is as ever: the about column beside the chat, the composer at its foot.
+    await expect(canvas.getByRole('complementary', { name: 'About Rivera Plumbing' })).toBeVisible();
+    await expect(canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
+    await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'en');
+  },
+};
+
+export const OwnerInChatPhone: Story = {
+  args: { ownerInChat: true, openStatus: OPEN_EN, children: <TakeOverConversation language="en" /> },
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'N-R2-TakeOver-A-390-EN', canvasNote: ownerInChatNote },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(window.innerWidth).toBe(PHONE);
+    await expectOwnerInChat(canvas.getByRole('main'), 'en');
+    // No sideways scroll: nothing reaches past the phone's width, the paused line wraps inside it.
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(PHONE);
+    for (const el of canvasElement.querySelectorAll('.cd-public-shell *')) {
+      await expect(el.getBoundingClientRect().right).toBeLessThanOrEqual(PHONE + 0.5);
+    }
+  },
+};
+
+export const OwnerInChatEs: Story = {
+  args: { ...spanish, ownerInChat: true, openStatus: CLOSED_ES, children: <TakeOverConversation language="es" /> },
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: {
+    canvas: 'N-R2-TakeOver-A-1512-EN',
+    canvasNote: `${ownerInChatNote} The board is in English; the same page in Spanish, with Lucía’s take-over from the fixture.`,
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'es');
+    await expectOwnerInChat(canvas.getByRole('main'), 'es');
+    await expect(canvas.queryByRole('button', { name: 'Pedir hablar con Maria Rivera' })).toBeNull();
+    await expect(canvasElement).not.toHaveTextContent('is in this chat');
   },
 };

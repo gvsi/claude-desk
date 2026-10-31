@@ -1,4 +1,4 @@
-import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
+import type { KeyboardEvent, MouseEvent, ReactNode, Ref } from 'react';
 
 import { Icon } from '../../icons/index.tsx';
 import { Spinner } from './Spinner.tsx';
@@ -54,6 +54,11 @@ interface ButtonAsButton extends ButtonBaseProps {
   menuOpen?: boolean;
   /** Keys pressed on the button, such as the arrow keys that open its menu. */
   onKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  /**
+   * The `<button>`, for a screen that has to know about it: React lets go of it (a callback gets
+   * `null`) before the button leaves the page, so whether it had focus can still be read then.
+   */
+  buttonRef?: Ref<HTMLButtonElement>;
 }
 
 /** A link with a button's look. It never opens a menu. */
@@ -64,6 +69,7 @@ interface ButtonAsLink extends ButtonBaseProps {
   external?: boolean;
   menuOpen?: undefined;
   onKeyDown?: undefined;
+  buttonRef?: undefined;
 }
 
 export type ButtonProps = ButtonAsButton | ButtonAsLink;
@@ -82,6 +88,7 @@ export function Button({
   describedBy,
   onClick,
   onKeyDown,
+  buttonRef,
   children,
 }: ButtonProps) {
   // A busy button is the one in flight; only the others wait.
@@ -123,6 +130,7 @@ export function Button({
   const opensMenu = menuOpen !== undefined;
   return (
     <button
+      ref={buttonRef}
       id={id}
       className={opensMenu ? `${className} cd-button--menu` : className}
       type={type}
