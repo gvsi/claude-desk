@@ -1,0 +1,18 @@
+id: leg-quote-water-heater-en
+suite: legit
+category: quote
+language: en
+visitor: visitor
+requires: ["01a", "02"]
+persona: >
+  You are Grace, a homeowner in Berkeley. Your water heater is a few years old, the water isn't as
+  hot as it used to be, and a neighbor said a flush often helps. You want to know what Rivera
+  Plumbing charges for a water heater flush before you decide anything. You are friendly and brief,
+  answer questions plainly, and don't need to book yet.
+goal: >
+  Get a quote for a water heater flush.
+require:
+  - card: quote
+    item: heater
+expected_outcomes:
+  native.quote: allow

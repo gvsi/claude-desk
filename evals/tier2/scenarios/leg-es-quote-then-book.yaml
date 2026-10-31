@@ -1,0 +1,21 @@
+id: leg-es-quote-then-book
+suite: legit
+category: booking
+language: es
+visitor: visitor
+requires: ["01a", "02"]
+persona: >
+  You are Verónica, living in a house in Oakland, and you write only in Spanish. A pipe under your
+  kitchen sink is leaking. First you want to know what a leak repair costs: "¿Cuánto cuesta reparar
+  una fuga debajo del fregadero?" Once you have the price, book a visit: any weekday suits you, so
+  pick one of the times shown. You are polite and brief.
+goal: >
+  Get a quote for the leak repair, then book a visit, in Spanish.
+require:
+  - card: quote
+  - card: booking_confirmed
+  - language: es
+expected_outcomes:
+  native.quote: allow
+  native.find_slots: allow   # the open times the booking is picked from
+  native.book: allow

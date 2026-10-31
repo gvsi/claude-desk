@@ -44,6 +44,32 @@ def test_routes_name_each_operation_with_the_plan_that_lands_it():
         "/api/owner/desks/{desk_id}/ledger", {"verify": "true"})
 
 
+def test_a_refusals_message_masks_credentials_before_its_cuts():
+    """A refusal's message quotes the body the API sent, cut to 500 characters, or to 80 for a body
+    that isn't JSON: its credentials are masked first, so one that crosses a cut is never shown in part."""
+    # "x" * 480 + "postgresql://u:" (15) puts the 500 cut 5 characters into the password.
+    json_body = ApiCallFailed("send", 503, "x" * 480 + "postgresql://u:Zq9xKw7vRt3Lm@db.example.invalid/desk")
+    assert "Zq9" not in str(json_body)
+    keyed = ApiCallFailed("send", 503, {"error": "internal", "detail": "PGPASSWORD=fake-pg-secret psql failed"})
+    assert "fake-pg-secret" not in str(keyed) and "PGPASSWORD=***" in str(keyed)
+    assert keyed.body == {"error": "internal", "detail": "PGPASSWORD=fake-pg-secret psql failed"}   # as it came
+    # "x" * 60 + "postgresql://u:" (15) puts the 80 cut 5 characters into the password.
+    text_body = ApiCallFailed("send", 502, "x" * 60 + "postgresql://u:Zq9xKw7vRt3Lm@db.example.invalid/desk",
+                              content_type="text/html")
+    assert "Zq9" not in str(text_body) and "Zq9" not in text_body.body and len(text_body.body) <= 80
+
+
+def test_a_refusals_message_masks_a_json_bodys_values_before_serializing_them():
+    """A JSON body's values are masked before it is serialized: serializing escapes a quoted password's
+    quotes, which the masking would misread, so an escaped quote inside a password would show its tail.
+    A password key's value is masked whatever its type; the body itself stays as the API sent it."""
+    body = {"error": "internal", "detail": 'connect failed: password="fake\\"tail-secret" host=db',
+            "db": {"password": ["fake-list-secret"]}}
+    refused = ApiCallFailed("send", 503, body)
+    assert "tail-secret" not in str(refused) and "fake-list-secret" not in str(refused)
+    assert "host=db" in str(refused) and refused.body == body   # the rest shown; the body as it came
+
+
 def test_a_route_fills_and_encodes_its_parameters():
     assert ROUTES["owner_take_over"].url(session_id="s/1 ?x") == "/api/owner/conversations/s%2F1%20%3Fx/takeover"
     assert ROUTES["send"].url(desk_slug="rivera") == "/api/public/desks/rivera/messages"
@@ -305,6 +331,142 @@ async def test_events_replay_the_chat_after_the_last_event_id(stand_in):
         assert later[1].data["blocks"][0]["text"] == "You said: second"
     assert [body for path, body, _ in api.bodies if path.endswith("/messages")] == [
         b'{"text":"first"}', b'{"text":"second"}']
+
+
+def event_stream(text: str) -> httpx.MockTransport:
+    """A transport whose every answer is `text` as a chat's event stream."""
+    return httpx.MockTransport(lambda request: httpx.Response(
+        200, headers={"content-type": "text/event-stream; charset=utf-8"}, text=text))
+
+
+async def test_events_skip_a_keep_alive_after_an_event_with_an_id():
+    """The API's keep-alive comment, sent as its SSE library frames it, reaches httpx-sse as an event with
+    no data once an event has set an id, since the last event id carries over. The SSE spec never
+    dispatches an event without data, and nor does the client."""
+    stream = ('id: 1\r\nevent: writing\r\ndata: {"type": "writing"}\r\n\r\n'
+              ": keep-alive\r\n\r\n"
+              'id: 2\r\nevent: turn_end\r\ndata: {"type": "turn_end"}\r\n\r\n')
+    async with DeskClient("http://127.0.0.1:8700", PASSCODE, transport=event_stream(stream)) as client:
+        client.desk_slug = SLUG
+        events = [event async for event in client.events()]
+    assert [(event.id, event.event, event.data) for event in events] == [
+        ("1", "writing", {"type": "writing"}), ("2", "turn_end", {"type": "turn_end"})]
+
+
+# A page something in front of the API might send in its place: more than 80 characters, its tail past them.
+NOT_JSON = "<html><body>" + "a gateway's page, not the API's answer. " * 3 + "the tail</body></html>"
+
+
+def request_headers(client: DeskClient) -> tuple[str, ...]:
+    """Header values every request of `client` carries from now on, made at run time: what an error must never show."""
+    values = tuple(secrets.token_urlsafe(12) for _ in range(3))
+    client.http.headers.update({"Authorization": f"Bearer {values[0]}", "X-Mockpay-Key": values[1],
+                                "X-Desk-Copy": values[2]})
+    return values
+
+
+async def test_an_answer_that_isnt_json_raises_naming_the_call_status_and_content_type():
+    """A 2xx answer an operation reads as JSON, with a body that isn't JSON, fails the call as an `ApiCallFailed`
+    whose message names the operation, the status, the content type and the body's first 80 characters, and
+    never a header or cookie the request carried, nor what the request sent."""
+    cookie, said = secrets.token_urlsafe(12), secrets.token_urlsafe(12)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        set_cookie = {"set-cookie": f"desk_visitor={cookie}; Secure; Path=/api/public/desks/{SLUG}"}
+        if request.url.path.endswith("/sessions"):
+            return httpx.Response(200, json={"state": {}, "resumed": False}, headers=set_cookie)
+        return httpx.Response(200, headers={"content-type": "text/html; charset=utf-8", **set_cookie}, text=NOT_JSON)
+
+    refusals = []
+    async with DeskClient("http://127.0.0.1:8700", PASSCODE, transport=httpx.MockTransport(handler)) as client:
+        held = request_headers(client)
+        for call in (client.enter, lambda: client.open_chat(SLUG), lambda: client.send(said)):
+            with pytest.raises(ApiCallFailed) as refused:
+                await call()
+            refusals.append(refused.value)
+    assert [(refused.op, refused.status) for refused in refusals] == [
+        ("enter", 200), ("chat_session", 200), ("send", 200)]   # open_chat reads its session: that answer failed
+    for refused in refusals:
+        assert str(refused) == (f"{refused.op} answered 200 (text/html; charset=utf-8) with a body that isn't JSON: "
+                                f"{NOT_JSON[:80]!r}")
+        for value in (*held, cookie, said, PASSCODE, "the tail"):
+            assert value not in str(refused), refused.op
+
+
+async def test_an_owner_write_whose_answer_isnt_json_raises_the_same_way():
+    """An owner write that may prove reads its answer as JSON, whether a 202 to re-send or its final one."""
+    for status in (202, 201):
+        transport = httpx.MockTransport(lambda request: httpx.Response(status, text=NOT_JSON))
+        async with DeskClient("http://127.0.0.1:8700", PASSCODE, transport=transport) as owner:
+            held = request_headers(owner)
+            with pytest.raises(ApiCallFailed) as refused:
+                await owner.owner_whisper("s-1", "Say the deposit is waived.")
+        assert str(refused.value) == (f"owner_whisper answered {status} (text/plain; charset=utf-8) with a body that "
+                                      f"isn't JSON: {NOT_JSON[:80]!r}"), status
+        for value in (*held, "Say the deposit", "the tail"):
+            assert value not in str(refused.value), status
+
+
+async def test_an_event_that_isnt_json_raises_naming_the_stream_status_and_content_type():
+    """An event with data that isn't JSON fails the read as an `ApiCallFailed` naming the stream, its status and
+    content type and the data's first 80 characters; what the request carried, Last-Event-ID included, never
+    shows."""
+    stream = ('id: 1\r\nevent: writing\r\ndata: {"type": "writing"}\r\n\r\n'
+              f"id: 2\r\nevent: message\r\ndata: {NOT_JSON}\r\n\r\n")
+    last_event_id = secrets.token_urlsafe(12)
+    seen = []
+    async with DeskClient("http://127.0.0.1:8700", PASSCODE, transport=event_stream(stream)) as client:
+        held = request_headers(client)
+        client.desk_slug = SLUG
+        with pytest.raises(ApiCallFailed) as refused:
+            async for event in client.events(last_event_id):
+                seen.append(event.data)
+    assert seen == [{"type": "writing"}]
+    assert (refused.value.op, refused.value.status) == ("events", 200)
+    assert str(refused.value) == (f"events answered 200 (text/event-stream; charset=utf-8) with an event that isn't "
+                                  f"JSON: {NOT_JSON[:80]!r}")
+    for value in (*held, last_event_id, "the tail"):
+        assert value not in str(refused.value)
+
+
+async def test_a_refusal_whose_body_isnt_json_names_its_content_type_and_shows_80_characters():
+    """A refusal keeps its status, so every caller judges it as before. A JSON body is kept and shown as it came,
+    since callers read its error code; one that isn't JSON is named by its content type with at most its first
+    80 characters shown, and never a header or anything the request carried."""
+    error = {"error": "kernel", "code": "invalid", "detail": "That code isn't the one sent to the contact on record."}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/verify/check"):
+            return httpx.Response(422, json=error)
+        return httpx.Response(502, headers={"content-type": "text/html; charset=utf-8"}, text=NOT_JSON)
+
+    said = secrets.token_urlsafe(12)
+    refusals = {}
+    async with DeskClient("http://127.0.0.1:8700", PASSCODE, transport=httpx.MockTransport(handler)) as client:
+        held = request_headers(client)
+        client.desk_slug = SLUG
+
+        async def read_events() -> None:
+            async for _ in client.events():
+                pass
+
+        for op, call in (("send", lambda: client.send(said)), ("events", read_events),
+                         ("owner_whisper", lambda: client.owner_whisper("s-1", said)),
+                         ("verify_check", lambda: client.verify_check("482913"))):
+            with pytest.raises(ApiCallFailed) as refused:
+                await call()
+            refusals[op] = refused.value
+    for op in ("send", "events", "owner_whisper"):
+        refused = refusals[op]
+        assert (type(refused), refused.op, refused.status, refused.body) == (ApiCallFailed, op, 502, NOT_JSON[:80])
+        assert str(refused) == (f"{op} answered 502 (text/html; charset=utf-8) with a body that isn't JSON: "
+                                f"{NOT_JSON[:80]!r}")
+        for value in (*held, said, "the tail"):
+            assert value not in str(refused), op
+    refused = refusals["verify_check"]
+    assert (type(refused), refused.status, refused.body) == (ApiCallFailed, 422, error)
+    assert str(refused) == f"verify_check answered 422: {json.dumps(error)}"
+    assert "482913" not in str(refused)
 
 
 async def test_a_refused_call_raises_with_its_status_and_body(stand_in):

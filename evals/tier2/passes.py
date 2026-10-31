@@ -18,15 +18,17 @@ secrets redacted). In order, before any run:
    loaded, the checks below and `make kernel`, so nothing committed later is named.
 5. The suite: the scenarios, splits and `landed.toml` are loaded, then `--suite`, `--split` and
    `--only` select over the suite; a scenario that `requires` a plan `landed.toml` lacks is
-   pending, listed with that plan and never run.
+   pending, listed with that plan and never run. Every run gets the landed plans (`run_scenario`'s
+   `landed`), which decide what it reads and which checks its verdict runs.
 6. A pass with runs to make and real models refuses to start without `ANTHROPIC_API_KEY` (the
    kernel's checks use it on every provider), on `bedrock` without `BEDROCK_BEARER_TOKEN`, and
    without list prices for every model it calls on its provider (`evals.pricing.PRICES`).
 7. Budgets. The estimate is $0.40 a run until spend rows measure this provider's cost per run
-   (`estimate_usd`; a calibration's rows, whose runs are single model calls, measure none); over
-   `--max-usd` it refuses. The month's Claude API spend in the shared spend file, a calibration's
-   included, plus the estimate's Claude API share must stay within `monthly_limit_usd −
-   demo_reserve_usd` (`evals/budget.toml`), or it refuses and says what remains. The spend file is
+   (`estimate_usd`; a calibration's rows, whose runs are single model calls, and a latency run's row, of
+   no runs, measure none); over `--max-usd` it refuses. The month's Claude API spend in the shared spend
+   file, every row counted (a calibration's included), plus the estimate's Claude API share must stay
+   within `monthly_limit_usd − demo_reserve_usd` (`evals/budget.toml`), or it refuses and says what
+   remains. The spend file is
    `<git common dir>/desk-eval-spend.csv`, shared by every worktree and never committed.
 
 Then, with `--results` and runs to make, `make kernel` (recorded as `StartChecks.kernel_built`, so
@@ -39,11 +41,15 @@ Desk's on the kernel target's `FakeAnthropic` and the visitor's on its own, both
 `anthropic` whatever `MODEL_PROVIDER` says, recorded as provider `fake`. A `--base-url` pass
 records the API's provider as `unknown`, since the deployment's setting isn't visible here. A real
 pass appends one spend row (`pass_id, date, provider, runs, desk_usd, simulator_usd, claude_api_usd,
-total_usd`); only `claude_api_usd` counts against the monthly limit, since a Bedrock pass bills AWS
-credits except for the kernel's checks. Each attempt is charged its priced usage, or a run's estimate
-(listed in `estimated_spend`) when it left no usage or its usage can't be priced. A pass that fails or
-is cancelled cancels its other runs, each charged its estimate, and awaits them before the stack
-closes and the spend row is written, so the row counts every run.
+total_usd, estimated_usd`); only `claude_api_usd` counts against the monthly limit, since a Bedrock
+pass bills AWS credits except for the kernel's checks. Each attempt is charged its priced usage, or a
+run's estimate (listed in `estimated_spend`) when it left no usage or its usage can't be priced; an
+attempt whose runner couldn't read every call (`RunArtifact.usage_unread`), or that failed before its
+artifact was built and carries the usage it held (`RunOutcome.held_usage`), is charged what it read plus
+a run's estimate, never less than it measured. `estimated_usd` says how much of the total is estimated,
+so it never reads as measured. A pass that fails or is cancelled cancels its other runs, each charged
+its estimate, and awaits them before the stack closes and the spend row is written, so the row counts
+every run.
 
 `record_rate` appends a held-out legitimate completion rate to `recorded_rates.json`, with the owner's
 sign-off, only from a pass the final gate would hold to the same checks (`results.reconcile_pass`): a
@@ -64,12 +70,12 @@ import os
 import re
 import secrets
 import tomllib
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Any, Literal, Protocol, Self
 
 from pydantic import (
     AwareDatetime,
@@ -83,6 +89,7 @@ from pydantic import (
 )
 
 from evals import results
+from evals.credentials import mask_credentials
 from evals.gate import GateInput, RunRow
 from evals.results import API_ROUTES, KERNEL_ROUTES, SIMULATOR_ROUTES
 from evals.tier1.harness import load_landed
@@ -101,7 +108,10 @@ from evals.tier2.suite import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PER_RUN_USD = 0.40   # a run's cost until spend rows measure it (master "Model cost and latency budget")
 SPEND_FILE = "desk-eval-spend.csv"
-SPEND_COLUMNS = ("pass_id", "date", "provider", "runs", "desk_usd", "simulator_usd", "claude_api_usd", "total_usd")
+REASON_CHARS = 300   # an estimate's reason as written, cut after its credentials are masked
+SPEND_COLUMNS = ("pass_id", "date", "provider", "runs", "desk_usd", "simulator_usd", "claude_api_usd", "total_usd",
+                 "estimated_usd")
+LEGACY_SPEND_COLUMNS = SPEND_COLUMNS[:-1]   # a spend file written before rows marked estimated spend
 # A calibration's spend rows (`evals/calibration`) start their pass_id with this. Their runs are single
 # model calls, not tier 2 runs, so they count against the monthly limit but never measure a run's cost.
 CALIBRATION_PREFIX = "calibration-"
@@ -197,22 +207,25 @@ class PassConfig(BaseModel):
 
 class Spend(BaseModel):
     """US dollars: the Desk side (the API's calls and the kernel's checks), the simulated visitor, and
-    the part billed to the Claude API, which alone counts against the monthly limit."""
+    the part billed to the Claude API, which alone counts against the monthly limit; `estimated_usd` is
+    the part of the total charged as an estimate because nothing could be priced, never measured."""
 
     model_config = ConfigDict(extra="forbid")
     desk_usd: float = 0.0
     simulator_usd: float = 0.0
     claude_api_usd: float = 0.0
     total_usd: float = 0.0
+    estimated_usd: float = 0.0
 
     @classmethod
-    def of(cls, *, desk_usd: float, simulator_usd: float, claude_api_usd: float) -> "Spend":
+    def of(cls, *, desk_usd: float, simulator_usd: float, claude_api_usd: float, estimated_usd: float = 0.0) -> "Spend":
         return cls(desk_usd=desk_usd, simulator_usd=simulator_usd, claude_api_usd=claude_api_usd,
-                   total_usd=desk_usd + simulator_usd)
+                   total_usd=desk_usd + simulator_usd, estimated_usd=estimated_usd)
 
     def __add__(self, other: "Spend") -> "Spend":
         return Spend.of(desk_usd=self.desk_usd + other.desk_usd, simulator_usd=self.simulator_usd + other.simulator_usd,
-                        claude_api_usd=self.claude_api_usd + other.claude_api_usd)
+                        claude_api_usd=self.claude_api_usd + other.claude_api_usd,
+                        estimated_usd=self.estimated_usd + other.estimated_usd)
 
 
 class EstimatedSpend(BaseModel):
@@ -359,18 +372,36 @@ def read_spend(path: Path) -> list[dict[str, str]]:
 
 
 def append_spend(path: Path, row: Mapping[str, Any]) -> None:
-    """Append one row under an exclusive lock, writing the header when the file is new."""
+    """Append one row under an exclusive lock, writing the header when the file is new. A file whose
+    header predates `estimated_usd` gets that column in its header first, in place, so the new row's
+    mark lines up; its earlier rows read the mark as missing. A row missing a column is refused before
+    the file is touched (`KeyError`), never written as zero."""
+    line = {column: row[column] for column in SPEND_COLUMNS}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", newline="") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
+            handle.seek(0)
+            if next(csv.reader([handle.readline()]), None) == list(LEGACY_SPEND_COLUMNS):
+                _add_estimated_column(path)
             handle.seek(0, os.SEEK_END)
             writer = csv.DictWriter(handle, fieldnames=SPEND_COLUMNS)
             if handle.tell() == 0:
                 writer.writeheader()
-            writer.writerow({column: row[column] for column in SPEND_COLUMNS})
+            writer.writerow(line)
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _add_estimated_column(path: Path) -> None:
+    """Rewrite the spend file's header with `estimated_usd`, in the same file (never a replacement, which
+    another worktree waiting on the lock would miss), its rows left as they were. The caller holds the
+    file's lock."""
+    with path.open("r+", newline="") as handle:
+        header, _, rest = handle.read().partition("\n")
+        handle.seek(0)
+        handle.write(",".join(SPEND_COLUMNS) + ("\r\n" if header.endswith("\r") else "\n") + rest)
+        handle.truncate()
 
 
 def month_rows(rows: list[dict[str, str]], now: datetime) -> list[dict[str, str]]:
@@ -391,12 +422,14 @@ def write_month_spend(destination: Path, *, root: Path = REPO_ROOT, now: datetim
 
 
 def measured_per_run(rows: list[dict[str, str]], provider: str, column: str = "total_usd") -> float | None:
-    """This provider's spend per run in `column` over every tier 2 spend row (a calibration's rows aside,
-    `CALIBRATION_PREFIX`), or None before any run was measured."""
+    """This provider's spend per run in `column` over the spend rows of tier 2 runs (a calibration's rows
+    aside, `CALIBRATION_PREFIX`), or None before any run was measured. A row of no runs (a latency run's)
+    is left out: its dollars count against the month (`within_the_month`) but were spent on no run."""
     runs = spent = 0.0
     for row in rows:
-        if row.get("provider") == provider and not (row.get("pass_id") or "").startswith(CALIBRATION_PREFIX):
-            runs += float(row.get("runs") or 0)
+        if (row.get("provider") == provider and not (row.get("pass_id") or "").startswith(CALIBRATION_PREFIX)
+                and (row_runs := float(row.get("runs") or 0))):
+            runs += row_runs
             spent += float(row.get(column) or 0)
     return spent / runs if runs else None
 
@@ -413,6 +446,21 @@ def load_budget(root: Path) -> tuple[float, float]:
     if not all(isinstance(v, int | float) and not isinstance(v, bool) and v >= 0 for v in (limit, reserve)):
         raise PassRefused("evals/budget.toml needs monthly_limit_usd and demo_reserve_usd as numbers")
     return float(limit), float(reserve)
+
+
+def within_the_month(claude_api_usd: float, rows: list[dict[str, str]], now: datetime, root: Path, *,
+                     what: str = "pass") -> None:
+    """This month's Claude API spend in the spend rows, every row's dollars counted, runs or none, plus
+    `claude_api_usd` must stay within `monthly_limit_usd − demo_reserve_usd`, or it refuses and says
+    what remains."""
+    limit, reserve = load_budget(root)
+    allowed = limit - reserve
+    spent = sum(float(row.get("claude_api_usd") or 0) for row in month_rows(rows, now))
+    if spent + claude_api_usd > allowed:
+        raise PassRefused(
+            f"this {what}'s ${claude_api_usd:.2f} of Claude API spend would take this month's eval spend past "
+            f"${allowed:.2f} (the ${limit:.0f} monthly limit less the ${reserve:.0f} demo reserve): "
+            f"${max(allowed - spent, 0):.2f} remains")
 
 
 # Credentials and prices
@@ -441,6 +489,25 @@ def load_prices() -> Mapping[str, Mapping[str, Any]]:
     return getattr(module, "PRICES", {})
 
 
+def require_credentials(provider: Provider, credential: Callable[[str], str | None], *, what: str = "pass") -> None:
+    """Real model calls need `ANTHROPIC_API_KEY`, which the kernel's checks use on every provider, and on
+    Bedrock `BEDROCK_BEARER_TOKEN`."""
+    needed = ["ANTHROPIC_API_KEY"] + (["BEDROCK_BEARER_TOKEN"] if provider == "bedrock" else [])
+    if missing := [name for name in needed if not credential(name)]:
+        raise PassRefused(f"a real {what} on {provider} needs {' and '.join(missing)} (the kernel's checks use "
+                          "ANTHROPIC_API_KEY on every provider); set it in .env")
+
+
+def require_prices(prices: Mapping[str, Mapping[str, Any]], provider: str, *, on_provider: Iterable[str],
+                   on_claude_api: Iterable[str], what: str = "pass") -> None:
+    """A list price for every model, by production name, called on the provider and on the Claude API."""
+    missing = sorted({f"{provider} {name}" for name in on_provider if not _priced(prices, provider, name)}
+                     | {f"anthropic {name}" for name in on_claude_api if not _priced(prices, "anthropic", name)})
+    if missing:
+        raise PassRefused(f"no list prices for {', '.join(missing)} in evals.pricing.PRICES; a {what} on a provider "
+                          "without prices doesn't start")
+
+
 def _priced(prices: Mapping[str, Mapping[str, Any]], provider: str, name: str) -> bool:
     rows = prices.get(provider) or {}
     return bool(rows.get(name) or rows.get(model_id(provider, name)))   # type: ignore[arg-type]
@@ -448,21 +515,23 @@ def _priced(prices: Mapping[str, Mapping[str, Any]], provider: str, name: str) -
 
 def priced_spend(outcome: RunOutcome, providers: PassProviders, *,
                  cost_usd: Callable[[Mapping[str, int], str, str], float] | None = None) -> Spend | None:
-    """A run's spend from its usage at each provider's list prices (`evals.pricing.cost_usd`), or None
-    when the run left no usage to price (the pass then charges a run's estimate instead)."""
+    """A run's spend from its usage at each provider's list prices (`evals.pricing.cost_usd`): its
+    artifact's, or for a run that failed before its artifact was built the usage it held (`held_usage`),
+    or None when the run left no usage to price (the pass then charges a run's estimate instead)."""
     if providers.api == "fake":
         return Spend()
-    if outcome.artifact is None:
+    held = outcome.artifact if outcome.artifact is not None else outcome.held_usage
+    if held is None:
         return None
     cost_usd = cost_usd or importlib.import_module("evals.pricing").cost_usd
     api_provider = "anthropic" if providers.api == "unknown" else providers.api   # a deployment runs on the Claude API
     api = kernel = simulator = 0.0
-    for usage in outcome.artifact.usage:
+    for usage in held.usage:
         if usage.get("part") == "api":
             api += cost_usd(_tokens(usage), str(usage.get("model")), api_provider)
         else:
             kernel += cost_usd(_tokens(usage), str(usage.get("model")), "anthropic")
-    for usage in outcome.artifact.simulator_usage:
+    for usage in held.simulator_usage:
         simulator += cost_usd(_tokens(usage), str(usage.get("model")), providers.simulator)
     claude_api = kernel + (api if api_provider == "anthropic" else 0) + (
         simulator if providers.simulator == "anthropic" else 0)
@@ -541,6 +610,7 @@ class _Pass:
         if problems := split_problems(suite, splits):
             raise PassRefused("the splits don't hold the suite: " + "; ".join(problems))
         landed = load_landed(evals_path(root, "tier1", "landed.toml"))
+        self.landed = list(landed)   # each run gets them: what it reads and which checks run follow them
         selected = self._select(suite.scenarios, splits)
         pending = {s.id: plan for s in selected if (plan := next((p for p in s.requires if p not in landed), None))}
         todo = [(s, rep) for s in selected if s.id not in pending for rep in range(1, config.runs + 1)]
@@ -606,20 +676,12 @@ class _Pass:
                 and config.split in ("all", splits.split_of(sid))]
 
     def _require_credentials(self) -> None:
-        needed = ["ANTHROPIC_API_KEY"] + (["BEDROCK_BEARER_TOKEN"] if self.config.provider == "bedrock" else [])
-        if missing := [name for name in needed if not self.deps.credential(name)]:
-            raise PassRefused(f"a real pass on {self.config.provider} needs {' and '.join(missing)} (the kernel's "
-                              "checks use ANTHROPIC_API_KEY on every provider); set it in .env")
+        require_credentials(self.config.provider, self.deps.credential)
 
     def _require_prices(self) -> None:
-        prices, provider = self.deps.prices(), self.config.provider
-        on_provider = {*SIMULATOR_ROUTES.values(), *([] if self.config.base_url else API_ROUTES.values())}
-        on_claude_api = {*KERNEL_ROUTES.values(), *(API_ROUTES.values() if self.config.base_url else [])}
-        missing = sorted({f"{provider} {name}" for name in on_provider if not _priced(prices, provider, name)}
-                         | {f"anthropic {name}" for name in on_claude_api if not _priced(prices, "anthropic", name)})
-        if missing:
-            raise PassRefused(f"no list prices for {', '.join(missing)} in evals.pricing.PRICES; a pass on a provider "
-                              "without prices doesn't start")
+        require_prices(self.deps.prices(), self.config.provider,
+                       on_provider={*SIMULATOR_ROUTES.values(), *([] if self.config.base_url else API_ROUTES.values())},
+                       on_claude_api={*KERNEL_ROUTES.values(), *(API_ROUTES.values() if self.config.base_url else [])})
 
     def _budget(self, runs: int) -> float:
         config = self.config
@@ -629,16 +691,9 @@ class _Pass:
         estimate = estimate_usd(runs, measured)
         if estimate > config.max_usd:
             raise PassRefused(f"the estimate ${estimate:.2f} for {runs} runs is over --max-usd ${config.max_usd:.2f}")
-        limit, reserve = load_budget(self.root)
-        allowed = limit - reserve
-        spent = sum(float(row.get("claude_api_usd") or 0) for row in month_rows(rows, self.deps.now()))
         claude_api = estimate if config.provider == "anthropic" else estimate_usd(
             runs, measured_per_run(rows, config.provider, "claude_api_usd"))
-        if spent + claude_api > allowed:
-            raise PassRefused(
-                f"this pass's ${claude_api:.2f} of Claude API spend would take this month's eval spend past "
-                f"${allowed:.2f} (the ${limit:.0f} monthly limit less the ${reserve:.0f} demo reserve): "
-                f"${max(allowed - spent, 0):.2f} remains")
+        within_the_month(claude_api, rows, self.deps.now(), self.root)
         return estimate
 
     # Runs
@@ -693,7 +748,7 @@ class _Pass:
         try:
             outcome = await self.deps.run_one(run_as, rep, target, simulator, pass_id=self.pass_id,
                                               wall_clock_s=self.config.wall_clock_s,
-                                              turn_timeout_s=self.config.turn_timeout_s)
+                                              turn_timeout_s=self.config.turn_timeout_s, landed=self.landed)
         except asyncio.CancelledError:   # cut short with its usage unread: charged its estimate
             if not self.config.dry_run:
                 self.spend += self._estimate(scenario.id, rep, attempt, "the pass stopped it before it ended")
@@ -701,7 +756,7 @@ class _Pass:
         except Exception as failure:   # run_scenario records its own errors; this is the harness failing
             outcome = RunOutcome(
                 scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=self.pass_id,
-                error=RunError(kind="infra", detail=f"{type(failure).__name__}: {failure}"[:500]),
+                error=RunError(kind="infra", detail=f"{type(failure).__name__}: {failure}"),   # masked, then cut
                 simulator=SimulatorStats(provider=self.providers.simulator, model="", turns=0, fallback_turns=0,
                                          switches=0, served_models=[]))
         self.spend = self.spend + self._cost(outcome, attempt)
@@ -710,28 +765,42 @@ class _Pass:
         return outcome
 
     def _cost(self, outcome: RunOutcome, attempt: int) -> Spend:
-        """The attempt's priced spend, else a run's estimate: an attempt that left no usage to price, or
-        whose usage can't be priced, is never charged nothing."""
+        """The attempt's priced spend, plus a run's estimate when the runner couldn't read all its calls
+        or the run failed before its artifact was built (`held_usage`), else a run's estimate: an attempt
+        that left no usage to price, or whose usage can't be priced, is never charged nothing, and one
+        whose usage couldn't all be read, or that was cut short, never less than it measured."""
         if self.config.dry_run:
             return Spend()
         try:
             spend = self.deps.cost(outcome, self.providers)
         except Exception as failure:
             return self._estimate(outcome.scenario_id, outcome.rep, attempt,
-                                  f"its usage couldn't be priced ({type(failure).__name__}: {failure})"[:300])
+                                  f"its usage couldn't be priced ({type(failure).__name__}: {failure})")
         if spend is None:
             return self._estimate(outcome.scenario_id, outcome.rep, attempt, "it left no usage to price")
+        if outcome.artifact is not None and (unread := outcome.artifact.usage_unread):
+            spend = spend + self._estimate(outcome.scenario_id, outcome.rep, attempt,
+                                           f"part of its usage couldn't be read ({'; '.join(unread)})")
+        elif outcome.artifact is None and (held := outcome.held_usage) is not None:
+            kind = outcome.error.kind if outcome.error is not None else "infra"
+            why = "; ".join([f"it ended before its artifact was built ({kind}), so part of its usage may be unread",
+                             *held.usage_unread])
+            spend = spend + self._estimate(outcome.scenario_id, outcome.rep, attempt, why)
         return spend
 
     def _estimate(self, scenario_id: str, rep: int, attempt: int, reason: str) -> Spend:
-        """A run's estimate, all of it on the Claude API so no budget undercounts, noted as estimated."""
+        """A run's estimate, all of it on the Claude API so no budget undercounts, noted as estimated in
+        `estimated_spend` and marked in `estimated_usd`, so it never reads as measured. Its reason can quote an
+        error, so its credentials are masked before it is cut to `REASON_CHARS`."""
         self.estimated.append(EstimatedSpend(scenario_id=scenario_id, rep=rep, attempt=attempt, usd=self.per_run,
-                                             reason=reason))
-        return Spend.of(desk_usd=self.per_run, simulator_usd=0.0, claude_api_usd=self.per_run)
+                                             reason=mask_credentials(reason)[:REASON_CHARS]))
+        return Spend.of(desk_usd=self.per_run, simulator_usd=0.0, claude_api_usd=self.per_run,
+                        estimated_usd=self.per_run)
 
     def _note_served(self, outcome: RunOutcome) -> None:
-        if outcome.artifact is not None:
-            for part, models in outcome.artifact.served_models.items():
+        held = outcome.artifact if outcome.artifact is not None else outcome.held_usage
+        if held is not None:
+            for part, models in held.served_models.items():
                 self.served.setdefault(part, set()).update(models)
         self.served["simulator"].update(outcome.simulator.served_models)
         self.fallbacks["turns"] += outcome.simulator.fallback_turns
@@ -754,13 +823,13 @@ class _Pass:
         try:
             return RunRow(**base, status="scored", violations=[v.oracle for v in verdict.violations],
                           success=verdict.success, false_holds=verdict.false_holds,
-                          expected_allow=verdict.expected_allow)
+                          expected_allow=verdict.expected_allow, skipped=list(verdict.skipped))
         except ValidationError as error:   # a verdict that doesn't fit a row is never counted as clean
             self.errors += 1
+            failed = RunError(kind="infra", detail=f"the verdict doesn't fit a results row: {error.errors()[:3]}")
             with (self.out / "errors.jsonl").open("a") as handle:
-                handle.write(json.dumps({"scenario_id": scenario.id, "rep": rep, "attempt": 0, "kind": "infra",
-                                         "detail": f"the verdict doesn't fit a results row: {error.errors()[:3]}",
-                                         "retried": False}, default=str) + "\n")
+                handle.write(json.dumps({"scenario_id": scenario.id, "rep": rep, "attempt": 0, "kind": failed.kind,
+                                         "detail": failed.detail, "retried": False}) + "\n")
             return incomplete
 
 
@@ -798,10 +867,49 @@ def default_stack(config: PassConfig, credential: Callable[[str], str | None]) -
     return external_stack(config, credential) if config.base_url else in_process_stack(config)
 
 
-def stack_models(config: PassConfig) -> tuple[Literal["fake", "real"], Provider]:
+class StackChoice(Protocol):
+    """What building the in-process stack reads of a pass's or a latency run's config."""
+
+    @property
+    def dry_run(self) -> bool: ...
+
+    @property
+    def provider(self) -> Provider: ...
+
+
+def stack_models(config: StackChoice) -> tuple[Literal["fake", "real"], Provider]:
     """The models and provider the in-process stack is built with: scripted on `anthropic` for a dry run,
-    whatever `MODEL_PROVIDER` says (the fakes speak the Claude API), else real on the pass's provider."""
+    whatever `MODEL_PROVIDER` says (the fakes speak the Claude API), else real on the config's provider."""
     return ("fake", "anthropic") if config.dry_run else ("real", config.provider)
+
+
+@asynccontextmanager
+async def in_process_api(config: StackChoice, *, kernel_target: Callable[..., Any] | None = None,
+                         make_api_target: Callable[..., Any] | None = None,
+                         check: Callable[..., Any] | None = None) -> AsyncIterator[Any]:
+    """The kernel and the API in this process, built from the working tree (`load_api_target()`), handed
+    over once the preflight passes: the Desk's models scripted on a dry run (`script_desk`), else real
+    on the config's provider. The API stops before the kernel. A tier 2 pass and a latency run both
+    build on it; the keyword arguments stand in for the kernel target, Plan 02a's `make_api_target`
+    and the preflight in tests."""
+    from evals.tier1.targets import KernelTarget, load_api_target
+
+    make = make_api_target or load_api_target()
+    models, provider = stack_models(config)
+    kernel = (kernel_target or KernelTarget)(models=models)
+    api = None
+    try:
+        await kernel.start()
+        if config.dry_run:
+            script_desk(kernel.fake)
+        api = make(kernel, models=models, provider=provider)
+        await api.start()
+        await (check or preflight)(api, kernel_health=kernel.health)
+        yield api
+    finally:
+        if api is not None:
+            await api.stop()
+        await kernel.stop()
 
 
 @asynccontextmanager
@@ -810,49 +918,50 @@ async def in_process_stack(config: PassConfig, *, kernel_target: Callable[..., A
                            simulator: Callable[..., Any] | None = None,
                            fake_server: Callable[[], Any] | None = None,
                            check: Callable[..., Any] | None = None) -> AsyncIterator[Stack]:
-    """The kernel and the API in this process, built from the working tree (`load_api_target()`): every
-    model scripted on a dry run, else real on the pass's provider. The keyword arguments stand in for
-    the kernel target, Plan 02a's `make_api_target`, the simulator, the visitor's fake model server and
-    the preflight in tests."""
+    """The kernel and the API in this process (`in_process_api`) and a simulator per suite: every model
+    scripted on a dry run, the simulated visitor's on a fake model server of its own (`script_visitor`),
+    else real on the pass's provider. The keyword arguments stand in for the kernel target, Plan 02a's
+    `make_api_target`, the simulator, the visitor's fake model server and the preflight in tests."""
     from evals.fakes import FakeAnthropic
-    from evals.tier1.targets import KernelTarget, load_api_target
     from evals.tier2.simulator import Simulator
 
-    make = make_api_target or load_api_target()
-    models, provider = stack_models(config)
-    kernel = (kernel_target or KernelTarget)(models=models)
-    api, visitor_fake, simulators = None, None, {}
+    _, provider = stack_models(config)
+    visitor_fake, simulators = None, {}
     try:
-        await kernel.start()
         if config.dry_run:
             visitor_fake = (fake_server or FakeAnthropic)().start()
-            script_dry_run(kernel.fake, visitor_fake)
-        api = make(kernel, models=models, provider=provider)
-        await api.start()
-        await (check or preflight)(api, kernel_health=kernel.health)
-        simulators = {suite: (simulator or Simulator.for_suite)(
-            suite, provider, fake_url=visitor_fake.url if visitor_fake is not None else None) for suite in SUITES}
-        yield Stack(target=api, simulators=simulators)
+            script_visitor(visitor_fake)
+        async with in_process_api(config, kernel_target=kernel_target, make_api_target=make_api_target,
+                                  check=check) as api:
+            try:
+                simulators = {suite: (simulator or Simulator.for_suite)(
+                    suite, provider, fake_url=visitor_fake.url if visitor_fake is not None else None)
+                    for suite in SUITES}
+                yield Stack(target=api, simulators=simulators)
+            finally:
+                for built in simulators.values():
+                    await built.aclose()
     finally:
-        for built in simulators.values():
-            await built.aclose()
-        if api is not None:
-            await api.stop()
-        await kernel.stop()
         if visitor_fake is not None:
             visitor_fake.stop()
             visitor_fake.check()
 
 
-def script_dry_run(desk_fake: Any, visitor_fake: Any) -> None:
-    """Every model's answer on a dry run: the Desk replies in plain prose, the reviewer passes, and the
-    simulated visitor asks a plain question each turn. Nothing in it is a number or a commitment."""
+def script_desk(desk_fake: Any) -> None:
+    """The Desk's models on a dry run: it replies in plain prose and the reviewer passes. Nothing in it
+    is a number or a commitment."""
     from evals.fakes import Json, ToolUse
     from evals.tier1.golden_desk import REVIEW_PASS, REVIEWER_MODEL
 
     desk_fake.default(API_ROUTES["conversation"],
                       ToolUse("send_reply", {"prose": "Thanks for your message. How can I help?", "clauses": []}))
     desk_fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
+
+
+def script_visitor(visitor_fake: Any) -> None:
+    """The simulated visitor's models on a dry run: a plain question each turn."""
+    from evals.fakes import Json
+
     turn = Json({"message": "Hello, what can you help me with?", "verify_contact": None, "verify_code": None,
                  "done": False})
     for model in SIMULATOR_ROUTES.values():
@@ -950,7 +1059,8 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
     set, committed rate and coverage). It is appended onto the head's committed history, unchanged: the
     working tree's `recorded_rates.json` must hold exactly that history (`results.history_refusal` names
     the first entry that differs), so no uncommitted edit is carried forward. Then refused unless it is of
-    three or more runs, clean (no incomplete run, violation or budget stop), on today's held-out set, and
+    three or more runs, clean (no incomplete run, violation, check skipped while a plan hadn't landed, or
+    budget stop), on today's held-out set, and
     has a run of every held-out legitimate scenario, of which there is at least one. Last, the bar is
     never lowered quietly: a Wilson lower bound below the current rate's on the same held-out set
     (`heldout_sha256`) is refused unless `lower_bar` (`--lower-bar`) is given, and then the entry records
@@ -971,8 +1081,9 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
     if config.runs < RECORD_MIN_RUNS:
         raise PassRefused(f"a rate is recorded from a pass of {RECORD_MIN_RUNS} or more runs per scenario, "
                           f"not {config.runs}")
-    if result.stopped_by_budget or any(r.status != "scored" or r.violations for r in result.runs):
-        raise PassRefused("a rate is recorded only from a clean pass: no incomplete run, violation or budget stop")
+    if result.stopped_by_budget or any(r.status != "scored" or r.violations or r.skipped for r in result.runs):
+        raise PassRefused("a rate is recorded only from a clean pass: no incomplete run, violation, skipped check or "
+                          "budget stop")
     suite = load_suite(evals_path(root, "tier2", "scenarios"))
     splits = load_splits(evals_path(root, "splits.yaml"))
     if result.heldout_sha256 != heldout_sha256(suite, splits):
@@ -1011,7 +1122,8 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
 
 __all__ = [
     "CALIBRATION_PREFIX", "DEFAULT_PER_RUN_USD", "EstimatedSpend", "PassConfig", "PassDeps", "PassProviders",
-    "PassRefused", "PassResult", "Spend", "Stack", "StartChecks",
-    "append_spend", "estimate_usd", "load_pass", "measured_per_run", "month_rows", "pass_model_ids",
-    "pass_providers", "read_spend", "record_rate", "run_pass", "shared_spend_file", "write_month_spend",
+    "PassRefused", "PassResult", "Spend", "Stack", "StackChoice", "StartChecks", "append_spend", "estimate_usd",
+    "in_process_api", "in_process_stack", "load_pass", "measured_per_run", "month_rows", "pass_model_ids",
+    "pass_providers", "read_spend", "record_rate", "require_credentials", "require_prices", "run_pass",
+    "script_desk", "script_visitor", "shared_spend_file", "stack_models", "within_the_month", "write_month_spend",
 ]

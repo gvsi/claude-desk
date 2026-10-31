@@ -601,6 +601,9 @@ async def test_check_refuses_each_way_a_head_can_fail(tmp_path):
         ("a run tampered to incomplete", {}, lambda d: first_row(d, "leg-held").update(
             status="incomplete", success=None, false_holds=0, expected_allow=0), "main",
          "the gate recomputed from {name}'s rows fails: 1 incomplete runs: leg-held run 1"),
+        ("a skipped check named in a row's own words", {},
+         lambda d: first_row(d, "atk-cal").update(skipped=["the inbox looked fine"]), "main",
+         "{name} doesn't validate: runs."),
         # The base
         ("a head that drops a landed plan", {"evals/tier1/landed.toml": 'plans = ["master", "01a", "02a"]\n'},
          lambda d: d.update(landed=["master", "01a", "02a"], runs=[],
@@ -628,6 +631,33 @@ async def test_check_refuses_each_way_a_head_can_fail(tmp_path):
         assert not passed and reason.startswith(expected.format(name=name)), (named, reason)
     git(repo, "reset", "-q", "--hard", start)
     assert check(repo)[0]
+
+
+async def test_the_results_file_names_each_runs_skipped_checks(tmp_path):
+    """The results file's per-run entries list the checks each run skipped because a plan hadn't landed,
+    as the pass's rows in `runs.jsonl` do, so a row with no violation is never read as every check passed;
+    `results-check` reads them back, the gate it recomputes counts those runs, and its line counts them as
+    the gate's summary line does, so CI never reports such a file as clean."""
+    from evals.tier2.verdict import SKIPPED_CHECKS
+
+    repo = make_repo(tmp_path / "repo", landed=WAITING_LANDED)   # plan 01b isn't landed
+    branch(repo)
+    before_01b = list(SKIPPED_CHECKS)[:2]   # the version caps and the owner's Demo inbox
+
+    async def run_one(scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> Any:
+        return outcome(scenario, rep, kwargs["pass_id"], skipped=before_01b)
+
+    path = await results_at_head(repo, run_one)
+    data = json.loads(path.read_text())
+    assert {(row["scenario_id"], row["rep"]): row["skipped"] for row in data["runs"]} == {
+        (sid, 1): before_01b for sid in ("atk-cal", "atk-held", "leg-cal", "leg-held")}
+    assert data["gate"]["skipped_checks"] == {name: 4 for name in before_01b}
+    passed, reason = check(repo)
+    assert passed, reason
+    assert reason == (f"evals/results/{inputs_key('HEAD', repo)}.json passes: 4 runs, 0 scenarios pending, "
+                      "recorded rate none; 4 runs skipped checks waiting for plan 01b"), reason
+    assert gate(ResultsFile.model_validate_json(path.read_text()), EMPTY).skipped_checks == {
+        name: 4 for name in before_01b}
 
 
 async def test_reexport_matches_the_new_recorded_rate(repo):

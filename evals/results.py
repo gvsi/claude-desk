@@ -49,8 +49,10 @@ held-out hash and recorded rate are the head's (a rate that is gating evidence),
 one row per head scenario and repeat (a scenario that `requires` a plan the head's `landed.toml`
 lacks is listed in `pending` with no rows), the head's rate history extends the base's unchanged and
 its `landed.toml` keeps every plan the base lists, and the gate recomputed from the rows passes. The
-stored `gate` is never trusted. Every file it reads is read from git at the head and the base, never from the working
-tree, so the check sees what CI sees; the scenario files are listed with `-z` too, and a listed name git can't read
+stored `gate` is never trusted. A passing line counts the runs that skipped checks while a plan hadn't
+landed, as the gate's summary line does (`gate.skipped_summary`), so such a file never reads as clean.
+Every file it reads is read from git at the head and the base, never from the working tree, so the
+check sees what CI sees; the scenario files are listed with `-z` too, and a listed name git can't read
 fails the check, so none is left out of the suite it rebuilds. The steps that hold a file against the head (its inputs,
 gating evidence, suite, hashes, rate and rows) are `reconcile(file, root, rev)`.
 
@@ -94,7 +96,7 @@ from pydantic import (
     field_validator,
 )
 
-from evals.gate import GateInput, GateResult, RunRow, Target, coverage_problems
+from evals.gate import SHOWN, GateInput, GateResult, RunRow, Target, coverage_problems, skipped_summary
 from evals.gate import gate as gate_of
 from evals.oracles.canonical import sha256_hex
 from evals.tier1.harness import load_landed
@@ -475,6 +477,31 @@ def pass_target(p: Any, root: Path = REPO_ROOT) -> Target:
     return Target.of(suite, splits, landed)
 
 
+def selection_problems(p: Any, root: Path = REPO_ROOT) -> list[str]:
+    """Why a finished pass (`PassResult`) doesn't hold one judged run of every scenario and repetition
+    its config selected, or an empty list when it does. Its rows and pending scenarios are reconciled
+    (`coverage_problems`) with the suite at its commit, read from git (`pass_target`), narrowed to what its
+    `--suite`, `--split` and `--only` select: one row per selected scenario and run `1..runs`, none for
+    anything else, each selected scenario waiting for an unlanded plan listed in `pending` with no rows;
+    and every row is scored, never incomplete. The rows are reconciled one by one, never counted, so a row
+    removed from `runs.jsonl` or written twice is named. A commit or suite that can't be read is a problem,
+    never a pass. Calibration and the latest report rely on it."""
+    try:
+        target = pass_target(p, root)
+    except ResultsRefused as refused:
+        return [str(refused)]
+    config = p.config
+    selected = Target(scenarios={sid: scenario for sid, scenario in target.scenarios.items()
+                                 if config.suite in ("all", scenario.suite) and config.split in ("all", scenario.split)
+                                 and (not config.only or sid in config.only)}, landed=target.landed)
+    problems = coverage_problems(p.gate_input(), selected)
+    if unjudged := [f"{r.scenario_id} run {r.rep}" for r in p.runs if r.status != "scored"]:
+        shown = ", ".join(unjudged[:SHOWN]) + (f" and {len(unjudged) - SHOWN} more" if len(unjudged) > SHOWN else "")
+        problems.append(f"{len(unjudged)} runs weren't judged (an error, or records the verdict couldn't read): "
+                        f"{shown}")
+    return problems
+
+
 # Reconciling a results file with a commit
 
 class CheckFailed(Exception):
@@ -662,9 +689,12 @@ def _check(base: str, root: Path) -> str:
     result = gate_of(file, head.rates)
     if not result.passed:
         raise CheckFailed(f"the gate recomputed from {name}'s rows fails: {result.reasons[0]}")
+    # Runs that skipped checks while a plan hadn't landed are counted as the gate's summary line counts them, so
+    # a file whose rows were made before that plan never reads as clean.
+    skipped = [skipped_summary(len(result.skipped_runs), result.skipped_checks)] if result.skipped_runs else []
     lowered = [notice for entry in head.rates.history[len(before):] if (notice := lowered_notice(entry))]
     return "; ".join([f"{name} passes: {len(file.runs)} runs, {len(file.pending)} scenarios pending, "
-                      f"recorded rate {_rate(file.recorded_rate)}", *lowered])
+                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *lowered])
 
 
 def _materialize(root: Path, rev: str, into: Path, only: tuple[str, ...] | None = None) -> Path:
@@ -702,6 +732,6 @@ __all__ = [
     "RATE_MODEL_IDS", "RESULTS_DIR", "SIMULATOR_ROUTES", "CheckFailed", "RateRef", "Reconciled", "ResultsFile",
     "ResultsProviders", "ResultsRefused", "dirty_gated", "final_gate", "gated_from_pairs", "gated_map", "gated_pairs",
     "gating_refusal", "inputs_key", "history_refusal", "is_gated", "key_of", "lowered_notice", "pass_target",
-    "rate_refusal", "reconcile", "reconcile_pass", "results_check", "results_file", "unchecked_refusal",
-    "write_results",
+    "rate_refusal", "reconcile", "reconcile_pass", "results_check", "results_file", "selection_problems",
+    "unchecked_refusal", "write_results",
 ]

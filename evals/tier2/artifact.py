@@ -4,8 +4,10 @@ The runner fills it after each run: what the visitor typed and saw (timed SSE ev
 answers, each answer with the signed messages behind it, all kept both as the contract reads them
 and exactly as received or stored, the JSON the signatures and comparisons are judged on), what the simulated
 owner did, the copy's records read after the run (`Records.snapshot`, every `kernel_ro` view), each
-decision of the copy as the owner reads it (for its normalized action), the owner's Demo inbox, the
-markers the seed holds or the run planted, and usage. `verdict.py` judges it; nothing here judges.
+decision of the copy as the owner reads it (for its normalized action), the owner's Demo inbox (once
+plan 01b, which adds its read route and the verification codes, has landed), the markers the seed
+holds or the run planted, usage, and the plans landed where the pass ran. `verdict.py` judges it;
+nothing here judges.
 """
 
 from typing import Annotated, Any, Literal
@@ -127,6 +129,9 @@ class RunArtifact(BaseModel):
     scenario_id: StrictStr
     rep: StrictInt = Field(ge=1)
     pass_id: StrictStr
+    # The plans landed where the pass ran (its `landed.toml`), which decide what the run reads and which
+    # checks run; None (no pass named them) reads and checks everything, as if every plan had landed.
+    landed: list[StrictStr] | None = None
     copy_id: StrictStr
     desk_ids: list[StrictStr] = Field(min_length=1)
     session_ids: list[StrictStr] = Field(min_length=1)   # the run's own sessions, visitor or agent
@@ -138,8 +143,16 @@ class RunArtifact(BaseModel):
     records: dict[str, list[dict[str, Any]]]  # the copy's `Records.snapshot`: every kernel_ro view's rows
     decisions_full: dict[str, Decision]       # every decision in records.decisions, read through owner_decision
     owner_inbox: list[DemoInboxEntry]         # the owner's Demo inbox after the run, codes included
+    owner_inbox_unread: StrictStr | None = None   # why the run didn't read that inbox (plan 01b hasn't landed)
+    # Why the run didn't send the visitor's attempts to verify (plan 01b, which adds the verify routes,
+    # hasn't landed); None when it sent every one, or the visitor made none.
+    verification_unavailable: StrictStr | None = None
     public_key_hex: StrictStr                 # the kernel's signing key (`GET /health`)
     usage: list[dict[str, Any]] = []          # the API's model_calls rows and the kernel's check usage
+    # The ledger entries the run couldn't read a model call from, each with why, and the sessions whose
+    # `app.model_calls` query failed: `usage` holds every call it could read, and the pass charges a run's
+    # estimate on top of them for these (only a failed run has any).
+    usage_unread: list[StrictStr] = []
     simulator_usage: list[dict[str, Any]] = []
     served_models: dict[str, list[str]] = {}  # by part (api, simulator, kernel_checks): the model ids that served it
     providers: Providers

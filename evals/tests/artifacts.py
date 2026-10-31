@@ -317,9 +317,11 @@ class Run:
     def signed_message(self, *blocks: dict[str, Any], author: str = "claude", session_id: str = SESSION,
                        signer: Ed25519PrivateKey = KEY, ledgered: bool = True) -> dict[str, Any]:
         """A checked reply as the API stores it in the session's stream (`EvMessage`), signed as its
-        verdict, with its `reply` ledger entry unless `ledgered` is False; shown nowhere yet."""
+        verdict, with its `reply` ledger entry unless `ledgered` is False (its soft-promise check made no
+        call: `soft_promise` is null, as the kernel writes it); shown nowhere yet."""
         message_id = f"m-{next(self.ids)}"
-        seq = self.event("reply", session_id=session_id, ref_id=message_id, ok=True) if ledgered else 999
+        seq = self.event("reply", session_id=session_id, ref_id=message_id, ok=True,
+                         soft_promise=None) if ledgered else 999
         visitor_plain = "Checked reply."
         fields = {"session_id": session_id, "generation": 0, "message_id": message_id,
                   "blocks_sha256": hashlib.sha256(rfc8785.dumps(list(blocks))).hexdigest(),

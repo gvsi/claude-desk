@@ -37,6 +37,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from httpx_sse import aconnect_sse
 
 from desk.contracts import A2ARequest, DemoAgentIssued, Mandate
+from evals.credentials import mask_credentials, mask_values
 from evals.routes import ROUTES
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -48,16 +49,43 @@ _PAYMENT_LINK = re.compile(r"(?:/api)?/pay/([^/?#\s]+)")
 # A proving route answers 202 `ProvingPending{retry: {path, body}}` once its kernel call passes 25 s; the
 # owner app re-sends `retry` every 3 s ("How proofs run"), and so does the client, for at most two minutes.
 PROVING_RETRY_S, PROVING_LIMIT_S = 3.0, 120.0
+SHOWN_UNREADABLE = 80   # the characters shown of a body or event that isn't JSON
+SHOWN_BODY = 500   # the characters a refusal's message shows of a JSON body
 
 
 class ApiCallFailed(AssertionError):
-    """An operation that needs a 2xx answer got another. Carries the status and the body the API
-    sent, never what the request carried."""
+    """An operation that needs a 2xx answer got another. Carries the status and the body the API sent,
+    never what the request carried: a JSON body as it came, for the caller to judge; one that isn't
+    JSON as its first 80 characters, named by its `content_type` (None for a JSON body). The message,
+    and a body that isn't JSON, have their credentials masked before they are cut (`mask_credentials`),
+    so one that crosses a cut is never shown in part; a JSON body's message shows a copy masked before it
+    is serialized (`mask_values`). The whole body is kept privately, so `message(replace)` can replace a
+    caller's own secrets in it before any cut."""
 
-    def __init__(self, op: str, status: int, body: Any):
-        self.op, self.status, self.body = op, status, body
-        shown = json.dumps(body) if not isinstance(body, str) else body
-        super().__init__(f"{op} answered {status}: {shown[:500]}")
+    def __init__(self, op: str, status: int, body: Any, *, content_type: str | None = None, what: str = "a body"):
+        self.op, self.status, self.content_type, self._what = op, status, content_type, what
+        self._sent = body   # the whole body as it came, never shown before `message` replaces, masks and cuts it
+        self.body = body if content_type is None else mask_credentials(body)[:SHOWN_UNREADABLE]
+        super().__init__(self.message())
+
+    def message(self, replace: Callable[[Any], Any] = lambda body: body) -> str:
+        """The refusal's message, with `replace` (a run's own secrets, say) applied to the whole body before it
+        is masked and cut, so a secret that crosses a cut is replaced whole, never shown in part."""
+        body = replace(self._sent)
+        if self.content_type is None:
+            shown = json.dumps(mask_values(body)) if not isinstance(body, str) else body
+            return f"{self.op} answered {self.status}: {mask_credentials(shown)[:SHOWN_BODY]}"
+        shown = mask_credentials(body)[:SHOWN_UNREADABLE]
+        return f"{self.op} answered {self.status} ({self.content_type}) with {self._what} that isn't JSON: {shown!r}"
+
+
+class AnswerUnreadable(ApiCallFailed):
+    """A 2xx answer the operation reads as JSON, or an event of the chat's stream, that isn't JSON, named the
+    way a refusal whose body isn't JSON is. It is never the API turning the call down, so no caller reads it
+    as one: the stack failed."""
+
+    def __init__(self, op: str, response: httpx.Response, what: str, text: str):
+        super().__init__(op, response.status_code, text, content_type=_content_type(response), what=what)
 
 
 @dataclass(frozen=True)
@@ -172,11 +200,27 @@ def _no_jar() -> CookieJar:
     return CookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
 
 
-def _body(response: httpx.Response) -> Any:
+def _content_type(response: httpx.Response) -> str:
+    return response.headers.get("content-type") or "no content type"
+
+
+def _refused(op: str, response: httpx.Response) -> ApiCallFailed:
+    """A non-2xx answer as the `ApiCallFailed` it raises, with its status, for the caller to judge."""
+    try:
+        body = response.json()
+    except ValueError:
+        return ApiCallFailed(op, response.status_code, response.text, content_type=_content_type(response))
+    return ApiCallFailed(op, response.status_code, body)
+
+
+def _json(op: str, response: httpx.Response) -> Any:
+    """A 2xx answer's JSON body, or None when it has none; a body that isn't JSON raises `AnswerUnreadable`."""
+    if not response.content:
+        return None
     try:
         return response.json()
     except ValueError:
-        return response.text
+        raise AnswerUnreadable(op, response, "a body", response.text) from None
 
 
 # The client
@@ -262,8 +306,8 @@ class DeskClient:
     async def _ok(self, op: str, **kwargs: Any) -> Any:
         response = await self.request(op, **kwargs)
         if not 200 <= response.status_code < 300:
-            raise ApiCallFailed(op, response.status_code, _body(response))
-        return _body(response) if response.content else None
+            raise _refused(op, response)
+        return _json(op, response)
 
     def _chat(self) -> dict[str, str]:
         if self.desk_slug is None:
@@ -299,7 +343,12 @@ class DeskClient:
     async def events(self, last_event_id: str | int | None = None, *,
                      query: dict[str, Any] | None = None) -> AsyncIterator[StreamEvent]:
         """The open chat's event stream, from after `last_event_id` (all of it with None), until the
-        caller stops reading. A refused stream raises `ApiCallFailed`."""
+        caller stops reading. A refused stream raises `ApiCallFailed`, and an event whose data isn't JSON
+        `AnswerUnreadable`.
+
+        An event without data is skipped, as the SSE spec never dispatches one: httpx-sse keeps the last
+        event id across events, so once one has set an id, it hands over the API's keep-alive comment
+        as an event with no data."""
         route = ROUTES["events"]
         headers = {} if last_event_id is None else {"Last-Event-ID": str(last_event_id)}
         timeout = httpx.Timeout(self._timeout_s, read=None)   # a quiet stream isn't a failure; callers bound it
@@ -308,9 +357,15 @@ class DeskClient:
             response = source.response
             if response.status_code != 200:
                 await response.aread()
-                raise ApiCallFailed("events", response.status_code, _body(response))
+                raise _refused("events", response)
             async for sse in source.aiter_sse():
-                yield StreamEvent(id=sse.id or None, event=sse.event, data=json.loads(sse.data))
+                if not sse.data:   # a keep-alive
+                    continue
+                try:
+                    data = json.loads(sse.data)
+                except ValueError:
+                    raise AnswerUnreadable("events", response, "an event", sse.data) from None
+                yield StreamEvent(id=sse.id or None, event=sse.event, data=data)
 
     async def owner_session(self, session_id: str) -> Any:
         """A conversation as the owner reads it (`OwnerTranscript`)."""
@@ -432,7 +487,7 @@ class DeskClient:
         deadline = time.monotonic() + PROVING_LIMIT_S
         response = await self.request(op, **kwargs)
         while response.status_code == 202:
-            pending = _body(response)
+            pending = _json(op, response)
             retry = pending.get("retry") if isinstance(pending, dict) else None
             path = retry.get("path") if isinstance(retry, dict) else None
             if not isinstance(path, str) or not path.startswith("/api/owner/") or time.monotonic() > deadline:
@@ -440,8 +495,8 @@ class DeskClient:
             await asyncio.sleep(PROVING_RETRY_S)
             response = await self.http.request(ROUTES[op].method, path, json=retry.get("body"))
         if not 200 <= response.status_code < 300:
-            raise ApiCallFailed(op, response.status_code, _body(response))
-        return _body(response) if response.content else None
+            raise _refused(op, response)
+        return _json(op, response)
 
 
-__all__ = ["ApiCallFailed", "DeskClient", "LoopbackJar", "StreamEvent", "path_matches"]
+__all__ = ["AnswerUnreadable", "ApiCallFailed", "DeskClient", "LoopbackJar", "StreamEvent", "path_matches"]
