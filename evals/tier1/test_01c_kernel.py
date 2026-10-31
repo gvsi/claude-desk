@@ -308,7 +308,9 @@ async def test_unknown_tool_and_amountless_money_probes_refuse(k: KernelHarness,
     desk = await golden_desk(k)
     version = await active_version(k, desk)
     before = await decision_ids(records, desk) if k.is_real else set()
-    unknown, unpriced = probe("admin.export_customers", {"all": True}), probe(LINK, resource_kind="quote")
+    # the link probe names a quote, so its arguments pass validation and the missing amount is what refuses it
+    unknown, unpriced = probe("admin.export_customers", {"all": True}), probe(LINK, {"quote_id": "probe"},
+                                                                              resource_kind="quote")
     results = await k.call("POST /policy/{version}/probe", path={"version": version},
                            body={"desk_id": desk.desk_id, "probes": [unknown, unpriced]}, auth=desk.owner,
                            expect=Expect(fields={**{f"0.{key}": value for key, value in REFUSED_PROBE.items()},
