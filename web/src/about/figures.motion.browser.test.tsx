@@ -163,6 +163,36 @@ describe('Tau3Chart with motion', () => {
     expect(figure.getAnimations({ subtree: true })).toEqual([]);
   });
 
+  it('a_short_window_still_plays_a_figure', async () => {
+    // In a window shorter than a third of the chart, a third of it is never in view: the chart plays once it fills
+    // the window, whether the reader jumps there or scrolls a little at a time.
+    await page.viewport(1440, 160);
+    for (const how of ['jump', 'scroll'] as const) {
+      const screen = await renderBelowTheFold(<Tau3Chart />);
+      const figure = figureIn(screen.container);
+      await frames();
+      expect(figure.getBoundingClientRect().height / 3, `${how}: a third of the chart is taller than the window`).toBeGreaterThan(
+        window.innerHeight,
+      );
+      expect(figure.dataset.play, how).toBe('ready');
+      const box = figure.getBoundingClientRect();
+      const filled = Math.round(box.top + window.scrollY + box.height / 2 - window.innerHeight / 2);
+      if (how === 'jump') {
+        window.scrollTo(0, filled);
+      } else {
+        for (let y = window.scrollY; y < filled; y = Math.min(filled, y + 6)) {
+          window.scrollTo(0, y);
+          await frames(1);
+        }
+        window.scrollTo(0, filled);
+      }
+      await expect.poll(() => figure.dataset.play, { message: how }).toBe('played');
+      await screen.unmount();
+      forgetPlayedFigures();
+      window.scrollTo(0, 0);
+    }
+  });
+
   it('played_figure_stays_complete_after_a_remount', async () => {
     const first = await render(<Tau3Chart />);
     await expect.poll(() => figureIn(first.container).dataset.play).toBe('played');

@@ -13,6 +13,21 @@ import { prefersReducedMotion } from '../motion.ts';
 /** How much of a figure is in view when it plays. */
 const IN_VIEW = 0.33;
 
+/** How much of a window a figure taller than three windows fills when it plays instead. */
+const FILLS = 0.9;
+
+/**
+ * The ratios at which the observer reports: every hundredth, so a scroll a little at a time is heard both at a third
+ * in view and as a figure taller than three windows comes to fill one (between 90% and all of it).
+ */
+const STEPS = Array.from({ length: 101 }, (_, i) => i / 100);
+
+/** Whether a figure is in view enough to play: a third of it, or most of a window too short to show a third. */
+function inView(entry: IntersectionObserverEntry): boolean {
+  if (entry.intersectionRatio >= IN_VIEW) return true;
+  return entry.rootBounds !== null && entry.intersectionRect.height >= entry.rootBounds.height * FILLS;
+}
+
 export type Play = 'ready' | 'played';
 
 /**
@@ -40,12 +55,12 @@ export function usePlayOnce<T extends Element>(name: FigureName): [ref: RefObjec
     setPlay('ready');
     const observer = new IntersectionObserver(
       (entries) => {
-        if (!entries.some((entry) => entry.intersectionRatio >= IN_VIEW)) return;
+        if (!entries.some(inView)) return;
         observer.disconnect();
         played.add(name);
         setPlay('played');
       },
-      { threshold: IN_VIEW },
+      { threshold: STEPS },
     );
     observer.observe(figure);
     return () => observer.disconnect();
