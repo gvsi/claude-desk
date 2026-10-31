@@ -1184,6 +1184,8 @@ describe('setup', () => {
       const wait = screen.getByText(words, { exact: true });
       await expect.element(writing).toBeVisible();
       await expect.element(wait).toBeVisible();
+      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
+      await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).not.toBeInTheDocument();
       expect(writing.element().nextElementSibling).toBe(wait.element());
       const log = screen.getByRole('log', { name: 'Setup questions' }).element();
       expect(wait.element().getBoundingClientRect().left).toBe(log.getBoundingClientRect().left);
@@ -1193,6 +1195,7 @@ describe('setup', () => {
       expectNoHorizontalScroll();
       finish('landed');
       await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
       await expect.element(wait).not.toBeInTheDocument();
 
       // An ordinary answer still uses the writing indicator, without the consent wait line.
@@ -1203,13 +1206,14 @@ describe('setup', () => {
       await screen.getByRole('textbox', { name: 'Your answer' }).fill('We repair leaks.');
       await screen.getByRole('button', { name: 'Send' }).click();
       await expect.element(writing).toBeVisible();
+      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
       await expect.element(wait).not.toBeInTheDocument();
       release();
       await expect.element(writing).not.toBeInTheDocument();
     }
   });
 
-  it('async_consent_waits_with_a_disabled_composer_then_focuses_the_first_question', async () => {
+  it('async_consent_waits_without_a_composer_then_focuses_the_first_question', async () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -1218,7 +1222,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await expect.element(box).toBeDisabled();
+    await expect.element(box).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).not.toBeInTheDocument();
     expectNoHorizontalScroll();
     const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
     onTestFinished(() => scroll.mockRestore());
@@ -1268,7 +1273,7 @@ describe('setup', () => {
       expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain(UNREACHABLE_COPY.en);
     });
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await expect.element(box).toBeDisabled();
+    await expect.element(box).not.toBeInTheDocument();
     finish('landed');
     await screen.getByRole('button', { name: 'Try again' }).click();
     await until(() => {
@@ -1277,6 +1282,8 @@ describe('setup', () => {
     });
     vi.useRealTimers();
     await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
+    await expect.element(box).toBeEnabled();
+    await expect.element(box).toHaveFocus();
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
     expect(requests('setupConsent')).toHaveLength(1);
   });
@@ -1291,9 +1298,10 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
     finish('landed');
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
     expect(requests('setupConsent')).toHaveLength(2);
     expect(screen.getByRole('log', { name: 'Setup questions' }).element().querySelectorAll('.cd-visitor-message')).toHaveLength(1);
   });
@@ -1309,9 +1317,10 @@ describe('setup', () => {
     await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
     expect(requests('setup', mark)).toHaveLength(1);
     await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).not.toBeInTheDocument();
     finish('landed');
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
     expect(requests('setupConsent', mark)).toHaveLength(1);
   });
 

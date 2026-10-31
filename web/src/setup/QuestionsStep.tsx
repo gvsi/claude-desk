@@ -96,6 +96,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   const asking = awaitsConsent(state);
   const number = questionNumber(state);
   const busy = state.busy === true;
+  const consentBusy = busy && !asking && state.question === null && state.step === 'questions' && sending === null;
   const work = useSetupWork(state, reread);
   const wasBusy = useRef(busy);
   useEffect(() => {
@@ -267,7 +268,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
         ))}
         {sending !== null ? <VisitorMessage text={sending} /> : null}
         {sending !== null || busy ? <WritingIndicator language="en" /> : null}
-        {busy && !asking && state.question === null && state.step === 'questions' && sending === null ? (
+        {consentBusy ? (
           <p className="cd-setup-step__line cd-type-meta">{copy.putting}</p>
         ) : null}
       </Transcript>
@@ -295,7 +296,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
             </Button>
           </div>
         </>
-      ) : (
+      ) : consentBusy ? null : (
         <div ref={composer}>
           <Composer
             variant="owner"
