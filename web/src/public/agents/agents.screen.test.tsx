@@ -955,6 +955,24 @@ describe('agents page', () => {
     expect(document.activeElement).toBe(elsewhere);
     elsewhere.remove();
 
+    // "Try again" pressed without focus on it, as a script's click or a browser that doesn't focus
+    // what is clicked does: focus stays on the page when the read fails, as it was.
+    let drop: (value?: unknown) => void = () => {};
+    const dropped = new Promise((resolve) => {
+      drop = resolve;
+    });
+    mockStore.inject({ route: 'agentCard', status: 503 });
+    mockStore.inject({ route: 'agentCard', status: 503, until: dropped });
+    const unfocused = await renderRoute(PAGE);
+    const unfocusedTryAgain = unfocused.screen.getByRole('button', { name: 'Try again' });
+    await expect.element(unfocusedTryAgain).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+    (unfocusedTryAgain.element() as HTMLButtonElement).click();
+    await expect.element(unfocused.screen.getByText('Opening the page for AI agents', { exact: true })).toBeVisible();
+    drop();
+    await expect.element(unfocusedTryAgain).toBeVisible();
+    expect(document.activeElement).toBe(document.body);
+
     // "Try again" clicked moves focus the same way, with no focus ring for the pointer to see.
     mockStore.inject({ route: 'agentCard', status: 503, times: 2 });
     const clicked = await renderRoute(PAGE);
