@@ -126,7 +126,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal, get_args
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from cryptography.exceptions import InvalidSignature
@@ -2154,7 +2154,10 @@ class FakeKernelState:
                                           request.query_params.get("desk_id"))
         declared = {"owner": OWNER_TOOLS, "agent": AGENT_DECLARED}.get(session.kind, VISITOR_DECLARED)
         facts = [*self._catalog(desk), *(fact for fact in desk.facts.values() if self._current(fact))]
-        local = self.now.astimezone(ZoneInfo(desk.timezone))
+        try:
+            local = self.now.astimezone(ZoneInfo(desk.timezone))
+        except ZoneInfoNotFoundError:
+            raise Refusal(500, "internal") from None
         return SessionContext(
             clock=ContextClock(as_of_utc=signed_time(self.now), local_now=local.isoformat(timespec="minutes"),
                                local_date=local.date().isoformat(),
