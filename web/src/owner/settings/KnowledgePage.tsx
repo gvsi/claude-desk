@@ -142,10 +142,12 @@ export function KnowledgePage() {
 
   /**
    * After a write whose answer was lost: the item as a fresh read of the list has it, `missing` when
-   * the list doesn't, or null when it can't be read either, so the outcome stays unknown.
+   * the list doesn't, or null when it can't be read either, so the outcome stays unknown. A read
+   * already in flight may have left before the write landed, so it is cancelled and a new one sent.
    */
   const readBack = async (itemId: string): Promise<KnowledgeListItem | 'missing' | null> => {
     try {
+      await queryClient.cancelQueries({ queryKey: knowledgeKey(deskId) });
       const items = await queryClient.fetchQuery({ ...knowledgeQuery(deskId), staleTime: 0 });
       return items.find((item) => item.item_id === itemId) ?? 'missing';
     } catch {

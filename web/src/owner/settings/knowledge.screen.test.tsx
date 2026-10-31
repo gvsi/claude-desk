@@ -284,6 +284,40 @@ describe('knowledge', () => {
     expect([...mockStore.world.knowledge.values()].filter((stored) => stored.item.text === other)).toHaveLength(1);
   });
 
+  it('knowledge_read_back_is_a_fresh_read', async () => {
+    // The note's id, known ahead, so a list answer can name it.
+    const uuid = '0f2c4a1e-5b6d-4c7e-8f90-a1b2c3d4e5f6';
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue(uuid);
+    const id = `note-${uuid}`;
+    const { screen } = await renderRoute(KNOWLEDGE, { pollScale: 100, retryScale: 0 });
+    await main(screen).getByRole('textbox', { name: 'A note' }).fill(NOTE);
+
+    // 1. The list read the add sets off is held in flight, answering the note as the owner's alone.
+    const stale = held();
+    const ownerOnly = { item_id: id, source: 'setup', title: NOTE.slice(0, 60), text: NOTE, label: { readers: ['owner'], record_owner: null }, created_at: new Date().toISOString() };
+    mockStore.inject({ route: 'knowledge', status: 200, until: stale.until, body: [ownerOnly] });
+    await main(screen).getByRole('button', { name: 'Add a note' }).click();
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
+    const reads = () => mockStore.requests.filter((r) => r.key === 'knowledge').length;
+    await expect.poll(reads).toBe(2);
+
+    // 2. Made public: it goes through, and its answer is lost.
+    mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
+    await switchOf(screen).click();
+    await expect.poll(() => posts().length).toBe(2);
+    // The read from before the change lands late, owner-only.
+    stale.release();
+
+    // 3. The read-back is a read sent after the change, never the one in flight: it says public.
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'true');
+    await expect.element(main(screen).getByText('Added.', { exact: true })).toBeVisible();
+    expect(main(screen).getByText(KNOWLEDGE_COPY.keptPrivate, { exact: true }).query()).toBeNull();
+    expect(reads()).toBe(3);
+    // The list says so too: the late, cancelled read doesn't overwrite it.
+    const row = () => main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem').element().textContent;
+    await expect.poll(() => row()?.endsWith('Customers can see this')).toBe(true);
+  });
+
   it('knowledge_writes_go_one_at_a_time', async () => {
     // Item A added, its card showing.
     const screen = await addNote();
