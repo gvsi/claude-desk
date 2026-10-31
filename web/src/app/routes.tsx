@@ -5,6 +5,7 @@ import { ABOUT_PAGES, type AboutId } from '../about/links.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { ConversationsPage } from '../owner/conversations/ConversationsPage.tsx';
 import { OwnerLayout } from '../owner/OwnerLayout.tsx';
+import { PeoplePage } from '../owner/people/PeoplePage.tsx';
 import { RuleDraftPage } from '../owner/rules/RuleDraftReview.tsx';
 import { SafetyPage } from '../owner/safety/SafetyPage.tsx';
 import { FIRST_SETTINGS_SECTION, SETTINGS_SECTIONS, SettingsLayout } from '../owner/settings/SettingsLayout.tsx';
@@ -65,6 +66,7 @@ export const routes: RouteObject[] = [
       // One route for the list and an attempt open beside it, so the page stays as it is (its filter
       // included) while the owner moves between attempts.
       { path: 'safety/:refId?', element: <SafetyPage /> },
+      { path: 'people', element: <PeoplePage /> },
       // A card draft's review, from router state or read again by its version after a reload.
       { path: 'rules/drafts/:version', element: <RuleDraftPage /> },
       // Settings opens on its first section. A path under it that names no section (Integrations,

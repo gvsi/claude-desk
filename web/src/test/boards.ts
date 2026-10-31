@@ -22,6 +22,8 @@ export interface OwnerBoardOptions {
   fill?: boolean;
   /** The page shows a conversation: its type, and receipts under at least one message. */
   transcript?: boolean;
+  /** The board draws no card (the Customers list): the page has none. With cards, each is in the card look. */
+  cards?: boolean;
   /** Elements Tab reaches in this order from the top of the page. */
   tabStops?: HTMLElement[];
   /** Presses Tab; the browser's own by default. */
@@ -45,8 +47,8 @@ const ROWS_CARD = { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' } as con
 
 /**
  * An owner page as its signed board draws it: the frame with `current` as the current page, the
- * concept footer, every card in the card look, a conversation's type and receipts, and the order
- * Tab takes through `tabStops`.
+ * concept footer, every card in the card look (or, with `cards: false`, no card at all), a
+ * conversation's type and receipts, and the order Tab takes through `tabStops`.
  *
  * In a conversation, the cards in Claude's messages are the chat's reply cards, in their own look
  * (`ReplyCard`, as the design system's conversation boards draw and check them), so the card look
@@ -54,7 +56,10 @@ const ROWS_CARD = { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' } as con
  * change review's own two cards are checked at the compact padding `ChangeReview` gives them. A card
  * of rows has the card look with no padding of its own, since each of its rows pads itself.
  */
-export async function expectOwnerBoard(root: HTMLElement, { current, fill = false, transcript = false, tabStops, user }: OwnerBoardOptions): Promise<void> {
+export async function expectOwnerBoard(
+  root: HTMLElement,
+  { current, fill = false, transcript = false, cards = true, tabStops, user }: OwnerBoardOptions,
+): Promise<void> {
   await expectOwnerFrame(root, current, { fill });
   await expectFooter(root);
   if (transcript) {
@@ -64,6 +69,9 @@ export async function expectOwnerBoard(root: HTMLElement, { current, fill = fals
     expectConversationType(root);
     const rows = await expectReceiptsUnderMessages(root);
     if (rows < 1) throw new Error('expected receipts under at least one message');
+  } else if (!cards) {
+    const found = root.querySelectorAll('.cd-card').length;
+    if (found > 0) throw new Error(`expected no card on the page, found ${found}`);
   } else if (root.querySelector(IN_A_CHANGE_REVIEW) !== null) {
     // A rules change's review (N-Conn-10, N-Conn-18, N-Conn-20): its "Changes" and checks cards are
     // compact, as `ChangeReview` draws them; every other card is in the card look.
