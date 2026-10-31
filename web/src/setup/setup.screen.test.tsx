@@ -1017,7 +1017,7 @@ describe('setup', () => {
     // An interview this copy doesn't hold: the not-found screen, never a retry.
     const { screen } = await renderRoute('/app/setup/setup-not-in-this-copy');
     await expect.element(screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
-    expect(requests('setup').map((r) => r.path)).toEqual(['/api/owner/setup/setup-not-in-this-copy']);
+    expect(requests('setup').map((r) => r.path)).toEqual(['/api/owner/setup/setup-not-in-this-copy?cards=1']);
     expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
   });
 
