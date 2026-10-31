@@ -6,13 +6,13 @@ desk_ro_owner ownership; desk_api receives only SELECT on the view. Drop without
 so unexpected dependencies fail atomically, as in kernel_ro_decision_policy_ids.
 
 Revision ID: kernel_ro_knowledge_created_at
-Revises: kernel_ro_decision_policy_ids
+Revises: 01b_2b_handoff_kind
 """
 
 from alembic import op
 
 revision = "kernel_ro_knowledge_created_at"
-down_revision = "kernel_ro_decision_policy_ids"
+down_revision = "01b_2b_handoff_kind"
 branch_labels = None
 depends_on = None
 
