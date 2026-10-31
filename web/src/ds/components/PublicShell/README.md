@@ -1,11 +1,11 @@
 # PublicShell
 
-`PublicShell` is the public page around a conversation: the business's brand header with its open status, the chat with the AI disclosure, the composer and the business's charter beside it.
+`PublicShell` is the public page around a conversation: the business's brand header with its open status, the chat with the AI disclosure, the composer and the business's charter beside it. It is a column the window's height in which only the conversation scrolls.
 
 ## When to use
 
 - On the public page of a Desk, around the visitor's `Transcript` and `Composer`.
-- Inside an owner screen that shows the public page (Today's side panel, setup) with `footer={false}`.
+- Inside an owner screen that shows the public page (Today's side panel, setup) with `footer={false}`. It is then the height of the panel that holds it (see "Standalone or embedded").
 - Not for owner pages: they use `AppShell`.
 
 ## What it shows
@@ -21,11 +21,12 @@
     - "You're chatting with Claude, an AI answering for {name}. Ask for {ownerName} anytime."
     - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con {ownerName} cuando quieras."
   - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`.
-  - The conversation (`children`), then the `composer` with `ConceptFooter poweredBy` under it. The composer and footer stay at the bottom of the window while the conversation scrolls. The conversation sets `--cd-row-max: 100%`, so each `TranscriptRow` fills the chat column, edge to edge with the composer.
-- **The about column**, 300 px on the panel at the right, named "About {name}" / "Sobre {name}":
+  - The conversation (`children`) in its scroll region, then the `composer` with `ConceptFooter poweredBy` under it (see "The page never scrolls"). The conversation sets `--cd-row-max: 100%`, so each `TranscriptRow` fills the chat column, edge to edge with the composer.
+- **The about column**, 300 px on the panel at the right, from the header to the foot of the window, named "About {name}" / "Sobre {name}":
   - The `about` blocks in order: cards as `ReplyCard`s in the page's language, prose as text.
   - The `aboutLinks` under "For AI agents" / "Para agentes de IA". Only paths on this site become links (`/d/…`); a scheme or another host is left out.
-  - With neither, there is no about column.
+  - A charter taller than the window scrolls in the column, on its own.
+  - With neither blocks nor links, there is no about column.
 
 Names (the business's, the Desk's, the owner's) are shown as written. The page carries `lang` from `language`.
 
@@ -43,14 +44,28 @@ The header says whether the business is open now, in the kernel's words.
 - **Placement.** At the right end of the header's row, level with the monogram. Below 640 px of shell width it takes its own line under the monogram and name, from the left gutter, 8 px below them, however short it is. A long line wraps inside the header and never scrolls sideways.
 - **No status, no line.** Without `openStatus`, with `null` (a Desk without hours, or a computation the kernel dropped), or with anything that isn't a non-empty `text` and a boolean `open`, there is no line and no dot, and the header is exactly as it is without hours.
 
+## The page never scrolls
+
+The shell is the window's height (`100dvh`, or `100vh` in a browser without dynamic viewport units), and the document itself never scrolls, as with `AppShell`.
+
+- **Pinned at the top:** the brand header, and under it the chat's head with "Chat with {name}", the AI disclosure and "Ask for {ownerName}".
+- **Pinned at the bottom:** the composer area, the `composer` with the footer under it.
+- **The scroll region** (`.cd-public-shell__scroll`) between them is the only part that scrolls. It holds the conversation, runs the chat's full width (so the scrollbar is at the chat's edge and the wheel scrolls it anywhere over the chat), and is positioned, so a receipt's screen-reader label scrolls with it instead of stretching the document. It is a stop in the tab order after "Ask for {ownerName}", a group named by the chat's title, so a conversation with nothing to focus in it still scrolls from the keyboard.
+- **The disclosure must stay in view.** It is part of the always-on baseline: however long the chat, and wherever the visitor has scrolled to, the business's header and the disclosure are on screen. Nothing may be added to the page that scrolls them away, such as content under the composer or a page that scrolls as a whole.
+- **What the page does:** the shell scrolls nothing itself. Keeping the newest message just above the composer as the chat goes on, and leaving a visitor who has scrolled back to read where they are, is the page's job (`PublicChat`), in this scroll region.
+- **On a phone,** `100dvh` follows the browser's toolbars as they show and hide, so the composer stays above them. Where the browser shrinks the page for the on-screen keyboard, the composer stays just above the keyboard too; where it doesn't, the browser moves the page to keep the composer in view while the visitor types.
+
 ## Layout
 
-The shell is an inline-size container, so it lays out by its own width, not the window's. Below 900 px the about column moves under the chat, full width. Below 720 px (each state of the handoff board at 640 px, a phone, or the owner's 420 px panel) the gutters are 16 px instead of 40, and below 640 px the open status also has its own line under the name.
+The shell is an inline-size container, so it lays out by its own width, not the window's. Below 720 px (each state of the handoff board at 640 px, a phone, or the owner's 420 px panel) the gutters are 16 px instead of 40, and below 640 px the open status also has its own line under the name.
+
+From 900 px of shell width the about column stands at the right of the chat. Below 900 px there is no room for it beside the chat, and the page doesn't scroll, so it opens the scroll region instead: the first thing above the conversation, the region's full width on the panel, with a hairline between it and the first message. It scrolls away as the chat goes on and comes back at the chat's start. The shell watches its own width and moves the column before the browser paints, so the column never shows beside a narrow chat, and the rest of the page stays mounted as it moves (an unsent draft is kept).
 
 ## Standalone or embedded
 
 - Standalone (the default), the shell is the page: the header is the `banner`, the chat is the `main` region, the about column is a `complementary` region, and the business's name is the page's `h1`.
 - With `footer={false}` the shell sits inside an owner screen that has its own landmarks and footer. The footer is left out, the header and chat are plain blocks, the business's name is a paragraph, and the about column is a region named "About {name}".
+- Embedded, the shell is the height of the panel that holds it (`height: 100%`). In a panel with a set height, as each state of the handoff board is, the conversation scrolls inside the shell as on the page; in a panel that grows with what it holds, the shell grows with the conversation and the panel scrolls.
 
 ## The brand header on its own
 
@@ -71,7 +86,7 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 - `ownerName` (`owner_display_name`), `language`, `onAskForOwner`.
 - `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
-- `composer`, a visitor `Composer` in the page's language, and `children`, the conversation.
+- `composer`, a visitor `Composer` in the page's language, pinned at the bottom, and `children`, the conversation, in the scroll region. Whatever the page adds after the conversation (notices, the element it keeps above the composer) goes in `children` too.
 
 ## Props
 
@@ -85,7 +100,7 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 | `about` | `RenderedBlock[]` | The charter blocks. |
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
 | `footer` | `boolean` | `true` by default; `false` when embedded. |
-| `composer` | `ReactNode` | Required. |
-| `children` | `ReactNode` | Required. |
+| `composer` | `ReactNode` | Required. Pinned at the bottom, with the footer under it. |
+| `children` | `ReactNode` | Required. The conversation, in the scroll region. |
 
 `PublicBrand` and `PublicOpenStatus` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.

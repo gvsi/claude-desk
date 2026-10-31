@@ -1,4 +1,5 @@
-import { useId, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { flushSync } from 'react-dom';
 
 import type { CardBlock, PublicDesk, RenderedBlock } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
@@ -101,11 +102,43 @@ const COPY = {
   },
 } satisfies Record<CopyLanguage, unknown>;
 
+/** From this width up, the about column stands at the right of the chat. */
+const ABOUT_BESIDE_FROM = 900;
+
 /**
- * The public page around a conversation: the business's brand header (with the kernel's open
- * status when the Desk has hours), the chat with its title, the AI disclosure and "Ask for
- * {owner}", the conversation and the composer with the concept footer under it, and the
- * business's charter in an about column at the right (under the chat when the page is narrow).
+ * Whether the shell is wide enough for the about column beside the chat, or `null` until it has
+ * measured itself. The shell lays out by its own width (inside an owner's panel as on a page of its
+ * own), so it watches itself, not the window.
+ *
+ * It measures before the first paint, and until then the column is drawn in neither place: the
+ * chat takes the shell's whole width, as it will on a phone, so nothing in it (the composer sizing
+ * its text box) measures itself at a width the visitor never sees. When the shell crosses the
+ * width, the column moves at once, before the browser paints and before the page's own observers
+ * measure the conversation (the page keeps the newest message above the composer as the shell
+ * resizes).
+ */
+function useAboutBeside(shell: RefObject<HTMLElement | null>): boolean | null {
+  const [beside, setBeside] = useState<boolean | null>(null);
+  useLayoutEffect(() => {
+    const el = shell.current;
+    if (!el) return undefined;
+    const fits = () => el.offsetWidth >= ABOUT_BESIDE_FROM;
+    setBeside(fits());
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => flushSync(() => setBeside(fits())));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [shell]);
+  return beside;
+}
+
+/**
+ * The public page around a conversation, the window's height: the business's brand header (with
+ * the kernel's open status when the Desk has hours) and the chat's head with its title, the AI
+ * disclosure and "Ask for {owner}" at the top; the composer with the concept footer under it at the
+ * bottom; and only the conversation's scroll region scrolling between them, so the disclosure never
+ * leaves the screen. The business's charter is an about column at the right, or, when the page is
+ * too narrow for it, the start of the conversation's scroll region.
  */
 export function PublicShell({
   brand,
@@ -122,6 +155,9 @@ export function PublicShell({
   const copy = COPY[language] ?? COPY.en;
   const embedded = footer === false;
   const aboutId = useId();
+  const chatId = useId();
+  const shellRef = useRef<HTMLDivElement>(null);
+  const aboutBeside = useAboutBeside(shellRef);
   const name = <Name>{brand.name}</Name>;
   const owner = <Name>{ownerName}</Name>;
 
@@ -137,62 +173,71 @@ export function PublicShell({
   const blocks = about ?? [];
   const hasAbout = blocks.length > 0 || links.length > 0;
 
+  const aboutColumn = hasAbout ? (
+    <About className="cd-public-shell__about" aria-labelledby={aboutId}>
+      <h2 id={aboutId} className="cd-public-shell__heading cd-type-section">
+        {copy.about(name)}
+      </h2>
+      {blocks.length > 0 ? (
+        <div className="cd-public-shell__blocks">
+          {blocks.map((block, index) =>
+            block.kind === 'prose' ? (
+              block.text.trim() === '' ? null : (
+                <p key={index} className="cd-public-shell__prose cd-type-body">
+                  {block.text}
+                </p>
+              )
+            ) : (
+              <ReplyCard key={index} block={block as CardBlock} language={language} ownerName={ownerName} />
+            ),
+          )}
+        </div>
+      ) : null}
+      {links.length > 0 ? (
+        <div className="cd-public-shell__links">
+          <h3 className="cd-public-shell__links-heading cd-type-meta">{copy.forAgents}</h3>
+          <ul role="list" className="cd-public-shell__link-list cd-type-body">
+            {links.map((link) => (
+              <li key={`${link.href} ${link.label}`}>
+                <TextLink href={link.href}>{link.label}</TextLink>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </About>
+  ) : null;
+
   return (
-    <div className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`} lang={language}>
+    <div ref={shellRef} className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`} lang={language}>
       <PublicBrandHeader brand={brand} language={language} openStatus={openStatus} landmark={!embedded} nameAsHeading={!embedded} />
       <div className="cd-public-shell__body">
         <Chat className="cd-public-shell__chat">
-          <div className="cd-public-shell__column">
-            <div className="cd-public-shell__chat-head">
-              <div className="cd-public-shell__chat-title">
-                <h2 className="cd-public-shell__heading cd-type-section">{copy.chatWith(name)}</h2>
-                <p className="cd-public-shell__disclosure cd-type-meta">{copy.disclosure(name, owner)}</p>
-              </div>
-              <Button variant="secondary" onClick={onAskForOwner}>
-                {copy.askFor(owner)}
-              </Button>
+          <div className="cd-public-shell__chat-head">
+            <div className="cd-public-shell__chat-title">
+              <h2 id={chatId} className="cd-public-shell__heading cd-type-section">
+                {copy.chatWith(name)}
+              </h2>
+              <p className="cd-public-shell__disclosure cd-type-meta">{copy.disclosure(name, owner)}</p>
             </div>
+            <Button variant="secondary" onClick={onAskForOwner}>
+              {copy.askFor(owner)}
+            </Button>
+          </div>
+          {/* The one part of the page that scrolls. Too narrow for the about column beside the chat,
+              the column opens it, above the first message. A stop in the tab order, named by the
+              chat's title, so a conversation with nothing to focus in it still scrolls from the
+              keyboard. */}
+          <div className="cd-public-shell__scroll" role="group" aria-labelledby={chatId} tabIndex={0}>
+            {aboutBeside === false ? aboutColumn : null}
             <div className="cd-public-shell__conversation">{children}</div>
-            <div className="cd-public-shell__composer">
-              {composer}
-              {embedded ? null : <ConceptFooter poweredBy />}
-            </div>
+          </div>
+          <div className="cd-public-shell__composer">
+            {composer}
+            {embedded ? null : <ConceptFooter poweredBy />}
           </div>
         </Chat>
-        {hasAbout ? (
-          <About className="cd-public-shell__about" aria-labelledby={aboutId}>
-            <h2 id={aboutId} className="cd-public-shell__heading cd-type-section">
-              {copy.about(name)}
-            </h2>
-            {blocks.length > 0 ? (
-              <div className="cd-public-shell__blocks">
-                {blocks.map((block, index) =>
-                  block.kind === 'prose' ? (
-                    block.text.trim() === '' ? null : (
-                      <p key={index} className="cd-public-shell__prose cd-type-body">
-                        {block.text}
-                      </p>
-                    )
-                  ) : (
-                    <ReplyCard key={index} block={block as CardBlock} language={language} ownerName={ownerName} />
-                  ),
-                )}
-              </div>
-            ) : null}
-            {links.length > 0 ? (
-              <div className="cd-public-shell__links">
-                <h3 className="cd-public-shell__links-heading cd-type-meta">{copy.forAgents}</h3>
-                <ul role="list" className="cd-public-shell__link-list cd-type-body">
-                  {links.map((link) => (
-                    <li key={`${link.href} ${link.label}`}>
-                      <TextLink href={link.href}>{link.label}</TextLink>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </About>
-        ) : null}
+        {aboutBeside === true ? aboutColumn : null}
       </div>
     </div>
   );
