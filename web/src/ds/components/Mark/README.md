@@ -19,7 +19,7 @@
 | The browser tab (`favicon.svg`) | The browser's | No tile: dark ink on a light tab bar, light ink on a dark one |
 
 - On the dark grounds (every ground in the app) the ink is `mark-ink-light`. On a light ground, `ground="light"`, it keeps the drawing's dark ink, `mark-ink`.
-- `tile` draws the white tile with its hairline edge and the drawing's dark ink. Only the About pages' top bar uses it: a guard (`mark_tile_only_on_the_about_top_bar` in `web/src/app/guards.test.ts`) fails any other file that passes it, apart from the design system's stories.
+- `tile` draws the white tile with its hairline edge and the drawing's dark ink. Only the About pages' top bar uses it. A guard (`mark_tile_only_on_the_about_top_bar` in `web/src/app/guards.test.ts`) reads every TypeScript file under `web/src/` and allows a tile in two places only: once in `web/src/about/ReaderPage.tsx`, inside its `Brand` (the About top bar), and in the design system's stories. Every other file fails it, the About pages' other files included, whether the `Mark` tag passes `tile` itself, under an imported or local name (`Mark as Bell`, `const Bell = Mark`), as a namespace's member (`<DS.Mark tile />`), or through a spread of props that could carry it.
 
 ## What the consumer provides
 

@@ -131,31 +131,58 @@ const MARK_FOLDER = 'ds/components/Mark/';
 const CLAY_FOLDER = 'ds/components/IntroDialog/';
 const COLOR_TABLES = ['ds/tokens.json', 'ds/tokens.css', 'ds/contrast.ts', 'ds/tokens.test.ts', 'ds/guards.test.ts'];
 
-// The mark's white tile: only the About pages' top bar draws it (owner, 2026-10-30), and the design
-// system's stories show it. A JSX `<Mark>` (or the name a file imports it under) that passes `tile`, or
-// a spread that could carry it, counts as a use.
-const MARK_IMPORT_ALIAS = /\bMark\s+as\s+([A-Za-z_$][\w$]*)/g;
-const TILE_ATTRIBUTE = /\stile\b|\{\s*\.\.\./;
+// A JavaScript name, and a reference to one of `names`: the name itself, or a namespace's member
+// (`DS.Mark`, `ui.ds.Mark`).
+const IDENT = String.raw`[A-Za-z_$][\w$]*`;
+const anyOf = (names: Iterable<string>) => [...names].map((name) => name.replaceAll('$', String.raw`\$`)).join('|');
+const reference = (names: Iterable<string>) => String.raw`(?:${IDENT}\s*\.\s*)*(?:${anyOf(names)})(?![\w$])`;
 
-/** The tag names `text` draws the mark under: `Mark`, and any name it imports `Mark` as. */
-function markNames(text: string): string[] {
-  return ['Mark', ...[...text.matchAll(MARK_IMPORT_ALIAS)].map((m) => m[1] ?? '')];
+/**
+ * The names `text` can write `component` under as a JSX tag: the component, the name an import gives
+ * it (`Mark as Bell`), and a local name set to any of these or to a namespace's member
+ * (`const Bell = Mark;`, `const Bell = DS.Mark;`, `const { Mark: Bell } = DS;`), followed to the end.
+ * A tag may also reach any of them through a namespace (`<DS.Mark>`), which `jsxTagsPassing` allows.
+ */
+function jsxNames(text: string, component: string): string[] {
+  const names = new Set([component]);
+  for (let size = 0; size !== names.size; ) {
+    size = names.size;
+    const ref = reference(names);
+    const given = [
+      new RegExp(String.raw`(?<![\w$])(?:${anyOf(names)})\s+as\s+(${IDENT})`, 'g'),
+      new RegExp(String.raw`\b(?:const|let|var)\s+(${IDENT})\s*(?::[^=;]*)?=\s*${ref}(?!\s*[.(\[])`, 'g'),
+      new RegExp(String.raw`\{[^{}]*(?<![\w$])(?:${anyOf(names)})\s*:\s*(${IDENT})[^{}]*\}\s*=`, 'g'),
+    ];
+    for (const pattern of given) for (const m of text.matchAll(pattern)) if (m[1]) names.add(m[1]);
+  }
+  return [...names];
 }
+
+/**
+ * Each JSX opening tag of `component` (under any name `jsxNames` finds, or as a namespace's member)
+ * whose props match `attribute`, as "file: tag".
+ */
+function jsxTagsPassing(scanned: Source[], component: string, attribute: RegExp): string[] {
+  return scanned.flatMap(({ file, text }) => {
+    const tag = new RegExp(String.raw`<(${reference(jsxNames(text, component))})(?![.])(${TAG_PART}*)>`, 'g');
+    return [...text.matchAll(tag)].filter((m) => attribute.test(m[2] ?? '')).map((m) => `${file}: ${m[0].replace(/\s+/g, ' ')}`);
+  });
+}
+
+// The mark's white tile: only the About pages' top bar draws it (owner, 2026-10-30), in that file's
+// `Brand`, and the design system's stories show it. A JSX `<Mark>`, under any name it is given, that
+// passes `tile`, or a spread that could carry it, counts as a use.
+const MARK_TILE_FILE = 'about/ReaderPage.tsx';
+const TILE_ATTRIBUTE = /\stile\b|\{\s*\.\.\./;
 
 /** Each `<Mark …>` opening tag in a source that passes `tile` or spreads its props, as "file: tag". */
 function markTiles(scanned: Source[]): string[] {
-  return scanned.flatMap(({ file, text }) =>
-    markNames(text).flatMap((name) =>
-      [...text.matchAll(new RegExp(String.raw`<${name}(?![\w$.])${TAG_PART}*>`, 'g'))]
-        .filter((m) => TILE_ATTRIBUTE.test(m[0].slice(name.length + 1)))
-        .map((m) => `${file}: ${m[0].replace(/\s+/g, ' ')}`),
-    ),
-  );
+  return jsxTagsPassing(scanned, 'Mark', TILE_ATTRIBUTE);
 }
 
-/** The files that may draw the mark's tile: the About pages, and the design system's stories. */
+/** The files that may draw the mark's tile: the About top bar's file, and the design system's stories. */
 function mayDrawTheMarkTile(file: string): boolean {
-  return file.startsWith('about/') || (file.startsWith('ds/') && /\.stories\.tsx$/.test(file));
+  return file === MARK_TILE_FILE || (file.startsWith('ds/') && /\.stories\.tsx$/.test(file));
 }
 
 /** Every text file under `src/` but this one and the color tables, read. */
@@ -455,18 +482,34 @@ describe('app source guards', () => {
     // A word that only starts with the prop's name, and an arrow's `>` inside a braced value, are not it.
     expect(markTiles(sample('<Mark key={tiles.length} onClick={() => open(tiles)} />'))).toEqual([]);
     expect(markTiles(sample('<Mark onClick={() => setOpen(true)} tile />'))).toHaveLength(1);
-    // The allowlist: the About pages and the design system's stories, nothing else.
-    expect(mayDrawTheMarkTile('about/ReaderPage.tsx')).toBe(true);
+    // A namespace's member, and a local name the component is given, however many steps it takes.
+    expect(markTiles(sample("import * as DS from '../ds/index.ts';\n<DS.Mark tile />"))).toEqual(['sample.tsx: <DS.Mark tile />']);
+    expect(markTiles(sample('const Bell = Mark;\n<Bell tile />'))).toEqual(['sample.tsx: <Bell tile />']);
+    expect(markTiles(sample('const Bell = DS.Mark;\nconst Ring: typeof Mark = Bell;\n<Ring size={20} tile />'))).toHaveLength(1);
+    expect(markTiles(sample('const { Mark: Bell } = DS;\n<Bell tile />'))).toHaveLength(1);
+    expect(markTiles(sample('const $bell = Mark;\n<$bell tile />'))).toEqual(['sample.tsx: <$bell tile />']);
+    expect(markTiles(sample('const Bell = MarkBanner;\n<Bell tile />\n<DS.MarkBanner tile />'))).toEqual([]);
+    // The allowlist: the About top bar's file and the design system's stories, nothing else, not even
+    // another file of the About pages.
+    expect(mayDrawTheMarkTile(MARK_TILE_FILE)).toBe(true);
     expect(mayDrawTheMarkTile('ds/components/Mark/Mark.stories.tsx')).toBe(true);
+    expect(mayDrawTheMarkTile('about/Hero.tsx')).toBe(false);
+    expect(mayDrawTheMarkTile('about/figures/ArchitectureFigure.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('ds/components/Sidebar/Sidebar.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('ds/boards/parts.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('owner/OwnerLayout.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('aboutness/Page.tsx')).toBe(false);
+    const planted: Source[] = [{ file: 'about/Hero.tsx', text: '<Mark tile />' }];
+    expect(markTiles(planted.filter(({ file }) => !mayDrawTheMarkTile(file)))).toEqual(['about/Hero.tsx: <Mark tile />']);
 
     // Every TypeScript file under src/, the design system included. The About top bar does draw it,
-    // so the matcher reads the code as it is written, and nothing else does.
+    // once, in its `Brand`, so the matcher reads the code as it is written, and nothing else does.
     const code = everyTextFile().filter(({ file }) => /\.tsx?$/.test(file));
-    expect(markTiles(code.filter(({ file }) => file === 'about/ReaderPage.tsx'))).toEqual(['about/ReaderPage.tsx: <Mark tile />']);
+    const reader = code.find(({ file }) => file === MARK_TILE_FILE);
+    expect(markTiles(reader ? [reader] : [])).toEqual([`${MARK_TILE_FILE}: <Mark tile />`]);
+    const brand = functionBody(reader?.text ?? '', 'Brand');
+    expect(brand, 'Brand is in ReaderPage.tsx').not.toBeNull();
+    expect(markTiles(sample(reader?.text.slice(...(brand ?? [0, 0])) ?? ''))).toHaveLength(1);
     expect(markTiles(code.filter(({ file }) => !mayDrawTheMarkTile(file)))).toEqual([]);
   });
 
