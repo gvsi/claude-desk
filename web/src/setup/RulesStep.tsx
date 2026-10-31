@@ -194,7 +194,8 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
     // Only a draft whose check passed goes on; one that can't be checked, or failed, waits here.
     body = (
       <>
-        {check.status === 'checked' ? null : <Notice tone="info">{copy.cantCheck}</Notice>}
+        {/* Only a check that couldn't run says so; one that failed says what didn't pass, in its lines below. */}
+        {check.status === 'unavailable' ? <Notice tone="info">{copy.cantCheck}</Notice> : null}
         <DraftRules draft={draft.data} people={people.data} check={check} />
         {check.status === 'checked' ? (
           <div className="cd-setup-step__actions">

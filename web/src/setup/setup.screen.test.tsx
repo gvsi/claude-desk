@@ -623,10 +623,18 @@ describe('setup', () => {
         if (at === 'safety_check') await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } });
         const record = deskOf(state).drafts.get(draft.version);
         if (!record) throw new Error('the mock keeps the setup draft');
-        const checks = record.draft.proof.checks.map((check, i) => (how === 'failed' && i === 0 ? { ...check, ok: false } : check));
+        const checks = record.draft.proof.checks.map((check, i) =>
+          how === 'failed' && i === 0 ? { ...check, ok: false, counterexample_plain: 'Dana could get a $500 refund without asking you' } : check,
+        );
         record.draft = { ...record.draft, proof: { ...record.draft.proof, ...proof, checks } };
         const resumed = (await renderRoute(`/app/setup/${state.interview_id}`)).screen;
-        await expect.element(resumed.getByText(CANT_CHECK, { exact: true })).toBeVisible();
+        if (how === 'failed') {
+          // A check that ran and failed says what didn't pass, never that it couldn't check.
+          for (const line of checkStatus(record.draft.proof).lines) await expect.element(resumed.getByText(line, { exact: true })).toBeVisible();
+          expect(resumed.getByText(CANT_CHECK, { exact: true }).elements(), `${how} at ${at}`).toHaveLength(0);
+        } else {
+          await expect.element(resumed.getByText(CANT_CHECK, { exact: true })).toBeVisible();
+        }
         expect(resumed.getByRole('button', { name: 'Looks right' }).elements(), `${how} at ${at}`).toHaveLength(0);
         expect(resumed.getByRole('button', { name: 'Confirm rules' }).elements(), `${how} at ${at}`).toHaveLength(0);
         await expect.element(resumed.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();

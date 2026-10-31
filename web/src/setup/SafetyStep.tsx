@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import type { PolicyVersion } from '../api/contracts.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { PolicyVersionOut, RulesDraft, SetupState } from '../api/views.ts';
-import { Button, Card, EmptyState, LoadingLine, Notice, PageHeader, SafetyCheckRow } from '../ds/index.ts';
+import { Button, Card, EmptyState, LoadingLine, Notice, PageHeader, SafetyCheckRow, StatusLabel } from '../ds/index.ts';
 import { capOf, draftFromDiff, draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
@@ -56,7 +56,8 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
   const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
   // The draft first, however the step was opened: only one whose check passed is tried and confirmed.
   const draft = useQuery(setupRulesQuery(id));
-  const checked = draft.data !== undefined && checkStatus(draft.data.proof).status === 'checked';
+  const status = draft.data === undefined ? null : checkStatus(draft.data.proof);
+  const checked = status?.status === 'checked';
   const check = useQuery({
     queryKey: ['setupSafetyCheck', id] as const,
     queryFn: () => request('setupSafetyCheck', { params: { id } }),
@@ -188,6 +189,24 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
   let body: ReactNode;
   if (draft.data === undefined) {
     body = draft.isError ? failure(draft.error, () => void draft.refetch()) : <LoadingLine>{copy.loading}</LoadingLine>;
+  } else if (status?.status === 'failed') {
+    // The check ran and failed: what didn't pass, and only "Save and exit".
+    body = (
+      <>
+        <ul role="list" className="cd-setup-rules__checks">
+          {status.lines.map((line) => (
+            <li key={line} className="cd-type-meta">
+              <StatusLabel tone="refused">{line}</StatusLabel>
+            </li>
+          ))}
+        </ul>
+        <div className="cd-setup-step__actions">
+          <Button variant="primary" size="main" href={exit}>
+            {SETUP_COPY.saveAndExit}
+          </Button>
+        </div>
+      </>
+    );
   } else if (!checked || unchecked) {
     body = cantCheck;
   } else if (check.isError) {
