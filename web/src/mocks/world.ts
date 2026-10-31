@@ -748,6 +748,9 @@ export class MockWorld {
     return {
       language,
       text,
+      get person() {
+        return session.person;
+      },
       decide: (spec) => this.decide(session, spec, language),
       status: (type, decision) => statusEvent(type, decision),
       reply: (blocks, opts) => this.reply(session, blocks, language, opts),

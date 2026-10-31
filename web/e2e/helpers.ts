@@ -19,9 +19,12 @@ const MOCK = {
   quoteReceipt: "Quoted from Maria Rivera's price list",
   heldReceipt: 'Waiting for Maria Rivera to approve',
   allowedLine: "You allowed this. It's done.",
-  /** Claude's reply once the discount is allowed: its words, the discounted quote's price, and the reply's check. */
+  /**
+   * Claude's reply once the discount is allowed: its words, the discounted quote's price (the 50%
+   * `DISCOUNT_ASK` asks for, off the $180.00 list price), and the reply's check.
+   */
   allowedReply: "Here's the price for clearing a drain, from Maria's price list.",
-  allowedPrice: '$153.00',
+  allowedPrice: '$90.00',
   replyReceipt: "Reply checked against Maria Rivera's rules",
 };
 

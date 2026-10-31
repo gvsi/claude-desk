@@ -195,7 +195,7 @@ describe('the dev server mock', () => {
     const stream = await tabB.stream(apiPath('events', slug, { after: before.last_seq }));
     try {
       await tabB.json('POST', apiPath('sendMessage', slug), { text: DISCOUNT }, 202);
-      expect((await stream.until('turn_end')).map((ev) => ev.type)).toEqual(['held', 'writing', 'message', 'turn_end']);
+      expect((await stream.until('turn_end')).map((ev) => ev.type)).toEqual(['writing', 'held', 'message', 'turn_end']);
 
       // Tab A sees the hold on Needs you and allows it.
       const needsYou = await tabA.json<NeedsYouItem[]>('GET', apiPath('needsYou', { desk_id: desk.desk_id }));
