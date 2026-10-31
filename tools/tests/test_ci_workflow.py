@@ -465,10 +465,21 @@ def test_gated_jobs_go_through_the_gate():
 
 
 def test_secret_scan_has_no_exceptions():
-    """gitleaks' default rules with nothing to exempt a finding: no allowlist, no ignore file, no inline allow."""
+    """gitleaks' default rules with nothing to exempt a finding but one reviewed entry: no other
+    allowlist, no ignore file, no inline allow. The entry covers one rule and needs its file and
+    its line both, so anything else in that file is still scanned."""
     assert tomllib.loads((ROOT / ".gitleaks.toml").read_text()) == {
         "minVersion": "v8.30.1",
         "extend": {"useDefault": True},
+        "allowlists": [{
+            "description": "backend/tests/kernel/fixtures/kernel_core_version.json: a kernel-core rules version's "
+                           "SHA-256 hashes, replayed by the upgrade test; no credentials",
+            "targetRules": ["generic-api-key"],
+            "condition": "AND",
+            "paths": ["^backend/tests/kernel/fixtures/kernel_core_version\\.json$"],
+            "regexTarget": "line",
+            "regexes": ['^\\s*"draft_key_sha256": "[0-9a-f]{64}",?$'],
+        }],
     }
     assert not (ROOT / ".gitleaksignore").exists()
     [scan] = checks(job_named("secret scan"))
