@@ -25,8 +25,10 @@ sees it once more, annotated, and once only.
 What the model sees (Plan 02a, "Transcript contract"):
 
 - A model context is the session's rows with a `model_seq` in the current `model_context`, in order. It
-  opens with a `context_start` row holding its frozen `tools` and, after the first context, a summary of
-  the conversation so far built by code.
+  opens with a `context_start` row holding its frozen `tools`, its frozen `system` prompt (the blocks every call
+  in the context sends: Opus 5.5 binds each thinking block to the prompt it was made under, so the loop opens a
+  fresh context when the prompt it renders differs) and, after the first context, a summary of the conversation
+  so far built by code. A context opened before contexts froze their prompt has no `system`.
 - A row the model will see is written with its frozen block (`model_content`): untrusted text only inside
   a wrapper (`prompts.wrap`), with `&`, `<` and `>` escaped, so no text can close its wrapper or open another.
   It waits with a null `model_seq` until the next model call, when `prepare_model_input` gives it one.
@@ -94,6 +96,10 @@ class Ids:
 
 @dataclass(frozen=True)
 class ModelInput:
+    """A model call's request as the current context holds it: the system prompt it froze (None for a context opened
+    before contexts froze one), its frozen tools and its messages."""
+
+    system: list[dict] | None
     tools: list[dict]
     messages: list[dict]
 
@@ -444,12 +450,15 @@ async def _summary(conn: AsyncConnection, session_id: str) -> str:
     return conversation_so_far([_summary_line(row) for row in rows])
 
 
-async def start_fresh_context(conn: AsyncConnection, ids: Ids, tools: list[dict]) -> int:
-    """Open a new model context with these frozen tools and, after the first context, the code-built summary.
+async def start_fresh_context(conn: AsyncConnection, ids: Ids, tools: list[dict], *, system: list[dict]) -> int:
+    """Open a new model context with these frozen tools, this frozen system prompt (the blocks every call in the
+    context sends) and, after the first context, the code-built summary.
 
     What the old context was still waiting for closes it unsent: tool changes (the new tools supersede them)
     and says (the summary carries them, from their delivered rows). The last desk context is stated again,
     since the facts Claude cites must be in the context it answers from."""
+    if not system:
+        raise ValueError("a model context freezes the system prompt its calls send")
     await _lock_transcript(conn, ids.session_id)
     await _refuse_open_tool_use(conn, ids.session_id)
     current = await _current_context(conn, ids.session_id)
@@ -466,7 +475,23 @@ async def start_fresh_context(conn: AsyncConnection, ids: Ids, tools: list[dict]
     return await _insert(conn, ids, kind="context_start", author="api", visibility="model",
                          model_context=0 if current is None else current + 1,
                          model_seq=await _next_seq(conn, ids.session_id),
-                         model_content={"tools": tools, "summary": summary})
+                         model_content={"tools": tools, "summary": summary, "system": system})
+
+
+async def _context_start(conn: AsyncConnection, session_id: str, context: int) -> dict:
+    """What the `context_start` row of model context `context` froze."""
+    return (await conn.execute(select(MESSAGES.c.model_content).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "context_start",
+        MESSAGES.c.model_context == context))).scalar_one()
+
+
+async def context_system(conn: AsyncConnection, session_id: str) -> list[dict] | None:
+    """The system prompt the current model context froze; None before the session's first context, and for a context
+    opened before contexts froze one."""
+    current = await _current_context(conn, session_id)
+    if current is None:
+        return None
+    return (await _context_start(conn, session_id, current)).get("system")
 
 
 async def context_tools(conn: AsyncConnection, session_id: str) -> tuple[list[dict], list[tuple[str, str]]] | None:
@@ -476,9 +501,7 @@ async def context_tools(conn: AsyncConnection, session_id: str) -> tuple[list[di
     current = await _current_context(conn, session_id)
     if current is None:
         return None
-    start = (await conn.execute(select(MESSAGES.c.model_content).where(
-        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "context_start",
-        MESSAGES.c.model_context == current))).scalar_one()
+    start = await _context_start(conn, session_id, current)
     changes = await conn.execute(select(MESSAGES.c.model_content).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "tool_change",
         or_(MESSAGES.c.model_context == current, MESSAGES.c.model_seq.is_(None))).order_by(MESSAGES.c.n))
@@ -487,7 +510,8 @@ async def context_tools(conn: AsyncConnection, session_id: str) -> tuple[list[di
 
 async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelInput:
     """Give the waiting rows their place (user-turn rows, then tool changes) and build the current context's
-    request: its frozen tools and messages. Raises `UnansweredToolUse` while a tool call has no result."""
+    request: its frozen system prompt and tools, and its messages. Raises `UnansweredToolUse` while a tool call has
+    no result."""
     await _lock_transcript(conn, session_id)
     current = await _current_context(conn, session_id)
     if current is None:
@@ -500,6 +524,7 @@ async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelIn
 
     rows = await conn.execute(select(MESSAGES.c.kind, MESSAGES.c.model_content).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_context == current).order_by(MESSAGES.c.model_seq))
+    system_prompt: list[dict] | None = None
     tools: list[dict] = []
     messages: list[dict] = []
     results: list[dict] = []
@@ -517,7 +542,7 @@ async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelIn
 
     for row in rows:
         if row.kind == "context_start":
-            tools = row.model_content["tools"]
+            system_prompt, tools = row.model_content.get("system"), row.model_content["tools"]
             if row.model_content["summary"] is not None:
                 user.append(_text_block(row.model_content["summary"]))
         elif row.kind == "model_assistant":
@@ -530,7 +555,7 @@ async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelIn
         else:
             user.append(row.model_content)
     close_gap()
-    return ModelInput(tools=tools, messages=messages)
+    return ModelInput(system=system_prompt, tools=tools, messages=messages)
 
 
 async def append_assistant(conn: AsyncConnection, ids: Ids, content: list[dict], *, generation: int) -> int:

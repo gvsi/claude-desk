@@ -13,6 +13,7 @@ import pytest
 from pydantic import TypeAdapter
 from sqlalchemy import text
 
+from desk.api import prompts
 from desk.api.kernel_client import KernelHttp
 from desk.api.loop import MAX_MODEL_CALLS, run_turn
 from desk.api.model import ModelUsage
@@ -647,6 +648,132 @@ async def test_tool_change_mid_conversation(api_conn, caller, fake):
     assert summary["text"].startswith("<conversation_so_far>") and "Can you book me in?" in summary["text"]
     assert [block["text"].split(">")[0] for block in rest] == ["<visitor_message", "<desk_context"]
     assert (await rows(api_conn, caller.session_id, "context_start", "model_context"))[-1] == (1,)
+
+
+def thinking_blocks(request) -> list[dict]:
+    return [block for message in request.messages if message["role"] == "assistant" for block in message["content"]
+            if block["type"] in ("thinking", "redacted_thinking")]
+
+
+async def frozen_systems(conn, session_id: str) -> list[tuple[int, list[dict] | None]]:
+    """Each model context the session opened, with the system prompt its `context_start` row froze."""
+    return [(context, start.get("system")) for context, start in await rows(
+        conn, session_id, "context_start", "model_context", "model_content")]
+
+
+def opens_from_the_summary(request, *lines: str) -> None:
+    """The request is a fresh context's first: one user message, opening with the summary that holds these lines,
+    and no earlier assistant content, so no earlier thinking."""
+    assert [message["role"] for message in request.messages] == ["user"]
+    summary = request.messages[0]["content"][0]["text"]
+    assert summary.startswith("<conversation_so_far>")
+    for line in lines:
+        assert line in summary, line
+
+
+async def test_a_context_sends_the_prompt_it_opened_with_and_a_new_template_starts_a_fresh_one(
+        api_conn, caller, monkeypatch):
+    """Opus 5.5 binds each thinking block to the conversation it was made in, the system prompt included. A context
+    sends the prompt it opened with on every call, and a turn whose prompt renders differently (a deploy changed the
+    template) starts a fresh context from the summary, with the new prompt and no earlier thinking."""
+    opened_with = conversation_system(RIVERA)
+    await said(api_conn, caller, "Hi, when are you open?")
+    first = ScriptedModel([response(thinking(), reply("We're open on weekdays and Saturday mornings.", HOURS))])
+    assert await run_turn(api_conn, caller, first) == "done"
+
+    def deployed(request):                       # the template changes while the next turn's first call is out
+        monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + "\n- Mention our new rule.")
+        return response(thinking(), tool_use("native__find_slots", {"days": 3}))
+
+    await said(api_conn, caller, "Can I book a visit?")
+    second = ScriptedModel([deployed, response(thinking(), reply("Here are the open times."))])
+    assert await run_turn(api_conn, caller, second) == "done"
+    assert [request.system for request in (*first.requests, *second.requests)] == [opened_with] * 3
+    (asked,) = first.requests
+    assert second.requests[0].messages[:len(asked.messages)] == asked.messages        # append-only
+    assert len(thinking_blocks(second.requests[1])) == 2                             # replayed, as made
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, opened_with)]
+
+    # the next turn renders the new template: a fresh context, from the summary, with the new prompt frozen in it
+    await said(api_conn, caller, "Thanks!")
+    third = ScriptedModel([response(reply("You're welcome."))])
+    assert await run_turn(api_conn, caller, third) == "done"
+    renders_now = conversation_system(RIVERA)
+    assert renders_now != opened_with and "Mention our new rule." in renders_now[0]["text"]
+    (fresh,) = third.requests
+    assert fresh.system == renders_now and thinking_blocks(fresh) == []
+    opens_from_the_summary(fresh, "visitor: Hi, when are you open?", "visitor: Can I book a visit?",
+                           "claude (shown to the visitor): We're open on weekdays and Saturday mornings.")
+    assert [block["text"].split(">")[0] for block in fresh.messages[0]["content"][1:]] == [
+        "<visitor_message", "<desk_context"]                       # the new words in full, and the facts again
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, opened_with), (1, renders_now)]
+
+
+NEW_NAMES = {"business_name": "Rivera Plumbing & Sons", "desk_name": "Evenings line", "owner_name": "Maria Rivera Ortiz"}
+
+
+def rename(fake, desk_id: str, renamed: str) -> None:
+    """The owner renames the business, the Desk or themselves in their app: the kernel's records change."""
+    desk = fake.desks[desk_id]
+    if renamed == "desk_name":
+        desk.name = NEW_NAMES[renamed]
+        fake._put_desk(desk)
+    elif renamed == "business_name":
+        desk.business_name = NEW_NAMES[renamed]
+        fake._put_business(desk)
+    else:
+        desk.owner_display_name = NEW_NAMES[renamed]
+        fake._put_business(desk)
+    fake.flush()
+
+
+@pytest.mark.parametrize("renamed", list(NEW_NAMES))
+async def test_an_owner_rename_mid_chat_starts_a_fresh_context(api_conn, caller, fake, renamed):
+    """The prompt names the business, the Desk and the owner, so renaming any of them changes it under the context's
+    thinking. A rename that lands mid-chat, while a call of the turn is out, leaves that turn's calls on the prompt
+    their context opened with; the next turn starts a fresh context with the new name."""
+    opened_with = conversation_system(RIVERA)
+    await said(api_conn, caller, "Hi, can I book a visit?")
+
+    def renamed_meanwhile(request):
+        rename(fake, caller.desk_id, renamed)
+        return response(thinking(), tool_use("native__find_slots", {"days": 3}))
+
+    first = ScriptedModel([renamed_meanwhile, response(thinking(), reply("Here are the open times."))])
+    assert await run_turn(api_conn, caller, first) == "done"
+    assert [request.system for request in first.requests] == [opened_with] * 2
+    assert len(thinking_blocks(first.requests[1])) == 1
+
+    await said(api_conn, caller, "Thanks!")
+    second = ScriptedModel([response(reply("You're welcome."))])
+    assert await run_turn(api_conn, caller, second) == "done"
+    now = conversation_system(RIVERA.model_copy(update={renamed: NEW_NAMES[renamed]}))
+    (fresh,) = second.requests
+    assert fresh.system == now != opened_with and thinking_blocks(fresh) == []
+    assert NEW_NAMES[renamed] in now[0]["text"]
+    opens_from_the_summary(fresh, "visitor: Hi, can I book a visit?",
+                           "claude (shown to the visitor): Here are the open times.")
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, opened_with), (1, now)]
+
+
+async def test_a_context_opened_before_prompts_were_frozen_starts_a_fresh_one(api_conn, caller):
+    """A conversation already under way when contexts began to freeze their prompt has a context with none: its
+    thinking can't be known to match this prompt, so its next turn starts a fresh context."""
+    await said(api_conn, caller, "Hi, when are you open?")
+    first = ScriptedModel([response(thinking(), reply("We're open on weekdays and Saturday mornings.", HOURS))])
+    assert await run_turn(api_conn, caller, first) == "done"
+    await api_conn.execute(text("UPDATE app.messages SET model_content = model_content - 'system'"
+                                " WHERE session_id = :s AND kind = 'context_start'"), {"s": caller.session_id})
+    await api_conn.commit()
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, None)]
+
+    await said(api_conn, caller, "Thanks!")
+    second = ScriptedModel([response(reply("You're welcome."))])
+    assert await run_turn(api_conn, caller, second) == "done"
+    (fresh,) = second.requests
+    assert fresh.system == conversation_system(RIVERA) and thinking_blocks(fresh) == []
+    opens_from_the_summary(fresh, "visitor: Hi, when are you open?")
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, None), (1, conversation_system(RIVERA))]
 
 
 async def metric_rows(conn, session_id: str) -> list[tuple[str, dict]]:

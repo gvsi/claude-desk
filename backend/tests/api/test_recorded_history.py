@@ -37,6 +37,7 @@ from tests.api.conftest import PASSCODE
 from tests.api.fakes import ScriptedModel
 from tests.api.test_rules import wrapped
 from tests.api.test_setup_questions import structured
+from tests.api.test_store import SYSTEM
 from tests.api.test_triage import CLAUDE_SPANISH, REFUSAL_TRIAGE, SPANISH, SPANISH_IN_ENGLISH, answer, sent_text
 from tests.kernel_contract.fake_kernel import FakeKernelState, RecordedSession, RecordedStep, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, mark_replayed
@@ -175,7 +176,7 @@ async def test_replayed_rows_never_reach_a_model_context(db, api_conn, ids):
     replayed row in a session the model talks in, even one carrying a frozen block, stays out of the session's model
     context and out of the summary a fresh context opens with."""
     night = Replayed(replay_id="night-1", at=LAST_NIGHT)
-    await start_fresh_context(api_conn, ids, [])
+    await start_fresh_context(api_conn, ids, [], system=SYSTEM)
     await append_message(api_conn, ids, "visitor_text", text="Is Monday morning free?")
     await append_message(api_conn, ids, "visitor_text", text="Replayed words", replayed=night)
     await append_message(api_conn, ids, "delivered", author="claude", replayed=night,
@@ -185,7 +186,7 @@ async def test_replayed_rows_never_reach_a_model_context(db, api_conn, ids):
     db.execute("UPDATE app.messages SET model_content = %s::jsonb"
                " WHERE replay_id IS NOT NULL AND kind = 'visitor_text'", (json.dumps(block),))
     first = await prepare_model_input(api_conn, ids.session_id)
-    await start_fresh_context(api_conn, ids, [])
+    await start_fresh_context(api_conn, ids, [], system=SYSTEM)
     fresh = await prepare_model_input(api_conn, ids.session_id)
     assert first.messages == [{"role": "user", "content": [
         {"type": "text", "text": "<visitor_message>Is Monday morning free?</visitor_message>"}]}]

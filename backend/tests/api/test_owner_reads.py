@@ -46,6 +46,7 @@ from desk.kernel_api import (
 )
 from desk.kernel_service import reply_check
 from tests.api.fakes import ScriptedModel
+from tests.api.test_store import SYSTEM
 from tests.kernel_contract.fake_kernel import fake_kernel_app, signed_time
 
 OWNER = "x-owner-session"
@@ -871,7 +872,7 @@ async def test_owner_transcript_adds_whispers_and_translations(app, browser, fak
         update={"prose": "I can come by at noon."})))
     held = await visitor.decide("native.quote", discounted_quote(fake, owner))
     async with engine.connect() as conn:
-        await start_fresh_context(conn, ids, [])
+        await start_fresh_context(conn, ids, [], system=SYSTEM)
         asked = await append_message(conn, ids, "visitor_text", text="Hola, ¿cuánto cuesta?", language="es",
                                      owner_translation="Hi, how much is it?")
         await prepare_model_input(conn, ids.session_id)

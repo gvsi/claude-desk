@@ -3,8 +3,9 @@ Plan 02a, Task 5).
 
 `run_turn(conn, caller, model)` answers what is waiting in a session. It reads the session's mode and generation
 from the kernel (`GET /whoami`) and its tools and facts (`GET /context`), brings the model context up to date
-(a `desk_context` row when the facts change, tool changes or a fresh context), then calls Claude and acts on each
-response by its stop reason. Claude only proposes: every tool call goes through `/decide` (`tools.route_call`),
+(a `desk_context` row when the facts change, tool changes, or a fresh context, which a changed system prompt opens
+too), then calls Claude on the system prompt and tools the context froze, and acts on each response by its stop
+reason. Claude only proposes: every tool call goes through `/decide` (`tools.route_call`),
 and every reply through `/check_reply` and `deliver()` (`tools.send_reply`).
 
 `run_pending(caller, model, ...)` is how a request starts turns (Task 6): one session's turns run one at a time,
@@ -50,6 +51,7 @@ from desk.api.store import (
     append_tool_results,
     clear_wake,
     context_hash,
+    context_system,
     context_text,
     context_tools,
     delivered_reply,
@@ -221,20 +223,25 @@ class _Turn:
             return _failed(failure)
         except KernelUnavailable:
             return "kernel_unavailable"
-        await self._bring_up_to_date(context)
         system = conversation_system(await desk_identity(conn, caller))
+        await self._bring_up_to_date(context, system)
         await conn.commit()
         while True:
             if self.model_calls >= MAX_MODEL_CALLS:
                 return await self._hand_off()
-            response = await self._call(system)
+            response = await self._call()
             outcome = await self._act(response)
             if outcome is not None:
                 return outcome
 
-    async def _bring_up_to_date(self, context: SessionContext) -> None:
+    async def _bring_up_to_date(self, context: SessionContext, system: list[dict]) -> None:
         """A `desk_context` row when the facts or knowledge changed, then the tool changes `/context` calls for:
-        appended to the current context, or a fresh one."""
+        appended to the current context, or a fresh one.
+
+        A fresh context also opens when the system prompt this turn renders isn't the one the context froze: a
+        deploy changed the template, the owner renamed the business, the Desk or themselves, or the context opened
+        before contexts froze their prompt. Each thinking block is bound to the prompt it was made under, so this
+        is a deliberate boundary: the new prompt applies from the summary, and no earlier thinking is replayed."""
         conn, ids = self.conn, self.caller.ids
         body = context_text(context.facts, context.knowledge)
         if context_hash(body) != await last_context_hash(conn, ids.session_id):
@@ -245,18 +252,22 @@ class _Turn:
             await append_tool_change(conn, ids, "tool_removal", name)
         for name in delta.add:
             await append_tool_change(conn, ids, "tool_addition", name)
-        if delta.fresh:
-            await start_fresh_context(conn, ids, model_tools(context))
+        fresh = delta.fresh
+        if not fresh and await context_system(conn, ids.session_id) != system:
+            logger.info("the system prompt changed since the model context opened: a fresh context starts")
+            fresh = True
+        if fresh:
+            await start_fresh_context(conn, ids, model_tools(context), system=system)
 
-    async def _call(self, system: list[dict]) -> ModelResponse | None:
-        """One model call on the context as it stands, its usage recorded at once; None when the model was
-        unavailable."""
+    async def _call(self) -> ModelResponse | None:
+        """One model call on the context as it stands (the system prompt and tools it froze, and its messages), its
+        usage recorded at once; None when the model was unavailable."""
         conn, caller = self.conn, self.caller
         model_input = await prepare_model_input(conn, caller.session_id)
         await conn.commit()
         self.model_calls += 1
         try:
-            response = await self.model.call(ModelRequest(route="conversation", system=system,
+            response = await self.model.call(ModelRequest(route="conversation", system=model_input.system,
                                                           messages=model_input.messages, tools=model_input.tools))
             failed = None
         except ModelUnavailable as unavailable:
