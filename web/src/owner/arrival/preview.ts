@@ -4,9 +4,11 @@
  * it: the business and its Main line Desk, Alex Kim's assistant's chat (a visiting agent's quote and
  * deposit, about 40 minutes before), the seeded hold (a visitor not on record asking for 15% off, 12
  * minutes before), Dana's chat (live, booked, with Maria's whisper) and the reply the check stopped,
- * the briefing and the last 7 days they make, and the hold's alert in the Demo inbox. The
- * held request and the names come from the design system's Rivera fixtures; times are counted back
- * from `now`. Nothing here is read from the API: no copy exists yet.
+ * the briefing and the last 7 days they make, and the hold's alert in the Demo inbox. The held
+ * request and the names come from the design system's Rivera fixtures. Each part of the seed is
+ * dated back from `now` as the seed dates it, and counted on its own day on the business's clock, so
+ * just after midnight what happened before it is yesterday's. Nothing here is read from the API: no
+ * copy exists yet.
  */
 import type { QueryKey } from '@tanstack/react-query';
 
@@ -19,8 +21,23 @@ const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 const TIMEZONE = 'America/Los_Angeles';
 
-/** How long before a new copy opens its seeded hold came in. */
-const HELD_MINUTES_AGO = 12;
+/**
+ * When each part of the seed happened, in ms before a new copy opens, as the seed dates it: the
+ * agent's steps 20 s apart, a visitor's turn's steps 150 ms apart, Dana's turns two minutes apart.
+ */
+const SEEDED = {
+  /** Alex Kim's assistant's two messages, 20 s apart from its chat's start 40 minutes before, and Claude's last answer. */
+  agentMessages: [39 * MINUTE + 40_000, 39 * MINUTE],
+  agentAnswered: 38 * MINUTE + 40_000,
+  /** The held visitor's message, its hold (when the owner's alert came too), and the reply the check stopped. */
+  heldMessage: 12 * MINUTE,
+  held: 12 * MINUTE - 150,
+  stoppedReply: 12 * MINUTE - 450,
+  /** Dana's three messages, the booking in her last turn, and that turn's end. */
+  danaMessages: [5 * MINUTE, 2 * MINUTE + 59_400, 38_800],
+  booked: 38_650,
+  danaLast: 38_200,
+} as const;
 
 /** The booking Dana made in her chat, in the kernel's words for the owner. */
 const DANA_BOOKED = 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.';
@@ -53,9 +70,10 @@ function addDays(date: string, days: number): string {
 /** Rivera's Today, Needs you and Demo inbox as a new copy opened at `now` reads them. */
 export function stillToday(now: Date): StillToday {
   const at = now.getTime();
-  const iso = (minutesAgo: number) => new Date(at - minutesAgo * MINUTE).toISOString();
+  const iso = (msAgo: number) => new Date(at - msAgo).toISOString();
+  const dateOf = (msAgo: number) => localDate(at - msAgo);
   const held = rivera.decisions.held;
-  const heldAt = iso(HELD_MINUTES_AGO);
+  const heldAt = iso(SEEDED.held);
   const visitorTurn = rivera.conversations.visitor.turns.find((t) => t.kind === 'visitor');
   const danaSession = rivera.conversations.danaLive.session.session_id;
   const agent = rivera.conversations.alexAgent;
@@ -83,7 +101,7 @@ export function stillToday(now: Date): StillToday {
     display_name: null,
     verified: false,
     mode: 'ai',
-    last_activity: iso(0),
+    last_activity: iso(SEEDED.danaLast),
     outcome_counts: { executed: 3 },
     owner_preview: false,
   };
@@ -104,10 +122,10 @@ export function stillToday(now: Date): StillToday {
       total: 3,
       newest: {
         // The reply the check stopped in the held visitor's chat: a price in Claude's own words.
-        blocked: { kind: 'blocked', at: heldAt, session_id: held.session_id, display_name: null, ref_id: 'preview-stopped-reply', line: null },
-        booking: { kind: 'booking', at: iso(0), session_id: danaSession, display_name: null, ref_id: 'preview-booking', line: DANA_BOOKED },
+        blocked: { kind: 'blocked', at: iso(SEEDED.stoppedReply), session_id: held.session_id, display_name: null, ref_id: 'preview-stopped-reply', line: null },
+        booking: { kind: 'booking', at: iso(SEEDED.booked), session_id: danaSession, display_name: null, ref_id: 'preview-booking', line: DANA_BOOKED },
         // Claude's last answer in Alex Kim's assistant's chat, which held nothing else.
-        lead_or_answer: { kind: 'answer', at: iso(39), session_id: agent.session.session_id, display_name: agent.name, ref_id: agent.session.session_id, line: null },
+        lead_or_answer: { kind: 'answer', at: iso(SEEDED.agentAnswered), session_id: agent.session.session_id, display_name: agent.name, ref_id: agent.session.session_id, line: null },
       },
     },
     this_week: {
@@ -121,11 +139,17 @@ export function stillToday(now: Date): StillToday {
       handled: 2,
       stepped_in: 1,
       stopped: 1,
-      days: [-6, -5, -4, -3, -2, -1, 0].map((offset) =>
-        offset === 0
-          ? { date: today, conversations: 3, bookings: 1, stopped: 1 }
-          : { date: addDays(today, offset), conversations: 0, bookings: 0, stopped: 0 },
-      ),
+      // Each on its own day: a conversation counts on each day it has a message in.
+      days: [-6, -5, -4, -3, -2, -1, 0].map((offset) => {
+        const date = addDays(today, offset);
+        const on = (msAgo: number) => dateOf(msAgo) === date;
+        return {
+          date,
+          conversations: Number(SEEDED.agentMessages.some(on)) + Number(on(SEEDED.heldMessage)) + Number(SEEDED.danaMessages.some(on)),
+          bookings: Number(on(SEEDED.booked)),
+          stopped: Number(on(SEEDED.stoppedReply)),
+        };
+      }),
     },
   };
 
