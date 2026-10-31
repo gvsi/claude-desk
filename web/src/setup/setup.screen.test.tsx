@@ -5,11 +5,13 @@
  * going live. Nothing turns on, goes live or reads "On" before its confirming request succeeds.
  */
 import { describe, expect, it } from 'vitest';
+import type { RenderResult } from 'vitest-browser-react';
 
 import type { RouteKey } from '../api/routes.ts';
 import type { SetupState } from '../api/views.ts';
 import { MEMORY_LABEL, SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
+import type { DeskRecord } from '../mocks/world.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 
 const DESCRIPTION =
@@ -26,6 +28,30 @@ async function startInterview(consent: boolean | null = true): Promise<SetupStat
   if (consent !== null) await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: consent } });
   return state;
 }
+
+/** An interview whose questions are all answered, at the tools step; the money limit answered as $500. */
+async function interviewAtTools(): Promise<SetupState> {
+  const state = await startInterview();
+  const id = state.interview_id;
+  for (const question of SETUP_QUESTIONS) {
+    const text = question.key === 'money_limit' ? '$500 is fine. Anything bigger, ask me.' : 'Yes, that works.';
+    await mockStore.dispatch('setupAnswer', { params: { id }, body: { text } });
+  }
+  return state;
+}
+
+/** The mock's Desk for an interview. */
+function deskOf(state: SetupState): DeskRecord {
+  const desk = mockStore.world.desk(state.desk_id);
+  if (!desk) throw new Error('the mock made the setup Desk');
+  return desk;
+}
+
+/** Each tool's status in the mock, by name. */
+const statuses = (state: SetupState, tools: readonly string[]) => tools.map((tool) => deskOf(state).tools.find((t) => t.tool === tool)?.status);
+
+/** A row of the tools list, by its connector's name. */
+const connectorRow = (screen: RenderResult, name: string) => screen.getByRole('listitem').filter({ hasText: new RegExp(`^${name}`) });
 
 const FAILED_LINE = "I couldn't answer just now. Your answer is still here; try again.";
 
@@ -99,5 +125,92 @@ describe('setup', () => {
     expect(requests('setup').length).toBeGreaterThan(reads);
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
     await expect.element(box).toHaveValue('');
+  });
+
+  it('tool_turns_on_only_after_its_change_is_confirmed', async () => {
+    const state = await interviewAtTools();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    const mark = mockStore.requests.length;
+
+    // Stripe, the mock payments server, with its Mock badge; connecting it lists its two tools, neither on.
+    const stripe = connectorRow(screen, 'Stripe');
+    await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: /^(Connect|Add) Stripe$/ }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Stripe/ })).toBeVisible();
+    expect(requests('setupConnect', mark).map((r) => r.body)).toEqual([{ server: 'mock_payments' }]);
+    const tools = ['payments.list_charges', 'payments.create_refund'];
+    expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
+    const review = screen.getByRole('region', { name: 'Tools' });
+    await expect.element(review.getByText('See charges', { exact: true })).toBeVisible();
+    await expect.element(review.getByText('Refund', { exact: true })).toBeVisible();
+    expect(review.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
+
+    // Connected is not on: back on the list, Stripe doesn't read "On", and opening it again connects nothing more.
+    await screen.getByRole('button', { name: 'Cancel' }).click();
+    await expect.element(connectorRow(screen, 'Stripe')).toBeVisible();
+    expect(connectorRow(screen, 'Stripe').getByText('On', { exact: true }).elements()).toHaveLength(0);
+    await screen.getByRole('button', { name: /^(Connect|Add) Stripe$/ }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Stripe/ })).toBeVisible();
+    expect(requests('setupConnect', mark)).toHaveLength(1);
+
+    // One confirm for the connector's tools, each at the hash it was listed at; nothing is on yet.
+    await screen.getByRole('button', { name: 'Turn it on' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turn on Stripe' })).toBeVisible();
+    const hashes = tools.map((tool) => deskOf(state).tools.find((t) => t.tool === tool)?.definition_sha256);
+    expect(requests('confirmTool', mark).map((r) => r.body)).toEqual([
+      { tools: tools.map((tool, i) => ({ tool, definition_sha256: hashes[i] })), enable: true },
+    ]);
+    expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
+    expect(requests('confirmRules', mark)).toHaveLength(0);
+    const drafted = [...deskOf(state).drafts.keys()].at(-1);
+
+    // Only the confirmed change turns them on, and the list, read again, says so.
+    await screen.getByRole('button', { name: 'Confirm and turn on' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    expect(requests('confirmRules', mark).map((r) => r.body)).toEqual([{ version: drafted }]);
+    expect(statuses(state, tools)).toEqual(['enabled', 'enabled']);
+    await expect.element(connectorRow(screen, 'Stripe').getByText('On', { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^(Connect|Add) Stripe$/ }).elements()).toHaveLength(0);
+    expect(requests('confirmTool', mark)).toHaveLength(1);
+  });
+
+  it('built_in_connector_turns_on_only_after_its_change_is_confirmed', async () => {
+    const state = await interviewAtTools();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    const mark = mockStore.requests.length;
+    const tools = ['native.payment_link', 'native.charge_mandate'];
+    expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
+
+    // A built-in connector has nothing to connect: its review opens at once.
+    await screen.getByRole('button', { name: /^(Add|Connect) Payments$/ }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Payments/ })).toBeVisible();
+    const review = screen.getByRole('region', { name: 'Tools' });
+    await expect.element(review.getByText('Payment link', { exact: true })).toBeVisible();
+    await expect.element(review.getByText('Charge within a signed limit', { exact: true })).toBeVisible();
+    expect(review.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
+
+    // Opening its review turns nothing on: back on the list, Payments doesn't read "On".
+    await screen.getByRole('button', { name: 'Cancel' }).click();
+    await expect.element(connectorRow(screen, 'Payments')).toBeVisible();
+    expect(connectorRow(screen, 'Payments').getByText('On', { exact: true }).elements()).toHaveLength(0);
+    await screen.getByRole('button', { name: /^(Add|Connect) Payments$/ }).click();
+
+    await screen.getByRole('button', { name: 'Turn it on' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Turn on Payments' })).toBeVisible();
+    const hashes = tools.map((tool) => deskOf(state).tools.find((t) => t.tool === tool)?.definition_sha256);
+    expect(requests('confirmTool', mark).map((r) => r.body)).toEqual([
+      { tools: tools.map((tool, i) => ({ tool, definition_sha256: hashes[i] })), enable: true },
+    ]);
+    expect(requests('setupConnect', mark)).toHaveLength(0);
+    expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
+    expect(requests('confirmRules', mark)).toHaveLength(0);
+
+    await screen.getByRole('button', { name: 'Confirm and turn on' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    expect(requests('confirmRules', mark)).toHaveLength(1);
+    expect(statuses(state, tools)).toEqual(['enabled', 'enabled']);
+    await expect.element(connectorRow(screen, 'Payments').getByText('On', { exact: true })).toBeVisible();
   });
 });
