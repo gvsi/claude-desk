@@ -6646,6 +6646,117 @@
         }
       }
     },
+    "/api/owner/policy/{desk_id}/tools/confirm": {
+      "post": {
+        "summary": "Confirm Tools",
+        "description": "Send the owner's reviewed pins to the kernel. Enabling drafts a rules version; only explicit policy\nconfirmation activates it. Disabling takes effect immediately. A slow proof answers 202 with this request.",
+        "operationId": "owner_confirm_tools",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolsConfirmIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolConfirmed"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvingPending"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/owner/policy/{desk_id}/confirm": {
       "post": {
         "summary": "Confirm Rules",
@@ -12031,6 +12142,33 @@
         ],
         "title": "ToolCall"
       },
+      "ToolConfirmed": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ToolProfile"
+            },
+            "type": "array",
+            "title": "Profiles"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "profiles",
+          "draft"
+        ],
+        "title": "ToolConfirmed"
+      },
       "ToolDecisionRow": {
         "properties": {
           "decision_id": {
@@ -12139,6 +12277,41 @@
         ],
         "title": "ToolDecisions",
         "description": "`GET /api/owner/desks/{desk_id}/tools/{tool}/decisions`: a page of the tool's decisions on the Desk, newest\nfirst; `next_before` is the cursor for the next page, None on the last."
+      },
+      "ToolPin": {
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "native.quote",
+              "native.find_slots",
+              "native.book",
+              "native.release_document",
+              "native.payment_link",
+              "native.charge_mandate",
+              "native.capture_lead",
+              "native.request_callback",
+              "native.start_verification",
+              "native.fetch_website",
+              "native.read_memory",
+              "payments.list_charges",
+              "payments.create_refund"
+            ],
+            "title": "Tool"
+          },
+          "definition_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Definition Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tool",
+          "definition_sha256"
+        ],
+        "title": "ToolPin"
       },
       "ToolProfile": {
         "properties": {
@@ -12380,6 +12553,31 @@
         ],
         "title": "ToolRow",
         "description": "A tool of the Desk as the kernel lists it (`kernel_ro.tools`): its effects, whether it can be undone, its\nstatus (`needs_review` until the owner confirms a connected tool), the description Claude sees and, for a\nconnected tool, the hash of the definition it is pinned to and a changed definition waiting for review; and the\nactive rules' cards that cover it, default asks included, in card order (Plan 02b, Task 9)."
+      },
+      "ToolsConfirmIn": {
+        "properties": {
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ToolPin"
+            },
+            "type": "array",
+            "maxItems": 13,
+            "minItems": 1,
+            "title": "Tools"
+          },
+          "enable": {
+            "type": "boolean",
+            "title": "Enable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tools",
+          "enable"
+        ],
+        "title": "ToolsConfirmIn",
+        "description": "The shared batch review body; the checked Desk ID comes from the route."
       },
       "TranscriptItem": {
         "properties": {
