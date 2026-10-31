@@ -827,6 +827,14 @@ describe('Vision pages against their boards', () => {
     await expect.poll(() => window.innerHeight).toBe(pageHeight);
     expect([round(shell.getBoundingClientRect().height), document.documentElement.scrollHeight]).toEqual([pageHeight, pageHeight]);
     expect(scroller.scrollHeight).toBe(scroller.clientHeight);
+    // The concept footer stays in the page's flow, so the height above can't be met by moving it:
+    // it sits under the composer and ends just over the window's foot (about 16 px, a pixel more or
+    // less with the machine's fonts).
+    const footer = one(root, '[data-ds="concept-footer"]');
+    expect(round(top(footer))).toBeGreaterThanOrEqual(round(bottom(one(root, '.cd-public-shell__composer'))));
+    const footerGap = round(window.innerHeight - bottom(footer));
+    expect(footerGap).toBeGreaterThanOrEqual(12);
+    expect(footerGap).toBeLessThanOrEqual(20);
 
     // Nothing here is live: the download's click goes nowhere, not even to a page of the app or a
     // place on this one, and nothing is asked of the API.
