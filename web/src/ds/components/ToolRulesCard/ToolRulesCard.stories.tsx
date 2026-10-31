@@ -84,6 +84,28 @@ export const PaymentLinkOnPayments: Story = {
   },
 };
 
+export const WithoutLink: Story = {
+  name: 'Without a link',
+  args: {
+    tool: { name: 'Payment link', description: 'Makes a one-time link for a quote. Charges money. Can be undone.' },
+  },
+  parameters: {
+    canvasNote:
+      'Not a board of its own: Payment link as N-Conn-02-Payments draws it, for All rules while the tool pages are not built. Without an href the tool’s name and line are plain text, with no chevron and no tab stop.',
+  },
+  play: async ({ canvas }) => {
+    const card = canvas.getByRole('region', { name: 'Payment link' });
+    await expect(within(card).queryAllByRole('link')).toHaveLength(0);
+    await expect(card.querySelectorAll('.cd-tool-rules__chevron')).toHaveLength(0);
+    const name = within(card).getByText('Payment link', { selector: '.cd-tool-rules__tool-name' });
+    expectComputed(name, { color: 'rgba(250, 249, 245, 0.92)', display: 'block' });
+    await expect(within(card).getByText('Makes a one-time link for a quote. Charges money. Can be undone.')).toBeVisible();
+    // The rules and the fallback as with a link.
+    await expect(within(card).getAllByRole('listitem')).toHaveLength(2);
+    await expect(within(card).getByText('Anything else here: ask me.')).toBeVisible();
+  },
+};
+
 export const RefundOnItsPage: Story = {
   args: {
     label: 'Your rules for refund',

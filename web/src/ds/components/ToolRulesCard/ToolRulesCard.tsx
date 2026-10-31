@@ -23,8 +23,11 @@ function PlainLink({ children, ...props }: RulesLinkProps) {
 export interface ToolRulesCardProps {
   /** The card's name: the tool's name on a connector's page, or "Your rules for refund" on its own page. */
   label: string;
-  /** On a connector's page, the tool's name and line as one link to the tool's page. */
-  tool?: { name: string; description: string; href: string };
+  /**
+   * On a connector's page, the tool's name and line as one link to the tool's page. Without an
+   * `href` (the page isn't built yet) they're plain text, with no chevron and no tab stop.
+   */
+  tool?: { name: string; description: string; href?: string };
   /** A row per rule that governs the tool (`rulesForTool`), most specific first. */
   rules: readonly RuleRowProps[];
   /**
@@ -38,6 +41,15 @@ export interface ToolRulesCardProps {
   linkComponent?: ComponentType<RulesLinkProps>;
 }
 
+function ToolText({ name, description }: { name: string; description: string }) {
+  return (
+    <span className="cd-tool-rules__tool-text">
+      <span className="cd-tool-rules__tool-name cd-type-section">{name}</span>{' '}
+      <span className="cd-tool-rules__tool-description cd-type-meta">{description}</span>
+    </span>
+  );
+}
+
 /**
  * A tool and every rule that governs it: on a connector's page, the tool's name and line as a link
  * to its page, then a `RuleRow` per rule, then what happens to anything else.
@@ -46,13 +58,16 @@ export function ToolRulesCard({ label, tool, rules, fallback = true, onAddRule, 
   return (
     <Card as="section" label={label} padding={16}>
       {tool ? (
-        <Link href={tool.href} className="cd-tool-rules__tool">
-          <span className="cd-tool-rules__tool-text">
-            <span className="cd-tool-rules__tool-name cd-type-section">{tool.name}</span>{' '}
-            <span className="cd-tool-rules__tool-description cd-type-meta">{tool.description}</span>
-          </span>
-          <Icon name="chevron-right" size={16} className="cd-tool-rules__chevron" />
-        </Link>
+        tool.href === undefined ? (
+          <div className="cd-tool-rules__tool">
+            <ToolText name={tool.name} description={tool.description} />
+          </div>
+        ) : (
+          <Link href={tool.href} className="cd-tool-rules__tool">
+            <ToolText name={tool.name} description={tool.description} />
+            <Icon name="chevron-right" size={16} className="cd-tool-rules__chevron" />
+          </Link>
+        )
       ) : null}
       {rules.length > 0 ? (
         <ul role="list" className="cd-tool-rules__rules">
