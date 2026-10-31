@@ -11,6 +11,7 @@ The app runs on FakeKernel with a scripted model.
 """
 
 import asyncio
+import contextlib
 import html
 import json
 import logging
@@ -41,6 +42,7 @@ from desk.api.prompts import (
     SetupStart,
     question_text,
 )
+from desk.api.ratelimit import RateLimited
 from desk.api.setup import owner_name
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest
@@ -1254,6 +1256,115 @@ async def test_a_repeat_while_the_first_is_starting_answers_in_progress_at_once(
     assert first.status_code == 201 and first.json()["interview_id"] == interview_id, first.text
     assert (await start_keyed(owner)).json() == first.json()
     assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+
+
+def held_limits(app: FastAPI, monkeypatch, *, hold: int = 0) -> tuple[list[str], list[asyncio.Event]]:
+    """The names of the limits the app is asked to count from now on, in order, whether or not they refuse; and,
+    for each of the first `hold` `setup_turn` checks, an event it waits for, set by the test to let it through."""
+    limiter = app.state.runtime.limiter
+    enforce, asked, holds = limiter.enforce, [], [asyncio.Event() for _ in range(hold)]
+
+    async def counting(name, key, **options):
+        asked.append(name)
+        if name == "setup_turn" and asked.count(name) <= hold:
+            await holds[asked.count(name) - 1].wait()
+        return await enforce(name, key, **options)
+
+    monkeypatch.setattr(limiter, "enforce", counting)
+    return asked, holds
+
+
+async def until(condition, timeout: float = 5) -> None:
+    async with asyncio.timeout(timeout):
+        while not condition():
+            await asyncio.sleep(0.01)
+
+
+async def test_a_repeat_during_the_first_ones_admission_waits_for_it_and_is_never_charged(app, browser, fake,
+                                                                                        kernel_http, model, engine,
+                                                                                        monkeypatch):
+    # The first start is still being admitted (held inside the setup turn limit's check) when its repeat arrives. The
+    # repeat waits for that admission, then finds the key's row and answers 409 `in_progress`; it is never counted.
+    owner = await new_owner(app, browser, kernel_http)
+    asked, (admitted,) = held_limits(app, monkeypatch, hold=1)
+    release = asyncio.Event()
+    model.add(gate := gated(started(), release))
+    first = asyncio.create_task(start_keyed(owner))
+    await until(lambda: asked.count("setup_turn") == 1)
+    repeat = asyncio.create_task(start_keyed(owner))
+    await asyncio.sleep(0.3)
+    assert not repeat.done()
+    admitted.set()
+    await asyncio.wait_for(gate.entered.wait(), 5)
+    repeat = await asyncio.wait_for(repeat, 5)
+    assert (repeat.status_code, repeat.json()) == (409, {"error": "in_progress", "retry_after": 2})
+    release.set()
+    first = await asyncio.wait_for(first, 10)
+    assert first.status_code == 201, first.text
+    assert asked.count("setup_turn") == 1
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    assert len(desk_setup.ADMISSIONS) == 0                           # each key's lock goes once nothing holds it
+
+
+class EachOnItsOwn:
+    """Admission with no lock in this process, as two processes each admit a request on their own."""
+
+    def admitting(self, copy_id: str, key: str) -> contextlib.nullcontext:
+        return contextlib.nullcontext()
+
+
+async def test_two_processes_racing_one_key_make_one_interview(app, browser, fake, kernel_http, model, engine,
+                                                               monkeypatch):
+    # Two starts with one key, each admitted on its own (two processes), both find no row and both pass the limit. The
+    # unique index on (copy, key) lets one claim the key; the other answers the setup interview that one made, with
+    # one model call and one Desk between them.
+    monkeypatch.setattr(desk_setup, "ADMISSIONS", EachOnItsOwn())
+    owner = await new_owner(app, browser, kernel_http)
+    asked, (one, two) = held_limits(app, monkeypatch, hold=2)
+    model.add(started())
+    racing = {asyncio.create_task(start_keyed(owner)), asyncio.create_task(start_keyed(owner))}
+    await until(lambda: asked.count("setup_turn") == 2)         # both looked, found no row and are being counted
+    one.set()
+    done, pending = await asyncio.wait(racing, timeout=10, return_when=asyncio.FIRST_COMPLETED)
+    (winner,) = done
+    assert winner.result().status_code == 201, winner.result().text
+    two.set()
+    loser = await asyncio.wait_for(pending.pop(), 10)
+    assert (loser.status_code, loser.json()) == (201, winner.result().json())
+    assert len(fake.called("POST /desks")) == 1 and len(model.requests) == 1
+    assert len(await interviews(engine)) == 1
+
+
+async def test_a_repeat_never_counts_on_the_setup_turn_limit(app, browser, fake, kernel_http, model, monkeypatch):
+    owner = await new_owner(app, browser, kernel_http)
+    asked, _ = held_limits(app, monkeypatch)
+    model.add(started())
+    first = await start_keyed(owner)
+    assert first.status_code == 201, first.text
+    for _ in range(3):
+        assert (await start_keyed(owner)).json() == first.json()
+    assert asked.count("setup_turn") == 1
+
+
+async def test_a_start_the_limit_refuses_leaves_no_row(app, browser, fake, kernel_http, model, engine, monkeypatch):
+    # Refused before its key is claimed: no row, no model call, no Desk, and the same key goes through once the limit
+    # lets it.
+    owner = await new_owner(app, browser, kernel_http)
+    limiter = app.state.runtime.limiter
+    enforce = limiter.enforce
+
+    async def refusing(name, key, **options):
+        if name == "setup_turn":
+            raise RateLimited(60)
+        return await enforce(name, key, **options)
+
+    monkeypatch.setattr(limiter, "enforce", refusing)
+    refused = await start_keyed(owner)
+    assert (refused.status_code, refused.json()) == (429, {"error": "rate_limited", "retry_after": 60})
+    assert await interviews(engine) == [] and fake.called("POST /desks") == [] and model.requests == []
+    monkeypatch.setattr(limiter, "enforce", enforce)
+    model.add(started())
+    assert (await start_keyed(owner)).status_code == 201
 
 
 @pytest.mark.parametrize("key", ["", "k" * 129, "start\x00a", "start\na"], ids=["empty", "129", "NUL", "newline"])

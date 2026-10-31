@@ -72,13 +72,16 @@ async def start_setup(body: SetupStartIn, request: Request,
     now, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409
     `conflict`; a repeat of a start that failed answers its failure again (a new click sends a new key); and a repeat
     sent while the first is still starting answers 409 `in_progress` at once, to be sent again after `retry_after`.
-    Without a key, each start makes its own interview and Desk."""
-    if body.idempotency_key is not None:
-        repeat = await setup.repeated_start(ctx, runtime(request).started().database(), body)
-        if repeat is not None:
-            return repeat
-    state = await _moving_on(request, ctx)
-    return await setup.start(ctx, state.database(), state.model, body)
+    A start is admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent
+    meanwhile waits for that admission and is never counted; another process admits on its own, so during a deploy's
+    overlap a repeat routed to the other task can be counted twice. Without a key, each start makes its own interview
+    and Desk."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    return await setup.start(ctx, state.database(), state.model, body, admit=admit)
 
 
 @router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 422, 503))

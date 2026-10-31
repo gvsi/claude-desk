@@ -12,7 +12,9 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   yet (a read of it is 404 meanwhile); a unique index on `(copy_id, idempotency_key)` lets one row in a copy hold a
   key. A repeat (`repeated_start`) finds the row and answers its interview as it stands, with nothing made: 409
   `conflict` for another body, the stored failure again when the first failed (`start_error`), and while the first is
-  still starting, 409 `in_progress` at once (`retry_after` 2 s), holding nothing while the client waits. A start
+  still starting, 409 `in_progress` at once (`retry_after` 2 s), holding nothing while the client waits. The lookup,
+  the limits and the claim run under the key's lock in this process (`ADMISSIONS`), so a concurrent repeat waits for
+  the first's admission and is never counted; another process's repeat meets the unique index instead. A start
   without a key writes its row last.
 - **Consent** (`consent`): stored once. On yes, the owner's Claude memory is searched (`native.read_memory`), then
   the website read (`native.fetch_website`) when the description named one; then the first question. On no, no
@@ -82,7 +84,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from desk.api.deps import ApiProblem, OwnerCtx
-from desk.api.idempotency import body_sha256
+from desk.api.idempotency import Admissions, body_sha256
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.metrics import record_model_call
 from desk.api.model import (
@@ -208,6 +210,7 @@ TURN_MAX_TOKENS = 4096
 SETUP_TIMEOUT_S = 60.0
 LOCK_TIMEOUT = "5s"              # the most an interview write waits for the row's lock (then 409 `conflict`)
 START_RETRY_S = 2               # when to send a repeat again that found its first still starting (409 `in_progress`)
+ADMISSIONS = Admissions()       # a keyed start's lookup, limits and claim, one at a time per (copy, key)
 DESK_NAME = "Main line"
 MEMORY_QUERY = "business services prices hours area contact website"
 READ_TEXT_MAX = 8000             # what a read keeps for later turns: the website tool's own model_view cut
@@ -681,12 +684,15 @@ async def repeated_start(owner: OwnerCtx, engine: AsyncEngine, body: SetupStartI
     return await read(owner, engine, row["interview_id"])
 
 
-async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: SetupStartIn) -> SetupState:
-    """Read the owner's description, make the Desk with Answering off, and ask for consent. With the client's key, the
-    interview's row is written first and the start's outcome saved to it, its failure too (module docstring); another
-    request that took the key meanwhile is answered as a repeat."""
+async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: SetupStartIn, *,
+                admit: Callable[[], Awaitable[None]]) -> SetupState:
+    """Read the owner's description, make the Desk with Answering off, and ask for consent, once `admit` (the route's
+    limits) lets the start through. With the client's key, a repeat is answered before `admit` counts it; otherwise
+    the interview's row is written first, under the key's lock, and the start's outcome saved to it, its failure too
+    (module docstring). A request another process admitted meanwhile is answered as a repeat."""
     key = body.idempotency_key
     if key is None:
+        await admit()
         interview, slug = await _begin(owner, engine, model, body, "setup-" + secrets.token_hex(16))
         async with engine.connect() as conn:
             await conn.execute(insert(INTERVIEWS).values(interview_id=interview.interview_id,
@@ -695,11 +701,16 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
             await conn.commit()
         return setup_state(interview, slug)
 
-    interview_id = await _claim(engine, owner.copy_id, key, start_sha256(body))
-    if interview_id is None:
+    async with ADMISSIONS.admitting(owner.copy_id, key):
         repeat = await repeated_start(owner, engine, body)
-        if repeat is None:                          # the row went with its copy meanwhile
-            raise ApiProblem(409, "conflict")
+        if repeat is not None:
+            return repeat
+        await admit()
+        interview_id = await _claim(engine, owner.copy_id, key, start_sha256(body))
+    if interview_id is None:                        # another process took the key since this one looked
+        repeat = await repeated_start(owner, engine, body)
+        if repeat is None:                          # and has let it go again: this one is to be sent again
+            raise ApiProblem(409, "in_progress", retry_after=START_RETRY_S)
         return repeat
     keyed = (INTERVIEWS.c.interview_id == interview_id, INTERVIEWS.c.copy_id == owner.copy_id)
     try:
