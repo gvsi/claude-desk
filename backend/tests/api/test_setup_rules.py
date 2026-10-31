@@ -1295,6 +1295,38 @@ async def test_setup_tool_review_retries_one_proof_with_the_browser_body(app, br
     assert len(fake.desks[state["desk_id"]].versions) == 1
 
 
+async def test_setup_tool_review_disables_at_once_and_keeps_verification_on(app, browser, fake, kernel_http, model):
+    # Disabling takes effect at once and drafts nothing, so an enabling answer kept from before is dropped and the
+    # same batch sent again asks the kernel; the kernel's refusal to turn verification off comes back as it is.
+    owner, state = await ready(app, browser, kernel_http, model)
+    desk_id = state["desk_id"]
+    tools = f"/api/owner/setup/{state['interview_id']}/tools"
+    rows = (await owner.browser.post(f"{tools}/connect")).json()
+    pins = [{"tool": row["tool"], "definition_sha256": row["definition_sha256"]} for row in rows]
+    path = f"/api/owner/policy/{desk_id}/tools/confirm"
+    enabling = {"tools": pins, "enable": True}
+    assert (await owner.browser.post(path, json=enabling)).status_code == 200
+    asked = len(fake.called("POST /tools/confirm"))
+
+    reply = await owner.browser.post(path, json={"tools": pins, "enable": False})
+    assert reply.status_code == 200, reply.text
+    disabled = ToolConfirmed.model_validate(reply.json())
+    assert disabled.draft is None
+    assert [(profile.tool, profile.status) for profile in disabled.profiles] == [
+        (pin["tool"], "disabled") for pin in pins]
+    listed = SetupTools.model_validate((await owner.browser.get(tools)).json())
+    assert {row.tool: row.status for row in listed.tools if row.source == "mcp"} == {
+        pin["tool"]: "disabled" for pin in pins}
+    assert (await owner.browser.post(path, json=enabling)).status_code == 200
+    assert len(fake.called("POST /tools/confirm")) == asked + 2
+
+    verification = fake.desks[desk_id].tools["native.start_verification"]
+    reply = await owner.browser.post(path, json={"tools": [{
+        "tool": verification.tool, "definition_sha256": verification.definition_sha256}], "enable": False})
+    assert (reply.status_code, reply.json()) == (422, {"error": "kernel", "code": "invalid"})
+    assert fake.desks[desk_id].tools["native.start_verification"].status == "enabled"
+
+
 @pytest.mark.parametrize("case", ["empty", "duplicate", "bad_hash", "extra"])
 async def test_setup_tool_review_uses_shared_batch_validation(app, browser, fake, kernel_http, model, case):
     owner, state = await ready(app, browser, kernel_http, model)
