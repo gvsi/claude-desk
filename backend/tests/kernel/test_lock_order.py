@@ -41,6 +41,7 @@ from .test_compiler import card
 from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode, set_session
 from .test_desk_writes import slot_body, updated
 from .test_execute import Crash, crash, executed, fake_quote_desk, post_execute, read, store_intent
+from .test_handoff_card import legacy_call_back
 from .test_lead_tools import CALLBACK, callback, handoff_done
 from .test_link_completion import PASS as LINK_PASS
 from .test_link_completion import RV_LINK_100, charged, completed, rivera_cards, rv_link
@@ -534,6 +535,22 @@ async def test_a_call_back_taking_over_a_card_handoff_runs_in_the_lock_order(app
         # call-back's, then its fact, then the outcome
         ["sessions", "decisions", "executions", "handoffs", "facts", "ledger_heads"],
     ]
+
+
+async def test_a_call_back_beside_several_open_ones_runs_in_the_lock_order(app, client, frozen_clock):
+    copy, visitor = await visitor_of(app, client)
+    older = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-1")
+    frozen_clock.advance(60)
+    newer = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-2")
+    for handoff_id, decision in (("handoff-older", older), ("handoff-newer", newer)):   # from before, side by side
+        await legacy_call_back(app, copy, visitor, handoff_id, decision.action.action_id)
+    allowed = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-3")
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    # T2 holds the session row FOR UPDATE, then the open handoffs FOR UPDATE (their actions read without a
+    # lock, to find the most recent), then the fact, then the outcome
+    assert log.transactions[-1] == ["sessions", "decisions", "executions", "handoffs", "facts", "ledger_heads"]
+    assert all(map(in_lock_order, log.transactions))
 
 
 async def test_closing_a_handoff_runs_in_the_lock_order(app, client):

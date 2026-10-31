@@ -56,7 +56,6 @@ from desk.db.models import (
     Desk,
     Document,
     Fact,
-    Handoff,
     KnowledgeItem,
     LedgerEntry,
     Message,
@@ -1203,102 +1202,22 @@ def test_handoff_kinds_come_back_from_their_rows_under_forced_row_security(scrat
     assert kinds == {"handoff-rls-card": "card", "handoff-rls-callback": "callback"}
 
 
-def test_one_open_handoff_per_session(kernel_tx):
-    """A session holds one open handoff, of either kind: a done one, another session's and one with
-    no session don't count against it."""
-    def handoff(handoff_id: str, session_id: str | None, status: str = "open") -> Handoff:
-        return Handoff(handoff_id=handoff_id, copy_id="copy-a", desk_id="desk-a", session_id=session_id,
-                       status=status, kind="callback", action_id=f"act-{handoff_id}")
-
-    kernel_tx.add_all([handoff("handoff-1", "session-1"), handoff("handoff-2", "session-1", "done"),
-                       handoff("handoff-3", "session-2"), handoff("handoff-4", None), handoff("handoff-5", None)])
-    kernel_tx.flush()
-    kernel_tx.add(Handoff(handoff_id="handoff-6", copy_id="copy-a", desk_id="desk-a", session_id="session-1",
-                          status="open", kind="card", action_id="handoff-6"))
-    with pytest.raises(IntegrityError):
-        kernel_tx.flush()
-
-
-def insert_open_handoff(admin: psycopg.Connection, copy_id: str, handoff_id: str, session_id: str,
-                        status: str = "open") -> None:
-    """A call-back's handoff and its fact, written as the kernel writes them: committed while open,
-    expired once done."""
-    desk_id = f"desk-{copy_id}"
-    admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, status, action_id)"
-                  " VALUES (%s, %s, %s, %s, %s, %s)", (handoff_id, copy_id, desk_id, session_id, status,
-                                                       f"act-{handoff_id}"))
-    admin.execute("INSERT INTO kernel.facts (desk_id, fact_id, copy_id, kind, status, claims)"
-                  " VALUES (%s, %s, %s, 'handoff', %s, '[]')",
-                  (desk_id, f"handoff:{handoff_id}", copy_id, "committed" if status == "open" else "expired"))
-
-
-def handoff_states(admin: psycopg.Connection, copy_id: str) -> dict[str, tuple[str, str]]:
-    """Each handoff of the copy, as (its status, its fact's status)."""
-    rows = admin.execute("SELECT h.handoff_id, h.status, f.status FROM kernel.handoffs h JOIN kernel.facts f"
-                         " ON f.desk_id = h.desk_id AND f.fact_id = 'handoff:' || h.handoff_id"
-                         " WHERE h.copy_id = %s", (copy_id,)).fetchall()
-    return {handoff_id: (status, fact) for handoff_id, status, fact in rows}
-
-
-def test_a_session_left_with_several_open_handoffs_keeps_one(scratch):
-    """Before the kind revision a session could hold several open handoffs (a call-back request
-    made more than once). The revision closes all but the first by ID, as the owner's mark of done
-    closes one, expiring their facts, so its index holds one open handoff per session from then on.
-    The downgrade drops the index and reopens nothing; the revision runs again over what it did."""
+def test_the_previous_release_writes_call_backs_as_it_did(scratch):
+    """During a deploy the previous release's kernel serves beside the migrated database, and it
+    writes a call-back's handoff naming no kind, beside any other open handoff of the session's, as
+    it always has: each insert still succeeds, as a call-back. One open handoff per session is kept
+    by this release's code, under the session row, not by the table."""
     admin = scratch.conn
-    before = ScriptDirectory.from_config(alembic_config()).get_revision(HANDOFF_KIND_REVISION).down_revision
     try:
-        scratch.migrate(command.downgrade, before)
-        for handoff_id in ("handoff-dup-b", "handoff-dup-a", "handoff-dup-c"):
-            insert_open_handoff(admin, "copy-dup", handoff_id, "session-dup")
-        insert_open_handoff(admin, "copy-dup", "handoff-dup-d", "session-dup", "done")
-        insert_open_handoff(admin, "copy-dup", "handoff-one", "session-one")
-        scratch.migrate(command.upgrade, "head")
-        kept = {"handoff-dup-a": ("open", "committed"), "handoff-dup-b": ("done", "expired"),
-                "handoff-dup-c": ("done", "expired"), "handoff-dup-d": ("done", "expired"),
-                "handoff-one": ("open", "committed")}
-        assert handoff_states(admin, "copy-dup") == kept
-        with pytest.raises(psycopg.errors.UniqueViolation):
-            insert_open_handoff(admin, "copy-dup", "handoff-dup-e", "session-dup")
-        scratch.migrate(command.downgrade, before)
-        assert admin.execute("SELECT count(*) FROM pg_indexes WHERE schemaname = 'kernel'"
-                             " AND indexname = 'handoffs_one_open_per_session'").fetchone() == (0,)
-        assert handoff_states(admin, "copy-dup") == kept
-        scratch.migrate(command.upgrade, "head")
-        scratch.migrate(command.stamp, before)                       # the revision runs again over what it did
-        scratch.migrate(command.upgrade, HANDOFF_KIND_REVISION)
-        assert handoff_states(admin, "copy-dup") == kept
+        for handoff_id in ("handoff-old-a", "handoff-old-b"):
+            admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, reason, status,"
+                          " action_id) VALUES (%s, 'copy-old', 'desk-old', 'session-old', 'Sam Lee', 'open', %s)",
+                          (handoff_id, f"act-{handoff_id}"))
+        rows = admin.execute("SELECT handoff_id, kind, status FROM kernel.handoffs WHERE copy_id = 'copy-old'"
+                             " ORDER BY handoff_id").fetchall()
+        assert rows == [("handoff-old-a", "callback", "open"), ("handoff-old-b", "callback", "open")]
     finally:
-        admin.execute("DELETE FROM kernel.facts WHERE copy_id = 'copy-dup'")
-        admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-dup'")
-        scratch.migrate(command.upgrade, "head")
-
-
-def test_a_sessions_extra_open_handoffs_close_under_forced_row_security(scratch):
-    """On a managed Postgres the migration role is neither SUPERUSER nor BYPASSRLS, and under forced
-    row security the tables' owner sees none of their rows. The revision lifts the force on the two
-    tables it writes for its own statements, in its own transaction, and puts it back: run as such an
-    owner, it closes a session's extra open handoffs and expires their facts, and both tables are
-    forced again after."""
-    migration = ScriptDirectory.from_config(alembic_config()).get_revision(HANDOFF_KIND_REVISION).module
-    admin = scratch.conn
-    with admin.transaction(force_rollback=True):
-        admin.execute("DROP INDEX kernel.handoffs_one_open_per_session")   # as before the revision
-        for handoff_id in ("handoff-rls-a", "handoff-rls-b"):
-            insert_open_handoff(admin, "copy-rls", handoff_id, "session-rls")
-        admin.execute("CREATE ROLE desk_test_handoffs_owner NOLOGIN NOSUPERUSER NOBYPASSRLS")
-        admin.execute("GRANT USAGE ON SCHEMA kernel TO desk_test_handoffs_owner")
-        for table in ("handoffs", "facts"):
-            admin.execute(f"ALTER TABLE kernel.{table} OWNER TO desk_test_handoffs_owner")
-        admin.execute("SET LOCAL ROLE desk_test_handoffs_owner")
-        assert admin.execute("SELECT count(*) FROM kernel.handoffs").fetchone() == (0,)   # it sees no row
-        admin.execute(migration.CLOSE_EXTRAS)
-        admin.execute("RESET ROLE")
-        states = handoff_states(admin, "copy-rls")
-        forced = admin.execute("SELECT relname, relforcerowsecurity FROM pg_class WHERE oid IN"
-                               " ('kernel.handoffs'::regclass, 'kernel.facts'::regclass)").fetchall()
-    assert states == {"handoff-rls-a": ("open", "committed"), "handoff-rls-b": ("done", "expired")}
-    assert sorted(forced) == [("facts", True), ("handoffs", True)]
+        admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-old'")
 
 
 def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:

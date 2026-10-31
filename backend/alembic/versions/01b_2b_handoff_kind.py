@@ -8,16 +8,11 @@ without naming a kind while it runs beside this one during a deploy; this releas
 it, and the check below keeps a default from ever passing for a card. The rows already there take
 their kind from the row itself (below).
 
-A session holds one open handoff, of either kind (`handoffs_one_open_per_session`, unique on the
-session among open rows): a card shown while one is open opens none, and a call-back request makes
-the open one its own. The index also serves the reply check's look for a session's open
-handoffs, so no other is needed. Before this revision a session could hold several, from a
-call-back request made more than once, so the upgrade first closes all but the first of them by
-ID, as the owner's mark of done closes one, and expires their facts (`CLOSE_EXTRAS`). Those two
-updates must see every row, which an admin under forced row security doesn't, so they run with
-the force lifted on the two tables, as their owner, inside the migration's transaction, and the
-force is put back before it ends: no other transaction sees the tables unforced, and a failure
-rolls all of it back. The downgrade drops the index and reopens nothing.
+The table holds no rule of one open handoff per session: during a deploy the previous release's
+kernel serves beside this schema and inserts a call-back's handoff whatever else is open, and a
+unique index would fail it. This release keeps one per session in its own code, under the session
+row, and rows from before may hold several. Consolidating those, by when each was requested and
+with each closure ledgered, is left to a follow-up.
 
 A card's handoff has no action. `action_id` stays NOT NULL and unique: a card's names the
 handoff's own id, which no action's id can equal (an action's id starts `act-`, a handoff's
@@ -44,8 +39,7 @@ to count them under forced row security, and the refusal would block a rollback 
 nothing.
 
 Any admin role can run this, superuser or not (a managed Postgres's admin isn't): the admin owns
-the tables, so it may rewrite the column and lift and put back the force on their row security;
-the grants run while the admin owns the view; the admin
+the table, so it may rewrite its column; the grants run while the admin owns the view; the admin
 owns kernel_ro, so it may drop the view; then `_change_owner` lends the admin SET on
 desk_ro_owner, and desk_ro_owner CREATE on the schema, for the ownership change alone, and takes
 both back. Like the revisions before it, it runs again over what it added: the view, which
@@ -86,27 +80,6 @@ DROP_KIND = """
     ALTER TABLE kernel.handoffs DROP COLUMN IF EXISTS kind;
 """
 
-# All but the first, by ID, of a session's open handoffs closed, as the owner's mark of done closes
-# one, with their facts expired; run as the tables' owner with their row security's force lifted for
-# these statements alone, and put back.
-CLOSE_EXTRAS = """
-    ALTER TABLE kernel.handoffs NO FORCE ROW LEVEL SECURITY;
-    ALTER TABLE kernel.facts NO FORCE ROW LEVEL SECURITY;
-    WITH closed AS (
-        UPDATE kernel.handoffs AS extra SET status = 'done'
-        WHERE extra.status = 'open' AND extra.session_id IS NOT NULL AND EXISTS (
-            SELECT 1 FROM kernel.handoffs AS kept WHERE kept.session_id = extra.session_id
-                AND kept.status = 'open' AND kept.handoff_id < extra.handoff_id)
-        RETURNING extra.desk_id, extra.handoff_id)
-    UPDATE kernel.facts AS fact SET status = 'expired' FROM closed
-        WHERE fact.desk_id = closed.desk_id AND fact.fact_id = 'handoff:' || closed.handoff_id;
-    ALTER TABLE kernel.facts FORCE ROW LEVEL SECURITY;
-    ALTER TABLE kernel.handoffs FORCE ROW LEVEL SECURITY;
-"""
-ONE_OPEN = ("CREATE UNIQUE INDEX IF NOT EXISTS handoffs_one_open_per_session ON kernel.handoffs (session_id)"
-            " WHERE status = 'open';")
-
-
 def _script(sql: str) -> None:
     """Run a multi-statement SQL script as-is (no parameters), inside the migration's transaction."""
     op.get_bind().connection.driver_connection.execute(sql)
@@ -142,13 +115,10 @@ def upgrade() -> None:
     _script("DROP VIEW kernel_ro.handoffs;")
     _script(ADD_KIND)
     _script("GRANT SELECT (kind) ON kernel.handoffs TO desk_ro_owner;")
-    _script(CLOSE_EXTRAS)
-    _script(ONE_OPEN)
     _create_view(AFTER)
 
 
 def downgrade() -> None:
-    _script("DROP INDEX IF EXISTS kernel.handoffs_one_open_per_session;")
     _script("DROP VIEW kernel_ro.handoffs;")
     _script(DROP_KIND)                    # dropping the column drops its CHECK and its column grant too
     _create_view(BEFORE)

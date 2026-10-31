@@ -551,8 +551,9 @@ class PaymentLink(Base):
 class Handoff(Base):
     """A conversation handed to the owner, `open` until the owner marks it `done`: one the handoff
     card opened, or a callback a visitor asked for (`native.request_callback`, 01b_2_handoffs),
-    which makes the session's open handoff its own. A session holds at most one open handoff, of
-    either kind (01b_2b_handoff_kind)."""
+    which makes the session's most recent open handoff its own. The kernel keeps one open handoff per
+    session, of either kind, under the session row; rows from before may hold several
+    (01b_2b_handoff_kind)."""
 
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}

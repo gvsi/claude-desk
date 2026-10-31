@@ -5,25 +5,29 @@ what the visitor said (untrusted, and the owner reads it under "Claude's note");
 time. `execute` makes the session's handoff a call-back's: kind `callback`, a reason carrying that
 text for the owner, a window that is the Desk's next open hour (`desks.next_open_window`), or none,
 and the action's id, with a `handoff:<id>` fact labelled for the session (the callback confirmed
-card) whose only claims are the window, so no visitor text reaches a card. A session holds one open
-handoff (`handoffs_one_open_per_session`): when it already has one, the handoff card's or an
-earlier call-back's, that one becomes this call-back's, in this execution's transaction, its fact
-written or rewritten under the same id, so the owner keeps one item for the conversation and the
-visitor's card shows the time now promised; otherwise a new one opens. The execution holds the
-session row `FOR UPDATE` (`locks_session`), so two such executions, or one and a reply check
-opening a card's handoff, take turns. The fact expires when its window ends, and when the owner
-closes the handoff (`POST /handoffs/{id}/done`), so a callback that happened is never promised again.
+card) whose only claims are the window, so no visitor text reaches a card. The kernel keeps one open
+handoff per session: when the session already has one, the handoff card's or an earlier
+call-back's, that one becomes this call-back's, in this execution's transaction, its fact written
+or rewritten under the same id, so the owner keeps one item for the conversation and the visitor's
+card shows the time now promised; otherwise a new one opens. A session may hold several open from
+before (or from the previous release, during a deploy): then the most recent becomes this one's,
+by when its request was made (`latest_open`), and the older ones are left as they are. The
+execution holds the session row `FOR UPDATE` (`locks_session`), so two such executions, or one and
+a reply check opening a card's handoff, take turns; the table itself holds no such rule. The fact
+expires when its window ends, and when the owner closes the handoff (`POST /handoffs/{id}/done`),
+so a callback that happened is never promised again.
 The owner is alerted per the Desk's notification defaults; the alert is read only from the Demo
 inbox, so the result's `inbox` stays empty.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from desk.contracts import Claim, Fact, NormalizedAction, ResourceRef, ToolProfile
+from desk.db.models import Action as ActionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import Handoff
 from desk.kernel_service import demo_inbox, desks, labels, render
@@ -75,6 +79,26 @@ def model_view(fact_id: str, handoff_id: str) -> dict[str, Any]:
     return {"fact_id": fact_id, "handoff_id": handoff_id}
 
 
+async def latest_open(ctx, desk_id: str, session_id: str) -> Handoff | None:
+    """The session's most recent open handoff, its open ones held `FOR UPDATE` (step 10 of the lock
+    order, after the session row the execution holds): by when its request was made, a call-back's
+    being its action's `created_at`, read without a lock. A card's handoff counts as the oldest,
+    since one opens only while the session has none open, so any call-back open beside it came
+    later; a call-back whose action can't be found counts as the oldest too, and a tie goes to the
+    larger ID. None when the session has none open."""
+    rows = list(await ctx.db.scalars(ctx.repo.scoped(select(Handoff).where(
+        Handoff.desk_id == desk_id, Handoff.session_id == session_id, Handoff.status == "open")
+        .order_by(Handoff.handoff_id).with_for_update())))
+    if len(rows) <= 1:
+        return rows[0] if rows else None
+    action_ids = [row.action_id for row in rows if row.kind == "callback"]
+    requested = dict((await ctx.db.execute(ctx.repo.scoped(select(ActionRow.action_id, ActionRow.created_at).where(
+        ActionRow.action_id.in_(action_ids))))).all())
+    never = datetime.min.replace(tzinfo=UTC)
+    return max(rows, key=lambda row: (requested.get(row.action_id, never) if row.kind == "callback" else never,
+                                      row.handoff_id))
+
+
 class RequestCallbackAdapter:
     profile = PROFILE
     Args = RequestCallbackArgs
@@ -95,9 +119,7 @@ class RequestCallbackAdapter:
         written = {"reason": f"{args.name} · {args.contact} · {args.reason}", "kind": "callback",
                    "callback_window": f"{start.isoformat()}/{end.isoformat()}" if start and end else None,
                    "action_id": action.action_id, "window_start": start, "window_end": end}
-        handoff = (await ctx.db.scalars(ctx.repo.scoped(select(Handoff).where(
-            Handoff.desk_id == action.desk_id, Handoff.session_id == session_id, Handoff.status == "open")
-            .with_for_update()))).one_or_none()
+        handoff = await latest_open(ctx, action.desk_id, session_id)
         if handoff is None:
             handoff = Handoff(handoff_id=new_id("handoff"), copy_id=action.copy_id, desk_id=action.desk_id,
                               session_id=session_id, status="open", **written)

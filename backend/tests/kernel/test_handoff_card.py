@@ -478,12 +478,53 @@ async def test_a_second_call_back_request_takes_over_the_first(app, client, froz
         first.facts[0].fact_id, "committed", decision.action.action_id, one)
     assert [f.fact_id for f in second.facts] == [fact.fact_id]
     assert len([alert for alert in await owner_alerts(client, copy) if "Sam Lee" in alert.body]) == 2
-    with pytest.raises(sqlalchemy.exc.IntegrityError):            # and the table holds one open handoff per session
-        async with kernel_ctx(app) as ctx:
-            ctx.bind(copy.copy_id)
-            ctx.db.add(Handoff(handoff_id="handoff-extra", copy_id=copy.copy_id, desk_id=copy.desk_id,
-                               session_id=visitor.session_id, reason=CARD_REASON, status="open", kind="card",
-                               action_id="handoff-extra"))
+
+
+async def test_two_call_back_requests_at_once_leave_one_open_handoff(app, client):
+    """A call-back's execution holds the session row FOR UPDATE, so two call-back requests run at once
+    in one session take turns: the second finds the first's handoff and takes it over."""
+    copy, visitor = await visitor_of(app, client)
+    decisions = [await decided(client, visitor, "native.request_callback", CALLBACK, call_id=call_id)
+                 for call_id in ("call-1", "call-2")]
+    results = await asyncio.gather(*(executed(client, visitor, decision) for decision in decisions))
+    assert [result.state for result in results] == ["succeeded", "succeeded"]
+    [handoff] = await handoffs_of(app, copy)
+    assert (handoff.kind, handoff.status) == ("callback", "open")
+    assert handoff.action_id in {decision.action.action_id for decision in decisions}
+    assert {result.model_view["handoff_id"] for result in results} == {handoff.handoff_id}
+
+
+async def legacy_call_back(app: FastAPI, copy: Rivera, visitor: Visitor, handoff_id: str, action_id: str) -> None:
+    """An open call-back's handoff written as an earlier kernel wrote it, beside any other open one."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=copy.copy_id, desk_id=copy.desk_id,
+                           session_id=visitor.session_id, reason=SAM, status="open", kind="callback",
+                           action_id=action_id))
+
+
+async def test_a_session_left_with_several_open_call_backs_has_its_newest_taken_over(app, client, frozen_clock):
+    """A session may hold several open call-backs from before one open handoff per session was
+    kept, or from the previous release during a deploy. The next call-back request takes over the
+    most recent, by when its request was made (its action's), never by its random ID, and leaves the
+    older ones as they are. A card shown there opens none."""
+    copy, visitor = await visitor_of(app, client)
+    older = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-1")
+    frozen_clock.advance(600)
+    newer = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-2")
+    await legacy_call_back(app, copy, visitor, "handoff-zzzz", older.action.action_id)
+    await legacy_call_back(app, copy, visitor, "handoff-aaaa", newer.action.action_id)   # the newest, first by ID
+    assert_handed_off(await checked(client, visitor, BLOCKED))
+    assert await handoff_alerts(app, copy) == []                                      # no card's handoff beside them
+
+    frozen_clock.advance(600)
+    latest = await decided(client, visitor, "native.request_callback", {**CALLBACK, "contact": "(510) 555-0199"},
+                           call_id="call-3")
+    result = await executed(client, visitor, latest)
+    assert (result.state, result.model_view["handoff_id"]) == ("succeeded", "handoff-aaaa")
+    rows = {row.handoff_id: (row.status, row.action_id) for row in await handoffs_of(app, copy)}
+    assert rows == {"handoff-aaaa": ("open", latest.action.action_id),
+                    "handoff-zzzz": ("open", older.action.action_id)}             # the older, as it was
 
 
 # ---- A held request awaiting the owner (the owner's decision of 2026-10-31) ---------------------------
