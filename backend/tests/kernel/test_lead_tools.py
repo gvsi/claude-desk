@@ -208,9 +208,11 @@ async def test_callback_without_an_open_hour_has_no_window(app, client):
     copy, visitor = await visitor_of(app, client)
     await alert_now(app, copy, "callback")
     every_day = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-    # no hours at all, then only a half hour a day: no whole hour is open
+    # no hours at all, then only a half hour a day: no whole hour is open (each in a session of its own,
+    # since a session holds one open handoff)
     for call_id, hours in (("call-1", []), ("call-2", [HoursWindow(days=every_day, start=time(9), end=time(9, 30))])):
         await set_hours(app, copy, hours)
+        visitor = await open_visitor(client, copy)
         [fact] = (await callback(client, visitor, call_id)).facts
         assert (fact.kind, fact.status, fact.claims) == ("handoff", "committed", [])
     assert [(row.window_start, row.window_end) for row in await rows_of(app, copy.copy_id, select(Handoff))] == [
@@ -589,7 +591,8 @@ async def test_closing_a_handoff_expires_its_fact(app, client, monkeypatch):
     copy, visitor = await visitor_of(app, client)
     with_window = await callback(client, visitor)
     await set_hours(app, copy, [])
-    without = await callback(client, visitor, "call-2")
+    other = await open_visitor(client, copy)                     # a session holds one open handoff
+    without = await callback(client, other, "call-2")
     facts = [result.facts[0].fact_id for result in (with_window, without)]
     handoff_ids = [result.model_view["handoff_id"] for result in (with_window, without)]
 
@@ -615,8 +618,8 @@ async def test_closing_a_handoff_expires_its_fact(app, client, monkeypatch):
     statuses = {row.fact_id: row.status for row in await rows_of(app, copy.copy_id, select(Fact).where(
         Fact.kind == "handoff"))}
     assert statuses == dict.fromkeys(facts, "expired")
-    for fact_id in facts:
-        verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact_id)])
+    for session, fact_id in zip((visitor, other), facts, strict=True):
+        verdict = await checked(client, session, "I passed your request on.", [clause("callback_confirmed", fact_id)])
         assert [(v.kind, v.rule_id, v.fact_ids) for v in verdict.violations] == [
             ("stale_fact", "not_current", [fact_id])]
 
@@ -646,8 +649,9 @@ async def test_a_deleted_desks_handoff_is_closed(app, client):
     """A deleted Desk's handoffs don't change: closing one, open or already done, is 409 `closed`,
     an `auth` entry on the Desk's ledger, as on every other route that names the Desk."""
     copy, visitor = await visitor_of(app, client)
-    handoff_ids = [(await callback(client, visitor, call_id)).model_view["handoff_id"]
-                   for call_id in ("call-1", "call-2")]
+    other = await open_visitor(client, copy)                     # a session holds one open handoff
+    handoff_ids = [(await callback(client, session, call_id)).model_view["handoff_id"]
+                   for session, call_id in ((visitor, "call-1"), (other, "call-2"))]
     assert (await handoff_done(client, handoff_ids[1], copy.owner)).status_code == 200
     response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
     assert response.status_code == 204, response.text

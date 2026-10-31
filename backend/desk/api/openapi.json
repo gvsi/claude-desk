@@ -1648,7 +1648,7 @@
     "/api/owner/desks/{desk_id}/safety": {
       "get": {
         "summary": "Safety",
-        "description": "The attempts the checkpoint stopped on the Desk, newest first: refused requests and replies of Claude's it\nblocked (the \"stopped\" Today counts).",
+        "description": "The Desk's refused requests and Claude's stopped drafts, newest first. Today and Safety count refused requests\nonly (owner decision, 2026-10-31). Each refusal's nullable `cause` comes from its decision's `policy_ids` and\nits ledger decide summary's `reason`/`check` and the session's verified state; drafts have no cause.",
         "operationId": "owner_safety",
         "parameters": [
           {
@@ -7154,6 +7154,40 @@
           "ledger_seq": {
             "type": "integer",
             "title": "Ledger Seq"
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "owner_rule",
+                  "not_verified",
+                  "not_their_record",
+                  "recipient",
+                  "no_such_slot",
+                  "unknown_item",
+                  "over_quote_ceiling",
+                  "quote_unpayable",
+                  "no_such_charge",
+                  "not_refundable",
+                  "no_such_document",
+                  "no_amount",
+                  "tool_not_available",
+                  "incomplete_request",
+                  "paused",
+                  "no_rules",
+                  "rules_unchecked",
+                  "agent_pay_out",
+                  "agent_limit",
+                  "other_copy",
+                  "no_rule"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cause"
           }
         },
         "type": "object",
@@ -7165,10 +7199,11 @@
           "origin",
           "created_at",
           "triage",
-          "ledger_seq"
+          "ledger_seq",
+          "cause"
         ],
         "title": "Attempt",
-        "description": "An attempt the checkpoint stopped (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b)."
+        "description": "A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a\nclosed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`\nand the session's verified state;\nthe web holds its words. It is null for held requests, stopped drafts and unmapped refusals."
       },
       "Briefing": {
         "properties": {
@@ -7189,9 +7224,9 @@
             "type": "integer",
             "title": "Leads"
           },
-          "blocked": {
+          "turned_down": {
             "type": "integer",
-            "title": "Blocked"
+            "title": "Turned Down"
           },
           "total": {
             "type": "integer",
@@ -7207,7 +7242,7 @@
           "conversations",
           "bookings",
           "leads",
-          "blocked",
+          "turned_down",
           "total",
           "newest"
         ],
@@ -7219,7 +7254,7 @@
           "kind": {
             "type": "string",
             "enum": [
-              "blocked",
+              "turned_down",
               "booking",
               "lead",
               "answer"
@@ -7267,6 +7302,40 @@
               }
             ],
             "title": "Line"
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "owner_rule",
+                  "not_verified",
+                  "not_their_record",
+                  "recipient",
+                  "no_such_slot",
+                  "unknown_item",
+                  "over_quote_ceiling",
+                  "quote_unpayable",
+                  "no_such_charge",
+                  "not_refundable",
+                  "no_such_document",
+                  "no_amount",
+                  "tool_not_available",
+                  "incomplete_request",
+                  "paused",
+                  "no_rules",
+                  "rules_unchecked",
+                  "agent_pay_out",
+                  "agent_limit",
+                  "other_copy",
+                  "no_rule"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cause"
           }
         },
         "type": "object",
@@ -7276,10 +7345,11 @@
           "session_id",
           "display_name",
           "ref_id",
-          "line"
+          "line",
+          "cause"
         ],
         "title": "BriefingItem",
-        "description": "One thing that happened since last night. `ref_id` is what it links to: the attempt's `ref_id` for `blocked`,\nthe decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a\nrefusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None."
+        "description": "One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,\nthe decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a\nrefusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required\nand nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped\nrefusals. Stopped drafts stay on Safety and out of the briefing."
       },
       "BriefingList": {
         "properties": {
@@ -7306,7 +7376,7 @@
       },
       "BriefingNewest": {
         "properties": {
-          "blocked": {
+          "turned_down": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/BriefingItem"
@@ -7339,12 +7409,12 @@
         },
         "type": "object",
         "required": [
-          "blocked",
+          "turned_down",
           "booking",
           "lead_or_answer"
         ],
         "title": "BriefingNewest",
-        "description": "The newest blocked attempt, booking, and lead or answer (the lead when both share a time); None when none."
+        "description": "The newest refused request, booking, and lead or answer (the lead when both share a time); None when none."
       },
       "BusinessOut": {
         "properties": {
@@ -11852,7 +11922,7 @@
           "days"
         ],
         "title": "ThisWeek",
-        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier\nbooking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last\none `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the\nreply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the\ndrafts."
+        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier\nbooking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last\none `end`. `stopped` counts refused requests from visitors and agents (owner decision, 2026-10-31).\nSafety lists Claude's stopped drafts too, without counting them; the briefing omits them."
       },
       "Today": {
         "properties": {
@@ -12568,7 +12638,7 @@
           "stopped"
         ],
         "title": "WeekDay",
-        "description": "One date of \"Last 7 days\", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,\nnot Claude's own drafts the reply check stopped."
+        "description": "One date of \"Last 7 days\", counted as `ThisWeek` counts: `stopped` counts refused requests that day\n(owner decision, 2026-10-31). Claude's stopped drafts are listed on Safety but not counted."
       },
       "WentLive": {
         "properties": {

@@ -43,7 +43,7 @@
 | `onClick` | `(event) => void` | Not called while disabled or busy. |
 | `onKeyDown` | `(event) => void` | Keys pressed on the button. Not on a link. |
 | `buttonRef` | `Ref<HTMLButtonElement>` | The `<button>`, for a screen that has to know about it. React lets go of it (a callback gets `null`) before the button leaves the page, so whether it had focus can still be read then, as `PublicShell` does for "Ask for {owner}". Not on a link. |
-| `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500), held as one run of text, so words around a name stay together and the gap only separates them from a menu button's chevron. |
+| `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500), held as one run of text, so words around a name stay together and the gap only separates them from a menu button's chevron. A label with a status, such as Safety's "1 held for you", is a whole `StatusLabel`, which keeps the one line `size-control` tall. |
 
 ## States
 

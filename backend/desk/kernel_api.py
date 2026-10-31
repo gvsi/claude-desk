@@ -167,6 +167,8 @@ class AnswerRequest(KernelRequest):           # POST /approvals/{decision_id}/an
 
 class CheckReplyRequest(KernelRequest):       # POST /check_reply
     draft: ReplyDraft
+    final: bool = True                    # false: a first attempt the API rewrites if every violation is rewritable
+                                          # (desk.rewrites), so its handoff clause opens no owner handoff then
 
 class OwnerMessageRequest(KernelRequest):     # POST /owner/messages (the kernel ledgers both kinds)
     session_id: str

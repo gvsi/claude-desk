@@ -90,5 +90,10 @@ def test_a_setup_turns_message_matches_its_recording():
         transcript=[Entry(role="tool_label", text="Read your memory", read="memory", content=f"Memory: {FORGED}"),
                     Entry(role="tool_label", text="Read your website", read="website", content=f"Website: {FORGED}",
                           website=f"https://rivera.example/{FORGED}")])
-    _matches_recording("setup_turns", [_turn_message(interview, key, f"Answer: {FORGED}")
-                                       for key in ("hours_and_area", "money_limit")])
+    messages = [_turn_message(interview, key, f"Answer: {FORGED}")
+                for key in ("hours_and_area", "money_limit")]
+    interview.transcript += [Entry(role="claude", text="When are you open?", question="hours_and_area"),
+                             Entry(role="owner", text=f"Earlier answer: {FORGED}"),
+                             Entry(role="claude", text=f"Follow-up: {FORGED}")]
+    messages.append(_turn_message(interview, "hours_and_area", f"Answer: {FORGED}"))
+    _matches_recording("setup_turns", messages)

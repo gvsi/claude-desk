@@ -19,8 +19,8 @@
 
 ## What it shows
 
-- Laid out as a `SituationRow` is: a hairline over the row, padded 14 px top and bottom; the trick at the left and the outcome in a 300 px column at the right, 24 px from it.
-- At the left, the kind of trick in `control` type at weight 520; the quoted words 2 px under it in `meta`, `text-secondary`; for a blocked trick the checkpoint 4 px under them in `caption`, `text-secondary`. A blocked row is 90 px with its hairline.
+- Laid out as a `SituationRow` is: hairlines only between list items, none above the first row, padded 14 px top and bottom; the trick at the left and the outcome in a 300 px column at the right, 24 px from it.
+- At the left, the kind of trick in `control` type at weight 520; the quoted words 2 px under it in `meta`, `text-secondary`; for a blocked trick the checkpoint 4 px under them in `caption`, `text-secondary`. A blocked row is 89 px for the first row, 90 px for later rows with the hairline.
 - At the right, "Blocked" beside a `status-refused` dot, or "Not blocked" beside a `status-held` dot, in `meta`, `text-primary`, and the reason 2 px under it in `meta`, `text-secondary`.
 - Below 560 px of row width the outcome drops under the trick, 8 px under it.
 

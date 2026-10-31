@@ -62,6 +62,7 @@ from desk.contracts import (
     money_tool,
 )
 from desk.kernel_api import CheckReplyRequest, DecideRequest, ExecuteRequest, SessionContext
+from desk.rewrites import REWRITABLE
 
 # How a change to the session's tools reaches Claude. "append": a `role: "system"` message of `tool_addition` and
 # `tool_removal` blocks, appended to the same context. "fresh_context": a new context with the new tools and a
@@ -174,9 +175,8 @@ SEND_REPLY = SEND_REPLY_TOOL["name"]
 # After an /execute timeout the decision is read each second for ten seconds ("Fail-closed behavior").
 EXECUTE_POLL_S, EXECUTE_POLLS = 1.0, 10
 EXECUTED = frozenset({"executed", "failed", "unknown"})
-# Violations Claude gets one rewrite for; any other kind hands off at once.
-REGENERABLE = frozenset({"number_in_prose", "promise_word", "soft_promise", "unknown_fact", "stale_fact",
-                         "unentitled_fact"})
+# Violations Claude gets one rewrite for; any other kind hands off at once. The kernel reads the same set.
+REGENERABLE = REWRITABLE
 NOT_RUN = {"outcome": "not_run"}
 UNAVAILABLE = {"outcome": "unavailable"}
 REFUSED = {"outcome": "refused"}

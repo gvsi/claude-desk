@@ -99,10 +99,13 @@ export interface ApprovalAnswerOut {
   card_diff: RuleCard[] | null;
 }
 /**
- * An attempt the checkpoint stopped (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its
+ * A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its
  * `decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the
  * kernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;
- * `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b).
+ * `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a
+ * closed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`
+ * and the session's verified state;
+ * the web holds its words. It is null for held requests, stopped drafts and unmapped refusals.
  */
 export interface Attempt {
   ref_id: string;
@@ -113,6 +116,31 @@ export interface Attempt {
   created_at: string;
   triage: Triage | null;
   ledger_seq: number;
+  cause:
+    | (
+        | "owner_rule"
+        | "not_verified"
+        | "not_their_record"
+        | "recipient"
+        | "no_such_slot"
+        | "unknown_item"
+        | "over_quote_ceiling"
+        | "quote_unpayable"
+        | "no_such_charge"
+        | "not_refundable"
+        | "no_such_document"
+        | "no_amount"
+        | "tool_not_available"
+        | "incomplete_request"
+        | "paused"
+        | "no_rules"
+        | "rules_unchecked"
+        | "agent_pay_out"
+        | "agent_limit"
+        | "other_copy"
+        | "no_rule"
+      )
+    | null;
 }
 /**
  * A stopped attempt, summarized for the owner (route `triage`): what the person seemed to be after, and a
@@ -137,30 +165,57 @@ export interface Briefing {
   conversations: number;
   bookings: number;
   leads: number;
-  blocked: number;
+  turned_down: number;
   total: number;
   newest: BriefingNewest;
 }
 /**
- * The newest blocked attempt, booking, and lead or answer (the lead when both share a time); None when none.
+ * The newest refused request, booking, and lead or answer (the lead when both share a time); None when none.
  */
 export interface BriefingNewest {
-  blocked: BriefingItem | null;
+  turned_down: BriefingItem | null;
   booking: BriefingItem | null;
   lead_or_answer: BriefingItem | null;
 }
 /**
- * One thing that happened since last night. `ref_id` is what it links to: the attempt's `ref_id` for `blocked`,
+ * One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,
  * the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
- * refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None.
+ * refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
+ * and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
+ * refusals. Stopped drafts stay on Safety and out of the briefing.
  */
 export interface BriefingItem {
-  kind: "blocked" | "booking" | "lead" | "answer";
+  kind: "turned_down" | "booking" | "lead" | "answer";
   at: string;
   session_id: string | null;
   display_name: string | null;
   ref_id: string;
   line: string | null;
+  cause:
+    | (
+        | "owner_rule"
+        | "not_verified"
+        | "not_their_record"
+        | "recipient"
+        | "no_such_slot"
+        | "unknown_item"
+        | "over_quote_ceiling"
+        | "quote_unpayable"
+        | "no_such_charge"
+        | "not_refundable"
+        | "no_such_document"
+        | "no_amount"
+        | "tool_not_available"
+        | "incomplete_request"
+        | "paused"
+        | "no_rules"
+        | "rules_unchecked"
+        | "agent_pay_out"
+        | "agent_limit"
+        | "other_copy"
+        | "no_rule"
+      )
+    | null;
 }
 /**
  * `GET /api/owner/desks/{desk_id}/briefing`: every item since last night, newest first.
@@ -764,9 +819,8 @@ export interface Suggestion {
  * "Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
  * `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
  * booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
- * one `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the
- * reply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the
- * drafts.
+ * one `end`. `stopped` counts refused requests from visitors and agents (owner decision, 2026-10-31).
+ * Safety lists Claude's stopped drafts too, without counting them; the briefing omits them.
  */
 export interface ThisWeek {
   timezone: string;
@@ -781,8 +835,8 @@ export interface ThisWeek {
   days: WeekDay[];
 }
 /**
- * One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,
- * not Claude's own drafts the reply check stopped.
+ * One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` counts refused requests that day
+ * (owner decision, 2026-10-31). Claude's stopped drafts are listed on Safety but not counted.
  */
 export interface WeekDay {
   date: string;

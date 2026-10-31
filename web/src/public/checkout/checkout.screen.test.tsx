@@ -336,9 +336,10 @@ describe('mock checkout', () => {
     expect([...(icon?.querySelectorAll('rect, path') ?? [])].map((shape) => shape.tagName)).toEqual(['rect', 'path']);
     expect(card.element().querySelectorAll('a, button')).toHaveLength(0);
     expect(card.element().textContent).not.toContain('Test payment');
-    // Its receipt sits under it, as under every message.
+    // Its only receipt is the reply check's own line, which a stranger's chat leaves out (the
+    // owner's decision of 2026-10-31); the owner's preview and transcript keep it.
     const row = card.element().closest('.cd-transcript-row');
-    expect(row?.querySelector('.cd-margin-receipt')).not.toBeNull();
+    expect(row?.querySelector('.cd-margin-receipt')).toBeNull();
     await expectScreenBasics(chat.screen.container, { owner: false });
   });
 });

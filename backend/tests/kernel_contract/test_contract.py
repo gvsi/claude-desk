@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
+from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
 from desk.contracts import (
     AgentAuth,
@@ -104,6 +105,7 @@ from tests.kernel_contract.fake_kernel import (
     RecordedStep,
     agent_signature,
     fake_kernel_app,
+    fake_signature,
     signed_time,
 )
 
@@ -147,9 +149,10 @@ async def answer(owner: CredentialView, decision_id: str, choice: str) -> Approv
                             path={"decision_id": decision_id})
 
 
-async def check_reply(view: CredentialView, session_id: str, generation: int, prose: str) -> ReplyVerdict:
+async def check_reply(view: CredentialView, session_id: str, generation: int, prose: str, *,
+                      final: bool = True) -> ReplyVerdict:
     draft = ReplyDraft(session_id=session_id, generation=generation, prose=prose)
-    return await view.call("POST /check_reply", CheckReplyRequest(draft=draft))
+    return await view.call("POST /check_reply", CheckReplyRequest(draft=draft, final=final))
 
 
 async def context(view: CredentialView, session_id: str, desk_id: str | None = None) -> SessionContext:
@@ -184,6 +187,36 @@ async def test_copy_owner_token_authenticates(kernel):
     assert me.session == copy.owner_session
 
     assert await refused(http.owner("not-" + copy.owner_token).whoami()) == (401, "auth")
+
+
+@pytest.mark.kernel_plan("01a")
+async def test_copy_returns_seeded_chat(kernel, ro_read):
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    chat = copy.seeded_chat
+    assert chat is not None
+    decision = chat.decision
+    assert chat.session_id == decision.session_id
+    assert chat.visitor_line == "Could you do the drain clearing at 15% off?"
+    assert (decision.outcome, decision.state, decision.visitor_plain) == (
+        "hold", "held", "Waiting for Maria Rivera to approve")
+    assert decision.action is not None
+    assert (decision.action.tool, decision.action.discount_bp, decision.action.amount_cents) == (
+        "native.quote", 1500, 15300)
+    if state is not None:
+        assert decision.signature == fake_signature(decision.model_dump(include={
+            "decision_id", "session_id", "state", "visitor_plain", "ledger_seq"}))
+    else:
+        from tests.kernel.test_decide import verify_signature
+
+        health = await http.public().call("GET /health")
+        verify_signature(health.public_key_hex, decision)
+
+    held = ro_read(ro_schema, copy.copy_id,
+                   "SELECT decision_id, session_id FROM {ro}.decisions WHERE state = 'held'")
+    assert held == [{"decision_id": decision.decision_id, "session_id": chat.session_id}]
+    read = await read_decision(http.owner(copy.owner_token), decision.decision_id)
+    assert read == decision.model_copy(update={"inbox": []})
 
 
 NOT_FINAL = {"allowed", "held", "approved", "unknown"}
@@ -522,6 +555,15 @@ async def read_policy_ids(api_ro_conn, ro_schema: str, copy: CopyCreated, decisi
     return row["policy_ids"]
 
 
+async def read_refusal_cause(api_ro_conn, ro_schema: str, copy: CopyCreated, decision_id: str) -> str | None:
+    """The Safety cause from the same decision and ledger views the API reads, on either kernel."""
+    ro = KernelRO(api_ro_conn, copy.copy_id, ro_schema)
+    row = await ro.one("decisions", decision_id=decision_id)
+    entry = await ro.one("ledger_entries", desk_id=copy.desk_ids[0], seq=row["ledger_seq"])
+    session = await ro.one("sessions", session_id=row["session_id"])
+    return refusal_cause(row, entry, verified=session["verified"])
+
+
 @pytest.mark.kernel_plan("01a")
 async def test_a_never_cards_refusal_names_its_forbid(kernel, ro_read, arrange, api_ro_conn):
     """The owner's Safety entries say why a refusal happened from the decision's deciding policies, which the API reads
@@ -538,6 +580,7 @@ async def test_a_never_cards_refusal_names_its_forbid(kernel, ro_read, arrange, 
     expected = ["F.never.never-native.quote"]
     assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
     assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
+    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) == "owner_rule"
 
 
 @pytest.mark.kernel_plan("01a")
@@ -1523,6 +1566,7 @@ async def test_a_baseline_refusal_names_its_forbid(kernel, ro_read, arrange, api
     expected = ["B.private_data_record_owner"]
     assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
     assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
+    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) == "not_their_record"
 
 
 # Single-use links: payment links (Plan 01c) -------------------------------------------------------------------------
@@ -1815,8 +1859,8 @@ async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
     async def turn(message: str, *drafts: str) -> CredentialView:
         view = turn_view(http, issued, slug, session_id, message)
         assert (await view.whoami(session_id)).session.session_id == session_id
-        for draft in drafts:
-            await check_reply(view, session_id, 0, draft)
+        for draft in drafts:                    # a first attempt, as the API sends one a rewrite may follow
+            await check_reply(view, session_id, 0, draft, final=False)
         return view
 
     passed = await turn("When are you open?", "We're open on weekdays.")

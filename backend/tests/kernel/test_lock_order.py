@@ -9,9 +9,9 @@ transaction of a path takes (`LockLog`) and check that they come in that order: 
 their reconciliation (a private action's too, once its session closed: its adapter asked, then
 the action withheld, refused or left unknown by what it answers), answers, cancels and reads, a
 verification start allowed or approved, a right code checked, a document link opened, a person
-removed or given another contact, a Desk deleted, and a handoff closed, after the Desk row an
-owner's write holds first; and Plan 01c's payment paths, over the real adapters and the mock
-payments server.
+removed or given another contact, a Desk deleted, a reply check that opens a handoff for its card,
+and a handoff closed, after the Desk row an owner's write holds first; and Plan 01c's payment
+paths, over the real adapters and the mock payments server.
 """
 
 import asyncio
@@ -41,7 +41,8 @@ from .test_compiler import card
 from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode, set_session
 from .test_desk_writes import slot_body, updated
 from .test_execute import Crash, crash, executed, fake_quote_desk, post_execute, read, store_intent
-from .test_lead_tools import callback, handoff_done
+from .test_handoff_card import legacy_call_back
+from .test_lead_tools import CALLBACK, callback, handoff_done
 from .test_link_completion import PASS as LINK_PASS
 from .test_link_completion import RV_LINK_100, charged, completed, rivera_cards, rv_link
 from .test_mandates import CHARGE, asked, rivera_agent
@@ -387,6 +388,33 @@ async def test_a_reply_check_keeps_the_lock_order(app, client, frozen_clock):
     assert log.transactions == [["sessions", "ledger_heads"]]
 
 
+async def test_a_reply_check_that_opens_a_handoff_keeps_the_lock_order(app, client, frozen_clock):
+    _, visitor = await visitor_of(app, client)
+    frozen_clock.advance(1)                                         # so the visitor's last_seen_at is written
+    with lock_log(app) as log:
+        assert not (await checked(client, visitor, "That will be $180.")).ok
+    # the session row, then the handoffs (the session's open ones, none, then the card's, inserted), then the
+    # handoff's entry and the verdict's; the owner's alert is an insert under a fresh key
+    assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
+    frozen_clock.advance(1)
+    with lock_log(app) as log:
+        assert not (await checked(client, visitor, "That will be $180.")).ok
+    # the open one, held FOR SHARE so the owner can't mark it done meanwhile, and only the verdict's entry
+    assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_a_reply_backed_by_an_open_handoff_keeps_the_lock_order(app, client, frozen_clock):
+    _, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    frozen_clock.advance(1)
+    with lock_log(app) as log:
+        assert (await checked(client, visitor, "Maria Rivera will reply here.")).ok
+    # a reply that passed on the open handoff's card: the session row, then that handoff FOR SHARE, held to the
+    # commit, then the verdict's entry
+    assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
+
+
 async def test_an_allowed_verification_start_runs_in_the_lock_order(app, client):
     _, visitor = await visitor_of(app, client)
     allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
@@ -492,6 +520,36 @@ async def test_deleting_a_desk_runs_in_the_lock_order(app, client):
     # (`ON_DELETE`), their facts expired, then the deletion ledgered
     assert log.transactions == [["sessions", "verification_challenges", "payment_links", "document_links", "facts",
                                  "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+
+
+async def test_a_call_back_taking_over_a_card_handoff_runs_in_the_lock_order(app, client):
+    _, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    allowed = await decided(client, visitor, "native.request_callback", CALLBACK)
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    assert log.transactions == [
+        ["sessions", "decisions", "executions"],                    # T1: the intent
+        # T2, holding the session row FOR UPDATE (one open handoff per session): the open handoff, closed, and the
+        # call-back's own, then their facts, then the closing's entry and the outcome
+        ["sessions", "decisions", "executions", "handoffs", "facts", "ledger_heads"],
+    ]
+
+
+async def test_a_call_back_beside_several_open_ones_runs_in_the_lock_order(app, client, frozen_clock):
+    copy, visitor = await visitor_of(app, client)
+    older = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-1")
+    frozen_clock.advance(60)
+    newer = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-2")
+    for handoff_id, decision in (("handoff-older", older), ("handoff-newer", newer)):   # from before, side by side
+        await legacy_call_back(app, copy, visitor, handoff_id, decision.action.action_id)
+    allowed = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-3")
+    with lock_log(app) as log:
+        assert (await executed(client, visitor, allowed)).state == "succeeded"
+    # T2 holds the session row FOR UPDATE, then the open handoffs FOR UPDATE, closed newest first, and the
+    # call-back's own, then their facts, then the closings' entries and the outcome
+    assert log.transactions[-1] == ["sessions", "decisions", "executions", "handoffs", "facts", "ledger_heads"]
     assert all(map(in_lock_order, log.transactions))
 
 

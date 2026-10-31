@@ -113,7 +113,9 @@ async def test_eval_target_copy_never_replays(db, fake, api_settings, clock, bro
             copies[replay_night] = response.json()["copy_id"]
     assert [call.body for call in fake.called("POST /copies")] == [{}, {"replay_night": True}]
     assert set(fake.replayed_nights) == {copies[True]}
-    assert app_rows(db, copies[False]) == (0, 0)
+    assert app_rows(db, copies[False]) == (2, 1)              # the live seeded hold's chat, with nothing replayed
+    assert db.execute("SELECT count(*) FROM app.messages WHERE copy_id = %s AND replay_id IS NOT NULL",
+                      (copies[False],)).fetchone()[0] == 0
 
     # So a kernel without the seeded night, which refuses any request naming `replay_night`, makes the copy at once.
     fake.without_seeded_night()
@@ -151,7 +153,8 @@ async def test_demo_copy_stores_the_replayed_night(db, fake, api_settings, clock
                                                    "receipt", "receipt"]   # the two conversations interleave
 
         rows = db.execute("SELECT session_id, kind, author, created_at, replay_id, wake, model_content, model_seq"
-                          " FROM app.messages WHERE copy_id = %s ORDER BY n", (copy_id,)).fetchall()
+                          " FROM app.messages WHERE copy_id = %s AND replay_id IS NOT NULL ORDER BY n",
+                          (copy_id,)).fetchall()
         kinds = ["agent_text" if event.session_id in agents and event.kind == "visitor_message"
                  else ROW_KIND[event.kind] for event in events]
         assert [row[:4] for row in rows] == [
@@ -160,15 +163,17 @@ async def test_demo_copy_stores_the_replayed_night(db, fake, api_settings, clock
         assert {row[4:] for row in rows} == {(replay_id, False, None, None)}
 
         sent = db.execute("SELECT session_id, kind, type, created_at, replay_id, handled_at FROM app.run_events"
-                          " WHERE copy_id = %s ORDER BY id", (copy_id,)).fetchall()
+                          " WHERE copy_id = %s AND replay_id IS NOT NULL ORDER BY id", (copy_id,)).fetchall()
         assert sent == [(event.session_id, "sse", event_type(event), shown_at(event), replay_id, None)
                         for event in events if event.kind != "visitor_message"]
         assert [event_type(event) for event in events if event.kind == "receipt"] == ["receipt", "receipt", "resolved"]
 
         assert model.requests == [] and fake.called("POST /check_reply") == [] and jobs.jobs == {}
         later = clock.now + timedelta(days=2)
-        assert await surface_due_decisions(engine, now=later, ro_schema=FAKE_RO_SCHEMA) == 0
-        assert db.execute("SELECT count(*) FROM app.run_events WHERE kind <> 'sse'").fetchone()[0] == 0
+        assert await surface_due_decisions(engine, now=later, ro_schema=FAKE_RO_SCHEMA) == 1
+        (live_due,) = db.execute("SELECT session_id, type FROM app.run_events WHERE kind <> 'sse'").fetchall()
+        assert live_due[1] == "decision_due" and live_due[0] not in {event.session_id for event in events}
+        assert fake.sessions[live_due[0]].closed_at is None      # only the live seeded hold can become due
 
 
 async def test_replayed_rows_never_reach_a_model_context(db, api_conn, ids):
@@ -392,9 +397,11 @@ async def test_replayed_events_keep_the_kernels_signed_fields(db, fake, api_sett
                             else EvReceipt(type="receipt", **signed))
             refs.append(("status", decision.decision_id))
     assert {event.decision.state for event in events if event.decision} == {"executed", "refused", "denied"}
-    stored = db.execute("SELECT payload FROM app.run_events WHERE copy_id = %s ORDER BY id", (copy_id,)).fetchall()
+    stored = db.execute("SELECT payload FROM app.run_events WHERE copy_id = %s AND replay_id IS NOT NULL ORDER BY id",
+                        (copy_id,)).fetchall()
     assert [payload for (payload,) in stored] == [event.model_dump(mode="json") for event in expected]
-    named = db.execute("SELECT kind, ref_id FROM app.messages WHERE copy_id = %s AND kind IN ('delivered', 'status')"
+    named = db.execute("SELECT kind, ref_id FROM app.messages WHERE copy_id = %s AND replay_id IS NOT NULL"
+                       " AND kind IN ('delivered', 'status')"
                        " ORDER BY n", (copy_id,)).fetchall()
     assert named == refs
 
@@ -432,8 +439,12 @@ async def test_failed_replay_storage_still_creates_the_copy(db, fake, api_settin
     one log line names the error's type alone."""
     fake.record_night(booked_visit(LAST_NIGHT))
 
+    from desk.api.routes.owner import deliver
+
     async def broken(*args, **kwargs):
-        raise RuntimeError("a database error quoting Hi, my kitchen sink drains slowly")
+        if kwargs.get("replayed") is not None:
+            raise RuntimeError("a database error quoting Hi, my kitchen sink drains slowly")
+        return await deliver(*args, **kwargs)
 
     monkeypatch.setattr("desk.api.routes.owner.deliver", broken)       # after the visitor's words were written
     async with running(api_settings, fake, clock) as app:
@@ -442,7 +453,9 @@ async def test_failed_replay_storage_still_creates_the_copy(db, fake, api_settin
         assert response.status_code == 201
         copy = CopyOut.model_validate(response.json())
         assert (await client.get("/api/owner/me")).json() == response.json()
-    assert set(fake.replayed_nights) == {copy.copy_id} and app_rows(db, copy.copy_id) == (0, 0)
+    assert set(fake.replayed_nights) == {copy.copy_id} and app_rows(db, copy.copy_id) == (2, 1)
+    assert db.execute("SELECT kind FROM app.messages WHERE copy_id = %s ORDER BY n", (copy.copy_id,)).fetchall() == [
+        ("visitor_text",), ("status",)]                       # a failed replay leaves the seeded chat intact
     logged = [record for record in caplog.records if record.name == "desk.api.routes.owner"]
     assert [(record.levelname, record.getMessage()) for record in logged] == [
         ("ERROR", "the replayed night couldn't be stored (RuntimeError); the copy has live data only")]
@@ -555,7 +568,7 @@ async def test_a_replayed_night_that_doesnt_fit_stores_nothing(tamper, db, fake,
         response = await browser(app).post("/api/owner/copies", json={"passcode": PASSCODE})
     (night,) = nights
     assert (response.status_code, response.json()["copy_id"]) == (201, night.copy_id)
-    assert app_rows(db, night.copy_id) == (0, 0)
+    assert app_rows(db, night.copy_id) == (2, 1)              # only the independently committed seeded chat
     logged = [(record.levelname, record.getMessage()) for record in caplog.records
               if record.name == "desk.api.routes.owner"]
     assert logged == [("ERROR", "the replayed night couldn't be stored (ValueError); the copy has live data only")]
@@ -563,7 +576,7 @@ async def test_a_replayed_night_that_doesnt_fit_stores_nothing(tamper, db, fake,
     async with engine.connect() as conn:
         with pytest.raises(ValueError):
             await store_replayed_night(conn, night, ro_schema=FAKE_RO_SCHEMA)
-    assert app_rows(db, night.copy_id) == (0, 0)
+    assert app_rows(db, night.copy_id) == (2, 1)
 
 
 async def test_kernel_without_the_seeded_night_still_makes_a_copy(db, fake, api_settings, clock, browser):
@@ -583,7 +596,7 @@ async def test_kernel_without_the_seeded_night_still_makes_a_copy(db, fake, api_
         second = response.json()["copy_id"]
         assert [call.body for call in fake.called("POST /copies")] == [{"replay_night": True}, {}] * 2
         assert set(fake.copies) == {first, second} and fake.replayed_nights == {}
-        assert app_rows(db, first) == app_rows(db, second) == (0, 0)
+        assert app_rows(db, first) == app_rows(db, second) == (2, 1)   # live seeded chats, with nothing replayed
 
         fake.fail("POST /copies", "422", times=2)                   # refused again: that answer stands
         response = await client.post("/api/owner/start_over")
@@ -778,7 +791,7 @@ async def test_a_refusal_of_unknown_origin_reads_as_recorded_history_everywhere(
         safety = (await client.get(f"/api/owner/desks/{desk_id}/safety")).json()
     for (shown, rows), flagged in ((read, False), (unread, True)):
         assert shown["recorded_history"] == flags(False, flagged, flagged)
-        assert shown["briefing"]["blocked"] == shown["this_week"]["stopped"] == 1
+        assert shown["briefing"]["turned_down"] == shown["this_week"]["stopped"] == 1
         assert [(row["decision_id"], row["replayed"]) for row in rows] == [(refused.decision_id, flagged)]
     assert [attempt["ref_id"] for attempt in safety] == [refused.decision_id]
 

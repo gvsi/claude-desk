@@ -781,7 +781,7 @@ describe('Vision pages against their boards', () => {
 
     // The about column: hours, Rivera's service area and the phone, Rivera's own facts.
     const about = screen.getByRole('complementary', { name: 'About Rivera Plumbing' });
-    expect(about.getByRole('article').elements().map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Policy', 'Contact']);
+    expect(about.getByRole('article').elements().map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Service area', 'Contact']);
     await expect.element(about.getByText('We work in Oakland, Berkeley, Alameda and Emeryville.', { exact: true })).toBeVisible();
     expectComputed(one(main(screen).element(), '.cd-composer__box'), SPEC.composer);
     await expectFooter(root);

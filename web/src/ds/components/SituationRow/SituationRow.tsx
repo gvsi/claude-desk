@@ -55,7 +55,7 @@ export interface SituationRowProps {
  * left; at the right the outcome in words beside its dot, and the kernel's reason under it. A row
  * whose outcome isn't the planned one says so under who is asking, beside a thin held bar. Live
  * rows land one by one, `motion-stagger` apart, and appear at once under reduced motion. The row is
- * drawn with a hairline over it; put each in a list item.
+ * drawn with hairlines only between rows; put each in a list item.
  */
 export function SituationRow({ title, who, outcome, dependsOnReview, reason, matches, index = 0, live = false }: SituationRowProps) {
   const words = dependsOnReview ? SECOND_LOOK : OUTCOME_WORDS[outcome];
