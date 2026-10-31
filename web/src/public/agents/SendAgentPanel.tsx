@@ -5,8 +5,9 @@
  * failed or gone. The tasks are offered before a run, under the limit, and again at the end of one
  * that ended; while a run is unresolved, and after a start whose answer was lost, none is, so the
  * agent is never sent twice by mistake. A task picked moves focus to the panel's title, since the
- * task's button goes with the others, so the next Tab goes on from the panel rather than from the
- * top of the page. Opening the page moves no focus: a run only ever starts from a pick.
+ * task's button goes with the others, and so does "New chat", which goes with its notice; the next
+ * Tab then goes on from the panel rather than from the top of the page. Opening the page moves no
+ * focus: a run only ever starts from a pick.
  *
  * The panel's card holds the run and so the Desk's reply cards: it is the one `Card` that
  * `holdsCards`, which only this file may use.
@@ -251,6 +252,9 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   };
 
   const newChat = () => {
+    // "New chat" goes with its notice, and the tasks come back: its focus moves to the title before
+    // it goes, as a task's does, so the next Tab goes on to the first task.
+    titleRef.current?.focus({ preventScroll: true });
     reading.current?.abort();
     setState(IDLE);
     void session.reopen().catch(() => setState({ ...IDLE, status: 'not_sent' }));

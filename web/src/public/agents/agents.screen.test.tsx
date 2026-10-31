@@ -762,6 +762,144 @@ describe('agents page', () => {
     await expect.element(again.getByRole('button', { name: 'Get a demo key' })).toBeVisible();
   });
 
+  it('demo_key_by_keyboard_keeps_the_place', async () => {
+    const { screen } = await renderRoute(PAGE);
+    const card = screen.getByRole('region', { name: 'Try it with a demo key' });
+    const title = card.getByRole('heading', { level: 2, name: 'Try it with a demo key' });
+    const getKey = card.getByRole('button', { name: 'Get a demo key' });
+    await expect.element(getKey).toBeVisible();
+
+    // Enter on "Get a demo key": the key takes the button's place, and focus moves to the card's
+    // title rather than falling to the page.
+    getKey.element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(card.getByRole('group', { name: 'Private key' })).toBeVisible();
+    await expect.element(title).toHaveFocus();
+    expect(title.element().matches(':focus-visible')).toBe(true);
+    // The next Tab goes on to the key's "Copy key", not back to the top of the page.
+    await userEvent.keyboard('{Tab}');
+    await expect.element(card.getByRole('button', { name: 'Copy key' })).toHaveFocus();
+
+    // A key that comes after the visitor has moved on leaves focus where they put it.
+    let land: (value?: unknown) => void = () => {};
+    const landed = new Promise((resolve) => {
+      land = resolve;
+    });
+    mockStore.inject({
+      route: 'agentKey',
+      status: 200,
+      body: { agent_key_id: 'demo-key-late', agent_private_key_hex: 'a'.repeat(64) },
+      until: landed,
+    });
+    const later = await renderRoute(PAGE);
+    const laterCard = later.screen.getByRole('region', { name: 'Try it with a demo key' });
+    const laterKey = laterCard.getByRole('button', { name: 'Get a demo key' });
+    await expect.element(laterKey).toBeVisible();
+    const asked = requests('agentKey').length;
+    laterKey.element().focus();
+    await userEvent.keyboard('{Enter}');
+    await until(() => expect(requests('agentKey')).toHaveLength(asked + 1));
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    const movedTo = document.activeElement;
+    expect(movedTo).not.toBe(document.body);
+    expect(laterCard.element().contains(movedTo)).toBe(false);
+    land();
+    await expect.element(laterCard.getByRole('group', { name: 'Private key' })).toBeVisible();
+    expect(document.activeElement).toBe(movedTo);
+
+    // A busy demo keeps the button, to try again, and so keeps its focus.
+    mockStore.inject({ route: 'agentKey', status: 429 });
+    const busy = await renderRoute(PAGE);
+    const busyCard = busy.screen.getByRole('region', { name: 'Try it with a demo key' });
+    const tryAgain = busyCard.getByRole('button', { name: 'Get a demo key' });
+    await expect.element(tryAgain).toBeVisible();
+    tryAgain.element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(busyCard.getByText(errorCopy('rate_limited'), { exact: true })).toBeVisible();
+    await expect.element(tryAgain).toHaveFocus();
+
+    // A key asked for with a click moves focus the same way, with no focus ring for the pointer to see.
+    const clicked = await renderRoute(PAGE);
+    const clickedCard = clicked.screen.getByRole('region', { name: 'Try it with a demo key' });
+    const clickedTitle = clickedCard.getByRole('heading', { level: 2, name: 'Try it with a demo key' });
+    await clickedCard.getByRole('button', { name: 'Get a demo key' }).click();
+    await expect.element(clickedCard.getByRole('group', { name: 'Private key' })).toBeVisible();
+    await expect.element(clickedTitle).toHaveFocus();
+    expect(clickedTitle.element().matches(':focus-visible')).toBe(false);
+  });
+
+  it('new_chat_for_a_demo_key_keeps_the_place', async () => {
+    // The key's session has ended, and so has the new one opened for it: the chat has ended.
+    mockStore.inject({ route: 'agentKey', status: 401, times: 2 });
+    const { screen } = await renderRoute(PAGE);
+    const card = screen.getByRole('region', { name: 'Try it with a demo key' });
+    const title = card.getByRole('heading', { level: 2, name: 'Try it with a demo key' });
+    const getKey = card.getByRole('button', { name: 'Get a demo key' });
+    await expect.element(getKey).toBeVisible();
+
+    // Enter on "Get a demo key": the chat has ended, the notice takes the button's place, and focus
+    // moves to the card's title; the next Tab goes on to "New chat".
+    getKey.element().focus();
+    await userEvent.keyboard('{Enter}');
+    const ended = card.getByText(CHAT_ENDED_COPY.en, { exact: true });
+    await expect.element(ended).toBeVisible();
+    await expect.element(title).toHaveFocus();
+    await userEvent.keyboard('{Tab}');
+    const newChat = card.getByRole('button', { name: NEW_CHAT_LABEL.en });
+    await expect.element(newChat).toHaveFocus();
+
+    // Enter on "New chat": the notice goes with it and "Get a demo key" comes back. Focus moves to
+    // the card's title rather than falling to the page, and the next Tab goes on to "Get a demo key".
+    await userEvent.keyboard('{Enter}');
+    await expect.element(ended).not.toBeInTheDocument();
+    await expect.element(title).toHaveFocus();
+    expect(title.element().matches(':focus-visible')).toBe(true);
+    await userEvent.keyboard('{Tab}');
+    await expect.element(getKey).toHaveFocus();
+  });
+
+  it('new_chat_for_the_agent_keeps_the_place', async () => {
+    // The send's session has ended, and so has the new one opened for it: the chat has ended.
+    mockStore.inject({ route: 'sendAgent', status: 401, times: 2 });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    const title = panel.getByRole('heading', { level: 2, name: 'Send an agent' });
+    const book = panel.getByRole('button', { name: 'Book the earliest visit' });
+    await expect.element(book).toBeVisible();
+
+    // Enter on a task: the chat has ended, and the next Tab from the panel's title goes on to "New chat".
+    book.element().focus();
+    await userEvent.keyboard('{Enter}');
+    const ended = panel.getByText(CHAT_ENDED_COPY.en, { exact: true });
+    await expect.element(ended).toBeVisible();
+    await expect.element(title).toHaveFocus();
+    await userEvent.keyboard('{Tab}');
+    const newChat = panel.getByRole('button', { name: NEW_CHAT_LABEL.en });
+    await expect.element(newChat).toHaveFocus();
+
+    // Enter on "New chat": the notice goes with it and the tasks come back. Focus moves to the
+    // panel's title rather than falling to the page, and the next Tab goes on to the first task.
+    await userEvent.keyboard('{Enter}');
+    await expect.element(ended).not.toBeInTheDocument();
+    await expect.element(title).toHaveFocus();
+    expect(title.element().matches(':focus-visible')).toBe(true);
+    await userEvent.keyboard('{Tab}');
+    await expect.element(book).toHaveFocus();
+
+    // "New chat" clicked moves focus the same way, with no focus ring for the pointer to see.
+    mockStore.inject({ route: 'sendAgent', status: 401, times: 2 });
+    const clicked = await renderRoute(PAGE);
+    const clickedPanel = clicked.screen.getByRole('region', { name: 'Send an agent' });
+    const clickedTitle = clickedPanel.getByRole('heading', { level: 2, name: 'Send an agent' });
+    await clickedPanel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    const clickedEnded = clickedPanel.getByText(CHAT_ENDED_COPY.en, { exact: true });
+    await expect.element(clickedEnded).toBeVisible();
+    await clickedPanel.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
+    await expect.element(clickedEnded).not.toBeInTheDocument();
+    await expect.element(clickedTitle).toHaveFocus();
+    expect(clickedTitle.element().matches(':focus-visible')).toBe(false);
+  });
+
   it('public_page_links_to_agents', async () => {
     // The public page's about column, under "For AI agents": both links lead to the agents page,
     // "Send an agent" to its panel. The about blocks stay the charter's.

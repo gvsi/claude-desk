@@ -15,26 +15,23 @@ export interface AgentsCardProps {
   lead?: ReactNode;
   /** The title's id, for a link to the card (`#send`). */
   id?: string;
+  /** The title, for a script to move focus to: it then takes focus (`tabIndex={-1}`), never a Tab stop. */
+  titleRef?: Ref<HTMLHeadingElement>;
   children: ReactNode;
 }
 
-export function AgentsCard({ title, lead, id, children }: AgentsCardProps) {
+export function AgentsCard({ title, lead, id, titleRef, children }: AgentsCardProps) {
   return (
     <Card as="section" label={title} padding={16}>
-      <AgentsCardContent title={title} lead={lead} id={id}>
+      <AgentsCardContent title={title} lead={lead} id={id} titleRef={titleRef}>
         {children}
       </AgentsCardContent>
     </Card>
   );
 }
 
-export interface AgentsCardContentProps extends AgentsCardProps {
-  /** The title, for a script to move focus to: it then takes focus (`tabIndex={-1}`), never a Tab stop. */
-  titleRef?: Ref<HTMLHeadingElement>;
-}
-
 /** What an agents card holds: its title, the line under it, then its body. */
-export function AgentsCardContent({ title, lead, id, titleRef, children }: AgentsCardContentProps) {
+export function AgentsCardContent({ title, lead, id, titleRef, children }: AgentsCardProps) {
   return (
     <>
       <h2 ref={titleRef} id={id} className="cd-agents-card__title cd-type-section" tabIndex={titleRef === undefined ? undefined : -1}>

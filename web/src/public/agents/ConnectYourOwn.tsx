@@ -3,7 +3,9 @@
  * API's code-built Agent Card, shown as written; then a demo key to try it with. The key comes from
  * the API once (`agentKey`, within the page's one visitor session), is shown once in mono with "Copy
  * key" and the warning that it is a demo key, not a business credential, and is kept nowhere: the
- * button is gone once it shows.
+ * button is gone once it shows. A button that goes while it has focus ("Get a demo key" when the key
+ * shows or the chat has ended, "New chat" when pressed) hands its focus to the card's title, so the
+ * next Tab goes on from the card rather than from the top of the page.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
@@ -92,6 +94,9 @@ function DemoKey({ slug, session, language }: { slug: string; session: AgentSess
   const [failure, setFailure] = useState<KeyFailure | null>(null);
   // Set while a request is out, so a second press before the page re-renders sends nothing.
   const inFlight = useRef(false);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  // Around "Get a demo key", which goes when the key comes or the chat has ended.
+  const getKeyRef = useRef<HTMLDivElement>(null);
   // Whether the card is on the page, so an answer that comes after it leaves changes nothing. Set on
   // every mount: StrictMode mounts it, cleans it up and mounts it again.
   const live = useRef(true);
@@ -102,6 +107,13 @@ function DemoKey({ slug, session, language }: { slug: string; session: AgentSess
     };
   }, []);
 
+  // "Get a demo key" is about to go: if it still has focus, the focus moves to the card's title
+  // rather than falling to the page. A visitor who moved on while the answer was on its way keeps
+  // their place. The focus doesn't scroll the page.
+  const keepFocus = () => {
+    if (getKeyRef.current?.contains(document.activeElement)) titleRef.current?.focus({ preventScroll: true });
+  };
+
   const getKey = () => {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -111,9 +123,15 @@ function DemoKey({ slug, session, language }: { slug: string; session: AgentSess
       try {
         const answer = await session.call(() => request('agentKey', { params: { slug } }));
         if (!isIssued(answer)) throw new ApiError('unavailable', { route: 'agentKey', method: 'POST', status: 200 });
-        if (live.current) setIssued(answer);
+        if (!live.current) return;
+        keepFocus();
+        setIssued(answer);
       } catch (err) {
-        if (live.current) setFailure(keyFailure(err));
+        if (!live.current) return;
+        const failed = keyFailure(err);
+        // A busy or unreachable demo keeps the button, to try again; an ended chat doesn't.
+        if (failed === 'ended') keepFocus();
+        setFailure(failed);
       } finally {
         inFlight.current = false;
         if (live.current) setBusy(false);
@@ -122,6 +140,9 @@ function DemoKey({ slug, session, language }: { slug: string; session: AgentSess
   };
 
   const newChat = () => {
+    // "New chat" goes with its notice, and "Get a demo key" comes back: its focus moves to the
+    // card's title before it goes, so the next Tab goes on to "Get a demo key".
+    titleRef.current?.focus({ preventScroll: true });
     setFailure(null);
     void session.reopen().catch(() => {
       if (live.current) setFailure('unreachable');
@@ -148,7 +169,7 @@ function DemoKey({ slug, session, language }: { slug: string; session: AgentSess
 
   // The simulated line goes once the key shows: the card then holds the key alone (board 02).
   return (
-    <AgentsCard title={copy.demoKeyTitle} lead={issued === null ? copy.simulated : undefined}>
+    <AgentsCard title={copy.demoKeyTitle} lead={issued === null ? copy.simulated : undefined} titleRef={titleRef}>
       {issued !== null ? (
         <>
           <CopyField label={copy.keyId} value={issued.agent_key_id} layout="block" language={language} />
@@ -163,7 +184,7 @@ function DemoKey({ slug, session, language }: { slug: string; session: AgentSess
           />
         </>
       ) : failure === 'ended' ? null : (
-        <div>
+        <div ref={getKeyRef}>
           <Button variant="secondary" busy={busy} onClick={getKey}>
             {copy.getDemoKey}
           </Button>
