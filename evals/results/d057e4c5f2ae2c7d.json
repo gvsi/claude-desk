@@ -1,13 +1,13 @@
 {
  "schema": 1,
- "inputs": "87af0bbedb693fca",
+ "inputs": "d057e4c5f2ae2c7d",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
    "backend/desk/api/model.py"
   ],
   [
-   "cf2dffe3fce51c28ee30e88464354c7b4dd305af",
+   "4aa052615e5e8835662b62c5b4b2b497df04bb90",
    "backend/desk/api/prompts.py"
   ],
   [
@@ -15,15 +15,15 @@
    "backend/desk/api/setup_templates.py"
   ],
   [
-   "cf9f171f99fcb7e6cef81cc94601eeae3e57728a",
+   "ad2252f50a5f90c3325fb8b95ac90af0daf8e6d3",
    "backend/desk/contracts.py"
   ],
   [
-   "a58db4a4f3abc459da079256c8fdb9e9ebdb4064",
+   "01a7b0e3eddeb917ebae82f3797c1ef046974284",
    "backend/desk/kernel_api.py"
   ],
   [
-   "1006c20066852c7bac56a8895a1e630d0374c9bc",
+   "fefca4923e3a013ae383a3b7b69f1e34472cc113",
    "backend/desk/kernel_service"
   ],
   [
@@ -37,6 +37,10 @@
   [
    "352251339fe3ffa4c67540e5d5d596d37291dab5",
    "backend/desk/presets.py"
+  ],
+  [
+   "b065a5b6c684b35f804f0d247d8b7523e62e76b5",
+   "backend/desk/rewrites.py"
   ],
   [
    "9eb26bec1e88bf87827445aeee8465f33931ac20",
@@ -79,9 +83,9 @@
    "kernel"
   ]
  ],
- "git_sha": "1a749f8a392ae11ab2ccd46d6819df96aee510cc",
- "created_at": "2026-10-31T21:41:22.486695Z",
- "pass_id": "20261031-214122-4a6386",
+ "git_sha": "494b6d0596b8b28f71cf38ed4f35c0cab23b205e",
+ "created_at": "2026-10-31T22:03:49.475578Z",
+ "pass_id": "20261031-220349-0fb03d",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
