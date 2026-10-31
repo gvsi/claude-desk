@@ -50,6 +50,29 @@ async def test_legacy_knowledge_sorts_first_with_required_null_timestamp(api, br
     assert [row["created_at"] for row in rows[:2]] == [None, None]
 
 
+async def test_knowledge_order_uses_database_collation_with_null_timestamps(
+        api, browser, fake, kernel_http, fake_ro, db):
+    owner = await new_owner(api, browser, fake, kernel_http)
+    tied_at = fake.now - timedelta(seconds=1)
+    fake_ro.write({"knowledge_items": [
+        {"copy_id": owner.copy_id, "desk_id": owner.desk_id, "item_id": item_id, "source": "upload",
+         "title": "Notes", "text": "Call on weekdays.", "readers": ["public"], "created_at": created_at}
+        for item_id, created_at in (("A", tied_at), ("a", tied_at), ("z-legacy", None))]})
+    # Use PostgreSQL's collation as the oracle, as the kernel does, rather than Python's string order.
+    expected = [row[0] for row in db.execute(
+        "SELECT item_id FROM fake_kernel_ro.knowledge_items WHERE copy_id = %s AND desk_id = %s"
+        " ORDER BY created_at NULLS FIRST, item_id", (owner.copy_id, owner.desk_id)).fetchall()]
+
+    reply = await owner.browser.get(f"/api/owner/desks/{owner.desk_id}/knowledge")
+
+    assert reply.status_code == 200, reply.text
+    rows = reply.json()
+    assert rows[0]["item_id"] == "z-legacy"
+    assert rows[0]["created_at"] is None
+    assert {row["item_id"] for row in rows[1:3]} == {"a", "A"}
+    assert [row["item_id"] for row in rows] == expected
+
+
 async def test_owner_only_knowledge_preserves_readers_and_view_masking(api, browser, fake, kernel_http, fake_ro):
     owner = await new_owner(api, browser, fake, kernel_http)
     path = f"/api/owner/desks/{owner.desk_id}/knowledge"
