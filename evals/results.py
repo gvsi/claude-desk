@@ -49,8 +49,10 @@ held-out hash and recorded rate are the head's (a rate that is gating evidence),
 one row per head scenario and repeat (a scenario that `requires` a plan the head's `landed.toml`
 lacks is listed in `pending` with no rows), the head's rate history extends the base's unchanged and
 its `landed.toml` keeps every plan the base lists, and the gate recomputed from the rows passes. The
-stored `gate` is never trusted. Every file it reads is read from git at the head and the base, never from the working
-tree, so the check sees what CI sees; the scenario files are listed with `-z` too, and a listed name git can't read
+stored `gate` is never trusted. A passing line counts the runs that skipped checks while a plan hadn't
+landed, as the gate's summary line does (`gate.skipped_summary`), so such a file never reads as clean.
+Every file it reads is read from git at the head and the base, never from the working tree, so the
+check sees what CI sees; the scenario files are listed with `-z` too, and a listed name git can't read
 fails the check, so none is left out of the suite it rebuilds. The steps that hold a file against the head (its inputs,
 gating evidence, suite, hashes, rate and rows) are `reconcile(file, root, rev)`.
 
@@ -94,7 +96,7 @@ from pydantic import (
     field_validator,
 )
 
-from evals.gate import SHOWN, GateInput, GateResult, RunRow, Target, coverage_problems
+from evals.gate import SHOWN, GateInput, GateResult, RunRow, Target, coverage_problems, skipped_summary
 from evals.gate import gate as gate_of
 from evals.oracles.canonical import sha256_hex
 from evals.tier1.harness import load_landed
@@ -687,9 +689,12 @@ def _check(base: str, root: Path) -> str:
     result = gate_of(file, head.rates)
     if not result.passed:
         raise CheckFailed(f"the gate recomputed from {name}'s rows fails: {result.reasons[0]}")
+    # Runs that skipped checks while a plan hadn't landed are counted as the gate's summary line counts them, so
+    # a file whose rows were made before that plan never reads as clean.
+    skipped = [skipped_summary(len(result.skipped_runs), result.skipped_checks)] if result.skipped_runs else []
     lowered = [notice for entry in head.rates.history[len(before):] if (notice := lowered_notice(entry))]
     return "; ".join([f"{name} passes: {len(file.runs)} runs, {len(file.pending)} scenarios pending, "
-                      f"recorded rate {_rate(file.recorded_rate)}", *lowered])
+                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *lowered])
 
 
 def _materialize(root: Path, rev: str, into: Path, only: tuple[str, ...] | None = None) -> Path:

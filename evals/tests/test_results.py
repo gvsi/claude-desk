@@ -636,7 +636,8 @@ async def test_check_refuses_each_way_a_head_can_fail(tmp_path):
 async def test_the_results_file_names_each_runs_skipped_checks(tmp_path):
     """The results file's per-run entries list the checks each run skipped because a plan hadn't landed,
     as the pass's rows in `runs.jsonl` do, so a row with no violation is never read as every check passed;
-    `results-check` reads them back, and the gate it recomputes counts those runs."""
+    `results-check` reads them back, the gate it recomputes counts those runs, and its line counts them as
+    the gate's summary line does, so CI never reports such a file as clean."""
     from evals.tier2.verdict import SKIPPED_CHECKS
 
     repo = make_repo(tmp_path / "repo", landed=WAITING_LANDED)   # plan 01b isn't landed
@@ -653,6 +654,8 @@ async def test_the_results_file_names_each_runs_skipped_checks(tmp_path):
     assert data["gate"]["skipped_checks"] == {name: 4 for name in before_01b}
     passed, reason = check(repo)
     assert passed, reason
+    assert reason == (f"evals/results/{inputs_key('HEAD', repo)}.json passes: 4 runs, 0 scenarios pending, "
+                      "recorded rate none; 4 runs skipped checks waiting for plan 01b"), reason
     assert gate(ResultsFile.model_validate_json(path.read_text()), EMPTY).skipped_checks == {
         name: 4 for name in before_01b}
 
