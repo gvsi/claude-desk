@@ -496,6 +496,8 @@ export interface ScriptRule {
   name: RuleName;
   /** Lowercase words or phrases, any one of which, found whole, picks the rule. Empty for the last rule, which takes anything. */
   words: readonly string[];
+  /** The tools its turn calls, besides replying: whether the session has them decides whether it runs (`scriptedTurn`). */
+  tools: readonly ToolName[];
   steps: readonly Step[];
 }
 
@@ -523,10 +525,14 @@ const CALLBACK_LEAD = { name: rivera.people.dana.name, contact: 'dana@example.co
 /** The callback request the script records, as the visitor typed it. */
 export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact} · Leaking water heater`;
 
+/** Claude hands the visitor to Maria: the kernel's handoff card, as asking for her gets. */
+const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+
 export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'discount',
     words: ['off', 'discount', 'descuento'],
+    tools: ['native.quote'],
     steps: [
       writing,
       // The percent the visitor asked for, held past the quote card's limit for Maria.
@@ -538,6 +544,7 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'invoice',
     words: ['invoice', 'return', 'factura'],
+    tools: ['native.start_verification'],
     steps: [
       writing,
       // The code goes to the contact on record, never to the visitor: the kernel decides that first.
@@ -555,6 +562,7 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'deposit',
     words: ['deposit', 'pay', 'pagar'],
+    tools: ['native.payment_link'],
     steps: [
       writing,
       (ctx) => {
@@ -571,6 +579,7 @@ export const SCRIPT: readonly ScriptRule[] = [
     // Picks a time already offered, so it comes before "book", which lists them.
     name: 'booked',
     words: ['first one', 'la primera'],
+    tools: ['native.book'],
     steps: [
       writing,
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.book)),
@@ -580,6 +589,7 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'book',
     words: ['book', 'tuesday', 'reservar'],
+    tools: ['native.find_slots'],
     steps: [
       writing,
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.slots)),
@@ -589,6 +599,7 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'price',
     words: ['price', 'cost', 'how much', 'cuánto', 'precio'],
+    tools: ['native.quote'],
     steps: [
       writing,
       (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
@@ -598,6 +609,7 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'callback',
     words: ['call me', 'callback', 'llámame'],
+    tools: ['native.request_callback'],
     steps: [
       writing,
       (ctx) => {
@@ -615,16 +627,19 @@ export const SCRIPT: readonly ScriptRule[] = [
   {
     name: 'talk',
     words: ['maria', 'talk to', 'hablar'],
-    steps: [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])],
+    tools: [],
+    steps: HANDOFF_STEPS,
   },
   {
     name: 'outage',
     words: ['outage'],
+    tools: [],
     steps: [writing, () => ({ type: 'error', code: 'kernel_unavailable' })],
   },
   {
     name: 'other',
     words: [],
+    tools: [],
     steps: [writing, (ctx) => ctx.reply([helpProse[ctx.language]])],
   },
 ];
@@ -653,6 +668,11 @@ export const AFTER_VERIFY: readonly Step[] = [
   (ctx) => ctx.reply([invoiceProse[ctx.language], blocks.document_link[ctx.language]]),
 ];
 
+/** Claude's turn once the visitor confirmed it's them (`AFTER_VERIFY`), as the session may run it (`stepsWithTools`). */
+export function afterVerify(allTools: boolean): readonly Step[] {
+  return stepsWithTools([DECISIONS.releaseInvoice.tool], AFTER_VERIFY, allTools);
+}
+
 /**
  * The seeded hold's turn, as the design system's fixtures have it (`rivera.conversations.visitor`):
  * the 15% quote is held, and Claude's draft named the discount in its own words, so the reply was
@@ -680,6 +700,29 @@ export function matchRule(text: string): ScriptRule {
   const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
   return rule;
+}
+
+/**
+ * The tools a visitor's or agent's session keeps while its Desk's Answering switch is off, besides
+ * replying (master plan, "Model-visible tools"): taking a lead and filing a callback. The owner's
+ * preview keeps every tool.
+ */
+export const TOOLS_WHILE_NOT_ANSWERING: ReadonlySet<ToolName> = new Set<ToolName>(['native.capture_lead', 'native.request_callback']);
+
+/**
+ * A turn that calls `tools`, as the session may run it: as written when the session has every tool
+ * (`allTools`: its Desk is answering, or it is the owner's preview) or needs only the ones it keeps
+ * while the Desk isn't; otherwise Claude hands the visitor to Maria, as the "talk" rule does, and
+ * nothing is decided.
+ */
+export function stepsWithTools(tools: readonly ToolName[], steps: readonly Step[], allTools: boolean): readonly Step[] {
+  return allTools || tools.every((tool) => TOOLS_WHILE_NOT_ANSWERING.has(tool)) ? steps : HANDOFF_STEPS;
+}
+
+/** The turn the visitor's words start: their rule's steps, as the session may run them. */
+export function scriptedTurn(text: string, allTools: boolean): readonly Step[] {
+  const rule = matchRule(text);
+  return stepsWithTools(rule.tools, rule.steps, allTools);
 }
 
 // ---------------------------------------------------------------------------------------------

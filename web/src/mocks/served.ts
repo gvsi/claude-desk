@@ -40,7 +40,7 @@ import {
   today,
   visitorTranscript,
 } from './readModels.ts';
-import { AFTER_VERIFY, EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, ruleChatReply, turnEnd, type Language, type Step } from './script.ts';
+import { EVENT_GAP_MS, afterAnswer, afterVerify, allows, cardDiffFor, ruleChatReply, scriptedTurn, turnEnd, type Language, type Step } from './script.ts';
 import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
 import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupGreeting } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
@@ -338,6 +338,15 @@ export class Server {
 }
 
 export const isFailure = (value: Failure | object): value is Failure => 'status' in value;
+
+/**
+ * Whether `session` has every tool its Desk's rules allow, as `/context` gives them: while the
+ * Desk's Answering switch is off, a visitor's or agent's session keeps only callbacks and leads
+ * (master plan, "Model-visible tools"), except the owner's preview.
+ */
+function hasAllTools(world: MockWorld, session: SessionRecord): boolean {
+  return session.ownerPreview || world.desk(session.deskId)?.summary.answering !== false;
+}
 
 /**
  * The chat an owner's take-over, hand-back or resume names, at the generation the owner last read,
@@ -649,7 +658,7 @@ const SERVED: ServedRoutes = {
     if (req.malformed || typeof text !== 'string' || text.length < 1 || text.length > MESSAGE_MAX) return INVALID;
     const { session } = visitor;
     sv.world.visitorText(session, text);
-    if (session.state.mode === 'ai') sv.runTurn(session, matchRule(text).steps, session.language, text);
+    if (session.state.mode === 'ai') sv.runTurn(session, scriptedTurn(text, hasAllTools(sv.world, session)), session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
   },
   visitorTyping(sv, req) {
@@ -678,7 +687,7 @@ const SERVED: ServedRoutes = {
     // One answer for a wrong, expired or used-up code, so a refusal never says which.
     if (!sv.world.checkCode(session, code)) return failWith(422, 'kernel', { code: 'invalid' });
     // The API wakes Claude, which goes on with what the visitor asked for.
-    sv.runTurn(session, AFTER_VERIFY, session.language, '');
+    sv.runTurn(session, afterVerify(hasAllTools(sv.world, session)), session.language, '');
     return ok({ state: session.state } satisfies VerifyChecked);
   },
   visitorInbox(sv, req) {

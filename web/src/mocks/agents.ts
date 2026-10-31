@@ -9,7 +9,7 @@
 import type { DemoAgentIssued, RenderedBlock } from '../api/contracts.ts';
 import type { AgentCardOut, AgentTurn, DemoAgentRun } from '../api/views.ts';
 import { placeholderHex, proseBlock, rivera } from '../ds/fixtures/index.ts';
-import { DECISIONS, type DecisionSpec, type Language } from './script.ts';
+import { DECISIONS, TOOLS_WHILE_NOT_ANSWERING, type DecisionSpec, type Language } from './script.ts';
 import { isoTime, type DeskRecord, type MockWorld, type SessionRecord } from './world.ts';
 
 /** The mock's `PUBLIC_ORIGIN`: the API builds the address agents use from it, never from a request's host. */
@@ -129,10 +129,13 @@ const AGENT_DECISIONS = {
   },
 } as const satisfies Record<string, DecisionSpec>;
 
-/** One exchange: the agent's signed request (its words, for the owner's view only) and the Desk's checked answer. */
+/**
+ * One exchange: the agent's signed request (its words, for the owner's view only), what the kernel
+ * decides for it (null when Claude calls no tool) and the Desk's checked answer.
+ */
 interface Exchange {
   request: string;
-  decision: DecisionSpec;
+  decision: DecisionSpec | null;
   reply: readonly RenderedBlock[];
 }
 
@@ -176,6 +179,20 @@ function exchangesFor(task: DemoAgentTask): Exchange[] {
   }
 }
 
+/**
+ * A task's exchanges as the agent's session may run them. While the Desk's Answering switch is off
+ * it keeps only callbacks and leads (master plan, "Model-visible tools"), so the first request that
+ * needs another tool gets the handoff, which decides nothing, and the run ends there.
+ */
+function exchangesWhile(answering: boolean, task: DemoAgentTask): Exchange[] {
+  const exchanges = exchangesFor(task);
+  if (answering) return exchanges;
+  const at = exchanges.findIndex((exchange) => exchange.decision !== null && !TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool));
+  const stopped = exchanges[at];
+  if (stopped === undefined) return exchanges;
+  return [...exchanges.slice(0, at), { request: stopped.request, decision: null, reply: [rivera.blocks.handoff.en] }];
+}
+
 /** A block as the wire carries it: its own lists, shared with nothing. */
 function copyBlock(block: RenderedBlock): RenderedBlock {
   return { ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] };
@@ -189,19 +206,19 @@ type TurnStep = (n: number) => AgentTurn;
  * the owner's view of the chat, and the Desk's answer is decided, checked and recorded as a
  * visitor's turn is. The agent's turn carries no words and no blocks.
  */
-function turnsFor(world: MockWorld, agent: SessionRecord, task: DemoAgentTask): TurnStep[] {
-  return exchangesFor(task).flatMap((exchange): TurnStep[] => [
+function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task: DemoAgentTask): TurnStep[] {
+  return exchangesWhile(desk.summary.answering, task).flatMap((exchange): TurnStep[] => [
     (n) => {
       world.agentText(agent, exchange.request);
       return { author: 'agent', n, blocks: [], receipts: [] };
     },
     (n) => {
       const ctx = world.context(agent, 'en', exchange.request);
-      const receipt = ctx.status('receipt', ctx.decide(exchange.decision));
-      world.emit(agent, receipt);
+      const receipts = exchange.decision === null ? [] : [ctx.status('receipt', ctx.decide(exchange.decision))];
+      for (const receipt of receipts) world.emit(agent, receipt);
       const reply = ctx.reply(exchange.reply.map(copyBlock));
       world.emit(agent, reply);
-      return { author: 'desk', n, blocks: reply.blocks, receipts: [receipt] };
+      return { author: 'desk', n, blocks: reply.blocks, receipts };
     },
   ]);
 }
@@ -226,7 +243,7 @@ export class AgentRuns {
     };
     const record: { run: DemoAgentRun; timer: ReturnType<typeof setTimeout> | null } = { run, timer: null };
     this.runs.set(run.run_id, record);
-    const steps = turnsFor(world, agent, task);
+    const steps = turnsFor(world, desk, agent, task);
     const tick = () => {
       record.timer = setTimeout(() => {
         record.timer = null;
@@ -259,7 +276,7 @@ export class AgentRuns {
  */
 export function seedAgentChat(world: MockWorld, desk: DeskRecord, from: number): void {
   const agent = world.at(from, () => world.addSession(desk, { sessionId: world.scoped('ses-alex-agent'), agent: AGENT_NAME }));
-  turnsFor(world, agent, 'quote_and_deposit').forEach((step, i) => {
+  turnsFor(world, desk, agent, 'quote_and_deposit').forEach((step, i) => {
     world.at(from + (i + 1) * 20_000, () => step(i + 1));
   });
 }

@@ -15,6 +15,7 @@ import type {
   BriefingList,
   ConversationSummary,
   CopyOut,
+  DemoAgentRun,
   NeedsYouItem,
   OwnerTranscript,
   PeopleOut,
@@ -29,6 +30,7 @@ import type {
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
+import { AGENT_TURN_GAP_MS } from './agents.ts';
 import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, askedDiscountBp, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
@@ -635,6 +637,85 @@ describe('the scripted Desk', () => {
 
     const unknown = await call('answer', { params: { decision_id: 'dec-elsewhere' }, body: { answer: 'allow_once' } });
     expect(unknown.status).toBe(404);
+  });
+
+  it('answering_off_leaves_only_callbacks_and_leads', async () => {
+    // With the Desk's Answering switch off, a visitor's or agent's turn may only reply, take a lead
+    // or file a callback (master plan, "Model-visible tools"): what needs another tool gets the
+    // handoff, as asking for Maria does, and decides nothing. The owner's preview keeps every tool.
+    const setAnswering = async (on: boolean) => {
+      expect((await call('setAnswering', { params: { desk_id: deskId }, body: { on } })).status).toBe(200);
+    };
+    const { session, events } = await openChat();
+    const turn = async (text: string) => {
+      const before = events.length;
+      await send(text);
+      await drain();
+      return events.slice(before).map(([, ev]) => ev);
+    };
+    const toolsDecided = (sessionId: string) =>
+      [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === sessionId).map((d) => d.decision.action?.tool);
+    const handoff = rivera.blocks.handoff.en;
+    const shown = (evs: SseEvent[]) => evs.flatMap((ev) => (ev.type === 'message' ? ev.blocks.map((b) => [b.kind, b.template, b.text]) : []));
+
+    await setAnswering(false);
+    const price = await turn('How much to clear a drain?');
+    expect(price.map((ev) => ev.type)).toEqual(['writing', 'message', 'turn_end']);
+    expect(shown(price)).toEqual([[handoff.kind, handoff.template, handoff.text]]);
+    for (const text of ['Can I get 10% off?', 'Can I book Tuesday?', 'Book the first one', 'How do I pay the deposit?', 'Can you send my invoice?']) {
+      expect(shown(await turn(text)), text).toEqual([[handoff.kind, handoff.template, handoff.text]]);
+    }
+    expect(toolsDecided(session.session_id)).toEqual([]);
+    expect(mockStore.world.inbox.filter((record) => record.sessionId === session.session_id)).toEqual([]);
+    expect([...mockStore.world.links.values()].filter((link) => link.sessionId === session.session_id)).toEqual([]);
+
+    // A callback still goes through, with its receipt and card.
+    const handoffs = mockStore.world.handoffs.size;
+    const callback = await turn('Can you call me back?');
+    expect(callback.map((ev) => ev.type)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(shown(callback).map(([, template]) => template)).toEqual(['callback_confirmed']);
+    expect(toolsDecided(session.session_id)).toEqual(['native.request_callback']);
+    expect(mockStore.world.handoffs.size).toBe(handoffs + 1);
+
+    // An agent sent from the chat gets the handoff too, and decides nothing.
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit' } });
+    expect(sent.status).toBe(202);
+    const runId = (sent.body as { run_id: string }).run_id;
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 6);
+    const run = (await call('agentRun', { params: { slug, run_id: runId } })).body as DemoAgentRun;
+    expect(run.state).toBe('done');
+    const desk = run.turns.filter((t) => t.author === 'desk');
+    expect(desk.map((t) => [t.blocks.map((b) => [b.kind, b.template, b.text]), t.receipts])).toEqual([[[[handoff.kind, handoff.template, handoff.text]], []]]);
+    const agentChat = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1);
+    expect(agentChat?.items.filter((item) => item.kind === 'agent_text').map((item) => item.text)).toEqual([
+      'Book the earliest visit for a leaking water heater for Alex Kim.',
+    ]);
+    expect(toolsDecided(agentChat?.state.session_id ?? '')).toEqual([]);
+
+    // Answering back on, the same question gets the quote.
+    await setAnswering(true);
+    const quoted = await turn('How much to clear a drain?');
+    expect(shown(quoted).map(([, template]) => template)).toEqual([null, 'quote']);
+    expect(toolsDecided(session.session_id)).toEqual(['native.request_callback', 'native.quote']);
+
+    // A code sent while the Desk answered, confirmed once Answering is off: the visitor is verified,
+    // but Claude's turn after it hands off instead of releasing the invoice.
+    await turn('Can you send my invoice?');
+    await setAnswering(false);
+    const before = events.length;
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    expect(shown(events.slice(before).map(([, ev]) => ev))).toEqual([[handoff.kind, handoff.template, handoff.text]]);
+    expect(toolsDecided(session.session_id)).toEqual(['native.request_callback', 'native.quote', 'native.start_verification']);
+
+    // Still off, the owner's preview of her Desk quotes: it keeps the visitor tools.
+    const preview = ((await call('openPreview', { params: { desk_id: deskId } })).body as VisitorSession).state;
+    const previewEvents: [number, SseEvent][] = [];
+    mockStore.listen(slug, 0, (seq, ev) => previewEvents.push([seq, ev]));
+    await send('How much to clear a drain?');
+    await drain();
+    expect(shown(previewEvents.map(([, ev]) => ev)).map(([, template]) => template)).toEqual([null, 'quote']);
+    expect(toolsDecided(preview.session_id)).toEqual(['native.quote']);
   });
 
   it('callback_comes_from_dana_on_record', async () => {
@@ -1354,7 +1435,8 @@ describe('planted faults', () => {
     expect((await again).status).toBe(429);
     expect((await call('today', { params: { desk_id: deskId } })).status).toBe(200);
 
-    // `afterCommit`: the message is kept and Claude answers it, but its answer is lost.
+    // `afterCommit`: the message is kept and Claude answers it, but its answer is lost. (Answering
+    // is off from above, so Claude's answer is the handoff, with no quote.)
     const { events } = await openChat();
     mockStore.inject({ route: 'sendMessage', status: 'network', afterCommit: true });
     expect(await mockStore.dispatch('sendMessage', { params: { slug }, body: { text: 'How much is drain clearing?' } })).toEqual({
@@ -1365,7 +1447,7 @@ describe('planted faults', () => {
     expect(read.items.filter((item) => item.kind === 'visitor_text').map((item) => item.text)).toEqual([
       'How much is drain clearing?',
     ]);
-    expect(typesOf(events)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
+    expect(typesOf(events)).toEqual(['writing', 'message', 'turn_end']);
 
     // Every request is recorded with its body and path, faulted or not.
     expect(mockStore.requests.filter((r) => r.key === 'setAnswering')).toEqual([
