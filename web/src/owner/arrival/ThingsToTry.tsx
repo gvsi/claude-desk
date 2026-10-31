@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router';
 
 import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Icon, Notice, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
+import { BREAK_IT_IDEAS, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
 import { VISION_PATHS } from '../../vision/data.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, useToday } from '../useDesks.ts';
-import { ATTACK_IDEAS, THINGS_TO_TRY } from './ideas.ts';
+import { THINGS_TO_TRY } from './ideas.ts';
 
 export interface ThingsToTryProps {
   /** The oldest held request, which "Answer a held request" waits for; null while nothing is held. */
@@ -19,12 +20,15 @@ export interface ThingsToTryProps {
 
 const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 
-/** What happened to the attack idea the owner picked. */
-type Pick =
-  /** The public page opened in a new tab, the idea typed into its chat box. */
-  | { idea: string; outcome: 'opened' }
-  /** The browser kept the new tab from opening. */
-  | { idea: string; outcome: 'blocked' };
+/** What happened to the "Try to break it" idea the owner picked, by its key. */
+interface Pick {
+  key: BreakItIdea['key'];
+  /** `opened`: the public page opened in a new tab, the idea in its chat box. `blocked`: the browser kept the tab from opening. */
+  outcome: 'opened' | 'blocked';
+}
+
+/** The ideas' words, as the chips show them. */
+const IDEA_TEXTS = BREAK_IT_IDEAS.map((idea) => idea.text);
 
 /** "Held by your rule: {rule}." without doubling the rule's own full stop. */
 function heldLine(rule: string | null | undefined): ReactNode {
@@ -161,47 +165,50 @@ function Thing({ icon, title, held = false, detail, below, children }: ThingProp
 }
 
 /**
- * "Try to break it": the ideas. A pick opens the public page in a new tab with the idea in its link
- * (`?draft=`), which the page types into its chat box for the owner to send; nothing is sent
- * without their Send. The idea is copied first, as a fallback only: a clipboard that refuses
- * changes nothing, since the link carries the idea either way. The tab is opened without
+ * "Try to break it": the fixed ideas. A pick opens the public page in a new tab with the idea's key
+ * in its link (`?try=`), and the page types that idea into its chat box for the owner to send;
+ * nothing is sent without their Send. The idea is copied too, as a fallback only: the copy starts
+ * and the tab opens in the click itself, without waiting for the copy, so the browser counts the
+ * tab as the owner's own, and a clipboard that refuses changes nothing. The tab is opened without
  * `noopener` (with it the browser hides whether the tab opened), and this page cuts the new tab's
- * link back to it. A browser that blocks the tab gets a link to open it by hand, the idea in it too.
+ * link back to it. A browser that blocks the tab gets a link to open it by hand, the key in it too.
  */
 function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ownerName: string }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
 
-  const onPick = async (idea: string) => {
+  const onPick = (text: string) => {
+    const idea = BREAK_IT_IDEAS.find((each) => each.text === text);
+    if (idea === undefined) return;
     setPick(null);
     try {
-      await navigator.clipboard.writeText(idea);
+      void navigator.clipboard.writeText(idea.text).catch(() => undefined);
     } catch {
-      // The link below carries the idea; the copy was only in case it doesn't arrive.
+      // No clipboard here at all; the link carries the idea either way.
     }
-    const tab = window.open(customerLink(slug, deskId, idea), '_blank');
+    const tab = window.open(customerLink(slug, deskId, idea.key), '_blank');
     if (tab === null) {
-      setPick({ idea, outcome: 'blocked' });
+      setPick({ key: idea.key, outcome: 'blocked' });
       return;
     }
     tab.opener = null;
-    setPick({ idea, outcome: 'opened' });
+    setPick({ key: idea.key, outcome: 'opened' });
   };
 
   const below = showing ? (
     <div className="cd-things__ideas">
-      <SuggestionChips label="Ideas to try" suggestions={ATTACK_IDEAS} onPick={(idea) => void onPick(idea)} />
-      {pick?.outcome === 'opened' ? <Notice tone="info">Typed into the chat box in the new tab. Press Send there.</Notice> : null}
+      <SuggestionChips label="Ideas to try" suggestions={IDEA_TEXTS} onPick={onPick} />
+      {pick?.outcome === 'opened' ? <Notice tone="info">The new tab opens with the idea in its chat box. Send it from there.</Notice> : null}
       {pick?.outcome === 'blocked' ? (
         <Notice
           tone="info"
           action={
-            <Button variant="secondary" href={customerLink(slug, deskId, pick.idea)} external>
+            <Button variant="secondary" href={customerLink(slug, deskId, pick.key)} external>
               Open your public page
             </Button>
           }
         >
-          Your browser blocked the new tab. Open your public page, with the idea typed in.
+          Your browser blocked the new tab. This link opens it with the idea typed in.
         </Notice>
       ) : null}
     </div>

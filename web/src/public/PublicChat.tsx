@@ -61,17 +61,19 @@ export interface PublicChatProps {
   /** Links under "For AI agents" in the about column, on the public page itself. */
   aboutLinks?: { label: string; href: string }[];
   /**
-   * Words a link carried for the chat box (`?draft=`): typed into the composer once the chat can be
-   * written in, as plain text and cut to `MESSAGE_MAX_LENGTH`, then sent only by the visitor's own
-   * Send, as typed words are. Read on mount only; blank does nothing.
+   * One of "Try to break it"'s fixed ideas (`BREAK_IT_IDEAS`), which the page named by key: typed
+   * into the composer once the chat can be written in, as plain text, then sent only by the
+   * visitor's own Send, as typed words are, under the same limit and checks. Read on mount only.
+   * Never words from a link: the page passes only an idea it looked up.
    */
-  draft?: string;
+  idea?: string;
 }
 
-/** A link's words as the chat box takes them: cut to the limit; nothing when blank. */
-function draftText(draft: string | undefined): string | null {
-  if (draft === undefined || draft.trim() === '') return null;
-  return draft.slice(0, MESSAGE_MAX_LENGTH);
+/** Words to put in the composer once the chat can be used, and whether they take focus there. */
+interface Carried {
+  text: string;
+  /** `always`: they do. `if_free`: only when nothing else on the page has focus. */
+  focus: 'always' | 'if_free';
 }
 
 /** Cards that report something done: their executed receipt draws the check. */
@@ -472,7 +474,7 @@ function PublicState({ embedded, language, children }: { embedded: boolean; lang
   );
 }
 
-export function PublicChat({ slug, embedded = false, previewDeskId, onSession, aboutLinks, draft }: PublicChatProps) {
+export function PublicChat({ slug, embedded = false, previewDeskId, onSession, aboutLinks, idea }: PublicChatProps) {
   const chat = useVisitorChat(slug, previewDeskId);
   // Page chrome follows the browser; each message's cards follow the message's own language.
   const [language] = useState(browserLanguage);
@@ -527,15 +529,18 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
   }, [drawn, chat.state.rows, shown]);
 
-  // Words wait in the composer once it can be used: the link's draft as the page opens, and words
-  // that didn't send when the chat ended, in the new chat's. Neither is sent without Send.
-  const carried = useRef<string | null>(draftText(draft));
+  // Words wait in the composer once it can be used: the link's idea as the page opens, and words
+  // that didn't send when the chat ended, in the new chat's. Neither is sent without Send. Words
+  // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
+  // when nothing else has it, so a visitor who moved on while the chat opened stays where they are.
+  const carried = useRef<Carried | null>(idea === undefined ? null : { text: idea, focus: 'if_free' });
   useEffect(() => {
-    const text = carried.current;
+    const words = carried.current;
     const box = composerRef.current?.querySelector('textarea');
-    if (!ready || text === null || !box) return;
+    if (!ready || words === null || !box) return;
     carried.current = null;
-    fillComposer(box, text);
+    const free = document.activeElement === null || document.activeElement === document.body;
+    fillComposer(box, words.text, { focus: words.focus === 'always' || free });
   }, [ready]);
 
   if (chat.status === 'not_found') {
@@ -618,7 +623,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
 
   const startNewChat = () => {
     const unsent = unsentWhenEnded(state.rows);
-    carried.current = unsent.length > 0 ? unsent.join('\n') : null;
+    carried.current = unsent.length > 0 ? { text: unsent.join('\n'), focus: 'always' } : null;
     chat.newChat();
   };
   const tryAgain = (
