@@ -1334,8 +1334,10 @@ class _Judge:
         the record on the session's Desk and of the session the card was delivered to; the reply entry at
         the card's signed seq the kernel's, on that session, naming the card's message; and before it,
         the kernel's own entry on the record's session moving the record to `state` for `reason` (its ref
-        and link both the record). Its fact's expiry is then no fault: it ended with the record. Whatever
-        can't be established is a fault."""
+        and link both the record). That reply must be the Desk's own card (`author` desk) that passed,
+        citing this fact. Its fact's expiry is then no fault: it ended with the record. Whatever can't be
+        established is a fault. It judges artifacts the harness wrote from the ledger and the stream;
+        their integrity is the signatures' job, not this check's."""
         own = _own_ref(block.fact_id or "")
         refs = [claim for claim in fact.get("claims") or [] if claim.get("key") == "ref"]
         record = self.links.get(own) if kind == "payment_link" and own is not None else None
@@ -1345,10 +1347,14 @@ class _Judge:
                 or record.get("state") != state):
             return (f"a card cites a fact that isn't a {state} {kind.replace('_', ' ')}'s own",
                     f"{where} cites {block.fact_id}")
-        # the reply entry the card's signature names: the kernel's, on this session, for this message
+        # the reply entry the card's signature names: the kernel's, on this session, for this message, and the
+        # Desk's own card (an ended record's card is kernel-issued) that passed, citing this fact
         reply = next((entry for entry in self.ledger.get(desk_id, []) if entry["seq"] == shown.signed_seq), None)
+        said = _summary(reply) if reply is not None else {}
         if (reply is None or shown.message_id is None
-                or _event_of(reply) != ("reply", "kernel", shown.session_id, shown.message_id)):
+                or _event_of(reply) != ("reply", "kernel", shown.session_id, shown.message_id)
+                or said.get("message_id") != shown.message_id or said.get("author") != "desk"
+                or said.get("ok") is not True or block.fact_id not in (said.get("fact_ids") or [])):
             return ("a card isn't placed by the reply entry its signature names", f"{where} cites {block.fact_id}")
         # the record's own entry ending it, the kernel's on the record's session, for the reason the card states
         ended_seqs = [entry["seq"] for entry in self.ledger.get(desk_id, [])

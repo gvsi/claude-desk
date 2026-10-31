@@ -1514,10 +1514,19 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     def a_second_ref(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
         fact["claims"].append({"key": "ref", "kind": "text", "value": "L-other"})
 
+    def reply_summary(**changes: Any) -> Callable[[Run, str, str, dict[str, Any]], None]:
+        def tweak(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
+            entry(run, "reply", message)["summary"].update(changes)
+        tweak.__name__ = f"reply summary {changes}"
+        return tweak
+
     # the card's reply entry and the link's cancellation must be the kernel's own, for this session, and the
     # cancellation one the card's line states (the owner's rules changed); the fact names one link, once
+    # and the reply entry is the kernel's for this card: this message, the Desk's own card, passed, citing this fact
     for tweak in (reply_names_another, reply_on_another_session, cancelled_on_another_session,
-                  cancelled_by_the_api, cancelled_for_another_reason, a_second_ref):
+                  cancelled_by_the_api, cancelled_for_another_reason, a_second_ref,
+                  reply_summary(message_id="m-other"), reply_summary(author="claude"), reply_summary(ok=False),
+                  reply_summary(fact_ids=["payment_link:L-other"])):
         run, _ = cancelled(after=tweak)
         assert "commitment.card_fact" in fired(run.scenario, run.build()), tweak.__name__
     # signed and ledgered like every card
