@@ -308,7 +308,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
-      {/* The transcript scrolls on its own, between the head and the owner's controls, its end in view as a chat's. */}
+      {/* The transcript, its end in view as a chat's: it scrolls on its own between the head and the owner's controls, or in a short window with them, as one. */}
       <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
         <Transcript label={`Conversation with ${who}`}>
           <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
