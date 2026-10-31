@@ -64,6 +64,16 @@ function onlyTheLimit(draft: RuleDraft): boolean {
   return draft.moneyCap !== null && draft.turnedOn.length === 0 && ruleDiff(draft.before, draft.after).length === 0;
 }
 
+/**
+ * An uncertain confirm with `rules_cannot_be_checked` is the request layer giving up a minute in,
+ * while the API was still checking (the API's own 409 is a clear answer, so it is never uncertain).
+ * The change may still apply after the rules were read, so the line that says it can't be applied
+ * would be wrong.
+ */
+function stoppedWaiting(err: unknown): boolean {
+  return err instanceof ApiError && err.code === 'rules_cannot_be_checked';
+}
+
 /** "Was $500", or what a limit of 0 meant. */
 function wasWords(cents: number): string {
   return cents <= 0 ? 'Was: every payment asked you first' : `Was ${formatCents(cents)}`;
@@ -145,7 +155,7 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
         // A caller's own confirm (setup's) applies the draft's version too, so they settle it as well.
         const now = await queryClient.fetchQuery({ ...rulesQuery(deskId), staleTime: 0 }).catch(() => null);
         if (now?.active.version === draft.version) applied();
-        else setError(now === null ? NOT_CONFIRMED : ownerErrorCopy(err));
+        else setError(now === null || stoppedWaiting(err) ? NOT_CONFIRMED : ownerErrorCopy(err));
       } else {
         setError(ownerErrorCopy(err));
       }
