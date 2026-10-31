@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
-import type { RuleCard, ToolName } from '../api/contracts.ts';
+import type { RuleCard } from '../api/contracts.ts';
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
 import type { ConfirmToolBody, SetupState, ToolRow } from '../api/views.ts';
 import {
@@ -18,7 +18,7 @@ import {
   type RuleMode,
   type SetupToolsRow,
 } from '../ds/index.ts';
-import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOn, toolState, type CatalogConnector, type ConnectorKey } from '../owner/connectors/catalog.ts';
+import { CONNECTORS, TOOL_NAMES, businessTools, connectorByKey, connectorOn, isCatalogTool, toolDisplayName, toolState, type CatalogConnector, type ConnectorKey } from '../owner/connectors/catalog.ts';
 import { draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
 import { toolOutcome } from '../owner/rules/outcome.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
@@ -50,7 +50,7 @@ const MOCK_PAYMENTS: ConnectorKey = 'stripe';
  */
 function toolsToTurnOn(connector: CatalogConnector, rows: readonly ToolRow[]): ToolRow[] {
   return rows.filter((row) => {
-    if (!connector.tools.includes(row.tool) || row.definition_sha256 === null) return false;
+    if (!isCatalogTool(row.tool) || !connector.tools.includes(row.tool) || row.definition_sha256 === null) return false;
     const state = toolState(row);
     return state === 'not_on' || state === 'off';
   });
@@ -66,13 +66,15 @@ function startingMode(row: ToolRow, cards: readonly RuleCard[]): RuleMode {
 }
 
 /** A tool as its review shows it: its name, what it does and touches, its outcome and the rules of yours that cover it. */
-function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewToolView {
-  const words = TOOL_NAMES[row.tool as ToolName];
+export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewToolView {
+  const business = businessTools([row]);
+  const name = toolDisplayName(row.tool, business) ?? 'A connected tool';
+  const line = business.get(row.tool)?.description ?? (isCatalogTool(row.tool) ? TOOL_NAMES[row.tool].line : name);
   const covering = rulesForTool({ tool: row.tool, effects: row.effects }, cards).filter((card) => card.is_default !== true);
   return {
     key: row.tool,
-    name: words.name,
-    description: `${words.line} ${describeEffects(row.effects, row.reversible)}`,
+    name,
+    description: `${line} ${describeEffects(row.effects, row.reversible)}`,
     mode: startingMode(row, cards),
     coveredBy: covering.map((card) => ({ text: card.reason, mode: card.mode })),
   };
@@ -90,7 +92,7 @@ function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (ke
   const external: SetupToolsRow[] = [];
   for (const connector of CONNECTORS) {
     const outside = connector.view.source.kind === 'external';
-    const listed = rows.some((row) => connector.tools.includes(row.tool));
+    const listed = rows.some((row) => isCatalogTool(row.tool) && connector.tools.includes(row.tool));
     let row: SetupToolsRow | null = null;
     if (connector.key === 'verification' && listed) row = { connector: connector.view, state: 'always_on' };
     else if (connectorOn(connector, rows)) row = { connector: connector.view, state: 'on' };
