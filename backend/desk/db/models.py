@@ -582,6 +582,13 @@ class SetupInterview(Base):
     draft_version: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    # A start sent with the client's key (migration api_idempotency): unique per copy, with its body's hash, the
+    # answer it failed with, if it did, and when it asked the kernel for the Desk. A start without one leaves all four
+    # null.
+    idempotency_key: Mapped[str | None] = mapped_column(Text)
+    request_sha256: Mapped[str | None] = mapped_column(Text)
+    start_error: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    desk_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class A2AError(BaseModel):

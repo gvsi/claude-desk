@@ -11,7 +11,7 @@
 ## What the consumer provides
 
 - `children`: the message (`VisitorMessage`, `ClaudeMessage`, `PersonMessage`, `AgentMessage` or `Whisper`).
-- `margin`: its `MarginReceipt`s and `MarginNote`s, in the order they happened. Receipts for an action and for the reply that reports it attach together under that reply.
+- `margin`: its `MarginReceipt`s and `MarginNote`s, in the order they happened. Receipts for an action and for the reply that reports it attach together under that reply. Under a visitor's message that didn't send, the screen's error `Notice` comes last, with its next step ("Try again").
 - For the header, the display strings: the screen formats any time in them; the design system formats none.
 - `live` on a row that arrived while the page was open (from the visitor's stream, or a new row on the owner's open conversation), never on one read from history: a load, a reload, the owner opening a past chat, recorded history. The screen clears it once the row is shown, so a remount draws it still.
 
@@ -19,6 +19,7 @@
 
 - The row is the reading column: at most `--cd-row-max` wide (`size-reading` by default), and the full width of a narrower log. A surface whose own column is already the reading width sets `--cd-row-max: 100%` on an ancestor so its rows fill that column; the public page does, so its rows end where its composer ends.
 - Its receipts attach under the message at every width, `space-8` below it and `space-8` apart, on the message's side: under Claude's and the owner's words they start at the left, as wide as the row; under a visitor's or an agent's bubble on the right they end where the bubble ends and are at most 85% of the row wide, like the bubble. Their lines start together either way, so the dots stay in one column. On the owner's wide screens, on a phone and on the public page alike, each checkpoint result sits right under the message it explains.
+- A `Notice` under a bubble on the right keeps the same rule, at every width: its line starts with the lines above it, so the dots stay in one column, and its next step sits `space-8` under the line, at the right, ending where the bubble ends. The line ends there too when it is the widest thing attached. The step never sits beside the line there, so what is attached is only as wide as its widest line.
 - The header's captions stack the same way, the receipts' caption second.
 
 ## Arriving live

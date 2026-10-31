@@ -2,9 +2,10 @@
  * `/d/:slug/agents`: the page for people's AI agents. It reads the public Desk (the kernel's names,
  * brand and Agent Card blocks) and the API's code-built Agent Card (the address agents send to, how
  * a request is signed, an example request), and shows them as written, in the browser's language,
- * under the business's brand header and the AI disclosure, with a demo key for connecting your own
- * agent (`ConnectYourOwn`) and the built-in agent sent on a task (`SendAgentPanel`). No model text is shown here but the Desk's checked
- * replies to the built-in agent; the agent's own words never are.
+ * under the business's brand header and the AI disclosure. The built-in agent sent on a task
+ * (`SendAgentPanel`) leads; what agents can do, how they prove who they are, and connecting your
+ * own agent with a demo key (`ConnectYourOwn`) follow. No model text is shown here but the Desk's
+ * checked replies to the built-in agent; the agent's own words never are.
  */
 import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { useLocation, useParams } from 'react-router';
@@ -91,9 +92,12 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
   // One session for both actions, so a key and a run opened together belong to the same chat.
   const session = useAgentSession(slug);
 
-  // The public page's "Send an agent" link lands on the panel once the page has drawn it.
+  // The public page's "Send an agent" link lands on the panel once the page has drawn it. The panel
+  // leads the page, so it is usually in view already: the page moves only when some of its card
+  // isn't, and as little as brings the card in (its top first, for a card taller than the window),
+  // so the title and the AI disclosure above it stay on screen when they can.
   useLayoutEffect(() => {
-    if (hash === `#${SEND_ID}`) document.getElementById(SEND_ID)?.scrollIntoView();
+    if (hash === `#${SEND_ID}`) document.getElementById(SEND_ID)?.closest('section')?.scrollIntoView({ block: 'nearest' });
   }, [hash]);
 
   return (
@@ -114,6 +118,8 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
           <DisclosureLine language={language} businessName={business} />
         </div>
         <div className="cd-agents-page__cards">
+          {/* The page's one live moment leads, right under the disclosure; the reference follows it. */}
+          <SendAgentPanel slug={slug} business={business} ownerName={desk.owner_display_name} session={session} language={language} />
           <AgentsCard title={copy.canDoTitle}>
             {skills.length > 0 ? (
               <ul className="cd-agents-page__list cd-type-body">
@@ -134,7 +140,6 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
             </ul>
           </AgentsCard>
           <ConnectYourOwn slug={slug} card={card} session={session} language={language} />
-          <SendAgentPanel slug={slug} business={business} ownerName={desk.owner_display_name} session={session} language={language} />
         </div>
         <ConceptFooter />
       </main>

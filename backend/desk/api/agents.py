@@ -21,14 +21,28 @@ What the launcher's panel reads (`DemoAgentRun`): each exchange as the agent's t
 agent's words go to the Desk but never back to the panel, so no text the kernel didn't check reaches the visitor),
 then the Desk's, with the blocks and signed statuses the kernel checked. Runs live in this process's memory
 (`DemoAgents`): the 50 newest, for an hour, each readable by its launching session alone.
+
+A send with the client's idempotency key (one per click) claims the key in the copy before the kernel mints the agent
+(`DemoAgents.claim`, which checks and takes it with no await between, so of two requests racing in the process one takes
+it): a repeat answers the run the first started and starts nothing; one for another task, or from another session or to
+another Desk than the key's, is `KeyReused`. A run whose agent the kernel refused to mint (a 4xx) ends `failed` and
+frees its key, since nothing was made, so the same request can be sent again; a mint that went unanswered may have
+happened, so that failed run keeps its key, as does a run that started, however it ends. Keys live in memory beside the
+runs, in a map of their own that keeps each for its run's hour, so a key outlives a run record the 50-run bound dropped:
+its repeat answers the same run ID, whose poll is then 404, and never starts a second run. The map holds at most 1000
+and never drops a key early: full, it refuses a new one (`KeysFull`) until the oldest key's hour ends. Like the runs,
+keys are this process's alone: a process restart, or a repeat routed to the other task during a deploy's overlap,
+forgets them.
 """
 
 import asyncio
 import hashlib
 import json
 import logging
+import math
 import secrets
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
@@ -37,6 +51,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from desk.api.idempotency import Admissions
 from desk.api.metrics import over_daily_budget, record_model_call
 from desk.api.model import CONVERSATION_MODEL, ModelClient, ModelRequest, ModelResponse, ModelUnavailable
 from desk.api.prompts import (
@@ -60,6 +75,7 @@ ROUTE = "visiting_agent"
 MAX_EXCHANGES = 6               # model calls a run, and so A2A requests
 MAX_TOKENS = 1024               # one short message as JSON
 MAX_RUNS = 50
+MAX_KEYS = 1000                 # the idempotency keys held at once, each for its run's hour
 RUN_LIFE = timedelta(hours=1)
 A2A_TIMEOUT_S = 120.0           # an answer waits for the Desk's turn: up to 30 s for the session's lock, then the turn
 
@@ -69,6 +85,32 @@ Spent = Callable[[], Awaitable[bool]]
 
 class RunFailed(Exception):
     """The run can't go on; the message says why without any of the Desk's or the model's text."""
+
+
+class KeyReused(Exception):
+    """The idempotency key's first request in the copy had another body, or came from another session or to another
+    Desk."""
+
+
+class KeysFull(Exception):
+    """The key map holds `MAX_KEYS` keys, none of them past its hour: a new one fits in `retry_after` seconds."""
+
+    def __init__(self, retry_after: int):
+        super().__init__(f"the key map is full for {retry_after} s")
+        self.retry_after = retry_after
+
+
+@dataclass(frozen=True)
+class HeldKey:
+    """An idempotency key a request took in its copy: the run it started, the request's hash, the session that sent
+    it, the Desk it went to and when it was claimed. A visitor session belongs to one Desk, so the session alone
+    already ties the key to its Desk; `slug` is kept as defence in depth."""
+
+    run_id: str
+    request_sha256: str
+    session_id: str
+    slug: str
+    claimed_at: datetime
 
 
 # Signing ------------------------------------------------------------------------------------------------------
@@ -212,16 +254,74 @@ class DemoAgents:
         self._model, self._a2a, self._engine, self._clock = model, a2a, engine, clock
         self._production = production
         self._runs: dict[str, tuple[DemoAgentRun, datetime]] = {}      # oldest first
+        self._keys: dict[tuple[str, str], HeldKey] = {}                # by (copy, idempotency key), oldest first
+        self.admissions = Admissions()                                  # a keyed send's lookup, limits and claim
         self._tasks: set[asyncio.Task] = set()
 
-    def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids) -> str:
-        """Start a run of the issued agent on `task` for the launcher's session; its run ID. The issued key goes to
-        the run's coroutine alone."""
+    def _new_run(self, task: DemoTask, slug: str, launcher: Ids) -> DemoAgentRun:
+        """A new `running` run's record for the launcher's session, kept from now."""
         now = self._clock()
         self._forget(now, room=1)
         run = DemoAgentRun(run_id="run-" + secrets.token_hex(16), launcher_session_id=launcher.session_id, slug=slug,
                            task=task, state="running", turns=[])
         self._runs[run.run_id] = (run, now)
+        return run
+
+    def keyed(self, copy_id: str, key: str, request_sha256: str, slug: str, launcher: Ids) -> str | None:
+        """The ID of the run a request with this key started in the copy within the hour, or None; `KeyReused` when
+        that request's body hashed otherwise, or it came from another session or went to another Desk."""
+        self._forget_keys(self._clock())
+        held = self._keys.get((copy_id, key))
+        if held is None:
+            return None
+        if (held.request_sha256, held.session_id, held.slug) != (request_sha256, launcher.session_id, slug):
+            raise KeyReused
+        return held.run_id
+
+    def claim(self, copy_id: str, key: str, request_sha256: str, task: DemoTask, slug: str,
+              launcher: Ids) -> tuple[str, DemoAgentRun | None]:
+        """Take the key in the copy for a new `running` run, checked and taken with no await between: the run's ID
+        and its record, which the caller then `launch`es, `fail`s or `free`s. When the copy already holds the key, the
+        ID of the run it started and None (`KeyReused` for another body, session or Desk); `KeysFull` when the map
+        holds `MAX_KEYS`."""
+        held = self.keyed(copy_id, key, request_sha256, slug, launcher)
+        if held is not None:
+            return held, None
+        wait = self.key_wait()
+        if wait is not None:
+            raise KeysFull(wait)
+        run = self._new_run(task, slug, launcher)
+        self._keys[(copy_id, key)] = HeldKey(run_id=run.run_id, request_sha256=request_sha256,
+                                             session_id=launcher.session_id, slug=slug, claimed_at=self._clock())
+        return run.run_id, run
+
+    def key_wait(self) -> int | None:
+        """None while a new key fits; else the whole seconds, at least 1, until the oldest key's hour ends."""
+        now = self._clock()
+        self._forget_keys(now)
+        if len(self._keys) < MAX_KEYS:
+            return None
+        oldest = next(iter(self._keys.values()))
+        return max(1, math.ceil((oldest.claimed_at + RUN_LIFE - now).total_seconds()))
+
+    def fail(self, run: DemoAgentRun, reason: str) -> None:
+        """End a claimed run `failed` whose mint may have happened (no answer came back): its key keeps it."""
+        _fail(run, reason)
+
+    def free(self, copy_id: str, key: str, run: DemoAgentRun, reason: str) -> None:
+        """End a claimed run `failed` whose agent the kernel refused to mint, and let its key go: nothing was made, so
+        the same request may be sent again. A repeat that already has the run's ID reads it `failed`."""
+        _fail(run, reason)
+        held = self._keys.get((copy_id, key))
+        if held is not None and held.run_id == run.run_id:
+            del self._keys[(copy_id, key)]
+
+    def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids,
+               run: DemoAgentRun | None = None) -> str:
+        """Start a run of the issued agent on `task` for the launcher's session, in `run`'s record when a claim made
+        it, else a new one; its run ID. The issued key goes to the run's coroutine alone."""
+        if run is None:
+            run = self._new_run(task, slug, launcher)
 
         async def record(response: ModelResponse) -> None:
             async with self._engine.connect() as conn:
@@ -254,6 +354,12 @@ class DemoAgents:
                 del self._runs[run_id]
         while self._runs and len(self._runs) + room > MAX_RUNS:
             del self._runs[next(iter(self._runs))]
+
+    def _forget_keys(self, now: datetime) -> None:
+        """Drop the keys claimed an hour ago or more, and only those."""
+        for copy_key, held in list(self._keys.items()):
+            if now - held.claimed_at >= RUN_LIFE:
+                del self._keys[copy_key]
 
     async def drain(self) -> None:
         """Wait until no run is going in this process."""

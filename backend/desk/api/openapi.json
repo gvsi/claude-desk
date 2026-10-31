@@ -2623,7 +2623,7 @@
     "/api/owner/setup": {
       "post": {
         "summary": "Start Setup",
-        "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.",
+        "description": "Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with\nAnswering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives\nhere is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude\ncouldn't answer, with nothing made.\n\nWith an `idempotency_key` (one per click), a repeat in the copy answers the interview the first made, as it stands\nnow, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409\n`conflict`, and one sent while the first is still starting answers 409 `in_progress` at once, to be sent again\nafter `retry_after`. A first that stopped before the kernel was asked for the Desk (its process did, say) frees\nthe key once it is older than the longest a start can take; one that stopped after asking, with no answer kept,\nmay have made the Desk, so it answers 409 `in_progress` for good, and only a new key starts again. A start is\nadmitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent meanwhile waits\nfor that admission and is never counted; another process admits on its own, so during a deploy's overlap a repeat\nrouted to the other task can be counted twice.\n\nOne rule for failures, as when sending the built-in agent: a start that fails before anything is made (refused by\nthe limits, or Claude couldn't answer, before the kernel is asked for the Desk) frees its key, so the same request\ncan be sent again; once the Desk was asked for, the key keeps the outcome, and a repeat of a start that failed\nthen answers its failure again (a new click sends a new key). Without a key, each start makes its own interview\nand Desk.",
         "operationId": "owner_start_setup",
         "requestBody": {
           "content": {
@@ -2648,6 +2648,26 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -4045,7 +4065,7 @@
     "/api/public/desks/{slug}/send_agent": {
       "post": {
         "summary": "Send Agent",
-        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.",
+        "description": "Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this\nprocess and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered\nhere. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.\n\nWith an `idempotency_key` (one per click), a repeat in the copy within the hour answers the run the first started\n(its ID; poll it for its state) and starts nothing, and a repeat that finds the key never counts on the limit. One\nwith another task, or from another session or to another Desk than the key's, is 409 `conflict`. The key is\nclaimed once the limit and the budget let the request through, before the kernel mints the agent. A request is\nadmitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent meanwhile waits\nfor that admission, then answers the run; another process admits on its own, so during a deploy's overlap a repeat\nrouted to the other task can be counted twice. Keys live in this process's memory, like the runs, each for its\nrun's hour; while 1000 are held, a new one is 429 `rate_limited` until the oldest one's hour ends.\n\nOne rule for failures, as when starting setup: a request that fails before anything is made (refused by the limit\nor the budget, or the kernel refused to mint the agent with a 4xx) frees its key, so the same request can be sent\nagain. Once the kernel may have minted the agent (no answer came back, or a 5xx) or the run started, the key keeps\nthe run however it ends, a failed one too, and a new click sends a new key. Without a key, each request starts\nits own run.",
         "operationId": "public_send_agent",
         "parameters": [
           {
@@ -4098,6 +4118,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -6857,7 +6887,7 @@
           "error"
         ],
         "title": "ApiError",
-        "description": "Every error answer: `error` names what went wrong; `code` is the kernel's, when `error` is \"kernel\";\n`retry_after` is the seconds to wait, on a 429. Fields that don't apply are left out."
+        "description": "Every error answer: `error` names what went wrong; `code` is the kernel's, when `error` is \"kernel\";\n`retry_after` is the seconds to wait before sending again: on a 429, and on a 409 `in_progress` that names one.\nFields that don't apply are left out."
       },
       "ApprovalAnswerIn": {
         "properties": {
@@ -11059,6 +11089,20 @@
               "push_the_limit"
             ],
             "title": "Task"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
           }
         },
         "additionalProperties": false,
@@ -11216,6 +11260,20 @@
               }
             ],
             "title": "Owner Display Name"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
           }
         },
         "additionalProperties": false,
@@ -11225,7 +11283,7 @@
           "timezone"
         ],
         "title": "SetupStartIn",
-        "description": "`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)\nand, if they give it, the name customers should see for them, which wins over one taken from the words. A name\nthe owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,\nspaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked."
+        "description": "`POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)\nand, if they give it, the name customers should see for them, which wins over one taken from the words. A name\nthe owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,\nspaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. An optional `idempotency_key`, one\nper click, makes a repeat answer the interview the first made instead of making another."
       },
       "SetupState": {
         "properties": {
@@ -11304,7 +11362,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent and after the last one) and the conversation so far."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent and after the last one) and the conversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
       },
       "SetupTools": {
         "properties": {

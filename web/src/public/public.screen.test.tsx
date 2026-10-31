@@ -517,6 +517,45 @@ describe('public chat page', () => {
     expect(screen.getByRole('article', { name: 'Quote' }).elements()).toHaveLength(1);
   });
 
+  it('failed_send_line_ends_under_its_bubble', async () => {
+    // Everything under a visitor's bubble ends where the bubble ends, as its receipts do: the line
+    // saying a message didn't send, and "Try again" under it, too. At the desktop window, a phone
+    // and the narrowest phone, in English and in Spanish.
+    const en = { language: undefined, text: 'How much is drain clearing?', line: "That didn't send. Your message is still here.", retry: 'Try again' };
+    const es = { language: 'es-MX', text: '¿Pueden venir mañana a las 8?', line: 'No se envió. Tu mensaje sigue aquí.', retry: 'Intentar de nuevo' };
+    const cases = [
+      { ...en, viewport: 'desktop', width: VIEWPORTS.desktop.width },
+      { ...en, viewport: 'phone', width: VIEWPORTS.phone.width },
+      { ...es, viewport: 'phone', width: VIEWPORTS.phone.width },
+      { ...es, viewport: 'phone', width: 320 },
+    ] as const;
+    for (const { language, text, line, retry, viewport, width } of cases) {
+      const at = `${language ?? 'en'} at ${width}`;
+      const { screen } = await renderRoute(PAGE, { viewport, language, seed: 'rivera' });
+      await page.viewport(width, VIEWPORTS[viewport].height);
+      await ready(screen);
+      mockStore.inject({ route: 'sendMessage', status: 500 });
+      await type(screen, text);
+      const failed = screen.getByRole('alert');
+      await expect.element(failed.getByText(line, { exact: true })).toBeVisible();
+
+      const row = rowOf(screen.getByText(text, { exact: true }).element());
+      const bubble = row.querySelector('.cd-visitor-message__bubble')?.getBoundingClientRect();
+      if (!bubble) throw new Error('no visitor bubble');
+      const words = textBox(failed.getByText(line, { exact: true }).element());
+      const button = failed.getByRole('button', { name: retry }).element().getBoundingClientRect();
+      expect(Math.abs(words.right - bubble.right), `${at}: the line ends at ${words.right}, the bubble at ${bubble.right}`).toBeLessThanOrEqual(2);
+      expect(Math.abs(button.right - bubble.right), `${at}: "${retry}" ends at ${button.right}, the bubble at ${bubble.right}`).toBeLessThanOrEqual(2);
+      const margin = row.querySelector('.cd-transcript-row__margin')?.getBoundingClientRect();
+      const dot = failed.element().querySelector('.cd-status-dot')?.getBoundingClientRect();
+      expect(dot?.left, `${at}: the line starts at the margin's left, with the lines above it`).toBe(margin?.left);
+      expect(words.top, `${at}: the line sits under the bubble`).toBeGreaterThanOrEqual(bubble.bottom);
+      // "Try again" keeps its full control height, a target a finger can hit.
+      expect(button.height, at).toBeGreaterThanOrEqual(32);
+      expectNoHorizontalScroll();
+    }
+  });
+
   it('lost_send_response_does_not_duplicate', async () => {
     const { screen, router } = await renderRoute(PAGE);
     await ready(screen);
