@@ -185,6 +185,19 @@ function mayDrawTheMarkTile(file: string): boolean {
   return file === MARK_TILE_FILE || (file.startsWith('ds/') && /\.stories\.tsx$/.test(file));
 }
 
+// The lockup's Preview badge, the product's one all-caps label (owner, 2026-10-30): a Pill with `caps`,
+// which only the Wordmark draws. A JSX `<Pill>`, under any name it is given, that passes `caps`, or a
+// spread that could carry it, counts as a use. Outside the design system, which guards its own files,
+// only tests may name the badge's type style or the marker the copy check allows capitals on.
+const WORDMARK_FILE = 'ds/components/Mark/Mark.tsx';
+const CAPS_ATTRIBUTE = /\scaps\b|\{\s*\.\.\./;
+const CAPS_BADGE_NAMES = /badge-caps|preview-badge/;
+
+/** Each `<Pill …>` opening tag in a source that passes `caps` or spreads its props, as "file: tag". */
+function pillCaps(scanned: Source[]): string[] {
+  return jsxTagsPassing(scanned, 'Pill', CAPS_ATTRIBUTE);
+}
+
 /** Every text file under `src/` but this one and the color tables, read. */
 function everyTextFile(): Source[] {
   return everyFileButThisOne()
@@ -511,6 +524,36 @@ describe('app source guards', () => {
     expect(brand, 'Brand is in ReaderPage.tsx').not.toBeNull();
     expect(markTiles(sample(reader?.text.slice(...(brand ?? [0, 0])) ?? ''))).toHaveLength(1);
     expect(markTiles(code.filter(({ file }) => !mayDrawTheMarkTile(file)))).toEqual([]);
+  });
+
+  it('caps_pill_only_in_the_wordmark', () => {
+    // The matcher, on known samples first: the prop however it is written, under an imported or
+    // local name or a namespace's member, and a spread that could carry it; not another component's.
+    expect(pillCaps(sample('<Pill caps>Preview</Pill>'))).toEqual(['sample.tsx: <Pill caps>']);
+    expect(pillCaps(sample("import * as DS from '../ds/index.ts';\n<DS.Pill caps>Preview</DS.Pill>"))).toEqual(['sample.tsx: <DS.Pill caps>']);
+    expect(pillCaps(sample("import { Pill as Badge } from '../ds/index.ts';\n<Badge\n  caps={true}>New</Badge>"))).toHaveLength(1);
+    expect(pillCaps(sample('const Badge = Pill;\n<Badge caps>New</Badge>'))).toEqual(['sample.tsx: <Badge caps>']);
+    expect(pillCaps(sample('<Pill {...badge} />'))).toHaveLength(1);
+    expect(pillCaps(sample('<Pill>Public</Pill> <PillGroup caps /> <Wordmark preview /> <DS.PillGroup caps />'))).toEqual([]);
+    // A planted badge in the intro dialog fails, though its row shows the badge through the Wordmark.
+    const planted: Source[] = [
+      { file: 'ds/components/IntroDialog/IntroDialog.tsx', text: '<Mark />\n<Wordmark />\n<Pill caps>Preview</Pill>' },
+      { file: 'ds/components/IntroDialog/IntroDialog.tsx', text: '<Mark />\n<Wordmark preview />' },
+    ];
+    expect(pillCaps(planted.filter(({ file }) => file !== WORDMARK_FILE))).toEqual(['ds/components/IntroDialog/IntroDialog.tsx: <Pill caps>']);
+
+    // Every TypeScript file under src/, the design system and the tests included. The Wordmark does
+    // draw the badge, so the matcher reads the code as it is written, and nothing else does.
+    const everything = everyTextFile();
+    const code = everything.filter(({ file }) => /\.tsx?$/.test(file));
+    expect(pillCaps(code.filter(({ file }) => file === WORDMARK_FILE))).toEqual([`${WORDMARK_FILE}: <Pill caps>`]);
+    expect(pillCaps(code.filter(({ file }) => file !== WORDMARK_FILE))).toEqual([]);
+
+    // Outside the design system, only tests name the badge's style or marker.
+    expect(hits(CAPS_BADGE_NAMES, sample('<span className="cd-type-badge-caps" data-ds="preview-badge">New</span>'))).toHaveLength(2);
+    const outsideTheDs = everything.filter(({ file }) => !file.startsWith('ds/') && !/\.test\.tsx?$/.test(file));
+    expect(outsideTheDs.map(({ file }) => file)).toContain('about/ReaderPage.tsx');
+    expect(hits(CAPS_BADGE_NAMES, outsideTheDs)).toEqual([]);
   });
 
   it('mark_and_clay_colors_stay_in_their_components', () => {

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
+import { CAPS_BADGE } from '../../test/copy.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Sidebar, type NavKey, type SidebarProps } from './Sidebar.tsx';
 
@@ -180,7 +181,7 @@ export const Lockup: Story = {
     const brand = canvasElement.querySelector('.cd-sidebar__brand') as HTMLElement;
     const mark = brand.querySelector(':scope > svg.cd-mark') as SVGSVGElement;
     const name = brand.querySelector('.cd-type-wordmark') as HTMLElement;
-    const badge = brand.querySelector('[data-ds="preview-badge"]') as HTMLElement;
+    const badge = brand.querySelector(CAPS_BADGE.selector) as HTMLElement;
     await expect(mark).not.toBeNull();
     await expect(brand.textContent).toBe('Claude DeskPreview');
     await expect([mark.getAttribute('width'), mark.getAttribute('height')]).toEqual(['36', '36']);

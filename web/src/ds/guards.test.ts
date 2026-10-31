@@ -5,7 +5,8 @@
  * they are where raw values and sample data are meant to live. Some guards read further:
  * `no_invisible_characters_in_any_file` reads every text file, `danger_only_for_refusing_answers`
  * every file but the docs, so a story or fixture can't show the red look on anything but a refusal,
- * and the clay and mark guards the canvas boards too.
+ * `caps_badge_only_in_the_lockup` every file but the docs too, so nothing but the lockup's badge
+ * draws capitals, and the clay and mark guards the canvas boards too.
  *
  * Each guard first proves its matcher on a known-bad sample, so it can't pass by matching nothing.
  */
@@ -167,6 +168,20 @@ function dangerVariants(text: string): string[] {
     for (const m of text.matchAll(DANGER_LITERAL)) if (!counted(m.index)) hits.push(m[0]);
   }
   return hits;
+}
+
+// The lockup's Preview badge, the product's one all-caps label (owner, 2026-10-30): its type style,
+// which draws capitals, and the marker the copy check allows capitals on.
+const CAPS_BADGE_NAMES = /badge-caps|preview-badge/g;
+
+// The only places that may name them: the Pill, which draws the badge; the Mark's folder, whose
+// Wordmark asks for it; the token sources; the type specimens in Foundations; and the tests and
+// their helpers, the copy check among them.
+const CAPS_BADGE_FOLDERS = ['components/Pill/', 'components/Mark/', 'test/'] as const;
+const CAPS_BADGE_FILES: readonly string[] = ['tokens.json', 'tokens.css', 'foundations/Foundations.stories.tsx'];
+
+function mayNameTheCapsBadge(file: string): boolean {
+  return CAPS_BADGE_FILES.includes(file) || CAPS_BADGE_FOLDERS.some((folder) => file.startsWith(folder)) || /\.test\.[a-z]+$/.test(file);
 }
 
 /** This file, as `everyTextFile` names it: its known-bad samples are not uses. */
@@ -431,6 +446,41 @@ describe('design system source guards', () => {
     expect(arrowsInSource(`&amp; &#8212; ${bs}u00a0 /${bs}bword${bs}d/ &#x2014;`)).toEqual([]);
     expect(findAll(sources, matches(UPPERCASE))).toEqual([]);
     expect(findAll(sources, arrowsInSource)).toEqual([]);
+  });
+
+  it('caps_badge_only_in_the_lockup', () => {
+    // The style and the marker, however a source writes them: a class, a data attribute, a selector.
+    const planted: Source[] = [
+      { file: 'components/Banner/Banner.tsx', text: '<span className="cd-pill cd-type-badge-caps" data-ds="preview-badge">New</span>' },
+      { file: 'components/Sidebar/Sidebar.css', text: '.cd-sidebar__new { } .cd-type-badge-caps { margin: 0 }' },
+      { file: 'boards/parts.tsx', text: "<span className={'cd-type-badge-caps'}>Soon</span>" },
+    ];
+    expect(findAll(planted.filter(({ file }) => !mayNameTheCapsBadge(file)), matches(CAPS_BADGE_NAMES))).toEqual([
+      'components/Banner/Banner.tsx: badge-caps',
+      'components/Banner/Banner.tsx: preview-badge',
+      'components/Sidebar/Sidebar.css: badge-caps',
+      'boards/parts.tsx: badge-caps',
+    ]);
+    expect(matches(CAPS_BADGE_NAMES)('.cd-type-badge { } data-ds="preview" badge-cap')).toEqual([]);
+    // The allowlist: two component folders, the tests and their helpers, and three files. A sibling
+    // folder whose name only starts the same way, another story or another foundation is outside it.
+    for (const file of ['components/Pill/Pill.tsx', 'components/Mark/Mark.tsx', 'tokens.json', 'tokens.css', 'foundations/Foundations.stories.tsx', 'tokens.test.ts', 'test/copy.ts']) {
+      expect(mayNameTheCapsBadge(file), file).toBe(true);
+    }
+    for (const file of ['components/PillGroup/PillGroup.tsx', 'components/Sidebar/Sidebar.stories.tsx', 'components/IntroDialog/IntroDialog.tsx', 'foundations/Type.stories.tsx', 'boards/parts.tsx', 'base.css']) {
+      expect(mayNameTheCapsBadge(file), file).toBe(false);
+    }
+
+    // Every file but the docs, which name the style to explain it, and this file's samples.
+    const code = everyTextFile().filter(({ file }) => !file.endsWith('.md') && file !== THIS_FILE);
+    expect(code.map(({ file }) => file)).toContain('boards/parts.tsx');
+    // The allowed files do name them, so the matcher reads the code as it is written.
+    expect(findAll(code.filter(({ file }) => file === 'components/Pill/Pill.tsx'), matches(CAPS_BADGE_NAMES))).toEqual([
+      'components/Pill/Pill.tsx: badge-caps',
+      'components/Pill/Pill.tsx: badge-caps',
+      'components/Pill/Pill.tsx: preview-badge',
+    ]);
+    expect(findAll(code.filter(({ file }) => !mayNameTheCapsBadge(file)), matches(CAPS_BADGE_NAMES))).toEqual([]);
   });
 
   it('no_invisible_characters_in_any_file', () => {

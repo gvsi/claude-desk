@@ -117,7 +117,7 @@ function drawsText(el: Element): boolean {
  * The product's one all-caps label (owner, 2026-10-30): the lockup's badge, `Pill caps`, whose word is
  * written "Preview" and drawn in capitals. Only that element, with exactly that word, may be uppercased.
  */
-const CAPS_BADGE = { selector: '[data-ds="preview-badge"]', text: 'Preview' } as const;
+export const CAPS_BADGE = { selector: '[data-ds="preview-badge"]', text: 'Preview' } as const;
 
 function isTheCapsBadge(el: Element): boolean {
   return el.matches(CAPS_BADGE.selector) && el.children.length === 0 && el.textContent === CAPS_BADGE.text;
