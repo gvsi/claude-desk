@@ -1006,29 +1006,31 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
                           check=check, stage=stage, turn=turn)
 
 
-def _turn_message(interview: Interview, key: QuestionKey, text: str) -> dict:
+def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: str | None = None) -> dict:
     """The answer turn's one message: the fixed head, then everything untrusted inside its wrapper. A limit question's
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
     even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
     turn includes earlier owner answers and Claude replies only after this question's last ask, never tool labels
     or their content. On a limit question these replies were made under the same isolation; earlier questions'
-    replies, which may repeat memory or website text, never enter the exchange."""
+    replies, which may repeat memory or website text, never enter the exchange. Entries staged by this run are
+    excluded from all transcript history; the current answer appears only in `owner_answer`."""
+    transcript = [entry for entry in interview.transcript if run_id is None or entry.pending != run_id]
     limit_turn = key in LIMIT_QUESTIONS.values()
     so_far = interview.answers.model_dump_json(exclude_defaults=True)
     if limit_turn:
         so_far = interview.answers.model_dump_json(include=set(LIMIT_QUESTIONS), exclude_defaults=True)
     parts = [setup_turn_head(interview.business_type, key), wrap(ANSWERS_SO_FAR_TAG, so_far)]
-    reads = [] if limit_turn else interview.transcript
+    reads = [] if limit_turn else transcript
     for entry in reads:
         if entry.read == "memory" and entry.content:
             parts.append(wrap(MEMORY_TAG, entry.content))
         elif entry.read == "website" and entry.content:
             parts.append(wrap_website(entry.content, entry.website or ""))
-    start = next((index + 1 for index in range(len(interview.transcript) - 1, -1, -1)
-                  if interview.transcript[index].question == key), len(interview.transcript))
+    start = next((index + 1 for index in range(len(transcript) - 1, -1, -1)
+                  if transcript[index].question == key), len(transcript))
     lines = [summary_line(SETUP_EXCHANGE_LABELS[entry.role], entry.text)
-             for entry in interview.transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS]
+             for entry in transcript[start:] if entry.role in SETUP_EXCHANGE_LABELS]
     if lines:
         parts.append(this_question_so_far(lines))
     parts.append(wrap(OWNER_ANSWER_TAG, text))
@@ -1119,10 +1121,11 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
     async def run(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
         key = question
         desk_id = interview.desk_id
-        turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
-                                [_turn_message(interview, key, text)], SETUP_TURNS[key], TURN_MAX_TOKENS)
-        patch = turn.patch()
         said, = staged
+        turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
+                                [_turn_message(interview, key, text, run_id=said.pending)],
+                                SETUP_TURNS[key], TURN_MAX_TOKENS)
+        patch = turn.patch()
         entries = []
         if turn.reply.strip():
             entries.append(Entry(role="claude", text=turn.reply.strip()))
