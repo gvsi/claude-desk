@@ -52,8 +52,8 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   };
   const inbox = useQuery({
     ...ownerInboxQuery(),
-    // Once as Today opens, unless it was just read ahead of Today; after that, only while the sheet
-    // is open, where a return to the tab or the network reads however fresh the last read is.
+    // Today's opening reads it first (`useTodayOpening`); this reads it again only while the sheet is
+    // open, where a return to the tab or the network reads however fresh the last read is.
     staleTime: FRESH_MS,
     // Today opens on what its first read found, a failure included, as it does with its other reads.
     retryOnMount: false,

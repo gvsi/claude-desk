@@ -410,6 +410,8 @@ describe('Demo inbox', () => {
     await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Today' }).click();
     const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line).toBeVisible();
+    // Time for a read on mount to go out, had Today sent the failed one again.
+    await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(2);
     expect(sawItOpening()).toBe(false);
     expect(screen.getByRole('button', { name: /^Demo inbox/ }).elements()).toHaveLength(0);
@@ -445,6 +447,24 @@ describe('Demo inbox', () => {
     await screen.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
     await expect.element(line).not.toBeInTheDocument();
+  });
+
+  it('owner_inbox_that_failed_is_read_again_on_the_next_visit', async () => {
+    // Today opens on a failed inbox read without sending it again. The next time Today opens, from
+    // another page, it reads the inbox afresh, and once that read works the inbox shows.
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0 });
+    const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    await expect.element(line).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(2);
+
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    await nav.getByRole('link', { name: 'Rules' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await nav.getByRole('link', { name: 'Today' }).click();
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(3);
+    expect(line.elements()).toHaveLength(0);
   });
 
   it('owner_inbox_still_out_as_today_opens_says_so', { timeout: 15_000 }, async () => {
