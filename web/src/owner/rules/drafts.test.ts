@@ -523,6 +523,59 @@ describe('rule drafts', () => {
     ]);
   });
 
+  /** Rivera's rules with a shared rule on private data changed in place from `was` to `now`, beside a quote and a refund change. */
+  function privateDataChange(was: RuleCard, now: RuleCard) {
+    const quoteDiscount = changed(ruleCards['rv-quote'], { max_discount_bp: 1000 });
+    const refundReworded = changed(ruleCards['rv-refund'], { reason: 'Refunds wait for you.' });
+    const pairs: [RuleCard, RuleCard][] = [
+      [ruleCards['rv-quote'], quoteDiscount],
+      [ruleCards['rv-refund'], refundReworded],
+      [was, now],
+    ];
+    const untouched = RIVERA_CARDS.filter((card) => !['rv-quote', 'rv-refund'].includes(card.card_id));
+    const draft = draftFromDiff(
+      rulesDraft({ cards: [...untouched, ...pairs.map(([, after]) => after)], diff: { added: [], removed: [], changed: pairs } }),
+      version(7, [...RIVERA_CARDS, was]),
+    );
+    return changeRows(draft, PEOPLE, TOOLS);
+  }
+
+  /** An automatic rule on private data for record owners, which alone covers only See charges, the one tool whose only effect it is. */
+  const autoPrivate: RuleCard = {
+    card_id: 'card-private',
+    applies_to: 'effect:private_data',
+    mode: 'auto',
+    who: 'record_owner',
+    reason: "Customers see their own records after confirming it's them.",
+  };
+  /** The same rule made "Never" for anyone, which covers every tool that touches private data. */
+  const neverPrivate = changed(autoPrivate, { mode: 'never', who: 'anyone', reason: 'Private records never go out.' });
+
+  it('shared_rule_covering_more_after_a_change_names_every_tool', () => {
+    // Made "Never", the rule also blocks Share a document and Refund: the row names every tool on
+    // either side, spans connectors so it has none and goes last, and each side names what it
+    // covers, the after side's target tagged as changed.
+    const rows = privateDataChange(autoPrivate, neverPrivate);
+    expect(rows.map((row) => row.key)).toEqual(['rv-quote', 'rv-refund', 'card-private']);
+    const row = rows[2];
+    expect(row).toMatchObject({ change: 'changed', title: 'Share a document, See charges and Refund', changed: ['applies_to', 'mode', 'who', 'reason'] });
+    expect(row?.connector).toBeUndefined();
+    expect(row?.before).toEqual({ appliesTo: 'See charges', mode: 'auto', reason: autoPrivate.reason, words: ruleWords(autoPrivate, PEOPLE) });
+    expect(row?.after).toEqual({ appliesTo: 'Share a document, See charges and Refund', mode: 'never', reason: neverPrivate.reason, words: ruleWords(neverPrivate, PEOPLE) });
+  });
+
+  it('shared_rule_covering_less_after_a_change_names_every_tool', () => {
+    // Made automatic, the rule covers only See charges: the row still names every tool it covered,
+    // and each side names its own.
+    const rows = privateDataChange(neverPrivate, autoPrivate);
+    expect(rows.map((row) => row.key)).toEqual(['rv-quote', 'rv-refund', 'card-private']);
+    const row = rows[2];
+    expect(row).toMatchObject({ change: 'changed', title: 'Share a document, See charges and Refund', changed: ['applies_to', 'mode', 'who', 'reason'] });
+    expect(row?.connector).toBeUndefined();
+    expect(row?.before?.appliesTo).toBe('Share a document, See charges and Refund');
+    expect(row?.after?.appliesTo).toBe('See charges');
+  });
+
   it('recommended_preset_keeps_what_it_automates', () => {
     // Rivera's rules as the seed has them, the starter's cards included, drafted to "Recommended rules".
     const owner = [...PRESETS.ask_first, ...RIVERA_CARDS];

@@ -27,15 +27,16 @@ function connectorFor(card: RuleCard): ConnectorView | undefined {
 }
 
 /**
- * A card on one side of a row: its outcome and limit, its reason and its words, and, when the row's
- * target moves (a card retargeted, or one that goes to a rule for a whole effect group), what it
- * applies to, so the widened or narrowed target shows. Otherwise the row's title names the target
- * and the sides don't repeat it (N-Conn-18).
+ * A card on one side of a row: its outcome and limit, its reason and its words, and `appliesTo`,
+ * what it applies to, only when the row's target moves (a card retargeted, one that goes to a rule
+ * for a whole effect group, or a shared rule that covers other tools than it did), so the widened
+ * or narrowed target shows. Otherwise the row's title names the target and the sides don't repeat
+ * it (N-Conn-18).
  */
-function cardSide(card: RuleCard, people: PeopleOut | null | undefined, moved: boolean): ChangeSide {
+function cardSide(card: RuleCard, people: PeopleOut | null | undefined, appliesTo: string | undefined): ChangeSide {
   const amount = card.mode === 'auto' && card.max_amount_cents != null ? formatCents(card.max_amount_cents) : undefined;
   return {
-    ...(moved ? { appliesTo: targetWords(card.applies_to) } : {}),
+    ...(appliesTo === undefined ? {} : { appliesTo }),
     mode: card.mode,
     ...(amount === undefined ? {} : { limit: amount }),
     reason: card.reason,
@@ -116,14 +117,57 @@ function rowLabel(card: RuleCard, side: readonly RuleCard[], catalog: readonly R
     const connector = connectorFor(card);
     return { title: targetWords(card.applies_to), ...(connector === undefined ? {} : { connector }), place: toolPlace(card.applies_to) };
   }
-  const covered = coveredTools(card, side, catalog);
+  return coveredLabel(coveredTools(card, side, catalog)) ?? { title: targetWords(card.applies_to), place: LAST_PLACE };
+}
+
+/**
+ * How a shared rule's row reads by the tools it covers, `covered`, in review order: their names
+ * joined; with their connector when they share one, right after the rows of the first of them;
+ * else no connector, last. None when it covers no tool.
+ */
+function coveredLabel(covered: readonly ToolName[]): RowLabel | undefined {
   const [first] = covered;
-  if (first === undefined) return { title: targetWords(card.applies_to), place: LAST_PLACE };
-  const title = listWords(covered.map((tool) => targetWords(tool)));
+  if (first === undefined) return undefined;
+  const title = coveredWords(covered);
   const connectors = new Set(covered.map((tool) => connectorOf(tool)?.key ?? null));
   const [only] = connectors;
   const connector = connectors.size === 1 && only != null ? connectorByKey(only)?.view : undefined;
   return connector === undefined ? { title, place: LAST_PLACE } : { title, connector, place: toolPlace(first) + 0.5 };
+}
+
+/** The names of the tools a shared rule covers, joined ("Share a document, See charges and Refund"). */
+function coveredWords(covered: readonly ToolName[]): string {
+  return listWords(covered.map((tool) => targetWords(tool)));
+}
+
+/** What a side covers, in words: its tools' names, or its group's words when it covers none of this Desk's. */
+function sideCoverage(card: RuleCard, covered: readonly ToolName[]): string {
+  return covered.length > 0 ? coveredWords(covered) : targetWords(card.applies_to);
+}
+
+/** A row that moves in the tools it covers: its label, and what each side covers in words. */
+interface CoverageMove {
+  label: RowLabel;
+  before: string;
+  after: string;
+}
+
+/**
+ * A row whose two sides are shared rules that cover different tools of this Desk's `catalog`, each
+ * among its own side of `draft`. Coverage follows a rule's outcome and the shared rules beside it,
+ * so a rule changed in place can cover other tools: made "Never" from automatic, a rule on private
+ * data covers every tool that touches it, not only those it covered jointly. Such a row reads by
+ * every tool either side covers, in review order, and each side names its own. None when either
+ * side isn't a shared rule, or both cover the same tools.
+ */
+function coverageMove(before: RuleCard, after: RuleCard, draft: RuleDraft, catalog: readonly RulesTool[]): CoverageMove | undefined {
+  if (!isEffectCard(before) || !isEffectCard(after)) return undefined;
+  const was = coveredTools(before, draft.before, catalog);
+  const now = coveredTools(after, draft.after, catalog);
+  if (was.length === now.length && was.every((tool, index) => now[index] === tool)) return undefined;
+  const label = coveredLabel(catalog.map((tool) => tool.tool).filter((tool) => was.includes(tool) || now.includes(tool)));
+  if (label === undefined) return undefined;
+  return { label, before: sideCoverage(before, was), after: sideCoverage(after, now) };
 }
 
 /** `items` by `place`, a stable sort, so items at one place keep their order. */
@@ -135,7 +179,8 @@ function byPlace<T>(items: readonly T[], place: (item: T) => number): T[] {
  * The review's rows: a row per card change (`reviewChanges` over the draft's before and after), each
  * side in words, then a `turned_on` row per tool the draft turns on, at the outcome the draft's
  * rules give it for anyone (`governingForAnyone`), else the default ask. The changed rows, then the
- * added ones, each go by connector and by tool within one, a shared rule placed by `rowLabel`.
+ * added ones, each go by connector and by tool within one, a shared rule placed by `rowLabel`, or,
+ * when it covers other tools after than before, by every tool either side covers (`coverageMove`).
  * `tools` is this Desk's catalog: each tool's effects, which say which shared rules cover and
  * govern it; the draft's own `turnedOn` rows count too.
  */
@@ -157,20 +202,26 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
   // dropped one (`rulesForTool`'s order) nor the pairing depends on the review's order; only the
   // rows it returns are sorted.
   const placed = reviewChanges(draft.before, draft.after, effectsOf).map((change) => {
-    const card = change.before ?? change.after;
+    const { before, after } = change;
+    const card = before ?? after;
     if (card === null) throw new Error('a review change with no card');
-    const { title, connector, place } = change.before === null ? labelOf(card, afterLabels) : labelOf(card, beforeLabels);
-    const moved = change.before !== null && change.after !== null && change.after.applies_to !== change.before.applies_to;
+    // A row reads by its card's side, the after side for an added rule; a shared rule that covers
+    // other tools after reads by every tool either side covers.
+    const move = before !== null && after !== null ? coverageMove(before, after, draft, catalog) : undefined;
+    const { title, connector, place } = move?.label ?? labelOf(card, before === null ? afterLabels : beforeLabels);
+    const retargeted = before !== null && after !== null && after.applies_to !== before.applies_to;
+    const target = (side: RuleCard, covered: string | undefined) => covered ?? (retargeted ? targetWords(side.applies_to) : undefined);
     // A shared rule's own row (an effect card that doesn't move) is where the design system's
-    // `ChangeRowView.shared` goes once it has one; a row that moves shows the move in `appliesTo`.
+    // `ChangeRowView.shared` goes once it has one. A row that moves, in its target or in the tools
+    // it covers, shows the move in `appliesTo`, the after side's target tagged as changed.
     const row: ChangeRowView = {
       key: card.card_id,
       change: change.change,
       title,
       ...(connector === undefined ? {} : { connector }),
-      before: change.before === null ? null : cardSide(change.before, people, moved),
-      after: change.after === null ? defaultSide() : cardSide(change.after, people, moved),
-      changed: change.fields,
+      before: before === null ? null : cardSide(before, people, target(before, move?.before)),
+      after: after === null ? defaultSide() : cardSide(after, people, target(after, move?.after)),
+      changed: move === undefined || change.fields.includes('applies_to') ? change.fields : ['applies_to', ...change.fields],
     };
     return { row, place };
   });
@@ -189,7 +240,7 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
       title,
       ...(connector === undefined ? {} : { connector }),
       before: null,
-      after: governing === undefined ? defaultSide() : cardSide(governing, people, false),
+      after: governing === undefined ? defaultSide() : cardSide(governing, people, undefined),
       changed: [],
     });
   }
