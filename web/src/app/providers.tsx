@@ -6,7 +6,9 @@ import { ApiError, observeRequests } from '../api/http.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { readLocal, writeLocal } from '../lib/storage.ts';
 import { retryDelayMs } from './poll.ts';
+import { invalidateCopy } from '../owner/useDesks.ts';
 import { PublicChatProvider } from '../public/PublicChatProvider.tsx';
+import { MOVES_SETUP } from '../setup/shared.ts';
 
 /**
  * Owner routes whose 401 doesn't end a session: creating a copy (a wrong passcode), asking whether
@@ -75,6 +77,17 @@ export function Providers({ router, children }: ProvidersProps) {
         void router.navigate('/', { state, replace: true });
       }),
     [router],
+  );
+
+  // Setup's work that moves an interview on can settle after setup has closed (the owner left while
+  // the rules draft was still being made): the copy's Desks, which name each Desk's setup step, are
+  // read again as each settles, so Today names the step the API has now.
+  useEffect(
+    () =>
+      observeRequests((outcome) => {
+        if (MOVES_SETUP.has(outcome.key)) void invalidateCopy(queryClient);
+      }),
+    [queryClient],
   );
 
   return (

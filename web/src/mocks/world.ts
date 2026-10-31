@@ -106,7 +106,8 @@ export interface SessionRecord {
 export type ToolRecord = ToolProfile & { review_reason: ToolReviewReason | null };
 
 export interface DeskRecord {
-  summary: DeskSummary;
+  /** The Desk as the copy lists it, but its setup, which is its interview's (`withSetupDesks`). */
+  summary: Omit<DeskSummary, 'setup'>;
   /** The active rules version, with its money cap. */
   policy: PolicyVersionOut;
   ledger: LedgerEntry[];
@@ -563,7 +564,7 @@ export class MockWorld {
       card_ids: [...spec.cardIds],
       review: null,
       reason_plain: spec.reasonPlain,
-      visitor_plain: statusLine(language, state, spec.tool),
+      visitor_plain: statusLine(language, state === 'refused' && spec.visitorStatus !== undefined ? spec.visitorStatus : state, spec.tool),
       answers: hold ? answersFor(spec, session.person !== null) : [],
       expires_at: isoTime(this.now() + DAY),
       inbox,

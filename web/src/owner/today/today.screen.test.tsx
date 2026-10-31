@@ -10,9 +10,9 @@ import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
-import { observeRequests } from '../../api/http.ts';
+import { newIdempotencyKey, observeRequests } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
-import type { BriefingItem, BriefingList, ConversationSummary, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
+import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, SetupState, ThisWeek, Today } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
@@ -21,7 +21,9 @@ import { writeLocal } from '../../lib/storage.ts';
 import { worker } from '../../mocks/browser.ts';
 import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
+import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { START_EXAMPLES } from '../../setup/copy.ts';
 import { expectLandedInPlace, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import {
@@ -1618,6 +1620,429 @@ describe('Today', () => {
       .toBeVisible();
     expect(document.body.textContent).not.toContain("That didn't go through. Check it and try again.");
     expect(router.state.location.pathname).toBe(TODAY);
+  });
+
+  it.each(['desktop', 'phone'] as const)('things_to_try_opens_the_vision_article_on_%s', async (viewport) => {
+    // One quiet link under the list, after its card, opens the Vision article under About this prototype.
+    const { screen, router } = await renderRoute(TODAY, { viewport });
+    const things = region(screen, 'Things to try');
+    const link = things.getByRole('link', { name: 'Vision: where a Desk could go next', exact: true });
+    await expect.element(link).toHaveAttribute('href', '/about/vision');
+    const list = things.getByRole('list').first().element();
+    expect(link.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(list.getBoundingClientRect().bottom);
+    // It replaces the link to the city office: no other link leads to a vision page.
+    const vision = things.getByRole('link').elements().filter((a) => (a.getAttribute('href') ?? '').startsWith('/vision/'));
+    expect(vision).toEqual([]);
+    expect(things.element().textContent).not.toContain('Where this is going');
+    // The same tab, through the router: the app stays loaded.
+    expect(link.element().getAttribute('target')).toBeNull();
+    await link.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'A front desk that never closes', exact: true })).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(0);
+    const heading = screen.container.querySelector('h1')?.getBoundingClientRect();
+    expect(heading?.top).toBeGreaterThanOrEqual(0);
+    expect(heading?.bottom).toBeLessThanOrEqual(window.innerHeight);
+  });
+});
+
+describe("Today's unfinished setup", () => {
+  /** The start step's first example: Okafor Plumbing, whose owner is Daniel. */
+  const OKAFOR = START_EXAMPLES.en.examples[0]?.description ?? '';
+
+  /** A Desk the mock's setup made, its questions answered, then left at its tools. */
+  async function deskAtTools(): Promise<SetupState> {
+    const started = await mockStore.dispatch('startSetup', { body: { description: OKAFOR, timezone: LA, idempotency_key: newIdempotencyKey() } });
+    if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+    const state = started.body as SetupState;
+    const id = state.interview_id;
+    await mockStore.dispatch('setupConsent', { params: { id }, body: { allow: false } });
+    for (const question of SETUP_QUESTIONS) await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: question.key, text: 'Yes, that works.' } });
+    return state;
+  }
+
+  /** A Desk the mock's setup made, its questions answered and its rules drafted, then left there. */
+  async function deskAtRules(): Promise<SetupState> {
+    const state = await deskAtTools();
+    await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
+    return state;
+  }
+
+  it('unfinished_setup_leads_back_into_it', async () => {
+    // Daniel left his new Desk's setup at its rules. Its Today says it isn't live yet, at the top of
+    // the page, and leads back into the interview at that step.
+    const state = await deskAtRules();
+    const { screen, router } = await renderRoute(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect.element(card).toBeVisible();
+    await expect.element(card.getByText('Not live yet', { exact: true })).toBeVisible();
+    expect(card.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+    const title = card.getByRole('heading', { level: 2, name: 'Finish setting up Okafor Plumbing' });
+    await expect.element(title).toBeVisible();
+    // The business's name is the owner's own words.
+    expect(title.element().querySelector('[data-copy="user"]')?.textContent).toBe('Okafor Plumbing');
+    await expect
+      .element(
+        card.getByText(
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          { exact: true },
+        ),
+      )
+      .toBeVisible();
+    // The setup steps, at Rules.
+    const steps = card.getByRole('list', { name: 'Setup steps' });
+    expect(steps.getByRole('listitem').elements().map((step) => step.textContent)).toEqual(['Questions, done', 'Tools, done', '3Rules', '4Safety check', '5Live']);
+    expect(steps.element().querySelector('[aria-current="step"]')?.textContent).toBe('3Rules');
+    const resume = card.getByRole('link', { name: 'Continue setup' });
+    await expect.element(resume).toHaveAttribute('href', `/app/setup/${state.interview_id}`);
+
+    // It comes first in Today's column, above Things to try, which stays.
+    const things = screen.getByRole('heading', { level: 2, name: 'Things to try' }).element();
+    expect(card.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // "Continue setup" reopens the interview at its rules.
+    await resume.click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+  });
+
+  it('save_and_exit_lands_on_the_card', async () => {
+    // Leaving setup with "Save and exit" opens the new Desk's Today, which leads back in: no loop
+    // between the two, and the card names the step the owner left.
+    const state = await deskAtRules();
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect
+      .element(
+        card.getByText(
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          { exact: true },
+        ),
+      )
+      .toBeVisible();
+    expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+  });
+
+  /** The card's line at the rules, with Answering off. */
+  const AT_RULES = "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.";
+
+  /**
+   * Opens setup at its tools, with the copy's Desks read there, at the tools; then `meanwhile` sets
+   * how the Desks answer from here on, the owner goes on to the rules and, once the draft is in and
+   * the API has moved setup on, leaves with "Save and exit" at once, within the few seconds Today
+   * counts the Desks read as fresh. Resolves on Today.
+   */
+  async function leaveRightAfterAStep(meanwhile: () => void = () => undefined): Promise<RenderResult> {
+    const state = await deskAtTools();
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    // The bar names the business once the copy's Desks are read, at the tools.
+    await expect.element(screen.getByText('Okafor Plumbing', { exact: true }).first()).toBeVisible();
+    meanwhile();
+    const startedAt = performance.now();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(0);
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    // Today never draws the step before, not even for a moment as it opens.
+    const sawTools = watchFor('Pick up at your tools');
+    onTestFinished(() => expect(sawTools(), 'Today drew the tools step').toBe(false));
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    expect(performance.now() - startedAt, "left within the Desks' fresh window").toBeLessThan(5_000);
+    return screen;
+  }
+
+  /** The card names the rules, with the steps at Rules. */
+  async function expectCardAtRules(screen: RenderResult): Promise<void> {
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect.element(card.getByText(AT_RULES, { exact: true })).toBeVisible();
+    expect(card.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('3Rules');
+  }
+
+  it('leaving_setup_right_after_a_step_names_the_new_step', async () => {
+    // The owner reads setup at its tools, goes on to the rules and leaves at once: the card names the rules, not the tools.
+    await expectCardAtRules(await leaveRightAfterAStep());
+  });
+
+  it('leaving_setup_names_the_new_step_while_the_desks_are_still_read', async () => {
+    // The copy's Desks, read again from the tools on, answer slowly: each read is answered as setup
+    // stands when it arrives, and the answer comes only when the test lets it. Today already names
+    // the step setup holds, rather than the one the Desks named at the tools.
+    let held = 0;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const screen = await leaveRightAfterAStep(() => {
+      worker.use(
+        http.get(ROUTES.desks.path, async () => {
+          held += 1;
+          const answer = await mockStore.dispatch('desks');
+          await released;
+          if ('network' in answer) return HttpResponse.error();
+          return HttpResponse.json(answer.body as object, { status: answer.status });
+        }),
+      );
+    });
+    await expect.poll(() => held).toBeGreaterThan(0);
+    await expectCardAtRules(screen);
+    // The answers come: the read sent as setup moved on, answered with the tools before the draft
+    // moved the API on, is let go; the one sent since names the rules. The card still names them.
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expectCardAtRules(screen);
+  });
+
+  it('leaving_setup_names_the_new_step_when_the_desks_cannot_be_read', async () => {
+    // The copy's Desks can't be read again after the tools: Today still names the step setup holds,
+    // and keeps naming it while the reads keep failing.
+    let before = 0;
+    const screen = await leaveRightAfterAStep(() => {
+      before = requests('desks').length;
+      mockStore.inject({ route: 'desks', status: 503, times: 10_000 });
+    });
+    await expectCardAtRules(screen);
+    // Every read of the Desks from the tools on fails: the step change's, and Today's own with its retry.
+    await expect.poll(() => requests('desks').length - before, { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
+    await expectCardAtRules(screen);
+  });
+
+  it('with_answering_on_the_line_says_nothing_of_answering', async () => {
+    // The Answering switch is separate from setup: Daniel turned Answering on before finishing his
+    // setup, so the card names where he picks up, and says nothing of Answering staying off.
+    const state = await deskAtRules();
+    await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: true } });
+    const { screen } = await renderRoute(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect
+      .element(card.getByText("Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.", { exact: true }))
+      .toBeVisible();
+    expect(card.element().textContent).not.toMatch(/Answering/);
+    await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('a_draft_that_lands_after_leaving_moves_the_card_on', async () => {
+    // The owner goes on from the tools and leaves while the rules draft is still being made: the API
+    // still has setup at its tools, so Today names them. Once the draft lands and the API moves setup
+    // on, Today names the rules, with no reload.
+    const state = await deskAtTools();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    worker.use(
+      http.post(ROUTES.setupRules.path.replace('{id}', state.interview_id), async () => {
+        await released;
+        return undefined;
+      }),
+    );
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByText('Drafting your rules', { exact: true })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect
+      .element(card.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
+      .toBeVisible();
+
+    release();
+    await expectCardAtRules(screen);
+  });
+
+  /** The card's line at the tools, with Answering off. */
+  const AT_TOOLS = 'Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.';
+
+  /**
+   * From Today, setup reopened at its tools; the rules it goes on to can't be checked (the API keeps
+   * it at the tools), and the owner leaves from there with "Save and exit", back to a Today already
+   * read. `meanwhile` runs once setup shows its tools. Resolves on Today, watching for the rules ever
+   * being named on the way.
+   */
+  async function leaveAfterACheckThatCannotRun(meanwhile: () => void = () => undefined) {
+    const state = await deskAtTools();
+    mockStore.inject({ route: 'setupRules', status: 409, body: { error: 'rules_cannot_be_checked' } });
+    const { screen, router } = await renderRoute(`/app/${state.desk_id}/today`);
+    const first = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect.element(first.getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    await first.getByRole('link', { name: 'Continue setup' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    meanwhile();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByText(/^I can't check these rules right now/)).toBeVisible();
+    const sawRules = watchFor('Pick up at your rules');
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    return { screen, router, state, sawRules };
+  }
+
+  it('rules_that_cannot_be_checked_leave_today_at_the_tools', async () => {
+    // The API keeps setup at its tools when its rules can't be checked: Today names the tools, and
+    // never the rules the page went on to, not even for a moment.
+    const { screen, sawRules } = await leaveAfterACheckThatCannotRun();
+    await expect.element(region(screen, 'Finish setting up Okafor Plumbing').getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    expect(sawRules()).toBe(false);
+  });
+
+  it('rules_that_cannot_be_checked_reopen_at_the_tools_when_the_desks_cannot_be_read', async () => {
+    // The same, with the copy's Desks failing from the tools on: the card still names the tools, and
+    // "Continue setup" opens the tools, whose Continue checks the rules again.
+    const { screen, router, state, sawRules } = await leaveAfterACheckThatCannotRun(() => {
+      mockStore.inject({ route: 'desks', status: 503, times: 10_000 });
+    });
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect.element(card.getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    expect(sawRules()).toBe(false);
+    await card.getByRole('link', { name: 'Continue setup' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+  });
+
+  it('the_card_waits_for_today_to_open', async () => {
+    // Leaving setup for Today while what Today first shows is still being read: Today holds its
+    // loading line alone, with no card, then opens with the card first.
+    const state = await deskAtRules();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', state.desk_id));
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
+
+    needsYou.release();
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect.element(card).toBeVisible();
+    const things = screen.getByRole('heading', { level: 2, name: 'Things to try' }).element();
+    expect(card.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('unfinished_setup_fits_a_laptop_and_a_phone', async () => {
+    // On a laptop "Continue setup" sits at the words' right, level with their top. On a phone the
+    // card still comes first, and the button drops under the words, from their left edge, as Today's
+    // other rows do. Nothing scrolls sideways at either width.
+    const state = await deskAtRules();
+    const parts = (screen: RenderResult) => {
+      const card = region(screen, 'Finish setting up Okafor Plumbing');
+      return {
+        card: card.element().getBoundingClientRect(),
+        // The "Not live yet" line, the words' first.
+        status: (card.getByText('Not live yet', { exact: true }).element().closest('p') ?? document.body).getBoundingClientRect(),
+        line: card.getByText(/^Your answers are saved\./).element().getBoundingClientRect(),
+        button: card.getByRole('link', { name: 'Continue setup' }).element().getBoundingClientRect(),
+        // The steps as drawn: the row, or under 480 px of its own width the one line that says where it is.
+        steps: (card.getByRole('list', { name: 'Setup steps' }).element().parentElement ?? document.body).getBoundingClientRect(),
+        things: screen.getByRole('heading', { level: 2, name: 'Things to try' }).element().getBoundingClientRect(),
+      };
+    };
+
+    const laptop = await renderRoute(`/app/${state.desk_id}/today`);
+    await expect.element(region(laptop.screen, 'Finish setting up Okafor Plumbing')).toBeVisible();
+    const wide = parts(laptop.screen);
+    expect(wide.button.left).toBeGreaterThanOrEqual(wide.line.right);
+    expect(Math.abs(wide.button.top - wide.status.top)).toBeLessThanOrEqual(1);
+    expect(wide.steps.top).toBeGreaterThanOrEqual(Math.max(wide.line.bottom, wide.button.bottom));
+    expect(wide.card.bottom).toBeLessThanOrEqual(wide.things.top);
+    expectNoHorizontalScroll();
+
+    const phone = await renderRoute(`/app/${state.desk_id}/today`, { viewport: 'phone' });
+    await expect.element(region(phone.screen, 'Finish setting up Okafor Plumbing')).toBeVisible();
+    const narrow = parts(phone.screen);
+    expect(narrow.card.bottom).toBeLessThanOrEqual(narrow.things.top);
+    expect(narrow.button.top).toBeGreaterThanOrEqual(narrow.line.bottom);
+    expect(Math.abs(narrow.button.left - narrow.line.left)).toBeLessThanOrEqual(1);
+    expect(narrow.steps.top).toBeGreaterThanOrEqual(narrow.button.bottom);
+    expect(narrow.button.right).toBeLessThanOrEqual(narrow.card.right);
+    const main = phone.screen.getByRole('main').element();
+    expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(phone.screen.container, { owner: true });
+  });
+
+  it('a_live_desk_has_no_setup_card', async () => {
+    // The seeded copy's Desk is live and was made without setup: Today has no card, and Things to try stays.
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Things to try')).toBeVisible();
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
+    expect(screen.getByRole('heading', { name: /^Finish setting up/ }).elements()).toHaveLength(0);
+    expect(screen.getByRole('link', { name: 'Continue setup' }).elements()).toHaveLength(0);
+  });
+
+  it('a_desk_listed_without_its_setup_has_no_card', async () => {
+    // An API from before `setup` lists the Desk without it: Today opens as for a live Desk.
+    const read = await mockStore.dispatch('desks');
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the Desks');
+    const without = (read.body as BusinessOut[]).map((business) => ({
+      ...business,
+      desks: business.desks.map(({ setup: _setup, ...desk }) => desk),
+    }));
+    mockStore.inject({ route: 'desks', status: 200, times: 10_000, body: without });
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Things to try')).toBeVisible();
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
+  });
+
+  it('the_line_names_the_step_setup_stopped_at', async () => {
+    // At each step setup can stop at, the card says where the owner picks up and the steps mark it;
+    // once the Desk goes live, the card leaves.
+    const state = await deskAtRules();
+    const id = state.interview_id;
+    const lineAt = async (step: string, line: string) => {
+      const { screen } = await renderRoute(`/app/${state.desk_id}/today`);
+      const card = region(screen, 'Finish setting up Okafor Plumbing');
+      await expect.element(card.getByText(line, { exact: true }), { timeout: 5_000 }).toBeVisible();
+      const current = card.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]');
+      expect(current?.textContent, step).toBe(step);
+    };
+    await lineAt(
+      '3Rules',
+      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+    );
+    await mockStore.dispatch('setupSituations', { params: { id } });
+    await lineAt(
+      '3Rules',
+      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+    );
+    await mockStore.dispatch('setupSafetyCheck', { params: { id } });
+    await lineAt(
+      '4Safety check',
+      "Your answers are saved. Pick up at the safety check, and I'll check your rules again before anything goes live. Answering stays off until then.",
+    );
+    await mockStore.dispatch('setupConfirm', { params: { id } });
+    await lineAt('5Live', 'Your answers are saved. Pick up at going live. Answering stays off until then.');
+
+    await mockStore.dispatch('goLive', { params: { id } });
+    const live = await renderRoute(`/app/${state.desk_id}/today`);
+    await expect.element(region(live.screen, 'Things to try')).toBeVisible();
+    expect(live.screen.getByText('Not live yet').elements()).toHaveLength(0);
+    expect(live.screen.getByRole('link', { name: 'Continue setup' }).elements()).toHaveLength(0);
+
+    // A Desk left at its questions, and one left at its tools.
+    const started = await mockStore.dispatch('startSetup', { body: { description: OKAFOR, timezone: LA, idempotency_key: newIdempotencyKey() } });
+    if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+    const next = started.body as SetupState;
+    const atQuestions = await renderRoute(`/app/${next.desk_id}/today`);
+    const first = region(atQuestions.screen, 'Finish setting up Okafor Plumbing');
+    await expect
+      .element(first.getByText('Your answers are saved. Pick up at the questions. Answering stays off until your Desk is live.', { exact: true }))
+      .toBeVisible();
+    expect(first.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
+    const tools = await deskAtTools();
+    const atTools = await renderRoute(`/app/${tools.desk_id}/today`);
+    const second = region(atTools.screen, 'Finish setting up Okafor Plumbing');
+    await expect
+      .element(second.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
+      .toBeVisible();
+    expect(second.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('2Tools');
   });
 });
 

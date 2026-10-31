@@ -44,7 +44,7 @@ import {
 } from './readModels.ts';
 import { EVENT_GAP_MS, afterAnswer, afterVerify, allows, cardDiffFor, ruleChatReply, scriptedTurn, turnEnd, type Language, type Step } from './script.ts';
 import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
-import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupGreeting } from './setup.ts';
+import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
 /** Plan 02's limit on a visitor's message and on the owner's words. */
@@ -411,7 +411,9 @@ const SERVED: ServedRoutes = {
     return ok(copyOut(sv.world));
   },
   me(sv, req) {
-    return req.cookies.owner ? ok(copyOut(sv.world)) : NO_OWNER;
+    if (!req.cookies.owner) return NO_OWNER;
+    const copy = copyOut(sv.world);
+    return ok({ ...copy, desks: withSetupDesks(sv.world, copy.desks) });
   },
   desks(sv, req) {
     return req.cookies.owner ? ok(withSetupBusinesses(sv.world, [businessOut(sv.world)])) : NO_OWNER;

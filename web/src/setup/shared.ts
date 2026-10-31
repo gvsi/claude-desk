@@ -5,7 +5,31 @@
 import { Fragment, createElement, type ReactNode } from 'react';
 
 import { ApiError, request } from '../api/http.ts';
+import type { RouteKey } from '../api/routes.ts';
+import { SETUP_STEPS, type SetupStep } from '../api/views.ts';
 import { SETUP_COPY } from './copy.ts';
+
+/**
+ * The requests that can move a setup interview on in the API: an answer, the rules draft, the
+ * situations, the safety check, the confirm and going live. The copy's Desks name each Desk's
+ * setup step, so each one, as it settles, has them read again (the app's providers), even once
+ * setup has closed: one still out when the owner left lands later.
+ */
+export const MOVES_SETUP: ReadonlySet<RouteKey> = new Set<RouteKey>(['setupAnswer', 'setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm', 'goLive']);
+
+/** The step each request that moves an interview on has it at in the API once it succeeds. */
+export const SETUP_REACHES: Readonly<Partial<Record<RouteKey, SetupStep>>> = {
+  setupRules: 'rules',
+  setupSituations: 'situations',
+  setupSafetyCheck: 'safety_check',
+  setupConfirm: 'preview',
+  goLive: 'live',
+};
+
+/** The later of two setup steps, in setup's order (`SETUP_STEPS`): an interview only moves forward. */
+export function laterStep(a: SetupStep, b: SetupStep): SetupStep {
+  return SETUP_STEPS.indexOf(b) > SETUP_STEPS.indexOf(a) ? b : a;
+}
 
 /** Setup's rules draft: posted once on the way in, and read again by the same post (the API answers the same draft). */
 export function setupRulesQuery(id: string) {

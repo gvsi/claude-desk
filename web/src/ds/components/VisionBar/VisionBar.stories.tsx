@@ -9,7 +9,7 @@ const LINE = 'Vision, not in the prototype. Nothing here is live.';
 const meta = {
   title: 'Layout/VisionBar',
   component: VisionBar,
-  args: { backHref: '#today' },
+  args: { backHref: '#vision' },
   parameters: { layout: 'fullscreen', canvas: 'N-R2-Vision-TeamDesk' },
 } satisfies Meta<typeof VisionBar>;
 
@@ -38,11 +38,11 @@ export const Default: Story = {
     const line = within(bar).getByText(LINE);
     expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(Math.round(line.getBoundingClientRect().left - pill.getBoundingClientRect().right)).toBe(12);
-    await expect(bar).toHaveTextContent(`Vision${LINE}Back to your Desk`);
+    await expect(bar).toHaveTextContent(`Vision${LINE}Back to Vision`);
 
-    // "Back to your Desk" is a link at the right edge, 24 px in, in meta, and the bar's one tab stop.
-    const back = within(bar).getByRole('link', { name: 'Back to your Desk' });
-    await expect(back).toHaveAttribute('href', '#today');
+    // "Back to Vision" is a link at the right edge, 24 px in, in meta, and the bar's one tab stop.
+    const back = within(bar).getByRole('link', { name: 'Back to Vision' });
+    await expect(back).toHaveAttribute('href', '#vision');
     expectComputed(back, { fontSize: '13px', color: 'rgb(126, 174, 218)' });
     await expect(Math.round(bar.getBoundingClientRect().right - back.getBoundingClientRect().right)).toBe(24);
     await userEvent.tab();
@@ -62,7 +62,7 @@ export const Phone: Story = {
     await expect(document.documentElement.scrollWidth).toBe(document.documentElement.clientWidth);
     expectComputed(bar, { paddingLeft: '16px', paddingRight: '16px' });
     // Nothing is clipped: the line and the link stay inside the bar.
-    const back = within(bar).getByRole('link', { name: 'Back to your Desk' });
+    const back = within(bar).getByRole('link', { name: 'Back to Vision' });
     const line = within(bar).getByText(LINE);
     for (const part of [line, back]) {
       await expect(part.getBoundingClientRect().right).toBeLessThanOrEqual(bar.getBoundingClientRect().right - 16);

@@ -119,7 +119,7 @@ export const Board: Story = {
 
     // focus_order_is_logical: the bar, the sidebar, the page's action, the teammates, the conversation's controls, then access.
     await expectTabOrder(userEvent, [
-      within(bar).getByRole('link', { name: 'Back to your Desk' }),
+      within(bar).getByRole('link', { name: 'Back to Vision' }),
       within(sidebar).getByRole('button', { name: 'Switch Desk, current: Team' }),
       within(sidebar).getByRole('switch', { name: 'Answering' }),
       add,
