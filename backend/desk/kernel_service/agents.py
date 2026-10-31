@@ -240,9 +240,10 @@ async def _nonce_row(ctx: KernelCtx, agent_key_id: str, nonce: str) -> AgentNonc
 
 
 async def authenticate(ctx: KernelCtx, request: Request, row: SessionRow, *, route: str, named: Named) -> None:
-    """The signature check of a call for the agent session `row` (`auth.require_session`): signed
-    by the key the session was opened with, over its Desk's slug, in a turn that hasn't ended.
-    Remembers the turn on the request for `end_turn`."""
+    """The signature check of a call for the agent session `row` (`auth.authenticate_session`, which
+    `/decide`, `GET /decisions/{id}` and `auth.require_session` reach): signed by the key the
+    session was opened with, over its Desk's slug, in a turn that hasn't ended. Remembers the turn
+    on the request for `end_turn`."""
     call = signed_call(request, route=route, named=named)
     slug = (await ctx.db.scalars(ctx.repo.scoped(select(Desk.slug).where(Desk.desk_id == row.desk_id)))).one()
     await verify_agent_auth(ctx, slug, call, row.session_id, route=route, named=named,
