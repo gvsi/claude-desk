@@ -5,7 +5,7 @@
  * back or resume, whisper to Claude, or write to the visitor in their own words. Polled while open.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 
 import type { SessionState } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
@@ -93,6 +93,15 @@ function useTypingBubble(read: OwnerTranscriptRead | undefined): boolean {
     if (current !== seen) setSeen(current);
   }, [current, seen]);
   return current !== null && words <= current.words;
+}
+
+/**
+ * A held request's answer menu opens under its button, inside the transcript's scroll region, which
+ * clips whatever reaches past its foot, and focus lands on one of its answers. As it does, the
+ * region shows the whole menu, so she reads every answer before choosing, not only the one focused.
+ */
+function showTheWholeMenu(event: FocusEvent<HTMLElement>): void {
+  if (event.target instanceof Element) event.target.closest('[role="menu"]')?.scrollIntoView({ block: 'nearest' });
 }
 
 /** A read that failed, in the owner's words, with a way to read it again. */
@@ -300,7 +309,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
       {/* The transcript scrolls on its own, between the head and the owner's controls, its end in view as a chat's. */}
-      <div ref={endInView.ref} className="cd-conversation__scroll">
+      <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
         <Transcript label={`Conversation with ${who}`}>
           <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
           <OwnerTranscript

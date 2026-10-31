@@ -4,7 +4,8 @@
    column at the sidebar's edge, 260 px wide with a hairline at its right that runs to the bottom of
    the window, and the open conversation sits beside it, its content no wider than the reading
    column, with the concept footer under it. In the open conversation the head stays at the top
-   and the owner's controls at the foot, and the transcript between them scrolls. Under 1024 px the
+   and the owner's controls at the foot, and the transcript between them scrolls; in a window too
+   short for that, the open conversation scrolls as a whole instead. Under 1024 px the
    list and an open conversation each take the page, the conversation with "All conversations"
    above it, and the footer follows whichever shows.
 
@@ -70,9 +71,13 @@
   list-style: none;
 }
 
-/* The open conversation's column. It scrolls as a whole only when the window is too short to give
-   the transcript its least height under the head and above the controls. */
+/* The open conversation's column. Its sides are its gutter, which the transcript's region reaches
+   across to the column's edge. It is a size container, so the conversation in it can tell when the
+   column is too short to give the transcript a region of its own, and then the column scrolls as
+   a whole. */
 .cd-conversations__open {
+  --cd-open-gutter: var(--space-28);
+  container: cd-open-conversation / size;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -80,7 +85,7 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-24) var(--space-28) var(--space-20);
+  padding: var(--space-24) var(--cd-open-gutter) var(--space-20);
 }
 
 .cd-conversations__open > * {
@@ -126,10 +131,13 @@
 
 @media (max-width: 1023.98px) {
   .cd-conversations__list,
-  .cd-conversations__open,
   .cd-conversations__footer {
     padding-right: var(--space-16);
     padding-left: var(--space-16);
+  }
+
+  .cd-conversations__open {
+    --cd-open-gutter: var(--space-16);
   }
 
   .cd-conversations--open > .cd-conversations__list,
@@ -151,16 +159,16 @@
 }
 
 /* The transcript's scroll region: the height left between the head and the controls, at least
-   about four lines of the chat, and as wide as the column from edge to edge, so its scroll bar
-   sits at the column's right edge and a focus ring at its sides isn't cut off. 4 px above and
-   below, given back by the margins, keep the ring clear at its top and foot. */
+   about four lines of the chat, and as wide as the column from edge to edge, across its gutter,
+   so its scroll bar sits at the column's right edge and a focus ring at its sides isn't cut off.
+   4 px above and below, given back by the margins, keep the ring clear at its top and foot. */
 .cd-conversation__scroll {
   position: relative;
   flex: 1 1 0;
   min-height: calc(5 * var(--size-control));
   overflow-y: auto;
-  margin: calc(-1 * var(--space-4)) calc(-1 * var(--space-28));
-  padding: var(--space-4) var(--space-28);
+  margin: calc(-1 * var(--space-4)) calc(-1 * var(--cd-open-gutter));
+  padding: var(--space-4) var(--cd-open-gutter);
   scroll-padding-block: var(--space-4);
 }
 
@@ -168,13 +176,26 @@
   max-width: var(--size-reading);
 }
 
-/* Under 1024 px the column's sides are 16 px, and so are the region's. */
+/* A column too short to leave the transcript room for a held request's card under the head and
+   above the owner's controls after Take over: the transcript takes its own height, and the column
+   scrolls as a whole, so there is one scroll region, never one inside another. The head, those
+   controls and a card take about 37 rem from 1024 px, and about 40 in the single column, where
+   "All conversations" sits above the head and the head and the card wrap more. */
+@media (min-width: 1024px) {
+  @container cd-open-conversation (max-height: 37.5rem) {
+    .cd-conversation__scroll {
+      flex: none;
+      overflow: visible;
+    }
+  }
+}
+
 @media (max-width: 1023.98px) {
-  .cd-conversation__scroll {
-    margin-right: calc(-1 * var(--space-16));
-    margin-left: calc(-1 * var(--space-16));
-    padding-right: var(--space-16);
-    padding-left: var(--space-16);
+  @container cd-open-conversation (max-height: 40rem) {
+    .cd-conversation__scroll {
+      flex: none;
+      overflow: visible;
+    }
   }
 }
 
