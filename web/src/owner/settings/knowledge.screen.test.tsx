@@ -101,7 +101,11 @@ describe('knowledge', () => {
     const field = main(screen).getByRole('textbox', { name: 'A note' });
     const addButton = main(screen).getByRole('button', { name: 'Add a note' });
     const cases = [
-      ['We service tankless water heaters from Rinnai and Navien. Saturday appointments are available.', 'We service tankless water heaters from Rinnai and Navien.…'],
+      // A shortened title drops the punctuation its last word ends with before the ellipsis.
+      ['We service tankless water heaters from Rinnai and Navien. Saturday appointments are available.', 'We service tankless water heaters from Rinnai and Navien…'],
+      ['We install tankless water heaters from Rinnai and Navien, and Saturday appointments are open.', 'We install tankless water heaters from Rinnai and Navien…'],
+      ['-'.repeat(61), '…'],
+      // A title that fits keeps its punctuation.
       ['Parking is on the street.', 'Parking is on the street.'],
       ['🔧'.repeat(60), '🔧'.repeat(60)],
       ['🔧'.repeat(61), `${'🔧'.repeat(59)}…`],

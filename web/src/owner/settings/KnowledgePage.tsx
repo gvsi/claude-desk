@@ -105,13 +105,20 @@ function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
   );
 }
 
-/** A title within `TITLE_LENGTH` characters, shortened at a word when possible. */
+/** What a shortened title drops from its end before the ellipsis: spaces, sentence punctuation and dashes. */
+const TITLE_CUT_END = /[\s.,;:!?\-–—]+$/u;
+
+/**
+ * A title within `TITLE_LENGTH` characters: text that fits is kept whole; longer text is shortened at
+ * a word when possible and ends in "…", without the punctuation or dash its last word ended with.
+ */
 function titleOf(text: string): string {
   const characters = [...text];
   if (characters.length <= TITLE_LENGTH) return text;
   const prefix = characters.slice(0, TITLE_LENGTH - 1);
   const space = prefix.lastIndexOf(' ');
-  return `${(space === -1 ? prefix : prefix.slice(0, space)).join('')}…`;
+  const cut = (space === -1 ? prefix : prefix.slice(0, space)).join('');
+  return `${cut.replace(TITLE_CUT_END, '')}…`;
 }
 
 /**
