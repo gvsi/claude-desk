@@ -5,7 +5,7 @@
  * static, so it asks the API for nothing; and each is drawn as its signed board draws it.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { userEvent } from 'vitest/browser';
+import { page as browserPage, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import {
@@ -64,6 +64,70 @@ const BACK_HREF = '/';
 /** The public page's AI disclosure, as every public page shows it. */
 const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";
 
+/** Marcus Bell's visit to Meridian Bay Permits, in the board story's words. */
+const CITY = {
+  disclosure: "You're chatting with Claude, an AI answering for Meridian Bay Permits. Ask for Permit Center staff anytime.",
+  /** Claude's words, in order. */
+  claude: [
+    'I can look that up after you confirm it’s you.',
+    'Thanks, Marcus. Here’s where your kitchen remodel stands.',
+    'Here’s what comes next.',
+    'These times are open on the inspection calendar. Which one works for you?',
+    'Whether your garage conversion needs a permit is a plan checker’s decision, so I’ve asked one to get back to you.',
+  ],
+  /** Marcus's messages, in order. */
+  marcus: [
+    'Hi, it’s Marcus Bell. What’s the status of my kitchen remodel permit?',
+    'When can an inspector come out?',
+    'One more thing. I’d like to turn my garage into a home office. Does that need a permit at all?',
+  ],
+  verified: 'Verified with a code sent to the email on the application',
+  /** The receipts under Claude's four answers, in order, each with its dot's tone. */
+  receipts: [
+    ['Reply checked against the City’s rules', 'handled'],
+    ['Code sent to the email on the application', 'handled'],
+    ['Reply checked against the City’s rules', 'handled'],
+    ['Read from your own permit file', 'handled'],
+    ['Reply checked against the City’s rules', 'handled'],
+    ['Times read from the inspection calendar', 'handled'],
+    ['Reply checked against the City’s rules', 'handled'],
+    ['Held for a person: whether work needs a permit is a staff decision', 'held'],
+  ],
+  /** The cards in the conversation, in order: what draws each, its label, then its words. */
+  cards: [
+    ['reply', 'Confirm it\'s you', ['I’ll send a code to the email on the application.']],
+    ['fact', 'Permit status', ['Plan check passed', 'Kitchen remodel, permit B-2026-0412', 'Fee due before issue: $1,286']],
+    [
+      'fact',
+      'Next steps',
+      ['Pay the fee, then book the first inspection', 'Pay online or at the Permit Center, 250 Harbor Street', 'First inspection: rough-in for electrical, plumbing and framing'],
+    ],
+    [
+      'reply',
+      'Open times',
+      [
+        'Rough-in inspection',
+        'Permit B-2026-0412, once the fee is paid',
+        'Wednesday, November 4, 8:00 am to 12:00 pm',
+        'Thursday, November 5, 1:00 pm to 4:00 pm',
+        'Monday, November 9, 8:00 am to 12:00 pm',
+      ],
+    ],
+  ],
+  /** The about column's cards, the city's charter, in order. */
+  about: [
+    ['Hours', ['Monday to Friday, 8:00 am to 4:30 pm', 'Inspections, Monday to Friday, 8:00 am to 4:00 pm']],
+    ['Policy', ['Plan checkers decide what needs a permit and what’s exempt.']],
+    ['Contact', ['(415) 555-0186', 'Permit Center, 250 Harbor Street']],
+  ],
+  suggestions: ['Book an inspection', 'Pay the fee', 'Talk to staff'],
+  /**
+   * The page's height at the board's window, as the story measures it: the board's 1485 px, plus
+   * 18 px for the shell's own AI disclosure's second line, less 6 px for each of the two fact cards.
+   */
+  pageHeight: 1485 + 18 - 2 * 6,
+} as const;
+
 /** Dana's visit, in the board's words. */
 const ACCOUNT = {
   ask: 'Your Claude account has a verified email. If it matches the contact Rivera Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
@@ -90,6 +154,13 @@ async function expectTabOrderFromTheTop(stops: HTMLElement[]): Promise<void> {
 
 function main(screen: RenderResult) {
   return screen.getByRole('main');
+}
+
+/** A card's words, one per paragraph or list item, after its label. */
+function cardWords(card: Element): string[] {
+  return [...card.querySelectorAll('p, li')]
+    .filter((line) => !line.matches('.cd-reply-card__label, .cd-fact-card__label'))
+    .map((line) => line.textContent ?? '');
 }
 
 /** Each line of text a person reads under `root`, one text node at a time, outside any card. */
@@ -246,6 +317,119 @@ describe('Vision pages', () => {
 });
 
 describe('Vision pages against their boards', () => {
+  it('city_office_matches_its_board', async () => {
+    // As Boards/Vision, city office draws it, at the story's window: Marcus Bell on Meridian Bay
+    // Permits' public page, asking about his permit.
+    const { screen } = await renderRoute(CITY_OFFICE);
+    await browserPage.viewport(1512, 982);
+    expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
+    // The heights below are the page's once its two typefaces have loaded.
+    await Promise.all([document.fonts.load('15px "Hanken Grotesk"'), document.fonts.load('15px "Source Serif 4"')]);
+    await document.fonts.ready;
+    const log = main(screen).getByRole('log', { name: 'Conversation with Meridian Bay Permits' });
+    await expect.element(log).toBeVisible();
+    const root = screen.container;
+    const bar = await expectVisionBar(root, BACK_HREF);
+    // As the public page names its tab: the business.
+    expect(document.title).toBe('Meridian Bay Permits');
+
+    // The city's public page right under the bar: its header, its name, the Permit Center and the
+    // kernel's open status. The header takes the shell's own field and rule, where the board draws
+    // the city's slate (the page's data holds no brand colors).
+    const header = screen.getByRole('banner').element();
+    expect(top(header)).toBe(bottom(bar));
+    expectComputed(header, { height: '76px', backgroundColor: 'rgb(34, 34, 32)', borderBottomColor: 'rgba(250, 249, 245, 0.12)' });
+    await expect.element(screen.getByRole('banner').getByRole('heading', { level: 1 })).toHaveTextContent('Meridian Bay Permits');
+    expect(header.textContent).toContain('City of Meridian Bay, Permit Center');
+    expect(one(header, '.cd-public-shell__open-status').textContent).toContain('Open now, until 4:30 pm');
+
+    // The page runs past the window, as the board draws it: the shell is the page, nothing outside
+    // it. Screen tests load no web fonts, so the footer's "Powered by" line can be a pixel taller
+    // than in the story, which loads them; every part above it measures as the story's.
+    const shellHeight = round(one(root, '.cd-public-shell').getBoundingClientRect().height);
+    expect(document.documentElement.scrollHeight).toBe(shellHeight);
+    expect(shellHeight).toBeGreaterThan(window.innerHeight);
+    expect(Math.abs(shellHeight - CITY.pageHeight)).toBeLessThanOrEqual(1);
+    expect(round(bottom(one(root, '.cd-public-shell__conversation')))).toBe(1382);
+    expectNoHorizontalScroll();
+
+    // The AI disclosure under the chat's title, once, and the staff to ask for.
+    const disclosure = [...main(screen).element().querySelectorAll('p')].filter((line) => line.textContent === CITY.disclosure);
+    expect(disclosure).toHaveLength(1);
+    const askStaff = main(screen).getByRole('button', { name: 'Ask for Permit Center staff' });
+    await expect.element(askStaff).toBeVisible();
+
+    // The conversation: Marcus's messages in bubbles, Claude's words in serif.
+    const transcript = log.element() as HTMLElement;
+    expectConversationType(transcript);
+    expect(some(transcript, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual(CITY.claude);
+    expect(some(transcript, '.cd-visitor-message__bubble').map((bubble) => bubble.textContent)).toEqual(CITY.marcus);
+
+    // Verified with a code to the email on the application, between the code's prompt and his permit.
+    const verified = log.getByRole('status').element();
+    expect(verified.textContent).toContain(CITY.verified);
+    const cards = log.getByRole('article').elements();
+    expect(cards[0]?.compareDocumentPosition(verified)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(cards[1]?.compareDocumentPosition(verified)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+
+    // Every card in the conversation, word for word: the status and the next steps are fact cards,
+    // the code's prompt and the open times the kernel's reply cards.
+    expect(cards.map((card) => card.getAttribute('aria-label'))).toEqual(CITY.cards.map(([, label]) => label));
+    for (const [index, [kind, label, words]] of CITY.cards.entries()) {
+      const card = cards[index] as HTMLElement;
+      expect(card.closest(kind === 'fact' ? '.cd-fact-card' : '.cd-reply-card'), `${label}: a ${kind} card`).not.toBeNull();
+      expect(cardWords(card), `${label}: its words`).toEqual([...words]);
+    }
+    // The open times are a list to answer in the chat, not buttons.
+    expect(cards[3]?.querySelectorAll('li')).toHaveLength(3);
+    expect(cards[3]?.querySelector('button')).toBeNull();
+    // Claude's words lead into each fact card, 12 px above it.
+    for (const index of [1, 2]) {
+      const fact = cards[index]?.closest('.cd-fact-card') as HTMLElement;
+      const words = fact.previousElementSibling as HTMLElement;
+      expect(words.querySelector('.cd-claude-message__prose')).not.toBeNull();
+      expect(round(top(fact) - bottom(words))).toBe(12);
+    }
+
+    // The receipts under each answer, in order: the reply's check, then what ran or what waits for a person.
+    expect(await expectReceiptsUnderMessages(transcript)).toBe(4);
+    const receipts = some(transcript, '.cd-margin-line');
+    expect(receipts.map((line) => line.textContent)).toEqual(CITY.receipts.map(([words]) => words));
+    expect(receipts.map((line) => one(line, '.cd-status-dot').className)).toEqual(CITY.receipts.map(([, tone]) => `cd-status-dot cd-status-dot--${tone}`));
+    expect(transcript.querySelector('.cd-transcript-row__margin button')).toBeNull();
+    // The garage question goes to staff: Claude's words alone, no card under them.
+    const lastAnswer = some(transcript, '.cd-transcript-row__main').at(-1) as HTMLElement;
+    expect(lastAnswer.textContent).toContain(CITY.claude[4]);
+    expect(lastAnswer.querySelector('.cd-card')).toBeNull();
+
+    // What to try next, 20 px under the conversation.
+    const chips = main(screen).getByRole('group', { name: 'Try asking' });
+    const chipButtons = chips.getByRole('button').elements() as HTMLElement[];
+    expect(chipButtons.map((chip) => chip.textContent)).toEqual(CITY.suggestions);
+    expect(round(top(chips.element()) - bottom(transcript))).toBe(20);
+
+    // The about column: the city's hours, who decides what needs a permit, and how to reach the Permit Center.
+    const about = screen.getByRole('complementary', { name: 'About Meridian Bay Permits' });
+    const aboutCards = about.getByRole('article').elements();
+    expect(aboutCards.map((card) => card.getAttribute('aria-label'))).toEqual(CITY.about.map(([label]) => label));
+    for (const [index, [label, words]] of CITY.about.entries()) {
+      expect(cardWords(aboutCards[index] as HTMLElement), `${label}: its words`).toEqual([...words]);
+    }
+
+    // The composer and the footer.
+    const composer = main(screen).getByRole('textbox', { name: 'Message Meridian Bay Permits' });
+    expectComputed(one(main(screen).element(), '.cd-composer__box'), SPEC.composer);
+    await expectFooter(root);
+
+    // focus_order_is_logical: the bar, Ask for Permit Center staff, the suggestions, then the composer.
+    await expectTabOrderFromTheTop([
+      bar.querySelector('a') as HTMLElement,
+      askStaff.element() as HTMLElement,
+      ...chipButtons,
+      composer.element() as HTMLElement,
+    ]);
+  });
+
   it('team_desk_matches_its_board', async () => {
     // As Boards/Vision, team desk draws it: Rivera Plumbing's team Desk, Luis's conversation open.
     const { screen } = await renderRoute(TEAM_DESK);
