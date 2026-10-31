@@ -170,6 +170,7 @@ from desk.api.versions import (
     post_draft,
     rules_draft,
     tool_rows,
+    version_cap,
     version_from_row,
 )
 from desk.contracts import (
@@ -1253,23 +1254,25 @@ async def _rule_tools(owner: OwnerCtx, desk_id: str) -> list[dict]:
     return [{"tool": row["tool"], "effects": list(row["effects"])} for row in rows if row["tool"] not in UTILITY_TOOLS]
 
 
-async def _post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard]) -> PolicyVersion:
-    """The kernel's draft of the utility cards and `cards`, on the active version (`versions.post_draft`).
+async def _post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], cap: int) -> PolicyVersion:
+    """The kernel's draft of the utility cards and `cards`, on the active version (`versions.post_draft`), at the
+    owner's answered money cap `cap` (0 when unanswered).
 
-    The money cap: setup's money cards are held to the answered cap (`template_cards`, `_card_problems`). The draft
-    names no cap yet: `PolicyDraftRequest` gains `auto_money_cap_cents` with the kernel's money cap contract (master
-    "Money cap"), and this request then sends the answered cap. Until then the kernel holds every version to the
-    platform's cap, which the answered cap can't pass."""
+    The money cap: setup's money cards are held to the answered cap (`template_cards`, `_card_problems`), and the
+    draft names it (`PolicyDraftRequest.auto_money_cap_cents`, master "Money cap"), so the kernel compiles and proves
+    the version at that cap; it becomes the Desk's only once the owner confirms the draft. The cap the owner reads
+    back is the version's (`versions.version_cap`)."""
     active = await active_row(owner, desk_id)
-    return await post_draft(owner, desk_id, [*UTILITY_CARDS, *cards], active["version"])
+    return await post_draft(owner, desk_id, [*UTILITY_CARDS, *cards], active["version"], auto_money_cap_cents=cap)
 
 
-async def _posted(owner: OwnerCtx, desk_id: str, cards: list[RuleCard],
-                  template: list[RuleCard]) -> PolicyVersion | None:
-    """The kernel's checkable draft of setup's `cards` (`_post_draft`), or None when the kernel refuses them as invalid
-    (422, which names no card: the kernel logs why). The `template` cards refused are the owner's error to see."""
+async def _posted(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], template: list[RuleCard],
+                  cap: int) -> PolicyVersion | None:
+    """The kernel's checkable draft of setup's `cards` at the answered cap (`_post_draft`), or None when the kernel
+    refuses them as invalid (422, which names no card: the kernel logs why). The `template` cards refused are the
+    owner's error to see."""
     try:
-        return checkable(await _post_draft(owner, desk_id, cards))
+        return checkable(await _post_draft(owner, desk_id, cards, cap))
     except KernelFailed as refused:
         if refused.code != "invalid" or cards == template:
             raise
@@ -1319,17 +1322,17 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
         async def post(drafted: list[RuleCard]) -> PolicyVersion | None:
             nonlocal cards                      # the first set keeps cards another request stored first
             cards = await _store_cards(engine, owner, interview_id, drafted, replace_stored=bool(cards))
-            return await _posted(owner, desk_id, cards, template)
+            return await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
 
         version = await draft_cards(model, recorder(engine, owner, CARD_DRAFT_ROUTE), business_type, answers,
                                     await _rule_tools(owner, desk_id), post)
     else:
-        version = await _posted(owner, desk_id, cards, template)
+        version = await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
     if (version is None or version.status == "rejected") and cards != template:
         cards = await _store_cards(engine, owner, interview_id, template, replace_stored=bool(cards))
-        version = checkable(await _post_draft(owner, desk_id, cards))
+        version = checkable(await _post_draft(owner, desk_id, cards, answers.auto_money_cap_cents))
     await _drafted(engine, owner, interview_id, version.version, "rules")
-    return rules_draft(version, answers.auto_money_cap_cents)
+    return rules_draft(version, version_cap(version))
 
 
 # Situations and the safety check -----------------------------------------------------------------------------------
@@ -1573,9 +1576,10 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
     except KernelFailed as refused:
         if refused.code != "conflict":
             raise
-        version = checkable(await _post_draft(owner, desk_id, interview.draft_cards))
+        version = checkable(await _post_draft(owner, desk_id, interview.draft_cards,
+                                              interview.answers.auto_money_cap_cents))
         await _drafted(engine, owner, interview_id, version.version, "rules")
-        raise RulesChangedSinceDraft(rules_draft(version, interview.answers.auto_money_cap_cents)) from None
+        raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
     await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))
     return active
 

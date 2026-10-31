@@ -167,6 +167,7 @@ from desk.contracts import (
     ToolProfile,
     Violation,
     money_tool,
+    moves_money,
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
@@ -990,7 +991,7 @@ class PaymentLink:
 @dataclass
 class VersionRecord:
     """A rules version the owner drafted: its cards (the owner's, then the compiler's default asks), its parent, its
-    proof and status, and the key a repeat of the same draft finds it by."""
+    proof and status, the key a repeat of the same draft finds it by, and its money cap (Plan 01b)."""
 
     version: int
     parent: int | None
@@ -999,6 +1000,7 @@ class VersionRecord:
     proof: ProofReport
     key: tuple
     created_at: datetime
+    auto_money_cap_cents: int = 0               # the most its auto money cards take or pay out per action
 
 
 @dataclass
@@ -1476,7 +1478,7 @@ class FakeKernelState:
                              schema_sha256=sha256_hex("schema"), baseline_sha256=sha256_hex("baseline"),
                              profiles_sha256=sha256_hex(canonical(list(record.key[2]))),
                              invariants_sha256=sha256_hex("invariants"), review_thresholds_version=1,
-                             auto_money_cap_cents=desk.auto_money_cap_cents, status=record.status, proof=record.proof)
+                             auto_money_cap_cents=record.auto_money_cap_cents, status=record.status, proof=record.proof)
 
     def _supersede_active(self, desk: Desk) -> None:
         """The active version's row becomes `superseded`, as an activation leaves it."""
@@ -2188,12 +2190,16 @@ class FakeKernelState:
             if session.person_id is not None and session.person_id == action.resource.owner_person_id:
                 return "allow", ["rv-docs"]
             return "refuse", []                 # the baseline: private data only to its verified record owner
+        if money_tool(tool, action.effects) and not 0 < (action.amount_cents or 0) <= AUTO_MONEY_HARD_CAP_CENTS:
+            return "refuse", []                 # the baseline: money always carries an amount, at most $10,000
         if tool == "native.charge_mandate" and not self._room_for(session, action):
             return "refuse", []                 # the baseline: an agent's charge stays within its mandate
         if tool in ("native.payment_link", "native.charge_mandate"):
             card = next((card for card in desk.cards if card.applies_to == tool and card.mode == "auto"), None)
             if card is not None:
-                return ("allow" if action.amount_cents <= card.max_amount_cents else "hold"), [card.card_id]
+                # within the card's limit and the active version's money cap, else it asks (the baseline's cap)
+                within = action.amount_cents <= min(card.max_amount_cents, desk.auto_money_cap_cents)
+                return ("allow" if within else "hold"), [card.card_id]
         preset = next((card.card_id for card in desk.cards if card.applies_to == tool and card.mode == "auto"
                        and card.who == "anyone" and card.card_id.startswith("preset-")), None)
         if preset is not None:
@@ -2849,10 +2855,10 @@ class FakeKernelState:
 
     def create_desk(self, request: Request, body: CreateDeskRequest) -> DeskCreated:
         """A new Desk in the owner's copy, through the seed path, with the `ask_first` preset active; its tools are
-        native only, so a `connections` list is refused (422), as are an owner name outside the pattern and an
-        unknown time zone."""
+        native only, so a `connections` list is refused (422), as are an owner name outside the pattern, an
+        unknown time zone and a money cap other than 0 (the presets are proved at 0; the owner raises it by a draft)."""
         copy, _ = self.owner_of(request)
-        if body.desk.connections:
+        if body.desk.connections or body.desk.auto_money_cap_cents != 0:
             raise Refusal(422, "invalid")
         self._check_business(body.business.owner_display_name, body.business.timezone)
         native = tuple(tool for tool in TOOL_FACTS if tool_profile(tool).source == "native")
@@ -3045,17 +3051,22 @@ class FakeKernelState:
         """The owner's cards compiled and proved against the active version (`expected_parent`, else 409): a new
         version with the compiler's default asks, `proved` or `rejected` (or `draft` when bounded), ledgered `policy`.
         The same cards on the same parent and tools return that version, except that a timed-out rejection proves
-        again. A card id given twice, a default card among the owner's, or a card that could change starting a
-        verification (`changes_always_on`) is 422 `invalid`, with nothing drafted or ledgered."""
+        again. A card id given twice, a default card among the owner's, a card that could change starting a
+        verification (`changes_always_on`), or an auto money card above the draft's money cap (the one it names,
+        else the active version's) is 422 `invalid`, with nothing drafted or ledgered."""
         desk = self._owners_desk(request, body.desk_id)
         if body.expected_parent != desk.policy_version:
             raise Refusal(409, "conflict")
+        cap = desk.auto_money_cap_cents if body.auto_money_cap_cents is None else body.auto_money_cap_cents
         ids = [card.card_id for card in body.cards]
-        if len(set(ids)) != len(ids) or any(card.is_default or changes_always_on(card) for card in body.cards):
+        if len(set(ids)) != len(ids) or any(
+                card.is_default or changes_always_on(card)
+                or (card.mode == "auto" and moves_money(card) and (card.max_amount_cents or 0) > cap)
+                for card in body.cards):
             raise Refusal(422, "invalid")
         enabled = tuple(sorted(tool for tool, profile in desk.tools.items() if profile.status == "enabled"))
         key = (body.expected_parent, sha256_hex(canonical([card.model_dump(mode="json") for card in body.cards])),
-               enabled)
+               enabled, cap)
         record = next((record for record in desk.versions.values() if record.key == key), None)
         if record is not None and not (record.status == "rejected" and record.proof.timed_out):
             return self._policy_version(desk, record)
@@ -3064,7 +3075,7 @@ class FakeKernelState:
         if record is None:
             record = VersionRecord(version=self._next_version(desk), parent=body.expected_parent,
                                    cards=[*body.cards, *self._default_cards(desk, body.cards)], status=status,
-                                   proof=proof, key=key, created_at=self.now)
+                                   proof=proof, key=key, created_at=self.now, auto_money_cap_cents=cap)
             desk.versions[record.version] = record
         else:
             record.status, record.proof = status, proof
@@ -3073,8 +3084,8 @@ class FakeKernelState:
         return self._policy_version(desk, record)
 
     def policy_confirm(self, request: Request, body: PolicyConfirmRequest) -> PolicyVersion:
-        """Activate a proved draft whose parent is still the active version, superseding it (ledgered `policy`);
-        anything else is 409, ledgered as refused. An unknown version is 404."""
+        """Activate a proved draft whose parent is still the active version, superseding it (ledgered `policy`), so
+        its money cap becomes the Desk's; anything else is 409, ledgered as refused. An unknown version is 404."""
         desk = self._owners_desk(request, body.desk_id)
         record = desk.versions.get(body.version)
         if record is None:
@@ -3085,8 +3096,10 @@ class FakeKernelState:
             raise Refusal(409, "conflict")
         self._supersede_active(desk)
         desk.cards, desk.policy_version, record.status = list(record.cards), record.version, "active"
+        desk.auto_money_cap_cents = record.auto_money_cap_cents
         self._put_version(desk, record)
-        self.append(desk, "policy", {"version": record.version, "activated": True})
+        self.append(desk, "policy", {"version": record.version, "activated": True,
+                                     "auto_money_cap_cents": record.auto_money_cap_cents})
         return self._policy_version(desk, record)
 
     def policy_probe(self, request: Request, body: PolicyProbeRequest) -> list[ProbeResult]:

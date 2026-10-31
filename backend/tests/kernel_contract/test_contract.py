@@ -2344,6 +2344,48 @@ async def test_confirm_needs_a_proved_version(kernel, ro_read):
     assert await refused(missing) == (404, "not_found")
 
 
+@pytest.mark.kernel_plan("01b")   # the money cap on each rules version, Plan 01b's
+async def test_a_draft_holds_its_auto_money_cards_to_its_cap(kernel, ro_read):
+    """Each rules version has a money cap, and its auto money cards fit it. A Desk that `POST /desks` makes starts
+    at 0, and a seed naming another cap is 422 `invalid`. A draft keeps its parent's cap unless it names one: an auto
+    `effect:charge` card for $20 is 422 `invalid` at the cap of 0 it keeps and at a named $19.99, drafting nothing,
+    and proved at a named $20, which the version carries and, once confirmed, the Desk's active version too."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    capped = a_new_desk()
+    capped.desk.auto_money_cap_cents = 2_000
+    assert await refused(owner.call("POST /desks", capped)) == (422, "invalid")
+    created = await owner.call("POST /desks", a_new_desk())
+
+    def versions() -> list[dict]:
+        return ro_read(ro_schema, copy.copy_id, "SELECT version, status, auto_money_cap_cents FROM {ro}.policy_versions"
+                                                " WHERE desk_id = %s ORDER BY version", (created.desk_id,))
+
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    assert versions() == [{"version": active["version"], "status": "active", "auto_money_cap_cents": 0}]
+    charge = RuleCard(card_id="card-charge", applies_to="effect:charge", mode="auto", who="anyone",
+                      max_amount_cents=2_000, reason="Payments up to $20 go through without asking.")
+    cards = [*owner_cards(active), charge]
+
+    def at(cap: int | None):
+        return owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=created.desk_id, cards=cards,
+                                                                   expected_parent=active["version"],
+                                                                   auto_money_cap_cents=cap))
+
+    assert await refused(at(None)) == (422, "invalid")
+    assert await refused(at(1_999)) == (422, "invalid")
+    assert [row["version"] for row in versions()] == [active["version"]]
+    version = await at(2_000)
+    proved_or_skip(version)
+    assert version.auto_money_cap_cents == 2_000
+    confirmed = await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=created.desk_id,
+                                                                              version=version.version))
+    assert (confirmed.status, confirmed.auto_money_cap_cents) == ("active", 2_000)
+    assert versions() == [{"version": active["version"], "status": "superseded", "auto_money_cap_cents": 0},
+                          {"version": version.version, "status": "active", "auto_money_cap_cents": 2_000}]
+
+
 def verification_card(ro_read, ro_schema: str, copy: CopyCreated) -> tuple[dict, list[RuleCard], RuleCard]:
     """The Rivera Desk's active version, its owner cards, and the presets' own card for starting a verification
     among them (auto, for anyone, on the tool), which every preset and the Rivera seed carry."""

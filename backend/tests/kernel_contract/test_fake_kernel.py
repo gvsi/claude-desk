@@ -295,8 +295,9 @@ async def test_the_mirror_holds_each_rules_versions_money_cap(fake, api_conn):
 
 async def test_a_money_hold_offers_allow_person_only_within_the_desks_cap(fake, monkeypatch):
     """A held money request offers "Allow for this person" only when its amount is within the Desk's
-    money cap (the Rivera seed's $500), never up to the $10,000 ceiling, and never with no amount, as
-    the kernel's `answers_for` does: the fake is never looser than the kernel. Payment links normalize
+    money cap (the Rivera seed's $500), never up to the $10,000 ceiling, as the kernel's `answers_for`
+    does; a money call with no amount, or an amount of 0, is refused outright, as the kernel's baseline
+    (`money_has_amount`) refuses it: the fake is never looser than the kernel. Payment links normalize
     only once Plan 01c brings quotes to pay, so here one is normalized at the amount under test."""
     http, state = fake
     _, visitor = await copy_and_visitor(http, state)
@@ -312,11 +313,15 @@ async def test_a_money_hold_offers_allow_person_only_within_the_desks_cap(fake, 
             list_cents=amount["cents"], discount_bp=0, amount_cents=amount["cents"], recipient=None, starts_at=None)
 
     monkeypatch.setattr(state, "_normalize", payment_link)
-    for call_id, cents, offered in (("call-1", 60_000, False), ("call-2", 50_000, True), ("call-3", None, False)):
+    for call_id, cents, offered in (("call-1", 60_000, False), ("call-2", 50_000, True)):
         amount["cents"] = cents
         held = await decide(view, session_id, 0, call_id, "native.payment_link", {"quote_id": f"quote-{call_id}"})
         assert held.outcome == "hold", held.reason_plain
         assert ("allow_person" in held.answers) is offered, (cents, held.answers)
+    for call_id, cents in (("call-3", None), ("call-4", 0)):
+        amount["cents"] = cents
+        out = await decide(view, session_id, 0, call_id, "native.payment_link", {"quote_id": f"quote-{call_id}"})
+        assert (out.outcome, out.answers) == ("refuse", []), (cents, out.reason_plain)
 
 
 async def test_an_owner_recovers_only_its_own_decisions(fake):
