@@ -253,7 +253,7 @@ REFUSAL_CHECKS: dict[str, RefusalCause] = {
     "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
     "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
     "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
-    "no_such_document": "no_such_document", "not_verified": "not_verified",
+    "no_such_document": "no_such_document",
 }
 # In precedence order, after any owner never card. The private-data cause depends on session verification.
 BASELINE_CAUSES: dict[str, RefusalCause] = {
@@ -288,7 +288,8 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       no_such_charge                                 no_such_charge        Couldn't find that payment
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
-      not_verified                                   not_verified          Not verified yet
+      not_verified, no_mandate, mandate_exhausted,
+      not_an_agent_with_a_mandate (unreachable)       null                  (no label)
     policy precedence:
       F.never.*                                      owner_rule            Your rule says no
       B.same_copy                                    other_copy            Not a record on this Desk

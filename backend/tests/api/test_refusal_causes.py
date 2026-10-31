@@ -1,5 +1,6 @@
 """Safety causes use only the kernel's exact reason/check codes and deciding policy IDs."""
 
+import ast
 import re
 from pathlib import Path
 from typing import get_args
@@ -23,7 +24,7 @@ from desk.kernel_service import decide
         ("no_such_slot", "no_such_slot"), ("unknown_item", "unknown_item"), ("over_limit", "over_quote_ceiling"),
         ("no_such_quote", "quote_unpayable"), ("quote_paid", "quote_unpayable"), ("quote_paying", "quote_unpayable"),
         ("no_such_charge", "no_such_charge"), ("not_refundable", "not_refundable"),
-        ("no_such_document", "no_such_document"), ("not_verified", "not_verified"),
+        ("no_such_document", "no_such_document"), ("not_verified", None),
         ("no_mandate", None), ("mandate_exhausted", None),
         ("not_an_agent_with_a_mandate", None),
     ]],
@@ -139,6 +140,36 @@ def test_refusal_reasons_track_kernel_early_refusals():
     from desk.api.owner_reads import REFUSAL_REASONS
 
     assert set(decide.REFUSED_PLAIN) - {"adapter_refused"} == set(REFUSAL_REASONS)
+
+
+def test_refusal_checks_track_kernel_adapters():
+    from desk.api.owner_reads import REFUSAL_CHECKS
+    from desk.kernel_service.adapters.payment_link import NO_SUCH_QUOTE
+
+    adapter_dir = Path(decide.__file__).parent / "adapters"
+    codes = {
+        node.args[0].value
+        for source in adapter_dir.glob("*.py")
+        for node in ast.walk(ast.parse(source.read_text()))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "AdapterRefusal"
+        and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+    }
+    # payable_quote returns these dynamic codes to AdapterRefusal(found).
+    codes |= {NO_SUCH_QUOTE, "quote_paid", "quote_paying"}
+    unreachable_at_decide = {
+        "no_mandate": "Payment-link prepare checks the mandate only during execution.",
+        "mandate_exhausted": "Mandate reservation happens in prepare during execution.",
+        "not_an_agent_with_a_mandate": "tools_given excludes charge_mandate without an agent's mandate.",
+        "not_verified": "tools_given excludes private-data payments tools before normalization: not_given wins.",
+    }
+    assert all(unreachable_at_decide.values())
+    assert set(REFUSAL_CHECKS).isdisjoint(unreachable_at_decide)
+    assert codes == set(REFUSAL_CHECKS) | set(unreachable_at_decide)
+    for code in unreachable_at_decide:
+        row = {"decision_id": "decision", "session_id": "session", "policy_ids": [], "card_ids": []}
+        entry = {"event": {"kind": "decide", "ref_id": "decision", "session_id": "session",
+                           "summary": {"outcome": "refuse", "reason": "adapter_refused", "check": code}}}
+        assert refusal_cause(row, entry, verified=False) is None, code
 
 
 def test_baseline_causes_cover_every_refusing_policy():
