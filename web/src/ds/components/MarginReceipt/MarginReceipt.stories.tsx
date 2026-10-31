@@ -5,6 +5,7 @@ import type { Decision, SseEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
+import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { Transcript } from '../Transcript/Transcript.tsx';
 import { TranscriptRow } from '../TranscriptRow/TranscriptRow.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
@@ -28,6 +29,14 @@ function statusIn(turns: (typeof rivera.conversations)['danaLive']['turns'], dec
   throw new Error(`no status event for ${decisionId}`);
 }
 
+/** The message of a stored conversation with this id. */
+function messageIn(turns: (typeof rivera.conversations)['danaLive']['turns'], messageId: string) {
+  for (const turn of turns) {
+    if (turn.kind === 'event' && turn.event.type === 'message' && turn.event.message_id === messageId) return turn.event;
+  }
+  throw new Error(`no message ${messageId}`);
+}
+
 /** Dana's list-price quote ran on its own: its receipt reads `executed`, and its decision is `rivera.decisions.allowed`. */
 const quoteRan = only(rivera.events.quoteTurn, 'receipt');
 const executed = receiptFromEvent(quoteRan);
@@ -35,6 +44,9 @@ const held = receiptFromEvent(only(rivera.events.heldTurn, 'held'));
 const replyChecked = receiptFromEvent(only(rivera.events.quoteTurn, 'message'));
 const replyHandedOff = receiptFromEvent(only(rivera.events.heldTurn, 'message'));
 const booked = receiptFromEvent(statusIn(rivera.conversations.danaLive.turns, 'dec-dana-book'));
+/** Claude's reply that confirms Dana's booking, and its own check. */
+const bookedReply = messageIn(rivera.conversations.danaLive.turns, 'msg-dana-booked');
+const bookedReplyChecked = receiptFromEvent(bookedReply);
 const refused = rivera.decisions.refused;
 const expired = rivera.decisions.expired;
 
@@ -196,6 +208,49 @@ export const BookedWithCheck: Story = {
     if (!stroke) throw new Error('no check stroke');
     expectComputed(stroke, { animationName: /^(?!none$).+/, animationIterationCount: '1', animationDuration: '0.2s' });
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
+  },
+};
+
+export const BookedLandsLive: Story = {
+  render: ({ onOpenTrace }) => (
+    <Transcript label={`Conversation with ${rivera.conversations.danaLive.name}`}>
+      <TranscriptRow
+        live
+        margin={[
+          <MarginReceipt key="reply" {...bookedReplyChecked} onOpenTrace={onOpenTrace} />,
+          <MarginReceipt key="booked" {...booked} drawCheck onOpenTrace={onOpenTrace} />,
+        ]}
+      >
+        <ClaudeMessage blocks={bookedReply.blocks} language={bookedReply.language} ownerName={rivera.business.ownerName} />
+      </TranscriptRow>
+    </Transcript>
+  ),
+  parameters: {
+    canvasNote:
+      "Boards are still frames. Here the reply that confirms Dana's booking arrives live: its receipts land one by one, motion-stagger apart, and the booking's sage check draws as its line lands. Storybook shows the motion your system asks for; the design system's browser tests render every story under reduced motion.",
+  },
+  play: async ({ canvasElement }) => {
+    const lines = [...canvasElement.querySelectorAll<HTMLElement>('.cd-margin-receipt')];
+    await expect(lines.map(visibleText)).toEqual([bookedReplyChecked.plain, booked.plain]);
+    const bookedLine = lines[1] as HTMLElement;
+    const stroke = bookedLine.querySelector('.cd-margin-line__check path');
+    if (!stroke) throw new Error('no check on the booked receipt');
+    const dot = dotIn(bookedLine);
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // Under reduced motion the line and its dot show at once, and the check is drawn from the start.
+      for (const el of [bookedLine, dot, stroke]) expectComputed(el, { animationName: 'none' });
+      expectComputed(stroke, { strokeDashoffset: '0px' });
+      return;
+    }
+    // live_check_draws_as_its_line_lands: the booked line is the second to land, two motion-stagger
+    // beats in; its dot grows and its check draws on that same beat, over motion-base, once.
+    const token = getComputedStyle(document.documentElement).getPropertyValue('--motion-stagger').trim();
+    await expect(token).toBe('150ms');
+    const beat = `${(2 * Number.parseInt(token, 10)) / 1000}s`;
+    expectComputed(bookedLine, { animationName: /^(?!none$).+/, animationDelay: beat });
+    expectComputed(dot, { animationName: /^(?!none$).+/, animationDelay: beat });
+    expectComputed(stroke, { animationName: /^(?!none$).+/, animationDelay: beat, animationDuration: '0.2s', animationIterationCount: '1' });
   },
 };
 

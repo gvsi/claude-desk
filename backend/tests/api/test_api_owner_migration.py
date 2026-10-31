@@ -1,6 +1,7 @@
 """The API's tables after Plan 02a: `api_tables` is applied to the hosted database as it stands on `main`, so it is
 never edited again; every change Plan 02b makes to the API's tables is a migration of its own, `api_owner`, revising
-`main`'s head (`0012_inbox_decision_id`, which revises `api_tables`), and `api_replay` revises `api_owner`.
+`main`'s head (`0012_inbox_decision_id`, which revises `api_tables`), `api_replay` revises `api_owner` and
+`api_idempotency` revises `api_replay`.
 
 The upgrade is tried from `main`'s head with rows already in `app.messages`: they come through it unchanged, and a
 take-over, a whisper, a hand-back and a reply the kernel's check stops then store their rows on the upgraded database.
@@ -74,11 +75,12 @@ def test_api_tables_is_left_as_main_applied_it():
         "api_tables is applied to the hosted database: change the API's tables in a new migration instead")
 
 
-def test_api_owner_revises_main_head_and_api_replay_revises_it():
+def test_api_owner_revises_main_head_and_each_later_revision_the_one_before():
     scripts = ScriptDirectory.from_config(alembic_config())
     assert scripts.get_revision("api_owner").down_revision == MAIN_HEAD
     assert scripts.get_revision("api_replay").down_revision == "api_owner"
-    assert scripts.get_heads() == ["api_replay"]
+    assert scripts.get_revision("api_idempotency").down_revision == "api_replay"
+    assert scripts.get_heads() == ["api_idempotency"]
 
 
 def test_a_lock_another_transaction_holds_fails_a_step_instead_of_hanging(db):
@@ -94,7 +96,7 @@ def test_a_lock_another_transaction_holds_fails_a_step_instead_of_hanging(db):
             stray.rollback()
     finally:
         migrate(command.upgrade, "head")                       # nothing to do at head
-    assert db.execute("SELECT version_num FROM alembic_version").fetchall() == [("api_replay",)]
+    assert db.execute("SELECT version_num FROM alembic_version").fetchall() == [("api_idempotency",)]
 
 
 def kept(admin: psycopg.Connection) -> list[tuple]:
