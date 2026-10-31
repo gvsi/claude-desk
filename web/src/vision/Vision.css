@@ -33,112 +33,6 @@
   min-width: 0;
 }
 
-/* The city office: Live now at the left, the always-on lines and today's numbers in a 360 px
-   column 32 px to its right. */
-.cd-vision-city {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-32);
-  min-width: 0;
-}
-
-.cd-vision-city__live {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: var(--space-10);
-  min-width: 0;
-}
-
-.cd-vision-city__side {
-  display: flex;
-  flex: 0 0 calc(var(--size-side-panel) - var(--space-40));
-  flex-direction: column;
-  gap: var(--space-16);
-  min-width: 0;
-}
-
-.cd-vision-city__title {
-  margin: 0;
-}
-
-.cd-vision-city__caption {
-  margin: var(--space-2) 0 var(--space-8);
-}
-
-/* Each live conversation is a row under a hairline, not a card, so its fact card never sits in a card. */
-.cd-vision-live {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.cd-vision-live__item {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-  padding: var(--space-14) 0;
-}
-
-.cd-vision-live__item:first-child {
-  padding-top: var(--space-4);
-}
-
-.cd-vision-live__item + .cd-vision-live__item {
-  border-top: 1px solid var(--line-hairline);
-}
-
-.cd-vision-live__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-8);
-}
-
-.cd-vision-live__action {
-  display: flex;
-}
-
-/* The city's always-on lines: a quiet lock, the line in control type, why in secondary meta. */
-.cd-vision-always {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.cd-vision-always__item {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-10);
-  padding: var(--space-10) 0;
-  border-top: 1px solid var(--line-hairline);
-}
-
-/* The 14 px lock level with the first line's 20 px. */
-.cd-vision-always__lock {
-  flex: none;
-  margin-top: calc(var(--space-6) / 2);
-  color: var(--text-secondary);
-}
-
-.cd-vision-always__title,
-.cd-vision-always__detail {
-  display: block;
-}
-
-.cd-vision-always__also {
-  margin: var(--space-8) 0 0;
-}
-
-.cd-vision-today {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-  margin: var(--space-8) 0 0;
-  padding: 0;
-  list-style: none;
-}
-
 /* The team Desk: the title and its line, then the teammates (220 px), Luis's conversation and his
    access (260 px), 28 px apart; the day's line and the footer at the foot, 16 px apart. */
 .cd-vision-page.cd-vision-team {
@@ -373,13 +267,11 @@
 
 /* Below a laptop's width the columns stack, as the owner app's pages do on a phone. */
 @media (max-width: 1023.98px) {
-  .cd-vision-city,
   .cd-vision-team__columns {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .cd-vision-city__side,
   .cd-vision-team__people,
   .cd-vision-team__access {
     flex-basis: auto;

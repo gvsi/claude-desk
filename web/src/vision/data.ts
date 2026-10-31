@@ -1,20 +1,17 @@
 /**
  * What the vision pages show, in the signed boards' words (the "Run 2 · vision" boards,
- * N-R2-Vision-*): a fictional city permits office, Rivera Plumbing's team Desk, a returning visitor
- * signed in with a Claude account, and the app on a phone. Fixed data only: no page reads anything
- * from the API. Rivera's own facts come from the design system's Rivera fixtures, as the first
- * visit's still preview of Today does.
+ * N-R2-Vision-*): Rivera Plumbing's team Desk, a returning visitor signed in with a Claude account,
+ * and the app on a phone. Fixed data only: no page reads anything from the API. Rivera's own facts
+ * come from the design system's Rivera fixtures, as the first visit's still preview of Today does.
  *
- * Fees, dates, statuses and bookings sit only in fact cards, never in Claude's words, as on every
- * Desk.
+ * Dates, documents and bookings sit only in cards, never in Claude's words, as on every Desk.
  */
 import type { DecisionState } from '../api/contracts.ts';
 import { proseBlock, rivera } from '../ds/fixtures/index.ts';
-import type { CopyLanguage, FactCardProps, NavCount, NavKey, PhoneTab, ReceiptSource, SidebarHrefs, StatusTone } from '../ds/index.ts';
+import type { FactCardProps, NavCount, NavKey, PhoneTab, ReceiptSource, SidebarHrefs, StatusTone } from '../ds/index.ts';
 
-/** Where each vision page lives. Today's "Things to try" leads to the city office. */
+/** Where each vision page lives. */
 export const VISION_PATHS = {
-  cityOffice: '/vision/city-office',
   teamDesk: '/vision/team-desk',
   claudeAccount: '/vision/claude-account',
   phone: '/vision/phone',
@@ -59,133 +56,12 @@ export interface VisionOwner {
   desks: { id: string; name: string }[];
   currentDeskId: string;
   current: NavKey;
-  /** The Desk's word for the people it serves: "Residents", "Teammates". */
+  /** The Desk's word for the people it serves: "Teammates". */
   peopleLabel: string;
   counts: { conversations?: NavCount; safety?: NavCount };
   /** The Answering switch's line: whom Claude answers, under whose rules. */
   answeringDescription: string;
 }
-
-// ---------------------------------------------------------------------------------------------
-// The city office (N-R2-Vision-CityOffice): Meridian Bay Permits, a fictional city permits office.
-
-export const CITY_OWNER: VisionOwner = {
-  business: 'Meridian Bay Permits',
-  owner: { name: 'Nadia Price', status: 'Permit Center supervisor' },
-  desks: [{ id: 'desk-meridian-permits', name: 'Permit Center' }],
-  currentDeskId: 'desk-meridian-permits',
-  current: 'today',
-  peopleLabel: 'Residents',
-  counts: { conversations: { n: 9, label: '9 live conversations' }, safety: { n: 4, label: '4 attempts stopped today' } },
-  answeringDescription: 'Claude answers under the City’s rules',
-};
-
-export const CITY_TODAY_HEADER = {
-  greeting: 'Good morning, Nadia',
-  presence: 'Nine residents are talking to the Desk right now.',
-  /** The Desk's public link, on a domain kept for examples. */
-  link: 'desk.example/meridian-bay-permits',
-} as const;
-
-export const CITY_LIVE_NOW = {
-  title: 'Live now',
-  count: { n: 9, label: '9 live' },
-  seeAll: 'See all in Conversations',
-} as const;
-
-/** One live conversation on the city's Today. */
-export interface CityLiveRow {
-  name: string;
-  level: 'Verified' | 'Public';
-  about: string;
-  /** Claude's words: they lead into the card and state no fee, date or status. */
-  reply: string;
-  language: CopyLanguage;
-  fact?: FactCardProps;
-  receipt: VisionReceipt;
-  /** The one thing the supervisor can do from the row. */
-  action?: string;
-}
-
-/**
- * Live now, in the board's words: who, their level, what about, Claude's words, the fact and the
- * receipt. Marcus Bell's reply leads into his card ("Here’s where your kitchen remodel stands."),
- * so the permit's status stays in the card.
- */
-export const CITY_LIVE: readonly CityLiveRow[] = [
-  {
-    name: 'Marcus Bell',
-    level: 'Verified',
-    about: 'Permit status, 3 min',
-    reply: 'Here’s where your kitchen remodel stands.',
-    language: 'en',
-    fact: {
-      label: 'Permit status',
-      icon: 'document',
-      title: 'Plan check passed',
-      lines: ['Kitchen remodel, permit B-2026-0412', 'Fee due before issue: $1,286'],
-    },
-    receipt: { source: decided('executed'), plain: 'Code sent to the email on the application. His own file, so I opened it.' },
-  },
-  {
-    name: 'Visitor in Eastshore',
-    level: 'Public',
-    about: 'Program deadline, in Spanish',
-    reply: 'Esta es la fecha límite del programa.',
-    language: 'es',
-    fact: {
-      label: 'Fecha límite',
-      icon: 'clock',
-      title: 'Programa de refuerzo sísmico',
-      lines: ['Cierra el 15 de diciembre, 5:00 pm'],
-      language: 'es',
-    },
-    receipt: { source: CHECKED, plain: 'From the published program page. Sent in Spanish.' },
-  },
-  {
-    name: 'Visitor',
-    level: 'Public',
-    about: 'Asked about a neighbor’s permit',
-    reply: 'Plans and applicant details go only to the applicant. Here’s what’s public.',
-    language: 'en',
-    fact: { label: 'Public record', icon: 'document', title: 'Permit B-2026-0377', lines: ['Status: issued'] },
-    receipt: { source: decided('refused'), plain: 'Not the applicant, so only public record fields. The file stayed closed.' },
-  },
-  {
-    name: 'Joan Park',
-    level: 'Verified',
-    about: 'Eligibility, waiting 4 min',
-    reply: 'Whether your garage conversion is exempt is a plan checker’s decision. I’ve asked one to join.',
-    language: 'en',
-    receipt: { source: decided('held'), plain: 'Held for a person: exemptions are a staff decision.' },
-    action: 'Assign staff',
-  },
-];
-
-/** The city's always-on lines: what can't be switched off on its Desk, and why. */
-export const CITY_ALWAYS_ON = {
-  title: 'Always on',
-  caption: 'Can’t be switched off',
-  lines: [
-    {
-      title: 'No legal or financial determinations without a qualified person',
-      detail: 'Eligibility, exemptions, fee waivers and code readings go to staff.',
-    },
-    { title: 'Files only to the applicant', detail: 'Codes go to the contact on the application, never one typed into chat.' },
-    { title: 'No promised outcomes', detail: 'Status and published dates only, in cards, never an approval or an outcome.' },
-  ],
-  also: 'Also always on: says it’s an AI, and logs every conversation for City records.',
-} as const;
-
-export const CITY_TODAY_SO_FAR = {
-  title: 'Today so far',
-  lines: [
-    '214 questions answered in 6 languages',
-    '38 applicants verified for their own files',
-    '7 handed to staff',
-    '0 determinations made without a person',
-  ],
-} as const;
 
 // ---------------------------------------------------------------------------------------------
 // The team Desk (N-R2-Vision-TeamDesk): Rivera Plumbing's team asking its own Desk.
