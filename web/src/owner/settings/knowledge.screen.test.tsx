@@ -229,6 +229,38 @@ describe('knowledge', () => {
     await expect.poll(() => main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem').elements().length).toBe(4);
   });
 
+  it.each([429, 422])('knowledge_refused_switch_preserves_readers_%s', async (status) => {
+    const screen = await addNote();
+    const line = status === 429 ? TOO_MANY : "That didn't go through. Check it and try again.";
+    for (const wasPublic of [false, true]) {
+      if (wasPublic) {
+        await switchOf(screen).click();
+        await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'true');
+      }
+      mockStore.inject({ route: 'addKnowledge', status, body: status === 422 ? { error: 'kernel', code: 'invalid' } : { error: 'rate_limited' } });
+      await switchOf(screen).click();
+      await expect.element(main(screen).getByText(line, { exact: true })).toBeVisible();
+      await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', String(wasPublic));
+    }
+  });
+
+  it('knowledge_lost_forced_private_add_shows_the_returned_readers_and_withheld_row', async () => {
+    mockStore.world.keepsKnowledgeOwnerOnly = () => true;
+    mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
+    const screen = await addNote(NOTE, { retryScale: 0 });
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
+    await expect.element(main(screen).getByText(ADDED, { exact: true })).toBeVisible();
+    const row = main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem').filter({ hasText: 'A note only you can see' });
+    await expect.element(row).toBeVisible();
+    expect(row.element().textContent).toMatch(/^A note only you can seeAdded .+Only you$/);
+    expect(main(screen).getByText(NOTE_TITLE, { exact: true }).query()).toBeNull();
+    // A lost publish that lands but is forced private is explained by the withheld title.
+    mockStore.inject({ route: 'addKnowledge', status: 'network', afterCommit: true });
+    await switchOf(screen).click();
+    await expect.element(main(screen).getByText(KNOWLEDGE_COPY.keptPrivate, { exact: true })).toBeVisible();
+    await expect.element(switchOf(screen)).toHaveAttribute('aria-checked', 'false');
+  });
+
   it('knowledge_lost_publish_before_commit_says_the_change_failed', async () => {
     const screen = await addNote(NOTE, { retryScale: 0 });
     mockStore.inject({ route: 'addKnowledge', status: 'network' });
