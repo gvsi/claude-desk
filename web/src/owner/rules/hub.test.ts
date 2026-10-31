@@ -76,6 +76,7 @@ describe('the Rules hub', () => {
     const keys = sections.flatMap((s) => s.tools.map((t) => t.key));
     expect(keys).not.toContain('native.fetch_website');
     expect(keys).not.toContain('native.read_memory');
+    expect(keys).not.toContain('native.web_search');
     expect(sections.map((s) => s.connector.id)).not.toContain('google_calendar');
     // The payment limit's line sits atop Payments and Stripe only.
     expect(sections.filter((s) => s.moneyLimit).map((s) => s.connector.id)).toEqual(['payments', 'stripe']);

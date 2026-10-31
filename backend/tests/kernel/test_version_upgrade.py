@@ -225,7 +225,7 @@ async def test_a_seed_version_from_an_earlier_kernel_is_rebuilt_from_its_shipped
 
 # The native tools this plan registered, which a Desk created before it has no rows for.
 NEW_NATIVE_TOOLS = ("native.capture_lead", "native.release_document", "native.request_callback",
-                    "native.start_verification")
+                    "native.start_verification", "native.web_search")
 
 
 async def without_new_native_tools(app: FastAPI, copy: Rivera) -> None:

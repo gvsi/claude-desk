@@ -2275,7 +2275,7 @@ async def test_expired_mandate_at_execution_names_no_rule_change(kernel, ro_read
 # Setup: a new Desk and the owner's setup tools (Plans 01b and 01c) ---------------------------------------------------
 
 
-SETUP_TOOLS = {"native.fetch_website", "native.read_memory"}
+SETUP_TOOLS = {"native.fetch_website", "native.read_memory", "native.web_search"}
 # `PRESETS["ask_first"]`: auto for anyone on these, everything else asks (Plan 01a).
 ASK_FIRST_AUTO = {"native.find_slots", "native.capture_lead", "native.request_callback", "native.start_verification",
                   *SETUP_TOOLS}

@@ -207,6 +207,7 @@ export interface NormalizedAction {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
   effects: ("read" | "private_data" | "change" | "charge" | "pay_out" | "send_message")[];
@@ -601,7 +602,7 @@ export interface KernelError {
 }
 export interface KnowledgeItem {
   item_id: string;
-  source: "website" | "upload" | "setup" | "memory_import";
+  source: "website" | "upload" | "setup" | "memory_import" | "web_search";
   title: string;
   text: string;
   label: Label;
@@ -634,7 +635,8 @@ export interface LedgerEvent {
     | "rate_limit"
     | "agent_auth"
     | "head_checkpoint"
-    | "desk_data";
+    | "desk_data"
+    | "web_search";
   origin: "kernel" | "api";
   session_id?: string | null;
   ref_id?: string | null;
@@ -796,6 +798,7 @@ export interface ToolProfile {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
   source: "native" | "mcp";
@@ -832,6 +835,7 @@ export interface ToolPin {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
   definition_sha256: string;
@@ -840,7 +844,7 @@ export interface ToolsConfirmRequest {
   desk_id: string;
   /**
    * @minItems 1
-   * @maxItems 13
+   * @maxItems 14
    */
   tools:
     | [ToolPin]
@@ -856,6 +860,22 @@ export interface ToolsConfirmRequest {
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
     | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ]
+    | [
+        ToolPin,
         ToolPin,
         ToolPin,
         ToolPin,
@@ -890,6 +910,7 @@ export interface ToolsSimulateChangeRequest {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
 }

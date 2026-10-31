@@ -902,6 +902,7 @@ export interface SimulateChangeIn {
     | "native.start_verification"
     | "native.fetch_website"
     | "native.read_memory"
+    | "native.web_search"
     | "payments.list_charges"
     | "payments.create_refund";
 }
