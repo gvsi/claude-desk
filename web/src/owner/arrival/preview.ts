@@ -138,7 +138,9 @@ export function stillToday(now: Date): StillToday {
       // Maria whispered in Dana's chat; Claude handled the agent's and the held visitor's alone.
       handled: 2,
       stepped_in: 1,
-      stopped: 1,
+      // Only a refused request counts as stopped here, and the seed has none: the reply the check
+      // stopped is the briefing's, not the week's.
+      stopped: 0,
       // Each on its own day: a conversation counts on each day it has a message in.
       days: [-6, -5, -4, -3, -2, -1, 0].map((offset) => {
         const date = addDays(today, offset);
@@ -147,7 +149,7 @@ export function stillToday(now: Date): StillToday {
           date,
           conversations: Number(SEEDED.agentMessages.some(on)) + Number(on(SEEDED.heldMessage)) + Number(SEEDED.danaMessages.some(on)),
           bookings: Number(on(SEEDED.booked)),
-          stopped: Number(on(SEEDED.stoppedReply)),
+          stopped: 0,
         };
       }),
     },
