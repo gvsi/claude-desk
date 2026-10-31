@@ -155,6 +155,25 @@ def test_cli_git_errors_return_two(repo, tmp_path, capsys, case):
     assert not output.err
 
 
+def test_cli_non_utf8_filename_returns_two(repo, capsys):
+    # Build the tree directly: some filesystems refuse non-UTF-8 filenames.
+    blob = git(repo, "rev-parse", "HEAD:kernel/src/lib.rs")
+    entries = git(repo, "ls-tree", "HEAD").encode() + b"\n"
+    entries += f"100644 blob {blob}\t".encode() + b"invalid-\xff.rs\n"
+    tree = subprocess.run(
+        ["git", "-C", str(repo), "mktree"], input=entries, capture_output=True, check=True,
+    ).stdout.decode().strip()
+    head = git(repo, "commit-tree", tree, "-p", "HEAD", "-m", "add a non-UTF-8 filename")
+    git(repo, "update-ref", "HEAD", head)
+
+    assert run.merge_ready([], root=repo) == 2
+    output = capsys.readouterr()
+    assert output.out.startswith("merge-ready: error:")
+    assert "decode" in output.out
+    assert len(output.out.splitlines()) == 1
+    assert not output.err
+
+
 @pytest.mark.parametrize("args", [["--head"], ["--unknown"], ["--hea", "HEAD"]])
 def test_cli_usage_errors_return_two(args):
     with pytest.raises(SystemExit) as error:

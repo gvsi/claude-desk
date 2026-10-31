@@ -307,7 +307,7 @@ def merge_ready(argv: list[str], *, root: Path | None = None) -> int:
     options = parser.parse_args(argv)
     try:
         ready, reason = check(options.head, root if root is not None else REPO_ROOT)
-    except (GitError, OSError) as error:
+    except (GitError, OSError, UnicodeError) as error:
         print(f"merge-ready: error: {' '.join(str(error).splitlines())}")
         return 2
     print(f"merge-ready: {reason}")
