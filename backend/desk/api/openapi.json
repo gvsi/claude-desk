@@ -7627,7 +7627,8 @@
               "refund_issued",
               "charge_confirmed",
               "callback_confirmed",
-              "payment_confirmed"
+              "payment_confirmed",
+              "link_cancelled"
             ],
             "title": "Template"
           },
@@ -10020,6 +10021,33 @@
               "es"
             ],
             "title": "Language"
+          },
+          "business_name": {
+            "type": "string",
+            "title": "Business Name"
+          },
+          "customer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Name"
+          },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "rules_changed"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason"
           }
         },
         "type": "object",
@@ -10027,7 +10055,9 @@
           "title",
           "amount_cents",
           "state",
-          "language"
+          "language",
+          "business_name",
+          "customer_name"
         ],
         "title": "PaymentLinkView"
       },
@@ -12071,6 +12101,22 @@
               "disabled"
             ],
             "title": "Status"
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "new",
+                  "changed",
+                  "delisted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
           }
         },
         "type": "object",
