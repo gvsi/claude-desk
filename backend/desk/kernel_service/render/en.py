@@ -1,4 +1,5 @@
-"""English: the visitor's status lines, the owner's alert previews and the clause cards.
+"""English: the visitor's status lines, the owner's alert previews and owner-only lines, and the
+clause cards.
 
 `{owner}` is the business's `owner_display_name`. Status lines carry no digits, currency or
 percentages: only clause cards rendered from facts do. Cards read datetimes in the business's
@@ -28,9 +29,13 @@ STATUS: dict[str, str] = {
     "reply_handed_off": "Passed to {owner} to answer",
     "owner_said": "Written by {owner}",
     "owner_say_blocked": "Not sent: it included text from a private document",   # shown to the owner alone
-    # an approved release of private data whose session no longer stands for its person (shown to the owner)
-    # Why an approved private release was refused, for the owner: unused until an owner-facing field carries
-    # it, since a decision's status line reaches the visitor, who mustn't read why their session ended.
+}
+
+# Owner-only, key for key with `es.OWNER_STATUS`: why an approved release of private data was
+# refused, since its session no longer stood for its person. Unused until an owner-facing field
+# carries it. A decision's status line reaches the visitor, who mustn't read why their session
+# ended, so these are kept out of `STATUS` and no status line can render one.
+OWNER_STATUS: dict[str, str] = {
     "refused_contact_changed": "Not shared: their session ended when their contact changed",
     "refused_person_removed": "Not shared: they were removed from your records",
     "refused_session_closed": "Not shared: their session ended before your answer",

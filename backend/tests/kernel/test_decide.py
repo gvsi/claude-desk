@@ -1180,18 +1180,50 @@ def test_status_lines_are_digit_free():
     states = {"allowed", "held", "refused", "approved", "denied", "expired", "cancelled", "executed", "failed",
               "unknown", "refused_at_execution"}
     receipts = {"reply_checked", "reply_handed_off", "owner_said", "owner_say_blocked"}   # a reply's, an owner say's
-    # why an approved release of private data went nowhere: its session no longer stood for its person
+    # why an approved release of private data went nowhere, for the owner alone: the visitor mustn't read why
+    # their session ended, so these aren't status lines and `render.status` can't render them
     reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed"}
-    assert render.STATUS_KEYS == states | receipts | reasons               # one line per decision state
+    assert render.STATUS_KEYS == states | receipts                         # one line per decision state
+    assert render.OWNER_STATUS_KEYS == reasons and not reasons & render.STATUS_KEYS
     for lang in ("en", "es"):
         for key in render.STATUS_KEYS:
             line = render.status(key, lang, owner="Maria Rivera")
             assert line and not re.search(r"[0-9$€%]", line), (lang, key, line)
             assert "{" not in line
+        for key in reasons:
+            line = render.OWNER_STATUS[lang][key]
+            assert line and not re.search(r"[0-9$€%{]", line), (lang, key, line)
+            with pytest.raises(KeyError):
+                render.status(key, lang, owner="Maria Rivera")
     assert render.status("held", "es", owner="Maria Rivera") == "Esperando la aprobación de Maria Rivera"
     assert (render.language("es"), render.language("fr"), render.language(None)) == ("es", "en", "en")
     with pytest.raises(KeyError):
         render.status("held", "fr", owner="Maria Rivera")                 # no free-text fallback
+
+
+@pytest.mark.parametrize("key", ["refused_contact_changed", "refused_person_removed", "refused_session_closed",
+                                 "verify_started"])
+async def test_a_decision_takes_only_a_visitor_status_line(app, client, registry, key):
+    """A decision's status line is `visitor_plain`, which the visitor reads, so `set_state` takes only a
+    visitor status line as its template: an owner-only line (why an approved release went nowhere) or
+    any other text (a verify card's message) raises `ValueError` before anything changes, so the
+    decision keeps its state and line and nothing is ledgered."""
+    rows = await desk_with(app, [FakeAdapter("native.quote")],
+                           [rule("ask-quotes", "ask", "Quotes wait for your answer.")])
+    held = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})
+    assert held.state == "held"
+    before = [entry.seq for entry in await ledger_rows(app, rows)]
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
+            DecisionRow.decision_id == held.decision_id).with_for_update()))).one()
+        with pytest.raises(ValueError, match=key):
+            await decide.set_state(ctx, row, "refused_at_execution", kind="approval", status=key, summary={
+                "decision_id": row.decision_id, "state": "refused_at_execution", "reason": "session_ended"})
+        assert (row.state, row.visitor_plain) == ("held", held.visitor_plain)
+    [stored] = await decisions_of(app, rows)
+    assert (stored.state, stored.visitor_plain) == ("held", held.visitor_plain)
+    assert [entry.seq for entry in await ledger_rows(app, rows)] == before
 
 
 async def test_deciding_checks_what_it_relies_on_and_fails_closed():

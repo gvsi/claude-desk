@@ -545,10 +545,11 @@ async def _refused_in_t2(ctx: KernelCtx, target: _Target, execution: Execution, 
     """A Desk deleted, an allow's session closed, or an approved release of private data whose
     session no longer stands (`session_ended`), after T1 and before the side effect: nothing runs.
     Its intent is `failed` (after `on_failed`), the decision `refused_at_execution` (`reason`, "rules
-    changed" unless given, its status line the template `status` when given), its `execute` entry
-    naming the `check` that failed, committed. An allow answers 409 `conflict`, as a refusal in T1
-    does; an approved hold answers with its failed result, so the owner's answer reads the decision
-    as refused."""
+    changed" unless given), its `execute` entry naming the `check` that failed, committed. The
+    visitor sees the state's own status line, never why their session ended; `status`, when given,
+    can only be another visitor status line (`decide.status_line`). An allow answers 409 `conflict`,
+    as a refusal in T1 does; an approved hold answers with its failed result, so the owner's answer
+    reads the decision as refused."""
     await _undo(ctx, target)
     result = _no_result(target.action.action_id, "failed")
     await _finish(ctx, target, execution, result, "refused_at_execution",
@@ -598,8 +599,9 @@ async def _undo(ctx: KernelCtx, target: _Target) -> None:
 async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result: ExecResult, decision_state: str,
                   summary: dict[str, Any], *, status: str | None = None) -> None:
     """The execution's final row and the decision's state (its status line the template `status`
-    when given), ledgered and signed, in the caller's transaction, which holds the decision row
-    (`target.decision`) and the execution row."""
+    when given, which can only be a visitor status line: `decide.status_line`), ledgered and signed,
+    in the caller's transaction, which holds the decision row (`target.decision`) and the execution
+    row."""
     execution.state = {"executed": "succeeded", "failed": "failed", "expired": "failed",
                        "refused_at_execution": "failed"}[decision_state]
     execution.result = result
@@ -872,10 +874,11 @@ async def _refused_in_recovery(ctx: KernelCtx, target: _Target, execution: Execu
     """A private action's outcome, recovered once its session no longer stands for its person: the
     adapter isn't asked. `on_failed` runs first, before anything is ledgered, so the rows it locks
     come before the ledger head (`repo.py`). Then the record: an intent is `unknown` (ledgered as
-    orphaned), then the action is `refused_at_execution` with the plain reason `ended` and nothing
-    in its result, ledgered as reconciled. If `on_failed` fails, what `prepare` reserved may stand,
-    so, with whatever it wrote taken back, the action stays `unknown` with nothing in its result,
-    for the next try."""
+    orphaned), then the action is `refused_at_execution` with nothing in its result, ledgered as
+    reconciled with the reason `session_ended` and the part that ended it (`ended`) as its check;
+    the visitor sees the state's own status line, never why their session ended. If `on_failed`
+    fails, what `prepare` reserved may stand, so, with whatever it wrote taken back, the action stays
+    `unknown` with nothing in its result, for the next try."""
     action_id = target.action.action_id
     try:
         async with ctx.db.begin_nested():
