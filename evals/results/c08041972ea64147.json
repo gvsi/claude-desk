@@ -1,13 +1,13 @@
 {
  "schema": 1,
- "inputs": "b4a5cbf7d457d5f7",
+ "inputs": "c08041972ea64147",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
    "backend/desk/api/model.py"
   ],
   [
-   "456b1c85a4cf52f0a42f5b02809710f606763550",
+   "cf2dffe3fce51c28ee30e88464354c7b4dd305af",
    "backend/desk/api/prompts.py"
   ],
   [
@@ -19,11 +19,11 @@
    "backend/desk/contracts.py"
   ],
   [
-   "3f85b452a28586c9ce63121ca7b7fca7b1497625",
+   "0dccbc9eed04d78a402e002c59739dedf975096c",
    "backend/desk/kernel_api.py"
   ],
   [
-   "5455f872a5d395b0a70a904febf07c731c7a7314",
+   "51315d1ba177f47968406e97545b4b515c0b1b2a",
    "backend/desk/kernel_service"
   ],
   [
@@ -79,9 +79,9 @@
    "kernel"
   ]
  ],
- "git_sha": "89d9ee0e024243c73fe4d48da8b4421158e02c03",
- "created_at": "2026-10-31T18:58:21.184287Z",
- "pass_id": "20261031-185821-872caa",
+ "git_sha": "0b07790c803ad4ab7180087d0bde6f02b8dec83f",
+ "created_at": "2026-10-31T19:18:43.887556Z",
+ "pass_id": "20261031-191843-cafbdf",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
