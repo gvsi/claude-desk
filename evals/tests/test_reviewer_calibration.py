@@ -4,6 +4,8 @@ import asyncio
 import csv
 import hashlib
 import json
+import re
+import signal
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -52,6 +54,38 @@ async def normalized_case_action(case, monkeypatch):
         action_id="calibration-action", copy_id=principal.copy_id, desk_id=principal.desk_id,
         session_id=principal.session_id, generation=1, tool=fields.tool, effects=adapter.profile.effects,
         args_sha256="0" * 64, profile_sha256="0" * 64, **normalized.model_dump()), principal
+
+
+def test_an_exception_note_on_a_list_price_quote_still_expects_a_pass():
+    case = next(c for c in reviewer.load_cases(reviewer.CASES_FILE) if c.id == "text-quote-exception")
+    assert case.action.discount_bp == 0
+    assert case.gate == "pass"
+
+
+def test_the_pinned_prompt_has_accepted_current_schema_valid_measurements(monkeypatch):
+    from desk.kernel_service import decisions
+
+    pin = (reviewer.REPO_ROOT / "backend/tests/kernel/test_decisions.py").read_text()
+    named = re.search(r"evals/calibration/results/reviewer-[\w-]+\.json", pin).group()
+    path = reviewer.REPO_ROOT / named
+    saved = json.loads(path.read_text())
+    assert saved["analysis"]["accepted"]
+    assert saved["prompts"]["new"]["text"] == decisions.REVIEW_SYSTEM
+    records = []
+    for row in saved["records"]:
+        assert set(row) == set(reviewer.Sample.model_fields)
+        record = reviewer.Sample.model_validate(row)
+        answer = record.answer()
+        if answer is not None:
+            assert set(answer.model_dump()) == set(decisions.REVIEW_SCHEMA["properties"])
+        records.append(record)
+    cases = reviewer.load_cases(reviewer.CASES_FILE)
+    current = reviewer.analyze(cases, records, saved["samples"])
+    assert current["complete"] and current["accepted"] and not current["stale"]
+    call = AsyncMock(side_effect=AssertionError("rescore must be offline"))
+    monkeypatch.setattr(decisions.AnthropicDecisions, "review", call)
+    assert "complete=True; accepted=True" in reviewer.rescore(path, cases)
+    call.assert_not_awaited()
 
 
 async def test_all_fixture_money_fields_match_real_adapter_normalization(monkeypatch):
@@ -204,6 +238,23 @@ def test_paid_run_refuses_without_a_cap_before_building_a_client():
         reviewer.main([], reviewer.Deps(client=lambda _: pytest.fail("no client without a cap")))
 
 
+def test_new_arm_defaults_to_head_for_library_and_cli(monkeypatch):
+    from evals.calibration.soft_promise import Prompt
+
+    refs = []
+
+    def load(root, ref):
+        refs.append(ref)
+        return Prompt("prompt", ref)
+
+    monkeypatch.setattr(reviewer, "load_prompt", load)
+    reviewer.load_prompts(reviewer.REPO_ROOT)
+    assert refs == ["origin/main", "HEAD"]
+    refs.clear()
+    assert reviewer.main(["--dry-run"]) == 0
+    assert refs == ["origin/main", "HEAD"]
+
+
 @pytest.fixture
 def fake_run(tmp_path, monkeypatch):
     import yaml
@@ -274,6 +325,21 @@ def test_both_arms_use_the_production_call_and_save_samples_and_shared_spend(fak
     [spend] = list(csv.DictReader(deps.spend_file.open()))
     assert spend["pass_id"].startswith("calibration-reviewer-") and spend["runs"] == "30"
     assert float(spend["claude_api_usd"]) == pytest.approx(30 * 0.0004)
+
+
+def test_saved_settings_follow_the_production_reviewer_constants(fake_run, monkeypatch):
+    from desk.kernel_service import decisions
+
+    monkeypatch.setattr(decisions, "REVIEW_THINKING", {"type": "disabled"}, raising=False)
+    monkeypatch.setattr(decisions, "REVIEW_EFFORT", "medium", raising=False)
+    deps, requests = fake_run
+    assert reviewer.main(["--samples", "1", "--max-usd", "2"], deps) == 0
+    [path] = deps.out_dir.glob("*.json")
+    settings = json.loads(path.read_text())["settings"]
+    assert settings["thinking"] == decisions.REVIEW_THINKING
+    assert settings["effort"] == decisions.REVIEW_EFFORT
+    assert all(request["thinking"] == settings["thinking"]
+               and request["output_config"]["effort"] == settings["effort"] for request in requests)
 
 
 def test_rescore_spends_nothing_and_excludes_changed_or_unrecorded_inputs(fake_run, monkeypatch, capsys):
@@ -456,20 +522,35 @@ def test_unpriced_calls_stop_at_the_cap_and_save_incomplete_results(fake_run, ca
     assert 0 < saved["spend_usd"] <= 0.06
 
 
-@pytest.mark.parametrize("interruption", [KeyboardInterrupt, asyncio.CancelledError])
-def test_cancel_saves_paid_answers_as_partial_with_the_spend_row(fake_run, interruption):
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, asyncio.CancelledError, signal.SIGTERM])
+def test_cancel_saves_paid_answers_as_partial_with_the_spend_row(fake_run, interruption, monkeypatch):
     deps, requests = fake_run
     original = deps.client("fake-key").messages.create
+    handlers = {}
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def install(number, handler):
+        handlers[number] = handler
+        return previous
+
+    if interruption == signal.SIGTERM:
+        monkeypatch.setattr(signal, "signal", install)
 
     async def create(**request):
         if len(requests) == 2:
             requests.append(request)
+            if interruption == signal.SIGTERM:
+                handler = handlers.get(signal.SIGTERM)
+                assert callable(handler), "SIGTERM must interrupt through the cleanup path"
+                handler(signal.SIGTERM, None)
             raise interruption()
         return await original(**request)
 
     deps.client = lambda _: SimpleNamespace(messages=SimpleNamespace(create=create))
-    with pytest.raises(interruption):
+    with pytest.raises(KeyboardInterrupt if interruption == signal.SIGTERM else interruption):
         reviewer.main(["--samples", "1", "--max-usd", "2"], deps)
+    if interruption == signal.SIGTERM:
+        assert handlers[signal.SIGTERM] == previous
 
     [spend] = list(csv.DictReader(deps.spend_file.open()))
     assert spend["runs"] == "3"

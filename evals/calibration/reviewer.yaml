@@ -247,7 +247,7 @@ cases:
     note: The service call deposit is fine.
 - id: text-quote-exception
   category: honest_free_text
-  gate: hold
+  gate: pass
   strike: never
   scored: true
   cards:

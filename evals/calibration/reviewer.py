@@ -9,7 +9,7 @@ Rescoring reads saved answers, rejects stale inputs, calls no model and writes n
     python -m evals.calibration.reviewer --rescore RESULTS
 
 PROMPT_REF / --prompt-ref selects the new arm; OLD_PROMPT_REF / --old-prompt-ref
-selects the old arm. Defaults are feat/reviewer-criteria and origin/main. Results
+selects the old arm. Defaults are HEAD and origin/main. Results
 go to evals/calibration/results/reviewer-old-new-<UTC timestamp>.json and paid
 calls append one row to the shared calibration spend ledger. Unpriced calls are
 charged their reservation. Cap stops and cancellations save partial results.
@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 import json
 import math
+import signal
 import sys
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -85,7 +86,7 @@ def load_prompt(root: Path, ref: str) -> Prompt:
 
 
 def load_prompts(root: Path, *, old_ref: str = "origin/main",
-                 new_ref: str = "feat/reviewer-criteria") -> dict[str, Prompt]:
+                 new_ref: str = "HEAD") -> dict[str, Prompt]:
     return {"old": load_prompt(root, old_ref), "new": load_prompt(root, new_ref)}
 
 
@@ -478,7 +479,7 @@ async def run(deps: Deps, cases: list[Case], prompts: dict[str, Prompt], samples
             "created_at": now.isoformat(), "git_sha": results.git(deps.root, "rev-parse", "HEAD").strip(),
             "model": decisions.REVIEW_MODEL, "samples": samples,
             "settings": {"max_tokens": decisions.REVIEW_MAX_TOKENS, "timeout_s": decisions.REVIEW_TIMEOUT_S,
-                         "thinking": {"type": "between_tools"}, "effort": "low"},
+                         "thinking": decisions.REVIEW_THINKING, "effort": decisions.REVIEW_EFFORT},
             "prompts": {arm: {"text": p.text, "source": p.source, "sha256": p.sha256} for arm, p in prompts.items()},
             "estimate_usd": estimate, "max_usd": max_usd, "spend_usd": meter.spent, "spend_row": row_id,
             "calls": meter.calls, "estimated_calls": meter.estimated, "estimated_usd": meter.estimated_usd,
@@ -505,7 +506,7 @@ def main(argv: Sequence[str] | None = None, deps: Deps | None = None) -> int:
     parser.add_argument("--samples", type=int)
     parser.add_argument("--max-usd", type=float)
     parser.add_argument("--old-prompt-ref")
-    parser.add_argument("--prompt-ref", help="new arm ref (default feat/reviewer-criteria)")
+    parser.add_argument("--prompt-ref", help="new arm ref (default HEAD)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rescore", type=Path)
     options = parser.parse_args(argv)
@@ -530,7 +531,7 @@ def main(argv: Sequence[str] | None = None, deps: Deps | None = None) -> int:
     try:
         cases = load_cases(deps.cases)
         prompts = load_prompts(deps.root, old_ref=options.old_prompt_ref or "origin/main",
-                               new_ref=options.prompt_ref or "feat/reviewer-criteria")
+                               new_ref=options.prompt_ref or "HEAD")
         estimate = sum(call_cost(prompt.text, call_input(case)) for prompt in prompts.values() for case in cases) * samples
         print(f"reviewer: {len(cases)} cases x 2 arms x {samples} samples = {len(cases) * 2 * samples} calls; "
               f"estimate ${estimate:.4f} at {decisions.REVIEW_MODEL} list price "
@@ -540,11 +541,20 @@ def main(argv: Sequence[str] | None = None, deps: Deps | None = None) -> int:
         if options.dry_run:
             print("dry run: no model called; spend $0.000000")
         else:
-            asyncio.run(run(deps, cases, prompts, samples, options.max_usd, estimate))
+            previous = signal.signal(signal.SIGTERM, _interrupt)
+            try:
+                asyncio.run(run(deps, cases, prompts, samples, options.max_usd, estimate))
+            finally:
+                signal.signal(signal.SIGTERM, previous)
     except (Refused, RuntimeError) as refusal:
         print(f"reviewer: {refusal}", file=sys.stderr)
         return 1
     return 0
+
+
+def _interrupt(number: int, frame: object) -> None:
+    """Unwind the runner so its finally block saves spend and partial answers."""
+    raise KeyboardInterrupt
 
 
 if __name__ == "__main__":

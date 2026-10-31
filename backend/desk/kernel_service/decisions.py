@@ -53,6 +53,8 @@ log = logging.getLogger(__name__)
 REVIEW_MODEL = "claude-sonnet-5-5"
 REVIEW_TIMEOUT_S = 4.0
 REVIEW_MAX_TOKENS = 2048
+REVIEW_THINKING = {"type": "between_tools"}   # thinking off, Sonnet 5.5's form
+REVIEW_EFFORT = "low"
 UNTRUSTED_ARG_CHARS = 200                 # each free-text argument is cut to this many characters
 REVIEW_SYSTEM = (
     "Review one proposed action for a small business's public AI assistant against the supplied owner "
@@ -348,7 +350,7 @@ class AnthropicDecisions:
     async def review(self, data: ReviewInput) -> Reviewed:
         review, usage = await self._ask(
             Review, data, model=REVIEW_MODEL, max_tokens=REVIEW_MAX_TOKENS, system=REVIEW_SYSTEM,
-            schema=REVIEW_SCHEMA, thinking={"type": "between_tools"},   # thinking off, Sonnet 5.5's form
+            schema=REVIEW_SCHEMA, thinking=REVIEW_THINKING, effort=REVIEW_EFFORT,
             timeout_s=REVIEW_TIMEOUT_S, failed="review_failed")
         return Reviewed(review=review, usage=usage)
 
@@ -361,7 +363,7 @@ class AnthropicDecisions:
 
     async def _ask(self, answer: type[Answer], data: BaseModel, *, model: str, max_tokens: int, system: str,
                    schema: dict[str, Any], thinking: dict[str, str], timeout_s: float,
-                   failed: str) -> tuple[Answer | None, CallUsage]:
+                   failed: str, effort: str = "low") -> tuple[Answer | None, CallUsage]:
         """One structured call at effort low: `data` as one JSON object (its letters as themselves,
         so Spanish reaches the model as text, not escapes), one try inside `timeout_s`, no tools and
         no fallback model (the client makes no retries, and the timeout goes with the request).
@@ -375,7 +377,7 @@ class AnthropicDecisions:
                 messages=[{"role": "user", "content": json.dumps(data.model_dump(mode="json"), sort_keys=True,
                                                                   ensure_ascii=False)}],
                 thinking=thinking,
-                output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
+                output_config={"effort": effort, "format": {"type": "json_schema", "schema": schema}},
                 timeout=timeout_s,
             ), timeout_s)
             parsed, status, kind = _parse(message, answer)
