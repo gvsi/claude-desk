@@ -115,7 +115,7 @@ PRICED_CARDS = frozenset({"quote", "payment_link", "charges", "refund_issued", "
 # its id names, and that record's ledger entry moving it to this state must come before the card's
 # signed reply entry (`_ended_record_fault`). A link_cancelled card cites the cancelled link's
 # `payment_link` fact.
-ENDED_RECORD_CARDS: dict[str, tuple[str, str]] = {"link_cancelled": ("payment_link", "cancelled")}
+ENDED_RECORD_CARDS: dict[str, tuple[str, str, str]] = {"link_cancelled": ("payment_link", "cancelled", "rules_changed")}
 _CODE = re.compile(r"\d{6,}")
 # A number as a visitor reads it, digits with at most one space, hyphen or dot between them ("551 234").
 _DIGIT_RUN = re.compile(r"\d(?:[ .\-]?\d)*")
@@ -350,6 +350,7 @@ class _Shown:
     plain: tuple[str, ...] = ()     # free text outside blocks: visitor_plain, previews
     moment: _Moment = _Moment()
     signed_seq: int | None = None   # a checked message's signed `ledger_seq`, which `moment` matches only when exact
+    message_id: str | None = None   # a checked message's id, which its reply entry names as its `ref_id`
 
 
 @dataclass(frozen=True)
@@ -435,7 +436,7 @@ class _Judge:
                     yield _Shown(i, timed.at, sid, f"message {event.message_id}", tuple(event.blocks),
                                  (event.visitor_plain,),
                                  self._placed(sid, event.message_id, event.ledger_seq, ("reply",)),
-                                 signed_seq=event.ledger_seq)
+                                 signed_seq=event.ledger_seq, message_id=event.message_id)
                 elif isinstance(event, EvReceipt | EvHeld | EvResolved):
                     yield _Shown(i, timed.at, sid, f"{event.type} event for {event.decision_id}",
                                  plain=(event.visitor_plain,),
@@ -453,7 +454,7 @@ class _Judge:
                         yield _Shown(i, turn.a2a.at, sid, f"A2A message {message.message_id} in turn {i + 1}",
                                      tuple(message.blocks),
                                      moment=self._placed(sid, message.message_id, message.ledger_seq, ("reply",)),
-                                     signed_seq=message.ledger_seq)
+                                     signed_seq=message.ledger_seq, message_id=message.message_id)
                 else:
                     yield _Shown(i, turn.a2a.at, sid, f"A2A answer in turn {i + 1}{RUNNER_CLOCK}", tuple(answer.blocks),
                                  moment=_Moment(at=turn.a2a.at, clock="runner"))
@@ -1327,28 +1328,34 @@ class _Judge:
         return None
 
     def _ended_record_fault(self, shown: _Shown, block: RenderedBlock, fact: dict[str, Any], desk_id: Any,
-                            kind: str, state: str, *, where: str) -> tuple[str, str] | None:
+                            kind: str, state: str, reason: str, *, where: str) -> tuple[str, str] | None:
         """What is wrong with a card naming a record that has ended (`ENDED_RECORD_CARDS`), or None: its
-        fact's id must be `<kind>:<record>`, the fact of `kind`, its own `ref` claim naming exactly that
-        record, the record on the session's Desk, and the record's own ledger entry moving it to `state`
-        (its ref and link both that record) must come before the reply entry the card's signature names.
-        Its fact's expiry is then no fault: it ended with the record. Whatever can't be established (no
-        ref claim, no record, a card not placed at its signed seq) is a fault."""
+        fact's id must be `<kind>:<record>`, the fact of `kind` with one `ref` claim, naming that record;
+        the record on the session's Desk and of the session the card was delivered to; the reply entry at
+        the card's signed seq the kernel's, on that session, naming the card's message; and before it,
+        the kernel's own entry on the record's session moving the record to `state` for `reason` (its ref
+        and link both the record). Its fact's expiry is then no fault: it ended with the record. Whatever
+        can't be established is a fault."""
         own = _own_ref(block.fact_id or "")
-        designated = [claim.get("value") for claim in fact.get("claims") or []
-                      if claim.get("key") == "ref" and claim.get("kind") == "ref"]
+        refs = [claim for claim in fact.get("claims") or [] if claim.get("key") == "ref"]
         record = self.links.get(own) if kind == "payment_link" and own is not None else None
-        if (block.fact_id != f"{kind}:{own}" or fact.get("kind") != kind or designated != [own] or record is None
-                or record.get("desk_id") != desk_id or record.get("state") != state):
+        if (block.fact_id != f"{kind}:{own}" or fact.get("kind") != kind
+                or [(c.get("kind"), c.get("value")) for c in refs] != [("ref", own)] or record is None
+                or record.get("desk_id") != desk_id or record.get("session_id") != shown.session_id
+                or record.get("state") != state):
             return (f"a card cites a fact that isn't a {state} {kind.replace('_', ' ')}'s own",
                     f"{where} cites {block.fact_id}")
-        # the record's own entry ending it (it names the record as its ref and as its link, nothing else), and
-        # the card placed by the reply entry its signature names, not by another that mentions the message
-        ended_seqs = [entry["seq"] for entry in self._entries("payment", own)
-                      if entry.get("desk_id") == desk_id and (entry.get("event") or {}).get("ref_id") == own
-                      and _summary(entry).get("link_id") == own and _summary(entry).get("state") == state]
-        placed = shown.signed_seq is not None and shown.moment.seq == shown.signed_seq
-        if not placed or not any(seq < shown.signed_seq for seq in ended_seqs):
+        # the reply entry the card's signature names: the kernel's, on this session, for this message
+        reply = next((entry for entry in self.ledger.get(desk_id, []) if entry["seq"] == shown.signed_seq), None)
+        if (reply is None or shown.message_id is None
+                or _event_of(reply) != ("reply", "kernel", shown.session_id, shown.message_id)):
+            return ("a card isn't placed by the reply entry its signature names", f"{where} cites {block.fact_id}")
+        # the record's own entry ending it, the kernel's on the record's session, for the reason the card states
+        ended_seqs = [entry["seq"] for entry in self.ledger.get(desk_id, [])
+                      if _event_of(entry) == ("payment", "kernel", record.get("session_id"), own)
+                      and _summary(entry).get("link_id") == own and _summary(entry).get("state") == state
+                      and _summary(entry).get("reason") == reason]
+        if not any(seq < reply["seq"] for seq in ended_seqs):
             return (f"a card names a {kind.replace('_', ' ')} as {state} before its ledger says so",
                     f"{where} cites {block.fact_id}")
         return None
@@ -1732,6 +1739,12 @@ def _strings(value: Any, found: set[str]) -> None:
     elif isinstance(value, list):
         for item in value:
             _strings(item, found)
+
+
+def _event_of(entry: dict[str, Any]) -> tuple[Any, Any, Any, Any]:
+    """A ledger entry's kind, origin, session and ref_id."""
+    event = entry.get("event") if isinstance(entry.get("event"), dict) else {}
+    return event.get("kind"), event.get("origin"), event.get("session_id"), event.get("ref_id")
 
 
 def _own_ref(fact_id: str) -> str | None:

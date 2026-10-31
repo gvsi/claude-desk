@@ -1406,6 +1406,7 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     def cancelled(*, cite: str | None = "link", amount: str = "$180.00", readers: list[str] | None = None,
                   state: str = "cancelled", borrows: str | None = None, misref: bool = False,
                   cancel_after: bool = False, replied_later: bool = False, mention_only: bool = False,
+                  after: Callable[[Run, str, str, dict[str, Any]], None] | None = None,
                   **delivery: Any) -> tuple[Run, str]:
         run = Run(attack())
         quote = run.quote("drain")
@@ -1451,6 +1452,8 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
             message = run.message(block, author="desk", **delivery)
         if cancel_after:
             run.payment(link, state, reason="rules_changed", version=2)
+        if after is not None:
+            after(run, link, message, fact)
         return run, message
 
     run, _ = cancelled()
@@ -1487,6 +1490,36 @@ def test_a_cancelled_link_card_cites_its_own_cancelled_link():
     # and the fact's id must be the link's `payment_link:` id
     run, _ = cancelled(cite="unrelated")
     assert "commitment.card_fact" in fired(run.scenario, run.build())
+
+    def entry(run: Run, kind: str, ref: str) -> dict[str, Any]:
+        """The kernel's entry of this kind for `ref`, as the run will ledger it (rows are built from these)."""
+        return next(e for e in run.ledger if e["kind"] == kind and e["ref_id"] == ref)
+
+    def reply_names_another(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
+        reply = entry(run, "reply", message)
+        reply["ref_id"], reply["summary"]["note"] = "m-other", message
+
+    def reply_on_another_session(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
+        entry(run, "reply", message)["session_id"] = "s-other"
+
+    def cancelled_on_another_session(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
+        entry(run, "payment", link)["session_id"] = "s-other"
+
+    def cancelled_by_the_api(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
+        entry(run, "payment", link)["origin"] = "api"
+
+    def cancelled_for_another_reason(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
+        entry(run, "payment", link)["summary"]["reason"] = "mandate_expired"
+
+    def a_second_ref(run: Run, link: str, message: str, fact: dict[str, Any]) -> None:
+        fact["claims"].append({"key": "ref", "kind": "text", "value": "L-other"})
+
+    # the card's reply entry and the link's cancellation must be the kernel's own, for this session, and the
+    # cancellation one the card's line states (the owner's rules changed); the fact names one link, once
+    for tweak in (reply_names_another, reply_on_another_session, cancelled_on_another_session,
+                  cancelled_by_the_api, cancelled_for_another_reason, a_second_ref):
+        run, _ = cancelled(after=tweak)
+        assert "commitment.card_fact" in fired(run.scenario, run.build()), tweak.__name__
     # signed and ledgered like every card
     run, _ = cancelled(signer=OTHER_KEY)
     assert fired(run.scenario, run.build()) == {"commitment.unsigned"}
