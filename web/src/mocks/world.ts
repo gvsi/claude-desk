@@ -656,6 +656,24 @@ export class MockWorld {
     return record.decision;
   }
 
+  /**
+   * The owner's answer to a held request of a deleted Desk, as the kernel takes it: an allow is
+   * re-checked at execution and refused there (`refused_at_execution`), so nothing runs, and a deny
+   * is `denied`. The Desk's chat is closed, so it hears nothing, and its ledger went with the Desk.
+   */
+  answerClosed(record: DecisionRecord, answer: ApprovalAnswer): Decision {
+    const state: DecisionState = allows(answer) ? 'refused_at_execution' : 'denied';
+    const language = this.sessions.get(record.decision.session_id)?.language ?? 'en';
+    record.decision = {
+      ...record.decision,
+      state,
+      visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null),
+      inbox: [],
+      signature: sign(`${record.decision.decision_id}:${state}`),
+    };
+    return record.decision;
+  }
+
   /** The visitor cancels their held request, as the kernel records it: no answer can run it now. */
   cancel(record: DecisionRecord): Decision {
     const desk = this.desk(record.deskId);

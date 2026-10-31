@@ -384,6 +384,11 @@ const SERVED: ServedRoutes = {
     if (record.decision.state !== 'held') return failWith(409, 'already_resolved', { decision: record.decision });
     const given = answer as ApprovalAnswer;
     if (!(record.decision.answers ?? []).includes(given)) return failWith(422, 'kernel', { code: 'invalid' });
+    // Its Desk is gone: refused at execution, or denied, and no follow-up, since its chat is closed.
+    // No card is drafted for a Desk that's gone.
+    if (sv.world.deletedDesks.has(record.deskId)) {
+      return ok({ decision: sv.world.answerClosed(record, given), execution_state: null, card_diff: null } satisfies ApprovalAnswerOut);
+    }
     const session = sv.world.sessions.get(record.decision.session_id);
     const decision = sv.world.answer(record, given);
     if (session) sv.runTurn(session, afterAnswer(given, decision), session.language, '');

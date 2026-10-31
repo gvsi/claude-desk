@@ -1024,6 +1024,46 @@ describe('deleting a Desk', () => {
     const otherAt = { params: { session_id: other.state.session_id }, body: { generation: other.state.generation } };
     expect((await call('takeover', otherAt)).status).toBe(200);
   });
+
+  it('deleted_desk_holds_are_refused_at_execution', async () => {
+    // Dana's refund and the seeded 15% quote are held for Maria when the Desk goes.
+    mockStore.reset('rivera_two_desks');
+    const refund = mockStore.world.addHeldRefund();
+    const quote = [...mockStore.world.decisions.values()].find(
+      (record) => record.deskId === deskId && record.decision.state === 'held' && record.decision.decision_id !== refund.decision_id,
+    );
+    const chat = mockStore.world.sessions.get(refund.session_id);
+    if (!quote || !chat) throw new Error('the Desk has two holds, and the refund a chat');
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(204);
+    const heard = chat.events.length;
+
+    // Allowed now, the refund doesn't run: the kernel's check at execution refuses a deleted Desk's
+    // action. No card is drafted for a Desk that's gone.
+    const allowed = await call('answer', { params: { decision_id: refund.decision_id }, body: { answer: 'allow_once' } });
+    expect(allowed).toEqual({
+      status: 200,
+      body: {
+        decision: expect.objectContaining({
+          decision_id: refund.decision_id,
+          state: 'refused_at_execution',
+          visitor_plain: VISITOR_PLAIN.en.refused_at_execution,
+          inbox: [],
+        }) as unknown,
+        execution_state: null,
+        card_diff: null,
+      },
+    });
+    // Denied, the quote is denied: there is nothing to run.
+    const denied = await call('answer', { params: { decision_id: quote.decision.decision_id }, body: { answer: 'deny_once' } });
+    expect(denied).toMatchObject({ status: 200, body: { decision: { state: 'denied' }, execution_state: null, card_diff: null } });
+    // Each is answered once; another answer is refused as it always is, with the decision as it stands.
+    const again = await call('answer', { params: { decision_id: refund.decision_id }, body: { answer: 'allow_once' } });
+    expect(again).toMatchObject({ status: 409, body: { error: 'already_resolved', decision: { state: 'refused_at_execution' } } });
+
+    // The closed chat hears nothing more, and no follow-up turn runs.
+    await drain();
+    expect(chat.events).toHaveLength(heard);
+  });
 });
 
 describe('planted faults', () => {
