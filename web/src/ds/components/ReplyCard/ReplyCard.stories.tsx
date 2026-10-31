@@ -333,7 +333,7 @@ export const UnsafeHref: Story = {
     await expect(canvasElement.querySelectorAll('a')).toHaveLength(0);
     await expect(canvas.queryByRole('link')).toBeNull();
     await expect(canvas.queryByRole('button')).toBeNull();
-    await expect(canvas.getByText('Service call deposit, $20')).toBeVisible();
+    await expect(canvas.getByText('Service call deposit, $20.00')).toBeVisible();
     await expect(canvas.getByText(TEST_PAYMENT.en)).toBeVisible();
   },
 };

@@ -215,12 +215,12 @@ const cards = {
   payment_link: {
     en: cardBlock('payment_link', {
       fact_id: 'payment_link:L-3301',
-      title: 'Service call deposit, $20',
+      title: 'Service call deposit, $20.00',
       href: '/pay/k7Hq2vX9',
     }),
     es: cardBlock('payment_link', {
       fact_id: 'payment_link:L-3301',
-      title: 'Service call deposit, $20',
+      title: 'Service call deposit, $20.00',
       href: '/pay/k7Hq2vX9',
     }),
   },
@@ -308,8 +308,8 @@ const cards = {
     es: cardBlock('refund_issued', { fact_id: 'refund:re-dana-1', title: '$180.00 reembolsados' }),
   },
   charge_confirmed: {
-    en: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20' }),
-    es: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20' }),
+    en: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20.00' }),
+    es: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20.00' }),
   },
   callback_confirmed: {
     en: cardBlock('callback_confirmed', {
@@ -322,8 +322,8 @@ const cards = {
     }),
   },
   payment_confirmed: {
-    en: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20' }),
-    es: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20' }),
+    en: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
+    es: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
   },
 } satisfies Record<ClauseTemplate, Bilingual<CardBlock>>;
 
