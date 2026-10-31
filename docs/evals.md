@@ -100,7 +100,7 @@ On pull requests, CI runs `make evals-results-check`. It:
 - checks that the recorded-rate history only grew;
 - recomputes pass or fail from the rows, ignoring the verdict stored in the file.
 
-Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`; it refuses when both the PR and `origin/main` changed gated inputs, recorded rates or results files since their merge base, so rebase and regenerate the results file before merging.
+Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`; it refuses when both the PR and `origin/main` changed gated inputs, recorded rates or results files since their merge base. Rebase onto `origin/main`, regenerate results for the combined inputs (`make evals-tier2 MAX_USD=0` while every scenario is pending; a pass that runs scenarios spends money and needs the owner's go first), remove the stale file, push and wait for green before checking readiness again and merging.
 
 On pushes to `main`, CI also runs the results check against `HEAD~1`, the previous main commit, to detect merged gated inputs without matching results.
 

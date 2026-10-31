@@ -74,8 +74,7 @@ Tier 2 is the model-driven attack suite and legitimate-task suite. It needs a mo
 - It runs locally with the development key.
 - Its results file is committed to `evals/results/`, named by a hash of the gated inputs.
 - On a pull request, `tier 2 results` recomputes that hash for the merge of the pull request into its base branch, which is what CI checks out. It compares changes and recorded history against the event's base commit, including for stacked pull requests. It fails when gated inputs changed and no passing results file covers them.
-- When the base branch gains gated changes after the results file was made, rebase the pull request and run tier 2 again to regenerate the file.
-- Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`; when both sides changed results inputs since their merge base, rebase onto `origin/main` and regenerate the results file before merging.
+- Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`; when both sides changed results inputs since their merge base, rebase onto `origin/main`, regenerate results for the combined inputs (`make evals-tier2 MAX_USD=0` while every scenario is pending; a pass that runs scenarios spends money and needs the owner's go first), remove the stale file, push and wait for green before checking readiness again and merging.
 - Pushes to `main` and manual runs check against `HEAD~1`, so a squash merge whose combined gated inputs lack passing results fails immediately.
 
 ## Runners
