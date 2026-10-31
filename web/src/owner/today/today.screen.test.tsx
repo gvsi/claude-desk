@@ -1520,8 +1520,8 @@ describe("Today's Demo inbox", () => {
 
   it('inbox_reads_nothing_from_the_moment_it_closes', async () => {
     // The sheet is closed from the moment it closes, before Today has drawn it closed: a poll that
-    // comes due then, or the owner coming back to the tab then, reads nothing. No poll lands by
-    // itself here, so the test brings them due.
+    // comes due then, or the owner coming back to the tab or to the network then, reads nothing. No
+    // poll lands by itself here, so the test brings them due.
     const polls = inboxPacedPolls();
     const { screen } = await renderRoute(TODAY, { pollScale: 100 });
     const open = inboxButton(screen);
@@ -1537,6 +1537,8 @@ describe("Today's Demo inbox", () => {
     onceGone(sheet.element(), () => {
       polls.due();
       document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+      window.dispatchEvent(new Event('offline'));
+      window.dispatchEvent(new Event('online'));
     });
     await sheet.getByRole('button', { name: 'Close' }).click();
     await expect.element(sheet).not.toBeInTheDocument();
