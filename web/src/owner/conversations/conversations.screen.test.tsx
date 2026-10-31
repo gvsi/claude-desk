@@ -20,7 +20,7 @@ import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { watchLandings } from '../../test/landings.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
@@ -66,6 +66,33 @@ function named(sessionId: string, name: string): SessionRecord {
 
 function log(screen: RenderResult) {
   return screen.getByRole('log');
+}
+
+/** Makes `chat` longer than the window: `count` more messages from the visitor. Returns the last. */
+function lengthen(chat: SessionRecord, count = 30): string {
+  let last = '';
+  for (let i = 1; i <= count; i += 1) {
+    last = `Message ${i} of ${count}: the water heater is still dripping.`;
+    mockStore.world.visitorText(chat, last);
+  }
+  return last;
+}
+
+/** Makes the list longer than the window: `count` more chats, each with a visitor's message. Returns how many. */
+function moreChats(count = 20): number {
+  const desk = mockStore.world.desk(RIVERA.deskId);
+  if (!desk) throw new Error("the copy has Rivera's main Desk");
+  for (let i = 1; i <= count; i += 1) mockStore.world.visitorText(mockStore.world.addSession(desk), `Hello, question ${i}.`);
+  return count;
+}
+
+/** The element whose scrolling moves `el`: the nearest that scrolls, `el` included, or the page. */
+function scrollerOf(el: Element): Element {
+  for (let node: Element | null = el; node !== null; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+  }
+  return document.scrollingElement ?? document.documentElement;
 }
 
 /** A receipt in the conversation, by the words it shows. */
@@ -345,6 +372,116 @@ describe('Conversations', () => {
     expect(sent[0]).toEqual({ type: 'owner_joined', name: OWNER });
     expect(sent[1]).toMatchObject({ type: 'message', author: 'owner' });
     expect(sent[1]?.type === 'message' && sent[1].blocks.map((b) => b.text)).toEqual([words]);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('a_long_chat_scrolls_on_its_own', async () => {
+    // A chat and a list longer than the window, at 1440 by 900.
+    const last = lengthen(named(DANA_LIVE, DANA));
+    const added = moreChats();
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const list = screen.getByRole('navigation', { name: 'Conversations' });
+    const rows = list.getByRole('link');
+    await expect.poll(() => rows.elements().length).toBe(3 + added);
+    const head = screen.getByRole('heading', { level: 2, name: DANA });
+    const latest = log(screen).getByText(last, { exact: true });
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    await expect.element(latest).toBeInTheDocument();
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+
+    // Read to its end, the chat scrolls on its own: the list's first row, the chat's head and the
+    // owner's controls stay in view.
+    latest.element().scrollIntoView({ block: 'end' });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    await expect.element(rows.first()).toBeInViewport({ ratio: 1 });
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+    await expect.element(takeOver).toBeInViewport({ ratio: 1 });
+
+    // The transcript is its own scroll region, apart from the head, the list and the controls; the
+    // main area around the page and the window don't scroll.
+    const transcript = scrollerOf(log(screen).element());
+    expect(transcript.scrollTop).toBeGreaterThan(0);
+    for (const other of [head.element(), list.element(), takeOver.element()]) expect(transcript.contains(other)).toBe(false);
+    const main = screen.getByRole('main').element();
+    expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
+    expectNoWindowScroll();
+
+    // The list is its own scroll region too: read to its last row, the chat stays where it was.
+    expect(scrollerOf(list.element())).toBe(list.element());
+    const readTo = transcript.scrollTop;
+    rows.last().element().scrollIntoView({ block: 'end' });
+    await expect.element(rows.last()).toBeInViewport({ ratio: 1 });
+    expect(list.element().scrollTop).toBeGreaterThan(0);
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    expect(transcript.scrollTop).toBe(readTo);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('take_over_keeps_the_list_and_the_head_in_place', async () => {
+    const last = lengthen(named(DANA_LIVE, DANA));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const firstRow = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link').first();
+    const head = screen.getByRole('heading', { level: 2, name: DANA });
+    const latest = log(screen).getByText(last, { exact: true });
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    await expect.element(takeOver).toBeVisible();
+    await expect.element(firstRow).toBeInViewport({ ratio: 1 });
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+    // She has read the chat to its end.
+    latest.element().scrollIntoView({ block: 'end' });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    const rowAt = firstRow.element().getBoundingClientRect().top;
+    const headAt = head.element().getBoundingClientRect().top;
+
+    // Take over, under a chat longer than the window: the owner's composer and Hand back come into
+    // view in the whisper's place, the list's first row and the chat's head haven't moved, and the
+    // end of the chat is still in view over the taller controls.
+    await takeOver.click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('button', { name: 'Hand back to Claude' })).toBeInViewport({ ratio: 1 });
+    await expect.element(firstRow).toBeInViewport({ ratio: 1 });
+    await expect.element(head).toBeInViewport({ ratio: 1 });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    expect(firstRow.element().getBoundingClientRect().top).toBe(rowAt);
+    expect(head.element().getBoundingClientRect().top).toBe(headAt);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('the_end_of_the_chat_stays_in_view', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const last = lengthen(chat);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const latest = log(screen).getByText(last, { exact: true });
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeVisible();
+    const transcript = scrollerOf(log(screen).element());
+
+    // At the end of the chat, her words and Dana's answer each come into view as they arrive.
+    latest.element().scrollIntoView({ block: 'end' });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    await box.fill('I can come at 4 today.');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log(screen).getByText('I can come at 4 today.', { exact: true })).toBeInViewport({ ratio: 1 });
+    mockStore.world.visitorText(chat, 'Four works, thank you.');
+    await expect.element(log(screen).getByText('Four works, thank you.', { exact: true })).toBeInViewport({ ratio: 1 });
+
+    // Scrolled back to read, she stays where she is while the chat moves on.
+    transcript.scrollTop = 0;
+    await expect.poll(() => transcript.scrollTop).toBe(0);
+    mockStore.world.visitorText(chat, 'Should I leave the gate open?');
+    const asked = log(screen).getByText('Should I leave the gate open?', { exact: true });
+    await expect.element(asked).toBeInTheDocument();
+    await readsMore('conversation', 2);
+    expect(transcript.scrollTop).toBe(0);
+    await expect.element(asked).not.toBeInViewport();
+
+    // Sending brings the end back, with her words in view.
+    await box.fill('Yes, please.');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log(screen).getByText('Yes, please.', { exact: true })).toBeInViewport({ ratio: 1 });
     await expectScreenBasics(screen.container, { owner: true });
   });
 
@@ -1150,7 +1287,7 @@ describe('Conversations', () => {
   });
 
   it('conversations_fit_a_phone', async () => {
-    named(DANA_LIVE, DANA);
+    const last = lengthen(named(DANA_LIVE, DANA));
     mockStore.world.addHeldRefund();
     const { screen, router } = await renderRoute(LIST, { viewport: 'phone' });
 
@@ -1169,6 +1306,16 @@ describe('Conversations', () => {
     await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
+
+    // Read to its end, the chat scrolls on its own there too: the way back and the chat's head stay
+    // in view above it, and the owner's controls under it.
+    const latest = log(screen).getByText(last, { exact: true });
+    latest.element().scrollIntoView({ block: 'end' });
+    await expect.element(latest).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('link', { name: 'All conversations' })).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('heading', { level: 2, name: DANA })).toBeInViewport({ ratio: 1 });
+    await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeInViewport({ ratio: 1 });
+    expectNoWindowScroll();
     await screen.getByRole('link', { name: 'All conversations' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(LIST);
     await expect.element(list).toBeVisible();

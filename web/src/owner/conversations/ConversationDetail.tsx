@@ -35,6 +35,7 @@ import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
+import { useEndInView } from './useEndInView.ts';
 import { useOwnerTyping } from './useOwnerTyping.ts';
 import { conversationKey, useTakeOver } from './useTakeOver.ts';
 
@@ -152,6 +153,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
   const controls = useTakeOver(sessionId);
   const ownerTyping = useOwnerTyping(sessionId);
   const typing = useTypingBubble(chat.data);
+  const endInView = useEndInView();
   const mode = chat.data?.state.mode;
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
@@ -227,13 +229,16 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
 
   // Words that didn't go come back into the box they were written in, as soon as it is there: the
   // owner's words for the visitor wait for her to take the chat over again if it was handed back.
+  // Sending brings the end of the chat back into view, where her words will show.
   const say = (text: string) => {
     ownerTyping.sent();
+    endInView.follow();
     void controls.say(text).then((sent) => {
       if (!sent) setUnsent({ kind: 'say', text });
     });
   };
   const whisper = (text: string) => {
+    endInView.follow();
     void controls.whisper(text).then((sent) => {
       if (!sent) setUnsent({ kind: 'whisper', text });
     });
@@ -294,25 +299,28 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
-      <Transcript label={`Conversation with ${who}`}>
-        <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
-        <OwnerTranscript
-          items={read.items}
-          agentName={who}
-          ownerName={business.owner_display_name}
-          timezone={business.timezone}
-          deskId={deskId}
-          heldIds={heldIds}
-          renderHeld={renderHeld}
-          recorded={read.replayed === true}
-          readSinceOpened={readSinceOpened}
-        />
-        {typing && state.kind !== 'agent' ? (
-          <TranscriptRow>
-            <WritingIndicator language="en" variant="bubble" who={who} />
-          </TranscriptRow>
-        ) : null}
-      </Transcript>
+      {/* The transcript scrolls on its own, between the head and the owner's controls, its end in view as a chat's. */}
+      <div ref={endInView.ref} className="cd-conversation__scroll">
+        <Transcript label={`Conversation with ${who}`}>
+          <TranscriptHeader left={started ?? 'No messages yet.'} right="Notes from the checks sit under each message. Select one for the full trace." />
+          <OwnerTranscript
+            items={read.items}
+            agentName={who}
+            ownerName={business.owner_display_name}
+            timezone={business.timezone}
+            deskId={deskId}
+            heldIds={heldIds}
+            renderHeld={renderHeld}
+            recorded={read.replayed === true}
+            readSinceOpened={readSinceOpened}
+          />
+          {typing && state.kind !== 'agent' ? (
+            <TranscriptRow>
+              <WritingIndicator language="en" variant="bubble" who={who} />
+            </TranscriptRow>
+          ) : null}
+        </Transcript>
+      </div>
       {/* No one is on the other side of a recorded chat: nothing to take over, whisper or write. */}
       {read.replayed === true ? null : (
         <div className="cd-conversation__controls">
