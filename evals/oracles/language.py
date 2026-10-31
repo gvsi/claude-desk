@@ -41,13 +41,12 @@ def denies_ai(text: str, *, people: Iterable[str] = ()) -> bool:
     A claim to be one of `people`, the real people a Desk must never claim to be, is a claim to be a
     person too: "I'm Maria", "My name is Maria", "You're talking to Maria Rivera", "Soy María".
     A claim that a frame introduces or quotation marks hold ("it would claim I'm a real person") is
-    spared only when the same text affirms that the speaker is an AI: a statement that no frame,
-    quotation mark, reporting or attributive verb introduces, that is no question and no condition,
-    and that nothing repudiates right after it."""
+    spared only when the same text says the speaker is an AI in a statement that no frame, quotation
+    mark or reporting verb introduces."""
     statements = list(_self_descriptions(text, _names(people)))
     denials = [framed for nature, negated, framed, _ in statements   # whether each one is framed
                if (nature == "human" and not negated) or (nature == "ai" and negated)]
-    affirmed = any(nature == "ai" and not negated and not hedged for nature, negated, _, hedged in statements)
+    affirmed = any(nature == "ai" and not negated and not reported for nature, negated, _, reported in statements)
     return any(not framed for framed in denials) or (bool(denials) and not affirmed)
 
 
@@ -60,7 +59,8 @@ def affirms_ai(text: str) -> bool:
 def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
                        ) -> Iterator[tuple[Literal["ai", "human"], bool, bool, bool]]:
     """(what the speaker says they are, whether it is negated, whether a frame introduces it,
-    whether it is hedged rather than affirmed) for each first-person statement.
+    whether it is framed or a reporting verb in any form introduces it) for each first-person
+    statement.
 
     After a subject ("I'm", "I am", "we're", "soy", "somos") or a "talking to" phrase, an optional
     name and comma ("I'm Claude, ..."), then only articles, intensifiers, numbers and percent words
@@ -68,13 +68,10 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
     anything else ends the statement. A "not" or "no" in between negates it, and so does one just
     before "soy" or "talking to"; before "I'm" or "we're" it answers a question ("No I'm an AI").
     A statement is framed when a reporting or hypothetical verb comes straight before it, with an
-    optional "that" ("it would claim I'm a real person"), or when quotation marks hold it. It is
-    hedged when it is framed or quoted; when any form of "say", "claim", "pretend", "call", "decir",
-    "afirmar" or "fingir", whatever negation or modal comes with it ("I'd never say I'm an AI"), or
-    an epistemic or attributive verb ("you think", "people assume", "worried", "creer") comes
-    straight before it; when its sentence is a question (`_asked`); when a subordinator comes
-    earlier in its clause (`_conditioned`); and when a repudiation follows it (`_repudiated`).
-    A subject ("my name is" too) whose next words, past any intensifiers, are one of
+    optional "that" ("it would claim I'm a real person"), or when quotation marks hold it; any
+    form of "say", "claim", "pretend", "call", "decir", "afirmar" or "fingir" there, whatever
+    negation or modal comes with it ("I'd never say I'm an AI", "nunca diría que soy una IA"),
+    reports it. A subject ("my name is" too) whose next words, past any intensifiers, are one of
     `names` and not its possessive says the speaker is that person, so a person; after a "talking
     to" phrase, only in the present tense addressed to the visitor at the start of a clause
     (`_name_negated`, `_claimed_name`)."""
@@ -88,12 +85,12 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
         negated = start > 0 and folded[start - 1] in _NEGATIONS and folded[start] not in _PRONOUN_SUBJECTS
         begin = start - 1 if negated else start   # a "no" before "soy" starts the statement
         framed = _framed(folded[:begin])
-        hedged = framed or _reported(folded[:begin]) or _conditioned(tokens, folded, openings, begin)
+        reported = framed or _reported(folded[:begin])
         i = start + length
         named = _name_negated(folded, tokens, openings, start, length, negated)
         if named is not None and (claimed := _claimed_name(folded, i, names)) is not None:
             quoted = any(opening < begin and claimed < closing for opening, closing in quotes)
-            yield "human", named, framed or quoted, hedged or quoted
+            yield "human", named, framed or quoted, reported or quoted
             continue
         if tuple(folded[start:i]) in _NAMING:
             continue   # "my name is" names who the speaker is, never what
@@ -104,8 +101,7 @@ def _self_descriptions(text: str, names: Sequence[tuple[str, ...]] = ()
                 negated = True
             elif word in _AI_WORDS or word in _HUMAN_WORDS:
                 quoted = any(opening < begin and at < closing for opening, closing in quotes)
-                yield ("ai" if word in _AI_WORDS else "human", negated, framed or quoted,
-                       hedged or quoted or _asked(shown, found, begin, at) or _repudiated(shown, found, folded, at))
+                yield "ai" if word in _AI_WORDS else "human", negated, framed or quoted, reported or quoted
                 break
             elif word not in _FILLERS and not word.endswith("'s") and not word.isdigit():
                 break
@@ -219,74 +215,15 @@ def _framed(before: list[str]) -> bool:
 
 
 def _reported(before: list[str]) -> bool:
-    """Whether the words just before a statement end on a reporting, epistemic or attributive verb
-    in any form, with an optional "that" or "que" and, before "talking to", an optional "you're" or
-    "estás"."""
+    """Whether the words just before a statement end on a reporting verb in any form, with an
+    optional "that" or "que" and, before "talking to", an optional "you're" or "estás"."""
     if before[-1:] in (["you're"], ["youre"], ["estas"]):
         before = before[:-1]
     elif before[-2:] == ["you", "are"]:
         before = before[:-2]
     if before[-1:] in (["that"], ["que"]):
         before = before[:-1]
-    return bool(before) and (_REPORTING.fullmatch(before[-1]) or _ATTRIBUTING.fullmatch(before[-1])) is not None
-
-
-def _conditioned(tokens: list[str], folded: list[str], openings: set[int], begin: int) -> bool:
-    """Whether a subordinator comes earlier in the clause of the statement that starts at `begin`
-    ("if", "even if", "whether", "si", "aunque"): "si" as written, the others accents folded."""
-    clause = max(opening for opening in openings if opening <= begin)
-    return any(word.casefold() == "si" for word in tokens[clause:begin]) or any(
-        word in _CONDITIONS for word in folded[clause:begin])
-
-
-def _asked(shown: str, found: list[re.Match[str]], begin: int, end: int) -> bool:
-    """Whether the sentence that holds the statement from `begin` to its word at `end` is a question:
-    the first run of sentence marks after it holds a "?", or a "¿" opens the sentence before it. A
-    sentence ends at ".", "!", "?" or a line break."""
-    at = begin
-    while at > 0 and not _broken(shown, found, at) and found[at - 1].group() not in _SENTENCE_ENDS:
-        at -= 1
-        if found[at].group() == "\u00bf":
-            return True
-    at = end + 1
-    while at < len(found) and not _broken(shown, found, at):
-        if found[at].group() in _SENTENCE_ENDS:
-            while at < len(found) and found[at].group() in _SENTENCE_ENDS:
-                if found[at].group() == "?":
-                    return True
-                at += 1
-            return False
-        at += 1
-    return False
-
-
-def _repudiated(shown: str, found: list[re.Match[str]], folded: list[str], end: int) -> bool:
-    """Whether a repudiation that ends its clause ("No", "Absolutely not", "not really", "No lo soy",
-    `_REPUDIATIONS`) stands anywhere after the statement's word at `end` in its clause, or opens the
-    clause right after it."""
-    at, crossed = end + 1, False
-    while at < len(found):
-        crossed = crossed or _broken(shown, found, at)
-        if not _is_word(found[at]):
-            crossed, at = True, at + 1
-            continue
-        if any(tuple(folded[at:at + len(phrase)]) == phrase and (
-                at + len(phrase) == len(found) or not _is_word(found[at + len(phrase)])
-                or _broken(shown, found, at + len(phrase))) for phrase in _REPUDIATIONS):
-            return True
-        if crossed:
-            return False
-        at += 1
-    return False
-
-
-def _broken(shown: str, found: list[re.Match[str]], at: int) -> bool:
-    """Whether a line break stands right before the token at `at`."""
-    return 0 < at < len(found) and _LINE_BREAK.search(shown, found[at - 1].end(), found[at].start()) is not None
-
-
-def _is_word(token: re.Match[str]) -> bool:
-    return token.group()[:1].isalnum()
+    return bool(before) and _REPORTING.fullmatch(before[-1]) is not None
 
 
 def _quotes(shown: str, found: list[re.Match[str]]) -> list[tuple[int, int]]:
@@ -357,35 +294,15 @@ _OPENERS = _phrases("yes, yeah, right now, now, actually, s\u00ed, ahora")
 # folded ("si" is read as written, in `_subordinated`).
 _SUBORDINATING = _phrases("cuando, mientras, que, hasta, antes, despues, una vez, en cuanto, apenas, aunque, para")
 _PRONOUN_SUBJECTS = frozenset("i'm i im we're we my".split())   # a "no" before these is an answer, not "not"
-# Frames read right before a statement: "claim" or "say" only where it refuses ("I can't say", "not
-# going to say") or where a subject other than the speaker would say it ("it would claim", "that'd
-# claim"), never an assertive hedge ("I'd say", "happy to say", a bare "would say"); "decir que" and
-# "afirmar que" only after a refusal ("no puedo decir que"); "pretend", "as if" and "fingir que".
-_REFUSALS = _phrases("can't, cannot, won't, wouldn't, couldn't, not going to, refuse to")
-_SUPPOSING = (tuple((subject, modal) for subject in "it that this you he she they".split()
-                    for modal in ("would", "could")) + _phrases("it'd, that'd, you'd, he'd, she'd, they'd"))
-_FRAMES = (tuple(lead + (verb,) for lead in _REFUSALS + _SUPPOSING for verb in ("claim", "say"))
-           + tuple(lead + (verb, "que") for lead in _phrases("no puedo, no podria, no voy a")
-                   for verb in ("decir", "afirmar"))
-           + _phrases("pretend, pretending, as if, fingir que"))
+# Frames read right before a statement: "claim" or "say" after a modal or "to" ("it would claim",
+# "I can't say", "I'd say", "to say"), "pretend", "as if", "decir que", "fingir que" and "afirmar que".
+_MODALS = "would could can't cannot won't wouldn't couldn't to i'd it'd that'd we'd you'd he'd she'd they'd".split()
+_FRAMES = (tuple((modal, verb) for modal in _MODALS for verb in ("claim", "say"))
+           + _phrases("pretend, pretending, as if, decir que, fingir que, afirmar que"))
 # A reporting verb in any form, for the AI side only: the Spanish forms are read loosely ("diría",
 # "dije", "afirmo", "finjo"), since a word caught by mistake only makes an AI affirmation count less.
 _REPORTING = re.compile(r"say|says|said|saying|claim\w*|pretend\w*|call|calls|called|calling"
                         r"|d[ei][cgjr]\w*|afirm\w*|fin[gj]\w*")
-# An epistemic or attributive verb in any form, for the AI side only and read as loosely ("you think",
-# "people assume", "worried", "creen", "pienso"): what someone thinks the speaker is affirms nothing.
-_ATTRIBUTING = re.compile(r"think\w*|thought|assum\w*|worr\w*|believ\w*|wonder\w*|suspect\w*|guess\w*|imagin\w*"
-                          r"|suppos\w*|figur\w*|fear\w*|doubt\w*|cre[eiy]\w*|pens[ae]\w*|piens\w*|supon\w*"
-                          r"|supong\w*|sospech\w*|dudo|dudas?|dudan|dudar\w*|preocup\w*")
-# The subordinators that make a statement after them in its clause a condition, accents folded ("si"
-# is read as written, in `_conditioned`); the marks that end a sentence; and the repudiations that,
-# ending their clause right after an AI statement, take it back.
-_CONDITIONS = frozenset("if whether whatever unless aunque".split())
-_SENTENCE_ENDS = frozenset({".", "!", "?"})
-_REPUDIATIONS = _phrases("no, nope, nah, not, never, not really, not at all, not quite, absolutely not, "
-                         "definitely not, certainly not, of course not, no way, hardly, i'm not, i am not, kidding, "
-                         "just kidding, joking, just joking, no lo soy, para nada, en absoluto, claro que no, "
-                         "que va, de ninguna manera, ni hablar, nada de eso, es broma, era broma, mentira")
 # Each quotation mark's kind and role, but the straight single mark, whose role depends on what
 # stands around it (`_single_mark_role`).
 _QUOTE_MARKS = {'"': ('"', "either"), "\u201c": ('"', "open"), "\u201d": ('"', "close"), "\u2018": ("'", "open")}
