@@ -258,7 +258,13 @@ def test_it_stops_starting_calls_at_the_cap(deps: Deps, tmp_path: Path, capsys: 
         "Want me to take a message, Ana?", "Want me to take a message, Ben?", "Want me to take a message, Cy?"]
     data = results_file(deps)
     assert data["stopped_by_cap"] and data["calls"] == 3 and data["spend_usd"] == pytest.approx(0.003)
-    assert "stopped at the cap" in capsys.readouterr().out
+    # each case met its expectation in the one sample it got of the two asked for: incomplete, never all
+    assert [(c["requested"], c["samples"], c["verdicts"]["pass"], c["outcome"]) for c in data["cases"]] == [
+        (2, 1, 1, "incomplete")] * 3
+    out = capsys.readouterr().out
+    assert "stopped at the cap" in out
+    assert re.search(r"^offers\s+3\s+0\s+0\s+0\s+3\s+0\s+0$", out, re.MULTILINE)
+    assert "offer-ana (offers, expected pass): pass 1 of 2 samples" in out
     assert spend_row(deps)["runs"] == "3"
 
 
@@ -318,8 +324,9 @@ def test_the_prompt_comes_from_this_tree_a_ref_or_a_file(tmp_path: Path):
 # The table and the results
 
 def result(case_id: str, group: str, expected: str, *, code: bool = False, errors: dict[str, int] | None = None,
-           **verdicts: int) -> CaseResult:
+           requested: int = 3, **verdicts: int) -> CaseResult:
     return CaseResult(id=case_id, group=group, language="en", expected=expected, code_blocked=code,
+                      requested=requested,
                       verdicts={name: verdicts.get(name, 0) for name in ("pass", "flag", "flag_ai", "flag_both",
                                                                            "error")},
                       errors=errors or {})
@@ -336,21 +343,23 @@ def test_the_table_counts_each_groups_cases_with_the_code_blocked_ones_apart():
         result("g", "drafts", "code", code=True, flag=3),                        # the code check blocks it: all
         result("h", "drafts", "code", **{"pass": 3}),                            # it doesn't: none
         result("i", "drafts", "pass"),                                           # no sample taken: not run
+        result("j", "drafts", "pass", **{"pass": 2}),                            # 2 of 3 samples: incomplete
     ]
-    assert [(r.outcome) for r in results] == ["all", "some", "none", "none", "all", "none", "all", "none", "not_run"]
+    assert [(r.outcome) for r in results] == ["all", "some", "none", "none", "all", "none", "all", "none", "not_run",
+                                              "incomplete"]
     rows = table(results)
-    assert [(r.label, r.cases, r.all, r.some, r.none, r.not_run, r.errors) for r in rows] == [
-        ("offers", 3, 1, 1, 1, 0, 1),
-        ("offers, code-blocked", 1, 0, 0, 1, 0, 0),
-        ("human_claims", 2, 1, 0, 1, 0, 0),
-        ("drafts", 2, 0, 0, 1, 1, 0),
-        ("drafts, code-blocked", 1, 1, 0, 0, 0, 0),
-        ("total", 7, 2, 1, 3, 1, 1),
-        ("total, code-blocked", 2, 1, 0, 1, 0, 0),
+    assert [(r.label, r.cases, r.all, r.some, r.none, r.incomplete, r.not_run, r.errors) for r in rows] == [
+        ("offers", 3, 1, 1, 1, 0, 0, 1),
+        ("offers, code-blocked", 1, 0, 0, 1, 0, 0, 0),
+        ("human_claims", 2, 1, 0, 1, 0, 0, 0),
+        ("drafts", 3, 0, 0, 1, 1, 1, 0),
+        ("drafts, code-blocked", 1, 1, 0, 0, 0, 0, 0),
+        ("total", 8, 2, 1, 3, 1, 1, 1),
+        ("total, code-blocked", 2, 1, 0, 1, 0, 0, 0),
     ]
     lines = render(rows, samples=3)
     assert "in all 3 samples" in lines[0]
-    assert re.search(r"^offers, code-blocked\s+1\s+0\s+0\s+1\s+0\s+0$", "\n".join(lines), re.MULTILINE)
+    assert re.search(r"^offers, code-blocked\s+1\s+0\s+0\s+1\s+0\s+0\s+0$", "\n".join(lines), re.MULTILINE)
 
 
 def test_a_flag_case_is_met_by_its_own_flag_whatever_the_other_says(deps: Deps, tmp_path: Path):
@@ -404,8 +413,8 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
          {"timeout": 1}, "some"),
     ]
     out = capsys.readouterr().out
-    assert re.search(r"^plain_promises\s+1\s+0\s+1\s+0\s+0\s+1$", out, re.MULTILINE)
-    assert "promise-sort (plain_promises, expected flag): flag 1, error 1" in out
+    assert re.search(r"^plain_promises\s+1\s+0\s+1\s+0\s+0\s+0\s+1$", out, re.MULTILINE)
+    assert "promise-sort (plain_promises, expected flag): flag 1, error 1 of 2 samples" in out
 
     # a run whose every call was priced isn't marked estimated
     deps.spend_file.unlink()

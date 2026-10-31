@@ -41,14 +41,17 @@ limit but never measures what a tier 2 run costs (`passes.CALIBRATION_PREFIX`).
 
 Results. `evals/out/soft-promise/<label>-<time>.json` holds the run (the prompt, where it came from and
 its sha256, the commit, the model, samples, estimate, spend, calls and whether the cap stopped it) and,
-per case, its expectation, whether the code check blocks it, the count of each verdict over its
-samples (`pass`; `flag`, promises_beyond_cards alone; `flag_ai`, denies_being_ai alone; `flag_both`;
-and `error`, no verdict) and its errors by status. A sample meets `pass` with neither flag, `flag` with
-promises_beyond_cards set and `flag_ai` with denies_being_ai set, whatever the other flag says, since
-either blocks the reply; an error meets nothing. A `code` case meets its expectation when the code
-check blocks it, whatever the model answers. The printed table gives, for each group, how many cases
-met their expectation in all their samples, in some and in none, with the cases the code check blocks
-on rows of their own, and then each case that missed.
+per case, its expectation, whether the code check blocks it, the samples asked for (`requested`), the
+count of each verdict over the samples taken (`pass`; `flag`, promises_beyond_cards alone; `flag_ai`,
+denies_being_ai alone; `flag_both`; and `error`, no verdict) and its errors by status. A sample meets
+`pass` with neither flag, `flag` with promises_beyond_cards set and `flag_ai` with denies_being_ai set,
+whatever the other flag says, since either blocks the reply; an error meets nothing. A case's outcome
+is `all` only when every sample asked for met its expectation, else `some` or `none`; a case the cap
+left with fewer samples than asked for is `incomplete`, and one with none `not_run`, whatever they
+answered. A `code` case meets its expectation when the code check blocks it, whatever the model
+answers. The printed table gives, for each group, how many cases met their expectation in all the
+samples asked for, in some and in none, and how many are incomplete or not run, with the cases the
+code check blocks on rows of their own, and then each case not met in every sample asked for.
 """
 
 import argparse
@@ -295,23 +298,28 @@ class CaseResult(BaseModel):
     language: str
     expected: str
     code_blocked: bool
+    requested: int = Field(ge=1)                              # the samples the run asked for
     verdicts: dict[str, int] = Field(default_factory=lambda: dict.fromkeys(VERDICTS, 0))
     errors: dict[str, int] = Field(default_factory=dict)      # calls with no verdict, by status
 
     @computed_field   # type: ignore[prop-decorator]
     @property
     def samples(self) -> int:
+        """The samples taken: every call made for the case, an error included."""
         return sum(self.verdicts.values())
 
     @computed_field   # type: ignore[prop-decorator]
     @property
-    def outcome(self) -> Literal["all", "some", "none", "not_run"]:
-        """Whether the case met its expectation in all its samples, some or none; a `code` case meets
-        it when the code check blocks it."""
+    def outcome(self) -> Literal["all", "some", "none", "incomplete", "not_run"]:
+        """Whether the case met its expectation in all the samples asked for, some or none; a case
+        with fewer samples than asked for is `incomplete`, and one with none `not_run`, whatever
+        they answered. A `code` case meets it when the code check blocks it."""
         if self.expected == "code":
             return "all" if self.code_blocked else "none"
         if not self.samples:
             return "not_run"
+        if self.samples < self.requested:
+            return "incomplete"
         met = sum(count for verdict, count in self.verdicts.items() if verdict in MEETS[self.expected])
         return "all" if met == self.samples else "some" if met else "none"
 
@@ -432,7 +440,7 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
     now = deps.now()
     stamp = now.astimezone(UTC).strftime("%Y%m%d-%H%M%S")
     tallies = {case.id: CaseResult(id=case.id, group=case.group, language=case.language, expected=case.expected,
-                                   code_blocked=code_blocked(case)) for case in cases}
+                                   code_blocked=code_blocked(case), requested=config.samples) for case in cases}
     checker = AnthropicDecisions(_WithSystem(deps.client(key), prompt.text))
     meter = _Meter(config.max_usd)
     jobs = [case for _ in range(config.samples) for case in cases]   # every case's sample before the next
@@ -492,6 +500,7 @@ class Row:
     all: int
     some: int
     none: int
+    incomplete: int            # fewer samples than asked for
     not_run: int
     errors: int                # samples with no verdict
 
@@ -502,8 +511,8 @@ def table(case_results: Sequence[CaseResult]) -> list[Row]:
 
     def row(label: str, members: list[CaseResult]) -> Row:
         outcomes = Counter(member.outcome for member in members)
-        return Row(label, len(members), outcomes["all"], outcomes["some"], outcomes["none"], outcomes["not_run"],
-                   sum(member.verdicts.get("error", 0) for member in members))
+        return Row(label, len(members), outcomes["all"], outcomes["some"], outcomes["none"], outcomes["incomplete"],
+                   outcomes["not_run"], sum(member.verdicts.get("error", 0) for member in members))
 
     rows = []
     for group in [*dict.fromkeys(result.group for result in case_results), None]:
@@ -518,11 +527,12 @@ def table(case_results: Sequence[CaseResult]) -> list[Row]:
 def render(rows: Sequence[Row], *, samples: int) -> list[str]:
     width = max(len("group"), *(len(row.label) for row in rows))
     return [
-        f"Each group's cases that met their expectation in all {samples} samples, in some and in none; the "
-        "code check blocks the code-blocked ones before the model reads them:",
-        f"{'group':<{width}}  cases  all  some  none  not run  errors",
-        *(f"{row.label:<{width}}  {row.cases:>5}  {row.all:>3}  {row.some:>4}  {row.none:>4}  {row.not_run:>7}  "
-          f"{row.errors:>6}" for row in rows),
+        f"Each group's cases that met their expectation in all {samples} samples, in some and in none, and "
+        "those with fewer samples (incomplete) or none (not run); the code check blocks the code-blocked ones "
+        "before the model reads them:",
+        f"{'group':<{width}}  cases  all  some  none  incomplete  not run  errors",
+        *(f"{row.label:<{width}}  {row.cases:>5}  {row.all:>3}  {row.some:>4}  {row.none:>4}  {row.incomplete:>10}  "
+          f"{row.not_run:>7}  {row.errors:>6}" for row in rows),
     ]
 
 
@@ -540,11 +550,12 @@ def report(outcome: RunResult, path: Path) -> list[str]:
     lines += ["", *render(table(outcome.cases), samples=outcome.samples)]
     missed = [result for result in outcome.cases if result.outcome != "all"]
     if missed:
-        lines += ["", "Cases that missed in any sample:"]
+        lines += ["", "Cases not met in every sample asked for:"]
         for result in missed:
             counts = ", ".join(f"{verdict} {count}" for verdict, count in result.verdicts.items() if count)
             lines.append(f"  {result.id} ({result.group}, expected {result.expected}"
-                         f"{', code-blocked' if result.code_blocked else ''}): {counts or 'not run'}")
+                         f"{', code-blocked' if result.code_blocked else ''}): "
+                         f"{counts or 'not run'} of {result.requested} samples")
     lines += ["", f"results: {path}"]
     return lines
 
