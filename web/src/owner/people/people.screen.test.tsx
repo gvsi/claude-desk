@@ -3,18 +3,23 @@
  * people on record with their contacts masked, the leads with recorded ones tagged, a person's own
  * rules read only, and the Desk's public link with its QR card and ready-made words.
  */
-import { describe, expect, it } from 'vitest';
+import QRCode from 'qrcode';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
-import type { RulesView } from '../../api/views.ts';
+import type { RulesView, SetupState } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { copyResultLine } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { RIVERA } from '../../mocks/seed.ts';
+import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectScreenBasics } from '../../test/screen.ts';
+import { SHARE_COPY, displayLink } from '../share/shareCopy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const PEOPLE = `${DESK}/people`;
@@ -93,6 +98,40 @@ const JORDAN = { name: 'Jordan Pike', note: 'Asked about a gas line for an outdo
 
 /** An email address written out in full: no "•" standing in for its name. */
 const UNMASKED_EMAIL = /[\w.+-]*[\w+-]@[\w-]+\.[\w.]+/g;
+
+/** The QR code the share kit draws for `url`, as the image it shows. */
+async function qrImage(url: string): Promise<string> {
+  const svg = await QRCode.toString(url, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' });
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/** Puts a clipboard in the browser that records what it was given. */
+function stubClipboard() {
+  const writeText = vi.fn(async (_: string) => {});
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  return writeText;
+}
+
+/** A setup interview made through the mock, its rules confirmed, at the owner's preview before going live. */
+async function setupAtPreview(): Promise<SetupState> {
+  const description = "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.";
+  const started = await mockStore.dispatch('startSetup', { body: { description, timezone: LA } });
+  if ('network' in started || started.status !== 200) throw new Error('the mock starts a setup');
+  const state = started.body as SetupState;
+  const params = { id: state.interview_id };
+  await mockStore.dispatch('setupConsent', { params, body: { allow: true } });
+  for (const question of SETUP_QUESTIONS) await mockStore.dispatch('setupAnswer', { params, body: { question: question.key, text: 'Yes, that works.' } });
+  for (const key of ['setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm'] as const) {
+    const answer = await mockStore.dispatch(key, { params });
+    if ('network' in answer || answer.status !== 200) throw new Error(`the mock answers ${key}`);
+  }
+  return state;
+}
+
+afterEach(() => {
+  Reflect.deleteProperty(navigator, 'clipboard');
+  vi.restoreAllMocks();
+});
 
 describe('customers', () => {
   it('people_lists_contacts_and_leads', async () => {
@@ -307,7 +346,11 @@ describe('customers', () => {
     await screen.getByRole('link', { name: 'Go to Customers' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(PEOPLE);
 
-    // While the list is on its way, the loading line; while the rules are, theirs.
+    // While the list is on its way, the loading line; while the rules are, theirs. The list, still
+    // polling, goes first, and a read it sent late reaches nothing, so it can't take the answers
+    // meant for the page.
+    await cleanup();
+    mockStore.nextEpoch();
     mockStore.inject({ route: 'people', status: 200, delayMs: 300, body: (await mockStore.dispatch('people', { params: { desk_id: RIVERA.deskId } }) as { body: unknown }).body });
     mockStore.inject({ route: 'rules', status: 503, times: 2 });
     const slow = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100 })).screen;
@@ -326,5 +369,106 @@ describe('customers', () => {
     expect(failed.getByText(dana.maskedContact).query()).toBeNull();
     await failed.getByRole('button', { name: 'Try again' }).click();
     await expect.element(failed.getByRole('heading', { level: 1, name: dana.name })).toBeVisible();
+  });
+});
+
+describe('share', () => {
+  it('share_page_uses_the_desk_slug', async () => {
+    const { screen } = await renderRoute(`${DESK}/share`);
+    const url = `${window.location.origin}/d/${RIVERA.slug}`;
+    const business = rivera.business.name;
+    const owner = rivera.business.ownerName;
+
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Share' })).toBeVisible();
+    await expect.element(screen.getByText('Put your Desk where customers already look for you.', { exact: true })).toBeVisible();
+
+    // The Desk's own public link, from its slug: copied whole, and opened in a new tab.
+    const link = screen.getByRole('region', { name: 'Your link' });
+    await expect.element(link.getByText(url, { exact: true })).toBeVisible();
+    const open = link.getByRole('link', { name: /^Open/ });
+    const words = screen.getByRole('list', { name: 'Ready-made words' });
+    await expect.element(screen.getByRole('img', { name: `QR code for ${url}` })).toBeVisible();
+
+    // The frame with Share current, its cards in the card look, and Tab through the link's two
+    // buttons, Print card, then the words.
+    await expectOwnerBoard(screen.container, {
+      current: 'Share',
+      tabStops: [
+        link.getByRole('button', { name: 'Copy link' }).element() as HTMLElement,
+        open.element() as HTMLElement,
+        screen.getByRole('button', { name: 'Print card' }).element() as HTMLElement,
+        words.getByRole('button', { name: 'Copy Google profile' }).element() as HTMLElement,
+      ],
+    });
+    await expect.element(open).toHaveAttribute('href', url);
+    await expect.element(open).toHaveAttribute('target', '_blank');
+    const writeText = stubClipboard();
+    await link.getByRole('button', { name: 'Copy link' }).click();
+    await expect.element(link.getByText(copyResultLine('copied'), { exact: true })).toBeVisible();
+    expect(writeText).toHaveBeenLastCalledWith(url);
+
+    // The printable card: the business, the QR code for the link, the link as people type it, and
+    // who answers there.
+    const card = screen.getByRole('figure', { name: business });
+    const qr = card.getByRole('img', { name: `QR code for ${url}` });
+    await expect.element(qr).toBeVisible();
+    await expect.element(qr).toHaveAttribute('src', await qrImage(url));
+    await expect.element(card.getByText(displayLink(url), { exact: true })).toBeVisible();
+    await expect.element(card.getByText(`Answered by Claude, an AI. Ask for ${owner} any time.`, { exact: true })).toBeVisible();
+
+    // The ready-made words, each with its Copy, which copies its words.
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Ready-made words' })).toBeVisible();
+    const blocks = SHARE_COPY(business, owner, url);
+    expect(words.getByRole('listitem').elements().map((row) => row.querySelector('.cd-copy-list__words')?.textContent)).toEqual(blocks.map((b) => b.text));
+    await words.getByRole('button', { name: 'Copy Voicemail' }).click();
+    expect(writeText).toHaveBeenLastCalledWith(blocks[2]?.text);
+
+    // The website embed is coming later: no code to copy.
+    const later = screen.getByText('Website embed', { exact: true }).element().closest('.cd-share-kit__later') as HTMLElement;
+    expect(later.textContent).toBe('Website embedThe same chat on your own site.Coming later');
+    expect(later.querySelector('button, code, a')).toBeNull();
+    expect(screen.container.textContent).not.toMatch(/<script|embed\.js/);
+
+    // Print card prints the card alone: only it is marked to print while the browser prints.
+    let marked: string | null = null;
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {
+      marked = document.documentElement.getAttribute('data-print-only');
+      window.dispatchEvent(new Event('afterprint'));
+    });
+    await screen.getByRole('button', { name: 'Print card' }).click();
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(marked).toBe('share-card');
+    expect(document.documentElement.hasAttribute('data-print-only')).toBe(false);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('share_kit_on_the_live_step', async () => {
+    const state = await setupAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    const url = `${window.location.origin}/d/${state.slug}`;
+
+    // Under the link and Go to Today, the share kit as Share has it, with no second link card: the
+    // printable card with the QR code for the API's public link, the ready-made words, and the
+    // website embed coming later.
+    const heading = screen.getByRole('heading', { level: 2, name: 'Share it' });
+    await expect.element(heading).toBeVisible();
+    const card = screen.getByRole('figure', { name: 'Rivera Plumbing' });
+    await expect.element(card.getByRole('img', { name: `QR code for ${url}` })).toBeVisible();
+    await expect.element(card.getByText(displayLink(url), { exact: true })).toBeVisible();
+    await expect.element(card.getByText(`Answered by Claude, an AI. Ask for ${rivera.business.ownerName} any time.`, { exact: true })).toBeVisible();
+    expect(screen.getByRole('list', { name: 'Ready-made words' }).getByRole('listitem').elements()).toHaveLength(3);
+    await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Your link' }).query()).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copy link' }).elements()).toHaveLength(1);
+    const today = screen.getByRole('link', { name: 'Go to Today' }).element();
+    expect(today.compareDocumentPosition(heading.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    // "Copy link" writes the API's public link.
+    const writeText = stubClipboard();
+    await screen.getByRole('button', { name: 'Copy link' }).click();
+    expect(writeText).toHaveBeenCalledWith(url);
+    await expectScreenBasics(screen.container, { owner: true });
   });
 });
