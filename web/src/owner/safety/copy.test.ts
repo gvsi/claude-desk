@@ -97,9 +97,11 @@ describe('Safety copy', () => {
     // to the end of the last, on the business's clock.
     expect(anythingStoppedIn(one('refused', '2026-10-24T07:00:00.000000Z'), week)).toBe(true);
     expect(anythingStoppedIn(one('reply_blocked', '2026-10-31T06:59:00.000000Z'), week)).toBe(true);
-    // Before the week began there, though already the 24th in UTC, or after it ended: not this week.
+    // Before the week began there, though already the 24th in UTC: not this week.
     expect(anythingStoppedIn(one('reply_blocked', '2026-10-24T06:59:00.000000Z'), week)).toBe(false);
-    expect(anythingStoppedIn(one('refused', '2026-10-31T07:00:00.000000Z'), week)).toBe(false);
+    // After the week Today last read ended, just past midnight or with the clocks apart: newer than
+    // that read, so it counts, and the week isn't said to have stopped nothing.
+    expect(anythingStoppedIn(one('refused', '2026-10-31T07:00:00.000000Z'), week)).toBe(true);
     // A hold is the owner's to answer, not stopped.
     expect(anythingStoppedIn(one('held', '2026-10-29T17:00:00.000000Z'), week)).toBe(false);
     // A time that can't be read may be this week's, so the week isn't said to have nothing.

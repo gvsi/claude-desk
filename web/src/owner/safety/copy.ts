@@ -131,17 +131,15 @@ export function stoppedHeadline(n: number): string {
 /**
  * Whether anything was stopped in the last seven days, as Today's "Last 7 days" frames them: a
  * request the kernel refused or a draft of Claude's the reply check stopped, by its `created_at`'s
- * local date in the week's time zone, `start` to `end`. A hold isn't stopped. An attempt whose time
- * can't be read may be this week's, so it counts: the week is never said to have stopped nothing
- * when it may have.
+ * local date in the week's time zone, from `start` on. An attempt newer than the week Today last
+ * read (just past midnight, or with the clocks apart) counts too, and so does one whose time can't
+ * be read, which may be this week's: the week is never said to have stopped nothing when it may
+ * have. A hold isn't stopped.
  */
-export function anythingStoppedIn(
-  attempts: readonly Pick<Attempt, 'kind' | 'created_at'>[],
-  week: Pick<ThisWeek, 'timezone' | 'start' | 'end'>,
-): boolean {
+export function anythingStoppedIn(attempts: readonly Pick<Attempt, 'kind' | 'created_at'>[], week: Pick<ThisWeek, 'timezone' | 'start'>): boolean {
   return attempts.some((a) => {
     if (a.kind !== 'refused' && a.kind !== 'reply_blocked') return false;
     const date = localDate(a.created_at, week.timezone);
-    return date === null || (date >= week.start && date <= week.end);
+    return date === null || date >= week.start;
   });
 }
