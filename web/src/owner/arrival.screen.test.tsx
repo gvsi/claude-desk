@@ -1196,6 +1196,25 @@ describe('Things to try ticks off', () => {
     expectNoHorizontalScroll();
   });
 
+  it('done_before_load_is_drawn_still_while_another_chat_is_read', async () => {
+    // Two preview chats before Today opens: the first got a reply, the second's transcript reads slowly.
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    const first = mockStore.visitorSession(RIVERA.slug);
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
+    await expect.poll(() => first?.items.some((item) => item.kind === 'delivered'), { timeout: 3_000 }).toBe(true);
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    const second = mockStore.visitorSession(RIVERA.slug);
+    if (!second || second === first) throw new Error('the owner has a second preview chat');
+    delayNextRead(ROUTES.conversation.path.replace('{session_id}', second.state.session_id), 1_000);
+
+    // "Chat as a customer" was done before Today opened: once every chat is read, it's drawn still.
+    const animated = watchListAnimations();
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true }), { timeout: 3_000 }).toBeVisible();
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(requests('needsYou').length + 2);
+    expect(animated()).toEqual([]);
+  });
+
   it('a_ticked_row_shown_again_is_drawn_still', async () => {
     const { screen } = await renderRoute(TODAY);
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();

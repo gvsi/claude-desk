@@ -115,7 +115,8 @@ export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOpti
     },
     answer: {
       settled: reading && ledger.data !== undefined,
-      done: reading && ((ledger.data !== undefined && answeredOnRecord(ledger.data)) || (deskId === seeded && answeredInView(answered))),
+      done: reading && ledger.data !== undefined && answeredOnRecord(ledger.data),
+      inView: reading && deskId === seeded && answeredInView(answered),
     },
     create: {
       settled: enabled && businesses !== undefined,

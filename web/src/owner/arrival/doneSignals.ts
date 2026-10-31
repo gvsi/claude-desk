@@ -11,11 +11,14 @@ export const THINGS = ['chat', 'break', 'answer', 'create'] as const;
 
 export type Thing = (typeof THINGS)[number];
 
-/** What the reads show for a thing now. */
+/** What the reads, and what the owner did in this view, show for a thing now. */
 export interface Reading {
+  /** The thing's reads show it done. */
   done: boolean;
-  /** Every read the thing needs has come in at least once (a read that is loading or failed hasn't). */
+  /** Every read the thing needs has come in, and none failed. */
   settled: boolean;
+  /** Something the owner did in this view shows it done, whatever the reads show yet: an answer given here. */
+  inView?: boolean;
 }
 
 /**
@@ -34,14 +37,24 @@ export const NOTHING_DONE: DoneMemory = { done: {}, settled: {} };
  * The memory after a reading. A thing seen done stays done in this view, whatever later reads show
  * (an answered card dismissed, a read that fails, the first Desk deleted). Returns `memory` itself
  * when nothing changed.
+ * - Done in view ticks it at once, as done in view.
+ * - Until a thing's reads first settle, what some of them show waits for the rest (one preview
+ *   chat read and another still out), so a thing done before the page opened is never taken for
+ *   one done in view. Done in that first settled reading is done at load.
+ * - Once they have settled, the reads showing it done later is done in view, even while a new read
+ *   (a new preview chat's) is still out.
  */
 export function remember(memory: DoneMemory, now: Record<Thing, Reading>): DoneMemory {
   let done = memory.done;
   let settled = memory.settled;
   for (const thing of THINGS) {
-    const { done: isDone, settled: isSettled } = now[thing];
-    if (isDone && done[thing] === undefined) done = { ...done, [thing]: { atLoad: isSettled && settled[thing] === undefined } };
-    if (isSettled && settled[thing] === undefined) settled = { ...settled, [thing]: true };
+    const { done: isDone, settled: isSettled, inView = false } = now[thing];
+    const settledBefore = settled[thing] !== undefined;
+    if (done[thing] === undefined) {
+      if (inView) done = { ...done, [thing]: { atLoad: false } };
+      else if (isDone && (isSettled || settledBefore)) done = { ...done, [thing]: { atLoad: !settledBefore } };
+    }
+    if (isSettled && !settledBefore) settled = { ...settled, [thing]: true };
   }
   return done === memory.done && settled === memory.settled ? memory : { done, settled };
 }

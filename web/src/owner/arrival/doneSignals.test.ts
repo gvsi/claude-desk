@@ -274,11 +274,25 @@ describe('what this view remembers', () => {
     expect(answered.done).toEqual({ answer: { atLoad: false } });
   });
 
-  it('a thing done before its reads settled, by an answer given here, was done in view', () => {
-    const answered = remember(NOTHING_DONE, reading({ answer: { done: true } }));
+  it('a thing done by an answer given here, before its reads settled, was done in view', () => {
+    const answered = remember(NOTHING_DONE, reading({ answer: { inView: true } }));
     expect(answered.done).toEqual({ answer: { atLoad: false } });
     // Its reads settling later changes nothing.
     expect(remember(answered, reading({ answer: { done: true, settled: true } })).done).toEqual({ answer: { atLoad: false } });
+  });
+
+  it('reads that show a thing done before they have all come in wait for the rest', () => {
+    // One preview chat's transcript has a reply; another's is still being read.
+    const partly = remember(NOTHING_DONE, reading({ chat: { done: true } }));
+    expect(partly.done).toEqual({});
+    // Once every read is in, it was done at load.
+    expect(remember(partly, reading({ chat: { done: true, settled: true } })).done).toEqual({ chat: { atLoad: true } });
+  });
+
+  it('once its reads have settled, a thing the reads show done while a new read is out was done in view', () => {
+    const loaded = remember(NOTHING_DONE, reading({ chat: { settled: true } }));
+    // A second preview chat's transcript is being read, and the first one got its reply.
+    expect(remember(loaded, reading({ chat: { done: true } })).done).toEqual({ chat: { atLoad: false } });
   });
 
   it('a thing seen done stays done, whatever the reads show next', () => {
