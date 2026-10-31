@@ -67,7 +67,6 @@ function isKnowledgeItem(value: unknown): value is KnowledgeItem {
   const { readers } = value.label;
   return (
     typeof value.item_id === 'string' &&
-    value.item_id !== '' &&
     KNOWLEDGE_SOURCES.has(value.source) &&
     typeof value.title === 'string' &&
     typeof value.text === 'string' &&
@@ -661,6 +660,15 @@ const SERVED: ServedRoutes = {
     if (isFailure(desk)) return desk;
     const item = isRecord(req.body) ? req.body.item : undefined;
     if (req.malformed || !isKnowledgeItem(item)) return INVALID;
+    if (item.item_id.length === 0 || item.item_id.length > 64 || /[^A-Za-z0-9_-]/.test(item.item_id)) return failWith(422, 'kernel', { code: 'invalid' });
+    if ([item.title, item.text].some((text) => /\p{Surrogate}/u.test(text))) return failWith(422, 'kernel', { code: 'invalid' });
+    if (item.title.includes('\0') || item.text.includes('\0')) return failWith(422, 'kernel', { code: 'invalid' });
+    if (new TextEncoder().encode(item.text).length > 100 * 1024) return failWith(422, 'kernel', { code: 'invalid' });
+    if ([...item.title].length > 200) return failWith(422, 'kernel', { code: 'invalid' });
+    if (item.label.record_owner != null) return failWith(422, 'kernel', { code: 'invalid' });
+    const readersAsked = item.label.readers ?? ['owner'];
+    if (readersAsked.length !== 1 || !['owner', 'public'].includes(readersAsked[0]!)) return failWith(422, 'kernel', { code: 'invalid' });
+    // Match the kernel's knowledge label, storable text, sizes, ref and per-Desk cap.
     // Posted again under its id, it replaces the item. The label is the one the kernel keeps, with
     // every field, as the API's models send them (readers default to the owner's).
     const forced = sv.world.keepsKnowledgeOwnerOnly(item);
@@ -668,6 +676,9 @@ const SERVED: ServedRoutes = {
     const stored: KnowledgeItem = { ...item, label: { readers, record_owner: item.label.record_owner ?? null } };
     const key = `${desk.summary.desk_id}:${item.item_id}`;
     const previous = sv.world.knowledge.get(key);
+    if (previous === undefined && [...sv.world.knowledge.values()].filter((row) => row.deskId === desk.summary.desk_id).length >= 200) {
+      return failWith(422, 'kernel', { code: 'invalid' });
+    }
     const createdAt = previous === undefined ? sv.world.now() : previous.createdAt;
     sv.world.knowledge.set(key, { deskId: desk.summary.desk_id, item: stored, createdAt, forced });
     return ok(stored);

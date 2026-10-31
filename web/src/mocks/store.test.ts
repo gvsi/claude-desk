@@ -1328,6 +1328,95 @@ describe('rules and tools', () => {
     expect(((await list()).body as typeof rows).find((row) => row.item_id === item.item_id)?.created_at).toBeNull();
   });
 
+  it('knowledge_refuses_invalid_readers', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const readers of [[], ['public', 'owner'], ['owner', 'owner'], ['person:p-1'], ['session:s-1'], ['stranger']]) {
+      expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, label: { readers } } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+      expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    }
+    for (const readers of [['owner'], ['public']]) {
+      expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, label: { readers } } } })).status).toBe(200);
+    }
+  });
+
+  it('knowledge_refuses_a_record_owner', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'], record_owner: 'person-1' } };
+    const before = [...mockStore.world.knowledge.entries()];
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+  });
+
+  it('knowledge_refuses_invalid_item_ids', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const item_id of ['', 'bad.id', 'bad/id', 'é', 'a'.repeat(65), 'note\n']) {
+      expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, item_id } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+      expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    }
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, item_id: 'A_0-'.repeat(16) } } })).status).toBe(200);
+  });
+
+  it('knowledge_caps_titles_at_200_characters', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: '🔧'.repeat(201), text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, title: '🔧'.repeat(200) } } })).status).toBe(200);
+  });
+
+  it('knowledge_caps_text_at_100_kib_utf8', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: '🔧'.repeat(25 * 1024 + 1), label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    const refused = await call('addKnowledge', { params: { desk_id: deskId }, body: { item } });
+    expect({ status: refused.status, body: refused.status === 422 ? refused.body : undefined }).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, text: '🔧'.repeat(25 * 1024) } } })).status).toBe(200);
+  });
+
+  it('knowledge_refuses_nul_in_title_or_text', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const field of ['title', 'text']) {
+      expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, [field]: 'Parking\0' } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+      expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    }
+  });
+
+  it('knowledge_refuses_unpaired_surrogates', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    const before = [...mockStore.world.knowledge.entries()];
+    for (const field of ['title', 'text']) {
+      for (const text of ['\ud800', '\udc00']) {
+        expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, [field]: text } } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+        expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+      }
+    }
+  });
+
+  it('knowledge_validates_title_and_text_utf8_separately', async () => {
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: '\ud800', text: '\udc00', label: { readers: ['owner'] } };
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+  });
+
+  it('knowledge_caps_each_desk_at_200_items_but_allows_replacements', async () => {
+    mockStore.world.knowledge.clear();
+    const item: KnowledgeItem = { item_id: 'note-valid', source: 'setup', title: 'Parking is on the street.', text: 'Parking is on the street.', label: { readers: ['owner'] } };
+    for (let i = 0; i < 200; i++) {
+      mockStore.world.knowledge.set(`${deskId}:note-${i}`, { deskId, item: { ...item, item_id: `note-${i}` }, createdAt: i, forced: false });
+    }
+    const before = [...mockStore.world.knowledge.entries()];
+    expect(await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).toEqual({ status: 422, body: { error: 'kernel', code: 'invalid' } });
+    expect([...mockStore.world.knowledge.entries()]).toEqual(before);
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item: { ...item, item_id: 'note-0', label: { readers: ['public'] } } } })).status).toBe(200);
+    expect(mockStore.world.knowledge.size).toBe(200);
+    // A different Desk's items do not count against this Desk.
+    const first = mockStore.world.knowledge.get(`${deskId}:note-0`)!;
+    mockStore.world.knowledge.delete(`${deskId}:note-0`);
+    mockStore.world.knowledge.set('desk-other:note-0', { ...first, deskId: 'desk-other' });
+    expect((await call('addKnowledge', { params: { desk_id: deskId }, body: { item } })).status).toBe(200);
+  });
+
   it('knowledge_answers_what_the_kernel_keeps', async () => {
     mockStore.world.knowledge.clear();
     const note: KnowledgeItem = {
