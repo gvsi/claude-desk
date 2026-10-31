@@ -131,6 +131,6 @@ class Settings:
             model_provider=model_provider,
             aws_region=(_env("AWS_REGION") or cls.aws_region) if model_provider == "bedrock" else cls.aws_region,
             bedrock_bearer_token=_env("BEDROCK_BEARER_TOKEN"),
-            business_tools_enabled=_env("BUSINESS_TOOLS_ENABLED") in {"1", "true"},
+            business_tools_enabled=_env("BUSINESS_TOOLS_ENABLED") == "1",
             setup_policy_claims_enabled=_env("SETUP_POLICY_CLAIMS_ENABLED") != "0",
         )

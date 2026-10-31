@@ -427,6 +427,7 @@ class Entry(BaseModel):
     pending: str | None = None
     held_policy_keys: list[str] | None = None   # latest charter write's snapshot; [] clears an earlier hold
     connected_apps: list[ConnectorKey] | None = None
+    owner_fields: list[str] = []  # Fact fields this owner turn set or explicitly cleared.
     owner_decided: bool = False
     connector_connect_attempted: bool = False
 
@@ -492,6 +493,11 @@ class Interview:
         if completed:
             # Persist on the next normal save, preserving the waiting question and every stored answer.
             self.latest_ask.covered = completed
+
+    @property
+    def owner_fields(self) -> set[str]:
+        """Owner fact decisions survive empty values and reloads through transcript metadata."""
+        return {name for entry in self.transcript if entry.role == "owner" for name in entry.owner_fields}
 
     @property
     def shows_cards(self) -> bool:
@@ -619,7 +625,8 @@ def _stored(interview: Interview) -> dict:
             # Omit only top-level nulls and empty additions; nested card nulls are part of its payload.
             "transcript": [entry.model_dump(mode="json", exclude={name for name, value in entry
                                                                  if value is None or
-                                                                 (name in {"choices", "covered", "planned", "dropped", "cards", "owner_decided",
+                                                                 (name in {"choices", "covered", "planned", "dropped", "cards", "owner_fields",
+                                                                           "owner_decided",
                                                                            "connector_connect_attempted"}
                                                                   and not value)})
                            for entry in interview.transcript],
@@ -1514,7 +1521,7 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     entries never enter history: its current answer appears only in `owner_answer`."""
     transcript = _history(interview, run_id)
     limit_turn = key in LIMIT_QUESTIONS.values()
-    so_far = interview.answers.model_dump_json(exclude_defaults=True)
+    so_far = interview.answers.model_dump_json(exclude_defaults=True, exclude={"suggested_fields"})
     if limit_turn:
         so_far = interview.answers.model_dump_json(include=set(LIMIT_QUESTIONS), exclude_defaults=True)
     asked = next((entry.text for entry in reversed(transcript) if entry.question == key), "")
@@ -1576,6 +1583,14 @@ def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> l
     return prices
 
 
+def _owner_patch_fields(patch: SetupPatch, key: QuestionKey) -> list[str]:
+    """Only fact fields this question is allowed to merge, including explicit empty lists."""
+    return [name for name, value in patch
+            if name in SetupPatch.model_fields and name not in LIMIT_QUESTIONS
+            and value is not None and not (isinstance(value, str) and not value.strip())
+            and (key not in LIMIT_QUESTIONS.values() or LIMIT_TURN_FACTS.get(name) == key)]
+
+
 def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupAnswers:
     """`answers` with what the patch sets (a blank text sets nothing). Each limit is taken only on the turn answering
     its own question (`LIMIT_QUESTIONS`), a fact in `FIELD_TURNS` only on the turns it lists, and any other fact only
@@ -1585,6 +1600,8 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
     values = answers.model_dump()
     limit_turn = key in LIMIT_QUESTIONS.values()
     for name, value in patch:
+        if name not in SetupPatch.model_fields:
+            continue
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
         if name in LIMIT_QUESTIONS and key != LIMIT_QUESTIONS[name]:
@@ -1607,6 +1624,7 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
             value = " ".join(value.split()) or None
         if value is not None:
             values[name] = value
+            values["suggested_fields"] = [field for field in values["suggested_fields"] if field != name]
     return SetupAnswers.model_validate(values)
 
 
@@ -1671,7 +1689,7 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
                                covered=", ".join(key for key in QUESTION_KEYS if closing or key in interview.covered),
                                uncovered="" if closing else ", ".join(key for key in QUESTION_KEYS
                                                                     if key not in interview.covered)),
-        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json()),
+        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json(exclude={"suggested_fields"})),
         wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)),
     ]
     if not interview.business_tools_enabled:
@@ -1855,6 +1873,10 @@ def _decide_typed(interview: Interview, proposal_id: str, accept: bool) -> bool:
         if failed.error == "amount_required":
             return False
         raise
+    if accept:
+        entry = next(entry for entry in reversed(interview.transcript)
+                     if entry.card is not None and entry.card.proposal_id == proposal_id)
+        entry.owner_decided = True
     return True
 
 
@@ -1967,6 +1989,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             else:
                 said.website = site[0]                   # kept as text: nothing is read without consent
         await _rename(ctx, desk_id, patch)
+        said.owner_fields = _owner_patch_fields(patch, key)
         interview.answers = merged(interview.answers, patch, key)
         interview.transcript += entries
         if turn.step_done:
@@ -2009,13 +2032,15 @@ def settle_plan(interview: Interview) -> None:
     pending = interview.pending_card
     for card in interview.unshown:
         config = card.job.config if card.job is not None else None
-        card.state = "declined" if isinstance(config, PurposePaymentConfig) and config.amount_cents is None else "accepted"
+        card.state = ("declined" if card.job is not None and card.job.job == "payment"
+                      and (config is None or config.amount_cents is None) else "accepted")
         interview.transcript.append(Entry(role="claude", text="", card=card.model_copy(deep=True)))
     if pending is not None:
         card = next(entry.card for entry in reversed(interview.transcript)
                     if entry.card is not None and entry.card.proposal_id == pending)
         config = card.job.config if card.job is not None else None
-        card.state = "declined" if isinstance(config, PurposePaymentConfig) and config.amount_cents is None else "accepted"
+        card.state = ("declined" if card.job is not None and card.job.job == "payment"
+                      and (config is None or config.amount_cents is None) else "accepted")
 
 
 async def close_setup(owner, engine, model, interview: Interview) -> None:
@@ -2069,23 +2094,26 @@ def finish(interview: Interview) -> None:
                   "public_contact": "contact_and_after_hours", "after_hours": "contact_and_after_hours",
                   "pricing": "what_you_do"}
         patch = SetupPatch.model_validate({name: value for name, value in suggested
-                                          if topics.get(name) in remaining and value
-                                          and not getattr(interview.answers, name)})
+                                          if topics.get(name) in remaining and name not in interview.owner_fields
+                                          and value and not getattr(interview.answers, name)})
         # A fact merge drops every limit, even if a stored suggestion somehow carries one.
+        suggested_fields = interview.answers.suggested_fields + sorted(patch.model_fields_set)
         interview.answers = merged(interview.answers, patch, "what_you_do")
+        interview.answers.suggested_fields = list(dict.fromkeys(suggested_fields))
     interview.cover(remaining)
-    jobs = [job for job in accepted_jobs(interview) if job.can_do_today]
+    jobs = [(" ".join(job.title.split()), " ".join(job.how.split()))
+            for job in accepted_jobs(interview) if job.can_do_today]
     # Reserve complete titles and separators before sharing the remaining space between descriptions.
     included = []
     reserved = 0
-    for job in jobs:
-        needed = len(job.title) + 2 + bool(included)
+    for title, how in jobs:
+        needed = len(title) + 2 + bool(included)
         if reserved + needed <= 1500:
-            included.append(job)
+            included.append((title, how))
             reserved += needed
     how_budget = (1500 - reserved) // len(included) if included else 0
-    interview.answers.how_we_help = "\n".join(f"{job.title}: {job.how[:how_budget]}"
-                                               for job in included) or None
+    interview.answers.how_we_help = "\n".join(f"{title}: {how[:how_budget]}"
+                                             for title, how in included) or None
     interview.step = "tools"
 
 
@@ -2120,7 +2148,9 @@ async def _connect_accepted_connector(owner: OwnerCtx, interview: Interview) -> 
 
 
 async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
-    """Apply business tools after the setup commit, without a turn guard or database lock."""
+    """Apply enabled business tools after the setup commit, without a database lock."""
+    if not interview.business_tools_enabled:
+        return
     desk_id = owner.desk(interview.desk_id)
     try:
         await _put_business_tools(owner, desk_id, accepted_jobs(interview))
@@ -2485,6 +2515,9 @@ async def draft_cards(model: ModelClient, record: Record, business_type: Busines
     cap = answers.auto_money_cap_cents
     owner_answers = answers.model_dump(mode="json", exclude_defaults=True)
     owner_answers.pop("how_we_help", None)
+    owner_answers.pop("suggested_fields", None)
+    for name in answers.suggested_fields:
+        owner_answers.pop(name, None)
     if jobs:
         owner_answers["accepted_jobs"] = jobs
     message = _user("\n\n".join([card_draft_head(business_type, cap), wrap(TOOLS_TAG, json.dumps(tools)),
@@ -2755,7 +2788,8 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
     message = _user("\n\n".join([SITUATIONS_HEAD.format(business_type=interview.business_type),
                                  wrap(RULES_TAG, rules_text), wrap(PRICES_TAG, json.dumps(prices)),
                                  wrap(TOOLS_TAG, json.dumps(tools)),
-                                 wrap(ANSWERS_TAG, interview.answers.model_dump_json(exclude_defaults=True))]))
+                                 wrap(ANSWERS_TAG, interview.answers.model_dump_json(
+                                     exclude_defaults=True, exclude={"suggested_fields"}))]))
 
     def usable(drafted: DraftedSituations) -> str | None:
         if any((draft.tool == "native.quote" or draft.tool in MONEY_TOOLS) and draft.item_id not in prices

@@ -150,7 +150,7 @@ async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: 
 
     answer = await setup.answer(ctx, state.database(), state.model, interview_id, body.question, body.text, card=body.card,
                                 runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit,
-                                 cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
+                                cards=cards, business_tools_enabled=state.settings.business_tools_enabled)
     if answer.busy:
         return JSONResponse(answer.model_dump(mode="json"), status_code=202)
     return answer
@@ -166,9 +166,10 @@ async def setup_proposal(interview_id: InterviewId, proposal_id: Annotated[str, 
 
     async def admit() -> None:
         await _moving_on(request, ctx)
+
     answer = await setup.decide_proposal(ctx, state.database(), state.model, interview_id, proposal_id, body, cards=cards,
-                                       business_tools_enabled=state.settings.business_tools_enabled,
-                                       runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
+                                         business_tools_enabled=state.settings.business_tools_enabled,
+                                         runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
     if answer.busy:
         return JSONResponse(answer.model_dump(mode="json"), status_code=202)
     return answer
@@ -183,9 +184,10 @@ async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn,
 
     async def admit() -> None:
         await _moving_on(request, ctx)
+
     answer = await setup.use_suggestions(ctx, state.database(), state.model, interview_id, cards=cards,
-                                      business_tools_enabled=state.settings.business_tools_enabled,
-                                       runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
+                                         business_tools_enabled=state.settings.business_tools_enabled,
+                                         runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
     if answer.busy:
         return JSONResponse(answer.model_dump(mode="json"), status_code=202)
     return answer
