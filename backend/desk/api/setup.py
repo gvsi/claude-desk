@@ -292,10 +292,10 @@ def reduce_name(text: str | None) -> str:
     return kept[:OWNER_NAME_MAX].strip()
 
 
-def owner_name(given: str | None, described: str | None, business_name: str) -> str:
-    """The name customers see for the owner: the one the owner gave, else the one their description gave, else the
-    business name, each reduced to the kernel's pattern; "Owner" when all reduce to nothing."""
-    for candidate in (given, described, business_name):
+def owner_name(given: str | None, described: str | None) -> str:
+    """The name customers see: the one the owner gave, else the one their description gave, reduced to the kernel's
+    pattern; "Owner" when neither gives a name. A business name is never a person's name."""
+    for candidate in (given, described):
         reduced = reduce_name(candidate)
         if reduced:
             return reduced
@@ -643,7 +643,7 @@ async def _read_description(owner: OwnerCtx, engine: AsyncEngine, model: ModelCl
     described = await structured(model, recorder(engine, owner), SETUP_START_SYSTEM,
                                  [_user(wrap(OWNER_DESCRIPTION_TAG, body.description))], SetupStart, START_MAX_TOKENS)
     business_name = " ".join(described.business_name.split())
-    name = owner_name(body.owner_display_name, described.owner_display_name, business_name)
+    name = owner_name(body.owner_display_name, described.owner_display_name)
     seed = DeskSeed(name=DESK_NAME, charter=[], hours=[], price_items=[], calendar_slots=[], people=[], documents=[],
                     notifications=default_notifications(described.business_type))
     return described, CreateDeskRequest(
@@ -661,7 +661,8 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
         interview_id=interview_id, copy_id=owner.copy_id, desk_id=created.desk_id,
         business_type=described.business_type, step="questions", consent=None,
         answers=SetupAnswers(summary=described.summary, business_name=desk.business.name,
-                             owner_display_name=desk.business.owner_display_name),
+                             owner_display_name=(reduce_name(body.owner_display_name)
+                                                 or reduce_name(described.owner_display_name) or None)),
         transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None),
                     Entry(role="claude", text=CONSENT_QUESTION, question="consent")])
     return interview, created.slug
