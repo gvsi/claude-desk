@@ -122,6 +122,16 @@ class Arrange:
             self._admin.execute("UPDATE kernel.sessions SET mode = 'paused', strikes = 3 WHERE session_id = %s",
                                 (session_id,))
 
+    def expire_mandate(self, mandate_id: str) -> None:
+        """Simulate reaching the stored mandate's expiry without expiring the decision or agent turn."""
+        if self._state is not None:
+            record = self._state.mandates[mandate_id]
+            record.mandate = record.mandate.model_copy(update={
+                "expires_at": (self._state.now - timedelta(seconds=1)).isoformat()})
+        else:
+            self._admin.execute("UPDATE kernel.mandates SET expires_at = %s WHERE mandate_id = %s",
+                                (datetime.now(UTC) - timedelta(seconds=1), mandate_id))
+
     async def never(self, owner: CredentialView, ro_read: Callable[..., list[dict]], ro_schema: str, copy: CopyCreated,
                     tool: str) -> None:
         """The owner's rules change: a `never` card for `tool` is confirmed on the copy's first Desk. The real kernel

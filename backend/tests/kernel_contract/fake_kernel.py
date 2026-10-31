@@ -2326,7 +2326,8 @@ class FakeKernelState:
         owner_plain = None
         if state == "refused_at_execution":
             owner_plain = OWNER_REFUSAL_TEXT[
-                "rules_changed" if summary.get("reason") == "rules_changed" else "fallback"]
+                "rules_changed" if summary.get("reason") == "rules_changed"
+                and summary.get("check") in {"tool", "profile", "pin", "policy"} else "fallback"]
         record.decision = self._signed(decision.model_copy(update={
             "state": state, "visitor_plain": line, "owner_plain": owner_plain,
             "ledger_seq": entry.seq, "answers": decision.answers if state == "held" else []}))
@@ -2415,7 +2416,9 @@ class FakeKernelState:
             record.running = True
             raise Refusal(409, "conflict")
         if decision.action.tool == "native.charge_mandate" and not self._room_for(session, decision.action):
-            self._transition(record, "refused_at_execution", kind="execute", reason="mandate_exhausted")
+            desk = self.desks[record.desk_id]
+            check = "conditions" if desk.policy_version == decision.policy_version else "policy"
+            self._transition(record, "refused_at_execution", kind="execute", reason="rules_changed", check=check)
             raise Refusal(409, "conflict")           # the reservation failed: nothing was charged
         return self._run(record, session)
 
@@ -2641,9 +2644,10 @@ class FakeKernelState:
         execution, card_diff = None, None
         if body.answer in ("allow_once", "allow_person") and (self._never(desk, action.tool) or (
                 action.tool == "native.charge_mandate" and not self._room_for(session, action))):
-            # the re-check at execution (step 6): the rules in force no longer let the owner approve it
+            # Step 6: distinguish changed rules from changed inputs under the decision's own rules.
+            check = "conditions" if desk.policy_version == decision.policy_version else "policy"
             self._transition(record, "refused_at_execution", kind="approval", answer=body.answer,
-                             approval_id=approval_id, reason="rules_changed", check="policy")
+                             approval_id=approval_id, reason="rules_changed", check=check)
         elif body.answer in ("allow_once", "allow_person"):
             self._transition(record, "approved", kind="approval", answer=body.answer, approval_id=approval_id)
             execution = self._run(record, session)

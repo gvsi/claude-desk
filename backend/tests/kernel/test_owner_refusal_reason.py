@@ -12,6 +12,7 @@ holds its text.
 
 import asyncio
 import json
+from datetime import timedelta
 from typing import get_args
 
 import httpx
@@ -36,6 +37,7 @@ from .test_decide import (Visitor, by_call, decided, desk_with, open_visitor, po
                           verify_signature)
 from .test_desk_writes import updated
 from .test_execute import activate, executions_of, post_execute, put_people
+from .test_mandates import CARDS, CHARGE, agent_charges, agent_desk, asked, expiry_of, quoted, reservations
 from .test_private_release import held_release, nothing_released
 
 OWNER_LINES = {
@@ -82,7 +84,10 @@ def test_an_owner_line_is_in_the_owners_language():
     ("rules_changed", "desk", "refused_desk_deleted"),
     ("session_ended", "desk", "refused_desk_deleted"),
     *[("rules_changed", check, "refused_rules_changed")
-      for check in ("tool", "session", "profile", "policy", "binding", "pin")],
+      for check in ("tool", "profile", "policy", "pin")],
+    ("rules_changed", "session", "refused_fallback"),      # takeover or pause changes no rule
+    ("rules_changed", "binding", "refused_fallback"),      # approval binding no longer matches
+    ("rules_changed", "conditions", "refused_fallback"),   # same rules, changed runtime inputs
     ("rules_changed", "args", "refused_fallback"),         # normalization may refuse a slot that started
     ("rules_changed", "unavailable", "refused_fallback"),  # a server outage changes no rule
     ("rules_changed", "prepare", "refused_fallback"),      # an adapter's own refusal is no re-check
@@ -187,6 +192,60 @@ async def test_signed_agent_answers_never_carry_the_owner_line(app, client, regi
     await assert_not_ledgered(app, rows, line)
 
 
+# ---- Runtime conditions -------------------------------------------------------------------------
+
+@pytest.mark.solver
+async def test_an_expired_mandate_on_the_allow_path_names_no_rule_change(desk_prove, app, client, frozen_clock):
+    setup = await agent_desk(app, client, frozen_clock)
+    frozen_clock.travel(await expiry_of(app, setup) - timedelta(seconds=30))
+    signed = setup.turn()
+    allowed = await asked(client, signed, CHARGE, await quoted(client, signed))
+    assert allowed.outcome == "allow"
+    frozen_clock.advance(31)
+
+    response = await post_execute(client, signed, allowed)
+
+    assert response.status_code == 409, response.text
+    refused = await owner_read(client, setup.desk.owner, allowed.decision_id)
+    assert refused.state == "refused_at_execution"
+    entries = [entry.event.summary for entry in await ledger_rows(app, setup.desk)
+               if entry.event.ref_id == allowed.decision_id and entry.event.kind == "execute"]
+    assert entries[-1]["check"] == "conditions"
+    assert entries[-1]["policy_version"] == allowed.policy_version
+    line = OWNER_LINES["en"]["refused_fallback"]
+    assert refused.owner_plain == line
+    assert await reservations(app, setup.desk.copy_id) == []
+    assert agent_charges(setup.desk.copy_id) == []
+    await assert_owner_only(client, signed, allowed, {"quote_id": allowed.action.resource.id}, line)
+    await assert_not_ledgered(app, setup.desk, line)
+
+
+@pytest.mark.solver
+async def test_an_expired_mandate_on_the_approval_path_names_no_rule_change(desk_prove, app, client, frozen_clock):
+    cards = [card.model_copy(update={"mode": "ask", "max_amount_cents": None})
+             if card.applies_to == CHARGE else card for card in CARDS]
+    setup = await agent_desk(app, client, frozen_clock, cards=cards)
+    frozen_clock.travel(await expiry_of(app, setup) - timedelta(seconds=30))
+    signed = setup.turn()
+    held = await asked(client, signed, CHARGE, await quoted(client, signed))
+    assert held.outcome == "hold"
+    frozen_clock.advance(31)
+
+    result = await answered(client, setup.desk.owner, held.decision_id, "allow_once")
+
+    assert (result.decision.state, result.execution) == ("refused_at_execution", None)
+    entries = [entry.event.summary for entry in await ledger_rows(app, setup.desk)
+               if entry.event.ref_id == held.decision_id and entry.event.kind == "approval"]
+    assert entries[-1]["check"] == "conditions"
+    line = OWNER_LINES["en"]["refused_fallback"]
+    assert result.decision.owner_plain == line
+    assert await owner_read(client, setup.desk.owner, held.decision_id) == result.decision
+    assert await reservations(app, setup.desk.copy_id) == []
+    assert agent_charges(setup.desk.copy_id) == []
+    await assert_owner_only(client, signed, held, {"quote_id": held.action.resource.id}, line)
+    await assert_not_ledgered(app, setup.desk, line)
+
+
 # ---- The approval path ---------------------------------------------------------------------------
 
 async def test_an_approval_the_new_rules_refuse_tells_the_owner_the_rules_changed(app, client):
@@ -201,6 +260,9 @@ async def test_an_approval_the_new_rules_refuse_tells_the_owner_the_rules_change
 
     assert (result.decision.state, result.decision.owner_plain, result.decision.visitor_plain) == (
         "refused_at_execution", line, GENERIC["en"])
+    entries = [entry.event.summary for entry in await ledger_rows(app, copy)
+               if entry.event.ref_id == held.decision_id and entry.event.kind == "approval"]
+    assert entries[-1]["check"] == "policy"
     assert await owner_read(client, copy.owner, held.decision_id) == result.decision
     verify_signature(await public_key(client), result.decision)
     await assert_owner_only(client, visitor, held, HELD_QUOTE, line)
@@ -379,6 +441,10 @@ async def test_an_allow_the_new_rules_refuse_tells_the_owner_the_rules_changed(a
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
     read = await owner_read(client, copy.owner, allowed.decision_id)
     assert (read.state, read.owner_plain, read.visitor_plain) == ("refused_at_execution", line, GENERIC["en"])
+    entries = [entry.event.summary for entry in await ledger_rows(app, copy)
+               if entry.event.ref_id == allowed.decision_id and entry.event.kind == "execute"]
+    assert entries[-1]["check"] == "policy"
+    assert entries[-1]["policy_version"] != allowed.policy_version
     verify_signature(await public_key(client), read)
     await assert_owner_only(client, visitor, allowed, args, line)
     await assert_not_ledgered(app, copy, line)
