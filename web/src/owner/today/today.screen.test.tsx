@@ -10,7 +10,7 @@ import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { ROUTES } from '../../api/routes.ts';
-import type { BriefingItem, BriefingList, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
+import type { BriefingItem, BriefingList, ConversationSummary, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
@@ -19,7 +19,7 @@ import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
 import { watchFor, watchPages } from '../../test/watch.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
@@ -396,7 +396,8 @@ describe('Today', () => {
       const name = [...(row?.querySelectorAll('[data-copy="user"]') ?? [])].map((el) => el.textContent);
       expect(name).toContain('Dana Whitfield');
     }
-    await expect.element(since.getByRole('link', { name: 'See all 3' })).toBeVisible();
+    // All three are on the card already, so there is no "See all" to open.
+    expect(since.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
 
     // A blocked reply has no line of its own, and a night with no booking leaves its row out.
     mockStore.reset('rivera');
@@ -411,6 +412,16 @@ describe('Today', () => {
     expect(kinds).toEqual(['Blocked', 'Answered']);
     expect(night.getByText('Booked').elements()).toHaveLength(0);
     await expect.element(night.getByRole('link', { name: /A reply was stopped/ })).toHaveAttribute('href', `${DESK}/safety/41`);
+    expect(night.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
+
+    // Three things, but no booking among the newest, so two rows: "See all 3" opens the third.
+    mockStore.reset('rivera');
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { blocked: REFUSAL, booking: null, lead_or_answer: ANSWER } } }));
+    const third = await renderRoute(TODAY);
+    const two = region(third.screen, 'Since last night');
+    await expect.element(two.getByText(REFUSAL.line ?? '', { exact: true })).toBeVisible();
+    expect(two.getByRole('listitem').elements()).toHaveLength(2);
+    await expect.element(two.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
   });
 
   it('see_all_opens_the_full_briefing', async () => {
@@ -665,6 +676,48 @@ describe('Today', () => {
     await expect.element(row).toHaveAccessibleName(/^Visitor \d{1,2}:\d{2} [ap]m$/);
     expect(row.getByText('Visitor', { exact: true }).elements()).toHaveLength(1);
     expect(row.element().querySelector('.cd-status-dot')).toBeNull();
+  });
+
+  it('live_now_says_when_it_shows', async () => {
+    // The signed board's caption in Live now's header: the section is there only while someone chats.
+    const { screen } = await renderRoute(TODAY);
+    const live = region(screen, 'Live now');
+    const caption = live.getByText('Shows while someone is chatting', { exact: true });
+    await expect.element(caption).toBeVisible();
+    // After the title, before the rows, in the quiet caption style the other Today sections use.
+    const heading = live.getByRole('heading', { level: 2, name: 'Live now' }).element();
+    const firstRow = live.getByRole('listitem').first().element();
+    expect(heading.compareDocumentPosition(caption.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(caption.element().compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expect.element(caption).toHaveClass('cd-type-meta');
+  });
+
+  it('live_now_fits_a_phone', async () => {
+    // Three chats live at once on a phone: the caption stays in the header, beside the title or
+    // under it, never over it or past the column, and nothing on the page scrolls sideways.
+    await injectToday((t) => {
+      const [dana] = t.live;
+      if (!dana) throw new Error("the seed has Dana's live chat");
+      const alex: ConversationSummary = { ...dana, session_id: 'ses-live-alex', display_name: 'Alex Kim', verified: true };
+      const sam: ConversationSummary = { ...dana, session_id: 'ses-live-sam', display_name: 'Sam Ortiz-Delacroix' };
+      return { ...t, live: [dana, alex, sam] };
+    });
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    const live = region(screen, 'Live now');
+    const caption = live.getByText('Shows while someone is chatting', { exact: true });
+    await expect.element(caption).toBeVisible();
+    expect(live.getByRole('listitem').elements()).toHaveLength(3);
+    const column = live.element().getBoundingClientRect();
+    const title = live.getByRole('heading', { level: 2, name: 'Live now' }).element().getBoundingClientRect();
+    const line = caption.element().getBoundingClientRect();
+    const firstRow = live.getByRole('listitem').first().element().getBoundingClientRect();
+    expect(line.left).toBeGreaterThanOrEqual(column.left);
+    expect(line.right).toBeLessThanOrEqual(column.right);
+    expect(line.left >= title.right || line.top >= title.bottom, 'beside the title or under it').toBe(true);
+    expect(line.bottom).toBeLessThanOrEqual(firstRow.top);
+    const main = screen.getByRole('main').element();
+    expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth);
+    expectNoHorizontalScroll();
   });
 
   it('allow_once_executes_and_updates', async () => {
