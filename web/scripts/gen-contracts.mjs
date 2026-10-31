@@ -5,9 +5,9 @@
 //   node scripts/gen-contracts.mjs          write contracts.gen.ts
 //   node scripts/gen-contracts.mjs --check  exit 1 if contracts.gen.ts is stale
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { compile } from 'json-schema-to-typescript';
 
@@ -31,8 +31,9 @@ function fail(message) {
  * - A dictionary keeps its value schema (`PublicDesk.brand` stays `{ [k: string]: string }`).
  * - A free-form object (`dict` in the models: `ToolProfile.input_schema`, `LedgerEvent.summary`)
  *   is `Record<string, unknown>`, so no model interface carries an open index signature.
+ * gen-api.mjs prepares the API's own schemas the same way.
  */
-function prepare(node) {
+export function prepare(node) {
   if (Array.isArray(node)) return node.map(prepare);
   if (node === null || typeof node !== 'object') return node;
   const out = {};
@@ -72,21 +73,25 @@ function contractsRoot(schema) {
   };
 }
 
-// The compiler's note on every unreachable definition names the synthetic root; it says
-// nothing about the contract, so it is dropped along with the root's own empty interface.
-const ROOT_DECLARATION = 'export interface ContractSchema {}\n';
-const DEFINITION_NOTE =
-  /\/\*\*\n \* This interface was referenced by `ContractSchema`'s JSON-Schema\n \* via the `definition` "[A-Za-z0-9]+"\.\n \*\/\n/g;
+/**
+ * The TypeScript for a synthetic root (`title: rootName`, its types under `$defs`), with the
+ * root's own empty interface and the compiler's note on every unreachable definition dropped:
+ * both name the synthetic root and say nothing about the schema. The note is a comment of its
+ * own, or the last paragraph of a type's description. gen-api.mjs compiles through this too.
+ */
+export async function compileDefinitions(root, rootName, bannerComment) {
+  const compiled = await compile(root, rootName, { bannerComment, unreachableDefinitions: true, format: true });
+  const rootDeclaration = `export interface ${rootName} {}\n`;
+  const note = ` \\* This interface was referenced by \`${rootName}\`'s JSON-Schema\\n \\* via the \`definition\` "[A-Za-z0-9]+"\\.\\n`;
+  const noteComment = new RegExp(`/\\*\\*\\n${note} \\*/\\n`, 'g');
+  const noteParagraph = new RegExp(` \\*\\n${note}`, 'g');
+  if (!compiled.includes(rootDeclaration)) throw new Error(`${rootName}: the compiler output changed shape`);
+  return compiled.replace(rootDeclaration, '').replace(noteComment, '').replace(noteParagraph, '');
+}
 
 /** The contracts.gen.ts text for the parsed contracts schema. */
 export async function generateContracts(schema) {
-  const compiled = await compile(contractsRoot(schema), ROOT_NAME, {
-    bannerComment: BANNER,
-    unreachableDefinitions: true,
-    format: true,
-  });
-  if (!compiled.includes(ROOT_DECLARATION)) throw new Error('gen-contracts: the compiler output changed shape');
-  return compiled.replace(ROOT_DECLARATION, '').replace(DEFINITION_NOTE, '');
+  return compileDefinitions(contractsRoot(schema), ROOT_NAME, BANNER);
 }
 
 async function main(args) {
@@ -118,6 +123,8 @@ async function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Run as a command, also through a symlinked path: Node resolves this module's own URL to the real
+// path, so the path it was started with is resolved the same way before the two are compared.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2));
 }

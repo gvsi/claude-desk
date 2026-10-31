@@ -1,0 +1,291 @@
+#!/usr/bin/env node
+// Generates src/api/openapi.gen.ts from backend/desk/api/openapi.json, the API's own OpenAPI
+// document: the API-owned schemas as types, and API_OPERATIONS, every path and method the API
+// serves with the schema each 2xx answer names. Contract schemas (the `$defs` keys of
+// backend/desk/contracts.schema.json) are imported from src/api/contracts.ts, their one import
+// path, and never redefined here. The web owns its client (`ROUTES` and `request()`); this output
+// only checks the route table and types the API's shapes.
+//   node scripts/gen-api.mjs          write openapi.gen.ts
+//   node scripts/gen-api.mjs --check  exit 1 if openapi.gen.ts is stale
+
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
+
+import { compileDefinitions, prepare } from './gen-contracts.mjs';
+
+const ROOT_NAME = 'ApiSchema';
+const SCHEMA_REF = /^#\/components\/schemas\/(.+)$/;
+const TYPE_NAME = /^[A-Z][A-Za-z0-9]*$/;
+
+const BANNER = [
+  '// API types, generated, do not edit.',
+  '// Source: backend/desk/api/openapi.json. Run `npm run gen:api` after it changes.',
+  '// Only the API-owned schemas are here; contract types come from src/api/contracts.ts.',
+].join('\n');
+
+function fail(message) {
+  throw new Error(`openapi.json: ${message}`);
+}
+
+/** The schema name a `$ref` points at; anything but a component schema fails. */
+function refName(ref) {
+  const match = typeof ref === 'string' ? SCHEMA_REF.exec(ref) : null;
+  if (!match) fail(`$ref ${JSON.stringify(ref)} is not a component schema`);
+  return match[1];
+}
+
+/** Keywords that say nothing about a schema's shape, left out when two schemas are compared. */
+const ANNOTATIONS = new Set(['title', 'description', 'default']);
+
+/**
+ * The schema name a reference points at, whether it is spelled `#/components/schemas/Name` (the
+ * OpenAPI document) or `#/$defs/Name` (the contracts schema).
+ */
+function referencedName(ref) {
+  return ref.replace(/^#\/(?:components\/schemas|\$defs)\//, '');
+}
+
+/**
+ * A prepared schema as it is compared with another: annotations dropped, and each reference, a
+ * `$ref` or a value of a discriminator's `mapping`, reduced to the schema name it points at.
+ * Property names and mapping keys are data and all kept.
+ */
+function shapeOf(node) {
+  if (Array.isArray(node)) return node.map(shapeOf);
+  if (node === null || typeof node !== 'object') return node;
+  const out = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (ANNOTATIONS.has(key)) continue;
+    if (key === '$ref' && typeof value === 'string') {
+      out.$ref = referencedName(value);
+    } else if (key === 'properties' && value && typeof value === 'object') {
+      out.properties = Object.fromEntries(Object.entries(value).map(([field, schema]) => [field, shapeOf(schema)]));
+    } else if (key === 'discriminator' && value && typeof value === 'object') {
+      out.discriminator = shapeOf(value);
+      if (value.mapping && typeof value.mapping === 'object') {
+        out.discriminator.mapping = Object.fromEntries(
+          Object.entries(value.mapping).map(([tag, ref]) => [tag, typeof ref === 'string' ? referencedName(ref) : ref]),
+        );
+      }
+    } else {
+      out[key] = shapeOf(value);
+    }
+  }
+  return out;
+}
+
+/**
+ * The document's component schemas, split into the API's own and the contracts it serves. A schema
+ * under a contract's name must have that contract's shape, since it becomes the contract's import.
+ */
+function splitSchemas(openapi, contracts) {
+  const schemas = openapi?.components?.schemas;
+  if (!schemas || typeof schemas !== 'object' || Object.keys(schemas).length === 0) fail('has no components.schemas');
+  const defs = contracts?.$defs;
+  if (!defs || typeof defs !== 'object') throw new Error('contracts.schema.json: has no $defs');
+  const contractNames = new Set(Object.keys(defs));
+  const own = {};
+  for (const [name, schema] of Object.entries(schemas)) {
+    if (!TYPE_NAME.test(name)) fail(`schema ${JSON.stringify(name)} is not a type name`);
+    if (!contractNames.has(name)) {
+      own[name] = schema;
+    } else if (!isDeepStrictEqual(shapeOf(prepare(schema)), shapeOf(prepare(defs[name])))) {
+      fail(`schema ${name} differs from the contract of the same name in contracts.schema.json`);
+    }
+  }
+  return { schemas, own, contractNames };
+}
+
+/**
+ * A prepared schema with every `$ref` resolved for the compiler: one to an API-owned schema points
+ * at its `$defs` entry, one to a contract becomes that contract's type name (added to `imports`).
+ */
+function linkRefs(node, own, contractNames, imports) {
+  if (Array.isArray(node)) return node.map((item) => linkRefs(item, own, contractNames, imports));
+  if (node === null || typeof node !== 'object') return node;
+  if ('$ref' in node) {
+    const name = refName(node.$ref);
+    if (name in own) return { ...node, $ref: `#/$defs/${name}` };
+    if (contractNames.has(name)) {
+      imports.add(name);
+      return { tsType: name };
+    }
+    fail(`$ref to ${name}, which is not in components.schemas`);
+  }
+  const out = {};
+  for (const [key, value] of Object.entries(node)) {
+    out[key] =
+      key === 'properties'
+        ? Object.fromEntries(Object.entries(value).map(([field, schema]) => [field, linkRefs(schema, own, contractNames, imports)]))
+        : linkRefs(value, own, contractNames, imports);
+  }
+  return out;
+}
+
+const HTTP_METHODS = new Set(['get', 'put', 'post', 'delete', 'patch', 'head', 'options', 'trace']);
+
+/**
+ * The bodies a 2xx answer may carry with no model, by media type without its parameters; each
+ * reads as null. Any media type that is neither JSON nor one of these fails.
+ */
+const NO_MODEL_BODIES = new Set([
+  // The visitor's event stream.
+  'text/event-stream',
+  // A document link's bytes, as the API declares them (`GET /api/d/{token}`).
+  'application/octet-stream',
+]);
+
+/** Whether a media type, parameters dropped, is JSON: `application/json` or any type ending `+json`. */
+function isJson(type) {
+  return type === 'application/json' || /^[^/]+\/[^/]+\+json$/.test(type);
+}
+
+/** The schema name a JSON body carries: its component schema, or `Name[]` for a list of one. */
+function jsonName(schema, where, schemas) {
+  const named = (node) => {
+    const name = refName(node.$ref);
+    if (!(name in schemas)) fail(`${where} names ${name}, which is not in components.schemas`);
+    return name;
+  };
+  if (schema && typeof schema.$ref === 'string') return named(schema);
+  if (schema?.type === 'array' && schema.items && typeof schema.items.$ref === 'string') return `${named(schema.items)}[]`;
+  fail(`${where}'s JSON body names no schema`);
+}
+
+/**
+ * The schema name a 2xx answer carries: the one its JSON bodies name (`application/json` or any
+ * `+json` type), or null when it has no body (a 204) or only a body known to carry no model (the
+ * event stream, document bytes). JSON bodies that name no model or different ones fail, as do a
+ * JSON body beside one with no model, any other media type, and a response the document only
+ * points at.
+ */
+function responseName(response, where, schemas) {
+  if (response === null || typeof response !== 'object' || '$ref' in response) fail(`${where} is not an inline response`);
+  const names = new Set();
+  let noModel = false;
+  for (const [mediaType, body] of Object.entries(response.content ?? {})) {
+    const type = mediaType.split(';')[0].trim().toLowerCase();
+    if (isJson(type)) names.add(jsonName(body?.schema, where, schemas));
+    else if (NO_MODEL_BODIES.has(type)) noModel = true;
+    else fail(`${where} answers ${JSON.stringify(mediaType)}, which is neither JSON nor a body known to carry no model`);
+  }
+  if (names.size > 1) fail(`${where}'s JSON bodies name different schemas: ${[...names].join(', ')}`);
+  if (names.size === 1 && noModel) fail(`${where} answers with a JSON body and with one that carries no model`);
+  return names.size === 1 ? [...names][0] : null;
+}
+
+/** A single status code, the only response key besides `default` this generator reads. */
+const STATUS_CODE = /^[1-5]\d\d$/;
+
+/**
+ * Every operation in `paths`, keyed "METHOD /path" in the document's order, with the schema name
+ * of each of its 2xx answers by status code. An operation with no 2xx answer fails, as do a
+ * response key that is neither a status code nor `default`, such as the range `2XX`, and a path
+ * item the document only points at (`$ref`), either of which would otherwise drop out unread.
+ */
+export function apiOperations(openapi) {
+  const paths = openapi?.paths;
+  const schemas = openapi?.components?.schemas ?? {};
+  if (!paths || typeof paths !== 'object' || Object.keys(paths).length === 0) fail('has no paths');
+  const operations = {};
+  for (const [route, item] of Object.entries(paths)) {
+    if (item && typeof item === 'object' && '$ref' in item) {
+      fail(`path ${JSON.stringify(route)} points at ${JSON.stringify(item.$ref)}, which is not read yet`);
+    }
+    for (const [method, operation] of Object.entries(item ?? {})) {
+      if (!HTTP_METHODS.has(method)) continue;
+      const key = `${method.toUpperCase()} ${route}`;
+      const answers = {};
+      for (const [status, response] of Object.entries(operation?.responses ?? {})) {
+        if (status === 'default') continue;
+        if (!STATUS_CODE.test(status)) fail(`${key} answers ${JSON.stringify(status)}, which is neither a status code nor default`);
+        if (status.startsWith('2')) answers[status] = responseName(response, `${key} ${status}`, schemas);
+      }
+      if (Object.keys(answers).length === 0) fail(`${key} has no 2xx answer`);
+      operations[key] = answers;
+    }
+  }
+  return operations;
+}
+
+/** API_OPERATIONS as TypeScript: one operation a line, status codes as numeric keys. */
+function operationsSource(operations) {
+  const lines = Object.entries(operations).map(([key, answers]) => {
+    const fields = Object.entries(answers).map(([status, name]) => `${status}: ${JSON.stringify(name)}`);
+    return `  ${JSON.stringify(key)}: { ${fields.join(', ')} },`;
+  });
+  return [
+    '/**',
+    ' * Every operation the API serves, as "METHOD /path", with the schema each 2xx answer carries by',
+    ' * status code: `Name[]` for a list, null for an answer with no JSON body. routes.typecheck.ts',
+    ' * checks the route table against it.',
+    ' */',
+    'export const API_OPERATIONS = {',
+    ...lines,
+    '} as const;',
+    '',
+  ].join('\n');
+}
+
+/** The openapi.gen.ts text for the parsed OpenAPI document and contracts schema. */
+export async function generateApi(openapi, contracts) {
+  const { own, contractNames } = splitSchemas(openapi, contracts);
+  const operations = apiOperations(openapi);
+  const imports = new Set();
+  const defs = {};
+  for (const [name, schema] of Object.entries(own)) {
+    defs[name] = { ...linkRefs(prepare(schema), own, contractNames, imports), title: name };
+  }
+  const root = { title: ROOT_NAME, type: 'object', properties: {}, additionalProperties: false, $defs: defs };
+  const types = await compileDefinitions(root, ROOT_NAME, '');
+  const importLine = imports.size > 0 ? `import type { ${[...imports].sort().join(', ')} } from './contracts.ts';\n\n` : '';
+  return `${BANNER}\n\n${importLine}${types.trimStart()}\n${operationsSource(operations)}`;
+}
+
+const WEB = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** What the command reads and writes: the API's document, the contracts schema and openapi.gen.ts. */
+const PATHS = {
+  openapi: path.join(WEB, '..', 'backend', 'desk', 'api', 'openapi.json'),
+  contracts: path.join(WEB, '..', 'backend', 'desk', 'contracts.schema.json'),
+  out: path.join(WEB, 'src', 'api', 'openapi.gen.ts'),
+};
+
+/**
+ * The command: writes openapi.gen.ts, or with --check only compares it. Returns the exit code: 1
+ * when the file is stale or missing, 2 on an unknown argument. Tests point `paths` at a temp folder.
+ */
+export async function main(args, paths = PATHS) {
+  const unknown = args.filter((arg) => arg !== '--check');
+  if (unknown.length > 0) {
+    console.error(`Unknown argument: ${unknown.join(' ')}. Use --check to verify without writing.`);
+    return 2;
+  }
+  const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
+  const text = await generateApi(read(paths.openapi), read(paths.contracts));
+  if (args.includes('--check')) {
+    let current = '';
+    try {
+      current = readFileSync(paths.out, 'utf8');
+    } catch {
+      // A missing file is stale.
+    }
+    if (current !== text) {
+      console.error('src/api/openapi.gen.ts is out of date with openapi.json. Run `npm run gen:api`.');
+      return 1;
+    }
+    console.log('src/api/openapi.gen.ts matches openapi.json.');
+    return 0;
+  }
+  writeFileSync(paths.out, text);
+  console.log('Wrote src/api/openapi.gen.ts from openapi.json.');
+  return 0;
+}
+
+// Run as a command, also through a symlinked path: Node resolves this module's own URL to the real
+// path, so the path it was started with is resolved the same way before the two are compared.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = await main(process.argv.slice(2));
+}
