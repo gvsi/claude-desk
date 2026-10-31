@@ -8,7 +8,8 @@ sends any, it names the cards that would change a tool of the always-on baseline
 which card; the kernel's refusal stays the enforcement.
 """
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
 from desk.always_on import changes_always_on
@@ -69,14 +70,17 @@ async def post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], expec
     check_always_on(cards)
     request = PolicyDraftRequest(desk_id=desk_id, cards=cards, expected_parent=expected_parent,
                                  auto_money_cap_cents=auto_money_cap_cents)
-    return await _proving_call(owner, "POST /policy/draft", request)
+    with _no_answer_cannot_be_checked():
+        return await owner.kernel.call("POST /policy/draft", request)
 
 
-async def _proving_call(owner: OwnerCtx, route: str, request: Any) -> Any:
-    """The kernel's answer to a request it proves a draft for; one that doesn't come in time is 409
-    `rules_cannot_be_checked`, since the proof may still be running. The kernel's refusals come back as they are."""
+@contextmanager
+def _no_answer_cannot_be_checked() -> Iterator[None]:
+    """Around a kernel call that proves a draft: no answer in time is 409 `rules_cannot_be_checked`, since the proof
+    may still be running. The kernel's refusals come back as they are. Each call site names its own route, so the
+    route scan (tests/api/test_kernel_routes.py) reads it."""
     try:
-        return await owner.kernel.call(route, request)
+        yield
     except KernelUnavailable as unavailable:
         if unavailable.status is None:                   # no answer in time: the proof may still be running
             raise ApiProblem(409, "rules_cannot_be_checked") from None
@@ -132,7 +136,8 @@ async def confirm_tools(owner: OwnerCtx, request: ToolsConfirmRequest) -> ToolCo
     Disabling proves nothing, so its answer and errors come back as they are."""
     if not request.enable:
         return await owner.kernel.call("POST /tools/confirm", request)
-    confirmed = await _proving_call(owner, "POST /tools/confirm", request)
+    with _no_answer_cannot_be_checked():
+        confirmed = await owner.kernel.call("POST /tools/confirm", request)
     if confirmed.draft is not None:
         checkable(confirmed.draft)
     return confirmed
