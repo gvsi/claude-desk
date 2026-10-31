@@ -479,10 +479,9 @@ const SERVED: ServedRoutes = {
     if (req.malformed || !Number.isSafeInteger(version)) return INVALID;
     const confirmed = sv.world.confirmDraft(desk, version as number);
     if (confirmed === 'not_found') return NOT_FOUND;
-    // Drafted from rules that have changed since: the owner asks for the change again.
-    if (confirmed === 'stale') return failWith(409, 'rules_changed_since_draft');
-    // A tool it turns on changed again since: the kernel refuses, and nothing changes.
-    if (confirmed === 'conflict') return failWith(409, 'kernel', { code: 'conflict' });
+    // Drafted from rules that have changed since, or a tool it turns on changed again since: the
+    // kernel refuses and nothing changes. The API answers every kernel 409 on confirm the same way.
+    if (confirmed === 'stale' || confirmed === 'conflict') return failWith(409, 'rules_changed_since_draft');
     return ok(confirmed);
   },
   confirmTool(sv, req) {

@@ -16,7 +16,7 @@ import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectScreenBasics } from '../../test/screen.ts';
 import type { AnswerDraftState } from '../approvals/useAnswer.ts';
-import { draftFromDiff } from './drafts.ts';
+import { draftFromDiff, draftFromVersion } from './drafts.ts';
 import { RuleDraftReview, type RuleDraftState } from './RuleDraftReview.tsx';
 
 const DESK = `/app/${RIVERA.deskId}`;
@@ -190,6 +190,29 @@ describe('rule draft review', () => {
     // Nothing applied, and the owner keeps their rules from here.
     await screen.getByRole('button', { name: 'Keep my rules' }).click();
     expect(requests('confirmRules')).toHaveLength(1);
+  });
+
+  it('drifted_tool_confirm_says_the_rules_changed', async () => {
+    // Refund's definition changed, and the owner turned it on at the changed hash.
+    const refund = 'payments.create_refund';
+    const drift = (sha: string) => {
+      desk().tools = desk().tools.map((row) => (row.tool === refund ? { ...row, status: 'needs_review', pending_definition_text: `Changed ${sha[0]}`, pending_sha256: sha } : row));
+    };
+    drift('e'.repeat(64));
+    const turned = mockStore.world.confirmTools(desk(), [{ tool: refund, definition_sha256: 'e'.repeat(64) }], true);
+    if (turned === 'not_found' || turned === 'conflict' || turned.draft == null) throw new Error('the tool confirm drafts a version');
+    const row = (await request('rules', { params: { desk_id: RIVERA.deskId } })).tools.find((tool) => tool.tool === refund);
+    if (row === undefined) throw new Error('the mock lists Refund');
+    const element = <RuleDraftReview deskId={RIVERA.deskId} draft={draftFromVersion(desk().policy, turned.draft, [row])} />;
+    const { screen } = await renderRoute('/review', { routes: [{ path: '/review', element }] });
+    await expect.element(screen.getByRole('button', { name: 'Confirm and turn on' })).toBeEnabled();
+
+    // It changes again before the owner confirms: the confirm is refused as the API answers it, and nothing turns on.
+    drift('a'.repeat(64));
+    await screen.getByRole('button', { name: 'Confirm and turn on' }).click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent('Your rules changed since this was drafted. Ask for the change again.');
+    expect(desk().policy.version).toBe(7);
+    expect(desk().tools.find((tool) => tool.tool === refund)).toMatchObject({ status: 'needs_review', pending_sha256: 'a'.repeat(64) });
   });
 
   it('reload_loads_the_draft', async () => {

@@ -931,8 +931,9 @@ describe('rules and tools', () => {
 
     // The definition changes again before the owner confirms: the draft names a hash that is no
     // longer listed, so the kernel refuses it and the tool stays off, waiting for the new review.
+    // The API answers that refusal as it answers every kernel 409 on confirm.
     drift(refund, 'a'.repeat(64));
-    expect(await confirm(version)).toEqual({ status: 409, body: { error: 'kernel', code: 'conflict' } });
+    expect(await confirm(version)).toEqual({ status: 409, body: { error: 'rules_changed_since_draft' } });
     expect((await rules()).active.version).toBe(7);
     expect(await rowOf(refund)).toMatchObject({ status: 'needs_review', definition_sha256: old, pending_sha256: 'a'.repeat(64) });
 
@@ -942,7 +943,7 @@ describe('rules and tools', () => {
     expect((await confirmTools({ tools: [{ tool: charges, definition_sha256: listed }], enable: false })).status).toBe(200);
     const back = await confirmTools({ tools: [{ tool: charges, definition_sha256: listed }], enable: true });
     drift(charges, 'b'.repeat(64));
-    expect(await confirm((back.body as ToolConfirmedOut).draft?.version)).toEqual({ status: 409, body: { error: 'kernel', code: 'conflict' } });
+    expect(await confirm((back.body as ToolConfirmedOut).draft?.version)).toEqual({ status: 409, body: { error: 'rules_changed_since_draft' } });
     expect(await rowOf(charges)).toMatchObject({ status: 'needs_review', pending_sha256: 'b'.repeat(64) });
   });
 });
