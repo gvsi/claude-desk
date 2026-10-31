@@ -5,6 +5,8 @@
     python -m evals.run tier2 --suite attack|legit|all --split calibration|heldout|all --runs N --max-usd X
         [--only ids] [--concurrency 4] [--dry-run] [--null-baseline] [--results] [--base-url URL --records-dsn DSN]
     python -m evals.run gate --pass <id> [--final]
+    python -m evals.run waiver-review --pass <id>
+    python -m evals.run waive --pass <id> --message <id> [--message <id>] --reason "<text>" --signed-off-by "<name>"
     python -m evals.run results --pass <id>
     python -m evals.run record-rate --pass <id> --signed-off-by "<name>" --reason "<text>" [--lower-bar]
     python -m evals.run key
@@ -205,7 +207,7 @@ def tier2(argv: list[str]) -> int:
 def _print_gate(judged: Any) -> None:
     """The gate's summary line, which counts the runs that skipped checks while a plan hadn't landed, then a
     line for each check they skipped and one for each reason the gate failed."""
-    from evals.gate import skipped_summary
+    from evals.gate import skipped_summary, violation_summary
 
     point = "none" if judged.completion_point is None else f"{judged.completion_point:.3f}"
     recorded = ("none" if judged.recorded_lower_95 is None
@@ -213,7 +215,8 @@ def _print_gate(judged: Any) -> None:
     skipped = (f"; {skipped_summary(len(judged.skipped_runs), judged.skipped_checks)}" if judged.skipped_runs
                else "")
     print(f"gate: {'passed' if judged.passed else 'failed'}; held-out legitimate completion {point} over "
-          f"{judged.completion_trials} runs ({judged.provider}), recorded {recorded}{skipped}")
+          f"{judged.completion_trials} runs ({judged.provider}), recorded {recorded}; "
+          f"{violation_summary(judged)}{skipped}")
     for check, runs in judged.skipped_checks.items():
         print(f"gate: in {runs} runs, {check}")
     for reason in judged.reasons:
@@ -231,18 +234,56 @@ def gate_command(argv: list[str]) -> int:
     from evals.results import ResultsRefused, final_gate
     from evals.tier2.passes import PassRefused, load_pass
     from evals.tier2.suite import load_recorded_rates
+    from evals.waivers import WaiverRefused, checked_waivers, load_waivers
 
     parser = _pass_parser("gate")
     parser.add_argument("--final", action="store_true")
     options = parser.parse_args(argv)
     try:
         finished, rates = load_pass(options.pass_id), load_recorded_rates()
-        judged = final_gate(finished, rates) if options.final else gate(finished, rates)
-    except (PassRefused, ResultsRefused) as refused:
+        if options.final:
+            judged = final_gate(finished, rates)
+        else:
+            waivers = checked_waivers(finished, load_waivers(EVALS_DIR.parent), root=EVALS_DIR.parent)
+            judged = gate(finished, rates, waivers=waivers)
+    except (PassRefused, ResultsRefused, WaiverRefused, OSError, ValueError) as refused:
         print(f"gate: {refused}")
         return 1
     _print_gate(judged)
     return 0 if judged.passed else 1
+
+
+def waiver_review_command(argv: list[str]) -> int:
+    from evals.tier2.passes import PassRefused, load_pass
+    from evals.waivers import write_review
+
+    options = _pass_parser("waiver-review").parse_args(argv)
+    try:
+        path = write_review(load_pass(options.pass_id), root=EVALS_DIR.parent)
+    except (PassRefused, OSError, ValueError) as refused:
+        print(f"waiver-review: {refused}")
+        return 1
+    print(f"waiver-review: {path.read_text().splitlines()[2]} Wrote {path.relative_to(EVALS_DIR.parent)}")
+    return 0
+
+
+def waive_command(argv: list[str]) -> int:
+    from evals.tier2.passes import PassRefused
+    from evals.waivers import sign_waivers
+
+    parser = _pass_parser("waive")
+    parser.add_argument("--message", action="append", required=True)
+    parser.add_argument("--reason", required=True)
+    parser.add_argument("--signed-off-by", required=True)
+    options = parser.parse_args(argv)
+    try:
+        entries = sign_waivers(options.pass_id, options.message, reason=options.reason,
+                               signed_off_by=options.signed_off_by, root=EVALS_DIR.parent)
+    except (PassRefused, OSError, ValueError) as refused:
+        print(f"waive: {refused}")
+        return 1
+    print(f"waive: appended {len(entries)} waivers for pass {options.pass_id}, signed by {entries[0].signed_off_by}")
+    return 0
 
 
 def results_command(argv: list[str]) -> int:
@@ -253,7 +294,7 @@ def results_command(argv: list[str]) -> int:
     options = _pass_parser("results").parse_args(argv)
     try:
         written = write_results(load_pass(options.pass_id), load_recorded_rates())
-    except (PassRefused, ResultsRefused) as refused:
+    except (PassRefused, ResultsRefused, OSError, ValueError) as refused:
         print(f"results: {refused}")
         return 1
     print(f"results: wrote {written.relative_to(EVALS_DIR.parent)}")
@@ -432,6 +473,7 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
     from evals.tier2.passes import load_pass
     from evals.tier2.suite import load_recorded_rates, load_splits, load_suite, suite_sha256
     from evals.usage import conversation_metrics
+    from evals.waivers import checked_waivers, load_waivers
 
     result = load_pass(pass_id, root)
     config = result.config
@@ -475,8 +517,12 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
         raise ReportRefused(f"pass {pass_id} doesn't read as a report's pass ({error.error_count()} problems: "
                             f"{error.errors()[0]['msg']})") from None
     latest = not kept_out(summary)
+    try:
+        waivers = checked_waivers(result, load_waivers(root), root=root)
+    except (OSError, ValueError) as error:
+        raise ReportRefused(f"the pass's waivers can't be checked: {error}") from None
     return {
-        "pass_result": summary, "gate_result": gate(result, rates), "metrics": metrics,
+        "pass_result": summary, "gate_result": gate(result, rates, waivers=waivers), "metrics": metrics,
         "latency": _pass_latency(root, result, latest=latest), "calibration": _calibration_at(root, result.git_sha),
         "recorded": rates.current,
         "null_baseline": _null_baseline(root, null_baseline_id, result, latest=latest) if null_baseline_id else None,
@@ -681,6 +727,7 @@ def _null_baseline(root: Path, null_id: str, real: "PassResult", *, latest: bool
 
 
 def report_command(argv: list[str], *, root: Path | None = None) -> int:
+    from evals.gate import violation_summary
     from evals.report import exploratory, kept_out, partial, write_report
     from evals.tier2.passes import REPO_ROOT, PassRefused
 
@@ -698,7 +745,8 @@ def report_command(argv: list[str], *, root: Path | None = None) -> int:
         return 1
     judged, latency = inputs["gate_result"], inputs["latency"]
     measured = latency is not None and (latency.local is not None or latency.hosted is not None)
-    print(f"report: pass {options.pass_id}: the gate {'passed' if judged.passed else 'failed'}; latency "
+    print(f"report: pass {options.pass_id}: the gate {'passed' if judged.passed else 'failed'}; "
+          f"{violation_summary(judged)}; latency "
           f"{'measured' if measured else 'not measured'}")
     for line in latency.local_left_out if latency is not None else []:
         print(f"report: {line}")
@@ -723,6 +771,7 @@ def report_command(argv: list[str], *, root: Path | None = None) -> int:
 
 
 COMMANDS = {"tier1": tier1, "simulator-check": simulator_check, "tier2": tier2, "gate": gate_command,
+            "waiver-review": waiver_review_command, "waive": waive_command,
             "results": results_command, "record-rate": record_rate_command, "key": key, "results-check": results_check,
             "merge-ready": merge_ready, "calibrate": calibrate_command, "latency": latency, "report": report_command}
 

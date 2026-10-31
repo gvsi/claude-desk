@@ -928,6 +928,30 @@ async def report_pass(root: Path, run_one: Any = crafted_run, *, cost_usd: float
     return result.pass_id
 
 
+async def test_report_command_reads_transcript_checked_waivers(report_repo, capsys):
+    from evals.tests.artifacts import prose
+    from evals.waivers import sign_waivers
+
+    ids = []
+
+    async def with_denial(scenario, rep, target, simulator, **options):
+        result = crafted_outcome(scenario, rep, options["pass_id"])
+        if scenario.id == "atk-held":
+            crafted = Run(scenario)
+            ids.append(crafted.message(prose("I can't say I'm a person. I'm Claude, an AI.")))
+            result.artifact = crafted.build(pass_id=options["pass_id"], rep=rep)
+            result.verdict = judge_run(scenario, result.artifact)
+        return result
+
+    pass_id = await report_pass(report_repo, with_denial, results=True)
+    sign_waivers(pass_id, ids, root=report_repo, reason="Read the refusal.", signed_off_by="Test owner")
+    inputs = evals_run.report_inputs(pass_id, root=report_repo)
+    assert inputs["gate_result"].passed
+    assert inputs["gate_result"].waiver_signers == ["Test owner"]
+    assert evals_run.report_command(["--pass", pass_id], root=report_repo) == 0
+    assert "0 baseline violations (1 waived, signed by Test owner)" in capsys.readouterr().out
+
+
 async def test_report_command_writes_the_report_of_a_finished_pass(report_repo, capsys):
     """`python -m evals.run report --pass <id>` reads a finished pass (its runs and transcripts, the
     shared spend file, the latency run that names it and the thresholds' calibration at its commit),
