@@ -413,6 +413,40 @@ describe('fixtures', () => {
     expect(contact?.title).toMatch(/^\(\d{3}\) 555-01\d{2}$/);
   });
 
+  test('booking_card_has_the_kernels_shape', () => {
+    // The kernel renders a confirmed booking as {date} / Arriving {start} to {end} / With {owner},
+    // with no booking ID (render/en.py and es.py); the fixture draws the same, in both languages.
+    const render = (language: string) => readFileSync(path.join(BACKEND, 'kernel_service', 'render', `${language}.py`), 'utf8');
+    expect(render('en')).toContain('f"Arriving {clock(start)} to {clock(end)}"');
+    expect(render('en')).toContain('f"With {desk.owner_display_name}"');
+    expect(render('es')).toContain('f"Llegada de {clock(start)} a {clock(end)}"');
+    expect(render('es')).toContain('f"Con {desk.owner_display_name}"');
+    const owner = rivera.business.ownerName;
+    const card = (language: 'en' | 'es') => rivera.blocks.booking_confirmed[language];
+    expect(card('en').title).toBe('Tuesday, November 3');
+    expect(card('en').lines).toEqual(['Arriving 2:00 pm to 4:00 pm', `With ${owner}`]);
+    expect(card('es').title).toBe('martes 3 de noviembre');
+    expect(card('es').lines).toEqual(['Llegada de 14:00 a 16:00', `Con ${owner}`]);
+    // No booking ID in what the visitor sees; the fact it comes from keeps its id.
+    for (const language of ['en', 'es'] as const) expect(card(language).text).not.toMatch(/B-77|Booking|Reserva/);
+  });
+
+  test('card_amounts_print_cents_as_the_kernel_does', () => {
+    // The kernel formats every amount with cents ("$20.00", "$1,234.56": render/cards.py `money`), so
+    // no fixture card's title or lines, in the catalog or in a conversation, shows a bare "$20".
+    const bare: string[] = [];
+    for (const block of cardBlocks) {
+      // The owner's own words are shown as written, not formatted by the kernel.
+      if (block.template === 'owner_said') continue;
+      for (const text of [block.title ?? '', ...(block.lines ?? [])]) {
+        for (const amount of text.match(/\$[\d,]+(?:\.\d+)?/g) ?? []) {
+          if (!/^\$\d{1,3}(?:,\d{3})*\.\d{2}$/.test(amount)) bare.push(`${block.template}: ${text}`);
+        }
+      }
+    }
+    expect(bare).toEqual([]);
+  });
+
   test('card_fixtures_are_cards', () => {
     // A block literal that leaves out its optional fields is still checked here and by the prose tests.
     expect(isRenderedBlock({ kind: 'card', template: 'policy', text: 'Cash only.', title: 'Cash only.' })).toBe(true);

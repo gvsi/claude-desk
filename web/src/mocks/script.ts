@@ -503,7 +503,7 @@ export interface ScriptRule {
   steps: readonly Step[];
 }
 
-/** The deposit link's title, as its card shows it: "Service call deposit, $20". */
+/** The deposit link's title, as its card shows it: "Service call deposit, $20.00". */
 const DEPOSIT_TITLE: Record<Language, string> = {
   en: blocks.payment_link.en.title ?? '',
   es: blocks.payment_link.es.title ?? '',

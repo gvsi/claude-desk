@@ -198,27 +198,29 @@ const cards = {
       options: slotOptions.es,
     }),
   },
+  // As the kernel renders a confirmed booking: {date} / Arriving {start} to {end} / With {owner},
+  // and no booking ID (render/en.py and es.py).
   booking_confirmed: {
     en: cardBlock('booking_confirmed', {
       fact_id: 'booking:B-77',
-      title: 'Tuesday, November 3, 2:00 pm',
-      lines: ['120 minutes', 'Booking B-77'],
+      title: 'Tuesday, November 3',
+      lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
     }),
     es: cardBlock('booking_confirmed', {
       fact_id: 'booking:B-77',
-      title: 'martes 3 de noviembre, 14:00',
-      lines: ['120 minutos', 'Reserva B-77'],
+      title: 'martes 3 de noviembre',
+      lines: ['Llegada de 14:00 a 16:00', 'Con Maria Rivera'],
     }),
   },
   payment_link: {
     en: cardBlock('payment_link', {
       fact_id: 'payment_link:L-3301',
-      title: 'Service call deposit, $20',
+      title: 'Service call deposit, $20.00',
       href: '/pay/k7Hq2vX9',
     }),
     es: cardBlock('payment_link', {
       fact_id: 'payment_link:L-3301',
-      title: 'Service call deposit, $20',
+      title: 'Service call deposit, $20.00',
       href: '/pay/k7Hq2vX9',
     }),
   },
@@ -306,8 +308,8 @@ const cards = {
     es: cardBlock('refund_issued', { fact_id: 'refund:re-dana-1', title: '$180.00 reembolsados' }),
   },
   charge_confirmed: {
-    en: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20' }),
-    es: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20' }),
+    en: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20.00' }),
+    es: cardBlock('charge_confirmed', { fact_id: 'charge:ch-agent-1', title: 'Service call deposit, $20.00' }),
   },
   callback_confirmed: {
     en: cardBlock('callback_confirmed', {
@@ -320,8 +322,8 @@ const cards = {
     }),
   },
   payment_confirmed: {
-    en: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20' }),
-    es: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20' }),
+    en: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
+    es: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
   },
 } satisfies Record<ClauseTemplate, Bilingual<CardBlock>>;
 
