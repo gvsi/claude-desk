@@ -28,6 +28,7 @@ const CHAT_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'brand-header', page: '.cd-public-brand', size: true },
   { name: 'chat-title', page: '.cd-public-shell__chat-title > h2' },
   { name: 'disclosure', page: '.cd-public-shell__disclosure' },
+  { name: 'ask-owner', page: '.cd-public-shell__chat-head > button', size: true },
   { name: 'composer', page: '.cd-composer__box', size: true },
   { name: 'concept-footer', page: '.cd-public-shell__footer .cd-concept-footer', size: true },
 ];
@@ -74,6 +75,20 @@ it('public_chat_opens_in_spanish', async () => {
   await expectScreenBasics(document.body, { owner: false });
 });
 
+it('public_chat_opens_in_spanish_desktop', async () => {
+  const read = holdReads(CHAT_READ);
+  await expectSkeletonLoad({
+    status: 'Abriendo el chat',
+    anchors: CHAT_ANCHORS,
+    open: async () => {
+      await renderRoute(CHAT, { viewport: 'desktop', language: 'es-MX', pollScale: 100 });
+      await vi.waitFor(() => expect(document.querySelector('[role="status"][lang="es"]')?.textContent).toBe('Abriendo el chat'));
+    },
+    release: read.release,
+  });
+  await expectScreenBasics(document.body, { owner: false });
+});
+
 it('setup_preview_opens_in_place', async () => {
   const started = await mockStore.dispatch('startSetup', { body: {
     description: "Rivera Plumbing. I'm Maria, a plumber in Oakland.",
@@ -93,7 +108,8 @@ it('setup_preview_opens_in_place', async () => {
   const read = holdReads(ROUTES.publicDesk.path.replace('{slug}', state.slug));
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    anchors: CHAT_ANCHORS.filter((anchor) => anchor.name !== 'concept-footer'),
+    // Setup's owner name comes from its interview; keep this preview's existing geometry checks.
+    anchors: CHAT_ANCHORS.filter((anchor) => anchor.name !== 'concept-footer' && anchor.name !== 'ask-owner'),
     open: async () => {
       await renderRoute(`/app/setup/${state.interview_id}`, { pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));

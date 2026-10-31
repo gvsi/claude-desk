@@ -57,7 +57,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
                 {language === 'es' ? <Skeleton shape="line" text="meta" width="65%" className="cd-public-shell-skeleton__phone-line" /> : null}
               </div>
             </div>
-            <Skeleton shape="block" width={151} height="var(--size-control)" className="cd-public-shell-skeleton__ask" anchor="ask-owner" />
+            <Skeleton shape="block" width={language === 'es' ? 209 : 151} height="var(--size-control)" className="cd-public-shell-skeleton__ask" anchor="ask-owner" />
           </div>
           <div className="cd-public-shell__scroll">
             {aboutBeside ? null : about}
