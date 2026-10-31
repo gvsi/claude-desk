@@ -1,5 +1,5 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
@@ -133,6 +133,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
   );
 
   const state = setup.data;
+  // The step setup opened at on this page: a step come to after it was reached live, and its
+  // results land as they arrive.
+  const [openedAt, setOpenedAt] = useState<SetupStep | null>(null);
+  if (openedAt === null && state !== undefined) setOpenedAt(state.step);
+  const opened = openedAt ?? state?.step;
   // An interview outside this copy: the app's not-found screen.
   if (state === undefined && setup.error instanceof ApiError && setup.error.kind === 'not_found') return <NotFound />;
   if (state === undefined) {
@@ -170,7 +175,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
       body = <RulesStep state={state} business={name} onNext={moveTo} />;
       break;
     case 'safety_check':
-      body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} reread={reread} />;
+      body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} reread={reread} live={opened !== 'safety_check'} />;
       break;
     case 'preview':
     case 'live':
