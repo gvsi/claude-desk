@@ -494,7 +494,8 @@ async def store_knowledge(ctx: KernelCtx, desk_id: str, item: KnowledgeItem) -> 
     context reads it), is stored the owner's alone, whatever label it came with
     (`owner_only_forced`), so private document text never reaches a visitor as knowledge.
     The API's view of the item (`kernel_ro.knowledge_items`) reads that ledgered flag and shows
-    such an item's title and text as NULL, so no document text reaches the API either.
+    such an item's title and text as NULL, so no document text reaches the API through its views
+    (the owner's own `/context` still carries the item, as the owner's).
 
     Checked before anything is written, else 422 `invalid`: the label is the owner's alone or
     everyone's (`["owner"]` or `["public"]`, with no record owner), the text at most 100 KiB and

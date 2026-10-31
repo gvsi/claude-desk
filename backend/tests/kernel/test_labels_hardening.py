@@ -554,7 +554,7 @@ async def test_the_knowledge_view_shows_no_document_text(app, client):
     for item in (PARKING, TOOLS, pasted):
         await stored(client, copy, item)
     # the item forced owner-only shows neither its title nor its text, so no document text or canary
-    # reaches the API; the owner's own owner-only item and the public one read as stored
+    # reaches the API through its view; the owner's own owner-only item and the public one read as stored
     assert knowledge_view(copy) == [
         ("kb-a-tools", "upload", TOOLS["title"], TOOLS["text"], ["public"]),
         ("kb-invoice", "upload", None, None, ["owner"]),
