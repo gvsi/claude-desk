@@ -15,7 +15,7 @@ Built against the person page board in review (N-Run2-People-Person); sign-off p
 - 8 px under it, a card of rows that reach its edges, each padded 12 px 16 px under a hairline but the first:
   - at the left, what the rule is on (`title`, "Book a visit") in `.cd-type-control` at weight 520, over its reason in `.cd-type-meta`, `text-secondary`, 2 px under it;
   - then what it enforces, the `words` joined by " · " (`ruleWordsLine`), in `.cd-type-meta`, `text-secondary`;
-  - and its outcome, `OutcomeMenu` without `onChange`: its dot and words, nothing to press.
+  - and its outcome, `OutcomeMenu` without `onChange`: its dot and words, nothing to press. On a crowded row the outcome wraps between its words, never inside one: it shrinks only to its longest word, and the rest of the row gives way first.
 - With no rules, "No rules just for {name}." in body type, `text-secondary`, in place of the card; the link stays.
 - It lays out by its own width (a container query): under 480 px, what a rule enforces and its outcome go under its reason.
 

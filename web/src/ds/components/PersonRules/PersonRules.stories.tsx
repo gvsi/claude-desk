@@ -119,3 +119,73 @@ export const NarrowPhoneWithALimit: Story = {
     await expect(tooWide).toEqual([]);
   },
 };
+
+/** The words in an element's text that its lines split: a word whose letters sit on more than one line. */
+function splitWords(element: Element): string[] {
+  const split: string[] = [];
+  const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const text = node.textContent ?? '';
+    for (const match of text.matchAll(/\S+/g)) {
+      const range = document.createRange();
+      range.setStart(node, match.index);
+      range.setEnd(node, match.index + match[0].length);
+      const tops = new Set([...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top)));
+      if (tops.size > 1) split.push(match[0]);
+    }
+  }
+  return split;
+}
+
+export const LongRuleNarrow: Story = {
+  name: 'A long rule, narrow',
+  args: {
+    rules: [
+      {
+        key: 'rv-dana-weekend',
+        title: 'Book a weekend emergency visit',
+        rule: { card_id: 'rv-dana-weekend', mode: 'auto', reason: 'Dana can book a weekend emergency visit at her home without asking you first.' },
+        words: [
+          { field: 'who', text: 'Dana Whitfield' },
+          { field: 'who', text: 'Verified' },
+          { field: 'hours', text: 'Saturdays and Sundays, 9:00 am to 1:00 pm' },
+          { field: 'review', text: 'Checked by the reviewer' },
+        ],
+      },
+      {
+        key: 'rv-dana-links',
+        title: 'Payment link',
+        rule: { card_id: 'rv-dana-links', mode: 'auto', reason: 'Dana can pay her invoices by link without asking you first.' },
+        words: [
+          { field: 'who', text: 'Dana Whitfield' },
+          { field: 'limits', text: 'Up to $10,000' },
+          { field: 'review', text: 'Checked by the reviewer' },
+        ],
+        limit: '$10,000',
+      },
+    ],
+  },
+  render: (args) => (
+    <div style={{ width: 520 }}>
+      <PersonRules {...args} />
+    </div>
+  ),
+  parameters: { canvasNote: `${NOTE} A long rule in a column just wide enough to keep each row on one line.` },
+  play: async ({ canvas }) => {
+    // outcome_words_stay_whole: the outcome shrinks only to its longest word, wrapping between words
+    // and never inside one, however long the rest of the row is.
+    const rows = within(canvas.getByRole('region', { name: 'Rules for Dana Whitfield' })).getAllByRole('listitem');
+    await expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      const outcome = row.querySelector<HTMLElement>('.cd-outcome');
+      if (!outcome) throw new Error('No outcome');
+      await expect(splitWords(outcome), `${row.textContent ?? ''}: no word split across lines`).toEqual([]);
+      // Nothing in the outcome reaches past it, and it stays inside its row.
+      const box = outcome.getBoundingClientRect();
+      for (const part of outcome.querySelectorAll('*')) {
+        await expect(part.getBoundingClientRect().right).toBeLessThanOrEqual(box.right + 0.5);
+      }
+      await expect(box.right).toBeLessThanOrEqual(row.getBoundingClientRect().right - 16 + 0.5);
+    }
+  },
+};
