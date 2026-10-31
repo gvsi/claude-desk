@@ -5,7 +5,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import type { LedgerPage } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
-import { AttemptRow, Button, ChainStatus, Chip, EmptyState, Notice, PageHeader, SegmentedControl, StatusDot } from '../../ds/index.ts';
+import { AttemptRow, Button, ChainStatus, Chip, EmptyState, Notice, PageHeader, SegmentedControl, StatusLabel } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
@@ -146,8 +146,7 @@ function HeldForYou({ deskId }: { deskId: string }) {
   if (held === 0) return null;
   return (
     <Button variant="secondary" href={todayPath(deskId)}>
-      <StatusDot tone="held" />
-      {held} held for you
+      <StatusLabel tone="held">{held} held for you</StatusLabel>
     </Button>
   );
 }

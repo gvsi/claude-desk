@@ -440,6 +440,28 @@ describe('Safety', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('held_for_you_dot_stands_apart_from_its_words', async () => {
+    // The seeded 15% quote waits for Maria: the header's button says so, its gold dot a status
+    // label's gap before the words, never touching them.
+    const { screen } = await renderRoute(SAFETY);
+    const held = screen.getByRole('link', { name: '1 held for you', exact: true });
+    await expect.element(held).toBeVisible();
+    const dot = held.element().querySelector('.cd-status-dot--held');
+    if (!dot) throw new Error('the button has its held dot');
+    const walker = document.createTreeWalker(held.element(), NodeFilter.SHOW_TEXT);
+    let words: Text | null = null;
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      if (node.textContent?.trim()) {
+        words = node as Text;
+        break;
+      }
+    }
+    if (words === null) throw new Error('the button has its words');
+    const range = document.createRange();
+    range.selectNodeContents(words);
+    expect(Math.round(range.getBoundingClientRect().left - dot.getBoundingClientRect().right)).toBe(8);
+  });
+
   it('mock_refusal_says_why', async () => {
     // The built-in agent's charge over its signed limit, refused by the baseline's signed-limit
     // policy, as the mock decides it: its row says why. The seeded stopped draft says nothing more.
