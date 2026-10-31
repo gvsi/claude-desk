@@ -532,6 +532,32 @@ describe('setup', () => {
     }
   });
 
+  it('the_same_example_again_puts_it_back_focused', async () => {
+    // An example's chip pressed again puts its words back exactly, after an edit or without one, and
+    // each press gives the box focus with the caret at its start, even when the words didn't change.
+    const { screen } = await renderRoute('/app/setup');
+    const box = screen.getByRole('textbox', { name: 'Your business' });
+    const field = () => box.element() as HTMLTextAreaElement;
+    const plumber = screen.getByRole('button', { name: 'A plumber in Oakland' });
+    const example = START_EXAMPLES.en.examples[0]?.description ?? '';
+    await plumber.click();
+    await expect.element(box).toHaveFocus();
+    field().setSelectionRange(example.length, example.length);
+    await userEvent.keyboard(' Gas lines too.');
+    await expect.element(box).toHaveValue(`${example} Gas lines too.`);
+    await plumber.click();
+    await expect.element(box).toHaveValue(example);
+    await expect.element(box).toHaveFocus();
+    expect([field().selectionStart, field().selectionEnd]).toEqual([0, 0]);
+    // The words as they are, the caret left at their end: the press still brings it back to the start.
+    field().setSelectionRange(example.length, example.length);
+    await plumber.click();
+    await expect.element(box).toHaveFocus();
+    expect([field().selectionStart, field().selectionEnd]).toEqual([0, 0]);
+    expect(field().value).toBe(example);
+    expect(requests('startSetup')).toHaveLength(0);
+  });
+
   it('an_example_over_the_owners_words_can_be_undone', async () => {
     // Words the owner typed are replaced as an edit of their own: the example goes in, and undo
     // (Cmd or Ctrl+Z) brings their words back, which "Start" then sends.
