@@ -7,7 +7,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { http } from 'msw';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { page, userEvent } from 'vitest/browser';
+import { cdp, page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
@@ -24,7 +24,7 @@ import type { DeskRecord } from '../mocks/world.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { retryAfterMs } from '../app/poll.ts';
 import { SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
-import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
 
 const DESCRIPTION =
   "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
@@ -427,17 +427,18 @@ describe('setup', () => {
     await expect.element(line).toBeVisible();
     const group = screen.getByRole('group', { name: 'Examples' });
     expect(group.getByRole('button').elements().map((chip) => chip.textContent)).toEqual(EXAMPLE_CHIPS);
-    // As the board draws them: 12 px under the hint, the chips 8 px under the line, and "Start" 20 px under the chips.
+    // As the signed board (UXC-P602-After) spaces them: the line 10 px under the hint (the field's
+    // 6 px gap and 4 more), the chips 8 px under the line, and "Start" 20 px under the chips.
     const hint = screen.getByText('Include your first name as customers should see it.', { exact: true }).element().getBoundingClientRect();
     const said = line.element().getBoundingClientRect();
     const chips = group.element().getBoundingClientRect();
     const start = screen.getByRole('button', { name: 'Start' }).element().getBoundingClientRect();
-    expect(Math.round(said.top - hint.bottom)).toBe(12);
+    expect(Math.round(said.top - hint.bottom)).toBe(10);
     expect(Math.round(chips.top - said.bottom)).toBe(8);
     expect(Math.round(start.top - chips.bottom)).toBe(20);
-    // In the secondary body type, as the step's subtitle is.
-    expect(getComputedStyle(line.element())).toMatchObject({ fontSize: '14px', lineHeight: '20px' });
-    expect(line.element().classList.contains('cd-type-body')).toBe(true);
+    // In the secondary meta type, as the board sets it.
+    expect(getComputedStyle(line.element())).toMatchObject({ fontSize: '13px', lineHeight: '18px', color: tokenColor('--text-secondary') });
+    expect(line.element().classList.contains('cd-type-meta')).toBe(true);
   });
 
   it('an_example_fills_the_box_and_starts_nothing', async () => {
@@ -530,6 +531,43 @@ describe('setup', () => {
         /\b(?:(?:mon|tues|wednes|thurs|fri|satur|sun)days?|january|february|march|april|may|june|july|august|september|october|november|december|lunes|martes|miércoles|jueves|viernes|sábados?|domingos?|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i,
       );
     }
+  });
+
+  it('an_example_fades_into_the_box', async () => {
+    // As the signed board draws it, the chosen words fill the box with a fade of their color from
+    // transparent, over motion-base on the motion ease, on every press (the same chip again too). Under
+    // reduced motion they are there at once.
+    const { screen } = await renderRoute('/app/setup');
+    const field = screen.getByRole('textbox', { name: 'Your business' }).element() as HTMLTextAreaElement;
+    const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    const fromColors: string[] = [];
+    let ends = 0;
+    field.addEventListener('animationstart', () => {
+      const first = (field.getAnimations()[0]?.effect as KeyframeEffect | null | undefined)?.getKeyframes()[0];
+      fromColors.push(String(first?.color));
+    });
+    field.addEventListener('animationend', () => {
+      ends += 1;
+    });
+    expect(getComputedStyle(field).animationName).toBe('none');
+    for (const [at, chip] of ['A plumber in Oakland', 'A plumber in Oakland', 'A tax preparer'].entries()) {
+      await screen.getByRole('button', { name: chip }).click();
+      await expect.poll(() => ends, { timeout: 2_000 }).toBe(at + 1);
+    }
+    const style = getComputedStyle(field);
+    expect(parseFloat(style.animationDuration) * 1000).toBe(parseFloat(token('--motion-base')));
+    expect(style.animationTimingFunction).toBe(token('--motion-ease'));
+    expect(fromColors[0]).toMatch(/^(?:transparent|rgba\(0, 0, 0, 0\))$/);
+
+    await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    onTestFinished(async () => {
+      await cdp().send('Emulation.setEmulatedMedia', { features: [] });
+    });
+    expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+    await screen.getByRole('button', { name: 'A bakery that takes custom orders' }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Your business' })).toHaveValue(START_EXAMPLES.en.examples[1]?.description);
+    expect(getComputedStyle(field).animationName).toBe('none');
+    expect(field.getAnimations()).toEqual([]);
   });
 
   it('the_same_example_again_puts_it_back_focused', async () => {

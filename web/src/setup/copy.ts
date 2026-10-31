@@ -61,7 +61,10 @@ export interface StartExample {
   description: string;
 }
 
-/** The start step's examples, as the signed board draws them (UXC-P602-After). */
+/**
+ * The start step's examples: the line and the chips in the signed board's words (UXC-P602-After),
+ * and the descriptions they put in the box, written for the build rather than taken from the board.
+ */
 export interface StartExamples {
   /** The line over the chips. */
   line: string;

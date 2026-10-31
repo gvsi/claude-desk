@@ -80,6 +80,10 @@ export function StartStep() {
     // The caret at the start, where the business's name is to change, and the box scrolled to it.
     box.setSelectionRange(0, 0);
     box.scrollTop = 0;
+    // The words fade in with each press: the fill's animation (SetupPage.css) starts over.
+    box.style.animation = 'none';
+    void box.offsetWidth;
+    box.style.removeProperty('animation');
   }, [picks]);
   const copy = SETUP_COPY.start;
   const examples = START_EXAMPLES[SETUP_LANGUAGE];
@@ -163,7 +167,7 @@ export function StartStep() {
   return (
     <form className="cd-setup-step" noValidate onSubmit={(event) => void start(event)}>
       <PageHeader title={copy.title} subtitle={copy.subtitle} titleRef={titleRef} />
-      <div className="cd-setup-start__field">
+      <div className={`cd-setup-start__field${picks > 0 ? ' cd-setup-start__field--filled' : ''}`}>
         <TextField
           label={copy.field}
           multiline
@@ -179,7 +183,7 @@ export function StartStep() {
           {...(empty ? { error: copy.empty } : {})}
         />
         <div className="cd-setup-start__examples">
-          <p className="cd-setup-start__line cd-type-body">{examples.line}</p>
+          <p className="cd-setup-start__line cd-type-meta">{examples.line}</p>
           <SuggestionChips label={examples.label} suggestions={examples.examples.map((example) => example.chip)} onPick={pick} disabled={locked} />
         </div>
       </div>
