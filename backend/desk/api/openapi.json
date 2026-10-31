@@ -13620,30 +13620,22 @@
       "SimulateChangeIn": {
         "properties": {
           "tool": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "native.quote",
-                  "native.find_slots",
-                  "native.book",
-                  "native.release_document",
-                  "native.payment_link",
-                  "native.charge_mandate",
-                  "native.capture_lead",
-                  "native.request_callback",
-                  "native.start_verification",
-                  "native.fetch_website",
-                  "native.read_memory",
-                  "native.web_search",
-                  "payments.list_charges",
-                  "payments.create_refund"
-                ]
-              },
-              {
-                "type": "string",
-                "pattern": "^desk\\.[a-z][a-z0-9-]{0,39}$"
-              }
+            "type": "string",
+            "enum": [
+              "native.quote",
+              "native.find_slots",
+              "native.book",
+              "native.release_document",
+              "native.payment_link",
+              "native.charge_mandate",
+              "native.capture_lead",
+              "native.request_callback",
+              "native.start_verification",
+              "native.fetch_website",
+              "native.read_memory",
+              "native.web_search",
+              "payments.list_charges",
+              "payments.create_refund"
             ],
             "title": "Tool"
           }
