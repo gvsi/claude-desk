@@ -652,7 +652,11 @@ export class MockWorld {
     return { entry_id: entry.entry_id, to: 'owner', preview: 'A request needs your answer' };
   }
 
-  /** The owner's answer, as the kernel records it: the approval, and the run when it allows. */
+  /**
+   * The owner's answer, as the kernel records it: the approval, with the summary `approvals.py`
+   * writes as it takes an answer (the decision, its action, the answer, and `approved` or `denied`),
+   * and the run when it allows.
+   */
   answer(record: DecisionRecord, answer: ApprovalAnswer): Decision {
     const desk = this.desk(record.deskId);
     const session = this.sessions.get(record.decision.session_id);
@@ -663,7 +667,12 @@ export class MockWorld {
       origin: 'kernel',
       session_id: sessionId,
       ref_id: decisionId,
-      summary: { answer },
+      summary: {
+        decision_id: decisionId,
+        action_id: record.decision.action?.action_id ?? null,
+        answer,
+        state: allows(answer) ? 'approved' : 'denied',
+      },
     });
     let state: DecisionState = 'denied';
     let ledgerSeq = approval.seq;
