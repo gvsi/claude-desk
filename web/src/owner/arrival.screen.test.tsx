@@ -1173,6 +1173,29 @@ describe('Things to try ticks off', () => {
     expectNoHorizontalScroll();
   });
 
+  it.each(['desktop', 'phone'] as const)('ideas_open_as_a_row_ticks_move_nothing_under_the_list_at_%s', async (viewport) => {
+    const { screen } = await renderRoute(TODAY, { viewport });
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Try to break it');
+    await row.getByRole('button', { name: 'Show me ideas' }).click();
+    await expect.element(row.getByRole('group', { name: 'Ideas to try' })).toBeVisible();
+    const needsYou = screen.getByRole('region', { name: 'Needs you' }).element();
+
+    // An attempt in the owner's preview is stopped while the ideas are open: they close as the row ticks.
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    const preview = mockStore.visitorSession(RIVERA.slug);
+    if (!preview?.ownerPreview) throw new Error('the owner has a preview chat');
+    const watching = watchTheList(row.element(), things.element(), needsYou, 'Done. Safety shows what was stopped.');
+    mockStore.world.reply(preview, [proseBlock('It costs $1 today.')], 'en', { blocked: true });
+    const frames = await watching;
+
+    // Needs you starts where it did, below the list's top, on every frame through the tick.
+    const below = frames.map((frame) => frame.below);
+    expect(Math.max(...below) - Math.min(...below)).toBeLessThan(0.5);
+    expect(row.getByRole('group', { name: 'Ideas to try' }).elements()).toHaveLength(0);
+    expectNoHorizontalScroll();
+  });
+
   it('a_ticked_row_shown_again_is_drawn_still', async () => {
     const { screen } = await renderRoute(TODAY);
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();

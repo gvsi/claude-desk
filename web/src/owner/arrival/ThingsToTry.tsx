@@ -181,27 +181,19 @@ interface ThingProps {
   children: ReactNode;
 }
 
-/** Of a row, its own height: the row without the ideas under it, which go once it's done. */
-function ownHeight(item: HTMLElement): number {
-  const below = item.querySelector<HTMLElement>(':scope > .cd-things__below');
-  const height = item.getBoundingClientRect().height;
-  if (below === null) return height;
-  return height - below.getBoundingClientRect().height - (Number.parseFloat(getComputedStyle(item).rowGap) || 0);
-}
-
 /**
  * What stays as a row turns done in view, in the commit that ticks it, before paint:
- * - Its height, kept as its least height: its done line and Done pill can be shorter than the detail
- *   and the button they replace, and nothing below the list may move. A row already done when it was
- *   first drawn keeps its own height, and a change of the row's width (a resized window) lets the
- *   kept height go.
+ * - Its height, the whole row's as it stood, kept as its least height: its done line and Done pill
+ *   can be shorter than the detail and the button they replace, and the ideas under "Try to break
+ *   it" close inside it, so nothing below the list moves. A row already done when it was first drawn
+ *   keeps its own height, and a change of the row's width (a resized window) lets the kept height go.
  * - Focus: the button or idea that had it is gone, so focus that was in the row goes to its title
  *   rather than falling to the page. Focus anywhere else is left alone.
  */
 function useTickInPlace(done: boolean) {
   const ref = useRef<HTMLLIElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
-  // The row's own height while it isn't done, kept up to date as it changes.
+  // The row's height while it isn't done, kept up to date as it changes.
   const before = useRef<number | null>(null);
   const wasDone = useRef(done);
   // Whether focus is in the row, as the row's own focus events last said.
@@ -212,7 +204,7 @@ function useTickInPlace(done: boolean) {
     const item = ref.current;
     if (item === null) return;
     if (!done) {
-      before.current = ownHeight(item);
+      before.current = item.getBoundingClientRect().height;
       wasDone.current = false;
       return;
     }
@@ -227,7 +219,7 @@ function useTickInPlace(done: boolean) {
     const item = ref.current;
     if (item === null || typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver(() => {
-      if (!wasDone.current) before.current = ownHeight(item);
+      if (!wasDone.current) before.current = item.getBoundingClientRect().height;
       else setKept((now) => (now !== null && Math.abs(item.getBoundingClientRect().width - now.width) > 0.5 ? null : now));
     });
     observer.observe(item);
