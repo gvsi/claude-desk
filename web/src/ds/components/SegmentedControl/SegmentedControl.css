@@ -45,6 +45,26 @@
   color: var(--text-primary);
 }
 
+/* The unseen target reaches size-touch without changing the track or the inline baseline.
+   Neighbours share a space-2 gap, so each reaches only halfway across it on the inline axis. */
+@media (pointer: coarse) {
+  .cd-segmented__option {
+    position: relative;
+  }
+
+  .cd-segmented__option:has(+ .cd-segmented__option),
+  .cd-segmented__option + .cd-segmented__option {
+    --cd-touch-reach-inline: calc(var(--space-2) / 2);
+  }
+
+  .cd-segmented__option::after {
+    content: '';
+    position: absolute;
+    inset-block: max(-1 * var(--cd-touch-reach-block, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+    inset-inline: max(-1 * var(--cd-touch-reach-inline, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cd-segmented__option {
     transition: none;

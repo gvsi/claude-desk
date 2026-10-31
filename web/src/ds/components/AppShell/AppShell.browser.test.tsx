@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
 import { motion } from '../../test/reducedMotion.ts';
+import { coarsePointer, expectHitAreaLands, expectUnseen, hitArea } from '../../test/touch.ts';
 import { AskClaudePanel } from '../AskClaudePanel/AskClaudePanel.tsx';
 import { Composer } from '../Composer/Composer.tsx';
 import { AppShell } from './AppShell.tsx';
@@ -41,6 +42,31 @@ afterEach(async () => {
 function isCompact(): boolean {
   return container.querySelector('.cd-app-shell--compact') !== null;
 }
+
+it('phone_menu_has_an_unseen_centred_44_px_touch_area_without_moving_or_scrolling', async () => {
+  await page.viewport(390, 844);
+  act(() => root.render(
+    <AppShell sidebar={<nav aria-label="Main">Today</nav>} business="Rivera Plumbing">
+      <p>Safety</p>
+    </AppShell>,
+  ));
+  const menu = page.getByRole('button', { name: 'Menu', exact: true }).element();
+  const visible = () => [...container.querySelectorAll('.cd-app-shell__topbar, .cd-app-shell__topbar svg, .cd-app-shell__business, .cd-app-shell__menu, main')]
+    .map((element) => element.getBoundingClientRect().toJSON());
+  const scroll = () => [document.documentElement.scrollWidth, document.documentElement.scrollHeight, container.scrollWidth, container.scrollHeight];
+  const fine = { visible: visible(), scroll: scroll() };
+  expect(getComputedStyle(menu, '::after').content, 'no hit area under a fine pointer').toBe('none');
+  expect([menu.getBoundingClientRect().width, menu.getBoundingClientRect().height]).toEqual([32, 32]);
+
+  await coarsePointer();
+  expect({ visible: visible(), scroll: scroll() }, 'the top bar, glyphs and page keep their boxes and scroll extents').toEqual(fine);
+  const own = menu.getBoundingClientRect();
+  const area = hitArea(menu);
+  expect([area.width, area.height], '44 px on both axes').toEqual([44, 44]);
+  expect([own.top - area.top, area.bottom - own.bottom, own.left - area.left, area.right - own.right], 'centred').toEqual([6, 6, 6, 6]);
+  expectHitAreaLands(menu);
+  expectUnseen(menu);
+});
 
 it('fill_never_changes_the_sidebar', () => {
   // The sidebar looks the same on every page: the panel, its seam, the window's height. `fill`

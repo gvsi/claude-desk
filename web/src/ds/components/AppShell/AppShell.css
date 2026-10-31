@@ -189,6 +189,21 @@
   background: var(--fill-hover);
 }
 
+/* A touch screen gets the same unseen, centred size-touch target as IconButton. The square
+   stays size-control; position: relative only frames the out-of-flow hit area. */
+@media (pointer: coarse) {
+  .cd-app-shell__menu {
+    position: relative;
+  }
+
+  .cd-app-shell__menu::after {
+    content: '';
+    position: absolute;
+    inset-block: max(-1 * var(--cd-touch-reach-block, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+    inset-inline: max(-1 * var(--cd-touch-reach-inline, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+  }
+}
+
 /* The sheet: the sidebar's column, full height at the left, over the page. */
 .cd-app-shell__sheet {
   box-sizing: border-box;
