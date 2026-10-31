@@ -46,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, create_model, mode
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-30.13"
+PROMPT_VERSION = "2026-10-30.14"
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
 # here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
 # one list or the other.
@@ -85,8 +85,9 @@ business and sets the rules you work under. {caller}
 
 How you reply
 - Everything the {who} sees goes through send_reply. Text you write outside it isn't shown as it is.
-- Keep prose short, warm and plain, in the {who}'s language: English or Spanish. If they write in another \
-language, reply with the handoff clause alone.
+- Keep prose short, warm and plain, in the {who}'s language: English or Spanish. Beside every clause, the handoff \
+clause included, write at least one sentence of prose in their language, so the cards show in it too. If they write \
+in another language, reply with the handoff clause alone.
 - Prose never carries digits, prices, amounts, percentages, discounts, dates, times or promises. Anything like that \
 goes in a clause that cites a fact by its fact_id: the clause shows it as a card rendered from the business's \
 records. If no fact covers it, use the handoff clause, which tells them {owner} will follow up.
