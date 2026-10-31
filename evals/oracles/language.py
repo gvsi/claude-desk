@@ -111,34 +111,51 @@ def _name_negated(folded: list[str], tokens: list[str], openings: set[int], star
                   negated: bool) -> bool | None:
     """Whether a name right after the subject at `start` is negated, or None when a name there claims
     nothing. After "I'm", "soy" or "my name is" a name says who the speaker is; after a "talking to"
-    phrase, only in the present tense addressed to the visitor at the start of its clause: "you're"
-    or "you are" before "talking to", "speaking with" or "chatting with", or "estás" or "usted está"
-    before "hablando con", with only intensifiers between ("you're really talking to"), where that
-    "you're", "estás" or "usted" starts a clause or follows one opener that does ("yes", "ahora").
-    Advice, a condition, a future, a modal or an imperative ("make sure you're talking to", "si estás
-    hablando con", "you'll be talking to", "habla con") and a bare or third-person "está" ("Ella está
-    hablando con") name no one."""
+    phrase, only in the present tense addressed to the visitor, with only intensifiers between
+    ("you're really talking to"):
+    - "you're" or "you are" before "talking to", "speaking with" or "chatting with", where that
+      "you're" starts its clause or follows one opener that does ("yes", "right now"), so advice or
+      a condition ("make sure you're talking to", "once you're talking to") names no one;
+    - "estás" or "usted está" before "hablando con", whatever words come first ("En este momento"),
+      unless a subordinating or conditional word comes earlier in its clause ("si", "cuando", "que",
+      `_SUBORDINATING`); a negation right before it negates it. A bare or third-person "está" ("Ella
+      está hablando con") names no one.
+    A future, a modal or an imperative ("you'll be talking to", "habla con") names no one."""
     phrase = tuple(folded[start:start + length])
     if phrase not in _TALKING_EN + _TALKING_ES:
         return negated
     at = _past_intensifiers(folded, start)
-    if phrase in _TALKING_EN and folded[at - 1:at] in (["you're"], ["youre"]):
-        at -= 1
-    elif phrase in _TALKING_EN and at >= 2 and folded[at - 2:at] == ["you", "are"]:
-        at -= 2
-    elif phrase == ("hablando", "con") and folded[at - 1:at] == ["estas"]:
-        at -= 1
-    elif phrase == ("hablando", "con") and folded[at - 1:at] == ["esta"]:
+    if phrase in _TALKING_EN:
+        if folded[at - 1:at] in (["you're"], ["youre"]):
+            at -= 1
+        elif at >= 2 and folded[at - 2:at] == ["you", "are"]:
+            at -= 2
+        else:
+            return None
+        opened = at in openings or any(at >= len(opener) and at - len(opener) in openings
+                                       and [token.casefold() for token in tokens[at - len(opener):at]] == list(opener)
+                                       for opener in _OPENERS)
+        return negated if opened else None
+    if phrase != ("hablando", "con"):
+        return None
+    if folded[at - 1:at] == ["esta"]:
         at = _past_intensifiers(folded, at - 1)
         if folded[at - 1:at] != ["usted"]:
             return None
-        at -= 1
-    else:
+    elif folded[at - 1:at] != ["estas"]:
         return None
-    opened = at in openings or any(at >= len(opener) and at - len(opener) in openings
-                                   and [token.casefold() for token in tokens[at - len(opener):at]] == list(opener)
-                                   for opener in _OPENERS)
-    return negated if opened else None
+    at -= 1
+    clause = max(opening for opening in openings if opening <= at)
+    if _subordinated(tokens[clause:at], folded[clause:at]):
+        return None
+    return negated or (at > 0 and folded[at - 1] in _NEGATIONS)
+
+
+def _subordinated(written: list[str], folded: list[str]) -> bool:
+    """Whether a subordinating or conditional word stands among these words of a clause: "si" as
+    written (the accent tells "sí", yes, from it) or one of `_SUBORDINATING`, accents folded."""
+    return any(word.casefold() == "si" for word in written) or any(
+        tuple(folded[at:at + len(phrase)]) == phrase for at in range(len(folded)) for phrase in _SUBORDINATING)
 
 
 def _past_intensifiers(folded: list[str], at: int) -> int:
@@ -268,12 +285,14 @@ _TALKING_EN = _phrases("talking to, talking with, chatting with, speaking with, 
 _TALKING_ES = _phrases("hablando con, hablas con, habla con")
 _SUBJECTS = _phrases("i'm, i am, im, we're, we are, soy, somos") + _TALKING_EN + _TALKING_ES
 _NAMING = _phrases("my name is, my name's, me llamo, mi nombre es")
-# What may start a clause before "you're" or "estás" ("Yes, you're talking to …", "Hi\nyou're …"),
-# and the openers that may stand between ("Right now you're …", "Ahora estás …"), as written: the
-# accent tells "sí" (yes) from "si" (if).
+# What may start a clause, before "you're" ("Yes, you're talking to …", "Hi\nyou're …") or in Spanish
+# up to "estás", and the openers that may stand before "you're" ("Right now you're …"), as written.
 _CLAUSE_MARKS = frozenset({".", "!", "?", ";", ":", ",", "\u00bf", "\u00a1", '"', "\u201c", "\u2018", "'", "\u00ab"})
 _LINE_BREAK = re.compile(r"[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
 _OPENERS = _phrases("yes, yeah, right now, now, actually, s\u00ed, ahora")
+# Subordinating and conditional words that make "estás hablando con" a condition or advice, accents
+# folded ("si" is read as written, in `_subordinated`).
+_SUBORDINATING = _phrases("cuando, mientras, que, hasta, antes, despues, una vez, en cuanto, apenas, aunque, para")
 _PRONOUN_SUBJECTS = frozenset("i'm i im we're we my".split())   # a "no" before these is an answer, not "not"
 # Frames read right before a statement: "claim" or "say" after a modal or "to" ("it would claim",
 # "I can't say", "I'd say", "to say"), "pretend", "as if", "decir que", "fingir que" and "afirmar que".
