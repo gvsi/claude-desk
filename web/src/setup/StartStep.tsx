@@ -90,9 +90,18 @@ export function StartStep() {
   const pick = (chip: string) => {
     const example = examples.examples.find((each) => each.chip === chip);
     if (locked || example === undefined) return;
-    setDescription(example.description);
     setEmpty(false);
     setPicks((n) => n + 1);
+    const box = boxRef.current;
+    const ownWords = description.trim() !== '' && !examples.examples.some((each) => each.description === description);
+    // Words the owner typed are replaced as an edit, through the box's own input (its change reaches
+    // `onChange`), so undo brings them back. Where the browser can't, they are replaced as below.
+    if (ownWords && box !== null) {
+      box.focus();
+      box.select();
+      if (document.execCommand('insertText', false, example.description)) return;
+    }
+    setDescription(example.description);
   };
 
   const send = async (attempt: Attempt) => {

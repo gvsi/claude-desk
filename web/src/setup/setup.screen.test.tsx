@@ -532,6 +532,25 @@ describe('setup', () => {
     }
   });
 
+  it('an_example_over_the_owners_words_can_be_undone', async () => {
+    // Words the owner typed are replaced as an edit of their own: the example goes in, and undo
+    // (Cmd or Ctrl+Z) brings their words back, which "Start" then sends.
+    const { screen } = await renderRoute('/app/setup');
+    const box = screen.getByRole('textbox', { name: 'Your business' });
+    const typed = "Lee's Bikes. I'm Lee, and I fix bikes in Fresno.";
+    await box.click();
+    await userEvent.keyboard(typed);
+    await expect.element(box).toHaveValue(typed);
+    await screen.getByRole('button', { name: 'A tax preparer' }).click();
+    await expect.element(box).toHaveValue(START_EXAMPLES.en.examples[2]?.description);
+    await expect.element(box).toHaveFocus();
+    expect(document.execCommand('undo')).toBe(true);
+    await expect.element(box).toHaveValue(typed);
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    expect(requests('startSetup').map((r) => (r.body as { description: string }).description)).toEqual([typed]);
+  });
+
   it('examples_are_off_while_a_start_is_settled', async () => {
     // A start in flight, or one whose answer was lost, is sent again with the words as they were:
     // the box is read-only and the examples are off, so a press changes nothing. A clear refusal
