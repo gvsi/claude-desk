@@ -1127,11 +1127,14 @@ describe('agents page', () => {
     mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
     const { screen } = await renderRoute(PAGE);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    const runs = agentRuns();
     await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+    // The chat's session ends: the mock answers the send 401, the page opens a new session, and the
+    // mock, which keeps the key for the old one, answers the same key 409 `conflict`.
     const opened = requests('openSession').length;
-    mockStore.inject({ route: 'sendAgent', status: 401 });
-    mockStore.inject({ route: 'sendAgent', status: 409, body: { error: 'conflict' } });
+    mockStore.dropVisitorCookie(RIVERA.slug);
     await panel.getByRole('button', { name: 'Try again' }).click();
     await expect.element(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en })).toBeVisible();
     await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
@@ -1142,12 +1145,85 @@ describe('agents page', () => {
     const keys = requests('sendAgent').map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
     expect(keys).toHaveLength(3);
     expect(new Set(keys).size).toBe(1);
+    expect(agentRuns()).toBe(runs + 1);
     await expectScreenBasics(screen.container, { owner: false });
     // "Reload the page" reloads it: the only retry left on this page view.
     const reload = vi.spyOn(pageActions, 'reload').mockImplementation(() => {});
     await panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).click();
     expect(reload).toHaveBeenCalledTimes(1);
     reload.mockRestore();
+  });
+
+  it('lost_start_stays_unresolved_when_its_session_cannot_reopen', async () => {
+    // "Try again" after a lost start finds the session gone (401), and opening a new one fails (a
+    // 429, or no answer). The send itself never answered, so the start is still unresolved: the lost
+    // line and "Try again" stay, with no task to send a second agent and no busy line. The next
+    // "Try again" goes on, and the agent runs once.
+    for (const failure of [{ status: 429 as const }, { status: 'network' as const }]) {
+      mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+      const { screen } = await renderRoute(PAGE);
+      const panel = screen.getByRole('region', { name: 'Send an agent' });
+      const what = JSON.stringify(failure);
+      await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+      const mark = mockStore.requests.length;
+      const runs = agentRuns();
+      await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+      await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+      mockStore.inject({ route: 'sendAgent', status: 401 });
+      mockStore.inject({ route: 'openSession', ...failure });
+      await panel.getByRole('button', { name: 'Try again' }).click();
+      await expect.poll(() => requests('openSession', mark).length, { message: what }).toBe(2);
+      await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+      await expect.element(panel.getByText(agentStartLostLine('en'), { exact: true })).toBeVisible();
+      expect(chipsIn(screen), what).toEqual([]);
+      expect(panel.getByText('The demo agent is busy. Try again in a minute.').elements(), what).toHaveLength(0);
+      expect(panel.getByText(UNREACHABLE_COPY.en).elements(), what).toHaveLength(0);
+
+      await panel.getByRole('button', { name: 'Try again' }).click();
+      await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+      const keys = requests('sendAgent', mark).map((r) => (r.body as { idempotency_key?: string }).idempotency_key);
+      expect(keys, what).toHaveLength(3);
+      expect(new Set(keys).size, what).toBe(1);
+      expect(agentRuns(), what).toBe(runs + 1);
+    }
+  });
+
+  it('lost_start_whose_chat_ends_offers_a_reload', async () => {
+    // "Try again" meets a 401, a new session opens, and the send meets a 401 again: the chat has
+    // ended, but the start is still unresolved, so the page offers the reload, never a new chat
+    // with fresh tasks.
+    mockStore.inject({ route: 'sendAgent', status: 'network', afterCommit: true });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    const runs = agentRuns();
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+    mockStore.inject({ route: 'sendAgent', status: 401, times: 2 });
+    await panel.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en })).toBeVisible();
+    await expect.element(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true })).toBeVisible();
+    expect(panel.getByRole('button', { name: NEW_CHAT_LABEL.en }).elements()).toHaveLength(0);
+    expect(panel.getByText(CHAT_ENDED_COPY.en).elements()).toHaveLength(0);
+    expect(chipsIn(screen)).toEqual([]);
+    expect(requests('sendAgent')).toHaveLength(3);
+    expect(agentRuns()).toBe(runs + 1);
+  });
+
+  it('kernel_conflict_on_a_retry_is_not_a_moved_session', async () => {
+    // A 409 from the kernel (`{error: "kernel"}`) refused the send itself, which freed its key: as
+    // on a first send, it wasn't sent, and the tasks come back. Only the API's own key conflict
+    // means the key moved session.
+    mockStore.inject({ route: 'sendAgent', status: 'network' });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByRole('button', { name: 'Try again' })).toBeVisible();
+    mockStore.inject({ route: 'sendAgent', status: 409, body: { error: 'kernel', code: 'conflict' } });
+    await panel.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(panel.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+    expect(chipsIn(screen)).toEqual(TASKS);
+    expect(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(0);
   });
 
   it('lost_start_past_its_keys_retry_window_offers_a_reload', async () => {

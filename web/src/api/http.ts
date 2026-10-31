@@ -43,6 +43,7 @@ interface ApiErrorInit {
   method: HttpMethod;
   status: number | null;
   code?: string | null;
+  kernel?: boolean;
   retryAfter?: number | null;
   decision?: Decision | null;
   state?: PaymentLinkState | null;
@@ -60,6 +61,8 @@ export class ApiError extends Error {
   readonly status: number | null;
   /** The body's `code` when `error` is "kernel", else its `error`: a snake_case word, or null. */
   readonly code: string | null;
+  /** Whether the body was the kernel's refusal (`{error: "kernel", code}`) rather than the API's own. */
+  readonly kernel: boolean;
   /** Seconds, from a 429's `retry_after`. */
   readonly retryAfter: number | null;
   /** A 409's final decision (an answer that came too late). */
@@ -81,6 +84,7 @@ export class ApiError extends Error {
     this.method = init.method;
     this.status = init.status;
     this.code = init.code ?? null;
+    this.kernel = init.kernel ?? false;
     this.retryAfter = init.retryAfter ?? null;
     this.decision = init.decision ?? null;
     this.state = init.state ?? null;
@@ -255,6 +259,7 @@ function errorFrom(key: RouteKey, method: HttpMethod, answer: Answer): ApiError 
     method,
     status: answer.status,
     code: codeOf(body),
+    kernel: body.error === 'kernel',
     retryAfter: retryAfterOf(body),
     decision: conflict ? decisionOf(body.decision) : null,
     state: conflict ? stateOf(body.state) : null,

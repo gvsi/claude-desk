@@ -126,13 +126,21 @@ const IDLE: PanelState = { status: 'idle', task: null, key: null, keyMadeAt: nul
 /** The states that offer the tasks: before a run, after one ended, and after a start that clearly didn't go ahead. */
 const OFFERS_TASKS: ReadonlySet<Status> = new Set<Status>(['idle', 'done', 'stopped', 'busy', 'budget', 'not_sent']);
 
-/** What a failed start means for the panel; `retry` when it was "Try again" after a lost start. */
+/**
+ * What a failed start means for the panel; `retry` when it was "Try again" after a lost start. Such
+ * a start stays unresolved until the send itself answers: a session that couldn't reopen (an
+ * `openSession` refusal or no answer) or anything else leaves it lost, to try again. A second 401
+ * ends the chat, but the agent may still be on its way, so it is the reload, never fresh tasks.
+ */
 function sendFailure(err: unknown, retry: boolean): Status {
+  const answered = err instanceof ApiError && err.route === 'sendAgent';
+  if (retry && !answered) return 'lost';
   if (!(err instanceof ApiError)) return 'not_sent';
-  // The key came from another session (a 401 opened a new one): the lost start's run, if any, is the
-  // old session's, out of this page's reach. A first send's conflict started nothing.
-  if (err.kind === 'conflict' && retry) return 'reload';
-  if (err.kind === 'unauthorized') return 'ended';
+  if (err.kind === 'unauthorized') return retry ? 'reload' : 'ended';
+  // The API's own key conflict: the key came from another session (a 401 opened a new one), so the
+  // lost start's run, if any, is the old session's, out of this page's reach. A first send's
+  // conflict, or the kernel's 409, which freed the key, started nothing.
+  if (retry && err.kind === 'conflict' && !err.kernel && err.code === 'conflict') return 'reload';
   if (err.kind === 'rate_limited') return 'busy';
   // The API checks the demo's budget before it starts anything.
   if (err.code === 'demo_budget') return 'budget';
