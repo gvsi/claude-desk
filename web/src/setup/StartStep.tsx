@@ -2,8 +2,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 
-import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
-import { Button, Notice, PageHeader, TextField } from '../ds/index.ts';
+import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
+import { Button, Notice, PageHeader, TextField, UNREACHABLE_COPY } from '../ds/index.ts';
 import { SETUP_COPY } from './copy.ts';
 
 /** Plan 02's limit on the business's description. */
@@ -19,6 +19,14 @@ function browserTimeZone(): string {
 }
 
 /**
+ * What a start whose answer was lost says: it may have made the Desk, so it isn't called not done.
+ * stopgap: the design system's setup-start-lost line.
+ */
+function lostStartLine(): string {
+  return UNREACHABLE_COPY.en;
+}
+
+/**
  * "Tell me about your business": a few sentences in the owner's own words, from which the API
  * takes the business's name and the owner's, and makes the new Desk with Answering off.
  */
@@ -29,12 +37,17 @@ export function StartStep() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [empty, setEmpty] = useState(false);
+  /**
+   * A start whose answer was lost may have made a Desk, and the API can't yet say which (its
+   * idempotency key is to come), so "Start" stays off on this page rather than make a second one.
+   */
+  const [lost, setLost] = useState(false);
   const copy = SETUP_COPY.start;
 
   const start = async (event: FormEvent) => {
     event.preventDefault();
     const text = description.trim();
-    if (pending) return;
+    if (pending || lost) return;
     setEmpty(text === '');
     if (text === '') return;
     setPending(true);
@@ -46,7 +59,8 @@ export function StartStep() {
     } catch (err) {
       // The session ended: the app goes back to the start, and there is nothing to say here.
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      setError(ownerErrorCopy(err));
+      if (isUncertain(err)) setLost(true);
+      else setError(ownerErrorCopy(err));
       setPending(false);
     }
   };
@@ -67,10 +81,17 @@ export function StartStep() {
         {...(empty ? { error: copy.empty } : {})}
       />
       {error === null ? null : <Notice tone="error">{error}</Notice>}
+      {lost ? <Notice tone="error">{lostStartLine()}</Notice> : null}
       <div className="cd-setup-step__actions">
-        <Button variant="primary" size="main" type="submit" busy={pending}>
-          {copy.action}
-        </Button>
+        {lost ? (
+          <Button variant="primary" size="main" type="submit" disabled>
+            {copy.action}
+          </Button>
+        ) : (
+          <Button variant="primary" size="main" type="submit" busy={pending}>
+            {copy.action}
+          </Button>
+        )}
       </div>
     </form>
   );

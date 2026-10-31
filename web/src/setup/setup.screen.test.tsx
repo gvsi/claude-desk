@@ -10,7 +10,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RulesDraft, SetupState } from '../api/views.ts';
-import { OUTCOME_GROUP_WORDS, copyResultLine } from '../ds/index.ts';
+import { OUTCOME_GROUP_WORDS, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { MEMORY_LABEL, SETUP_QUESTIONS } from '../mocks/setup.ts';
@@ -130,6 +130,42 @@ describe('setup', () => {
     await expect.element(screen.getByText('Yes, use it', { exact: true })).toBeVisible();
     const setup = (await mockStore.dispatch('setup', { params: { id: router.state.location.pathname.split('/').at(-1) ?? '' } })) as { body: SetupState };
     expect(setup.body.consent).toBe(true);
+  });
+
+  it('lost_start_is_unknown_and_a_refused_one_can_be_tried_again', async () => {
+    // A clear refusal: its line, and "Start" works again.
+    const { screen } = await renderRoute('/app/setup');
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    mockStore.inject({ route: 'startSetup', status: 422, body: { error: 'invalid' } });
+    await screen.getByRole('button', { name: 'Start' }).click();
+    const refused = ownerErrorCopy(new ApiError('unprocessable', { route: 'startSetup', method: 'POST', status: 422, code: 'invalid' }));
+    await expect.element(screen.getByText(refused, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    expect(requests('startSetup')).toHaveLength(2);
+
+    // A start whose answer was lost (no answer, a timeout or a 5xx) may have made a Desk: it is
+    // never called not done, and "Start" stays off on that page, so it can't make a second one.
+    for (const lost of [{ status: 503 as const }, { status: 'network' as const, afterCommit: true }]) {
+      const page = (await renderRoute('/app/setup')).screen;
+      const mark = mockStore.requests.length;
+      await page.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+      mockStore.inject({ route: 'startSetup', ...lost });
+      await page.getByRole('button', { name: 'Start' }).click();
+      await expect.element(page.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+      await expect.element(page.getByRole('button', { name: 'Start' })).toBeDisabled();
+      expect(requests('startSetup', mark)).toHaveLength(1);
+      expect(page.getByText(refused, { exact: true }).elements()).toHaveLength(0);
+    }
+  });
+
+  it('interview_outside_the_copy_is_not_found', async () => {
+    // An interview this copy doesn't hold: the not-found screen, never a retry.
+    const { screen } = await renderRoute('/app/setup/setup-not-in-this-copy');
+    await expect.element(screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(requests('setup').map((r) => r.path)).toEqual(['/api/owner/setup/setup-not-in-this-copy']);
+    expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
   });
 
   it('answer_failure_keeps_the_answer', async () => {
