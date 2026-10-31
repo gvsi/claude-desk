@@ -365,7 +365,7 @@ describe('The Vision article', () => {
       const { screen } = await renderRoute(PATH, { viewport });
       await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true }), { message: viewport }).toBeVisible();
       const bar = screen.getByRole('banner').element();
-      const documents = screen.getByRole('navigation', { name: 'Documents' });
+      const documents = screen.getByRole('navigation', { name: 'About this prototype' });
       const vision = documents.getByRole('link', { name: 'Vision', exact: true }).element();
       expect(vision.getAttribute('aria-current'), viewport).toBe('page');
       // The page on show is drawn as the reading pages draw it, in the article's palette: ink on the band's paper.

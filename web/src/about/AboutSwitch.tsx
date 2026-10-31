@@ -14,7 +14,7 @@ export interface AboutSwitchProps {
 
 export function AboutSwitch({ current, className, linkClassName }: AboutSwitchProps) {
   return (
-    <nav className={className} aria-label="Documents">
+    <nav className={className} aria-label="About this prototype">
       {ABOUT_SET_LINKS.map((link) => (
         <Link key={link.id} className={linkClassName} to={link.href} aria-current={link.id === current ? 'page' : undefined}>
           {link.label}

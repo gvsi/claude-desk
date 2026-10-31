@@ -98,7 +98,7 @@ describe('About pages', () => {
       await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
       await expect.element(screen.getByRole('article')).toBeVisible();
       await expect.element(screen.getByRole('link', { name: 'Try Desk prototype', exact: true })).toHaveAttribute('href', '/');
-      const documents = screen.getByRole('navigation', { name: 'Documents' });
+      const documents = screen.getByRole('navigation', { name: 'About this prototype' });
       await expect.element(documents.getByRole('link', { name: title, exact: true })).toHaveAttribute('aria-current', 'page');
 
       // The switch opens the other page at its own address.
@@ -160,7 +160,7 @@ describe('About pages', () => {
           await expect.element(screen.getByRole('heading', { level: 1, name: heading, exact: true }), { message: where }).toBeVisible();
 
           // The switch: the three pages in order, the one on show marked as the current page and no other.
-          const documents = screen.getByRole('navigation', { name: 'Documents' });
+          const documents = screen.getByRole('navigation', { name: 'About this prototype', exact: true });
           const links = documents.getByRole('link').elements();
           expect(links.map((link) => link.textContent), where).toEqual(['Capability prediction', 'Product proposal', 'Vision']);
           expect(links.map((link) => link.getAttribute('href')), where).toEqual(['/about/prediction', '/about/proposal', '/about/vision']);

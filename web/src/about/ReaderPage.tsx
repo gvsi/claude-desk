@@ -28,7 +28,7 @@ import { ReadinessScale } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { Inlines } from './Inlines.tsx';
 import { AboutSwitch } from './AboutSwitch.tsx';
-import { readNext, type AboutId, type AboutPage } from './links.ts';
+import { readNext, VISION_ARTICLE, type AboutId, type AboutPage } from './links.ts';
 import { MONTHS } from './months.ts';
 import { prefersReducedMotion } from './motion.ts';
 import { PrototypeLink } from './PrototypeLink.tsx';
@@ -317,8 +317,8 @@ function Contents({ sections, compact }: { sections: Heading[]; compact: boolean
   return compact ? <FoldedContents sections={sections} /> : <SideContents sections={sections} />;
 }
 
-/** The author, the date, the reading time and the other document, beside the article. */
-function Details({ document, other }: { document: AboutDocument; other: AboutDocument }) {
+/** The author, the date, the reading time and related About pages, beside the article. */
+function Details({ document, alsoRead }: { document: AboutDocument; alsoRead: AboutPage[] }) {
   const { author, date, day } = bylineOf(document.blocks);
   const minutes = readingMinutes(document.blocks);
   return (
@@ -338,10 +338,12 @@ function Details({ document, other }: { document: AboutDocument; other: AboutDoc
         </div>
         <div>
           <dt>Also read</dt>
-          <dd>
-            <Link className="cd-text-link" to={other.route}>
-              {other.title}
-            </Link>
+          <dd className="cd-about-meta__links">
+            {alsoRead.map((other) => (
+              <Link key={other.route} className="cd-text-link" to={other.route}>
+                {other.title}
+              </Link>
+            ))}
           </dd>
         </div>
       </dl>
@@ -433,6 +435,7 @@ export interface ReaderPageProps {
 export function ReaderPage({ id }: ReaderPageProps) {
   const about = ABOUT_DOCUMENTS[id];
   const other = ABOUT_DOCUMENTS[about.next];
+  const alsoRead = id === 'proposal' ? [other, VISION_ARTICLE] : [other];
   const compact = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
   const sections = about.blocks.filter((block): block is Heading => block.kind === 'heading' && block.depth === 2);
   usePagePlace(id);
@@ -470,7 +473,7 @@ export function ReaderPage({ id }: ReaderPageProps) {
             <Article document={about} compact={compact} />
             <ReadNext next={readNext(id)} compact={compact} />
           </div>
-          {compact ? null : <Details document={about} other={other} />}
+          {compact ? null : <Details document={about} alsoRead={alsoRead} />}
         </div>
       </main>
       <footer className="cd-about-footer">
