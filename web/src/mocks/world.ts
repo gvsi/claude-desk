@@ -763,8 +763,9 @@ export class MockWorld {
    * handoff first, as the kernel's check does (`openCardHandoff`), except in history the seed or a
    * test writes: the kernel's seed holds its request without checking a reply.
    */
-  reply(session: SessionRecord, blocks: RenderedBlock[], language: Language, opts: { blocked?: boolean } = {}): EvMessage {
-    const blocked = opts.blocked ?? false;
+  reply(session: SessionRecord, blocks: RenderedBlock[], language: Language, opts: { blocked?: boolean; paused?: boolean } = {}): EvMessage {
+    const paused = opts.paused ?? false;
+    const blocked = paused || (opts.blocked ?? false);
     const messageId = this.id('msg');
     if (this.replaying === 0 && blocks.some((block) => block.template === 'handoff')) this.openCardHandoff(session);
     const checked = this.appendLedger(this.deskOf(session), {
@@ -772,7 +773,7 @@ export class MockWorld {
       origin: 'kernel',
       session_id: session.state.session_id,
       ref_id: messageId,
-      summary: { author: 'claude', ok: !blocked, language, violations: blocked ? ['number_in_prose'] : [] },
+      summary: { author: 'claude', ok: !blocked, language, violations: paused ? ['session_paused'] : blocked ? ['number_in_prose'] : [] },
     });
     return {
       type: 'message',
@@ -1048,8 +1049,9 @@ export class MockWorld {
   }
 
   /**
-   * The breaker pauses the chat after repeated blocked attempts, as the kernel records it: nobody
-   * answers until the owner resumes Claude or takes over. Tests add it; no seed has it.
+   * The breaker pauses the chat after repeated blocked attempts, as the kernel records it: Claude
+   * doesn't answer until the owner resumes it or takes over, and each message meanwhile gets the
+   * kernel's handoff (`PAUSED_TURN`). Tests add it; no seed has it.
    */
   pause(session: SessionRecord): void {
     session.state = { ...session.state, mode: 'paused' };

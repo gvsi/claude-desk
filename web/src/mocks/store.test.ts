@@ -920,6 +920,33 @@ describe('the scripted Desk', () => {
     expect(mine()).toHaveLength(2);
   });
 
+  it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
+    // As the API's turn in a chat the breaker paused: no model call and no "writing", only the
+    // kernel's handoff, which its check stops as paused (`session_paused`, no attempt anyone made)
+    // and which opens the owner's handoff the first time, as any reply showing the card does.
+    const { session, events } = await openChat();
+    const record = mockStore.world.sessions.get(session.session_id);
+    const desk = mockStore.world.desk(deskId);
+    if (!record || !desk) throw new Error('the chat and its Desk are in the copy');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    const attempts = async () => ((await call('safety', { params: { desk_id: deskId } })).body as unknown[]).length;
+    const stopped = await attempts();
+    mockStore.world.pause(record);
+
+    for (const text of ['Hello? Is anyone there?', 'Hello?']) {
+      const before = events.length;
+      await send(text);
+      await drain();
+      const shown = events.slice(before).map(([, ev]) => ev);
+      expect(shown.map((ev) => ev.type), text).toEqual(['message', 'turn_end']);
+      const [message] = shown;
+      expect(message?.type === 'message' && [message.author, message.handoff, message.blocks.map((b) => b.template)]).toEqual(['claude', true, ['handoff']]);
+      expect(desk.ledger.at(-1)?.event).toMatchObject({ kind: 'reply', summary: { ok: false, violations: ['session_paused'] } });
+    }
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+    expect(await attempts()).toBe(stopped);
+  });
+
   it('handoff_done_is_recorded_as_the_kernel_does', async () => {
     // The owner marking a handoff done, of either kind, is one `desk_data` entry naming it, on no
     // chat and with no `kind` (plan 01b, `POST /handoffs/{id}/done`).
