@@ -259,10 +259,13 @@ evals-tier1:
 # CI and the deploy preflight run, with no database, network or key: exit 0 when no gated path, recorded
 # rate or results file changed since BASE (renames count both paths), else when the committed file for
 # the head's inputs is complete and its gate passes.
-.PHONY: evals-tier2 evals-key evals-results-check
+# evals-merge-ready refuses a merge when both HEAD and origin/main changed results inputs since
+# their merge base. Fetch origin first; rebase and regenerate the results file when it refuses.
+.PHONY: evals-tier2 evals-key evals-results-check evals-merge-ready
 RUNS ?= 1
 MAX_USD ?= 40
 BASE ?= origin/main
+HEAD ?= HEAD
 
 evals-tier2:
 	$(EVALS) python -m evals.run tier2 --suite all --split all --runs $(RUNS) --max-usd $(MAX_USD) --results
@@ -272,6 +275,9 @@ evals-key:
 
 evals-results-check:
 	@$(EVALS) python -m evals.run results-check --base $(BASE)
+
+evals-merge-ready:
+	@$(EVALS) python -m evals.run merge-ready --head "$(HEAD)"
 
 # The soft-promise check measured on the real model. It spends money: every case in
 # evals/calibration/soft_promise.yaml is sent SAMPLES times to the kernel's check, one Haiku 5.5 call
