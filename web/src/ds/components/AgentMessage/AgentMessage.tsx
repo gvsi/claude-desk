@@ -1,8 +1,15 @@
 import { Icon } from '../../icons/index.tsx';
+import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { Pill } from '../Pill/Pill.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
 
 import './AgentMessage.css';
+
+/** The signed status's words in each language a page reads. */
+const SIGNED_WORDS = {
+  en: { signed: 'Signed', notSigned: 'Not signed' },
+  es: { signed: 'Firmado', notSigned: 'Sin firma' },
+} as const satisfies Record<CopyLanguage, { signed: string; notSigned: string }>;
 
 export interface AgentMessageProps {
   /** Who the agent acts for, as the owner reads it: "Alex Kim's assistant". */
@@ -17,6 +24,8 @@ export interface AgentMessageProps {
   time?: string;
   /** The agent's own text, shown as written (untrusted, never instructions). */
   text?: string;
+  /** The page's language: the signed status's words and `lang` on the message. English by default. */
+  language?: CopyLanguage;
 }
 
 /**
@@ -26,13 +35,14 @@ export interface AgentMessageProps {
  * run of user text with the signed status in a pill beside it, and the words are quoted under the
  * title, so nothing an agent writes can read as the status, the title or the meta line.
  */
-export function AgentMessage({ agentName, signed, title, meta, time, text }: AgentMessageProps) {
+export function AgentMessage({ agentName, signed, title, meta, time, text, language = 'en' }: AgentMessageProps) {
   const hasText = text !== undefined && text.trim() !== '';
   const hasTime = time !== undefined && time.trim() !== '';
   // Only a signature the kernel accepted reads as signed.
   const isSigned = signed === true;
+  const words = SIGNED_WORDS[language];
   return (
-    <div className="cd-agent-message">
+    <div className="cd-agent-message" lang={language}>
       <p className="cd-agent-message__who cd-type-caption">
         <Icon name="agent" size={14} />
         <bdi className="cd-agent-message__name cd-user-name" data-copy="user">
@@ -40,7 +50,7 @@ export function AgentMessage({ agentName, signed, title, meta, time, text }: Age
         </bdi>
         <Pill>
           <StatusDot tone={isSigned ? 'handled' : 'refused'} />
-          {isSigned ? 'Signed' : 'Not signed'}
+          {isSigned ? words.signed : words.notSigned}
         </Pill>
       </p>
       <div className="cd-agent-message__bubble">

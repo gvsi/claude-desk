@@ -32,7 +32,7 @@ type Story = StoryObj<typeof meta>;
  * The line above the bubble: the agent's name as its own run of user text, then the signed status
  * as a separate pill with its dot, never one run of text a name could imitate.
  */
-async function expectWho(root: HTMLElement, name: string, status: 'Signed' | 'Not signed', tone: 'handled' | 'refused') {
+async function expectWho(root: HTMLElement, name: string, status: 'Signed' | 'Not signed' | 'Firmado' | 'Sin firma', tone: 'handled' | 'refused') {
   const who = root.querySelector<HTMLElement>('.cd-agent-message__who');
   if (!who) throw new Error('no line above the bubble');
   const nameEl = who.querySelector<HTMLElement>('.cd-user-name');
@@ -102,5 +102,24 @@ export const NotSigned: Story = {
   play: async ({ args, canvasElement }) => {
     // agent_name_is_not_status: the name, whatever it says, is user text; the status is the pill's.
     await expectWho(canvasElement, args.agentName, 'Not signed', 'refused');
+  },
+};
+
+/** On the agents page in Spanish: the pill's words in the page's language, the agent's name as given. */
+export const Spanish: Story = {
+  args: { language: 'es', title: 'Reserva la primera visita', text: undefined, meta: 'Solicitud 1', time: undefined },
+  render: (args) => (
+    <div>
+      <AgentMessage {...args} />
+      <AgentMessage {...args} signed={false} meta="Solicitud 2" />
+    </div>
+  ),
+  parameters: { canvas: 'none', canvasNote: 'N-R2-Agents-04-Run’s signed requests on the agents page in Spanish: “Firmado” and “Sin firma” in the pill.' },
+  play: async ({ args, canvasElement }) => {
+    // agent_message_speaks_the_pages_language: the status in Spanish, and `lang` on the message.
+    const [signed, unsigned] = [...canvasElement.querySelectorAll<HTMLElement>('.cd-agent-message')] as [HTMLElement, HTMLElement];
+    await expectWho(signed, args.agentName, 'Firmado', 'handled');
+    await expectWho(unsigned, args.agentName, 'Sin firma', 'refused');
+    for (const message of [signed, unsigned]) await expect(message).toHaveAttribute('lang', 'es');
   },
 };
