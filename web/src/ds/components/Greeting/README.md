@@ -13,6 +13,9 @@
   - `line`, the words: "Two people and one agent are talking to your Desk right now.", "Quiet right now."
   - `people`, one `{ kind: 'person' | 'agent', initials? }` per visitor. The first three are drawn beside the line as small glyphs (a person's initials when given, else the person or agent glyph). They are `aria-hidden`: the line says it in words.
 - `link`, the public link as the screen shows it (`label`) and `onCopy`, which copies it. The button is "Copy your Desk link".
+  - `copied`, true for a short while after a copy that worked. The screen owns the clipboard and the timer: Today sets it for `COPIED_FOR_MS` (1.6 s), starts again on each copy that works, and clears it on a failed copy or when Today unmounts. While it is true, the link's words give way to "Copied" in `text-primary`, and the copy icon to a check. The button keeps its name.
+  - "Copied" is laid over the link's words, in the same cell, so the pill keeps its width and nothing beside it moves. It takes no pointer or selection, so the link can still be selected by hand.
+  - "Copied" and the check are `aria-hidden`. The screen says it to screen readers in its own `role="status"` line ("Your Desk link is copied."), as Today does.
 
 ## Props
 
@@ -20,8 +23,11 @@
 | --- | --- | --- |
 | `text` | `string` | Required. `.cd-type-greeting` (serif, 36/44, weight 300). |
 | `presence` | `{ line: string; people: PresenceGlyph[] }` | The line in `body` type, `text-secondary`. At most three glyphs. |
-| `link` | `{ label: string; onCopy: () => void }` | An outlined pill at the right; it drops under the text on a narrow line. |
+| `link` | `{ label: string; onCopy: () => void; copied?: boolean }` | An outlined pill at the right; it drops under the text on a narrow line. `copied` says "Copied" with a check, at the same width. |
 
 ## Motion
 
-The presence glyphs are the screen's one small moment: their opacity breathes between 50% and 100% over `motion-breathe`, each half a breath out of step with the one before. Under `prefers-reduced-motion: reduce` they are still, at full opacity.
+- The presence glyphs are the screen's one small moment: their opacity breathes between 50% and 100% over `motion-breathe`, each half a breath out of step with the one before.
+- The copy button presses in on `:active` (`scale(0.97)`, `motion-fast`), with the check over it.
+- When `copied` turns on or off, the link's words and "Copied" crossfade over `motion-fast`. The copy icon fades and shrinks out as the check fades and settles in (from `scale(0.8)`, on the emphasis ease), both over `motion-fast`.
+- Under `prefers-reduced-motion: reduce` the glyphs are still at full opacity, the button doesn't press in, and "Copied" and the check draw at once.

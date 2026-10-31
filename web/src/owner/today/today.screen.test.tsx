@@ -31,6 +31,7 @@ import {
   nextFrames,
 } from '../../test/screen.ts';
 import { watchFor, watchPages } from '../../test/watch.ts';
+import { COPIED_FOR_MS } from './TodayPage.tsx';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const DESK = `/app/${RIVERA.deskId}`;
@@ -50,6 +51,24 @@ const CHANGED = 'This changed while you were looking. Reload to see where it sta
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
+
+/** The Desk's public link, as the greeting's pill shows it and its button copies it. */
+const PUBLIC_LINK = `${window.location.origin}/d/${RIVERA.slug}`;
+
+/** Waits `ms` of real time, or none when `ms` isn't positive. */
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, Math.max(0, ms)));
+
+/**
+ * What the greeting's link pill says now, the link or "Copied": its words drawn at full opacity.
+ * The other words lie under them, faded out.
+ */
+function linkPillShows(screen: RenderResult): string[] {
+  const pill = screen.getByRole('button', { name: 'Copy your Desk link' }).element().closest('.cd-greeting__link');
+  if (!pill) throw new Error("Today's greeting draws its link pill");
+  return [...pill.querySelectorAll('span')]
+    .filter((el) => el.childElementCount === 0 && getComputedStyle(el).opacity === '1')
+    .map((el) => el.textContent ?? '');
+}
 
 /** Today as the mock reads it now, changed by `patch`, answering every read of it from here on. */
 async function injectToday(patch: (today: Today) => Today): Promise<void> {
@@ -373,6 +392,58 @@ describe('Today', () => {
     expect(screen.getByRole('textbox').elements()).toHaveLength(0);
     expect(document.body.textContent).not.toMatch(/Ask Claude/i);
     expect(document.querySelectorAll('[aria-label*="Ask Claude" i], [placeholder*="Ask Claude" i]')).toHaveLength(0);
+  });
+
+  it('copied_shows_in_the_link_then_the_link_again', async () => {
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+    const { screen } = await renderRoute(TODAY);
+    const copy = screen.getByRole('button', { name: 'Copy your Desk link' });
+    await expect.element(copy).toBeVisible();
+    expect(linkPillShows(screen)).toEqual([PUBLIC_LINK]);
+
+    // A copy that worked: the pill says "Copied" where the link was, and the status line says it
+    // to screen readers in its own words.
+    await copy.click();
+    await expect.poll(() => linkPillShows(screen)).toEqual(['Copied']);
+    const firstShown = performance.now();
+    expect(writeText).toHaveBeenCalledWith(PUBLIC_LINK);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Your Desk link is copied.' })).toBeInTheDocument();
+    expect(copy.element().getAttribute('aria-label')).toBe('Copy your Desk link');
+
+    // Another copy before it clears starts the wait again: past the first copy's time, it still
+    // says "Copied".
+    await pause(COPIED_FOR_MS / 2);
+    await copy.click();
+    await expect.poll(() => writeText.mock.calls.length).toBe(2);
+    const secondCopied = performance.now();
+    await pause(firstShown + COPIED_FOR_MS + 300 - performance.now());
+    expect(linkPillShows(screen)).toEqual(['Copied']);
+
+    // Then the link again, COPIED_FOR_MS after the last copy, while the status line keeps its words.
+    await expect.poll(() => linkPillShows(screen), { timeout: COPIED_FOR_MS + 2_000 }).toEqual([PUBLIC_LINK]);
+    expect(performance.now() - secondCopied).toBeGreaterThanOrEqual(COPIED_FOR_MS);
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Your Desk link is copied.' })).toBeInTheDocument();
+  });
+
+  it('failed_copy_never_says_copied', async () => {
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
+    const { screen } = await renderRoute(TODAY);
+    const copy = screen.getByRole('button', { name: 'Copy your Desk link' });
+    const failedLine = screen.getByRole('status').filter({ hasText: "Copy didn't work. Select the link and copy it yourself." });
+
+    // The clipboard refused: the status line says so in its words, and the pill keeps the link.
+    await copy.click();
+    await expect.element(failedLine).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(linkPillShows(screen)).toEqual([PUBLIC_LINK]);
+
+    // A copy that worked, then one the clipboard refused: the pill takes back "Copied" at once.
+    writeText.mockResolvedValueOnce(undefined);
+    await copy.click();
+    await expect.poll(() => linkPillShows(screen)).toEqual(['Copied']);
+    await copy.click();
+    await expect.element(failedLine).toBeInTheDocument();
+    await expect.poll(() => linkPillShows(screen), { timeout: COPIED_FOR_MS / 2 }).toEqual([PUBLIC_LINK]);
   });
 
   it('briefing_shows_one_row_per_kind', async () => {

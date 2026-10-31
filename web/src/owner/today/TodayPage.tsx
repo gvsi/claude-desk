@@ -30,6 +30,9 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
   failed: "Copy didn't work. Select the link and copy it yourself.",
 };
 
+/** How long the link's pill says "Copied" after a copy that worked. */
+export const COPIED_FOR_MS = 1_600;
+
 /**
  * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy,
  * "Things to try", then, in this order, "Needs you" and "Live now" when they have something, and
@@ -51,6 +54,14 @@ export function TodayPage() {
   // An answered card moves to "Answered just now", and focus that fell to the page follows it.
   const answeredFocus = useAnsweredFocus(answers.answered);
   const [linkCopy, setLinkCopy] = useState<LinkCopy>('idle');
+  // The pill says "Copied" while this is set: a count of the copies that worked since it last cleared,
+  // so each one starts the COPIED_FOR_MS wait again. A failed copy clears it; leaving Today ends the wait.
+  const [copied, setCopied] = useState<number | null>(null);
+  useEffect(() => {
+    if (copied === null) return undefined;
+    const timer = window.setTimeout(() => setCopied(null), COPIED_FOR_MS);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
   const cards = useRef(new Map<string, HTMLElement>());
   // Whether the Demo inbox's sheet is open, as it says once it has opened or closed.
   const [inboxOpen, setInboxOpen] = useState(false);
@@ -148,8 +159,14 @@ export function TodayPage() {
     Promise.resolve()
       .then(() => navigator.clipboard.writeText(link))
       .then(
-        () => setLinkCopy('copied'),
-        () => setLinkCopy('failed'),
+        () => {
+          setLinkCopy('copied');
+          setCopied((n) => (n ?? 0) + 1);
+        },
+        () => {
+          setLinkCopy('failed');
+          setCopied(null);
+        },
       );
   };
 
@@ -160,7 +177,7 @@ export function TodayPage() {
           <Greeting
             text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
             presence={today.data ? greetingPresence(live) : undefined}
-            link={{ label: link, onCopy: copyLink }}
+            link={{ label: link, onCopy: copyLink, copied: copied !== null }}
           />
           <p className="cd-sr-only" role="status">
             {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}

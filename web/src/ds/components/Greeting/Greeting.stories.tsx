@@ -1,9 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn } from 'storybook/test';
+import { useState } from 'react';
+import { expect, fn, waitFor, within } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
-import { Greeting } from './Greeting.tsx';
+import { Greeting, type GreetingProps } from './Greeting.tsx';
 
 /** The public link as the owner's screen would show it: a display string, never fetched. */
 const PUBLIC_LINK = `desk.example/d/${rivera.business.slug}`;
@@ -70,5 +71,100 @@ export const WithPresence: Story = {
 
     // The link sits at the right of the greeting's line.
     await expect(copy.getBoundingClientRect().left).toBeGreaterThan(heading.getBoundingClientRect().right);
+  },
+};
+
+/** The check icon's shape, as the icon set draws it. */
+const CHECK_PATH = 'M20 6 9 17l-5-5';
+
+export const Copied: Story = {
+  args: {
+    presence: { line: 'One person is talking to your Desk right now.', people: [{ kind: 'person' }] },
+    link: { label: PUBLIC_LINK, onCopy: fn(), copied: true },
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'UXC-P203-After (canvas page "UX craft proposals", signed 2026-10-30) draws the link pill just after a copy; no reference board draws it, and the nearest is N-Today-Run1.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    const pill = canvasElement.querySelector<HTMLElement>('.cd-greeting__link');
+    if (!pill) throw new Error('the greeting draws its link pill');
+
+    // The link's words give way to "Copied", in text-primary.
+    const copied = within(pill).getByText('Copied', { exact: true });
+    expectComputed(copied, { opacity: '1', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(within(pill).getByText(PUBLIC_LINK), { opacity: '0' });
+
+    // The copy icon gives way to a check.
+    const check = pill.querySelector<SVGElement>(`svg:has(path[d="${CHECK_PATH}"])`);
+    const copyIcon = canvas.getByRole('button', { name: 'Copy your Desk link' }).querySelector('svg');
+    if (!check || !copyIcon) throw new Error('the pill draws the check, and the button its copy icon');
+    await expect(check.getBoundingClientRect().width).toBe(16);
+    expectComputed(check.parentElement ?? check, { opacity: '1' });
+    expectComputed(copyIcon, { opacity: '0' });
+
+    // The button keeps its name. "Copied" and the check are for the eye: the screen's own status
+    // line says it to screen readers.
+    await expect(canvas.getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Copy your Desk link']);
+    await expect(copied).toHaveAttribute('aria-hidden', 'true');
+    await expect(check.parentElement).toHaveAttribute('aria-hidden', 'true');
+  },
+};
+
+/** The greeting wired as Today wires it: a press that copies sets `copied`. */
+function CopiesOnPress(args: GreetingProps) {
+  const [copied, setCopied] = useState(false);
+  const { link } = args;
+  if (!link) return <Greeting {...args} />;
+  const onCopy = () => {
+    link.onCopy();
+    setCopied(true);
+  };
+  return <Greeting {...args} link={{ ...link, copied, onCopy }} />;
+}
+
+export const CopiedAfterPress: Story = {
+  args: {
+    presence: { line: 'One person is talking to your Desk right now.', people: [{ kind: 'person' }] },
+    link: { label: PUBLIC_LINK, onCopy: fn() },
+  },
+  render: (args) => <CopiesOnPress {...args} />,
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'UXC-P203-After (canvas page "UX craft proposals", signed 2026-10-30) draws the press and the crossfade to "Copied"; no reference board draws it, and the nearest is N-Today-Run1. Clearing it is the screen\'s.',
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    const pill = canvasElement.querySelector<HTMLElement>('.cd-greeting__link');
+    if (!pill) throw new Error('the greeting draws its link pill');
+    const words = within(pill).getByText(PUBLIC_LINK);
+    const before = { pill: pill.getBoundingClientRect(), words: words.getBoundingClientRect() };
+
+    // Before a copy, a pointer on the link's words reaches them, not the faded "Copied" over them,
+    // so the owner can select the link by hand (as a failed copy asks), and "Copied" never joins
+    // a selection.
+    const start = document.elementFromPoint(before.words.left + 4, before.words.top + before.words.height / 2);
+    await expect(start).toBe(words);
+    expectComputed(within(pill).getByText('Copied', { exact: true }), { userSelect: 'none' });
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Copy your Desk link' }));
+    await expect(args.link?.onCopy).toHaveBeenCalledTimes(1);
+
+    // The link's words cross to "Copied" over motion-fast.
+    const copied = within(pill).getByText('Copied', { exact: true });
+    for (const layer of [words, copied]) expectComputed(layer, { transitionProperty: 'opacity', transitionDuration: '0.12s' });
+    await waitFor(() => expectComputed(copied, { opacity: '1' }));
+    await waitFor(() => expectComputed(words, { opacity: '0' }));
+
+    // The pill keeps its width, measured: "Copied" is laid over the link's words, where they start.
+    const after = pill.getBoundingClientRect();
+    await expect({ left: after.left, width: after.width, height: after.height }).toEqual({
+      left: before.pill.left,
+      width: before.pill.width,
+      height: before.pill.height,
+    });
+    await expect(copied.getBoundingClientRect().left).toBe(before.words.left);
+    await expect(words.getBoundingClientRect().width).toBe(before.words.width);
   },
 };
