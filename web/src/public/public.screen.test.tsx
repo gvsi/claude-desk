@@ -373,6 +373,37 @@ describe('public chat page', () => {
     expect(screen.container.querySelectorAll('.cd-margin-receipt button, button.cd-margin-receipt')).toHaveLength(0);
   });
 
+  it('allowed_request_keeps_approval_then_outcome_under_the_message_live_and_reloaded', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 10% off a drain clearing?');
+    const waiting = screen.getByText(rivera.decisions.held.visitor_plain, { exact: true });
+    const heldRow = rowOf(waiting.element());
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    await request('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } });
+    const approved = screen.getByText('Maria Rivera approved this', { exact: true });
+    const outcome = screen.getByText("Quoted from Maria Rivera's price list", { exact: true });
+    await expect.element(approved).toBeVisible();
+    await expect.element(outcome).toBeVisible();
+    expect(rowOf(approved.element())).toBe(heldRow);
+    expect(rowOf(outcome.element())).toBe(heldRow);
+    const expected = ["Reply checked against Maria Rivera's rules", 'Maria Rivera approved this', "Quoted from Maria Rivera's price list"];
+    expect(receiptsOf(heldRow)).toEqual(expected);
+    expect(outcome.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(approved.element().getBoundingClientRect().bottom);
+    await expect.element(waiting).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(shownMessages()).toHaveLength(2));
+    expect(receiptsOf(heldRow)).toEqual(expected);
+
+    const phone = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(phone.screen);
+    const loadedApproval = phone.screen.getByText('Maria Rivera approved this', { exact: true });
+    await expect.element(loadedApproval).toBeVisible();
+    expect(receiptsOf(rowOf(loadedApproval.element()))).toEqual(expected);
+    expectNoHorizontalScroll();
+  });
+
   it('cancelled_line_under_a_landed_reply_shows_at_once', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);

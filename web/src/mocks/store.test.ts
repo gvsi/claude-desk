@@ -326,9 +326,9 @@ describe('the scripted Desk', () => {
     for (const entry of others) expect(entry.decision_id, entry.entry_id).toBeNull();
   });
 
-  it('answer_resolves_and_follows_up', async () => {
+  it.each(['en', 'es'] as const)('allowed_answer_emits_approved_before_outcome_and_follows_up_%s', async (language) => {
     const { events } = await openChat();
-    await send('Can I get 15% off?');
+    await send(language === 'es' ? '¿Me hacen un descuento del 15%?' : 'Can I get 15% off?');
     await drain();
     const [, held] = events[1] ?? [];
     const decisionId = held?.type === 'held' ? held.decision_id : '';
@@ -336,7 +336,7 @@ describe('the scripted Desk', () => {
     const answered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } });
     expect(answered.status).toBe(200);
     expect(answered.body).toMatchObject({
-      decision: { decision_id: decisionId, state: 'executed', visitor_plain: "Quoted from Maria Rivera's price list" },
+      decision: { decision_id: decisionId, state: 'executed', visitor_plain: executedLine('native.quote', language, 'Maria Rivera') },
       execution_state: 'succeeded',
       card_diff: null,
     });
@@ -344,16 +344,22 @@ describe('the scripted Desk', () => {
     expect(typesOf(events)).toEqual(['writing', 'held', 'message', 'turn_end']);
 
     await drain();
-    expect(typesOf(events).slice(4)).toEqual(['resolved', 'writing', 'message', 'turn_end']);
-    const [, resolved] = events[4] ?? [];
+    expect(typesOf(events).slice(4)).toEqual(['receipt', 'resolved', 'writing', 'message', 'turn_end']);
+    const [, approved] = events[4] ?? [];
+    expect(approved).toMatchObject({ type: 'receipt', decision_id: decisionId, state: 'approved', visitor_plain: VISITOR_PLAIN[language].approved });
+    const [, resolved] = events[5] ?? [];
     // An executed action's line says what ran and whose records it used, never a bare "Done".
     expect(resolved).toMatchObject({
       type: 'resolved',
       decision_id: decisionId,
       state: 'executed',
-      visitor_plain: "Quoted from Maria Rivera's price list",
+      visitor_plain: executedLine('native.quote', language, 'Maria Rivera'),
     });
-    const [, followUp] = events[6] ?? [];
+    if (approved?.type !== 'receipt' || resolved?.type !== 'resolved') throw new Error('approval precedes resolution');
+    expect(approved.ledger_seq).toBeLessThan(resolved.ledger_seq);
+    const approvalEntry = mockStore.world.desks[0]?.ledger.find((entry) => entry.seq === approved.ledger_seq);
+    expect(approvalEntry?.event).toMatchObject({ kind: 'approval', ref_id: decisionId, summary: { state: 'approved' } });
+    const [, followUp] = events[7] ?? [];
     expect(followUp?.type === 'message' && followUp.blocks.map((b) => [b.kind, b.template])).toEqual([
       ['prose', null],
       ['card', 'quote'],
@@ -364,6 +370,18 @@ describe('the scripted Desk', () => {
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou.map((item) => item.decision?.decision_id)).not.toContain(decisionId);
     expect(needsYou).toHaveLength(1);
+  });
+
+  it('denied_answer_emits_only_the_denial_before_follow_up', async () => {
+    const { events } = await openChat();
+    await send('Can I get 10% off?');
+    await drain();
+    const held = events.find(([, ev]) => ev.type === 'held')?.[1];
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    expect((await call('answer', { params: { decision_id: held.decision_id }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events).slice(4)).toEqual(['resolved', 'writing', 'message', 'turn_end']);
+    expect(events[4]?.[1]).toMatchObject({ type: 'resolved', state: 'denied', visitor_plain: VISITOR_PLAIN.en.denied });
   });
 
   it('answer_records_the_kernels_approval', async () => {
@@ -1210,7 +1228,7 @@ describe('taking over', () => {
     expect(typesOf(events)).toEqual(['owner_joined', 'turn_end']);
   });
 
-  it('takeover_still_tells_the_visitor_an_answered_hold_ran', async () => {
+  it('takeover_still_tells_the_visitor_approval_then_the_outcome', async () => {
     const { session, events } = await openChat();
     await send('Can I get 15% off?');
     await drain();
@@ -1222,8 +1240,9 @@ describe('taking over', () => {
     expect((await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } })).status).toBe(200);
     expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
     await drain();
-    expect(typesOf(events).slice(4)).toEqual(['owner_joined', 'resolved', 'turn_end']);
-    expect(events[5]?.[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
+    expect(typesOf(events).slice(4)).toEqual(['owner_joined', 'receipt', 'resolved', 'turn_end']);
+    expect(events[5]?.[1]).toMatchObject({ type: 'receipt', decision_id: decisionId, state: 'approved' });
+    expect(events[6]?.[1]).toMatchObject({ type: 'resolved', decision_id: decisionId, state: 'executed' });
     expect(kindsFor(session.session_id).filter((kind) => kind === 'reply')).toHaveLength(1);
   });
 });
