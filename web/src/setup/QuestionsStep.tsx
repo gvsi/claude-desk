@@ -4,7 +4,8 @@ import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { QuestionKey, SetupMessage, SetupState } from '../api/views.ts';
 import { Button, ClaudeMessage, Composer, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
-import { QUESTION_ORDER, SETUP_COPY } from './copy.ts';
+import { QUESTION_ORDER, SETUP_COPY, stillCheckingLine } from './copy.ts';
+import { useSetupWork } from './useSetupWork.ts';
 
 /** Plan 02's limit on an answer. */
 const ANSWER_MAX = 2000;
@@ -77,6 +78,7 @@ function Line({ message }: { message: SetupMessage }) {
  * which asks the next question. An answer that didn't go through stays in the composer.
  */
 export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
+  const step = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLDivElement>(null);
   const returnFocus = useRef(false);
   const [consenting, setConsenting] = useState<boolean | null>(null);
@@ -93,6 +95,28 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   const id = state.interview_id;
   const asking = awaitsConsent(state);
   const number = questionNumber(state);
+  const busy = state.busy === true;
+  const work = useSetupWork(state, reread);
+  const wasBusy = useRef(busy);
+  useEffect(() => {
+    if (wasBusy.current && !busy && asking) setConsentError(stillCheckingLine());
+    wasBusy.current = busy;
+  }, [busy, asking]);
+  const waitingForFirstQuestion = useRef(asking || (busy && state.question === null));
+
+  useEffect(() => {
+    if (asking || busy) {
+      if (asking || state.question === null) waitingForFirstQuestion.current = true;
+      return;
+    }
+    if (!waitingForFirstQuestion.current || state.question === null) return;
+    waitingForFirstQuestion.current = false;
+    const box = composer.current?.querySelector('textarea');
+    const focus = document.activeElement;
+    if (!box || box.disabled || (focus !== document.body && !step.current?.contains(focus))) return;
+    box.focus();
+    box.scrollIntoView({ block: 'nearest' });
+  }, [asking, busy, state.question]);
 
   /**
    * The consent, sent once. A lost reply, or a 409 (it was given already), reads the interview,
@@ -117,7 +141,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
       const unsure = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
       const now = unsure ? await reread() : null;
-      if (now !== null && !awaitsConsent(now)) return;
+      if (now !== null && (now.busy === true || !awaitsConsent(now))) return;
       if (unsure && now === null) setConsentUnknown(true);
       setConsentError(ownerErrorCopy(err));
     } finally {
@@ -235,16 +259,28 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   }, [sending, retrying, failed]);
 
   return (
-    <div className="cd-setup-step">
+    <div className="cd-setup-step" ref={step}>
       <PageHeader title={copy.title} subtitle={number === null ? copy.beforeConsent : copy.counter(number, QUESTION_ORDER.length)} />
       <Transcript label={copy.conversation}>
         {state.messages.map((message, index) => (
           <Line key={`${index}-${message.role}`} message={message} />
         ))}
         {sending !== null ? <VisitorMessage text={sending} /> : null}
-        {sending !== null ? <WritingIndicator language="en" /> : null}
+        {sending !== null || busy ? <WritingIndicator language="en" /> : null}
       </Transcript>
-      {asking ? (
+      {work.gaveUp ? (
+        <Notice
+          tone="error"
+          action={
+            <Button variant="secondary" busy={work.retrying} onClick={() => void work.retry()}>
+              {copy.tryAgain}
+            </Button>
+          }
+        >
+          {stillCheckingLine()}
+        </Notice>
+      ) : null}
+      {asking && !busy ? (
         <>
           {consentError === null ? null : <Notice tone="error">{consentError}</Notice>}
           <div className="cd-setup-step__actions">
@@ -263,7 +299,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
             label={copy.composerLabel}
             placeholder={copy.placeholder}
             maxLength={ANSWER_MAX}
-            disabled={sending !== null || retrying}
+            disabled={busy || sending !== null || retrying}
             onSend={send}
             {...(failed === null ? {} : { failed: { text: failed.text, line: copy.failed, onRetry: () => void retry() } })}
           />

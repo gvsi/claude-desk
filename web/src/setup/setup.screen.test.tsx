@@ -26,7 +26,7 @@ import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
-import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextStart } from '../mocks/setup.ts';
+import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
@@ -1171,6 +1171,146 @@ describe('setup', () => {
     await expect.element(other.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(otherBox).toHaveValue('Same words.');
     expect(requests('setupAnswer', sent)).toHaveLength(1);
+  });
+
+  it('async_consent_waits_with_a_disabled_composer_then_focuses_the_first_question', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeDisabled();
+    expectNoHorizontalScroll();
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView');
+    onTestFinished(() => scroll.mockRestore());
+    finish('landed');
+    await expect.element(screen.getByText(MEMORY_LABEL, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
+    await expect.element(box).toBeEnabled();
+    await expect.element(box).toHaveFocus();
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).not.toBeInTheDocument();
+  });
+
+  it('failed_async_consent_restores_the_buttons_with_a_notice_and_can_be_answered_again', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+    finish('failed');
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    const notice = screen.getByRole('alert');
+    await expect.element(notice).toHaveTextContent(UNREACHABLE_COPY.en);
+    expect(notice.element().compareDocumentPosition(screen.getByRole('button', { name: 'Yes, use it' }).element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expectNoHorizontalScroll();
+    await screen.getByRole('button', { name: "No, I'll type it" }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    await expect.element(notice).not.toBeInTheDocument();
+  });
+
+  it('async_consent_gives_up_at_90_seconds_and_try_again_reads_the_landed_work', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await until(() => {
+      vi.advanceTimersByTime(0);
+      expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
+    });
+    await vi.advanceTimersByTimeAsync(89999);
+    expect(screen.container.querySelector('[role="alert"]')).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    await until(() => {
+      vi.advanceTimersByTime(0);
+      expect(screen.container.querySelector('[role="alert"]')?.textContent).toContain(UNREACHABLE_COPY.en);
+    });
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeDisabled();
+    finish('landed');
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await until(() => {
+      vi.advanceTimersByTime(0);
+      expect((box.element() as HTMLTextAreaElement).disabled).toBe(false);
+    });
+    vi.useRealTimers();
+    await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+    expect(requests('setupConsent')).toHaveLength(1);
+  });
+
+  it('repeated_async_consent_answered_202_keeps_waiting_without_an_error', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    // Another request got there first while this page still shows the consent buttons.
+    await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+    finish('landed');
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    expect(requests('setupConsent')).toHaveLength(2);
+    expect(screen.getByRole('log', { name: 'Setup questions' }).element().querySelectorAll('.cd-visitor-message')).toHaveLength(1);
+  });
+
+  it('lost_async_consent_reads_the_busy_interview_and_waits_without_an_error', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    const mark = mockStore.requests.length;
+    mockStore.inject({ route: 'setupConsent', status: 503, afterCommit: true });
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    expect(requests('setup', mark)).toHaveLength(1);
+    await expect.element(screen.getByRole('alert')).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeDisabled();
+    finish('landed');
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    expect(requests('setupConsent', mark)).toHaveLength(1);
+  });
+
+  it('setup_opened_mid_run_polls_without_taking_focus_from_the_exit_link', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { strict: true });
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    const exit = screen.getByRole('link', { name: 'Save and exit' });
+    (exit.element() as HTMLElement).focus();
+    const mark = requests('setup').length;
+    finish('landed');
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+    expect(requests('setup').length).toBeGreaterThan(mark);
+    await expect.element(exit).toHaveFocus();
+    expect(requests('setupConsent')).toHaveLength(1);
+  });
+
+  it('leaving_setup_mid_run_stops_interview_reads', async () => {
+    const state = await startInterview(null);
+    const finish = holdNextConsent(mockStore.world, state.interview_id);
+    await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByText('Claude is writing', { exact: true })).toBeVisible();
+    const sends = vi.spyOn(window, 'fetch');
+    onTestFinished(() => sends.mockRestore());
+    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    await screen.getByRole('link', { name: 'Save and exit' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    const leftAt = reads();
+    finish('landed');
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 2200));
+    expect(reads()).toBe(leftAt);
+    expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
   });
 
   it('lost_consent_is_read_before_it_is_sent_again', async () => {
