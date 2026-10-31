@@ -375,11 +375,11 @@ describe('rule drafts', () => {
     expect(quote.after?.appliesTo).toBeUndefined();
     expect(quote.after?.words).toContainEqual({ field: 'limits', text: 'Discounts up to 10%' });
 
-    // An effect card: the group in words, and no connector. An added rule's one side leaves its
-    // target to the row's title, which names it.
+    // A shared rule (an effect card): titled by the tools it covers in this Desk's catalog, with
+    // their connector when they share one (N-Conn-18). An added rule's one side leaves its target
+    // to the row's title, which names it.
     const shared = rowFor('card-charges');
-    expect(shared).toMatchObject({ change: 'added', title: 'Every tool that charges money', before: null, changed: [] });
-    expect(shared.connector).toBeUndefined();
+    expect(shared).toMatchObject({ change: 'added', title: 'Payment link and Charge within a signed limit', connector: view('payments'), before: null, changed: [] });
     expect(shared.after).toEqual({ mode: 'auto', limit: '$300', reason: charges.reason, words: ruleWords(charges, PEOPLE) });
 
     // A card retargeted from Payment link to every tool that charges money says so on both sides.
@@ -416,7 +416,8 @@ describe('rule drafts', () => {
 
     // A changed row per dropped card, personal ones included: nothing in the preset covers them, so
     // each falls to the default ask, and only a new outcome is tagged. The rows go by connector, as
-    // the Connectors page lists them, and by tool within one (N-Conn-18), shared rules last.
+    // the Connectors page lists them, and by tool within one (N-Conn-18). The shared rule for the
+    // agent's charges sits with Payments, right after the first tool it covers, as the board draws it.
     const dropped = rows.filter((row) => row.change === 'changed');
     expect(dropped.map((row) => row.key)).toEqual([
       'rv-quote',
@@ -425,10 +426,10 @@ describe('rule drafts', () => {
       'rv-dana-book',
       'rv-docs',
       'rv-link',
+      'rv-agent-charges',
       'rv-mandate',
       'rv-charges',
       'rv-refund',
-      'rv-agent-charges',
     ]);
     expect(dropped.map((row) => row.connector?.name)).toEqual([
       'Quotes',
@@ -438,9 +439,21 @@ describe('rule drafts', () => {
       'Documents',
       'Payments',
       'Payments',
+      'Payments',
       'Stripe',
       'Stripe',
-      undefined,
+    ]);
+    expect(dropped.map((row) => row.title)).toEqual([
+      'Quote',
+      'Book a visit',
+      'Book a visit',
+      'Book a visit',
+      'Share a document',
+      'Payment link',
+      'Payment link and Charge within a signed limit',
+      'Charge within a signed limit',
+      'See charges',
+      'Refund',
     ]);
     // The default ask is for the same tool, so neither side names a target: the row's title does.
     for (const row of dropped) {
@@ -457,6 +470,43 @@ describe('rule drafts', () => {
     expect(added.map((row) => row.key)).toEqual(ids(preset));
     expect(added.map((row) => row.title)).toEqual(['Find open times', 'Save a lead', 'Request a callback', "Confirm it's them", 'Website reading', 'Memory reading']);
     expect(rows).toHaveLength(owner.length + preset.length);
+  });
+
+  it('shared_rule_rows_name_the_tools_they_cover', () => {
+    // Rivera's rules with three shared rules added: never private data, every message sent
+    // automatically, and the agent's charges. Rivera's own quote rule changes too.
+    const neverPrivate: RuleCard = { card_id: 'card-never-private', applies_to: 'effect:private_data', mode: 'never', who: 'anyone', reason: 'Private records never go out.' };
+    const autoMessages: RuleCard = { card_id: 'card-auto-messages', applies_to: 'effect:send_message', mode: 'auto', who: 'anyone', reason: 'Messages go out on their own.' };
+    const quoteDiscount = changed(ruleCards['rv-quote'], { max_discount_bp: 1000 });
+    const added = [neverPrivate, autoMessages, rivera.sharedChargeCard];
+    const draft = draftFromDiff(
+      rulesDraft({
+        cards: [...RIVERA_CARDS.filter((card) => card.card_id !== 'rv-quote'), quoteDiscount, ...added],
+        diff: { added, removed: [], changed: [[ruleCards['rv-quote'], quoteDiscount]] },
+      }),
+      ACTIVE,
+    );
+    const rows = changeRows(draft, PEOPLE, TOOLS);
+    const rowFor = (key: string) => rows.find((row) => row.key === key);
+
+    // A shared rule whose tools span connectors names them all, has no connector and goes last.
+    expect(rowFor('card-never-private')).toMatchObject({ title: 'Share a document, See charges and Refund', change: 'added' });
+    expect(rowFor('card-never-private')?.connector).toBeUndefined();
+    // An automatic one covers a tool with other effects only jointly, so messages alone don't
+    // cover Share a document, which also touches private data: only "Confirm it's them".
+    expect(rowFor('card-auto-messages')).toMatchObject({ title: "Confirm it's them", connector: view('verification') });
+    // The added rows by the tools' places: Verification, then Payments, then the one that spans.
+    expect(rows.map((row) => row.key)).toEqual(['rv-quote', 'card-auto-messages', 'rv-agent-charges', 'card-never-private']);
+
+    // With no tool in the Desk's catalog to name, a shared rule keeps its group's words, with no
+    // connector, and goes last.
+    const bare = changeRows(draft, PEOPLE);
+    expect(bare.map((row) => [row.key, row.title, row.connector])).toEqual([
+      ['rv-quote', 'Quote', view('quotes')],
+      ['card-never-private', 'Every tool that touches private data', undefined],
+      ['card-auto-messages', 'Every tool that sends a message out', undefined],
+      ['rv-agent-charges', 'Every tool that charges money', undefined],
+    ]);
   });
 
   it('recommended_preset_keeps_what_it_automates', () => {

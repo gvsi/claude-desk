@@ -5,9 +5,9 @@
  */
 import type { Effect, RuleCard, ToolName } from '../../api/contracts.ts';
 import type { PeopleOut, ToolRow } from '../../api/views.ts';
-import { reviewChanges, ruleDiff, rulesForTool, type ChangeRowView, type ChangeSide, type RulesTool } from '../../ds/index.ts';
-import { formatCents } from '../../lib/format.ts';
-import { CONNECTORS, TOOL_NAMES, connectorOf } from '../connectors/catalog.ts';
+import { reviewChanges, ruleDiff, rulesForTool, type ChangeRowView, type ChangeSide, type ConnectorView, type RulesTool } from '../../ds/index.ts';
+import { formatCents, listWords } from '../../lib/format.ts';
+import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOf } from '../connectors/catalog.ts';
 import type { RuleDraft } from './drafts.ts';
 import { ruleWords, targetWords } from './ruleWords.ts';
 
@@ -21,9 +21,9 @@ export const DEFAULT_SIDE = {
 /** The tools a rules review knows the effects of, by name. */
 type ToolEffects = readonly Pick<ToolRow, 'tool' | 'effects'>[];
 
-/** The connector a card's tool belongs to; none for an effect card or a tool the catalog doesn't know. */
-function connectorFor(card: RuleCard) {
-  return card.applies_to.startsWith('effect:') ? undefined : (connectorOf(card.applies_to as ToolName)?.view ?? undefined);
+/** The connector a tool card's tool belongs to; none for a tool the catalog doesn't know. */
+function connectorFor(card: RuleCard): ConnectorView | undefined {
+  return connectorOf(card.applies_to as ToolName)?.view ?? undefined;
 }
 
 /**
@@ -81,35 +81,97 @@ function toolPlace(tool: string): number {
   return at === -1 ? TOOL_ORDER.length : at;
 }
 
+/** A row's card as the review lists it: its title, its connector, and its place among the rows. */
+interface RowLabel {
+  title: string;
+  connector?: ConnectorView;
+  place: number;
+}
+
+/** After every tool's rows: a shared rule whose tools span connectors, or that covers none of this Desk's. */
+const LAST_PLACE = TOOL_ORDER.length + 1;
+
 /**
- * `cards` in the order the review lists their rows (N-Conn-18): by the tool's place, then the
- * shared rules. The sort is stable, so the cards for one tool, and the shared rules, keep the
- * draft's order, and which card governs a dropped one (`rulesForTool`'s order) doesn't change.
+ * The tools of this Desk's `catalog` (in review order) that the shared rule `card` covers, among
+ * `side`, the cards on its side of the draft. The design system's `rulesForTool` over the side's
+ * shared rules alone lists exactly the shared rules that cover a tool (master "Coverage and
+ * overlap"): every tool with the rule's effect, and for an automatic rule on a tool with several
+ * effects, only jointly with an automatic rule for each of the others.
  */
-function inReviewOrder(cards: readonly RuleCard[]): RuleCard[] {
-  const place = (card: RuleCard) => (isEffectCard(card) ? TOOL_ORDER.length + 1 : toolPlace(card.applies_to));
-  return [...cards].sort((a, b) => place(a) - place(b));
+function coveredTools(card: RuleCard, side: readonly RuleCard[], catalog: readonly RulesTool[]): ToolName[] {
+  const shared = side.filter(isEffectCard);
+  return catalog.filter((tool) => rulesForTool(tool, shared).some((rule) => rule.card_id === card.card_id)).map((tool) => tool.tool);
+}
+
+/**
+ * How a card's row reads and where it goes (N-Conn-18). A tool's card: the tool's name and its
+ * connector, at the tool's place. A shared rule (`effect:charge`): the tools it covers in this
+ * Desk's catalog, joined ("Payment link and Charge within a signed limit"); with their connector
+ * when they share one, right after the rows of the first tool it covers, as the board draws it;
+ * else no connector, last. Covering none of this Desk's tools, it keeps its group's words
+ * ("Every tool that charges money"), last.
+ */
+function rowLabel(card: RuleCard, side: readonly RuleCard[], catalog: readonly RulesTool[]): RowLabel {
+  if (!isEffectCard(card)) {
+    const connector = connectorFor(card);
+    return { title: targetWords(card.applies_to), ...(connector === undefined ? {} : { connector }), place: toolPlace(card.applies_to) };
+  }
+  const covered = coveredTools(card, side, catalog);
+  const [first] = covered;
+  if (first === undefined) return { title: targetWords(card.applies_to), place: LAST_PLACE };
+  const title = listWords(covered.map((tool) => targetWords(tool)));
+  const connectors = new Set(covered.map((tool) => connectorOf(tool)?.key ?? null));
+  const [only] = connectors;
+  const connector = connectors.size === 1 && only != null ? connectorByKey(only)?.view : undefined;
+  return connector === undefined ? { title, place: LAST_PLACE } : { title, connector, place: toolPlace(first) + 0.5 };
+}
+
+/** `items` by `place`, a stable sort, so items at one place keep their order. */
+function byPlace<T>(items: readonly T[], place: (item: T) => number): T[] {
+  return [...items].sort((a, b) => place(a) - place(b));
 }
 
 /**
  * The review's rows: a row per card change (`reviewChanges` over the draft's before and after), each
  * side in words, then a `turned_on` row per tool the draft turns on, at the outcome the draft's
- * rules give it for anyone (`governingForAnyone`), else the default ask. Each group goes by
- * connector and by tool within one, shared rules last. `tools` gives each tool's effects, which say
- * which shared rules govern it; the draft's own `turnedOn` rows count too.
+ * rules give it for anyone (`governingForAnyone`), else the default ask. The changed rows, then the
+ * added ones, each go by connector and by tool within one, a shared rule placed by `rowLabel`.
+ * `tools` is this Desk's catalog: each tool's effects, which say which shared rules cover and
+ * govern it; the draft's own `turnedOn` rows count too.
  */
 export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefined, tools: ToolEffects = []): ChangeRowView[] {
-  const effects = new Map<string, readonly Effect[]>();
+  const effects = new Map<ToolName, readonly Effect[]>();
   for (const row of [...tools, ...draft.turnedOn]) effects.set(row.tool, row.effects);
   const effectsOf = (tool: ToolName): readonly Effect[] => effects.get(tool) ?? [];
+  const catalog = byPlace(
+    [...effects].map(([tool, toolEffects]): RulesTool => ({ tool, effects: toolEffects })),
+    (tool) => toolPlace(tool.tool),
+  );
+  // Each side's labels, read once: a shared rule's coverage depends on the other shared rules beside it.
+  const labelsOf = (side: readonly RuleCard[]) => new Map(side.map((card) => [card, rowLabel(card, side, catalog)]));
+  const beforeLabels = labelsOf(draft.before);
+  const afterLabels = labelsOf(draft.after);
+  const labelOf = (card: RuleCard, labels: ReadonlyMap<RuleCard, RowLabel>) => labels.get(card) ?? rowLabel(card, [card], catalog);
 
-  const changes = reviewChanges(inReviewOrder(draft.before), inReviewOrder(draft.after), effectsOf);
-  const rows: ChangeRowView[] = changes.map((change): ChangeRowView => {
+  // The draft's cards go to `reviewChanges` as the draft has them, so which card governs a dropped
+  // one (`rulesForTool`'s order) doesn't depend on the review's order; only the rows are sorted.
+  const changes = reviewChanges(
+    byPlace(draft.before, (card) => labelOf(card, beforeLabels).place),
+    draft.after,
+    effectsOf,
+  );
+  const added = changes.filter((change) => change.before === null);
+  const ordered = [
+    ...changes.filter((change) => change.before !== null),
+    ...byPlace(added, (change) => (change.after === null ? LAST_PLACE : labelOf(change.after, afterLabels).place)),
+  ];
+  const rows: ChangeRowView[] = ordered.map((change): ChangeRowView => {
     const card = change.before ?? change.after;
     if (card === null) throw new Error('a review change with no card');
-    const title = targetWords(card.applies_to);
-    const connector = connectorFor(card);
+    const { title, connector } = change.before === null ? labelOf(card, afterLabels) : labelOf(card, beforeLabels);
     const moved = change.before !== null && change.after !== null && change.after.applies_to !== change.before.applies_to;
+    // A shared rule's own row (an effect card that doesn't move) is where the design system's
+    // `ChangeRowView.shared` goes once it has one; a row that moves shows the move in `appliesTo`.
     return {
       key: card.card_id,
       change: change.change,
