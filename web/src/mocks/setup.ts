@@ -108,12 +108,35 @@ const INVALID = fail(422, 'invalid');
 const CONFLICT = fail(409, 'conflict');
 
 /**
- * The business's name, as the API's structured read of the description takes it: here, its first
- * sentence, cut to 60 characters ("Rivera Plumbing. I'm Maria, …" → "Rivera Plumbing").
+ * A phrase naming the business: "I run X", "I own X", "We run X" or "We own X", the name ending at
+ * " in ", " on ", a comma or the sentence's end. A name starts with a capital and isn't a day, so
+ * "We run a small crew", "We run Monday to Friday" and "I own 3 vans" name nothing.
+ */
+const RUNS = /\b(?:I|[Ww]e)\s+(?:run|own)\s+((?!(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)days?\b)[A-ZÀ-Ý][^,.!?\n]*)/;
+/** The other phrase naming it: a sentence that starts "X is my shop" (or "our business", "my café", …). */
+const IS_MY =
+  /(?:^|[.\n!?])\s*([A-ZÀ-Ý0-9][^.\n!?]*?)\s+is\s+(?:my|our)\s+(?:business|shop|store|company|bakery|caf[eé]|restaurant|salon|studio|firm|practice|clinic)(?![A-Za-zÀ-ÿ])/;
+
+/** A sentence of the owner introducing themselves ("I'm Ana", "My name is Ana", "Hi, I'm Ana"), or a greeting alone. */
+const INTRODUCTION = /^(?:(?:[Hh]i|[Hh]ello|[Hh]ey)\b[\s,]*)?(?:I(?:'|’)?m\b|I am\b|[Mm]y name is\b|$)/;
+
+/**
+ * The business's name, as the API's structured read of the description takes it: here, the way a
+ * reader would, cut to 60 characters. First a phrase naming it ("I'm Ana. I run Ana's Bakery in
+ * Oakland." or "Ana's Bakery is my shop" → "Ana's Bakery"), else the first sentence that isn't the
+ * owner introducing themselves ("Rivera Plumbing. I'm Maria, …" → "Rivera Plumbing"), else
+ * "Your business" ("I'm Ana." alone).
  */
 function businessNameOf(description: string): string {
-  const first = description.split(/[.\n!?]/)[0]?.trim() ?? '';
-  return first === '' ? 'Your business' : first.slice(0, 60).trim();
+  const named =
+    RUNS.exec(description)?.[1]?.split(/\s(?:in|on)\s/)[0] ??
+    IS_MY.exec(description)?.[1] ??
+    description
+      .split(/[.\n!?]/)
+      .map((sentence) => sentence.trim())
+      .find((sentence) => sentence !== '' && !INTRODUCTION.test(sentence));
+  const name = named?.trim() ?? '';
+  return name === '' ? 'Your business' : name.slice(0, 60).trim();
 }
 
 /** The owner's first name, from "I'm Maria" in the description; null when it gives none. */
