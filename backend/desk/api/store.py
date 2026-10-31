@@ -695,10 +695,15 @@ async def latest_pending(conn: AsyncConnection, session_id: str) -> int | None:
 
 
 async def newest_row(conn: AsyncConnection, session_id: str) -> int | None:
-    """The `n` of the session's newest row, or None for a session with none. A session's rows commit in the order of
-    their `n` (`append_message`), so a row committed after this read has a larger one: it is the cutoff a model call
-    places rows up to (`prepare_model_input(through=)`), read before the loop looks for the message to tell the
-    kernel (`latest_said(through=)`)."""
+    """The `n` of the session's newest row, or None for a session with none: the cutoff a model call places rows up
+    to (`prepare_model_input(through=)`), read before the loop looks for the message to tell the kernel
+    (`latest_said(through=)`). A row takes its `n` when it is inserted, so one still open can sit below a newer row
+    that committed first: a visitor's or an agent's message, which `append_message` inserts under the session's events
+    lock, below a loop row (tool results, an assistant row, a context or tool change), which takes no such lock. So
+    this takes the events lock first, waiting out any open `append_message`: every message below the cutoff is then
+    committed, and the look sees it. The lock is held until the caller's transaction ends, which the loop ends before
+    any kernel call."""
+    await lock_events(conn, session_id)
     return (await conn.execute(select(func.max(MESSAGES.c.n)).where(
         MESSAGES.c.session_id == session_id))).scalar_one()
 

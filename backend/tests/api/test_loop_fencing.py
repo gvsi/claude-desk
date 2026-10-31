@@ -1263,6 +1263,73 @@ async def test_a_message_landing_as_a_call_places_its_rows_waits_when_its_turn_i
     assert words not in json.dumps(model.requests[0].messages, ensure_ascii=False)
 
 
+async def events_lock_waiters(engine: AsyncEngine, session_id: str) -> int:
+    """How many connections wait for the session's events lock (`store.lock_events`)."""
+    key = lock_key("events:" + session_id)
+    async with engine.connect() as conn:
+        return (await conn.execute(text(
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid::bigint = :high"
+            " AND objid::bigint = :low AND objsubid = 1"),
+            {"high": (key >> 32) & 0xFFFFFFFF, "low": key & 0xFFFFFFFF})).scalar_one()
+
+
+async def test_a_message_still_committing_as_the_next_call_looks_goes_to_the_kernel_first(
+        api_conn, engine, caller, visitor, fake, monkeypatch):
+    """A visitor's message takes its `n` as it is inserted, under the session's events lock, and commits a moment
+    later; the loop writes its own rows (here its tool results) without that lock, so they can take a higher `n` and
+    commit first. The next model call's cutoff waits for the events lock (`store.newest_row`), so the message is
+    committed, seen by the look and sent to `/turn` before the call places it: Claude never reads a message whose
+    language the kernel didn't hear first."""
+    words = "Hola, ¿pueden venir mañana por la mañana?"
+    opened, look_done = asyncio.Event(), asyncio.Event()
+    late: list[int] = []
+
+    async def visitor_writes() -> None:                       # the public route's append, still open
+        async with engine.connect() as conn:
+            late.append(await append_message(conn, caller.ids, "visitor_text", text=words))
+            opened.set()
+            while not look_done.is_set() and not await events_lock_waiters(engine, caller.session_id):
+                await asyncio.sleep(0.01)
+            await conn.commit()
+
+    writing: list[asyncio.Task] = []
+    answering, looking = loop.append_tool_results, loop.latest_said
+
+    async def answer_while_open(conn, ids, assistant_n, results):   # the loop's tool results, as the message is open
+        if not writing:
+            writing.append(asyncio.create_task(visitor_writes()))
+            await opened.wait()
+        return await answering(conn, ids, assistant_n, results)
+
+    async def look(conn, session_id, **bounds):
+        found = await looking(conn, session_id, **bounds)
+        if opened.is_set() and not look_done.is_set():      # the look before the next call: then the message commits
+            look_done.set()
+            await writing[0]
+        return found
+
+    monkeypatch.setattr(loop, "append_tool_results", answer_while_open)
+    monkeypatch.setattr(loop, "latest_said", look)
+    await said(api_conn, caller, "Hi, can someone come on Friday?")
+    model = ScriptedModel([response(tool_use("native__find_slots", {"days": 3}, id="toolu_slots")),
+                           response(reply("Tengo horarios mañana por la mañana."))])
+    calls_before_turn = []
+
+    async def turn_starts(request: httpx.Request) -> None:
+        calls_before_turn.append(len(model.requests))
+
+    kernel = Kernel(fake, before={turn_path(caller): turn_starts})
+    async with KernelHttp("http://fake-kernel", transport=kernel) as http:
+        assert await loop.run_turn(api_conn, replace(caller, kernel=http.session(visitor.token)), model) == "done"
+
+    assert [call.body["text"] for call in fake.called("POST /sessions/{session_id}/turn")] == [
+        "Hi, can someone come on Friday?", words]
+    assert calls_before_turn == [0, 1]                         # before the second call, which reads it
+    assert words in json.dumps(model.requests[1].messages, ensure_ascii=False)
+    tool_results_n = max(n for (n,) in await rows(api_conn, caller.session_id, "model_tool_results", "n"))
+    assert late[0] < tool_results_n                            # the race: the message's `n` is below the loop's row
+
+
 async def test_a_take_over_or_a_close_just_before_the_turn_starts_ends_it(api_conn, kernel_http, fake, ro_schema):
     """The session moved on between `/whoami` and the turn's first call: a take-over (a new generation) makes the
     kernel refuse the turn as stale, and the turn ends silently; a closed conversation ends with the session error.

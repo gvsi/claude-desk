@@ -343,8 +343,10 @@ class _Turn:
         A visitor or agent message newer than the one the turn last sent `/turn` (one sent while the turn ran) joins
         this call, so it goes to `/turn` first (`_tell_waiting`), while it still waits: a refusal leaves it waiting
         for a turn, as `/context`'s does, and ends this one (its outcome is returned in place of a response). The
-        call places rows only up to the session's newest row as the look began (`store.newest_row`), so a message
-        landing after the look keeps waiting for the next call, which tells the kernel first."""
+        call places rows only up to a cutoff read just before the look (`store.newest_row`), which first waits out any
+        message still being written, under the events lock it holds until `_tell_waiting` commits, before `/turn`. So
+        every message up to the cutoff is seen by the look, and one written after it keeps waiting for the next call,
+        which tells the kernel first."""
         conn, caller = self.conn, self.caller
         while True:
             through = await newest_row(conn, caller.session_id)      # this call places nothing written after it
