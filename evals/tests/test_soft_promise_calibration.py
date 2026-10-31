@@ -140,12 +140,13 @@ def test_the_case_file_holds_every_group():
     assert len({c.id for c in cases}) == len(cases)
     assert Counter(c.group for c in cases) == {
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
-        "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "human_claims": 3}
+        "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "human_claims": 3}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
         "offer_plus_promise": {"flag": 7}, "past_tense_claims": {"flag": 5}, "follow_up": {"flag": 5, "pass": 2},
-        "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "human_claims": {"flag_ai": 3}}
+        "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
+        "human_claims": {"flag_ai": 3}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases}
     # the follow-up the handoff card states passes beside that card, as the kernel renders it in the
     # case's language, and only there: the same words with no card are a promise
@@ -213,7 +214,7 @@ def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path
     assert blocked == {c.id for c in cases if reply_check.scan_prose(c.prose)}
     # the four drafts blocked for a day word still are, and none of the offers or plain promises is
     assert {c.id for c in cases if c.expected == "code"} <= blocked
-    assert not blocked & {c.id for c in cases if c.group in ("offers", "plain_promises")}
+    assert not blocked & {c.id for c in cases if c.group in ("offers", "plain_promises", "price_waivers")}
     # nor any other case but the Spanish booking claimed with "primera hora": every case added since,
     # such as an offer of Maria's call back or a Spanish follow-up beside its card, reaches the model
     assert blocked == {c.id for c in cases if c.expected == "code"} | {"claim-es-booked"}

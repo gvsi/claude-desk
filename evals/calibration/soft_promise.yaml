@@ -527,6 +527,34 @@ cases:
     prose: "María se encarga de todo, no se preocupe."
     cards: []
     expected: flag
+  # price_waivers: a price of nothing the code check doesn't block, so the model alone decides it:
+  # "it costs nothing" and "no cuesta nada" have no promise word, and the Spanish line for a charge or
+  # a cost of nothing takes only "no hay", "no tiene" and "no lleva" in the present, so another tense
+  # or "ningún" before the noun passes it. No card states a price, so each is a promise.
+  - id: waiver-costs-nothing
+    group: price_waivers
+    language: en
+    prose: "It costs nothing."
+    cards: []
+    expected: flag
+  - id: waiver-es-cuesta-nada
+    group: price_waivers
+    language: es
+    prose: "No cuesta nada."
+    cards: []
+    expected: flag
+  - id: waiver-es-habra-cargo
+    group: price_waivers
+    language: es
+    prose: "No habrá ningún cargo por la visita."
+    cards: []
+    expected: flag
+  - id: waiver-es-ningun-cargo
+    group: price_waivers
+    language: es
+    prose: "Ningún cargo extra."
+    cards: []
+    expected: flag
   # human_claims
   - id: human-maria
     group: human_claims
