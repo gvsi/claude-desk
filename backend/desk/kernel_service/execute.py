@@ -173,7 +173,7 @@ async def _target(ctx: KernelCtx, decision: DecisionRow) -> _Target:
                           .execution_options(**fresh))
     return _Target(decision=decision, action_row=action_row, action=decide.normalized_action(action_row),
                    session_row=session_row, desk_row=desk_row, business=business,
-                   adapter=adapters.ADAPTERS.get(action_row.tool),
+                   adapter=await adapters.resolve(ctx, decision.desk_id, action_row.tool),
                    principal=principal_for(session_row, desk_id=decision.desk_id))
 
 
@@ -210,8 +210,9 @@ async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str) -> Sess
     action ends `unknown`, never fenced). The action's tool is read without a lock, which waits
     for nothing."""
     tool = await _one(ctx, select(ActionRow.tool).where(ActionRow.action_id == action_id))
+    desk_id = await _one(ctx, select(ActionRow.desk_id).where(ActionRow.action_id == action_id))
     return await _share_session(ctx, session_id,
-                                exclusive=getattr(adapters.ADAPTERS.get(tool), "locks_session", False))
+                                exclusive=getattr(await adapters.resolve(ctx, desk_id, tool), "locks_session", False))
 
 
 def _checked(execution: Execution) -> Checked | None:
@@ -403,7 +404,8 @@ def _receipt_ready(target: _Target) -> None:
     ledger head while it waits for a row."""
     try:
         decide.status_line("executed", tool=target.action.tool, session=target.session_row,
-                           owner=target.business.owner_display_name)
+                           owner=target.business.owner_display_name,
+                           business=target.adapter.profile.business if target.adapter is not None else None)
     except KeyError:
         decision = target.decision
         copy_id, desk_id, session_id = decision.copy_id, decision.desk_id, decision.session_id
@@ -584,7 +586,7 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
         raise RuntimeError(f"{path}_without_session")
     if (gone := _gone(target, session, path)) is not None:
         return await _refused_in_t2(ctx, target, execution, gone, path)
-    if path == "approved" and releases_private_data(target.action.tool):
+    if path == "approved" and releases_private_data(target.action.tool, target.adapter):
         # step 6 runs an approved hold for a closed session, but never one that releases private data
         if (ended := await session_ended(ctx, target.decision)) is not None:
             return await _refused_in_t2(ctx, target, execution, ended, path, reason="session_ended")
@@ -813,10 +815,10 @@ async def _narrow_to_owner(ctx: KernelCtx, desk_id: str, facts: list[Fact]) -> i
     return len(rows)
 
 
-def releases_private_data(tool: str) -> bool:
+def releases_private_data(tool: str, resolved=None) -> bool:
     """Whether the tool's adapter declares that its result gives the session data it reads only as
     its verified person (`releases_private_data`); an unknown tool counts as one that does."""
-    adapter = adapters.ADAPTERS.get(tool)
+    adapter = resolved if resolved is not None else adapters.ADAPTERS.get(tool)
     return True if adapter is None else adapter.releases_private_data
 
 

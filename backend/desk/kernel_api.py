@@ -13,6 +13,8 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, Str
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     ActorKind,
+    AnyToolName,
+    BusinessTool,
     ApprovalAnswer,
     ApprovalResult,
     BusinessSeed,
@@ -220,7 +222,7 @@ class ToolsConnectRequest(KernelRequest):     # POST /tools/connect
 class ToolPin(BaseModel):                  # a tool and the hash the owner reviewed: an MCP tool's listed definition_sha256,
     model_config = ConfigDict(extra="forbid")   # a native tool's adapter profile_sha256
 
-    tool: ToolName
+    tool: AnyToolName
     definition_sha256: Sha256Hex
 
 def each_tool_once(tools: list[ToolPin]) -> list[ToolPin]:
@@ -231,7 +233,7 @@ def each_tool_once(tools: list[ToolPin]) -> list[ToolPin]:
 
 class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole connector in one batch, one tool a list of one
     desk_id: str
-    tools: list[ToolPin] = Field(min_length=1, max_length=len(get_args(ToolName)))
+    tools: list[ToolPin] = Field(min_length=1, max_length=len(get_args(ToolName)) + 8)
     enable: bool                          # true drafts one rules version enabling them all; false disables them all at once
 
     @model_validator(mode="after")
@@ -451,3 +453,11 @@ KERNEL_ROUTES: dict[str, tuple[type[BaseModel] | None, type | None]] = {
     "GET /ledger/{desk_id}?verify=true": (None, LedgerPage),
     "GET /health": (None, Health),
 }
+
+
+class BusinessToolsRequest(KernelRequest):
+    tools: list[BusinessTool] = Field(max_length=8)
+
+
+KERNEL_REQUESTS += (BusinessToolsRequest,)
+KERNEL_ROUTES["PUT /desks/{id}/business_tools"] = (BusinessToolsRequest, DeskUpdated)

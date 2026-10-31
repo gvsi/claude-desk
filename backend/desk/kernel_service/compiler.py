@@ -144,12 +144,19 @@ def desk_schema(profiles: Iterable[ToolProfile]) -> dict[str, Any]:
                 raise ValueError(f"{profile.tool}: the base schema doesn't declare it")
             continue
         principals = MCP_PRINCIPAL_TYPES.get(profile.tool)
+        resource = MCP_RESOURCE_TYPE
+        if profile.source == "business":
+            from desk.kernel_service.adapters.blocks import profile as block_profile
+            if profile.business is None or block_profile(profile.tool, profile.business).effects != profile.effects:
+                raise ValueError(f"{profile.tool}: invalid business profile")
+            principals = ("Visitor", "Agent")
+            resource = "Slot" if profile.business.config.block == "typed_booking" else "Desk"
         groups = [f"effect:{effect}" for effect in profile.effects]
         if principals is None or not groups or any(group not in actions for group in groups):
             raise ValueError(f"{profile.tool}: no action can be declared for it")
         actions[profile.tool] = {
             "memberOf": [{"id": group} for group in groups],
-            "appliesTo": {"principalTypes": list(principals), "resourceTypes": [MCP_RESOURCE_TYPE],
+            "appliesTo": {"principalTypes": list(principals), "resourceTypes": [resource],
                           "context": {"type": "Ctx"}},
         }
     return schema

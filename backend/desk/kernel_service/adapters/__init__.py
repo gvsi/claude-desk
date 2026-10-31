@@ -44,19 +44,40 @@ def registered_profiles(source: Literal["native", "mcp"] | None = None) -> list[
 def profile_sha256(profile: ToolProfile) -> str:
     """sha256 of `canonical_json` of the profile without its status or pending fields."""
     fields = profile.model_dump(mode="json", exclude=set(UNHASHED_PROFILE_FIELDS))
+    if profile.business is None:
+        fields.pop("business", None)  # preserve every existing native and MCP pin and proof
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(fields)).encode()).hexdigest()
 
 
-def resolve(tool: str, row: object) -> Adapter | None:
-    """Resolve only a registered adapter with an intact pinned row profile.
+async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
+    """Resolve only the copy's own Desk row; malformed or stale block profiles fail closed."""
+    from sqlalchemy import select
+    from desk.contracts import is_business_tool
+    from desk.db.models import Tool
+    from desk.kernel_service.adapters import blocks
 
-    Business adapters can extend this resolver when their tool rows land. Unknown tools
-    and stale profiles grant no callable capability.
-    """
-    profile = getattr(row, "profile", None)
-    if profile is None or profile_sha256(profile) != getattr(row, "profile_sha256", None):
+    if not is_business_tool(tool):
+        return ADAPTERS.get(tool)
+    row = (await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+        Tool.desk_id == desk_id, Tool.tool == tool)))).one_or_none()
+    if row is None or row.source != "business" or row.profile is None or row.profile.business is None:
         return None
-    return ADAPTERS.get(tool)
+    try:
+        expected = blocks.profile(tool, row.profile.business)
+        if (row.profile.tool != tool or row.profile.source != "business"
+                or row.definition_sha256 != expected.definition_sha256
+                or row.profile.definition_sha256 != expected.definition_sha256
+                or row.profile_sha256 != profile_sha256(expected)
+                or row.profile_sha256 != profile_sha256(row.profile)):
+            return None
+        # TODO PR2 typed booking, PR3 urgent, PR4 purpose payment: add their trusted execution hooks.
+        if expected.business.config.block != "intake":
+            return None
+        adapter = blocks.BlockAdapter(expected)
+        _check(adapter)
+        return adapter
+    except (ValueError, TypeError, KeyError):
+        return None
 
 
 def _check(adapter: Adapter) -> None:
