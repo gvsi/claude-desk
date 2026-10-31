@@ -1176,14 +1176,18 @@ async def test_the_owners_rule_is_quoted_whole(app, client, registry):
     ("no_agent_pay_out", "An agent can never be paid money out, so it was refused."),
     ("agent_charge_within_mandate", "It was more than this agent's signed limit allows, so it was refused."),
     ("money_has_amount", "A payment needs an amount above zero and within the platform's limit, so it was refused."),
-    ("auto_money_cap", "It was over your limit for payments that go through without you, so it was refused."),
 ])
 def test_a_baseline_refusal_names_the_deciding_rule(baseline_id, said):
     call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
                            action=None, version_row=SimpleNamespace(cards=[]), quotes={})
+    if baseline_id == "agent_charge_within_mandate":
+        call.principal = SimpleNamespace(kind="agent")
+        call.mandate_remaining_cents = 1_000
+        call.action = SimpleNamespace(amount_cents=2_000, discount_bp=0)
     evaluation = decide.Evaluation("refuse", [f"B.{baseline_id}"], [], None, None,
                                  strike=False, needed_review=False)
-    assert decide._reason_plain(call, "refuse", None, evaluation) == f"A stranger asked to book a visit. {said}"
+    assert decide._reason_plain(call, "refuse", None, evaluation) == (
+        f"{decide._asked(call.subject, call.req.call.tool, call.action)} {said}")
 
 
 def test_a_refusal_without_a_deciding_policy_does_not_blame_the_baseline():
@@ -1192,6 +1196,17 @@ def test_a_refusal_without_a_deciding_policy_does_not_blame_the_baseline():
     evaluation = decide.Evaluation("refuse", [], [], None, None, strike=False, needed_review=False)
     assert decide._reason_plain(call, "refuse", None, evaluation) == (
         "A stranger asked to book a visit. None of your rules covers this yet, so it was refused.")
+
+
+@pytest.mark.parametrize("remaining", [None, 2_000])
+def test_a_mandate_refusal_without_an_exceeded_limit_keeps_the_generic_line(remaining):
+    call = SimpleNamespace(subject="An agent", req=SimpleNamespace(call=SimpleNamespace(tool="native.charge_mandate")),
+                           action=SimpleNamespace(amount_cents=2_000, discount_bp=0), mandate_remaining_cents=remaining,
+                           principal=SimpleNamespace(kind="agent"), version_row=SimpleNamespace(cards=[]), quotes={})
+    evaluation = decide.Evaluation("refuse", ["B.agent_charge_within_mandate"], [], None, None,
+                                 strike=False, needed_review=False)
+    assert decide._reason_plain(call, "refuse", None, evaluation).endswith(decide.BASELINE_PLAIN)
+    assert decide._status_key(call, "refused", None, evaluation) == "refused"
 
 
 @pytest.mark.parametrize("policy_ids", [["F.never.no-quotes"], ["F.never.no-quotes", "B.same_copy"]])
@@ -1205,16 +1220,18 @@ def test_an_owner_never_card_keeps_its_reason(policy_ids):
         "A stranger asked to get a quote. Your rule says never: “No quotes in chat.”")
 
 
-def test_every_baseline_rule_has_an_owner_explanation():
+def test_every_baseline_rule_that_can_refuse_shares_its_owner_explanation_with_probes():
     baseline_ids = set(re.findall(r'@id\("([^"]+)"\)', compiler.BASELINE))
     assert baseline_ids
-    assert decide.BASELINE_RULE_PLAIN.keys() == baseline_ids
+    # The approvable evaluation has owner_approved=true: the auto cap holds, never refuses.
+    assert decide.BASELINE_RULE_PLAIN.keys() == baseline_ids - {"auto_money_cap"}
+    assert decide.BASELINE_RULE_PLAIN is activation.BASELINE_REASONS
 
 
 def test_two_deciding_baseline_rules_keep_the_generic_explanation():
     call = SimpleNamespace(subject="A stranger", req=SimpleNamespace(call=SimpleNamespace(tool="native.book")),
                            action=None, version_row=SimpleNamespace(cards=[]), quotes={})
-    evaluation = decide.Evaluation("refuse", ["B.money_has_amount", "B.auto_money_cap"], [], None, None,
+    evaluation = decide.Evaluation("refuse", ["B.agent_charge_within_mandate", "B.money_has_amount"], [], None, None,
                                  strike=False, needed_review=False)
     assert decide._reason_plain(call, "refuse", None, evaluation) == (
         "A stranger asked to book a visit. The always-on safety rules don't allow it.")
