@@ -129,3 +129,4 @@ One design PR from `plan/08a-ux-craft-about`, titled `feat(web): play the About 
 - Played set across tests (Opus, P2): a test-only `forgetPlayedFigures()` called in each motion file's `afterEach`.
 - P3s taken: the no-observer test moved to the motion project (both seats); the page checks that run with motion wait for rest, with an owning task and run commands; the e2e print and Back/Forward steps get sound premises and pass conditions; the second moment covers both About pages.
 - Round cap reached (2 completed rounds, the second with no P1). These fixes aren't re-reviewed as a plan; each task's review and the PR panel check them.
+- Task 2: P3 parked — a step that already finished can relight once if the layout crosses 1100 px during the 2.44 s trace (rotating a tablet mid-trace); the figure still ends at rest, and a switch after the play has ended replays nothing — rare and harmless, needs per-part played state across remounts.
