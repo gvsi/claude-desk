@@ -194,7 +194,7 @@
     "/api/owner/desks": {
       "get": {
         "summary": "Desks",
-        "description": "The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher.",
+        "description": "The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher. Each Desk\nnames its setup interview while that isn't finished.",
         "operationId": "owner_desks",
         "responses": {
           "200": {
@@ -8339,6 +8339,33 @@
         ],
         "title": "DeskSeed"
       },
+      "DeskSetup": {
+        "properties": {
+          "interview_id": {
+            "type": "string",
+            "title": "Interview Id"
+          },
+          "step": {
+            "type": "string",
+            "enum": [
+              "questions",
+              "tools",
+              "rules",
+              "situations",
+              "safety_check",
+              "preview"
+            ],
+            "title": "Step"
+          }
+        },
+        "type": "object",
+        "required": [
+          "interview_id",
+          "step"
+        ],
+        "title": "DeskSetup",
+        "description": "A Desk's setup interview that hasn't gone live: its ID (`GET /api/owner/setup/{id}`) and the step it is at.\nSetup finishes at its go-live step (step `live`); an interview whose rules are confirmed but that hasn't gone live\n(`preview`) is still unfinished, since going live is setup's last step."
+      },
       "DeskSummary": {
         "properties": {
           "desk_id": {
@@ -8367,6 +8394,16 @@
           "answering": {
             "type": "boolean",
             "title": "Answering"
+          },
+          "setup": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeskSetup"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -8376,9 +8413,11 @@
           "name",
           "business_name",
           "hours",
-          "answering"
+          "answering",
+          "setup"
         ],
-        "title": "DeskSummary"
+        "title": "DeskSummary",
+        "description": "One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back\ninto it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.\n`answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its\nsetup."
       },
       "DeskUpdated": {
         "properties": {
