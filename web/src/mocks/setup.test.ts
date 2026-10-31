@@ -1,12 +1,14 @@
 /**
  * The mock's setup interview, driven the way its handlers drive it: the business's name it reads
- * from the owner's description, the way a reader would, and the slug and first question that follow.
+ * from the owner's description, the way a reader would, and the slug and first question that follow;
+ * and the unfinished setup the owner's Desks name until the Desk goes live.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import type { SetupState } from '../api/views.ts';
+import type { RouteKey } from '../api/routes.ts';
+import type { BusinessOut, CopyOut, SetupState } from '../api/views.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
-import { setupPublicDesk } from './setup.ts';
+import { SETUP_QUESTIONS, setupPublicDesk } from './setup.ts';
 import { mockStore } from './store.ts';
 
 interface Started {
@@ -303,5 +305,65 @@ describe("setup's examples", () => {
         expect(desk.about, chip).toBe(about);
       }
     }
+  });
+});
+
+describe("a Desk's unfinished setup, in the owner's Desks", () => {
+  /** Each of the copy's Desks, by id, with the setup interview the owner's Desks name for it. */
+  async function setups(): Promise<Map<string, unknown>> {
+    const answer = await mockStore.dispatch('desks');
+    if ('network' in answer || answer.status !== 200) throw new Error('the mock lists the Desks');
+    return new Map((answer.body as BusinessOut[]).flatMap((business) => business.desks.map((desk) => [desk.desk_id, desk.setup])));
+  }
+
+  /** Answers a route of the interview, or throws. */
+  async function step(key: RouteKey, id: string, body?: unknown): Promise<void> {
+    const answer = await mockStore.dispatch(key, { params: { id }, body });
+    if ('network' in answer || answer.status !== 200) throw new Error(`the mock answers ${key}`);
+  }
+
+  it('a_desk_made_by_setup_names_its_interview_until_it_goes_live', async () => {
+    // The seeded Desk was made without setup: it names none.
+    const seeded = await setups();
+    expect([...seeded.values()]).toEqual([null]);
+
+    const body = { description: "Okafor Plumbing. I'm Daniel.", timezone: 'America/Los_Angeles', idempotency_key: 'start-unfinished' };
+    const started = await mockStore.dispatch('startSetup', { body });
+    if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+    const { interview_id: id, desk_id: deskId } = started.body as SetupState;
+    const setupOf = async () => (await setups()).get(deskId);
+
+    // From the start of setup, at each step it stops at, until it goes live.
+    expect(await setupOf()).toEqual({ interview_id: id, step: 'questions' });
+    await step('setupConsent', id, { allow: false });
+    for (const question of SETUP_QUESTIONS) await step('setupAnswer', id, { question: question.key, text: 'Yes, that works.' });
+    expect(await setupOf()).toEqual({ interview_id: id, step: 'tools' });
+    await step('setupRules', id);
+    expect(await setupOf()).toEqual({ interview_id: id, step: 'rules' });
+    await step('setupSituations', id);
+    expect(await setupOf()).toEqual({ interview_id: id, step: 'situations' });
+    await step('setupSafetyCheck', id);
+    expect(await setupOf()).toEqual({ interview_id: id, step: 'safety_check' });
+    // Its rules confirmed and Answering still off, setup isn't finished until it goes live.
+    await step('setupConfirm', id);
+    expect(await setupOf()).toEqual({ interview_id: id, step: 'preview' });
+    await step('goLive', id);
+    expect(await setupOf()).toBeNull();
+    // And the seeded Desk still names none.
+    const [seededId] = seeded.keys();
+    expect((await setups()).get(seededId ?? '')).toBeNull();
+  });
+
+  it('the_copy_names_it_too', async () => {
+    // The copy (`me`) lists the same Desks as the switcher does, each naming its unfinished setup.
+    const body = { description: "Okafor Plumbing. I'm Daniel.", timezone: 'America/Los_Angeles', idempotency_key: 'start-copy' };
+    const started = await mockStore.dispatch('startSetup', { body });
+    if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+    const { interview_id: id, desk_id: deskId } = started.body as SetupState;
+    const me = await mockStore.dispatch('me');
+    if ('network' in me || me.status !== 200) throw new Error('the mock reads the copy');
+    const desks = (me.body as CopyOut).desks;
+    expect(desks.map((desk) => [desk.desk_id, desk.setup])).toEqual([...(await setups())]);
+    expect(desks.find((desk) => desk.desk_id === deskId)?.setup).toEqual({ interview_id: id, step: 'questions' });
   });
 });

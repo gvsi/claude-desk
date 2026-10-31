@@ -4,12 +4,15 @@
  * then a scripted interview of seven questions, the money limit among them. Its tools step lists
  * the new Desk's tools and connects the mock payments server; its rules are drafted from the
  * answers at the answered money limit, tried on real situations and on a safety check, and confirmed
- * with Answering still off; going live turns Answering on. The interviews are kept per copy beside
- * its world, so a start over leaves none behind.
+ * with Answering still off; going live turns Answering on. Until then the owner's Desks name the
+ * interview and its step. The interviews are kept per copy beside its world, so a start over leaves
+ * none behind.
  */
 import type { Probe, ProbeResult, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   BusinessOut,
+  DeskSetup,
+  DeskSummary,
   PaymentLinkOut,
   PolicyVersionOut,
   QuestionKey,
@@ -833,8 +836,24 @@ export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: L
 }
 
 /**
+ * A Desk's setup interview while it hasn't gone live, as the owner's Desks name it (issue 233): null
+ * for a Desk setup didn't make, and once its interview is live.
+ */
+function unfinishedSetup(world: MockWorld, deskId: string): DeskSetup | null {
+  const interview = interviewForDesk(world, deskId);
+  if (!interview || interview.state.step === 'live') return null;
+  return { interview_id: interview.state.interview_id, step: interview.state.step };
+}
+
+/** The copy's Desks as the copy (`me`) lists them: each Desk setup made names its setup until it goes live. */
+export function withSetupDesks(world: MockWorld, desks: DeskSummary[]): DeskSummary[] {
+  return desks.map((desk) => ({ ...desk, setup: unfinishedSetup(world, desk.desk_id) }));
+}
+
+/**
  * The copy's businesses as the owner reads them: each Desk setup made is a business of its own,
- * with its owner, as the API makes one at the start of setup; the others stay as they are.
+ * with its owner, as the API makes one at the start of setup, naming its setup until it goes live;
+ * the others stay as they are.
  */
 export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[]): BusinessOut[] {
   const made = [...interviewsOf(world).values()];
@@ -849,7 +868,7 @@ export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[])
         name: interview.business,
         owner_display_name: interview.ownerName ?? interview.business,
         timezone: interview.timezone,
-        desks: [{ ...desk.summary }],
+        desks: [{ ...desk.summary, setup: unfinishedSetup(world, desk.summary.desk_id) }],
       },
     ];
   });

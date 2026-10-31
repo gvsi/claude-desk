@@ -46,6 +46,22 @@ export interface DeskSummary {
   business_name: string;
   hours: HoursWindow[];
   answering: boolean;
+  /**
+   * The Desk's setup interview while it hasn't gone live, so Today can lead back into it; null once
+   * the Desk is live, and for a Desk made without setup. Pending the API's `DeskSummary.setup`
+   * (issue 233): typed here, and optional, until the regenerated client has it. A Desk without it
+   * has no unfinished setup.
+   */
+  setup?: DeskSetup | null;
+}
+
+/**
+ * A Desk's setup interview that hasn't gone live (`DeskSummary.setup`, pending with it): its id,
+ * which `/app/setup/{interview_id}` reopens at its step, and the step it stopped at.
+ */
+export interface DeskSetup {
+  interview_id: string;
+  step: SetupStep;
 }
 
 /** The demo copy this browser's owner cookie names (copies, `me`, `start_over`). */
