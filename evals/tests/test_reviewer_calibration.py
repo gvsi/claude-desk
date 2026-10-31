@@ -1,5 +1,6 @@
 """Offline checks for the paired action reviewer measurement."""
 
+import asyncio
 import csv
 import hashlib
 import json
@@ -234,6 +235,7 @@ def test_both_arms_use_the_production_call_and_save_samples_and_shared_spend(fak
     [path] = deps.out_dir.glob("reviewer-old-new-*.json")
     result = json.loads(path.read_text())
     assert len(result["records"]) == 30
+    assert not result["partial"]
     for record in result["records"]:
         assert record["prompt_sha256"] == hashlib.sha256(f'{record["arm"]} prompt'.encode()).hexdigest()
         assert record["status"] == "ok" and record["usage"]["input_tokens"] == 100
@@ -428,6 +430,39 @@ def test_unpriced_calls_stop_at_the_cap_and_save_incomplete_results(fake_run, ca
     [path] = deps.out_dir.glob("*.json")
     saved = json.loads(path.read_text())
     assert saved["stopped_by_cap"] and not saved["over_cap"]
+    assert saved["partial"]
     assert not saved["analysis"]["complete"] and not saved["analysis"]["accepted"]
     assert 0 < len(requests) == saved["calls"] < 6
     assert 0 < saved["spend_usd"] <= 0.06
+
+
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt, asyncio.CancelledError])
+def test_cancel_saves_paid_answers_as_partial_with_the_spend_row(fake_run, interruption):
+    deps, requests = fake_run
+    original = deps.client("fake-key").messages.create
+
+    async def create(**request):
+        if len(requests) == 2:
+            requests.append(request)
+            raise interruption()
+        return await original(**request)
+
+    deps.client = lambda _: SimpleNamespace(messages=SimpleNamespace(create=create))
+    with pytest.raises(interruption):
+        reviewer.main(["--samples", "1", "--max-usd", "2"], deps)
+
+    [spend] = list(csv.DictReader(deps.spend_file.open()))
+    assert spend["runs"] == "3"
+    paths = list(deps.out_dir.glob("reviewer-old-new-*.json"))
+    assert len(paths) == 1, "interrupted runs must retain answers alongside spend"
+    saved = json.loads(paths[0].read_text())
+    assert saved["partial"] and not saved["stopped_by_cap"] and not saved["over_cap"]
+    assert saved["calls"] == len(requests) == 3
+    assert saved["estimated_calls"] == 1
+    assert len(saved["records"]) == 2
+    assert {record["arm"] for record in saved["records"]} == {"old", "new"}
+    assert all(record["status"] == "ok" for record in saved["records"])
+    assert saved["spend_row"] == spend["pass_id"]
+    assert saved["spend_usd"] == pytest.approx(float(spend["total_usd"]), abs=0.000001)
+    assert not saved["analysis"]["complete"] and not saved["analysis"]["accepted"]
+    assert "complete=False" in reviewer.rescore(paths[0], reviewer.load_cases(deps.cases))

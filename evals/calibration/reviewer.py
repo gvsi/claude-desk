@@ -12,7 +12,7 @@ PROMPT_REF / --prompt-ref selects the new arm; OLD_PROMPT_REF / --old-prompt-ref
 selects the old arm. Defaults are feat/reviewer-criteria and origin/main. Results
 go to evals/calibration/results/reviewer-old-new-<UTC timestamp>.json and paid
 calls append one row to the shared calibration spend ledger. Unpriced calls are
-charged their reservation. A cap stop saves incomplete results and exits 1.
+charged their reservation. Cap stops and cancellations save partial results.
 """
 
 import argparse
@@ -426,6 +426,7 @@ async def run(deps: Deps, cases: list[Case], prompts: dict[str, Prompt], samples
     stamp = now.strftime("%Y%m%d-%H%M%S")
     row_id = f"{CALIBRATION_PREFIX}reviewer-old-new-{stamp}"
     stopped = False
+    finished = False
     try:
         # Interleave arms per case and sample to reduce ordering drift.
         for number in range(1, samples + 1):
@@ -456,6 +457,7 @@ async def run(deps: Deps, cases: list[Case], prompts: dict[str, Prompt], samples
                     break
             if stopped:
                 break
+        finished = True
     finally:
         if meter.calls:
             usd = f"{meter.spent:.6f}"
@@ -465,30 +467,30 @@ async def run(deps: Deps, cases: list[Case], prompts: dict[str, Prompt], samples
                 "desk_usd": usd, "simulator_usd": "0.000000", "claude_api_usd": usd, "total_usd": usd,
                 "estimated_usd": f"{meter.estimated_usd:.6f}",
             })
-    analysis = analyze(cases, records, samples)
-    payload = {
-        "about": "Paired reviewer answers. Analysis is as of the run; --rescore against current cases is "
-                 "authoritative. Stale input_sha256 answers are never scored. Diagnostics are excluded.",
-        "created_at": now.isoformat(), "git_sha": results.git(deps.root, "rev-parse", "HEAD").strip(),
-        "model": decisions.REVIEW_MODEL, "samples": samples,
-        "settings": {"max_tokens": decisions.REVIEW_MAX_TOKENS, "timeout_s": decisions.REVIEW_TIMEOUT_S,
-                     "thinking": {"type": "between_tools"}, "effort": "low"},
-        "prompts": {arm: {"text": p.text, "source": p.source, "sha256": p.sha256} for arm, p in prompts.items()},
-        "estimate_usd": estimate, "max_usd": max_usd, "spend_usd": meter.spent, "spend_row": row_id,
-        "calls": meter.calls, "estimated_calls": meter.estimated, "estimated_usd": meter.estimated_usd,
-        "stopped_by_cap": stopped, "over_cap": meter.over,
-        "cases": [case.model_dump(mode="json") for case in cases],
-        "records": [record.model_dump(mode="json") for record in records], "analysis": analysis,
-    }
-    deps.out_dir.mkdir(parents=True, exist_ok=True)
-    path = deps.out_dir / f"reviewer-old-new-{stamp}.json"
-    suffix = 1
-    while path.exists():
-        suffix += 1
-        path = deps.out_dir / f"reviewer-old-new-{stamp}-{suffix}.json"
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
-    print(render(analysis))
-    print(f"spend: ${meter.spent:.6f}; calls: {meter.calls}; results: {path}")
+        analysis = analyze(cases, records, samples)
+        payload = {
+            "about": "Paired reviewer answers. Analysis is as of the run; --rescore against current cases is "
+                     "authoritative. Stale input_sha256 answers are never scored. Diagnostics are excluded.",
+            "created_at": now.isoformat(), "git_sha": results.git(deps.root, "rev-parse", "HEAD").strip(),
+            "model": decisions.REVIEW_MODEL, "samples": samples,
+            "settings": {"max_tokens": decisions.REVIEW_MAX_TOKENS, "timeout_s": decisions.REVIEW_TIMEOUT_S,
+                         "thinking": {"type": "between_tools"}, "effort": "low"},
+            "prompts": {arm: {"text": p.text, "source": p.source, "sha256": p.sha256} for arm, p in prompts.items()},
+            "estimate_usd": estimate, "max_usd": max_usd, "spend_usd": meter.spent, "spend_row": row_id,
+            "calls": meter.calls, "estimated_calls": meter.estimated, "estimated_usd": meter.estimated_usd,
+            "stopped_by_cap": stopped, "over_cap": meter.over, "partial": not finished or stopped or meter.over,
+            "cases": [case.model_dump(mode="json") for case in cases],
+            "records": [record.model_dump(mode="json") for record in records], "analysis": analysis,
+        }
+        deps.out_dir.mkdir(parents=True, exist_ok=True)
+        path = deps.out_dir / f"reviewer-old-new-{stamp}.json"
+        suffix = 1
+        while path.exists():
+            suffix += 1
+            path = deps.out_dir / f"reviewer-old-new-{stamp}-{suffix}.json"
+        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+        print(render(analysis))
+        print(f"spend: ${meter.spent:.6f}; calls: {meter.calls}; results: {path}")
     if stopped or meter.over:
         raise Refused("run stopped at or exceeded --max-usd; saved partial results are incomplete")
     return path
