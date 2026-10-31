@@ -585,8 +585,9 @@ async def test_a_paid_link_stays_paid_whatever_happens_to_its_session(app, clien
 async def test_claude_cannot_draft_link_cancelled(app, client, reviewer, template):
     """Only the kernel tells a visitor a link was cancelled or a payment landed. Claude drafting either
     card is refused, even when it cites a fact of the kind the card renders that the conversation can
-    read: its charge, or its own payment link's, open or cancelled. Nor can the prose beside a card
-    say a link's amount."""
+    read: its charge, or its own payment link's, open or cancelled. Another visitor's chat citing that
+    charge or cancelled link gets the same answer, so the refusal says nothing of whose fact it is.
+    Nor can the prose beside a card say a link's amount."""
     copy = await rivera(app, client)
     visitor = await open_visitor(client, copy)
     cited = ["payment_link:paylink-aaaaaaaaaaaaaaaa"]
@@ -605,8 +606,11 @@ async def test_claude_cannot_draft_link_cancelled(app, client, reviewer, templat
         verdict = await checked(client, visitor, "Your $20.00 payment link was cancelled.")
         assert "number_in_prose" in [violation.kind for violation in verdict.violations]
         assert_handed_off(verdict)
-    for clauses in [[clause(template)], *([clause(template, fact_id)] for fact_id in cited)]:
-        verdict = await checked(client, visitor, "Here is where your payment stands.", clauses)
+    stranger = await open_visitor(client, copy)                         # another chat, citing this one's fact
+    drafts = [(visitor, [clause(template)]), *((visitor, [clause(template, fact_id)]) for fact_id in cited),
+              (stranger, [clause(template, cited[-1])])]
+    for chat, clauses in drafts:
+        verdict = await checked(client, chat, "Here is where your payment stands.", clauses)
         [violation] = verdict.violations
         assert (violation.kind, violation.rule_id, violation.span) == ("unknown_fact", "kernel_only_template",
                                                                        template)
