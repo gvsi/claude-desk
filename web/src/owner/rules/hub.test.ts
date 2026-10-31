@@ -82,7 +82,9 @@ describe('the Rules hub', () => {
       tool.tool === 'payments.list_charges' ? { ...tool, status: 'disabled' } : tool.tool === 'payments.create_refund' ? { ...tool, status: 'needs_review' } : tool,
     );
     expect(hubSections(rulesView(desk()), people()).map((s) => s.connector.id)).not.toContain('stripe');
-    desk().tools = desk().tools.map((tool) => (tool.tool === 'payments.create_refund' ? { ...tool, status: 'needs_review', pending_sha256: 'b'.repeat(64) } : tool));
+    desk().tools = desk().tools.map((tool) =>
+      tool.tool === 'payments.create_refund' ? { ...tool, status: 'needs_review', pending_sha256: 'b'.repeat(64), review_reason: 'changed' } : tool,
+    );
     const stripe = hubSections(rulesView(desk()), people()).find((s) => s.connector.id === 'stripe');
     expect(stripe?.tools.map((t) => [t.key, t.status])).toEqual([
       ['payments.list_charges', 'disabled'],

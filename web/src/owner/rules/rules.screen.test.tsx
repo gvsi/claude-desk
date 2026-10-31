@@ -96,7 +96,9 @@ const SECTIONS = ['Quotes', 'Bookings', 'Leads and callbacks', 'Verification', '
 describe('rules page', () => {
   it('rules_page_groups_outcomes_by_connector', async () => {
     // Refund's definition changed and waits for review.
-    desk().tools = desk().tools.map((tool) => (tool.tool === 'payments.create_refund' ? { ...tool, status: 'needs_review', pending_sha256: 'b'.repeat(64) } : tool));
+    desk().tools = desk().tools.map((tool) =>
+      tool.tool === 'payments.create_refund' ? { ...tool, status: 'needs_review', pending_sha256: 'b'.repeat(64), review_reason: 'changed' } : tool,
+    );
     const { screen } = await renderRoute(`${DESK}/rules`);
 
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
