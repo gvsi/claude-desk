@@ -131,14 +131,6 @@
   color: var(--text-primary);
 }
 
-/* The payment limit, leading the rules under it, in weight 520 as the board draws it. */
-.cd-setup-rules__limit {
-  margin: 0;
-  color: var(--text-primary);
-  font-weight: 520;
-  overflow-wrap: anywhere;
-}
-
 .cd-setup-rules__checks {
   display: flex;
   flex-direction: column;

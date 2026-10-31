@@ -6,17 +6,17 @@ import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
 import type { ConfirmToolBody, SetupState, ToolRow } from '../api/views.ts';
 import {
   Button,
-  ConnectorDirectory,
   ConnectorReview,
   EmptyState,
   LoadingLine,
   Notice,
   PageHeader,
+  SetupToolsList,
   describeEffects,
   rulesForTool,
-  type DirectoryRowView,
   type ReviewToolView,
   type RuleMode,
+  type SetupToolsRow,
 } from '../ds/index.ts';
 import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOn, toolState, type CatalogConnector, type ConnectorKey } from '../owner/connectors/catalog.ts';
 import { draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
@@ -102,27 +102,27 @@ function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewToolView {
 }
 
 /**
- * The new Desk's connectors: built in, and the ones it can connect, each saying whether it is on,
- * or with a way to add it.
- * stopgap: swap for the design system's setup tools list (N-R2-Setup-05-Tools: "Built in" and
- * "Connect your own", a status or "Add"/"Connect" on each row) once it is on main.
+ * The new Desk's connectors as the design system's setup tools list draws them (N-R2-Setup-05),
+ * each row read through `toolState`: Verification "Always on"; a connector with a tool on, or
+ * changed, "On"; one whose listed tools are none of them on, "Add" (built in) or, for Stripe once
+ * it can be connected, its tool count and "Connect". A built-in connector with no tools listed, and
+ * Google Calendar, which has none, aren't shown.
  */
-function ToolsList({ rows, connectable, onChoose }: { rows: readonly ToolRow[]; connectable: boolean; onChoose: (key: ConnectorKey) => void }) {
-  const builtIn: DirectoryRowView[] = [];
-  const connected: DirectoryRowView[] = [];
-  const available: DirectoryRowView[] = [];
+function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (key: ConnectorKey) => void) {
+  const builtIn: SetupToolsRow[] = [];
+  const external: SetupToolsRow[] = [];
   for (const connector of CONNECTORS) {
+    const outside = connector.view.source.kind === 'external';
     const listed = rows.some((row) => connector.tools.includes(row.tool));
-    const external = connector.view.source.kind === 'external';
-    const tools = connector.tools.length;
-    if (connectorOn(connector, rows)) {
-      const note = connector.key === 'verification' ? copy.alwaysOn : copy.on;
-      (external ? connected : builtIn).push({ connector: connector.view, tools, note });
-    } else if (listed || (connector.key === MOCK_PAYMENTS && connectable)) {
-      available.push({ connector: connector.view, tools, onConnect: () => onChoose(connector.key) });
+    let row: SetupToolsRow | null = null;
+    if (connector.key === 'verification' && listed) row = { connector: connector.view, state: 'always_on' };
+    else if (connectorOn(connector, rows)) row = { connector: connector.view, state: 'on' };
+    else if (listed || (connector.key === MOCK_PAYMENTS && connectable)) {
+      row = { connector: connector.view, state: 'off', onChoose: () => onChoose(connector.key), ...(outside ? { tools: connector.tools.length } : {}) };
     }
+    if (row !== null) (outside ? external : builtIn).push(row);
   }
-  return <ConnectorDirectory builtIn={builtIn} connected={connected} available={available} />;
+  return { builtIn, external };
 }
 
 /**
@@ -283,7 +283,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   } else if (rows.length === 0 && tools.data.connectable.length === 0) {
     list = <EmptyState title={copy.empty} body={copy.emptyBody} />;
   } else {
-    list = <ToolsList rows={rows} connectable={tools.data.connectable.includes('mock_payments')} onChoose={(key) => void choose(key)} />;
+    list = <SetupToolsList {...setupRows(rows, tools.data.connectable.includes('mock_payments'), (key) => void choose(key))} />;
   }
 
   return (

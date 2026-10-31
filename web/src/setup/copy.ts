@@ -9,8 +9,8 @@ import { UNREACHABLE_COPY } from '../ds/index.ts';
 /**
  * What setup says when its checking ran out of time on this side (the proving give-up) and the
  * interview hasn't moved on: the outcome is unknown, and pressing again joins the work still
- * running, so it never says the step wasn't done.
- * stopgap: the design system's line for an outcome still being checked.
+ * running, so it never says the step wasn't done. It is the design system's `UNREACHABLE_COPY`,
+ * the closest line the design system has: it asks the owner to try again in a moment.
  */
 export function stillCheckingLine(): string {
   return UNREACHABLE_COPY.en;

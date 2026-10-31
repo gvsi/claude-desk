@@ -58,44 +58,6 @@ function Line({ message }: { message: SetupMessage }) {
 }
 
 /**
- * Where the owner answers, and how an answer that didn't go through comes back: the line saying so
- * with "Try again", and the words back in the composer.
- * stopgap: swap for the design system's failed-send state on `Composer` (the words kept in the box
- * with "Try again" inside it, N-R2-Setup-04-Answer-Failed) once it is on main.
- */
-function AnswerBox({
-  failed,
-  sending,
-  retrying,
-  onSend,
-  onRetry,
-}: {
-  failed: boolean;
-  sending: boolean;
-  retrying: boolean;
-  onSend: (text: string) => void;
-  onRetry: () => void;
-}) {
-  return (
-    <>
-      {failed ? (
-        <Notice
-          tone="error"
-          action={
-            <Button variant="secondary" busy={retrying} onClick={onRetry}>
-              {copy.tryAgain}
-            </Button>
-          }
-        >
-          {copy.failed}
-        </Notice>
-      ) : null}
-      <Composer variant="owner" label={copy.composerLabel} placeholder={copy.placeholder} maxLength={ANSWER_MAX} disabled={sending || retrying} onSend={onSend} />
-    </>
-  );
-}
-
-/**
  * "A few questions": the setup conversation in order, Claude's words in its serif, the owner's as
  * theirs and each read of their memory or website as its label. First Claude asks to read the
  * owner's Claude memory ("Yes, use it" or "No, I'll type it"); then each answer goes to the API,
@@ -169,55 +131,45 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
       if (err instanceof ApiError && err.kind === 'conflict') {
         const now = await reread();
         setSending(null);
+        // Refused: the words stay, kept with "Try again" while the interview can't be read, else
+        // back in the composer for the question now asked.
         if (now === null) setFailed({ ...answer, unknown: false });
-        setRefill({ text: answer.text });
+        else setRefill({ text: answer.text });
         return;
       }
       const now = isUncertain(err) ? await reread() : null;
       setSending(null);
       if (now !== null && movedPast(now, answer.question)) return;
       setFailed({ ...answer, unknown: isUncertain(err) && now === null });
-      setRefill({ text: answer.text });
     }
   };
 
   /**
-   * "Try again", and Send while an answer didn't go through: the interview is read first, since the
-   * answer may have been taken. Moved past its question: one taken unknowingly moves the page on,
-   * with nothing sent; one refused keeps its words for the question now asked. Still on it: the
-   * words are sent as the answer to that question, never to another. A read that fails changes
-   * nothing, and the line stays.
+   * "Try again" reads the interview first, since the answer may have been taken. Moved past its
+   * question: one taken unknowingly moves the page on, with nothing sent; one refused comes back in
+   * the composer for the question now asked. Still on it: the same words are sent again as the
+   * answer to that question, never to another. A read that fails changes nothing, and the failed
+   * box stays.
    */
-  const retry = async (typed?: string) => {
+  const retry = async () => {
     if (failed === null || retrying) return;
     setRetrying(true);
     const now = await reread();
     setRetrying(false);
-    const box = composer.current?.querySelector('textarea');
-    const text = typed ?? (box?.value.trim() || failed.text);
-    if (now === null) {
-      if (typed !== undefined) setRefill({ text });
-      return;
-    }
-    if (movedPast(now, failed.question)) {
+    if (now === null) return;
+    const kept = failed;
+    if (movedPast(now, kept.question)) {
       setFailed(null);
-      if (failed.unknown) {
-        if (box) fillComposer(box, '');
-      } else if (typed !== undefined) {
-        setRefill({ text });
-      }
+      if (!kept.unknown) setRefill({ text: kept.text });
       return;
     }
-    if (box) fillComposer(box, '');
-    void submit({ question: failed.question, text });
+    void submit({ question: kept.question, text: kept.text });
   };
 
-  /** The composer's words: the answer to the question the page shows, unless one before them is still unsettled. */
+  /** The composer's words: the answer to the question the page shows. */
   const send = (text: string) => {
-    if (failed !== null) {
-      void retry(text);
-      return;
-    }
+    // While an answer is unsettled the composer shows it with "Try again", which reads first; nothing posts blind.
+    if (failed !== null || retrying) return;
     if (state.question === null) {
       // No question is waiting here: read where the interview stands, and keep the words.
       setRefill({ text });
@@ -232,7 +184,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     if (refill === null || !box || box.disabled) return;
     fillComposer(box, refill.text);
     setRefill(null);
-  }, [refill, sending, retrying]);
+  }, [refill, sending, retrying, failed]);
 
   return (
     <div className="cd-setup-step">
@@ -258,7 +210,15 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
         </>
       ) : (
         <div ref={composer}>
-          <AnswerBox failed={failed !== null} sending={sending !== null} retrying={retrying} onSend={send} onRetry={() => void retry()} />
+          <Composer
+            variant="owner"
+            label={copy.composerLabel}
+            placeholder={copy.placeholder}
+            maxLength={ANSWER_MAX}
+            disabled={sending !== null || retrying}
+            onSend={send}
+            {...(failed === null ? {} : { failed: { text: failed.text, line: copy.failed, onRetry: () => void retry() } })}
+          />
         </div>
       )}
     </div>

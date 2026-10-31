@@ -10,6 +10,7 @@ import {
   Card,
   EmptyState,
   LoadingLine,
+  MoneyLimit,
   Notice,
   OutcomeGroups,
   PageHeader,
@@ -63,21 +64,14 @@ function groupRows(cards: readonly RuleCard[], people: PeopleOut | null | undefi
 
 const CHECK_TONES: Readonly<Record<CheckStatus['status'], StatusTone>> = { checked: 'handled', failed: 'refused', unavailable: 'held' };
 
-/**
- * The payment limit, leading the rules under it, in its signed words. It has no "Change" in setup,
- * by the owner's ruling of 2026-10-30.
- */
-function MoneyLimitLine({ cents }: { cents: number }) {
-  return <p className="cd-setup-rules__limit cd-type-body">{moneyLimitLine(cents)}</p>;
-}
-
 /** The draft and its check: the limit, the rules by outcome, what is always on, and the check's lines. */
 function DraftRules({ draft, people, check }: { draft: RulesDraft; people: PeopleOut | null | undefined; check: CheckStatus }) {
   const rows = groupRows(draft.cards, people);
   const none = Object.values(rows).every((group) => group.length === 0);
   return (
     <>
-      <OutcomeGroups rows={rows} moneyLimit={<MoneyLimitLine cents={capOf(draft)} />} />
+      {/* The limit leads the rules, read-only: no "Change" in setup (owner ruling, 2026-10-30). */}
+      <OutcomeGroups rows={rows} moneyLimit={<MoneyLimit line={moneyLimitLine(capOf(draft))} prominent />} />
       {none ? <EmptyState title={copy.empty} body={copy.emptyBody} /> : null}
       <Card padding={16}>
         <AlwaysOnList />

@@ -10,7 +10,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
-import { OUTCOME_GROUP_WORDS, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { OUTCOME_GROUP_WORDS, SETUP_START_LOST_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { MEMORY_LABEL, SETUP_QUESTIONS } from '../mocks/setup.ts';
@@ -99,6 +99,9 @@ const UNPROVED = {
 
 const FAILED_LINE = "I couldn't answer just now. Your answer is still here; try again.";
 
+/** The composer's failed box, which keeps an answer that didn't go through beside "Try again". */
+const keptAnswer = (screen: RenderResult) => screen.getByRole('group', { name: 'Your answer' });
+
 /** Whether `el` is set in Claude's serif. */
 const inSerif = (el: Element) => /Source Serif 4/.test(getComputedStyle(el).fontFamily);
 
@@ -164,7 +167,7 @@ describe('setup', () => {
       await page.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
       mockStore.inject({ route: 'startSetup', ...lost });
       await page.getByRole('button', { name: 'Start' }).click();
-      await expect.element(page.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+      await expect.element(page.getByText(SETUP_START_LOST_COPY, { exact: true })).toBeVisible();
       await expect.element(page.getByRole('button', { name: 'Start' })).toBeDisabled();
       expect(requests('startSetup', mark)).toHaveLength(1);
       expect(page.getByText(refused, { exact: true }).elements()).toHaveLength(0);
@@ -188,9 +191,10 @@ describe('setup', () => {
     mockStore.inject({ route: 'setupAnswer', status: 429 });
     await screen.getByRole('button', { name: 'Send' }).click();
 
-    // The line says so, the words are back where the owner wrote them, and nothing moved on.
+    // The line says so, the words stay in the composer beside "Try again", and nothing moved on.
     await expect.element(screen.getByText(FAILED_LINE, { exact: true })).toBeVisible();
-    await expect.element(box).toHaveValue(answer);
+    await expect.element(keptAnswer(screen).getByText(answer, { exact: true })).toBeVisible();
+    expect(box.elements()).toHaveLength(0);
     await expect.element(screen.getByText('Question 1 of 7', { exact: true })).toBeVisible();
 
     await screen.getByRole('button', { name: 'Try again' }).click();
@@ -230,7 +234,10 @@ describe('setup', () => {
     mockStore.inject({ route: 'setup', status: 503 });
     await screen.getByRole('button', { name: 'Send' }).click();
     await expect.element(screen.getByText(FAILED_LINE, { exact: true })).toBeVisible();
-    await expect.element(box).toHaveValue(answer);
+    await expect.element(keptAnswer(screen).getByText(answer, { exact: true })).toBeVisible();
+    // Nothing can be typed or sent blind while it shows: only "Try again", which reads first.
+    expect(box.elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Send' }).elements()).toHaveLength(0);
     const failedReads = requests('setup', mark).length;
     expect(failedReads).toBe(1);
 
@@ -244,20 +251,6 @@ describe('setup', () => {
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
     const said = (await mockStore.dispatch('setup', { params: { id } })) as { body: SetupState };
     expect(said.body.messages.filter((m) => m.role === 'owner' && m.text === answer)).toHaveLength(1);
-
-    // The same, but the owner presses Send instead of "Try again": it reads first all the same.
-    const other = await startInterview();
-    const again = (await renderRoute(`/app/setup/${other.interview_id}`)).screen;
-    const otherBox = again.getByRole('textbox', { name: 'Your answer' });
-    await otherBox.fill(answer);
-    const from = mockStore.requests.length;
-    mockStore.inject({ route: 'setupAnswer', status: 'network', afterCommit: true });
-    mockStore.inject({ route: 'setup', status: 503 });
-    await again.getByRole('button', { name: 'Send' }).click();
-    await expect.element(again.getByText(FAILED_LINE, { exact: true })).toBeVisible();
-    await again.getByRole('button', { name: 'Send' }).click();
-    await expect.element(again.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
-    expect(requests('setupAnswer', from)).toHaveLength(1);
   });
 
   it('stale_answer_is_refused_and_kept', async () => {
@@ -330,10 +323,16 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
     const mark = mockStore.requests.length;
 
-    // Stripe, the mock payments server, with its Mock badge; connecting it lists its two tools, neither on.
+    // Built in, and the apps to connect: Stripe, the mock payments server, with its Mock badge and
+    // its two tools; connecting it lists them, neither on.
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Built in' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Connect your own' })).toBeVisible();
     const stripe = connectorRow(screen, 'Stripe');
     await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
-    await screen.getByRole('button', { name: /^(Connect|Add) Stripe$/ }).click();
+    await expect.element(stripe.getByText('2 tools', { exact: true })).toBeVisible();
+    // Verification is on every Desk.
+    await expect.element(connectorRow(screen, 'Verification').getByText('Always on', { exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Stripe/ })).toBeVisible();
     expect(requests('setupConnect', mark).map((r) => r.body)).toEqual([{ server: 'mock_payments' }]);
     const tools = ['payments.list_charges', 'payments.create_refund'];
@@ -347,7 +346,7 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Cancel' }).click();
     await expect.element(connectorRow(screen, 'Stripe')).toBeVisible();
     expect(connectorRow(screen, 'Stripe').getByText('On', { exact: true }).elements()).toHaveLength(0);
-    await screen.getByRole('button', { name: /^(Connect|Add) Stripe$/ }).click();
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Stripe/ })).toBeVisible();
     expect(requests('setupConnect', mark)).toHaveLength(1);
 
@@ -368,7 +367,7 @@ describe('setup', () => {
     expect(requests('confirmRules', mark).map((r) => r.body)).toEqual([{ version: drafted }]);
     expect(statuses(state, tools)).toEqual(['enabled', 'enabled']);
     await expect.element(connectorRow(screen, 'Stripe').getByText('On', { exact: true })).toBeVisible();
-    expect(screen.getByRole('button', { name: /^(Connect|Add) Stripe$/ }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Connect Stripe' }).elements()).toHaveLength(0);
     expect(requests('confirmTool', mark)).toHaveLength(1);
   });
 
@@ -381,7 +380,7 @@ describe('setup', () => {
     expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
 
     // A built-in connector has nothing to connect: its review opens at once.
-    await screen.getByRole('button', { name: /^(Add|Connect) Payments$/ }).click();
+    await screen.getByRole('button', { name: 'Add Payments' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Payments/ })).toBeVisible();
     const review = screen.getByRole('region', { name: 'Tools' });
     await expect.element(review.getByText('Payment link', { exact: true })).toBeVisible();
@@ -392,7 +391,7 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Cancel' }).click();
     await expect.element(connectorRow(screen, 'Payments')).toBeVisible();
     expect(connectorRow(screen, 'Payments').getByText('On', { exact: true }).elements()).toHaveLength(0);
-    await screen.getByRole('button', { name: /^(Add|Connect) Payments$/ }).click();
+    await screen.getByRole('button', { name: 'Add Payments' }).click();
 
     await screen.getByRole('button', { name: 'Turn it on' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Turn on Payments' })).toBeVisible();
@@ -414,7 +413,7 @@ describe('setup', () => {
   it('tool_confirm_conflicts_fail_closed', async () => {
     const state = await interviewAtTools();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await screen.getByRole('button', { name: /^(Connect|Add) Stripe$/ }).click();
+    await screen.getByRole('button', { name: 'Connect Stripe' }).click();
     await expect.element(screen.getByRole('button', { name: 'Turn it on' })).toBeVisible();
     const mark = mockStore.requests.length;
     const tools = ['payments.list_charges', 'payments.create_refund'];
@@ -452,6 +451,7 @@ describe('setup', () => {
 
     // The payment limit first, in its signed words, at the answered $500; never the retired words.
     await expect.element(screen.getByText(moneyLimitLine(50_000), { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Change' }).elements()).toHaveLength(0);
     expect(requests('setupRules')).toHaveLength(1);
     const draft = [...deskOf(state).drafts.values()].at(-1)?.draft;
     expect(draft?.auto_money_cap_cents).toBe(50_000);
@@ -532,6 +532,7 @@ describe('setup', () => {
     // An outcome the answers planned to depend on Claude's second look is what was planned: the
     // kernel's hold, with the second look, passed through as it came, and no flag.
     const deposit = rows.filter({ hasText: 'An agent pays the service call deposit' });
+    await expect.element(deposit.getByText('Does it if Claude’s second look agrees', { exact: true })).toBeVisible();
     await expect.element(deposit.getByText('Within its signed limit, checked by the reviewer.', { exact: true })).toBeVisible();
     expect(deposit.getByText('Not what we planned', { exact: true }).elements()).toHaveLength(0);
     const answered = (await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } })) as { body: SituationResult[] };
@@ -931,7 +932,7 @@ describe('setup', () => {
     // The review of a connector and its change, opened from the tools step.
     const tools = await interviewAtTools();
     const screen = await openStep(`/app/setup/${tools.interview_id}`, 'Stripe', 'desktop');
-    await screen.getByRole('button', { name: /^(Add|Connect) Payments$/ }).click();
+    await screen.getByRole('button', { name: 'Add Payments' }).click();
     await expect.element(screen.getByRole('button', { name: 'Turn it on' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     await screen.getByRole('button', { name: 'Turn it on' }).click();

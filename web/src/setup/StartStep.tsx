@@ -3,7 +3,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
-import { Button, Notice, PageHeader, TextField, UNREACHABLE_COPY } from '../ds/index.ts';
+import { Button, Notice, PageHeader, SETUP_START_LOST_COPY, TextField } from '../ds/index.ts';
 import { SETUP_COPY } from './copy.ts';
 
 /** Plan 02's limit on the business's description. */
@@ -16,14 +16,6 @@ function browserTimeZone(): string {
   } catch {
     return 'UTC';
   }
-}
-
-/**
- * What a start whose answer was lost says: it may have made the Desk, so it isn't called not done.
- * stopgap: the design system's setup-start-lost line.
- */
-function lostStartLine(): string {
-  return UNREACHABLE_COPY.en;
 }
 
 /**
@@ -81,7 +73,7 @@ export function StartStep() {
         {...(empty ? { error: copy.empty } : {})}
       />
       {error === null ? null : <Notice tone="error">{error}</Notice>}
-      {lost ? <Notice tone="error">{lostStartLine()}</Notice> : null}
+      {lost ? <Notice tone="error">{SETUP_START_LOST_COPY}</Notice> : null}
       <div className="cd-setup-step__actions">
         {lost ? (
           <Button variant="primary" size="main" type="submit" disabled>
