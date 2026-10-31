@@ -35,11 +35,11 @@ from desk.kernel_service.app import create_app
 from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FakeDecisions
-from .helpers import draft_and_confirm, kernel_ctx, ledger_rows, rows_of
-from .test_adapters import Rivera, rivera
+from .helpers import connections_of, draft_and_confirm, kernel_ctx, ledger_rows, rows_of, until_waiting
+from .test_adapters import Rivera, quote_args, rivera
 from .test_approvals import answered
 from .test_context import context_of
-from .test_decide import Visitor, open_visitor, set_session
+from .test_decide import Visitor, decided, open_visitor, set_session
 from .test_execute import executed
 from .test_money_cap import post_draft
 from .test_payment_links import confirm, delay, link_for, nothing_listening, quoted, view
@@ -182,6 +182,38 @@ async def test_read_during_completion_leaves_it_alone(app, client, reviewer, moc
     assert [(each.state, each.cancel_reason) for each in seen] == [("issued", None)] * 2
     assert (await asyncio.wait_for(completion, 5)).state == "paid"
     assert (await view(client, link.token)).state == "paid" and len(charges(copy)) == 1
+
+
+async def test_a_decision_during_a_completion_waits_for_it_and_both_finish(app, client, reviewer, monkeypatch):
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    link = await rv_link(app, client, reviewer, copy, visitor)
+    at_provider, answer = asyncio.Event(), asyncio.Event()
+    complete = payments.ProviderClient.complete
+
+    async def held_at_the_provider(self, checkout_id: str):
+        at_provider.set()
+        await answer.wait()
+        return await complete(self, checkout_id)
+
+    monkeypatch.setattr(payments.ProviderClient, "complete", held_at_the_provider)
+    with connections_of(app) as pids:
+        completing = asyncio.create_task(completed(client, link.token))
+        await asyncio.wait_for(at_provider.wait(), 5)   # C2 holds the session row FOR SHARE at the provider
+        deciding = asyncio.create_task(decided(client, visitor, "native.quote", quote_args(("deposit", 1)),
+                                               call_id="call-during"))
+        # the decision asks for the same row FOR UPDATE (`auth.lock_session`), and waits for C2
+        await until_waiting(app, deciding, pids)
+        assert not deciding.done()
+        answer.set()
+        paid = await asyncio.wait_for(completing, 10)
+        decision = await asyncio.wait_for(deciding, 10)
+    assert paid.state == "paid" and paid.verdict is not None
+    assert decision.outcome == "allow", decision.reason_plain
+    # nothing deadlocked, and the decision committed after the completion: its entry follows the payment's
+    [paid_seq] = [entry.seq for entry in await ledger_rows(app, copy)
+                  if entry.event.kind == "payment" and entry.event.summary.get("state") == "paid"]
+    assert decision.ledger_seq > paid_seq
 
 
 async def test_late_completion_is_refused(app, client, reviewer, frozen_clock):
