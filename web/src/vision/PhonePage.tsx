@@ -2,9 +2,9 @@ import { useId } from 'react';
 
 import {
   ApprovalCard,
+  ClaudeMessage,
   Composer,
   ConceptFooter,
-  FactCard,
   MarginReceipt,
   PhoneFrame,
   PhoneTabBar,
@@ -15,7 +15,7 @@ import {
 } from '../ds/index.ts';
 import { brandFrom } from '../public/brand.ts';
 import { PHONE_CHAT, PHONE_PAGE, PHONE_TAB_HREFS, PHONE_TODAY, RIVERA_PUBLIC_DESK } from './data.ts';
-import { ClaudeWords, VisionFrame } from './VisionFrame.tsx';
+import { VisionFrame } from './VisionFrame.tsx';
 
 const noop = () => undefined;
 
@@ -104,10 +104,7 @@ function VisitorPhone() {
             <VisitorMessage text={PHONE_CHAT.asked} />
           </TranscriptRow>
           <TranscriptRow margin={<MarginReceipt source={PHONE_CHAT.receipt.source} plain={PHONE_CHAT.receipt.plain} ledgerSeq={0} />}>
-            <div className="cd-vision-reply">
-              <ClaudeWords text={PHONE_CHAT.reply} ownerName={RIVERA_PUBLIC_DESK.owner_display_name} />
-              <FactCard {...PHONE_CHAT.booked} />
-            </div>
+            <ClaudeMessage blocks={PHONE_CHAT.reply} language="en" ownerName={RIVERA_PUBLIC_DESK.owner_display_name} />
           </TranscriptRow>
         </Transcript>
       </div>

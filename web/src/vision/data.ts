@@ -238,20 +238,16 @@ export const PHONE_TODAY = {
   ] satisfies readonly { name: string; kind: string; tone: StatusTone }[],
 } as const;
 
-/** The booking's card: its day and time, which Claude's words never state. */
-const PHONE_BOOKED: FactCardProps = {
-  label: 'Booked',
-  icon: 'clock',
-  title: 'Tuesday, November 3',
-  lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
-};
-
-/** A visitor's chat on a phone: the booking, confirmed only next to its card. */
+/**
+ * A visitor's chat on a phone: the booking, confirmed only next to its card. Owner's copy ruling,
+ * 2026-10-30, for invariant 2: the booking is the kernel's booking card, which carries the day and
+ * time, and Claude's words promise nothing it doesn't back.
+ */
 export const PHONE_CHAT = {
   disclosureUnderName: 'Claude, an AI, answers for Maria Rivera',
   asked: 'Can someone come Tuesday afternoon?',
-  reply: 'Maria will text you when she’s on her way.',
-  booked: PHONE_BOOKED,
+  /** Claude's words, then the booking card, as one message. */
+  reply: [proseBlock('You’re all set. Here’s your visit.'), rivera.blocks.booking_confirmed.en],
   receipt: { source: decided('executed'), plain: 'Booked on Maria Rivera’s calendar' } satisfies VisionReceipt,
   composer: 'Message Rivera Plumbing',
   disclosure: 'This chat is with Claude, an AI.',

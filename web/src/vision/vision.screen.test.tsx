@@ -391,15 +391,32 @@ describe('Vision pages against their boards', () => {
     await expect.element(visitor.getByText('Claude, an AI, answers for Maria Rivera', { exact: true })).toBeVisible();
     const log = visitor.getByRole('log', { name: 'Conversation with Rivera Plumbing' }).element() as HTMLElement;
     expectConversationType(log);
+    // The booking is confirmed only by its card: Claude's words state no date, time or booking, and
+    // promise nothing the card doesn't back.
+    expect(await expectNoFactsInProse(log)).toBe(1);
     expect(await expectReceiptsUnderMessages(log)).toBe(1);
     expect(one(log, '.cd-margin-line').textContent).toBe('Booked on Maria Rivera’s calendar');
+    // The booking is the kernel's booking card, in the same message as Claude's words.
     const booked = visitor.getByRole('article', { name: 'Booked' });
-    expect(booked.element().textContent).toBe('BookedTuesday, November 3Arriving 2:00 pm to 4:00 pmWith Maria Rivera');
+    expect(booked.element().textContent).toBe('BookedTuesday, November 3, 2:00 pm120 minutesBooking B-77');
     const reply = one(log, '.cd-claude-message__prose');
-    expect(reply.textContent).toBe('Maria will text you when she’s on her way.');
-    expect(reply.textContent ?? '').not.toMatch(/\d|Tuesday|November/);
-    await expect.element(visitor.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
+    expect(reply.textContent).toBe('You’re all set. Here’s your visit.');
+    expect(booked.element().closest('.cd-claude-message')).toBe(reply.closest('.cd-claude-message'));
+    const composer = visitor.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    await expect.element(composer).toBeVisible();
     await expect.element(visitor.getByText('This chat is with Claude, an AI.', { exact: true })).toBeVisible();
+
+    // focus_order_is_logical: the bar's link, the held quote's answers, the five tabs, then the
+    // visitor's composer and Send. Send is disabled while the box is empty, so a message is typed first.
+    await composer.fill('Thanks');
+    await expectTabOrderFromTheTop([
+      bar.querySelector('a') as HTMLElement,
+      held.getByRole('button', { name: 'Allow this time' }).element() as HTMLElement,
+      held.getByRole('button', { name: 'Deny this time' }).element() as HTMLElement,
+      ...(tabs as HTMLElement[]),
+      composer.element() as HTMLElement,
+      visitor.getByRole('button', { name: 'Send' }).element() as HTMLElement,
+    ]);
 
     // Nothing scrolls sideways, and the footer follows the phones.
     expectNoHorizontalScroll();
