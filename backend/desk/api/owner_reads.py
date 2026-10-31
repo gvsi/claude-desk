@@ -375,18 +375,21 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
         if row["outcome"] != "refuse" or row["session_id"] not in sessions:
             continue
         entry = entries.get(row["ledger_seq"])
-        origin = (entry["event"] or {}).get("origin", "kernel") if entry else "kernel"
+        event = entry.get("event") if entry else None
+        origin = event.get("origin", "kernel") if isinstance(event, dict) else "kernel"
         found.append(Stopped(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"],
                              line=row["reason_plain"], replayed=decision_replayed(row, entry), kind="refused",
                              reason_plain=row["reason_plain"], card_ids=tuple(row["card_ids"] or ()), origin=origin,
                              ledger_seq=row["ledger_seq"],
                              cause=refusal_cause(row, entry, verified=sessions[row["session_id"]]["verified"])))
     for entry in ledger:
-        event = entry["event"] or {}
-        summary = event.get("summary") or {}
-        violations = reply_violations(summary)
+        event = entry.get("event")
+        if not isinstance(event, dict) or not isinstance(event.get("summary"), dict):
+            continue
+        summary = event["summary"]
         if event.get("kind") != "reply" or summary.get("author") != "claude" or event.get("session_id") not in sessions:
             continue
+        violations = reply_violations(summary)
         if not [kind for kind, _ in violations if kind != "session_paused"]:
             continue
         found.append(Stopped(at=entry_time(entry), session_id=event.get("session_id"), ref_id=str(entry["seq"]),

@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text as sql
 
+from desk.api import owner_reads
 from desk.api.kernel_client import CredentialView, KernelFailed
 from desk.api.main import create_app
 from desk.api.owner_reads import (
@@ -917,6 +918,43 @@ async def test_verification_commits_between_owner_reads(scene, monkeypatch):
     assert listed.status_code == 200
     (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
     assert item["cause"] == "not_their_record"
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("summary", 1), ("summary", "malformed"), ("summary", None), ("summary", []),
+    ("event", 1), ("event", "malformed"), ("event", None), ("event", []),
+])
+async def test_malformed_summary_keeps_safety_available(scene, monkeypatch, field, value):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    refusal = await who.decide("native.book", {"slot_id": "S-20990101-0000"})
+    rows = KernelRO.rows
+    stopped = []
+    original_stopped = owner_reads._stopped_attempts
+
+    def capture_stopped(*args):
+        found = original_stopped(*args)
+        stopped.extend(found)
+        return found
+
+    async def malformed(ro, view, **filters):
+        found = await rows(ro, view, **filters)
+        if view == "ledger_entries":
+            for row in found:
+                if row["seq"] == refusal.ledger_seq:
+                    if field == "event":
+                        row["event"] = value
+                    else:
+                        row["event"]["summary"] = value
+        return found
+
+    monkeypatch.setattr(KernelRO, "rows", malformed)
+    monkeypatch.setattr(owner_reads, "_stopped_attempts", capture_stopped)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] is None
+    (attempt,) = [attempt for attempt in stopped if attempt.ref_id == refusal.decision_id]
+    assert attempt.replayed is True
 
 
 @pytest.mark.parametrize("summary", [
