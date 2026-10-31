@@ -88,7 +88,7 @@ describe('rule draft review', () => {
     await expect.element(changes.getByText('Refund', { exact: true })).toBeVisible();
     const after = changes.getByRole('group', { name: 'After' });
     await expect.element(after.getByText(DANA_NEVER_REFUND.reason, { exact: true })).toBeVisible();
-    await expect.element(after.getByText('Only Dana Whitfield', { exact: true })).toBeVisible();
+    await expect.element(after.getByText('Dana Whitfield · Verified', { exact: true })).toBeVisible();
     await expect.element(after.getByText('Never', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Checked against the always-on rules and your other rules.', { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
@@ -264,7 +264,7 @@ describe('rule draft review', () => {
     await expect.element(newLimit.getByText('Was $500', { exact: true })).toBeVisible();
     const row = lowered.screen.getByRole('region', { name: 'Changes' }).getByRole('listitem');
     await expect.element(row.getByRole('group', { name: 'Before' }).getByText('Automatic up to $300; over $300, ask me first', { exact: true })).toBeVisible();
-    await expect.element(row.getByRole('group', { name: 'After' }).getByText('Anyone · Up to $100 · Claude takes a second look first', { exact: true })).toBeVisible();
+    await expect.element(row.getByRole('group', { name: 'After' }).getByText('Anyone · Up to $100 · Checked by the reviewer', { exact: true })).toBeVisible();
     const cancels = lowered.screen.getByText(CANCELS_LINKS, { exact: true });
     await expect.element(cancels).toBeVisible();
     expect(before(cancels.element(), lowered.screen.getByRole('button', { name: 'Confirm change' }).element())).toBe(true);

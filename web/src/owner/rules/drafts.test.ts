@@ -14,7 +14,7 @@ import { connectorByKey } from '../connectors/catalog.ts';
 import { DEFAULT_SIDE, cancelsLinksFor, changeRows } from './changeRows.ts';
 import { checkStatus } from './checkStatus.ts';
 import { capOf, draftFromAnswer, draftFromDiff, draftFromVersion, moneyCapChange } from './drafts.ts';
-import { PAYMENT_MAX_CENTS, moneyCapWords, moneyLimitHint, moneyLimitLine, ruleWords } from './ruleWords.ts';
+import { PAYMENT_MAX_CENTS, moneyCapWords, moneyLimitHint, moneyLimitLine, ruleWords, type AgentNames } from './ruleWords.ts';
 
 const { ruleCards } = rivera;
 const DANA = rivera.people.dana;
@@ -238,17 +238,29 @@ describe('rule drafts', () => {
     expect(checkStatus({ ...CHECKED, checks: [failing('A stranger could book on Sunday')] }).status).toBe('failed');
   });
 
+  it('rule_words_match_the_boards', () => {
+    // Every card of Rivera's, the shared rule for Alex Kim's assistant and Dana's own booking rule,
+    // in the words the design system's fixture renders from the signed boards.
+    const agents: AgentNames = new Map([[rivera.demoAgentIssued.agent_key_id, rivera.conversations.alexAgent.name]]);
+    const cards = [...RIVERA_CARDS, rivera.sharedChargeCard, rivera.personalBookingCard];
+    expect(ids(cards).sort()).toEqual(Object.keys(rivera.ruleWords).sort());
+    for (const card of cards) expect(ruleWords(card, PEOPLE, agents), card.card_id).toEqual(rivera.ruleWords[card.card_id as keyof typeof rivera.ruleWords]);
+    // Dana's own documents, as her page lists them: her name, and that she confirms it's her.
+    const danaDocs: RuleCard = { ...ruleCards['rv-docs'], card_id: 'rv-dana-docs', who: 'person', person_id: DANA.personId };
+    expect(ruleWords(danaDocs, PEOPLE)).toEqual(rivera.danaRules.find((rule) => rule.key === 'rv-dana-docs')?.words);
+  });
+
   it('rule_words_read_limits', () => {
-    // Each word tagged with its field, in order: who, limits, hours, the second look.
+    // Each word tagged with its field, in order: who, limits, hours, the reviewer's check.
     expect(ruleWords(ruleCards['rv-book-wk'], PEOPLE)).toEqual([
       { field: 'who', text: 'Anyone' },
       { field: 'hours', text: 'Weekdays, 8:00 am to 6:00 pm' },
-      { field: 'review', text: 'Claude takes a second look first' },
+      { field: 'review', text: 'Checked by the reviewer' },
     ]);
     expect(ruleWords(ruleCards['rv-link'], PEOPLE)).toEqual([
       { field: 'who', text: 'Anyone' },
       { field: 'limits', text: 'Up to $300' },
-      { field: 'review', text: 'Claude takes a second look first' },
+      { field: 'review', text: 'Checked by the reviewer' },
     ]);
     // A quote rule says what it allows off the price list, none included.
     expect(ruleWords(ruleCards['rv-quote'], PEOPLE)).toEqual([
@@ -259,15 +271,33 @@ describe('rule drafts', () => {
     expect(ruleWords(changed(ruleCards['rv-quote'], { max_discount_bp: 1250 }), PEOPLE)).toContainEqual({ field: 'limits', text: 'Discounts up to 12.5%' });
     expect(ruleWords(changed(ruleCards['rv-link'], { max_amount_cents: 4050 }), PEOPLE)).toContainEqual({ field: 'limits', text: 'Up to $40.50' });
 
-    // Who it is for, a person by name once `people` has them.
-    const who = (fields: Partial<RuleCard>, people: PeopleOut | null = PEOPLE) => ruleWords(changed(ruleCards['rv-docs'], fields), people)[0];
-    expect(who({ who: 'anyone' })).toEqual({ field: 'who', text: 'Anyone' });
-    expect(who({ who: 'verified' })).toEqual({ field: 'who', text: 'Verified customers' });
-    expect(who({ who: 'record_owner' })).toEqual({ field: 'who', text: 'Only the customer it belongs to' });
-    expect(who({ who: 'person', person_id: DANA.personId })).toEqual({ field: 'who', text: 'Only Dana Whitfield' });
-    expect(who({ who: 'person', person_id: DANA.personId }, null)).toEqual({ field: 'who', text: 'Only this customer' });
-    expect(who({ who: 'person', person_id: 'per-unknown' })).toEqual({ field: 'who', text: 'Only this customer' });
-    expect(who({ who: 'agent', agent_key_id: 'demo-agent' })).toEqual({ field: 'who', text: 'Only this agent' });
+    // Who it is for, in the boards' words. What the rule applies to says which: a charge within a
+    // signed limit is for agents that have one, a refund goes back to whoever paid, and a person's
+    // rule on private data says she confirms it's her.
+    const who = (fields: Partial<RuleCard>, people: PeopleOut | null = PEOPLE, agents?: AgentNames) =>
+      ruleWords(changed(ruleCards['rv-docs'], fields), people, agents)
+        .filter((word) => word.field === 'who')
+        .map((word) => word.text);
+    expect(who({ who: 'anyone' })).toEqual(['Anyone']);
+    expect(who({ who: 'anyone', applies_to: 'native.charge_mandate' })).toEqual(['Signed agents']);
+    expect(who({ who: 'anyone', applies_to: 'effect:charge' })).toEqual(['Anyone']);
+    expect(who({ who: 'verified' })).toEqual(['Verified customers']);
+    expect(who({ who: 'record_owner' })).toEqual(["The record's owner, verified"]);
+    expect(who({ who: 'record_owner', applies_to: 'payments.list_charges' })).toEqual(["The record's owner, verified"]);
+    expect(who({ who: 'record_owner', applies_to: 'payments.create_refund' })).toEqual(['The customer who paid, verified']);
+    expect(who({ who: 'record_owner', applies_to: 'effect:pay_out' })).toEqual(['The customer who paid, verified']);
+    // A person by name once `people` has them, "One customer" while it loads or fails or when it doesn't list them.
+    expect(who({ who: 'person', person_id: DANA.personId })).toEqual(['Dana Whitfield', 'Verified']);
+    expect(who({ who: 'person', person_id: DANA.personId, applies_to: 'native.book' })).toEqual(['Dana Whitfield']);
+    expect(who({ who: 'person', person_id: DANA.personId, applies_to: 'payments.create_refund' })).toEqual(['Dana Whitfield', 'Verified']);
+    expect(who({ who: 'person', person_id: DANA.personId }, null)).toEqual(['One customer', 'Verified']);
+    expect(who({ who: 'person', person_id: 'per-unknown', applies_to: 'native.book' })).toEqual(['One customer']);
+    // An agent by the name the caller has for its key; the API names no agent yet, so "One agent".
+    const agents: AgentNames = new Map([['demo-agent', "Alex Kim's assistant"]]);
+    expect(who({ who: 'agent', agent_key_id: 'demo-agent', applies_to: 'effect:charge' }, PEOPLE, agents)).toEqual(["Alex Kim's assistant"]);
+    expect(who({ who: 'agent', agent_key_id: 'demo-agent', applies_to: 'effect:charge' })).toEqual(['One agent']);
+    expect(who({ who: 'agent', agent_key_id: 'another-agent', applies_to: 'effect:charge' }, PEOPLE, agents)).toEqual(['One agent']);
+    expect(who({ who: 'agent', agent_key_id: 'demo-agent', applies_to: 'effect:charge' }, PEOPLE, new Map([['demo-agent', '  ']]))).toEqual(['One agent']);
 
     // Hours in the business's own local times, the days grouped as the boards say them.
     const hours = (days: string[], start: string, end: string) => formatHours({ days, start, end } as Parameters<typeof formatHours>[0]);
@@ -414,7 +444,7 @@ describe('rule drafts', () => {
     const byKey = new Map(rows.map((row) => [row.key, row]));
     expect(byKey.get('rv-quote')?.changed).toEqual(['mode']);
     expect(byKey.get('rv-refund')?.changed).toEqual([]);
-    expect(byKey.get('rv-dana-book')).toMatchObject({ title: 'Book a visit', before: { words: [{ field: 'who', text: 'Only Dana Whitfield' }] } });
+    expect(byKey.get('rv-dana-book')).toMatchObject({ title: 'Book a visit', before: { words: [{ field: 'who', text: 'Dana Whitfield' }] } });
 
     // The preset's own cards, which Rivera's rules didn't have here, are added rows.
     const added = rows.filter((row) => row.change === 'added');
@@ -456,7 +486,7 @@ describe('rule drafts', () => {
     });
     expect(byKey.get('rv-link')?.changed).toEqual(expect.arrayContaining(['applies_to', 'mode']));
     expect(byKey.get('rv-mandate')?.after).toMatchObject({ appliesTo: 'Every tool that charges money', mode: 'ask' });
-    expect(byKey.get('rv-refund')?.after).toMatchObject({ appliesTo: 'Every tool that moves money out', mode: 'ask' });
+    expect(byKey.get('rv-refund')?.after).toMatchObject({ appliesTo: 'Every tool that sends money out', mode: 'ask' });
     expect(byKey.get('rv-refund')?.changed).not.toContain('mode');
 
     // Weekday bookings from 8:00 am to 6:00 pm reach outside the preset's 9-to-5 rule and Saturdays lie
