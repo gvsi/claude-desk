@@ -393,6 +393,8 @@ describe('the scripted Desk', () => {
         ],
       ],
     ]);
+    // The prose leads into the card and promises nothing it doesn't back.
+    expect(booked.map((ev) => ev.blocks[0]?.text)).toEqual(["You're all set. Here's your visit.", 'Ya está todo listo. Aquí tienes tu visita.']);
     // The booking is this chat's, confirmed.
     const sessionId = mockStore.visitorSession(slug)?.state.session_id;
     const bookings = [...mockStore.world.decisions.values()].filter(
