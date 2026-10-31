@@ -3,11 +3,12 @@
 # matched case-insensitively as whole words on the prose with accents and other marks dropped
 # ("dólares" is matched as "dolares"), each run of whitespace read as one space and every dash and
 # hyphen as "-" ("fin‐de‐semana" with U+2010 is "fin-de-semana"). Categories: number, money,
-# percent and date (number_in_prose), and promise and booking (promise_word). A booking claim with
-# a condition straight before it ("cuando tu cita está confirmada") passes (`BOOKING_CONDITION`
+# percent and date (number_in_prose), and promise, booking and callback (promise_word). A booking
+# or call claim with a condition straight before it ("cuando tu cita está confirmada") passes (`BOOKING_CONDITION`
 # in reply_check.py), but not after "sí" (yes), whose accent tells it from "si" (if); every
-# booking claim passes in a reply that carries the booking's card. Both lexicons run on every
-# draft, whatever its language.
+# booking claim passes in a reply that carries the booking's card. Call claims instead need a
+# callback_confirmed card that passed the clause checks; neither card exempts the other category.
+# Both lexicons run on every draft, whatever its language.
 
 # Spelled-out numbers. A bare "uno", "una", "once" or "medio" counts only next to a unit or another
 # number word, so "una pregunta" passes; "las once" and "la una" are clock times (below).
@@ -90,14 +91,25 @@ promise	libres?(?=[\s-]+(?:(?:para|a)[\s-]+(?:(?:el|la|l[oa]s|nuestr[oa]s?|sus?|
 # names ("visita guiada", "corte de pelo"). It keeps the whole claim after its condition
 # ("cuando tu mesa está confirmada"). "Guardado" and "listo" need a booking noun, so saving
 # details or finishing another task makes no booking claim ("tus datos están guardados").
-booking	(?:tus?|sus?|el|la|los|las|una?|mis?|est[ea]s?|es[ea]s?|nuestr[oa]s?)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:citas?|reservas?|visitas?[\s-]+guiadas?|visitas?|turnos?|horas?|plazas?|recorridos?|clases?|leccion(?:es)?|sesion(?:es)?|mesas?|habitacion(?:es)?|estancias?|estadias?|alojamientos?|consultas?|pruebas?|degustacion(?:es)?|tratamientos?|masajes?|cortes?[\s-]+de[\s-]+pelo|demostracion(?:es)?|recogidas?)[\s-]+(?:ya[\s-]+)?(?:estan?|quedan?|quedo|quedaron|fu(?:e|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:confirmad|reservad|agendad|apartad|programad|hech|guardad|list)[oa]s?
-booking	(?:ya[\s-]+)?(?:estas|estan?|quedas|quedan?|quedo|quedaste|quedaron|fu(?:e|iste|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:(?:confirmad|reservad|agendad|apartad)[oa]s?|hech[oa]s?(?=[\s-]+(?:(?:tus?|sus?|el|la|los|las)[\s-]+)?(?:citas?|reservas?|visitas?[\s-]+guiadas?|visitas?|turnos?|horas?|plazas?|recorridos?|clases?|leccion(?:es)?|sesion(?:es)?|mesas?|habitacion(?:es)?|estancias?|estadias?|alojamientos?|consultas?|pruebas?|degustacion(?:es)?|tratamientos?|masajes?|cortes?[\s-]+de[\s-]+pelo|demostracion(?:es)?|recogidas?)(?!\w)))
+booking	(?:tus?|sus?|el|la|los|las|una?|mis?|est[ea]s?|es[ea]s?|nuestr[oa]s?)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:citas?|reservas?|visitas?[\s-]+guiadas?|visitas?|turnos?|horas?|plazas?|recorridos?|clases?|leccion(?:es)?|sesion(?:es)?|mesas?|habitacion(?:es)?|estancias?|estadias?|alojamientos?|consultas?|pruebas?|degustacion(?:es)?|tratamientos?|masajes?|cortes?[\s-]+de[\s-]+pelo|demostracion(?:es)?|recogidas?|reunion(?:es)?)[\s-]+(?:ya[\s-]+)?(?:estan?|quedan?|quedo|quedaron|fu(?:e|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:confirmad|reservad|agendad|apartad|programad|hech|guardad|list)[oa]s?
+booking	(?:ya[\s-]+)?(?:estas|estan?|quedas|quedan?|quedo|quedaste|quedaron|fu(?:e|iste|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:(?:confirmad|reservad|agendad|apartad)[oa]s?|hech[oa]s?(?=[\s-]+(?:(?:tus?|sus?|el|la|los|las)[\s-]+)?(?:citas?|reservas?|visitas?[\s-]+guiadas?|visitas?|turnos?|horas?|plazas?|recorridos?|clases?|leccion(?:es)?|sesion(?:es)?|mesas?|habitacion(?:es)?|estancias?|estadias?|alojamientos?|consultas?|pruebas?|degustacion(?:es)?|tratamientos?|masajes?|cortes?[\s-]+de[\s-]+pelo|demostracion(?:es)?|recogidas?|reunion(?:es)?)(?!\w)))
 # The headline, with the noun first and a blank or a colon before the participle ("Reserva
 # confirmada.", "Visita: confirmada."), where no word comes straight before the noun: after a
 # determiner the participle only describes it ("para dejar una cita confirmada, necesito su
 # dirección").
-booking	(?<![^\W_] )(?:citas?|reservas?|visitas?[\s-]+guiadas?|visitas?|turnos?|horas?|plazas?|recorridos?|clases?|leccion(?:es)?|sesion(?:es)?|mesas?|habitacion(?:es)?|estancias?|estadias?|alojamientos?|consultas?|pruebas?|degustacion(?:es)?|tratamientos?|masajes?|cortes?[\s-]+de[\s-]+pelo|demostracion(?:es)?|recogidas?)(?:[\s-]+|[\s-]*:[\s-]*)(?:ya[\s-]+)?(?:confirmad|reservad|agendad|apartad|programad|hech|guardad|list)[oa]s?
+booking	(?<![^\W_] )(?:citas?|reservas?|visitas?[\s-]+guiadas?|visitas?|turnos?|horas?|plazas?|recorridos?|clases?|leccion(?:es)?|sesion(?:es)?|mesas?|habitacion(?:es)?|estancias?|estadias?|alojamientos?|consultas?|pruebas?|degustacion(?:es)?|tratamientos?|masajes?|cortes?[\s-]+de[\s-]+pelo|demostracion(?:es)?|recogidas?|reunion(?:es)?)(?:[\s-]+|[\s-]*:[\s-]*)(?:ya[\s-]+)?(?:confirmad|reservad|agendad|apartad|programad|hech|guardad|list)[oa]s?
 # A completed first-person reservation claims a booking too ("hemos reservado tu mesa").
 # The auxiliary keeps a visitor's question out ("has reservado tu mesa"), and a negation
-# keeps an unmade booking out ("no hemos reservado tu mesa").
-booking	(?<!no )(?<!nunca )(?:he|hemos)[\s-]+(?:ya[\s-]+)?(?:reservado|agendado|confirmado|programado|apartado)[\s-]+(?:tus?|sus?|el|la|los|las|una?)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:citas?|reservas?|visitas?[\s-]+guiadas?|visitas?|turnos?|horas?|plazas?|recorridos?|clases?|leccion(?:es)?|sesion(?:es)?|mesas?|habitacion(?:es)?|estancias?|estadias?|alojamientos?|consultas?|pruebas?|degustacion(?:es)?|tratamientos?|masajes?|cortes?[\s-]+de[\s-]+pelo|demostracion(?:es)?|recogidas?)
+# keeps an unmade booking out ("no hemos reservado tu mesa"). No or nunca can also
+# precede one or two object clitics (me, te, le, lo, la, nos, os, les, los, las, se).
+# Fixed-width lookbehinds group them by length; they cannot cross another word or a
+# sentence break. Word boundaries keep a name ending in "no" (Bruno) from denying a
+# booking. The callback auxiliary below uses the same negation boundary.
+booking	(?<!\bno )(?<!\bnunca )(?<!\bno (?:me|te|le|lo|la|os|se) )(?<!\bno (?:nos|les|los|las) )(?<!\bno (?:me|te|le|lo|la|os|se) (?:me|te|le|lo|la|os|se) )(?<!\bno (?:me|te|le|lo|la|os|se) (?:nos|les|los|las) )(?<!\bno (?:nos|les|los|las) (?:me|te|le|lo|la|os|se) )(?<!\bno (?:nos|les|los|las) (?:nos|les|los|las) )(?<!\bnunca (?:me|te|le|lo|la|os|se) )(?<!\bnunca (?:nos|les|los|las) )(?<!\bnunca (?:me|te|le|lo|la|os|se) (?:me|te|le|lo|la|os|se) )(?<!\bnunca (?:me|te|le|lo|la|os|se) (?:nos|les|los|las) )(?<!\bnunca (?:nos|les|los|las) (?:me|te|le|lo|la|os|se) )(?<!\bnunca (?:nos|les|los|las) (?:nos|les|los|las) )(?:he|hemos)[\s-]+(?:ya[\s-]+)?(?:reservado|agendado|confirmado|programado|apartado)[\s-]+(?:tus?|sus?|el|la|los|las|una?)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:citas?|reservas?|visitas?[\s-]+guiadas?|visitas?|turnos?|horas?|plazas?|recorridos?|clases?|leccion(?:es)?|sesion(?:es)?|mesas?|habitacion(?:es)?|estancias?|estadias?|alojamientos?|consultas?|pruebas?|degustacion(?:es)?|tratamientos?|masajes?|cortes?[\s-]+de[\s-]+pelo|demostracion(?:es)?|recogidas?|reunion(?:es)?)
+
+# Llamada and devolución de llamada (in both numbers, accents folded as above)
+# claim a callback, not a booking, and need their own validated callback card.
+callback	(?:tus?|sus?|el|la|los|las|una?|mis?|est[ea]s?|es[ea]s?|nuestr[oa]s?)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:devolucion(?:es)?[\s-]+de[\s-]+llamadas?|llamadas?)[\s-]+(?:ya[\s-]+)?(?:estan?|quedan?|quedo|quedaron|fu(?:e|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:confirmad|reservad|agendad|apartad|programad|hech|guardad|list)[oa]s?
+callback	(?:ya[\s-]+)?(?:estas|estan?|quedas|quedan?|quedo|quedaste|quedaron|fu(?:e|iste|eron)|ha[ns]?[\s-]+(?:quedado|sido))[\s-]+(?:confirmad|reservad|agendad|apartad|programad|hech|guardad|list)[oa]s?[\s-]+(?:(?:tus?|sus?|el|la|los|las)[\s-]+)?(?:[^\W\d_]+[\s-]+)?(?:devolucion(?:es)?[\s-]+de[\s-]+llamadas?|llamadas?)
+callback	(?<![^\W_] )(?:devolucion(?:es)?[\s-]+de[\s-]+llamadas?|llamadas?)(?:[\s-]+|[\s-]*:[\s-]*)(?:ya[\s-]+)?(?:confirmad|reservad|agendad|apartad|programad|hech|guardad|list)[oa]s?
+callback	(?<!\bno )(?<!\bnunca )(?<!\bno (?:me|te|le|lo|la|os|se) )(?<!\bno (?:nos|les|los|las) )(?<!\bno (?:me|te|le|lo|la|os|se) (?:me|te|le|lo|la|os|se) )(?<!\bno (?:me|te|le|lo|la|os|se) (?:nos|les|los|las) )(?<!\bno (?:nos|les|los|las) (?:me|te|le|lo|la|os|se) )(?<!\bno (?:nos|les|los|las) (?:nos|les|los|las) )(?<!\bnunca (?:me|te|le|lo|la|os|se) )(?<!\bnunca (?:nos|les|los|las) )(?<!\bnunca (?:me|te|le|lo|la|os|se) (?:me|te|le|lo|la|os|se) )(?<!\bnunca (?:me|te|le|lo|la|os|se) (?:nos|les|los|las) )(?<!\bnunca (?:nos|les|los|las) (?:me|te|le|lo|la|os|se) )(?<!\bnunca (?:nos|les|los|las) (?:nos|les|los|las) )(?:he|hemos)[\s-]+(?:ya[\s-]+)?(?:reservado|agendado|confirmado|programado|apartado)[\s-]+(?:tus?|sus?|el|la|los|las|una?)[\s-]+(?:[^\W\d_]+[\s-]+)?(?:devolucion(?:es)?[\s-]+de[\s-]+llamadas?|llamadas?)
