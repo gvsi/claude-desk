@@ -1,6 +1,6 @@
 /* ConnectorIcon: a square tile at the control radius. Built in, a line icon on the secondary fill;
-   a third-party connector, its own mark on the light brand tile, the one light surface besides the
-   intro illustration's cards. The icon scales with the tile, as on the boards: 26 px on a 48 px
+   a third-party connector, its own mark on the light brand tile, one of the product's three light surfaces with the
+   intro illustration's cards and the mark's own white tile. The icon scales with the tile, as on the boards: 26 px on a 48 px
    tile, 20 px on 36 px, 13 px on 24 px. */
 
 .cd-connector-icon {
