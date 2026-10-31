@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import type { LedgerEvent } from './contracts.ts';
-import { handoffEntryOf } from './handoffEntry.ts';
+import { handoffEntryOf, takeoverEntryOf } from './handoffEntry.ts';
 
 const entry = (kind: LedgerEvent['kind'], summary: unknown) => ({ kind, summary }) as Pick<LedgerEvent, 'kind' | 'summary'>;
+
+describe('takeoverEntryOf', () => {
+  it('distinguishes_takeover_from_handback_only_with_a_readable_direction', () => {
+    expect(takeoverEntryOf(entry('takeover', { from: 'ai', to: 'owner' }))).toBe('takeover');
+    expect(takeoverEntryOf(entry('takeover', { from: 'owner', to: 'ai' }))).toBe('handback');
+    for (const summary of [undefined, null, [], 'owner to ai', {}, { mode: 'ai' }, { to: 'ai' }, { from: 'owner', to: 'unknown' }]) {
+      expect(takeoverEntryOf(entry('takeover', summary))).toBeNull();
+    }
+    expect(takeoverEntryOf(entry('reply', { from: 'owner', to: 'ai' }))).toBeNull();
+  });
+});
 
 describe('handoffEntryOf', () => {
   it('names_the_handoff_entries_as_the_kernel_writes_them', () => {

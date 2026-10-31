@@ -1029,13 +1029,14 @@ export class MockWorld {
    * the visitor is told.
    */
   takeOver(session: SessionRecord): SessionState {
+    const previous = session.state.mode;
     session.state = { ...session.state, mode: 'owner', generation: session.state.generation + 1 };
     this.appendLedger(this.deskOf(session), {
       kind: 'takeover',
       origin: 'kernel',
       session_id: session.state.session_id,
       ref_id: null,
-      summary: { mode: 'owner', generation: session.state.generation },
+      summary: { from: previous, to: 'owner', generation: session.state.generation },
     });
     this.emit(session, { type: 'owner_joined', name: BUSINESS.owner_display_name });
     return session.state;
@@ -1043,13 +1044,14 @@ export class MockWorld {
 
   /** The owner hands the chat back to Claude, at the next generation, and the visitor is told. */
   handBack(session: SessionRecord): SessionState {
+    const previous = session.state.mode;
     session.state = { ...session.state, mode: 'ai', generation: session.state.generation + 1 };
     this.appendLedger(this.deskOf(session), {
       kind: 'takeover',
       origin: 'kernel',
       session_id: session.state.session_id,
       ref_id: null,
-      summary: { mode: 'ai', generation: session.state.generation },
+      summary: { from: previous, to: 'ai', generation: session.state.generation },
     });
     this.emit(session, { type: 'owner_left' });
     return session.state;

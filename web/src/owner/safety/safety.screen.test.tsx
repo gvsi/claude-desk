@@ -665,6 +665,31 @@ describe('Safety', () => {
     noOldWords();
   });
 
+  it('takeover_and_handback_have_distinct_record_labels', async () => {
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    const session = mockStore.visitorSession(RIVERA.slug);
+    if (!session) throw new Error('the visitor has a chat');
+    const params = { session_id: session.state.session_id };
+    await mockStore.dispatch('takeover', { params, body: { generation: session.state.generation } });
+    await mockStore.dispatch('handback', { params, body: { generation: session.state.generation } });
+    const entries = (await mockLedger()).entries.filter((e) => e.event.kind === 'takeover');
+    expect(entries).toHaveLength(2);
+    const [taken, returned] = entries;
+    if (!taken || !returned) throw new Error('both mode changes are recorded');
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, taken.seq).getByText('Take over', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, returned.seq).getByText('Hand back to Claude', { exact: true })).toBeVisible();
+    expect(taken.event.summary).toEqual({ from: 'ai', to: 'owner', generation: 2 });
+    expect(returned.event.summary).toEqual({ from: 'owner', to: 'ai', generation: 3 });
+    await expectScreenBasics(screen.container, { owner: true });
+    await recordRow(screen, returned.seq).click();
+    const trace = region(screen, `Full trace of entry ${returned.seq}`);
+    await expect.element(trace.getByText('What was recorded', { exact: true })).toBeVisible();
+    expect(trace.element().textContent).toContain('"from": "owner"');
+    expect(trace.element().textContent).toContain('"to": "ai"');
+  });
+
   it('handoff_entries_say_which_they_are', async () => {
     // A visitor asks for Maria, the handoff card hands her the chat, and she marks it done: the
     // record names the two entries the checkpoint wrote for what they are. Any other change to the
