@@ -229,9 +229,13 @@ def payment_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
 
 
 def link_cancelled(fact: Fact | None, desk: DeskInfo) -> Card:
-    """The kernel's line for a payment link a rule change cancelled; it names the owner and no fact."""
-    return Card(title=(f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "
-                      "Ask again if you still want to pay."))
+    """`{total}` / `{title}` / `This payment link was cancelled because {owner}'s rules changed. Ask
+    again if you still want to pay.`: the kernel's card for a payment link a rule change cancelled,
+    from that link's own `payment_link` fact."""
+    return Card(title=money(claims(fact)["total"]), lines=(
+        title_claim(fact),
+        f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "
+        "Ask again if you still want to pay."))
 
 
 # ---- The public header's open-now line ("Open status") ----------------------------------------------

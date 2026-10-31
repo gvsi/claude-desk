@@ -22,21 +22,14 @@ export const TEST_PAYMENT = {
 } as const;
 
 /**
- * The templates with card chrome: every one but `link_cancelled`, which has none yet. The public
- * chat draws that block as `LinkCancelledCard`, with `LINK_CANCELLED_CHROME`, and `ReplyCard` shows
- * it as a template this build doesn't know.
- */
-type ChromedTemplate = Exclude<ClauseTemplate, 'link_cancelled'>;
-
-/**
  * The templates whose card is about money moving: a link to pay, a paid link, an agent's charge and
  * a refund. Each one carries the test-payment note in both languages, and chrome.test.ts fails if
  * one doesn't, or if a card outside this list does. A new money card goes here.
  */
-export const MONEY_TEMPLATES: readonly ChromedTemplate[] = ['payment_link', 'payment_confirmed', 'charge_confirmed', 'refund_issued'];
+export const MONEY_TEMPLATES: readonly ClauseTemplate[] = ['payment_link', 'payment_confirmed', 'charge_confirmed', 'refund_issued'];
 
 /** Every template has both languages, so a missing template or language is a compile error. */
-export const CARD_CHROME: Readonly<Record<ChromedTemplate, Readonly<Record<CopyLanguage, Readonly<CardChrome>>>>> = {
+export const CARD_CHROME: Readonly<Record<ClauseTemplate, Readonly<Record<CopyLanguage, Readonly<CardChrome>>>>> = {
   quote: { en: { label: 'Quote' }, es: { label: 'Presupuesto' } },
   booking_options: { en: { label: 'Open times' }, es: { label: 'Horarios libres' } },
   booking_confirmed: { en: { label: 'Booked' }, es: { label: 'Reservado' } },
@@ -68,21 +61,15 @@ export const CARD_CHROME: Readonly<Record<ChromedTemplate, Readonly<Record<CopyL
     en: { label: 'Paid', note: TEST_PAYMENT.en },
     es: { label: 'Pagado', note: TEST_PAYMENT.es },
   },
-};
-
-/**
- * The fixed words of the card for a payment link a confirmed rule change cancelled
- * (`LinkCancelledCard`): its label only. No money moved, so it has no test-payment note.
- */
-export const LINK_CANCELLED_CHROME: Readonly<Record<CopyLanguage, Readonly<CardChrome>>> = {
-  en: { label: 'Payment link cancelled' },
-  es: { label: 'Enlace de pago cancelado' },
+  // A payment link a confirmed rule change cancelled: its label only. No money moved, so it has no
+  // test-payment note, and the link is gone, so it has no button.
+  link_cancelled: { en: { label: 'Payment link cancelled' }, es: { label: 'Enlace de pago cancelado' } },
 };
 
 /** The template's chrome in `language`, or null for a template this build doesn't know. */
 export function cardChrome(template: string, language: CopyLanguage): Readonly<CardChrome> | null {
   if (!Object.hasOwn(CARD_CHROME, template)) return null;
-  const chrome = CARD_CHROME[template as ChromedTemplate];
+  const chrome = CARD_CHROME[template as ClauseTemplate];
   return Object.hasOwn(chrome, language) ? chrome[language] : chrome.en;
 }
 

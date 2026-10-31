@@ -5,7 +5,6 @@ import { Composer } from '../components/Composer/Composer.tsx';
 import { ClaudeMessage } from '../components/ClaudeMessage/ClaudeMessage.tsx';
 import { MarginReceipt } from '../components/MarginReceipt/MarginReceipt.tsx';
 import { PublicShell } from '../components/PublicShell/PublicShell.tsx';
-import { LinkCancelledCard } from '../components/ReplyCard/LinkCancelledCard.tsx';
 import { Transcript } from '../components/Transcript/Transcript.tsx';
 import { TranscriptRow } from '../components/TranscriptRow/TranscriptRow.tsx';
 import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx';
@@ -17,8 +16,11 @@ import { SPEC, expectConversationType, expectFooter, expectReceiptsUnderMessages
 /** Claude's answer to the visitor, as the board writes it: Claude's own message, before the Desk's. */
 const ANSWER = 'The payment link I sent earlier was cancelled. Maria changed her rules, so a new link needs her answer.';
 
-/** The kernel's line for the cancelled link, which the Desk's own message carries in its card. */
-const LINE = "This payment link was cancelled because Maria Rivera's rules changed. Ask again if you still want to pay.";
+/**
+ * The Desk's own link_cancelled card for the deposit link, as the kernel renders it from the link's
+ * fact: the amount, then what the link was for and the kernel's line.
+ */
+const CARD = { ...rivera.blocks.link_cancelled.en, lines: rivera.blocks.link_cancelled.en.lines ?? [] };
 
 function ChatLinkCancelled() {
   return (
@@ -40,11 +42,8 @@ function ChatLinkCancelled() {
         <TranscriptRow
           margin={[<MarginReceipt key="link" source={{ kind: 'reply', handoff: false }} plain="Link cancelled when Maria Rivera’s rules changed" ledgerSeq={62} />]}
         >
-          {/* The Desk's own message (author desk) carries only the card, as ClaudeMessage lays one
-              out. The card waits for the kernel's link_cancelled template to come as a block. */}
-          <div className="cd-claude-message" lang="en">
-            <LinkCancelledCard line={LINE} language="en" />
-          </div>
+          {/* The Desk's own message (author desk) carries only the card. */}
+          <ClaudeMessage blocks={[CARD]} language="en" ownerName={rivera.business.ownerName} />
         </TranscriptRow>
       </Transcript>
     </PublicShell>
@@ -60,9 +59,9 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-R2-Chat-Link-Cancelled',
     canvasNote: [
-      'Built against the board in review; sign-off pending.',
-      'A payment link a confirmed rule change cancelled, in the chat: the Desk’s own message carries only LinkCancelledCard, with the payment link’s icon, “Payment link cancelled” and the kernel’s line. A cancelled link moves no money, so the card has no test-payment note.',
-      'The board draws an earlier card, with an amount, what the link was for, a reason and the test-payment note, under Claude’s words in the same message. Claude’s words are Claude’s own message here, before the Desk’s; the receipts’ lines are the board’s, and the kernel writes them.',
+      'Signed on 2026-10-30.',
+      'A payment link a confirmed rule change cancelled, in the chat: the Desk’s own message carries only the link_cancelled reply card, with the payment link’s icon and “Payment link cancelled”, then the kernel’s block: the amount, what the link was for and the kernel’s line.',
+      'The board also draws the test-payment note; a cancelled link moves no money, so the card has none. The board draws the card under Claude’s words in the same message; Claude’s words are Claude’s own message here, before the Desk’s. The receipts’ lines are the board’s, and the kernel writes them.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -86,10 +85,14 @@ export const Board: Story = {
     await expect(within(answer).getByText(ANSWER)).toBeVisible();
     await expect(desk.querySelector('.cd-claude-message__prose')).toBeNull();
 
-    // The card: named by its label, the kernel's line as written, no note, link or button.
+    // The card: named by its label, then the kernel's block as written (the amount, what the link
+    // was for and the kernel's line), with the payment link's icon and no note, link or button.
     const card = within(desk).getByRole('article', { name: 'Payment link cancelled' });
     expectComputed(card, { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' });
-    await expect(card.textContent).toBe(`Payment link cancelled${LINE}`);
+    await expect(card.textContent).toBe(['Payment link cancelled', CARD.title, ...CARD.lines].join(''));
+    await expect(one(desk, '.cd-reply-card__headline').textContent).toBe('$20.00');
+    await expect(desk.querySelectorAll('.cd-reply-card__label svg')).toHaveLength(1);
+    await expect(card).not.toHaveTextContent('Test payment');
     await expect(within(card).queryByRole('link')).toBeNull();
     await expect(within(card).queryByRole('button')).toBeNull();
     await expect(Math.round(one(desk, '.cd-reply-card').getBoundingClientRect().left)).toBe(266);

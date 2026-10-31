@@ -32,7 +32,19 @@ import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
-import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, askedDiscountBp, matchRule, turnLanguage, type RuleName } from './script.ts';
+import {
+  DECISIONS,
+  DEMO_CODE,
+  EVENT_GAP_MS,
+  HELD_PROSE,
+  LINK_CANCELLED,
+  VISITOR_PLAIN,
+  askedDiscountBp,
+  linkCancelledBlock,
+  matchRule,
+  turnLanguage,
+  type RuleName,
+} from './script.ts';
 import { RIVERA } from './seed.ts';
 import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
@@ -818,6 +830,20 @@ describe('the scripted Desk', () => {
     expect(handoff?.reason).toBe(`${name} · ${phone} · Leaking water heater`);
     const lead = mockStore.world.leads.at(-1);
     expect([lead?.displayName, lead?.note]).toEqual([name, `${phone} · Leaking water heater`]);
+  });
+
+  it('link_cancelled_card_is_the_kernels', () => {
+    // The card the mock posts for a link a rule change cancelled is the design system's fixture
+    // card, which its fixtures test holds to the kernel's render/en.py and es.py: the deposit
+    // link's amount, its title as the owner wrote it, then the kernel's line, citing the link's fact.
+    for (const language of ['en', 'es'] as const) {
+      const card = rivera.blocks.link_cancelled[language];
+      expect(linkCancelledBlock({ title: 'Service call deposit', amount_cents: 2000 }, language), language).toEqual(card);
+      expect(LINK_CANCELLED[language], language).toBe(card.lines?.at(-1));
+    }
+    // Its amount reads as render/cards.py `money` writes it: grouped dollars, then two cents digits.
+    expect(linkCancelledBlock({ title: 'Leak repair', amount_cents: 123_456 }, 'en').title).toBe('$1,234.56');
+    expect(linkCancelledBlock({ title: 'Leak repair', amount_cents: 5 }, 'es').title).toBe('$0.05');
   });
 
   it('events_replay_after_seq', async () => {

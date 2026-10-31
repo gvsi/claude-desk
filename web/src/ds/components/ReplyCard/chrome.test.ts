@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CLAUSE_TEMPLATES } from '../../../api/contracts.ts';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
-import { CARD_CHROME, cardChrome, LINK_CANCELLED_CHROME, MONEY_TEMPLATES } from './chrome.ts';
+import { CARD_CHROME, MONEY_TEMPLATES } from './chrome.ts';
 
 const LANGUAGES = ['en', 'es'] as const satisfies readonly CopyLanguage[];
 
@@ -21,10 +21,9 @@ describe('CARD_CHROME', () => {
   });
 
   it('only_money_cards_say_test_payment', () => {
-    // A card that carries the note is about money moving, so it belongs in MONEY_TEMPLATES. A
-    // cancelled link has no card chrome yet (a_cancelled_link_has_no_card_chrome_yet).
+    // A card that carries the note is about money moving, so it belongs in MONEY_TEMPLATES.
     for (const template of CLAUSE_TEMPLATES) {
-      if (template === 'link_cancelled' || MONEY_TEMPLATES.includes(template)) continue;
+      if (MONEY_TEMPLATES.includes(template)) continue;
       for (const language of LANGUAGES) {
         expect(CARD_CHROME[template][language].note, `${template} ${language}`).not.toBe(TEST_PAYMENT[language]);
       }
@@ -32,20 +31,13 @@ describe('CARD_CHROME', () => {
   });
 
   it('a_cancelled_link_moves_no_money', () => {
-    // The card for a link a rule change cancelled has a label in both languages and no note: no money
-    // moved, so it doesn't say "Test payment", and its label has no amount, date or promise.
-    expect(LINK_CANCELLED_CHROME).toEqual({
+    // The link_cancelled card has a label in both languages and no note or button: no money moved,
+    // so it doesn't say "Test payment", the link is gone, and its label has no amount, date or promise.
+    expect(MONEY_TEMPLATES).not.toContain('link_cancelled');
+    expect(CARD_CHROME.link_cancelled).toEqual({
       en: { label: 'Payment link cancelled' },
       es: { label: 'Enlace de pago cancelado' },
     });
-    for (const language of LANGUAGES) expect(LINK_CANCELLED_CHROME[language].label).not.toMatch(/[0-9$€]/);
-  });
-
-  it('a_cancelled_link_has_no_card_chrome_yet', () => {
-    // The public chat draws a link_cancelled block as LinkCancelledCard. Its card chrome comes with
-    // the cancelled-link card's own change; until then ReplyCard (an owner's transcript) shows the
-    // block as a template it doesn't know, its text in a plain card with no label.
-    expect(Object.hasOwn(CARD_CHROME, 'link_cancelled')).toBe(false);
-    for (const language of LANGUAGES) expect(cardChrome('link_cancelled', language)).toBeNull();
+    for (const language of LANGUAGES) expect(CARD_CHROME.link_cancelled[language].label).not.toMatch(/[0-9$€]/);
   });
 });

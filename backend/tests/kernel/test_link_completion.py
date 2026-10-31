@@ -15,6 +15,8 @@ says otherwise). A test that drafts and confirms cards needs the solver (`solver
 
 import asyncio
 import dataclasses
+import json
+import logging
 import time
 from datetime import time as clock_time
 from datetime import timedelta
@@ -22,15 +24,19 @@ from datetime import timedelta
 import httpx
 import psycopg
 import pytest
+from cryptography.exceptions import InvalidSignature
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import Select, select, text
+from sqlalchemy.exc import NoSuchColumnError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from desk.contracts import HoursWindow, PolicyVersion, Review, RuleCard
+from desk.db.models import Document
 from desk.db.models import Fact as FactRow
 from desk.db.models import PaymentLink
 from desk.db.session import database_url, libpq_url
 from desk.kernel_api import LinkCancelled, PaymentLinkStateResult
-from desk.kernel_service import payments
+from desk.kernel_service import payments, reply_check
 from desk.kernel_service.app import create_app
 from desk.kernel_service.seed import RIVERA_CARDS
 
@@ -580,21 +586,54 @@ async def test_a_paid_link_stays_paid_whatever_happens_to_its_session(app, clien
 @pytest.mark.parametrize("template", ["link_cancelled", "payment_confirmed"])
 async def test_claude_cannot_draft_link_cancelled(app, client, reviewer, template):
     """Only the kernel tells a visitor a link was cancelled or a payment landed. Claude drafting either
-    card is refused, even when it cites a charge the conversation can read."""
+    card is refused, even when it cites a fact of the kind the card renders that the conversation can
+    read: its charge, or its own payment link's, open or cancelled. Another visitor's chat citing that
+    charge or cancelled link gets the same answer, so the refusal says nothing of whose fact it is.
+    Nor can the prose beside a card say a link's amount."""
     copy = await rivera(app, client)
     visitor = await open_visitor(client, copy)
-    cited = "payment_link:paylink-aaaaaaaaaaaaaaaa"
+    cited = ["payment_link:paylink-aaaaaaaaaaaaaaaa"]
     if template == "payment_confirmed":
         link = await rv_link(app, client, reviewer, copy, visitor)
         assert (await completed(client, link.token)).state == "paid"
         [fact] = await charge_facts(app, copy)
-        cited = fact.fact_id
-        assert cited in [f.fact_id for f in (await context_of(client, visitor.session_id, visitor.headers)).facts]
-    for clauses in ([clause(template)], [clause(template, cited)]):
-        verdict = await checked(client, visitor, "Here is where your payment stands.", clauses)
+        cited = [fact.fact_id]
+        assert fact.fact_id in [f.fact_id for f in (await context_of(client, visitor.session_id,
+                                                                     visitor.headers)).facts]
+    else:
+        live, cancelled = [await rv_link(app, client, reviewer, copy, visitor, call_id=f"call-{n}") for n in range(2)]
+        assert (await post_cancel(client, cancelled.token)).status_code == 200
+        cited += [f"payment_link:{link.link_id}" for link in (live, cancelled)]
+        assert cited[1] in [f.fact_id for f in (await context_of(client, visitor.session_id, visitor.headers)).facts]
+        verdict = await checked(client, visitor, "Your $20.00 payment link was cancelled.")
+        assert "number_in_prose" in [violation.kind for violation in verdict.violations]
+        assert_handed_off(verdict)
+    stranger = await open_visitor(client, copy)                         # another chat, citing this one's fact
+    drafts = [(visitor, [clause(template)]), *((visitor, [clause(template, fact_id)]) for fact_id in cited),
+              (stranger, [clause(template, cited[-1])])]
+    for chat, clauses in drafts:
+        verdict = await checked(client, chat, "Here is where your payment stands.", clauses)
         [violation] = verdict.violations
         assert (violation.kind, violation.rule_id, violation.span) == ("unknown_fact", "kernel_only_template",
                                                                        template)
+        assert_handed_off(verdict)
+
+
+async def test_a_link_cancelled_card_is_never_current_for_a_draft(app, client, reviewer, monkeypatch):
+    """A second fence behind `kernel_only_template`: the template counts no fact status as current,
+    so even with `link_cancelled` taken off the kernel-only list, Claude citing a link's fact gets no
+    card (`stale_fact`): a link it cancelled, whose fact has expired, and an open one, whose fact is
+    current for every other template, which only the template's empty status set refuses."""
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    link = await rv_link(app, client, reviewer, copy, visitor)
+    assert (await post_cancel(client, link.token)).status_code == 200
+    still_open = await rv_link(app, client, reviewer, copy, visitor, ("drain", 1), call_id="call-link-2")
+    monkeypatch.setattr(reply_check, "KERNEL_ONLY", reply_check.KERNEL_ONLY - {"link_cancelled"})
+    for fact_id in (f"payment_link:{link.link_id}", f"payment_link:{still_open.link_id}"):
+        verdict = await checked(client, visitor, "Here is where your payment stands.",
+                                [clause("link_cancelled", fact_id)])
+        assert violations(verdict) == [("stale_fact", "not_current", [fact_id])], fact_id
         assert_handed_off(verdict)
 
 
@@ -681,19 +720,20 @@ async def test_activation_cancels_open_links_it_no_longer_allows(desk_prove, app
     seen = await view(client, over.token)
     assert (seen.state, seen.cancel_reason, seen.customer_name) == ("cancelled", "rules_changed", None)
 
-    # the chat gets the kernel's line, signed at the session's generation, in its last language
+    # the chat gets the kernel's card for the link, signed at the session's generation, in its last language
     public = await public_key(client)
     [line] = await cancelled_links(client, copy, 2)
     assert (line.link_id, line.session_id) == (over.link_id, visitor.session_id)
     [block] = line.verdict.blocks
     assert (block.kind, block.template, block.fact_id, block.title, block.lines, block.href) == (
-        "card", "link_cancelled", None, CANCELLED["en"], [], None)
+        "card", "link_cancelled", f"payment_link:{over.link_id}", "$300.00",
+        ["Water heater flush × 2", CANCELLED["en"]], None)
     assert (line.verdict.ok, line.verdict.generation, line.verdict.language) == (True, 0, "en")
     verify_verdict(public, visitor.session_id, line.verdict)
     assert (await checked(client, visitor, "Hola, ¿qué tal?")).language == "es"
     [again] = await cancelled_links(client, copy, 2)                    # read again: the same link, signed anew
-    assert (again.link_id, again.verdict.language, again.verdict.blocks[0].title) == (over.link_id, "es",
-                                                                                    CANCELLED["es"])
+    assert (again.link_id, again.verdict.language, again.verdict.blocks[0].lines) == (
+        over.link_id, "es", ["Water heater flush × 2", CANCELLED["es"]])
     assert again.verdict.message_id != line.verdict.message_id
     verify_verdict(public, visitor.session_id, again.verdict)
     replies = [entry for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"
@@ -708,6 +748,145 @@ async def test_activation_cancels_open_links_it_no_longer_allows(desk_prove, app
         assert (await completed(client, link.token)).state == "paid", link.amount_cents
     await set_session(app, copy, visitor.session_id, closed_at=frozen_clock.now())
     assert await cancelled_links(client, copy, 2) == []                 # nor is a closed chat sent a line
+
+
+async def lower_the_cap_to_100(client: httpx.AsyncClient, copy: Rivera) -> int:
+    """Maria lowers her money cap to $100, and `rv-link` with it: the version she confirms."""
+    version = await draft_and_confirm(client, copy.owner_token, copy.desk_id, rivera_cards(link=RV_LINK_100),
+                                      auto_money_cap_cents=10_000)
+    return version.version
+
+
+@pytest.mark.solver
+async def test_a_cancelled_links_card_shows_its_own_title_and_amount(desk_prove, app, client, reviewer):
+    """Each chat's `link_cancelled` card says which link was cancelled: the amount as its headline,
+    then what the link was for and the kernel's line, rendered from that link's own `payment_link`
+    fact, never from model text, and signed with the card (`blocks_sha256`). A verified person's
+    link reads the same way, in the language she last wrote in."""
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    dana = await confirmed(client, copy, "dana@example.com")
+    heater = await rv_link(app, client, reviewer, copy, visitor, ("heater", 2), call_id="call-heater")   # $300
+    drain = await rv_link(app, client, reviewer, copy, dana, ("drain", 1), call_id="call-drain")         # $180
+    assert (await checked(client, dana, "Hola, ¿qué tal?")).language == "es"
+    version = await lower_the_cap_to_100(client, copy)
+
+    lines = {line.session_id: line for line in await cancelled_links(client, copy, version)}
+    assert {line.link_id for line in lines.values()} == {heater.link_id, drain.link_id}
+    public = await public_key(client)
+    expected = {visitor.session_id: (heater, "$300.00", "Water heater flush × 2", CANCELLED["en"], "en"),
+                dana.session_id: (drain, "$180.00", "Drain clearing", CANCELLED["es"], "es")}
+    for session_id, (link, amount, title, line_text, language) in expected.items():
+        verdict = lines[session_id].verdict
+        assert (lines[session_id].link_id, verdict.ok, verdict.language) == (link.link_id, True, language)
+        [block] = verdict.blocks                                         # the card alone: no prose beside it
+        assert (block.kind, block.template, block.fact_id, block.title, block.lines, block.href) == (
+            "card", "link_cancelled", f"payment_link:{link.link_id}", amount, [title, line_text], None)
+        assert block.text == "\n".join([amount, title, line_text])
+        verify_verdict(public, session_id, verdict)
+        # the title and amount are part of what is signed: a card showing another amount doesn't verify
+        for changed in ({"title": "$1.00"}, {"lines": ["Leak repair", line_text]}):
+            forged = verdict.model_copy(update={"blocks": [block.model_copy(update=changed)]})
+            with pytest.raises(InvalidSignature):
+                verify_verdict(public, session_id, forged)
+    replies = [entry.event for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"
+                and entry.event.summary["author"] == "desk"]
+    assert sorted((event.session_id, tuple(event.summary["fact_ids"])) for event in replies) == sorted(
+        (session_id, (f"payment_link:{link.link_id}",)) for session_id, (link, *_) in expected.items())
+
+
+WITHHELD = {"another_session": "not_a_reader", "no_such_fact": "no_such_fact",
+            "another_links_fact": "template_mismatch", "canary": "canary"}
+
+
+@pytest.mark.solver
+@pytest.mark.parametrize("change", [*WITHHELD, "no_source", "no_total", "title_not_text", "claims_unreadable"])
+async def test_a_cancelled_links_card_needs_its_own_readable_fact(desk_prove, app, client, reviewer, caplog, change):
+    """A cancelled link's card shows only the fact named after that link, which the chat it goes to
+    may read, well formed and holding no document text. A link row that names another visitor's chat
+    (who can't read the link's fact), a fact gone, a fact naming another link, a canary in what the
+    card would show, and a malformed fact (no source, no total, a title that isn't text, or claims
+    that don't parse) each leave the link without a line, logged, with nothing of the link's figures
+    sent or ledgered. Another chat's link that the same version cancelled still gets its line."""
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    stranger = await open_visitor(client, copy)
+    heater = await rv_link(app, client, reviewer, copy, visitor, ("heater", 2), call_id="call-heater")   # $300
+    drain = await rv_link(app, client, reviewer, copy, stranger, ("drain", 1), call_id="call-drain")     # $180
+    version = await lower_the_cap_to_100(client, copy)
+    fact_id = f"payment_link:{heater.link_id}"
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        link = (await ctx.db.scalars(ctx.repo.scoped(select(PaymentLink).where(
+            PaymentLink.link_id == heater.link_id)))).one()
+        fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(FactRow.fact_id == fact_id)))).one()
+        if change == "another_session":
+            link.session_id = stranger.session_id
+        elif change == "no_such_fact":
+            fact.fact_id = "payment_link:paylink-aaaaaaaaaaaaaaaa"
+        elif change == "no_source":
+            fact.source = None
+        elif change == "no_total":
+            fact.claims = [claim for claim in fact.claims if claim.key != "total"]
+        elif change == "title_not_text":
+            fact.claims = [claim.model_copy(update={"kind": "money", "value": 30_000}) if claim.key == "title"
+                           else claim for claim in fact.claims]
+        elif change == "claims_unreadable":
+            # written around the contract's check: a money claim holding text, so the stored claims don't parse
+            unreadable = [{**claim.model_dump(mode="json"), "value": "$300"} if claim.key == "total"
+                          else claim.model_dump(mode="json") for claim in fact.claims]
+            await ctx.db.execute(text("UPDATE kernel.facts SET claims = CAST(:claims AS jsonb) "
+                                      "WHERE desk_id = :desk_id AND fact_id = :fact_id"),
+                                 {"claims": json.dumps(unreadable), "desk_id": fact.desk_id, "fact_id": fact_id})
+        else:
+            canary = (await ctx.db.scalars(ctx.repo.scoped(select(Document.canary)))).first()
+            key, value = ("ref", "paylink-aaaaaaaaaaaaaaaa") if change == "another_links_fact" else (
+                "title", f"Flush {canary}")
+            fact.claims = [claim.model_copy(update={"value": value}) if claim.key == key else claim
+                           for claim in fact.claims]
+
+    with caplog.at_level(logging.ERROR, logger="desk.kernel_service.payments"):
+        response = await get_cancelled(client, copy, version)
+    assert response.status_code == 200, response.text
+    [line] = [LinkCancelled.model_validate(item) for item in response.json()]       # the other chat's line only
+    assert (line.link_id, line.session_id, line.verdict.ok, line.verdict.blocks[0].fact_id) == (
+        drain.link_id, stranger.session_id, True, f"payment_link:{drain.link_id}")
+    reason = WITHHELD.get(change, "malformed")
+    assert f"link_cancelled_withheld link_id={heater.link_id} reason={reason}" in caplog.text
+    assert [(entry.event.session_id, entry.event.summary["fact_ids"]) for entry in await ledger_rows(app, copy)
+            if entry.event.kind == "reply" and entry.event.summary["author"] == "desk"] == [
+        (stranger.session_id, [f"payment_link:{drain.link_id}"])]
+
+
+@pytest.mark.solver
+async def test_a_database_error_fails_the_whole_cancelled_links_read(desk_prove, app, client, reviewer, caplog,
+                                                                     monkeypatch):
+    """Only a malformed fact withholds one link's line. A database error loading a link's fact
+    fails the whole read, even one that is also a `KeyError` (`NoSuchColumnError`): nothing is
+    listed or ledgered, and the API's read of the version again lists every link."""
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    stranger = await open_visitor(client, copy)
+    heater = await rv_link(app, client, reviewer, copy, visitor, ("heater", 2), call_id="call-heater")   # $300
+    drain = await rv_link(app, client, reviewer, copy, stranger, ("drain", 1), call_id="call-drain")     # $180
+    version = await lower_the_cap_to_100(client, copy)
+    fact_id = f"payment_link:{heater.link_id}"
+    scalars = AsyncSession.scalars
+
+    async def failing_scalars(self: AsyncSession, statement, *args, **kwargs):
+        if (isinstance(statement, Select) and statement.column_descriptions[0]["entity"] is FactRow
+                and fact_id in statement.compile().params.values()):
+            raise NoSuchColumnError("Could not locate column in row for column 'facts.claims'")
+        return await scalars(self, statement, *args, **kwargs)
+
+    with monkeypatch.context() as patched, caplog.at_level(logging.ERROR, logger="desk.kernel_service.payments"):
+        patched.setattr(AsyncSession, "scalars", failing_scalars)
+        response = await get_cancelled(client, copy, version)
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    assert "link_cancelled_withheld" not in caplog.text
+    assert not [entry for entry in await ledger_rows(app, copy) if entry.event.kind == "reply"
+                and entry.event.summary["author"] == "desk"]
+    assert {line.link_id for line in await cancelled_links(client, copy, version)} == {heater.link_id, drain.link_id}
 
 
 @pytest.mark.solver
