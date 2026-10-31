@@ -881,12 +881,14 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.world.answer(held, 'deny_once');
     await router.navigate(`${DESK}/rules/all`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    // Counted before Rules opens again: the page's own read may reach the server before or after
+    // the page draws, and once it's out no other read is sent until it comes back.
+    const before = reads.held();
     await router.navigate(`${DESK}/rules`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     const again = screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(again.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
-    const waiting = reads.held();
-    await expect.poll(() => reads.held()).toBeGreaterThan(waiting);
+    await expect.poll(() => reads.held()).toBeGreaterThan(before);
     expect(chipWords(again)).toEqual([...FIXED_CHIPS]);
 
     // Dana's refund is held meanwhile: once the reads come back, the chip asks about it.
