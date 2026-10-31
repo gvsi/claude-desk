@@ -17,7 +17,7 @@ Amends: the master plan ("Shared contracts v2", "Decision semantics and proof ob
 ## What this plan serves
 
 - An offered exception can't become a booking: a booking outside the owner's service area, or one whose place is unclear, waits for the owner, whatever Claude said and whatever the reviewer scored.
-- The owner's area is enforced by code and proved: the condition is compiled from the owner's cards, and the proofs show that no checking card auto-books a place that isn't on the list.
+- The owner's area is enforced by code and proved: the condition is compiled from the owner's cards. When no auto card covering `native.book` sets `any_area`, the proofs show that no booking whose stated place isn't on the list is auto-allowed, for any reviewer value; otherwise each card is held to its own condition. The place is the visitor's word, not a verified address (open question 9).
 - The claim stays honest: the tier 2 report shows the area attacks' results beside legitimate booking completion and the area holds the owner had to clear, and the threat model states the risk that remains (a visitor who names a false town).
 
 ## 1. The booking argument
