@@ -91,11 +91,12 @@ export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): v
   // An instant jump has arrived already, and keeps its place as the page changes; so has a jump to where it is.
   if (Math.abs(window.scrollY - going) <= 1) return;
   let followedAgain = false;
-  const stopWaiting = waitForJump(
-    () => stopResting(),
-    () => stopResting(),
-  );
-  const stopResting = onScrollRest(() => {
+  const stopWaiting = waitForJump(stop, stop);
+  // A rest is heard from the scroll's end, or from the window going still: a browser can skip the end of a glide
+  // that starts while an earlier scroll's end is still due. Either only counts where the glide was going.
+  const stopResting = onScrollRest(rested);
+  const stopStill = onStill(rested);
+  function rested() {
     if (Math.abs(window.scrollY - going) > 1) return;
     if (!followedAgain && !atPlaceOf(heading)) {
       followedAgain = true;
@@ -103,9 +104,13 @@ export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): v
       heading.scrollIntoView({ behavior, block: 'start' });
       return;
     }
+    stop();
+  }
+  function stop() {
     stopWaiting();
     stopResting();
-  });
+    stopStill();
+  }
 }
 
 /** What the reader does that means they have moved on from where the page put them, Back and Forward included. */
@@ -123,38 +128,59 @@ export function keepSectionWhileTypeLoads(heading: HTMLElement, behavior: Scroll
   const { fonts } = document;
   if (!fonts || fonts.status !== 'loading') return () => {};
   let acted = false;
-  let moving = false;
+  let typeLoaded = false;
   const act = () => {
     acted = true;
     stop();
   };
-  const onScroll = () => {
-    moving = true;
-  };
-  let afterRest: (() => void) | null = null;
-  const stopResting = onScrollRest(() => {
-    moving = false;
-    afterRest?.();
+  // A glide still under way, or a jump's scroll still settling, is let finish first: the heading is followed again
+  // once the type has loaded and the window has gone still.
+  const stopStill = onStill(() => {
+    if (typeLoaded) followAgain();
   });
   function stop() {
     for (const kind of READER_ACTIONS) window.removeEventListener(kind, act);
-    window.removeEventListener('scroll', onScroll);
-    stopResting();
+    stopStill();
   }
-  for (const kind of READER_ACTIONS) window.addEventListener(kind, act, { passive: true });
-  window.addEventListener('scroll', onScroll, { passive: true });
-  const followAgain = () => {
+  function followAgain() {
     stop();
     if (acted || !heading.isConnected) return;
     if (!atPlaceOf(heading)) heading.scrollIntoView({ behavior, block: 'start' });
-  };
+  }
+  for (const kind of READER_ACTIONS) window.addEventListener(kind, act, { passive: true });
   void fonts.ready.then(() => {
     if (acted) return;
-    // A glide still under way, or a jump whose scroll hasn't been heard to end, is let finish first.
-    if (moving) afterRest = followAgain;
-    else followAgain();
+    typeLoaded = true;
+    if (stillNow()) followAgain();
   });
   return act;
+}
+
+/** When the window last scrolled, by the page's clock. */
+let lastScroll = Number.NEGATIVE_INFINITY;
+
+/** Whether the window has been still for a moment. */
+function stillNow(): boolean {
+  return performance.now() - lastScroll >= REST_WAIT;
+}
+
+/**
+ * Calls `onStill` each time the window goes still: once no scroll has been heard for a moment. Unlike `scrollend`,
+ * this never goes missing; a glide's frames come more often than that, so it doesn't fire part way. Returns what
+ * stops it.
+ */
+function onStill(onStill: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const onScroll = () => {
+    lastScroll = performance.now();
+    clearTimeout(timer);
+    timer = setTimeout(onStill, REST_WAIT);
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  return () => {
+    clearTimeout(timer);
+    window.removeEventListener('scroll', onScroll);
+  };
 }
 
 /**
