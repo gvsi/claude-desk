@@ -52,7 +52,9 @@ describe('App', () => {
       await expectScreenBasics(screen.container, { owner });
     }
 
-    // A visitor reads it in their own language, at a phone's width too.
+    // A visitor reads it in their own language, at a phone's width too, and the whole document is
+    // in that language while it shows (index.html sets English; the test browser's page has its own).
+    document.documentElement.lang = 'en';
     thrown = 0;
     const es = await renderRoute(`/d/${RIVERA.slug}`, { routes: throwingAt('/d/:slug'), language: 'es-MX', viewport: 'phone' });
     await expect.element(es.screen.getByText(UNREACHABLE_COPY.es, { exact: true })).toBeVisible();
@@ -61,6 +63,11 @@ describe('App', () => {
     expectNoErrorDetail('the public page in Spanish');
     await expectScreenBasics(es.screen.container, { owner: false });
     expectNoHorizontalScroll();
+    expect(document.documentElement.lang).toBe('es');
+    // Leaving the page hands the document its language back.
+    await es.router.navigate('/no/such/page');
+    await expect.element(es.screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.documentElement.lang).toBe('en');
   });
 
   it('owner_401_replaces_the_page_with_the_passcode', async () => {
