@@ -100,8 +100,6 @@ cards:
     We work in Oakland, Berkeley, Alameda and Emeryville.
   service_area_es: &service_area_es |-
     Trabajamos en Oakland, Berkeley, Alameda y Emeryville.
-  callback_en: &callback_en |-
-    Maria Rivera will call you back on Monday, November 2, between 8:00 am and 9:00 am
   callback_es: &callback_es |-
     Maria Rivera te llamará el lunes 2 de noviembre, entre las 8:00 y las 9:00
   pricing_policy_en: &pricing_policy_en |-
