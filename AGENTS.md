@@ -45,6 +45,8 @@ If a task seems to require breaking one of these, stop and raise it with the pro
   - Planning stays on Opus 5.5, and reviews keep the two-seat panel above.
   - Easy or low-risk tasks use Sol at high for planning, implementation and review, with no Opus seat.
   - The UI tester's and the UX craft reviewer's sweeps keep their cadence and run through `codex exec` on Sol at high.
+  - It limits Claude usage only; GPT work runs as normal. Web-only fixes that don't touch money, verification, approvals or the reply check count as low-risk. Task reviews run on Sol.
+  - To pause work, stop it at a safe point with its work committed on its branch, so it resumes with nothing lost. The orchestrating session messages only the lanes whose work changes, never every lane at once.
 - **Owner sign-off required for:** creating cloud resources or deploying; spending beyond model usage for development and evals; secrets handling; sharing anything outside the repo; changing a locked decision in the spec; anything irreversible.
 - **Secrets:** never commit or print secrets; local secrets live in `.env` (git-ignored).
 - **Names and copy:** the product is Claude Desk ("a Desk", "Desks"). Sentence case, plain literal copy, no all-caps labels (one named exception: the "PREVIEW" badge in the Claude Desk lockup), no "→" on buttons. Footer: "Concept prototype by Giovanni Alcantara, not an Anthropic product". No Claude or Anthropic logos.
