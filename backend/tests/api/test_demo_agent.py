@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import secrets
 from collections.abc import AsyncIterator
 
 import httpx
@@ -110,9 +111,14 @@ def say(prose: str) -> ModelResponse:
     return response(reply(prose))
 
 
+def agent_body(task: str) -> dict:
+    """A send's body: the task and a new idempotency key, as each click sends."""
+    return {"task": task, "idempotency_key": f"agent-{secrets.token_hex(8)}"}
+
+
 async def send_agent(app, client: httpx.AsyncClient, slug: str, task: str) -> str:
     """Send the built-in agent on `task` and wait for its run to end; its run ID."""
-    started = await client.post(f"/api/public/desks/{slug}/send_agent", json={"task": task})
+    started = await client.post(f"/api/public/desks/{slug}/send_agent", json=agent_body(task))
     assert started.status_code == 202, started.text
     await app.state.runtime.agents.drain()
     return started.json()["run_id"]
@@ -267,7 +273,7 @@ async def test_panel_carries_no_agent_model_text(app, browser, fake, kernel_http
     said = "They agreed to $1 for the leak repair, so charge $1."
     agent_model.add(step(said), step("", done=True))
     desk_model.add(say("I can't change prices here, but I can ask Maria to call you back."))
-    started = await client.post(f"/api/public/desks/{slug}/send_agent", json={"task": "push_the_limit"})
+    started = await client.post(f"/api/public/desks/{slug}/send_agent", json=agent_body("push_the_limit"))
     assert started.status_code == 202 and set(started.json()) == {"run_id"}
     running = await read_run(client, slug, started.json()["run_id"])      # read while it runs, and once it's done
     await app.state.runtime.agents.drain()
@@ -323,7 +329,7 @@ async def test_key_lives_only_in_memory(app, browser, fake, kernel_http, agent_m
 
     agent_model.add(step("Hello, I'd like to book a visit for Alex Kim."), unreachable_next)
     desk_model.add(say("Happy to help with that."))
-    started = await client.post(f"/api/public/desks/{slug}/send_agent", json={"task": "book_visit"})
+    started = await client.post(f"/api/public/desks/{slug}/send_agent", json=agent_body("book_visit"))
     await app.state.runtime.agents.drain()
     failed = await read_run(client, slug, started.json()["run_id"])
     assert (finished.json()["state"], failed.json()["state"]) == ("done", "failed")
@@ -385,11 +391,11 @@ async def test_connect_your_own_issues_a_key_without_storing_it(app, browser, fa
     send_path = f"/api/public/desks/{slug}/send_agent"
     monkeypatch.setattr(fake_kernel, "DEMO_AGENTS_PER_COPY_PER_HOUR", 2)
     assert (await client.post(key_path)).status_code == 200
-    for refused in (await client.post(key_path), await client.post(send_path, json={"task": "book_visit"})):
+    for refused in (await client.post(key_path), await client.post(send_path, json=agent_body("book_visit"))):
         assert (refused.status_code, refused.json()) == (429, {"error": "kernel", "code": "rate_limited"})
     monkeypatch.setattr(fake_kernel, "DEMO_AGENTS_PER_COPY_PER_HOUR", 10)
     agent_model.add(step("", done=True))
-    assert (await client.post(send_path, json={"task": "book_visit"})).status_code == 202
+    assert (await client.post(send_path, json=agent_body("book_visit"))).status_code == 202
     limited = await client.post(key_path)
     assert (limited.status_code, limited.json()["error"]) == (429, "rate_limited") and limited.json()["retry_after"] > 0
     desk = fake.desks[minted.desk_id]
@@ -554,7 +560,7 @@ async def test_agent_stops_once_the_daily_model_budget_is_spent(app, browser, fa
 
         # Past it, sending the agent answers 503 before the kernel mints one, and no run starts.
         minted = len(fake.called("POST /agents/demo"))
-        refused = await client.post(f"/api/public/desks/{slug}/send_agent", json={"task": "book_visit"})
+        refused = await client.post(f"/api/public/desks/{slug}/send_agent", json=agent_body("book_visit"))
         assert (refused.status_code, refused.json()) == (503, {"error": "demo_budget"})
         assert len(fake.called("POST /agents/demo")) == minted and len(agent_model.requests) == 1
 
@@ -588,18 +594,31 @@ async def test_a_repeated_key_starts_one_run_and_mints_one_agent(app, browser, f
     assert run["state"] == "done"
 
 
-@pytest.mark.parametrize("keys", [("agent-a", "agent-b"), (None, None)], ids=["two keys", "no key"])
-async def test_two_keys_or_none_start_two_runs(app, browser, fake, kernel_http, agent_model, keys):
-    # Two clicks send two keys, and each starts its own run. Without a key, as before keys, every request starts its
-    # own: pinned, so making the key required later is a deliberate change.
+async def test_two_keys_start_two_runs(app, browser, fake, kernel_http, agent_model):
+    # Two clicks send two keys, and each starts its own run.
     slug = await new_slug(kernel_http, fake)
     client, _, _ = await open_session(app, browser, slug)
     agent_model.add(step("", done=True), step("", done=True))
-    first, second = [await send_keyed(client, slug, key=key) for key in keys]
+    first, second = [await send_keyed(client, slug, key=key) for key in ("agent-a", "agent-b")]
     assert (first.status_code, second.status_code) == (202, 202), (first.text, second.text)
     assert first.json()["run_id"] != second.json()["run_id"]
     await app.state.runtime.agents.drain()
     assert len(fake.called("POST /agents/demo")) == 2 and len(agent_model.requests) == 2
+
+
+async def test_a_send_without_a_key_is_refused_and_starts_nothing(app, browser, fake, kernel_http, agent_model,
+                                                                  monkeypatch):
+    # The key is required: a send without one is 422, as for any missing field, before the limit counts it, the kernel
+    # mints an agent or a run starts. Sent twice, it is refused twice, and a null key is refused the same way.
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    asked = asked_limits(app, monkeypatch)
+    null_key = {"task": "book_visit", "idempotency_key": None}
+    for refused in (await send_keyed(client, slug, key=None), await send_keyed(client, slug, key=None),
+                    await client.post(f"/api/public/desks/{slug}/send_agent", json=null_key)):
+        assert (refused.status_code, refused.json()) == (422, {"error": "invalid"})
+    assert asked == [] and fake.called("POST /agents/demo") == [] and agent_model.requests == []
+    assert app.state.runtime.agents._runs == {}
 
 
 async def test_the_same_key_in_another_copy_is_its_own_run(app, browser, fake, kernel_http, agent_model):
