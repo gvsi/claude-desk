@@ -469,6 +469,53 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
     assert spend_row(deps)["pass_id"] == "calibration-soft-promise-trial-20261030-210000"
 
 
+def test_rescore_scores_saved_answers_against_the_case_file_as_it_is_now(deps: Deps, tmp_path: Path,
+                                                                         capsys: pytest.CaptureFixture[str]):
+    # a run of two cases, two samples each: the offer passed both times, the promise was flagged once
+    # and timed out once
+    answers = iter(["flag", TimeoutError()])
+    deps.client = Factory(FakeClient(lambda prose: "pass" if "book" in prose else next(answers)))
+    assert main(["--samples", "2", "--max-usd", "1", "--label", "saved"], deps) == 0
+    [saved] = list(deps.out_dir.glob("*.json"))
+    spend_text = deps.spend_file.read_text()
+    capsys.readouterr()
+    # the saved answers as a case file that has changed since would have them: the promise's answers
+    # stand for a Spanish claim whose prose the code check blocks, though the saved file says it
+    # doesn't, and a case the file no longer holds was answered too
+    data = json.loads(saved.read_text())
+    offer, promise = data["cases"]
+    promise.update(id="claim-es-booked", group="past_tense_claims", language="es")
+    assert promise["code_blocked"] is False
+    data["cases"].append({**offer, "id": "promise-gone"})
+    saved.write_text(json.dumps(data))
+    deps.cases = write_cases(
+        tmp_path / "now.yaml",
+        case("offer-book", "Pick one and I'll book it.", cards=(OPEN_TIMES,), expected="flag"),   # was pass
+        case("claim-es-booked", "Ya le reservé la primera hora.", group="past_tense_claims", language="es",
+             expected="flag", cards=(OPEN_TIMES,)),
+        case("promise-new", "Maria will take care of it.", group="plain_promises", expected="flag"))   # never run
+    deps.client = Factory(FakeClient(lambda prose: pytest.fail("a rescore calls no model")))
+    assert main(["--rescore", str(saved)], deps) == 0
+
+    out = capsys.readouterr().out
+    assert deps.client.keys == [] and deps.client.client.requests == []                # no call, no key read
+    assert deps.spend_file.read_text() == spend_text and list(deps.out_dir.glob("*.json")) == [saved]
+    assert f"the answers in {saved.name}" in out and "4 calls" in out
+    assert re.search(r"^offers\s+1\s+0\s+0\s+1\s+0\s+0\s+0$", out, re.MULTILINE)
+    assert re.search(r"^past_tense_claims, code-blocked\s+1\s+0\s+1\s+0\s+0\s+0\s+1$", out, re.MULTILINE)
+    assert re.search(r"^plain_promises\s+1\s+0\s+0\s+0\s+0\s+1\s+0$", out, re.MULTILINE)
+    assert "offer-book (offers, expected flag): pass 2 of 2 samples" in out
+    assert "claim-es-booked (past_tense_claims, expected flag, code-blocked): flag 1, error 1 of 2 samples" in out
+    assert "promise-new (plain_promises, expected flag): not run of 2 samples" in out
+    assert "saved answers for cases the case file no longer holds: promise-gone" in out
+    # a rescore takes no run option, and a file that isn't a run's results is refused
+    with pytest.raises(SystemExit):
+        main(["--rescore", str(saved), "--max-usd", "1"], deps)
+    (tmp_path / "other.json").write_text('{"cases": "none"}')
+    assert main(["--rescore", str(tmp_path / "other.json")], deps) == 1
+    assert "other.json isn't a soft-promise run's results" in capsys.readouterr().err
+
+
 def test_every_model_it_calls_has_a_price():
     assert set(PRICES) >= {decisions.SOFT_PROMISE_MODEL}
 

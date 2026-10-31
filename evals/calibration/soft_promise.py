@@ -4,8 +4,12 @@ file, and each answer counted against what the case expects.
 
     python -m evals.calibration.soft_promise --samples N --max-usd X
         [--prompt-ref REF | --prompt-file PATH] [--label NAME] [--concurrency 4]
+    python -m evals.calibration.soft_promise --rescore RESULTS
 
 `make evals-soft-promise MAX_USD=<dollars> [SAMPLES=5] [PROMPT_REF=<ref> | PROMPT_FILE=<path>]` runs it.
+`--rescore` calls no model and spends nothing: it scores the answers a run saved in its results file
+against the case file as it is now (each case's expectation, and whether the code check blocks it, in
+this tree) and prints the table; a case the run never asked about is not run.
 It spends money: each call is one Haiku 5.5 call on the Claude API, estimated at $0.0005
 (`PER_CALL_USD`, over four times the master plan's $0.00011 for one check, so an estimate errs high).
 
@@ -73,7 +77,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import anthropic
 import yaml
@@ -575,6 +579,20 @@ def render(rows: Sequence[Row], *, samples: int) -> list[str]:
     ]
 
 
+def scored(case_results: Sequence[CaseResult], *, samples: int) -> list[str]:
+    """The table, then each case not met in every sample asked for, with its answers."""
+    lines = render(table(case_results), samples=samples)
+    missed = [result for result in case_results if result.outcome != "all"]
+    if missed:
+        lines += ["", "Cases not met in every sample asked for:"]
+        for result in missed:
+            counts = ", ".join(f"{verdict} {count}" for verdict, count in result.verdicts.items() if count)
+            lines.append(f"  {result.id} ({result.group}, expected {result.expected}"
+                         f"{', code-blocked' if result.code_blocked else ''}): "
+                         f"{counts or 'not run'} of {result.requested} samples")
+    return lines
+
+
 def report(outcome: RunResult, path: Path) -> list[str]:
     planned = len(outcome.cases) * outcome.samples
     lines = [
@@ -589,16 +607,60 @@ def report(outcome: RunResult, path: Path) -> list[str]:
     if outcome.over_cap:
         lines.append(f"over the cap: spent ${outcome.spend_usd:.4f}, past --max-usd ${outcome.max_usd:.4f}, since a "
                      "call cost more than its bound")
-    lines += ["", *render(table(outcome.cases), samples=outcome.samples)]
-    missed = [result for result in outcome.cases if result.outcome != "all"]
-    if missed:
-        lines += ["", "Cases not met in every sample asked for:"]
-        for result in missed:
-            counts = ", ".join(f"{verdict} {count}" for verdict, count in result.verdicts.items() if count)
-            lines.append(f"  {result.id} ({result.group}, expected {result.expected}"
-                         f"{', code-blocked' if result.code_blocked else ''}): "
-                         f"{counts or 'not run'} of {result.requested} samples")
-    lines += ["", f"results: {path}"]
+    lines += ["", *scored(outcome.cases, samples=outcome.samples), "", f"results: {path}"]
+    return lines
+
+
+# Rescoring saved answers
+
+class _SavedCase(BaseModel):
+    """A case's answers as a results file holds them; what else it says, its expectation and whether
+    the code check blocked it then included, is computed again."""
+
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    verdicts: dict[Literal["pass", "flag", "flag_ai", "flag_both", "error"], Annotated[int, Field(ge=0)]]
+    errors: dict[str, Annotated[int, Field(ge=0)]] = Field(default_factory=dict)
+
+
+class _SavedRun(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    model: str
+    samples: int = Field(ge=1)
+    calls: int = Field(ge=0)
+    prompt: PromptRecord
+    cases: list[_SavedCase]
+
+
+def rescore(saved: Path, cases_file: Path) -> list[str]:
+    """The answers in `saved`, a run's results file, scored against the cases in `cases_file` as it
+    is now: each case's expectation and whether the code check blocks it come from the case file and
+    this tree, the samples asked for from the run, and a case the run never asked about is not run.
+    No model is called and nothing is written."""
+    try:
+        run_ = _SavedRun.model_validate_json(saved.read_bytes())
+    except (OSError, ValidationError):
+        raise Refused(f"{saved.name} isn't a soft-promise run's results file") from None
+    answered = {case.id: case for case in run_.cases}
+    if len(answered) < len(run_.cases) or any(sum(case.verdicts.values()) > run_.samples for case in run_.cases):
+        raise Refused(f"{saved.name} isn't a soft-promise run's results file: a case is there twice or has more "
+                      f"than its {run_.samples} samples")
+    cases = load_cases(cases_file)
+    case_results = []
+    for case in cases:
+        result = CaseResult(id=case.id, group=case.group, language=case.language, expected=case.expected,
+                            code_blocked=code_blocked(case), requested=run_.samples)
+        if (answers := answered.get(case.id)) is not None:
+            result.verdicts = {verdict: answers.verdicts.get(verdict, 0) for verdict in VERDICTS}
+            result.errors = dict(answers.errors)
+        case_results.append(result)
+    gone = [case_id for case_id in answered if case_id not in {case.id for case in cases}]
+    lines = [f"soft-promise rescore: the answers in {saved.name} ({run_.calls} calls to {run_.model}, {run_.samples} "
+             f"samples of each case, with the prompt in {run_.prompt.source}, sha256 {run_.prompt.sha256[:12]}) "
+             f"against {cases_file.name} as it is now; no model called", "",
+             *scored(case_results, samples=run_.samples)]
+    if gone:
+        lines += ["", f"saved answers for cases the case file no longer holds: {', '.join(gone)}"]
     return lines
 
 
@@ -609,23 +671,43 @@ def main(argv: Sequence[str] | None = None, deps: Deps | None = None) -> int:
         prog="python -m evals.calibration.soft_promise", allow_abbrev=False,
         description="Send every soft-promise case N times to the kernel's check on the real model (this spends "
                     "money) and count its answers.")
-    parser.add_argument("--samples", type=int, required=True, help="calls per case")
-    parser.add_argument("--max-usd", type=float, required=True,
+    parser.add_argument("--samples", type=int, help="calls per case")
+    parser.add_argument("--max-usd", type=float,
                         help="the most the run may spend, in US dollars; it refuses an estimate over it")
     prompt = parser.add_mutually_exclusive_group()
     prompt.add_argument("--prompt-ref", help="take SOFT_PROMISE_SYSTEM from decisions.py at this git ref")
     prompt.add_argument("--prompt-file", type=Path, help="send this file's text as the system prompt")
     parser.add_argument("--label", help="names the results file and the spend row")
-    parser.add_argument("--concurrency", type=int, default=4, help="calls at a time")
+    parser.add_argument("--concurrency", type=int, help="calls at a time (4)")
+    parser.add_argument("--rescore", type=Path, metavar="RESULTS",
+                        help="score the answers in a run's results file against the case file as it is now, "
+                             "with no model call, and print the table; it takes no other option")
     options = parser.parse_args(argv)
+    deps = deps or Deps()
+    run_options = (options.samples, options.max_usd, options.prompt_ref, options.prompt_file, options.label,
+                   options.concurrency)
+    if options.rescore is not None:
+        if any(option is not None for option in run_options):
+            parser.error("--rescore reads saved answers and takes no other option")
+        try:
+            print("\n".join(rescore(options.rescore, deps.cases)))
+        except Refused as refusal:
+            print(f"soft-promise: {refusal}", file=sys.stderr)
+            return 1
+        return 0
+    missing = [name for name, value in (("--samples", options.samples), ("--max-usd", options.max_usd))
+               if value is None]
+    if missing:
+        parser.error(f"the following arguments are required: {', '.join(missing)}")
     try:
         config = Config(samples=options.samples, max_usd=options.max_usd, prompt_ref=options.prompt_ref,
-                        prompt_file=options.prompt_file, label=options.label, concurrency=options.concurrency)
+                        prompt_file=options.prompt_file, label=options.label,
+                        concurrency=4 if options.concurrency is None else options.concurrency)
     except ValidationError as error:
         first = error.errors()[0]
         parser.error(f"--{str(first['loc'][0]).replace('_', '-')}: {first['msg']}")
     try:
-        outcome, path = asyncio.run(run(config, deps or Deps()))
+        outcome, path = asyncio.run(run(config, deps))
     except Refused as refusal:
         print(f"soft-promise: {refusal}", file=sys.stderr)
         return 1
