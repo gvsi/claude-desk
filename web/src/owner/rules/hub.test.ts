@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { RuleCard, ToolName } from '../../api/contracts.ts';
 import type { PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import type { ToolSummaryView } from '../../ds/index.ts';
 import { peopleOut, rulesView } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -42,6 +43,15 @@ function rowOf(rules: RulesView, tool: ToolName): ToolRow {
 /** A rule for anyone, at every optional field's default unless `fields` sets it. */
 function card(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'reason'> & Partial<RuleCard>): RuleCard {
   return { who: 'anyone', person_id: null, agent_key_id: null, max_amount_cents: null, max_discount_bp: 0, hours: null, review: false, is_default: false, ...fields };
+}
+
+/** `tool`'s row on the hub, which every Rivera copy lists. */
+function hubTool(rules: RulesView, tool: ToolName): ToolSummaryView {
+  const found = hubSections(rules, people())
+    .flatMap((s) => s.tools)
+    .find((t) => t.key === tool);
+  if (!found) throw new Error(`no ${tool} on the hub`);
+  return found;
 }
 
 beforeEach(() => {
@@ -232,7 +242,7 @@ describe('the Rules hub', () => {
     expect(tool('native.payment_link')).toMatchObject({ summary: '2 rules · 1 shared', mode: 'auto', limit: '$300' });
     expect(tool('native.start_verification')).toMatchObject({ summary: 'Always on', mode: 'auto' });
     expect(tool('payments.create_refund')).toMatchObject({ summary: 'The customer who paid, verified', mode: 'ask' });
-    // A rule for the record's owner is the most general one there.
+    // The only rule there, for the record's owner, decides it.
     expect(tool('native.release_document')).toMatchObject({ summary: "The record's owner, verified", mode: 'auto' });
     // Every row as the signed presets board draws it.
     for (const board of rivera.connectors.sections) {
@@ -253,6 +263,39 @@ describe('the Rules hub', () => {
     const book = hubSections(rulesView(desk()), people()).flatMap((s) => s.tools).find((t) => t.key === 'native.book');
     expect(dana.active.cards.some((c) => c.card_id === 'rv-dana-book')).toBe(true);
     expect(book).toMatchObject({ summary: 'Dana Whitfield', mode: 'ask' });
+  });
+
+  it('summary_asks_when_an_ask_rule_ties_an_automatic_one', () => {
+    // As in the kernel, the most specific rule decides, a tool's own rule above a shared one, and
+    // at the same rank "Ask me first" beats "Automatic", whichever group each rule is for.
+    const verifiedAsk = card({ card_id: 'card-quote-verified-ask', applies_to: 'native.quote', mode: 'ask', who: 'verified', reason: 'Quotes for verified customers ask you first.' });
+    const quote = hubTool(view([verifiedAsk]), 'native.quote');
+    expect(quote).toMatchObject({ summary: '2 rules', mode: 'ask' });
+    expect(quote.limit).toBeUndefined();
+
+    // A shared ask rule ranks below a tool's own rule: Share a document's automatic rule for the
+    // record's owner still decides it.
+    const messagesAsk = card({ card_id: 'card-messages-ask', applies_to: 'effect:send_message', mode: 'ask', reason: 'Messages ask you first.' });
+    expect(hubTool(view([messagesAsk]), 'native.release_document')).toMatchObject({ summary: '2 rules · 1 shared', mode: 'auto' });
+  });
+
+  it('summary_shows_never_when_a_never_rule_governs', () => {
+    // A never rule always wins, as in the kernel: a shared one on every tool that charges money
+    // decides Payment link over its own automatic rule up to $300, with no limit to show.
+    const noCharges = card({ card_id: 'card-charges-never', applies_to: 'effect:charge', mode: 'never', reason: 'No payments for now.' });
+    const link = hubTool(view([noCharges]), 'native.payment_link');
+    expect(link).toMatchObject({ summary: '2 rules · 1 shared', mode: 'never' });
+    expect(link.limit).toBeUndefined();
+
+    // So does one for a narrower group.
+    desk().policy.cards = desk().policy.cards.filter((c) => c.card_id !== noCharges.card_id);
+    const verifiedNever = card({ ...noCharges, card_id: 'card-charges-verified-never', who: 'verified' });
+    expect(hubTool(view([verifiedNever]), 'native.payment_link')).toMatchObject({ summary: '2 rules · 1 shared', mode: 'never' });
+
+    // One for one person says nothing about everyone else: the tool's own rule decides.
+    desk().policy.cards = desk().policy.cards.filter((c) => c.card_id !== verifiedNever.card_id);
+    const danaNever = card({ ...noCharges, card_id: 'card-charges-dana-never', who: 'person', person_id: rivera.people.dana.personId });
+    expect(hubTool(view([danaNever]), 'native.payment_link')).toMatchObject({ summary: '2 rules · 1 shared', mode: 'auto', limit: '$300' });
   });
 
   it('limit_field_takes_whole_dollars', () => {
