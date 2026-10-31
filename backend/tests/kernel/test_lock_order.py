@@ -9,9 +9,9 @@ transaction of a path takes (`LockLog`) and check that they come in that order: 
 their reconciliation (a private action's too, once its session closed: its adapter asked, then
 the action withheld, refused or left unknown by what it answers), answers, cancels and reads, a
 verification start allowed or approved, a right code checked, a document link opened, a person
-removed or given another contact, a Desk deleted, and a handoff closed, after the Desk row an
-owner's write holds first; and Plan 01c's payment paths, over the real adapters and the mock
-payments server.
+removed or given another contact, a Desk deleted, a reply check that opens a handoff for its card,
+and a handoff closed, after the Desk row an owner's write holds first; and Plan 01c's payment
+paths, over the real adapters and the mock payments server.
 """
 
 import asyncio
@@ -385,6 +385,22 @@ async def test_a_reply_check_keeps_the_lock_order(app, client, frozen_clock):
     assert verdict.ok
     # the session is seen at the check's end (no lock across the model call), just before its entry
     assert log.transactions == [["sessions", "ledger_heads"]]
+
+
+async def test_a_reply_check_that_opens_a_handoff_keeps_the_lock_order(app, client, frozen_clock):
+    _, visitor = await visitor_of(app, client)
+    frozen_clock.advance(1)                                         # so the visitor's last_seen_at is written
+    with lock_log(app) as log:
+        assert not (await checked(client, visitor, "That will be $180.")).ok
+    # the session row, then the handoffs (the session's open ones, none, then the card's, inserted), then the
+    # handoff's entry and the verdict's; the owner's alert is an insert under a fresh key
+    assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
+    frozen_clock.advance(1)
+    with lock_log(app) as log:
+        assert not (await checked(client, visitor, "That will be $180.")).ok
+    # the open one, held FOR SHARE so the owner can't mark it done meanwhile, and only the verdict's entry
+    assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
 
 
 async def test_an_allowed_verification_start_runs_in_the_lock_order(app, client):

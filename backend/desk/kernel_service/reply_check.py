@@ -40,8 +40,9 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    handoff clause, in the reply's language.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
    lines, until the next turn starts (its row written only now, so no lock on it is held while
-   the model reads the draft), and the verdict is ledgered (`reply`) and signed in the same
-   transaction.
+   the model reads the draft); when the verdict shows the handoff card, an owner handoff is
+   opened for the session unless one is open already (`open_card_handoff`, the owner's decision
+   of 2026-10-30); and the verdict is ledgered (`reply`) and signed in the same transaction.
 
 The owner's messages (`owner_message`) end in the same record: a say is checked for canaries
 alone and shown as typed in an `owner_said` card, and a whisper is only ledgered.
@@ -71,14 +72,15 @@ from sqlalchemy import select
 
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
-from desk.db.models import Booking, Business, CalendarSlot, Desk
+from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Person
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
-from desk.kernel_service import agents, auth, context, labels, lang, ledger, render
+from desk.kernel_service import agents, auth, context, demo_inbox, labels, lang, ledger, render
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template, storable
+from desk.kernel_service.sessions import verified
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
@@ -619,12 +621,19 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     it while the soft-promise check runs and a take-over doesn't wait for the model; it comes
     before the ledger head, as the lock order says (`repo.py`). A take-over that commits while
     the check runs keeps its mode and generation (only these two columns are written), and the
-    verdict carries the generation the draft was checked at, which `deliver()` then drops."""
+    verdict carries the generation the draft was checked at, which `deliver()` then drops.
+
+    When the verdict of Claude's draft shows the handoff card, in place of a draft the checks
+    blocked or because the draft cited it, the session's owner handoff is opened next, before the
+    ledger head (`open_card_handoff`), and ledgered just before the verdict. An owner's message
+    never opens one."""
     if seen:
         session_row.last_seen_at = ctx.clock.now()
         if detected is not None:
             session_row.last_language = detected
         await ctx.db.flush()
+    if author == "claude" and any(block.template == "handoff" for block in blocks):
+        await open_card_handoff(ctx, session_row)
     ok = not violations
     message_id = message_id if message_id is not None else new_id("msg")
     summary = {"message_id": message_id, "author": author, "ok": ok, "language": language,
@@ -644,6 +653,84 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     return ReplyVerdict(ok=ok, language=language, blocks=list(blocks), violations=list(violations),
                         message_id=message_id, generation=session_row.generation, visitor_plain=visitor_plain,
                         ledger_seq=entry.seq, signature=signature)
+
+
+# ---- The handoff the card opens -------------------------------------------------------------------
+
+# Owner-only text from kernel templates, in the owner's language (English, as the owner's previews are):
+# no visitor text, no prose of Claude's, no contact.
+CARD_REASON = "The Desk handed this to you."
+A_VISITOR = "A visitor"
+
+
+def card_alert(who: str) -> str:
+    """The owner's alert for a handoff the card opened: who is waiting, and nothing of what was said."""
+    return f"{who} is waiting in a conversation the Desk handed to you."
+
+
+async def open_handoff_ids(ctx: KernelCtx, session_row: SessionRow, *, lock: bool = False) -> list[str]:
+    """The IDs of the session's open handoffs, of either kind: read without a lock, or with `lock`
+    held `FOR SHARE` (step 10 of the lock order), so the owner can't mark one done until the
+    caller's transaction ends."""
+    stmt = select(Handoff.handoff_id).where(Handoff.desk_id == session_row.desk_id,
+                                           Handoff.session_id == session_row.session_id, Handoff.status == "open")
+    if lock:
+        stmt = stmt.order_by(Handoff.handoff_id).with_for_update(read=True)
+    return list(await ctx.db.scalars(ctx.repo.scoped(stmt)))
+
+
+async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:
+    """Who is waiting, as the owner's records name them: a verified person's display name, else
+    "A visitor" (an agent's key has no name of its own)."""
+    if not verified(kind, assurance, person_id):
+        return A_VISITOR
+    name = (await ctx.db.execute(ctx.repo.scoped(select(Person.display_name).where(
+        Person.person_id == person_id, Person.removed_at.is_(None))))).scalar_one_or_none()
+    return name or A_VISITOR
+
+
+async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | None:
+    """The owner's handoff for a verdict that shows the handoff card ("Let me check with Maria
+    Rivera. Maria Rivera will reply here."), in the verdict's transaction, so the card's promise
+    has something behind it (the owner's decision of 2026-10-30). Returns its ID, or None when it
+    opens none.
+
+    In the lock order: the session row first (`FOR NO KEY UPDATE`, the mode `finalize`'s write
+    takes, read as columns, so the row the request read keeps the generation the verdict is signed
+    at), then the session's open handoffs `FOR SHARE`, then the ledger head. Two checks of one
+    session, a call-back's execution (which holds the session row `FOR SHARE`) and the owner's
+    mark of done (which holds the handoff `FOR UPDATE`) each come wholly before or after it.
+
+    It opens none when a take-over or hand-back has moved the session to another generation since
+    the request read it (`deliver()` drops the verdict, so the visitor never sees the card), or
+    when the session already has an open handoff of either kind (an earlier card, or a call-back
+    request): one at a time, so a conversation of blocked drafts alerts the owner once. Otherwise
+    it inserts one of kind `card`: open, no call-back window and no fact (it promises no call
+    back), the kernel's reason (`CARD_REASON`), and as `action_id` its own ID, which no action's
+    can equal; alerts the owner (`handoff`, under the Desk's notification preferences, with no
+    decision) with who is waiting (`card_alert`); and ledgers `desk_data` `{part: "handoffs",
+    refs: [handoff_id], kind: "card"}` on the session, the entry the owner's mark of done writes
+    too. The owner marks it done with `POST /handoffs/{id}/done`, after which the next card opens
+    a new one; a session closing changes nothing of it."""
+    current = (await ctx.db.execute(ctx.repo.scoped(
+        select(SessionRow.generation, SessionRow.kind, SessionRow.assurance, SessionRow.person_id).where(
+            SessionRow.session_id == session_row.session_id).with_for_update(key_share=True)))).one()
+    if current.generation != session_row.generation:
+        return None
+    if await open_handoff_ids(ctx, session_row, lock=True):
+        return None
+    copy_id, desk_id, session_id = session_row.copy_id, session_row.desk_id, session_row.session_id
+    handoff_id = new_id("handoff")
+    ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=copy_id, desk_id=desk_id, session_id=session_id,
+                       reason=CARD_REASON, callback_window=None, status="open", kind="card", action_id=handoff_id,
+                       window_start=None, window_end=None))
+    await ctx.db.flush()
+    who = await _waiting(ctx, current.kind, current.assurance, current.person_id)
+    await demo_inbox.alert_owner(ctx, desk_id, "handoff", render.owner_preview("handoff"), card_alert(who))
+    await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="desk_data", origin="kernel", session_id=session_id,
+        summary={"part": "handoffs", "refs": [handoff_id], "kind": "card"}))
+    return handoff_id
 
 
 # ---- The owner's messages -------------------------------------------------------------------------

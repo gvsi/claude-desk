@@ -18,7 +18,9 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    other adapter, on either path, so a Desk's deletion, which closes the session `FOR UPDATE`,
    commits before T2 takes the row or waits until T2 commits; written by a visitor's or agent's
    own requests (`last_seen_at`, `last_language`), the reply check's only at its end, just before
-   its ledger entry, so it holds no lock on the row while the soft-promise check runs;
+   its ledger entry, so it holds no lock on the row while the soft-promise check runs, and taken
+   there `FOR NO KEY UPDATE` too when its verdict shows the handoff card
+   (`reply_check.open_card_handoff`), before it looks for the session's open handoffs;
 2. the decision row, `FOR UPDATE`: lazy expiry, an answer, a cancel, each step of an execution,
    reconciliation;
 3. the execution row: inserted with the intent, `FOR UPDATE` in T2, T3 and reconciliation;
@@ -39,7 +41,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    `POST /knowledge` upserts;
 10. an adapter's own rows, which its hooks lock or write (a booking and the calendar slot it
     books, which its T2 takes `FOR SHARE`; a handoff; Plan 01c's mandates), after whatever of steps
-    4 to 9 the same transaction takes;
+    4 to 9 the same transaction takes; and the handoffs of a session whose reply shows the
+    handoff card: its open ones `FOR SHARE`, then the card's, inserted when none is open;
 11. facts: an open expires its link's, voiding expires the links', a removal relabels its
     person's documents', a right code relabels the session's (`labels.relabel_on_verify`), closing
     a handoff expires its own, an hours write rewrites the Desk's, an execution or reconciliation
