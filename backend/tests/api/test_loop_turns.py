@@ -527,7 +527,7 @@ async def test_parallel_calls_with_mixed_outcomes_share_one_tool_result_message(
         response(tool_use("native__quote", DRAIN, id="toolu_quote"),
                  tool_use("native__quote", {**DRAIN, "requested_discount_bp": 5000}, id="toolu_half"),
                  tool_use("native__release_document", {"document_id": "doc-1"}, id="toolu_invoice")),
-        lambda request: response(reply("Here's your quote. I've asked Maria Rivera about the discount.",
+        lambda request: response(reply(prompts.STATUS_LINES["check_status"]["en"],
                                        {"template": "quote", "fact_id": quote_fact(request)})),
     ])
     async with KernelHttp("http://fake-kernel", transport=Watching(fake, {"/decide"}, together)) as http:
@@ -683,14 +683,23 @@ async def test_held_result_returns_without_waiting(api_conn, caller, fake):
     assert shown[-1].blocks[0].text == "Could you tell me a little more about what you need?"
 
 
-async def test_a_delivered_handoff_allows_a_checked_later_turn(api_conn, caller, fake):
+@pytest.mark.parametrize("blocked", [True, False], ids=["blocked-draft", "claude-handoff"])
+async def test_a_delivered_handoff_allows_a_checked_later_turn(api_conn, caller, fake, blocked):
     """A scripted handoff does not pause the visitor or replay owner contact on the next turn."""
     await said(api_conn, caller, "Please ask the owner to help with this.")
-    fake.violation("canary")  # staged immediate handoff, orchestration only
-    first = ScriptedModel([response(reply("Please help with this.")), response()])
-    assert await run_turn(api_conn, caller, first) == "handoff"
-    (result,) = tool_results(first.requests[1])
-    assert result["content"] == {"outcome": "delivered_handoff"}
+    if blocked:
+        fake.violation("canary")  # staged immediate handoff, orchestration only
+    clauses = [] if blocked else [{"template": "handoff"}]
+    first = ScriptedModel([response(reply("Please help with this.", *clauses)), response()])
+    assert await run_turn(api_conn, caller, first) == ("handoff" if blocked else "done")
+    if blocked:
+        (result,) = tool_results(first.requests[1])
+        assert result["content"] == {"outcome": "delivered_handoff"}
+    else:
+        assert len(first.requests) == 1
+        assert fake.called("/check_reply")[0].body["draft"]["clauses"] == [{"template": "handoff", "fact_id": None}]
+    assert len(fake.handoffs) == 1 and card_handoffs(fake, caller) == ["open"]
+    handoff_ids = set(fake.handoffs)
     assert "don't use the handoff clause again for the same request" in first.requests[0].system[0]["text"]
 
     await said(api_conn, caller, "Can you still help me describe the problem?")
@@ -705,7 +714,8 @@ async def test_a_delivered_handoff_allows_a_checked_later_turn(api_conn, caller,
     assert len(shown) == 2
     assert sum(block.template == "handoff" for event in shown for block in event.blocks) == 1
     assert shown[-1].blocks[0].text == "Where is the leak coming from?" and not shown[-1].handoff
-    assert fake.called("/decide") == [] and fake.handoffs == {}
+    assert fake.called("/decide") == []
+    assert set(fake.handoffs) == handoff_ids and card_handoffs(fake, caller) == ["open"]
 
 
 @pytest.mark.parametrize("accepted", [True, False], ids=["accepted", "declined"])
@@ -793,9 +803,11 @@ async def test_staged_status_promise_flags_stay_blocked(api_conn, caller, fake, 
     (blocked,) = tool_results(model.requests[-2])
     assert blocked["is_error"] and blocked["content"] == {"outcome": "blocked", "instruction": REWRITE_INSTRUCTION,
                                                           "violations": [{"kind": "soft_promise", "span": prose}]}
-    assert len(fake.handoffs) == int(callback)
+    assert len(fake.handoffs) == 1
+    (work,) = fake.handoffs.values()
+    assert work["session_id"] == caller.session_id and work["status"] == "open"
+    assert work["kind"] == ("callback" if callback else "card")
     if callback:
-        (work,) = fake.handoffs.values()
         assert fact_ids == ["handoff:" + work["handoff_id"]]
 
 

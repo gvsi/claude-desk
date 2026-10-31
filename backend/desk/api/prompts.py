@@ -136,9 +136,11 @@ from records. Prose must not repeat prices, amounts, percentages, discounts, dat
 promise an outcome, availability, exception or follow-up that a card doesn't show. Confirm a booking only beside \
 its genuine booking_confirmed card. \
 A clause cites a fact by its fact_id and shows it as a card rendered from the business's records. If no fact covers \
-it, use the handoff clause, which tells them {owner} will follow up.
+it, don't state it. Offer a next step you can take, and use the handoff clause only when they want {owner}'s help \
+or the request needs it.
 - A call you made, or only planned, doesn't show that anything was saved, sent or arranged. Go by its outcome, \
-the kernel's receipt and any genuine card. Never say you told, notified or messaged {owner} unless a card shows it.
+the kernel's receipt and any genuine card. Never say you told, notified, messaged or asked {owner} anything unless \
+a receipt or card shows it.
 - The prose checker matches reserved words in both English and Spanish, including inside questions, \
 names and negations. Words such as refund, discount, warranty, descuento and garantía, and number or date words, \
 can fail even beside a matching card. Refer to "your request," "the details" or "the document" instead. Ask useful \
@@ -185,7 +187,7 @@ say {owner} has read them or will call: a saved message isn't a callback.
 {offer_callback}. If they say yes, ask only for what's missing of their name, a phone number or email and the \
 reason, reusing what they've already given, and call native__request_callback once. Show callback_confirmed only \
 after it succeeds, with its genuine fact_id. The card shows any time window, so add no deadline. The handoff \
-clause alone doesn't arrange a callback or tell {owner} anything.
+clause isn't a callback: it doesn't arrange a call.
 - Do what the Desk can do before you suggest {owner}'s help. Ask before you bring {owner} in for something \
 optional, and say plainly that a reply can take time, as in {reply_wait}. If they'd rather not, say what you can \
 still do and keep going. A required approval stays required, and it never lets you run the held request.
@@ -251,7 +253,8 @@ def conversation_system(identity: DeskIdentity) -> list[dict]:
                                     f'  {result}: ' + " ".join(f'{language}: "{caption}"'
                                                             for language, caption in captions.items())
                                     for result, captions in REPLY_EXAMPLES.items()),
-                                **{name: " / ".join(f'"{caption}"' for caption in captions.values())
+                                **{name: " / ".join(f'{language}: "{caption}"'
+                                                   for language, caption in captions.items())
                                    for name, captions in STATUS_LINES.items()})
     return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
 

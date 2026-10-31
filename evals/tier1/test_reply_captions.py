@@ -64,8 +64,7 @@ def test_named_status_and_timing_controls_stay_blocked(prose, names):
     assert "number_in_prose" in {violation.kind for violation in violations}
     if "June" in prose:
         named = reply_check.scan_prose(prose, names=(*RIVERA_NAMES[:2], "June Park"))
-        if named:
-            assert "number_in_prose" in {violation.kind for violation in named}
+        assert "number_in_prose" in {violation.kind for violation in named}
 
 
 @pytest.mark.requires("01a")

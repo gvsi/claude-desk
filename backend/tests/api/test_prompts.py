@@ -173,7 +173,9 @@ def test_system_prompt_covers_the_rules():
         "Never state a price, amount, date or time of your own, and never promise an outcome, availability, "
         "exception or follow-up that a card doesn't show.",
         "Confirm a booking only beside its genuine booking_confirmed card",
-        "cites a fact by its fact_id", "use the handoff clause",
+        "cites a fact by its fact_id",
+        "If no fact covers it, don't state it. Offer a next step you can take, and use the handoff clause only "
+        "when they want Maria Rivera's help or the request needs it.",
         "The prose checker matches reserved words in both English and Spanish, including inside "
         "questions, names and negations",
         "refund, discount, warranty, descuento and garantía",
@@ -195,7 +197,7 @@ def test_system_prompt_covers_the_rules():
         "\"held_for_owner\": the request hasn't happened; it waits for Maria Rivera.",
         "A call you made, or only planned, doesn't show that anything was saved, sent or arranged.",
         "Go by its outcome, the kernel's receipt and any genuine card.",
-        "Never say you told, notified or messaged Maria Rivera unless a card shows it.",
+        "Never say you told, notified, messaged or asked Maria Rivera anything unless a receipt or card shows it.",
         "Don't call it again or check on it, don't say Maria Rivera will approve it or when, and don't say an "
         "answer will show up here.",
         "Don't name what's waiting in words the cards keep (a discount, refund, price, amount, date, time or booking)",
@@ -211,7 +213,7 @@ def test_system_prompt_covers_the_rules():
         "reusing what they've already given, and call native__request_callback once.",
         "Show callback_confirmed only after it succeeds, with its genuine fact_id.",
         "The card shows any time window, so add no deadline.",
-        "The handoff clause alone doesn't arrange a callback or tell Maria Rivera anything.",
+        "The handoff clause isn't a callback: it doesn't arrange a call.",
         "Do what the Desk can do before you suggest Maria Rivera's help.",
         "Ask before you bring Maria Rivera in for something optional, and say plainly that a reply can take time",
         "If they'd rather not, say what you can still do and keep going.",
@@ -386,6 +388,7 @@ def test_status_sentences_are_name_free_and_present_where_used(owner):
     for name, captions in prompts.STATUS_LINES.items():
         assert set(captions) == {"en", "es"}
         line = next(line for line in text.splitlines() if line.startswith(starts[name]))
+        assert f'en: "{captions["en"]}" / es: "{captions["es"]}"' in line
         for caption in captions.values():
             assert caption in line
             assert "{" not in caption and "}" not in caption
