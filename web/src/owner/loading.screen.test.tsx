@@ -14,7 +14,6 @@ import { rivera } from '../ds/fixtures/index.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
-import { START_EXAMPLES } from '../setup/copy.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
 import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
@@ -83,7 +82,9 @@ it('reload_with_two_desks_moves_once', async () => {
 
 /** A Desk the mock's setup made for Okafor Plumbing, its questions answered and its rules drafted, then left there. */
 async function deskLeftAtRules(): Promise<SetupState> {
-  const description = START_EXAMPLES.en.examples[0]?.description ?? '';
+  // Keep this fixture independent of setup's editable starter businesses.
+  const description =
+    "Okafor Plumbing. I'm Daniel, and I fix leaks, clear drains and replace water heaters for homes around Oakland. People often send me a photo of the problem before I come out.";
   const started = await mockStore.dispatch('startSetup', {
     body: { description, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() },
   });
