@@ -33,7 +33,7 @@ import { Transcript } from '../components/Transcript/Transcript.tsx';
 import { TranscriptRow } from '../components/TranscriptRow/TranscriptRow.tsx';
 import { VisionBar } from '../components/VisionBar/VisionBar.tsx';
 import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx';
-import { cardBlock, proseBlock, rivera } from '../fixtures/index.ts';
+import { cardBlock, meridian, proseBlock, rivera } from '../fixtures/index.ts';
 import { MAIN_LINE, OWNER_HREFS, brandOf } from './parts.tsx';
 
 import './vision.css';
@@ -480,40 +480,14 @@ export function PhoneApps() {
 // page. Meridian Bay Permits is fictional; no vision page names a real city office.
 
 /** Who answers for the city when Claude hands over, as the page names them ("Ask for Permit Center staff"). */
-const CITY_STAFF = 'Permit Center staff';
+const CITY_STAFF = meridian.business.ownerName;
 
 /**
- * The city's public Desk in the shape the kernel serves (`PublicDesk`): its name and the Permit
- * Center, its colors, its charter (hours, who decides what needs a permit, and how to reach the
- * Permit Center) and its open status, as the board draws them. Two charter lines are a vision of
- * what the templates could carry, beyond what they render today: the hours card's "Inspections, …"
- * line (the kernel writes each window of the hours, unlabelled) and the contact card's second line
- * (the kernel writes the contact verbatim, as one line).
+ * The city's public Desk, the fixtures' `meridian.publicDesk.en`: its name and the Permit Center,
+ * its colors, its charter and its open status, as the board draws them (`meridian.ts` names the
+ * charter's two vision lines).
  */
-export const CITY_DESK: PublicDesk = {
-  business_name: 'Meridian Bay Permits',
-  desk_name: 'City of Meridian Bay, Permit Center',
-  owner_display_name: CITY_STAFF,
-  brand: { primary: '#2D3D4C', accent: '#6F8BA3' },
-  charter: [
-    cardBlock('hours', {
-      fact_id: 'charter:hours',
-      title: 'Monday to Friday, 8:00 am to 4:30 pm',
-      lines: ['Inspections, Monday to Friday, 8:00 am to 4:00 pm'],
-    }),
-    cardBlock('policy', { fact_id: 'charter:policy:decisions', title: 'Plan checkers decide what needs a permit and what’s exempt.' }),
-    cardBlock('contact', { fact_id: 'charter:contact', title: '(415) 555-0186', lines: ['Permit Center, 250 Harbor Street'] }),
-  ],
-  agent_card: [],
-  open_status: {
-    open: true,
-    until: '2026-10-30T16:30:00-07:00',
-    opens_at: null,
-    text: 'Open now, until 4:30 pm',
-    as_of: '2026-10-30T10:00:00-07:00',
-    refresh_at: '2026-10-30T16:30:00-07:00',
-  },
-};
+export const CITY_DESK: PublicDesk = meridian.publicDesk.en;
 
 /**
  * Marcus Bell's visit, word for word as the board writes it: his messages, Claude's words, the

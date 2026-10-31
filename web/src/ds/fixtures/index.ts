@@ -1,7 +1,9 @@
 // Fixtures for stories and tests: contract-shaped data for Rivera Plumbing (the demo business,
-// following the master plan's Rivera seed) and Chen & Co. CPA (the verification board and the
-// business switcher). Everything a visitor would read is what the kernel would send: cards carry
-// kernel-rendered text, and prose and status lines hold nothing a reply check would block.
+// following the master plan's Rivera seed), Chen & Co. CPA (the verification board and the
+// business switcher) and Meridian Bay Permits (the public Desk on the city office's vision page).
+// Everything a visitor would read is what the kernel would send: cards carry kernel-rendered text,
+// and prose and status lines hold nothing a reply check would block. The one exception is two lines
+// of Meridian's charter, a vision of what the templates could carry, which `meridian.ts` names.
 
 import type { DemoInboxEntry, InboxNotice, RenderedBlock, SessionState, SseEvent } from '../../api/contracts';
 
@@ -54,5 +56,6 @@ export function requestHrefOf(entry: DemoInboxEntry | null): string | undefined 
 }
 
 export { chen } from './chen';
+export { meridian } from './meridian';
 export type { CardData } from './rivera';
 export { cardBlock, placeholderHex, proseBlock, rivera, RIVERA_MONEY_CAP_CENTS } from './rivera';
