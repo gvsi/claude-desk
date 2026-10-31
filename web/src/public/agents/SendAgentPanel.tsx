@@ -131,6 +131,9 @@ const OFFERS_TASKS: ReadonlySet<Status> = new Set<Status>(['idle', 'done', 'stop
  * a start stays unresolved until the send itself answers: a session that couldn't reopen (an
  * `openSession` refusal or no answer) or anything else leaves it lost, to try again. A second 401
  * ends the chat, but the agent may still be on its way, so it is the reload, never fresh tasks.
+ * Any other answer from the send settles it as on a first send: that relies on the API answering a
+ * repeat from its key before every refusal that offers the tasks again (its limits' 429s, the full
+ * key map's 429, `demo_budget`, a kernel 4xx on the mint), so such a refusal means nothing started.
  */
 function sendFailure(err: unknown, retry: boolean): Status {
   const answered = err instanceof ApiError && err.route === 'sendAgent';
