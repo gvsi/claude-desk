@@ -9,7 +9,8 @@
    the panel inside itself.
 
    The first visit's one moment: the panel arrives, and the illustration plays its conversation
-   once, in about 1.1 s, while the content column stays still with focus already in the field.
+   once, in about 1.1 s with today's tokens, while the content column stays still with focus
+   already in the field.
    On a correct passcode the dialog leaves in motion-fast. Under reduced motion none of it runs. */
 
 .cd-intro {
@@ -321,8 +322,8 @@
     animation: cd-intro-rise var(--motion-base) var(--motion-ease-emphasis) both;
   }
 
-  /* Dana asks once the panel has settled (290 ms in); Claude answers a beat later (600 ms), as if
-     it read her first. */
+  /* Dana asks once the panel has settled, about 290 ms in with today's tokens; Claude answers a
+     beat later, at about 600 ms, as if it read her first. */
   .cd-intro__illustration > .cd-intro__card--asked {
     animation-delay: calc(var(--motion-base) + var(--motion-stagger) - var(--motion-instant));
   }
@@ -331,7 +332,7 @@
     animation-delay: calc(var(--motion-base) * 3);
   }
 
-  /* The booking's check draws once, as the board draws it (860 ms). */
+  /* The booking's check draws once, as the board draws it, at about 860 ms with today's tokens. */
   .cd-intro__check path {
     stroke-dasharray: 24;
     stroke-dashoffset: 24;
@@ -339,7 +340,8 @@
     animation-delay: calc(var(--motion-base) * 4 + var(--motion-instant));
   }
 
-  /* Then what the Desk checked, one receipt at a time, motion-stagger apart (1000 and 1150 ms). */
+  /* Then what the Desk checked, one receipt at a time, motion-stagger apart: at about 1000 and
+     1150 ms with today's tokens. */
   .cd-intro__receipt {
     animation: cd-intro-tick var(--motion-base) var(--motion-ease-emphasis) both;
   }
