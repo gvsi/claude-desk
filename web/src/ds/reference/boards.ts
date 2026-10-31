@@ -66,7 +66,10 @@ export const REFERENCE_BOARDS = [
   // Customers: the list loading, and the list on a phone.
   'N-Run2-People-Loading',
   'N-Run2-People-Phone',
-  // Setup: real situations and the safety check, each a page longer than the window.
+  // Setup: an answer that couldn't be sent, kept with Try again; the tools step, a page longer
+  // than the window; real situations and the safety check, each a page longer than the window.
+  'N-R2-Setup-04-Answer-Failed',
+  'N-R2-Setup-05-Tools',
   'N-R2-Setup-09-Situations',
   'N-R2-Setup-11-Safety',
   // The agents page: the page itself, longer than the window, and the demo key shown once.
@@ -92,6 +95,16 @@ export const REFERENCE_BOARDS = [
   'N-Run2-Settings-Notifications',
   'N-Run2-Settings-Billing',
   'N-Run2-Settings-Phone',
+  // Settings › Channels, signed on 2026-10-30: the page the app builds, with no vision bar; and the
+  // same page under the vision bar, a vision story only.
+  'N-Run2-Settings-Channels',
+  'N-R2-Vision-Channels',
+  // The vision pages, signed on 2026-10-30, each under the vision bar: a team Desk's conversations;
+  // a returning visitor signed in with a Claude account; and Today and the public chat as phone
+  // apps. The city office's page is being redrawn from a resident's side and comes in a later change.
+  'N-R2-Vision-TeamDesk',
+  'N-R2-Vision-ClaudeAccount',
+  'N-R2-Vision-Phone',
 ] as const;
 
 export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];
@@ -109,6 +122,8 @@ export const BOARD_VIEWPORTS = {
   sidebar: { name: 'Sidebar alone', width: 264, height: 982 },
   phone: { name: 'Phone', width: 390, height: 844 },
   'phone-900': { name: 'Phone, a 900 px page', width: 390, height: 900 },
+  'laptop-994': { name: '14-inch laptop, a 994 px page', width: 1512, height: 994 },
+  'laptop-1061': { name: '14-inch laptop, a 1061 px page', width: 1512, height: 1061 },
   'laptop-1100': { name: '14-inch laptop, a 1100 px page', width: 1512, height: 1100 },
   'laptop-1150': { name: '14-inch laptop, a 1150 px page', width: 1512, height: 1150 },
   'laptop-1500': { name: '14-inch laptop, a 1500 px page', width: 1512, height: 1500 },
@@ -117,8 +132,9 @@ export const BOARD_VIEWPORTS = {
 export type BoardViewport = keyof typeof BOARD_VIEWPORTS;
 
 /**
- * The boards drawn at another window than the canvas's, and which. Every Connectors tab and Rules
- * board (`N-Conn-*`) is drawn at the laptop's, but for its phone board.
+ * The boards drawn at another window than the canvas's, and which: the window each board's story
+ * runs at, which is also its render's size unless `RENDER_SIZES` gives its own. Every Connectors tab
+ * and Rules board (`N-Conn-*`) is drawn at the laptop's, but for its phone board.
  */
 const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewport, 'canvas'>>>> = {
   'N-History-Conversations': 'laptop',
@@ -129,6 +145,8 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-Conn-24-Phone-Connectors': 'phone',
   'N-Run2-People-Loading': 'laptop',
   'N-Run2-People-Phone': 'phone',
+  'N-R2-Setup-04-Answer-Failed': 'laptop',
+  'N-R2-Setup-05-Tools': 'laptop-1100',
   'N-R2-Setup-09-Situations': 'laptop-1100',
   'N-R2-Setup-11-Safety': 'laptop-1150',
   'N-R2-Agents-01-Page': 'laptop-1500',
@@ -146,11 +164,48 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-Run2-Settings-Notifications': 'laptop',
   'N-Run2-Settings-Billing': 'laptop',
   'N-Run2-Settings-Phone': 'phone-900',
+  'N-Run2-Settings-Channels': 'laptop',
+  'N-R2-Vision-Channels': 'laptop',
+  'N-R2-Vision-TeamDesk': 'laptop-1061',
+  'N-R2-Vision-ClaudeAccount': 'laptop-994',
+  'N-R2-Vision-Phone': 'laptop',
 };
 
-/** The window `board` is drawn at, so its render's size and its story's viewport. */
+/** The window `board`'s story runs at, and its render's size unless `RENDER_SIZES` gives its own. */
 export function boardViewport(board: ReferenceBoard): BoardViewport {
   return BOARD_WINDOWS[board] ?? (board.startsWith('N-Conn-') ? 'laptop' : 'canvas');
+}
+
+/**
+ * The boards whose render is drawn at another height than the page their story measures: the canvas
+ * board's own size. Their stories run at the page's height (`BOARD_WINDOWS`), so a play measures
+ * the page as the components draw it, and the render is checked at the size the canvas drew it.
+ */
+const RENDER_SIZES: Readonly<Partial<Record<ReferenceBoard, { width: number; height: number }>>> = {
+  'N-R2-Vision-TeamDesk': { width: 1512, height: 1022 },
+  'N-R2-Vision-ClaudeAccount': { width: 1512, height: 1013 },
+};
+
+/** The size `board`'s render is drawn at: its own (`RENDER_SIZES`), or its story's window. */
+export function renderSize(board: ReferenceBoard): { width: number; height: number } {
+  const own = RENDER_SIZES[board];
+  if (own !== undefined) return own;
+  const { width, height } = BOARD_VIEWPORTS[boardViewport(board)];
+  return { width, height };
+}
+
+/**
+ * The problem with a render's size, or null when it is the size its board is drawn at
+ * (`renderSize`), or for a board captured at its full height, that width and at least that height.
+ */
+export function renderSizeProblem(board: ReferenceBoard, size: { width: number; height: number }): string | null {
+  const want = renderSize(board);
+  if (capturedAtFullHeight(board)) {
+    return size.width === want.width && size.height >= want.height
+      ? null
+      : `${board}: ${size.width}×${size.height}, not ${want.width} wide and at least ${want.height} tall`;
+  }
+  return size.width === want.width && size.height === want.height ? null : `${board}: ${size.width}×${size.height}, not ${want.width}×${want.height}`;
 }
 
 /**

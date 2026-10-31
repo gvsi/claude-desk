@@ -36,6 +36,69 @@
   max-width: 85%;
 }
 
+/* A Notice attached there (a visitor's message that didn't send) follows the same rule, at every
+   width: its line starts with the lines above it, so the dots stay in one column, and its next step
+   sits under it at the right, ending where the bubble ends. The line ends there too when it is the
+   widest thing attached. Beside each other, the line and the step would make what is attached as
+   wide as both, and the line would start that much further left when the step dropped under it on
+   a phone. The line stretches rather than centring under a wider receipt. */
+.cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-visitor-message, .cd-agent-message)) > .cd-transcript-row__margin > .cd-notice {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+}
+
+.cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-visitor-message, .cd-agent-message)) > .cd-transcript-row__margin > .cd-notice > .cd-notice__action {
+  align-self: flex-end;
+}
+
+/* A row that arrived live, on a page already open: the message rises space-4 and fades in, and
+   what is attached under it lands one by one, motion-stagger apart, each sliding in space-4 from
+   the left (a receipt's dot grows with it, in MarginReceipt.css). From the third on they share a
+   beat, so a long list never keeps the reply waiting. Each is held at its start until its turn and
+   let go at its end, so nothing lingers once it has landed. Visual only: what the log announces,
+   and the words, order and colors, stay as they are. */
+.cd-transcript-row--live > .cd-transcript-row__main {
+  animation: cd-transcript-row-rise var(--motion-base) var(--motion-ease-emphasis) backwards;
+}
+
+.cd-transcript-row--live > .cd-transcript-row__margin > * {
+  --cd-arrival: 1;
+
+  animation: cd-transcript-row-land var(--motion-base) var(--motion-ease-emphasis) backwards;
+  animation-delay: calc(var(--motion-stagger) * var(--cd-arrival));
+}
+
+.cd-transcript-row--live > .cd-transcript-row__margin > :nth-child(2) {
+  --cd-arrival: 2;
+}
+
+.cd-transcript-row--live > .cd-transcript-row__margin > :nth-child(n + 3) {
+  --cd-arrival: 3;
+}
+
+@keyframes cd-transcript-row-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+}
+
+@keyframes cd-transcript-row-land {
+  from {
+    opacity: 0;
+    transform: translateX(calc(-1 * var(--space-4)));
+  }
+}
+
+/* Reduced motion: the row and everything attached show at once. */
+@media (prefers-reduced-motion: reduce) {
+  .cd-transcript-row--live > .cd-transcript-row__main,
+  .cd-transcript-row--live > .cd-transcript-row__margin > * {
+    animation: none;
+  }
+}
+
 .cd-transcript-header__caption {
   margin: 0;
   color: var(--text-secondary);

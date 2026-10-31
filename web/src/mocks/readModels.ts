@@ -3,7 +3,7 @@
  * copy as it stands (world.ts) in the shapes of Plan 02's read models (`api/views.ts`) and the
  * shared contracts.
  */
-import type { Decision, DecisionState, LedgerEntry, LedgerPage, PublicDesk } from '../api/contracts.ts';
+import type { Decision, DecisionState, LedgerEntry, LedgerPage, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   Attempt,
   Briefing,
@@ -19,18 +19,25 @@ import type {
   NeedsYouSession,
   OwnerTranscript,
   PaymentLinkOut,
+  PeopleOut,
   Reports,
+  RulesPreset,
+  RulesView,
   ThisWeek,
   Today,
+  ToolRow,
   TranscriptKind,
   VisitorTranscript,
 } from '../api/views.ts';
+import { rulesForTool } from '../ds/components/ToolRulesCard/toolRules.ts';
 import { rivera } from '../ds/fixtures/index.ts';
+import { AGENT_CARD_BLOCKS } from './agents.ts';
 import type { Language } from './script.ts';
-import { BUSINESS } from './seed.ts';
+import { BUSINESS, PRESETS } from './seed.ts';
 import {
   LEDGER_KEY,
   MINUTE,
+  canonicalCard,
   isoTime,
   type DecisionRecord,
   type DeskRecord,
@@ -254,7 +261,7 @@ interface Activity {
   /** A visitor's or an agent's own words. */
   texts: Happened[];
   bookings: Booking[];
-  leads: (Happened & { leadId: string; displayName: string; note: string })[];
+  leads: (Happened & { leadId: string; displayName: string; note: string | null })[];
   /** Refusals at decide time, and Claude's replies the check stopped. */
   stopped: (Happened & { refId: string; line: string | null })[];
   holds: Happened[];
@@ -505,6 +512,7 @@ export function publicDesk(desk: DeskRecord, language: Language): PublicDesk {
     ...rivera.publicDesk[language],
     desk_name: desk.summary.name,
     brand: { ...BUSINESS.brand },
+    agent_card: AGENT_CARD_BLOCKS[language].map((block) => ({ ...block })),
     open_status: desk.openStatus?.[language] ?? null,
   };
 }
@@ -533,3 +541,58 @@ export const HEALTH: HealthOut = {
     unproved_seeds: [],
   },
 };
+
+/**
+ * The preset the owner cards came from: the one whose cards they are, exactly, else null. It is
+ * provenance only, and Rivera's own rules match neither.
+ */
+function presetOf(cards: readonly RuleCard[]): RulesPreset | null {
+  const set = (list: readonly RuleCard[]) => list.filter((card) => card.is_default !== true).map(canonicalCard).sort().join('\n');
+  const owned = set(cards);
+  const match = (Object.keys(PRESETS) as RulesPreset[]).find((preset) => set(PRESETS[preset]) === owned);
+  return match ?? null;
+}
+
+/**
+ * The Desk's rules as the owner reads them: the active version with its money cap, every tool row
+ * (the kernel's tool columns, without the adapter's own) with the active cards that cover it, in
+ * card order, each `shared` when it is on an effect group, and the preset the owner cards came from.
+ */
+export function rulesView(desk: DeskRecord): RulesView {
+  const cards = desk.policy.cards;
+  const tools = desk.tools.map((tool): ToolRow => {
+    const covering = new Set(rulesForTool({ tool: tool.tool, effects: tool.effects }, cards).map((card) => card.card_id));
+    return {
+      tool: tool.tool,
+      source: tool.source,
+      effects: [...tool.effects],
+      reversible: tool.reversible,
+      status: tool.status,
+      description_confirmed: tool.description_confirmed,
+      definition_sha256: tool.definition_sha256 ?? null,
+      pending_definition_text: tool.pending_definition_text ?? null,
+      pending_sha256: tool.pending_sha256 ?? null,
+      cards: cards
+        .filter((card) => covering.has(card.card_id))
+        .map((card) => ({ card_id: card.card_id, mode: card.mode, reason: card.reason, shared: card.applies_to.startsWith('effect:') })),
+    };
+  });
+  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards) };
+}
+
+/** The business's people on record (Dana and Bob, as the seed has them) and the Desk's leads, oldest first. */
+export function peopleOut(world: MockWorld, desk: DeskRecord): PeopleOut {
+  const { dana, bob } = rivera.people;
+  return {
+    people: [dana, bob].map((person) => ({ person_id: person.personId, display_name: person.name, masked_contact: person.maskedContact })),
+    leads: world.leads
+      .filter((lead) => lead.deskId === desk.summary.desk_id)
+      .map((lead) => ({
+        lead_id: lead.leadId,
+        display_name: lead.displayName,
+        note: lead.note,
+        created_at: isoTime(lead.createdAt),
+        ...(lead.replayed === true ? { replayed: true } : {}),
+      })),
+  };
+}

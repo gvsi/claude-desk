@@ -20,14 +20,17 @@ import type {
   Health,
   HoursWindow,
   KnowledgeItem,
+  Outcome,
   PaymentLinkView,
   PolicyVersion,
+  Probe,
   ProbeResult,
   ProofReport,
   RenderedBlock,
   RuleCard,
   SessionMode,
   SessionState,
+  ToolConfirmed,
   ToolName,
   ToolProfile,
 } from './contracts.ts';
@@ -299,7 +302,11 @@ export interface HealthOut {
 
 export interface PeopleOut {
   people: { person_id: string; display_name: string; masked_contact: string }[];
-  leads: { lead_id: string; display_name: string; note: string; created_at: string }[];
+  /**
+   * The name and note as the visitor typed them (untrusted; the API types either as missing);
+   * `replayed`: replayed from the recorded history into this copy (plan 02b), absent is false.
+   */
+  leads: { lead_id: string; display_name: string | null; note: string | null; created_at: string; replayed?: boolean }[];
 }
 
 /** A tool as the owner reviews it: the kernel's tool row (`ToolProfile`'s columns). */
@@ -315,14 +322,43 @@ export interface ToolRow {
   /** A changed definition waiting for review. Untrusted. */
   pending_definition_text: string | null;
   pending_sha256: string | null;
+  /**
+   * The active version's cards that cover the tool, in card order, `shared` for a rule on an effect
+   * group (plan 02b Task 9; pending, typed here and optional until the API sends it). Screens read
+   * which rules govern a tool from the active version's cards (`rulesForTool`), which say the same.
+   */
+  cards?: ToolRowCard[];
 }
 
-export type RulesPreset = 'ask_first' | 'auto' | 'custom';
+/** A card that covers a tool, as `ToolRow.cards` lists it (pending, plan 02b Task 9). */
+export interface ToolRowCard {
+  card_id: string;
+  mode: RuleCard['mode'];
+  reason: string;
+  shared: boolean;
+}
+
+/**
+ * A rules version with its money cap, `auto_money_cap_cents`: the most an auto rule takes or pays
+ * out in one action without asking (kernel verification plan 01b Task 3b; master "Money cap"). The
+ * active version's is the Desk's. Typed here, and optional, until the regenerated contract types
+ * have it; a missing cap is 0, the kernel's default, under which every payment asks.
+ */
+export interface PolicyVersionOut extends PolicyVersion {
+  auto_money_cap_cents?: number;
+}
+
+/** The presets the owner can start from (the master plan's `desk.presets.PRESETS`); there is no "custom". */
+export type RulesPreset = 'ask_first' | 'auto';
 
 export interface RulesView {
-  active: PolicyVersion;
+  active: PolicyVersionOut;
   tools: ToolRow[];
-  preset: RulesPreset;
+  /**
+   * The preset the active owner cards came from, provenance only; null when they match neither
+   * (plan 02b Task 9, typed here until the API sends it).
+   */
+  preset: RulesPreset | null;
 }
 
 export interface CardDiff {
@@ -337,6 +373,8 @@ export interface RulesDraft {
   /** The draft version's cards, default cards left out. */
   cards: RuleCard[];
   diff: CardDiff | null;
+  /** The draft's money cap (plan 02b; typed here, and optional, until the API sends it): missing is 0. */
+  auto_money_cap_cents?: number;
   proof: ProofReport;
   /** Each a card's `reason`. */
   summary: { on_its_own: string[]; asks_you: string[]; never: string[] };
@@ -364,6 +402,16 @@ export interface RuleChatOut {
 
 export type SetupStep = 'questions' | 'tools' | 'rules' | 'situations' | 'safety_check' | 'preview' | 'live';
 
+/** The setup interview's seven questions (plan 02b Task 6, `QUESTION_KEYS`). */
+export type QuestionKey =
+  | 'what_you_do'
+  | 'hours_and_area'
+  | 'quote_limit'
+  | 'discounts'
+  | 'documents_and_payments'
+  | 'money_limit'
+  | 'contact_and_after_hours';
+
 export interface SetupMessage {
   role: 'claude' | 'owner' | 'tool_label';
   text: string;
@@ -375,6 +423,10 @@ export interface SetupState {
   slug: string;
   step: SetupStep;
   messages: SetupMessage[];
+  /** Whether the owner let Claude read their memory and website; null until asked. */
+  consent: boolean | null;
+  /** The question waiting for an answer; null before consent and after the last one. */
+  question: QuestionKey | null;
 }
 
 export interface SetupTools {
@@ -382,18 +434,34 @@ export interface SetupTools {
   connectable: 'mock_payments'[];
 }
 
+/** A situation Claude wrote from the owner's answers to try on the draft rules (plan 02b Task 7). */
+export interface Situation {
+  /** Claude's words, from the owner's answers. */
+  title: string;
+  who: 'public' | 'verified' | 'agent' | 'after_hours';
+  probe: Probe;
+  /** What the answers planned; `allow_if_reviewed` is "does it if Claude's second look agrees". */
+  expected: Outcome | 'allow_if_reviewed';
+}
+
 export interface SituationResult {
-  situation: string;
+  situation: Situation;
   result: ProbeResult;
-  /** False on another outcome or when the outcome depends on the reviewer. */
+  /**
+   * Whether the result is what was planned: a plan to do it after Claude's second look matches a
+   * result that depends on the reviewer; any other plan, the same outcome without the reviewer.
+   */
   matches: boolean;
 }
 
 export interface SafetyCheckRow {
+  /** The kind of trick: "Pretends to be you". */
   label: string;
-  tries: number;
+  /** What a bad actor would say, as they'd type it. Shown quoted, as their words. */
+  tries: string;
   result: ProbeResult;
-  blocked: number;
+  /** Refused, or held where that stops it; never when it depends on the reviewer. */
+  blocked: boolean;
 }
 
 export interface SafetyCheck {
@@ -438,7 +506,8 @@ export interface AgentCardOut {
     encoding: string;
     ts_window_s: number;
   };
-  example_request: Record<string, unknown>;
+  /** The request line, its headers and its body, as text (the API's `AgentCardOut.example_request`). */
+  example_request: string;
 }
 
 export interface AgentRunStarted {
@@ -450,7 +519,8 @@ export interface AgentTurn {
   author: 'agent' | 'desk';
   n: number;
   blocks: RenderedBlock[];
-  receipts: EvReceipt[];
+  /** A Desk turn's status events, as its `A2AResponse` carries them. */
+  receipts: (EvReceipt | EvHeld | EvResolved)[];
 }
 
 export interface DemoAgentRun {
@@ -525,23 +595,62 @@ export interface DraftAddBody {
 }
 
 export interface PresetBody {
-  preset: Exclude<RulesPreset, 'custom'>;
+  preset: RulesPreset;
+}
+
+/**
+ * `draftMoneyCap`'s body (plan 02b; typed here until the regenerated types have it): the payment
+ * limit a draft changes to, in cents, from 0 to the $10,000 platform ceiling. The draft keeps the
+ * active rules, and nothing changes until the owner confirms it.
+ */
+export interface MoneyCapBody {
+  auto_money_cap_cents: number;
 }
 
 export interface ConfirmRulesBody {
   version: number;
 }
 
-export interface ConfirmToolBody {
+/** One tool of a `confirmTool` batch, with the hash of the definition the owner confirms. */
+export interface ToolConfirmEntry {
   tool: ToolName;
-  enable: boolean;
+  /**
+   * The row's `definition_sha256`, the hash it was listed at; only the changed-tool review sends its
+   * `pending_sha256`, the hash of the definition the owner just read.
+   */
   definition_sha256: string;
+}
+
+/**
+ * `confirmTool`'s batch body (plan 02b Task 7, with kernel payments Task 4, plan 01c; typed here
+ * until the regenerated types have it): a whole connector in one action, one tool a list of one.
+ * Turning on drafts one version for the listed tools, confirmed like any rules draft; turning off
+ * applies at once, with no draft.
+ */
+export interface ConfirmToolBody {
+  tools: ToolConfirmEntry[];
+  enable: boolean;
+}
+
+/** `confirmTool`'s answer: the kernel's `ToolConfirmed`, its draft carrying the draft's money cap. */
+export interface ToolConfirmedOut extends Omit<ToolConfirmed, 'draft'> {
+  draft: PolicyVersionOut | null;
 }
 
 export interface StartSetupBody {
   description: string;
   timezone: string;
   owner_display_name?: string;
+}
+
+/**
+ * A setup answer and the question it answers (`SetupState.question` when it was asked): the API
+ * refuses it with 409 `conflict` once the interview has moved past that question, so an answer
+ * sent twice never answers the next one (plan 02b Task 6, as amended).
+ */
+export interface SetupAnswerBody {
+  question: QuestionKey;
+  text: string;
 }
 
 export interface ConsentBody {

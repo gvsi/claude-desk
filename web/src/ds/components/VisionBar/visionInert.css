@@ -1,0 +1,17 @@
+/* VisionInertLine: a secondary caption 8 px under the control's row once shown. While empty it is
+   out of the flow, as the screen-reader-only text is, so it moves nothing in a column with a gap
+   (the composer's) and still sits in the page, where its change is announced. */
+
+.cd-vision-inert-line {
+  margin: var(--space-8) 0 0;
+  color: var(--text-secondary);
+}
+
+.cd-vision-inert-line:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}

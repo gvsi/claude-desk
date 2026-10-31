@@ -33,6 +33,13 @@ export const RELOAD_PAGE_LABEL = {
   es: 'Recargar la página',
 } as const satisfies CopyPair;
 
+/**
+ * The owner's line when the answer to starting setup was lost, so the setup interview may already
+ * exist: starting again may leave two drafts. English only, as owner screens are, so a plain
+ * string rather than a `CopyPair`, which would need a Spanish line no screen shows.
+ */
+export const SETUP_START_LOST_COPY = 'Setup may have started, but we lost the answer. If you reload and start again, you may get two drafts.';
+
 /** The demo has spent its model budget for now. */
 export const DEMO_BUDGET_COPY = {
   en: 'The demo has used its budget for now. Try again later.',

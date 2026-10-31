@@ -57,6 +57,8 @@ export interface PublicChatProps {
   previewDeskId?: string;
   /** Called with the chat's session once it is open. */
   onSession?: (session: SessionState) => void;
+  /** Links under "For AI agents" in the about column, on the public page itself. */
+  aboutLinks?: { label: string; href: string }[];
 }
 
 /** Cards that report something done: their executed receipt draws the check. */
@@ -169,11 +171,16 @@ function ChatRowView({ row, ownerName, language, onResend, after = [] }: RowProp
       ) : (
         <SystemLine text={copy.claudeIsBack} />
       );
-    return <TranscriptRow margin={receipts}>{line}</TranscriptRow>;
+    return (
+      <TranscriptRow margin={receipts} live={row.live}>
+        {line}
+      </TranscriptRow>
+    );
   }
   const { ev } = item;
+  // A reply that arrived on the stream lands, its receipts one by one.
   return (
-    <TranscriptRow margin={receipts}>
+    <TranscriptRow margin={receipts} live={row.live}>
       {ev.author === 'owner' ? (
         <PersonMessage name={ownerName} blocks={ev.blocks} language={ev.language} />
       ) : (
@@ -371,7 +378,7 @@ function PublicState({ embedded, language, children }: { embedded: boolean; lang
   );
 }
 
-export function PublicChat({ slug, embedded = false, previewDeskId, onSession }: PublicChatProps) {
+export function PublicChat({ slug, embedded = false, previewDeskId, onSession, aboutLinks }: PublicChatProps) {
   const chat = useVisitorChat(slug, previewDeskId);
   // Page chrome follows the browser; each message's cards follow the message's own language.
   const [language] = useState(browserLanguage);
@@ -417,6 +424,14 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
     if (document.activeElement !== null && document.activeElement !== document.body) return;
     composerRef.current?.querySelector('textarea')?.focus();
   }, [chat.cancelling, chat.cancelFailed, chat.state.openHolds]);
+
+  // A row that arrived live lands as it is first drawn. Once the transcript has drawn it, the chat
+  // stops calling it live, so a remount (the visitor leaving the page and coming back) draws it still.
+  const drawn = chat.status !== 'not_found' && desk !== null;
+  const { shown } = chat;
+  useEffect(() => {
+    if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
+  }, [drawn, chat.state.rows, shown]);
 
   // Words that didn't send when the chat ended wait in the new chat's composer once it can be used.
   const carried = useRef<string | null>(null);
@@ -566,6 +581,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
         openStatus={openStatus}
         onAskForOwner={askForOwner}
         about={desk.charter}
+        aboutLinks={aboutLinks}
         footer={!embedded}
         composer={
           <div ref={composerRef} onInput={visitorTyping.onInput}>

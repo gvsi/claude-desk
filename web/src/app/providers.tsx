@@ -4,6 +4,7 @@ import type { DataRouter } from 'react-router';
 
 import { ApiError, observeRequests } from '../api/http.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
+import { retryDelayMs } from './poll.ts';
 import { PublicChatProvider } from '../public/PublicChatProvider.tsx';
 
 /**
@@ -30,7 +31,7 @@ function isClientError(error: unknown): boolean {
 export function createQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
-      queries: { retry: (failures, error) => failures < 1 && !isClientError(error) },
+      queries: { retry: (failures, error) => failures < 1 && !isClientError(error), retryDelay: retryDelayMs },
       mutations: { retry: false },
     },
   });

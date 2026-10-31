@@ -137,6 +137,8 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
     queryFn: () => request('conversation', { params: { session_id: sessionId } }),
     refetchInterval: pollMs('conversation'),
   });
+  // A read taken since the chat opened has come in, not only one kept from an earlier visit.
+  const readSinceOpened = chat.isFetchedAfterMount && chat.isSuccess;
   const failure = useReadFailure(chat);
   const needsYou = useNeedsYou(deskId);
   // The requests held here come from Needs you: a failed read says so, rather than a hold with nothing to answer.
@@ -299,6 +301,8 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
           deskId={deskId}
           heldIds={heldIds}
           renderHeld={renderHeld}
+          recorded={read.replayed === true}
+          readSinceOpened={readSinceOpened}
         />
         {typing && state.kind !== 'agent' ? (
           <TranscriptRow>

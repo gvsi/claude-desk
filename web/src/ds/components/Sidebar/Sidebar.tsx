@@ -68,6 +68,11 @@ export interface SidebarProps {
   /** Whether Claude is answering on this Desk. */
   answering: boolean;
   onAnsweringChange: (answering: boolean) => void;
+  /**
+   * The Answering switch's line, saying whom Claude answers under whose rules: "Claude answers your
+   * team under your rules" on a team Desk. "Claude answers under your rules" by default.
+   */
+  answeringDescription?: string;
   /** The owner's name and one line of status: "Available for chats". */
   owner: { name: string; status: string };
   /** The router's link component for the nav rows; a plain `<a>` by default. */
@@ -116,6 +121,7 @@ export function Sidebar({
   counts,
   answering,
   onAnsweringChange,
+  answeringDescription = 'Claude answers under your rules',
   owner,
   linkComponent: Link = PlainLink,
   about,
@@ -189,7 +195,7 @@ export function Sidebar({
         ) : null}
       </div>
       <div className="cd-sidebar__footer">
-        <Switch label="Answering" description="Claude answers under your rules" checked={answering} onChange={onAnsweringChange} />
+        <Switch label="Answering" description={answeringDescription} checked={answering} onChange={onAnsweringChange} />
         <div className="cd-sidebar__owner">
           <span className="cd-sidebar__avatar cd-type-count" aria-hidden="true">
             {initialsOf(owner.name)}

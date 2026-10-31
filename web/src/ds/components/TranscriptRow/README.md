@@ -11,14 +11,28 @@
 ## What the consumer provides
 
 - `children`: the message (`VisitorMessage`, `ClaudeMessage`, `PersonMessage`, `AgentMessage` or `Whisper`).
-- `margin`: its `MarginReceipt`s and `MarginNote`s, in the order they happened. Receipts for an action and for the reply that reports it attach together under that reply.
+- `margin`: its `MarginReceipt`s and `MarginNote`s, in the order they happened. Receipts for an action and for the reply that reports it attach together under that reply. Under a visitor's message that didn't send, the screen's error `Notice` comes last, with its next step ("Try again").
 - For the header, the display strings: the screen formats any time in them; the design system formats none.
+- `live` on a row that arrived while the page was open (from the visitor's stream, or a new row on the owner's open conversation), never on one read from history: a load, a reload, the owner opening a past chat, recorded history. The screen clears it once the row is shown, so a remount draws it still.
 
 ## Layout
 
 - The row is the reading column: at most `--cd-row-max` wide (`size-reading` by default), and the full width of a narrower log. A surface whose own column is already the reading width sets `--cd-row-max: 100%` on an ancestor so its rows fill that column; the public page does, so its rows end where its composer ends.
 - Its receipts attach under the message at every width, `space-8` below it and `space-8` apart, on the message's side: under Claude's and the owner's words they start at the left, as wide as the row; under a visitor's or an agent's bubble on the right they end where the bubble ends and are at most 85% of the row wide, like the bubble. Their lines start together either way, so the dots stay in one column. On the owner's wide screens, on a phone and on the public page alike, each checkpoint result sits right under the message it explains.
+- A `Notice` under a bubble on the right keeps the same rule, at every width: its line starts with the lines above it, so the dots stay in one column, and its next step sits `space-8` under the line, at the right, ending where the bubble ends. The line ends there too when it is the widest thing attached. The step never sits beside the line there, so what is attached is only as wide as its widest line.
 - The header's captions stack the same way, the receipts' caption second.
+
+## Arriving live
+
+A row with `live` lands once, in about half a second, at most 650 ms (the last line starts by 450 ms). Its receipts arrive with their reply, a beat apart, so the eye sees the Desk's checks arrive with the reply they explain:
+
+- The message rises `space-4` and fades in, over `motion-base` on `motion-ease-emphasis`.
+- What is attached lands one by one, `motion-stagger` apart, the first one beat after the message: each slides in `space-4` from the left and fades in, and a receipt's dot grows from half size with it (`MarginReceipt`). From the third on they share the third beat, so a long list never keeps the reply waiting.
+- A booking's or a payment's check (`drawCheck`) draws as its line lands.
+- `live` is read once, when the row is first drawn: changing it later neither starts nor stops the motion, and a re-render never replays it.
+- It lands once. When the last line has landed, the row is like any other: a line attached later (a held request's outcome, an approval) shows at once, and nothing in it can land again.
+- The motion is visual only. The log announces the row as it does without it, and the words, order and colors are the same.
+- Under reduced motion nothing moves: the row and everything attached show at once, and the landing is spent, so turning motion back on never plays it.
 
 ## Props
 
@@ -28,6 +42,7 @@
 | --- | --- | --- |
 | `children` | `ReactNode` | Required. The message. |
 | `margin` | `ReactNode` | Optional. Receipts and notes, attached under the message. An empty list, or only `null` and `false`, attaches nothing. |
+| `live` | `boolean` | Optional. The row arrived live: it lands once (see "Arriving live"). Read when the row is first drawn; spent once the landing has played, or at once under reduced motion. Never for a row read from history. |
 
 `TranscriptHeader`:
 

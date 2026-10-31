@@ -96,6 +96,44 @@ export const Agent: Story = {
   },
 };
 
+export const Unnamed: Story = {
+  args: { name: 'Visitor', time: '12:06 pm', status: undefined },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'Nearest board N-Conv-Run1. A visitor who gave no name: the name line already says "Visitor", so the row has no status line rather than say it twice.',
+  },
+  play: async ({ canvas }) => {
+    // One line, named by who and when; no status words and no dot alone.
+    const link = canvas.getByRole('link', { name: 'Visitor 12:06 pm' });
+    await expect(canvas.getAllByText('Visitor')).toHaveLength(1);
+    await expect(link.querySelector('.cd-status-dot')).toBeNull();
+    // The row keeps its height, its one line centered in it.
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(48);
+    const name = canvas.getByText('Visitor').getBoundingClientRect();
+    const row = link.getBoundingClientRect();
+    await expect(Math.abs(name.top - row.top - (row.bottom - name.bottom))).toBeLessThanOrEqual(2);
+  },
+};
+
+export const UnnamedRecorded: Story = {
+  args: { name: 'Visitor', time: '10:10 pm', status: undefined, href: '#conversations/ses-recorded-2', recorded: true },
+  parameters: {
+    canvas: 'N-History-Conversations',
+    canvasNote: 'The board writes "Visitor" on both lines; with no name the status is left out, and the Recorded tag keeps its place at the line’s end.',
+  },
+  play: async ({ canvas }) => {
+    const link = canvas.getByRole('link', { name: 'Visitor 10:10 pm Recorded' });
+    await expect(canvas.getAllByText('Visitor')).toHaveLength(1);
+    await expect(link.querySelector('.cd-status-dot')).toBeNull();
+    // Under the time, at the line's end, as on a row with a status.
+    const tag = canvas.getByText('Recorded');
+    const time = canvas.getByText('10:10 pm');
+    await expect(Math.round(tag.getBoundingClientRect().right)).toBe(Math.round(time.getBoundingClientRect().right));
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(49);
+  },
+};
+
 export const Recorded: Story = {
   args: {
     name: 'Visitor',

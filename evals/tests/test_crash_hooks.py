@@ -110,6 +110,10 @@ def kernel(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> I
     package.__path__ = []
     app = types.ModuleType("desk.kernel_service.app")
     app.create_app = stand_in.create_app
+    # The real kernel's modules another test imported stay cached, and an import finds them there
+    # before the stand-in: each is taken out for the test and put back after it.
+    for name in [name for name in sys.modules if name.startswith("desk.kernel_service.")]:
+        monkeypatch.delitem(sys.modules, name)
     for name, module in (("", package), (".app", app), (".execute", stand_in.execute),
                          (".payments", stand_in.payments)):
         monkeypatch.setitem(sys.modules, f"desk.kernel_service{name}", module)

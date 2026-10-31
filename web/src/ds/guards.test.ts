@@ -235,6 +235,21 @@ function everyTextFile(): Source[] {
     .map((file) => ({ file, text: readFileSync(path.join(DS, file), 'utf8') }));
 }
 
+/** Every TypeScript file under `web/src/`, paths relative to it, so a guard can read the whole app. */
+function webSources(): Source[] {
+  const src = path.join(DS, '..');
+  return readdirSync(src, { recursive: true, encoding: 'utf8' })
+    .map((file) => file.split(path.sep).join('/'))
+    .filter((file) => /\.tsx?$/.test(file))
+    .sort()
+    .map((file) => ({ file, text: readFileSync(path.join(src, file), 'utf8') }));
+}
+
+/** `text` without its comments, so a guard reads only code and the strings code holds. */
+function withoutComments(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+}
+
 // A stylesheet that paints the selected row's ground, and a component that renders a Button.
 const PAINTS_SELECTED = /\bbackground(?:-color)?\s*:[^;{}]*var\(\s*--bg-selected\s*\)/;
 const RENDERS_BUTTON = /<Button\b/;
@@ -534,6 +549,50 @@ describe('design system source guards', () => {
       return readmeProblem(name, existsSync(file) ? readFileSync(file, 'utf8') : undefined);
     });
     expect(problems.filter((problem) => problem !== null)).toEqual([]);
+  });
+
+  it('fact_card_only_on_the_vision_pages', () => {
+    // FactCard shows a vision page's sample facts. A real conversation's facts reach a visitor only as
+    // the kernel's rendered cards (ReplyCard), so nothing in the web app may name it but its own
+    // folder, the index that exports it, the vision boards' page parts and the vision pages.
+    const named = (text: string) => matches(/\bFactCard\b/)(withoutComments(text));
+    // An import names it three times: the binding and the path's folder and file.
+    expect(named("import { FactCard } from '../components/FactCard/FactCard.tsx';")).toHaveLength(3);
+    expect(named('const card = <FactCard label="Job card" icon="calendar" title="Friday" />;')).toHaveLength(1);
+    expect(named("const note = 'each fact in a FactCard';")).toHaveLength(1);
+    expect(named('// A FactCard in a comment.\n/* and FactCard here */\nconst card = <Card />;')).toEqual([]);
+    expect(named('import type { FactCardProps } from "../ds/index.ts";')).toEqual([]);
+    const allowed = (file: string) =>
+      file.startsWith('ds/components/FactCard/') || file === 'ds/index.ts' || file === 'ds/boards/vision.tsx' || file.startsWith('vision/');
+    const files = webSources().filter(({ file }) => file !== `ds/${THIS_FILE}`);
+    expect(files.filter(({ file, text }) => !allowed(file) && named(text).length > 0).map(({ file }) => file)).toEqual([]);
+    // It is named where it is meant to be, so the check can't pass by finding nothing.
+    expect(files.filter(({ file, text }) => file === 'ds/boards/vision.tsx' && named(text).length > 0)).toHaveLength(1);
+  });
+
+  it('inert_controls_only_on_the_vision_pages', () => {
+    // The inert props make a control do nothing, for a vision page, which makes no requests. A real
+    // page must send, answer and download, so only the components that take them, the vision boards'
+    // page parts, the vision pages and the module of the line an inert control shows may name them.
+    const named = (text: string) => matches(/\binert(?:Send|Answers|Download)\b/)(withoutComments(text));
+    expect(named('<Composer variant="visitor" onSend={send} inertSend />')).toEqual(['inertSend']);
+    expect(named('const props = { inertAnswers: true, inertDownload };')).toEqual(['inertAnswers', 'inertDownload']);
+    expect(named('// inertSend in a comment\nconst inert = true; const inertSending = 1;')).toEqual([]);
+    const allowed = (file: string) =>
+      ['ds/components/ApprovalCard/', 'ds/components/Composer/', 'ds/components/ReplyCard/', 'ds/components/ClaudeMessage/', 'vision/'].some((folder) =>
+        file.startsWith(folder),
+      ) ||
+      file === 'ds/components/VisionBar/visionInert.tsx' ||
+      file === 'ds/boards/vision.tsx';
+    const files = webSources().filter(({ file }) => file !== `ds/${THIS_FILE}`);
+    expect(files.filter(({ file, text }) => !allowed(file) && named(text).length > 0).map(({ file }) => file)).toEqual([]);
+    // They are used where they are meant to be, so the check can't pass by finding nothing.
+    expect(named(files.find(({ file }) => file === 'ds/boards/vision.tsx')?.text ?? '').sort()).toEqual([
+      'inertAnswers',
+      'inertDownload',
+      'inertSend',
+      'inertSend',
+    ]);
   });
 
   // Importing the index transforms every component on first use. When the whole suite runs, the

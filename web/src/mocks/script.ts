@@ -147,12 +147,13 @@ const callbackCards: Record<'window' | 'open', Record<Language, CardBlock>> = {
 };
 
 /**
- * Booking the first time offered: Claude's checked words carry no price or date, and the kernel's
- * card says what was booked. The Spanish card is the design system fixture's.
+ * Booking the first time offered: Claude's checked words carry no price or date and promise
+ * nothing the card doesn't back, and the kernel's card says what was booked. The Spanish card is
+ * the design system fixture's.
  */
 const bookedProse: Record<Language, RenderedBlock> = {
-  en: proseBlock("Maria will text you when she's on her way."),
-  es: proseBlock('Maria te enviará un mensaje cuando vaya de camino.'),
+  en: proseBlock("You're all set. Here's your visit."),
+  es: proseBlock('Ya está todo listo. Aquí tienes tu visita.'),
 };
 
 const bookedCard: Record<Language, CardBlock> = {
@@ -671,4 +672,81 @@ export function cardDiffFor(
     ];
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The owner's rule chat: Ask Claude, beside the Rules page
+
+/** What Claude answers the owner, and the cards it drafts, merged into the active rules by `card_id`. */
+export interface RuleChatReply {
+  answer: string;
+  /** Empty when the owner asked a question rather than a change: nothing is drafted. */
+  add: RuleCard[];
+}
+
+/** A card with every optional field at its default, as the kernel drafts one. */
+function draftCard(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'who' | 'reason'> & Partial<RuleCard>): RuleCard {
+  return { person_id: null, agent_key_id: null, max_amount_cents: null, max_discount_bp: 0, hours: null, review: false, is_default: false, ...fields };
+}
+
+/** Monday to Friday, all day. */
+const WEEKDAYS_ALL_DAY = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } satisfies RuleCard['hours'];
+
+/**
+ * How Rivera's Claude answers the owner on Rules, in place of the API's model turn: the Rules
+ * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rule for
+ * anyone to weekdays, so weekend quotes ask; "Quote water heater installs up to $600" adds a
+ * quote rule up to that amount), a question is answered with no draft, and anything else says
+ * what Claude can draft. `active` is the Desk's active rules.
+ */
+export function ruleChatReply(text: string, active: readonly RuleCard[]): RuleChatReply {
+  const lower = text.toLowerCase();
+  if (lower.includes('weekend') && lower.includes('quot')) {
+    const quote = active.find((card) => card.applies_to === 'native.quote' && card.who === 'anyone' && card.mode === 'auto' && card.is_default !== true);
+    const weekdays = draftCard({
+      card_id: 'card-weekday-quotes',
+      applies_to: 'native.quote',
+      mode: 'auto',
+      who: 'anyone',
+      ...quote,
+      hours: WEEKDAYS_ALL_DAY,
+      reason: 'Quotes from your price list on weekdays. Weekend quotes wait for your answer.',
+    });
+    return {
+      answer: "Here's that change: quotes stay automatic on weekdays, and on weekends they wait for your answer. Nothing changes until you confirm it.",
+      add: [weekdays],
+    };
+  }
+  if (lower.includes('water heater')) {
+    return {
+      answer: "Here's a rule for that: I quote water heater installs on my own up to $600, and anything above that asks you first.",
+      add: [
+        draftCard({
+          card_id: 'card-water-heater-quotes',
+          applies_to: 'native.quote',
+          mode: 'auto',
+          who: 'anyone',
+          max_amount_cents: 60_000,
+          reason: 'Water heater installs quoted up to $600.',
+        }),
+      ],
+    };
+  }
+  if (lower.includes('refund') && (lower.includes('why') || lower.includes('held'))) {
+    return {
+      answer:
+        "Dana's refund waited for you because refunds ask you first: your rule says refunds to a customer wait for your answer. If you'd like small refunds to go through on their own, ask me to draft that rule.",
+      add: [],
+    };
+  }
+  if (lower.trim().endsWith('?')) {
+    return {
+      answer: 'I can explain what a rule does, or draft a change to one. Ask about a tool by name, such as quotes, bookings or refunds.',
+      add: [],
+    };
+  }
+  return {
+    answer: 'I can draft one rule change at a time, such as "Stop quoting on weekends". Tell me which tool and what should happen, and I\'ll show you the change before anything applies.',
+    add: [],
+  };
 }
