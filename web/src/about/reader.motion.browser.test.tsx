@@ -377,7 +377,7 @@ describe('ReaderPage with motion', () => {
   it('back_during_a_contents_glide_stops_it', async () => {
     // Part way through the glide to "Readiness", the reader goes Back: the address no longer names the section, and the
     // window stops where it is rather than going on there. (A memory router has no browser to restore the reader's
-    // place; the end-to-end test checks that Back's restore wins.)
+    // place; the end-to-end test checks that the glide stops within about a line of it.)
     const screen = await renderReader('prediction');
     await jumpTo(1800);
     followLink('readiness');

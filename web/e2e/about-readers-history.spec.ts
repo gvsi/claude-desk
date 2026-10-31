@@ -37,8 +37,7 @@ test('back_during_a_contents_glide_returns_to_the_readers_place', async ({ page 
   await page.waitForFunction((from) => window.scrollY > from + 2, before, { polling: 'raf' });
   await page.goBack();
   await page.waitForURL((url) => url.pathname === '/about/prediction' && url.hash === '');
-  // Past when the glide would have arrived, the window is where the reader was, give or take the line the glide had
-  // already moved.
+  // Past when the glide would have arrived: the glide has stopped within about a line of the reader's place.
   await page.waitForTimeout(1200);
   expect(Math.abs((await page.evaluate(() => window.scrollY)) - before), 'back during the glide').toBeLessThanOrEqual(56);
 });

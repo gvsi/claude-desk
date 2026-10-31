@@ -91,8 +91,8 @@ function atPlaceOf(heading: HTMLElement): boolean {
 }
 
 /**
- * What ends the wait on the reading type for an address's section: any pointer or key, as well as a scroll, Back and
- * Forward included. Only that wait uses it; the reader moving on otherwise is `onReaderScroll`.
+ * What ends a hold's wait on the reading type: any pointer or key, as well as a scroll, Back and Forward included. For
+ * an address it ends the hold; for a contents link it ends only the wait.
  */
 const READER_ACTIONS = ['wheel', 'touchmove', 'pointerdown', 'keydown', 'popstate'] as const;
 
@@ -203,8 +203,8 @@ function hold(heading: HTMLElement, behavior: ScrollBehavior, move: boolean): ()
   function end(stopGlide = false) {
     if (place !== self) return;
     place = null;
-    // A glide carries on by itself; an instant move to where the window is now stops it, and history's restore of the
-    // reader's place on Back still wins.
+    // A glide carries on by itself. An instant move to where the window is now stops it: after Back, within about a
+    // line of the reader's place, since frames already under way still land after the browser's restore.
     if (stopGlide && self.moving) window.scrollTo({ top: window.scrollY, behavior: 'instant' });
     for (const stop of stops) stop();
   }
