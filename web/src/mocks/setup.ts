@@ -1,7 +1,8 @@
 /**
  * The mock API's setup interview (plan 02b Tasks 6 and 7), served the way the API serves it.
  * Starting a setup makes a new Desk with Answering off and asks to read the owner's Claude memory;
- * then a scripted interview of seven questions, the money limit among them. Its tools step lists
+ * then a CPA consultant run with proposals and choices, or the original seven scripted questions.
+ * Its tools step lists
  * the new Desk's tools and connects the mock payments server; its rules are drafted from the
  * answers at the answered money limit, tried on real situations and on a safety check, and confirmed
  * with Answering still off; going live turns Answering on. Until then the owner's Desks name the
@@ -11,10 +12,14 @@
 import type { Probe, ProbeResult, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   BusinessOut,
+  Choice,
+  ConnectorProposal,
   DeskSetup,
   DeskSummary,
+  JobProposal,
   PaymentLinkOut,
   PolicyVersionOut,
+  ProposalCard,
   QuestionKey,
   RulesDraft,
   SafetyCheck,
@@ -73,6 +78,11 @@ export const MEMORY_LABEL = 'Searched your Claude memory';
 /** One interview, as the API keeps it in `app.setup_interviews`. */
 interface Interview {
   state: SetupState;
+  /** CPA descriptions use the consultant fixture; other descriptions keep the scripted run. */
+  consultant: boolean;
+  covered: Set<QuestionKey>;
+  answers: Partial<Record<QuestionKey, string>>;
+  usedSuggestions: boolean;
   /** The business's name, its owner's first name and a line about it, as the API takes them from the description. */
   business: string;
   ownerName: string | null;
@@ -295,6 +305,14 @@ export function capFromAnswer(text: string): number {
   return Number.isSafeInteger(dollars) ? Math.min(dollars * 100, MONEY_CAP_MAX_CENTS) : 0;
 }
 
+/** CPA limits accept a stated amount, never a number embedded in an unrelated answer. */
+function consultantCapFromAnswer(text: string): number {
+  const match = /^(?:up to\s+)?\$?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?$/i.exec(text.trim());
+  if (!match?.[1]) return 0;
+  const cents = Number(match[1].replace(/,/g, '')) * 100 + Number((match[2] ?? '').padEnd(2, '0'));
+  return Number.isSafeInteger(cents) && cents <= MONEY_CAP_MAX_CENTS ? cents : 0;
+}
+
 /**
  * The new Desk's tools: every built-in tool, with Documents and Payments connected but not on (each
  * `needs_review` as a connect never confirmed, `new`, with no changed definition), and nothing from
@@ -493,17 +511,121 @@ function moveTo(interview: Interview, step: SetupState['step']): void {
   if (!atLeast(interview.state.step, step)) interview.state.step = step;
 }
 
-function say(interview: Interview, role: SetupMessage['role'], text: string): void {
-  interview.state.messages.push({ role, text, choices: [], card: null });
+function say(interview: Interview, role: SetupMessage['role'], text: string, choices: Choice[] = []): void {
+  interview.state.messages.push({ role, text, choices, card: null });
+}
+
+/** The CPA fixture's proposals, made once so their ids remain stable throughout the interview. */
+function consultantProposals(): ProposalCard[] {
+  const jobs: JobProposal[] = [
+    {
+      job: 'schedule', title: 'Book a free intro consult',
+      why: 'New clients can find a time without a string of emails.',
+      how: 'Offer a free intro consult in your available times and book the time the client chooses.',
+      can_do_today: true, config: { block: 'typed_booking', appointment_type: 'Free intro consult', minutes: 20 },
+    },
+    {
+      job: 'intake', title: 'New client intake',
+      why: 'You have the basics before the first conversation.',
+      how: 'Ask about the return and any tax notices, then save the answers for your team.',
+      can_do_today: true,
+      config: { block: 'intake', questions: ['Is this a personal or business return?', 'Which tax years do you need help with?', 'Have you heard from the IRS or the state?'] },
+    },
+    {
+      job: 'payment', title: 'Collect a retainer',
+      why: 'Clients can pay the agreed retainer without waiting for an email.',
+      how: 'Send a payment link for the engagement retainer under the money rules you approve.',
+      can_do_today: true, config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: 50_000 },
+    },
+    {
+      job: 'status', title: "Where's my return?",
+      why: 'Clients know how to ask for an update.',
+      how: 'Take the client’s details and question so a person on your team can reply. Live return status is coming later.',
+      can_do_today: false, config: null,
+    },
+  ];
+  const connectors: ConnectorProposal[] = [
+    { app: 'google_calendar', label: 'Google Calendar', why: 'Keep consult times in the calendar your team uses.', connectable: false },
+    { app: 'stripe', label: 'Stripe', why: 'Collect retainers through payment links under your rules.', connectable: true },
+  ];
+  const fields = [
+    ...jobs.map((job) => ({ kind: 'job' as const, job, connector: null })),
+    ...connectors.map((connector) => ({ kind: 'connector' as const, job: null, connector })),
+  ];
+  return fields.map((proposal) => ({ ...proposal, proposal_id: `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`, state: 'proposed' }));
+}
+
+function openConsultant(interview: Interview): void {
+  say(interview, 'claude', `${interview.business} handles tax returns and bookkeeping for individuals and small businesses. Clients most often reach out to get started, arrange a consult, or ask where their return stands. Here are the jobs I suggest for your Desk.`);
+  for (const card of consultantProposals()) interview.state.messages.push({ role: 'claude', text: '', choices: [], card });
+  interview.state.question = 'what_you_do';
+  say(interview, 'claude', 'Which clients should I help get started first?', [
+    { text: 'Individuals and small businesses', recommended: true },
+    { text: 'Individuals only', recommended: false },
+    { text: 'Small businesses only', recommended: false },
+  ]);
+}
+
+/** The consultant deliberately asks contact before hours and skips quote/discount topics. */
+const CONSULTANT_TOPICS: readonly QuestionKey[] = ['what_you_do', 'contact_and_after_hours', 'hours_and_area', 'documents_and_payments', 'money_limit'];
+
+/** Code-owned limit wording; exact choice words are pending Giovanni's sign-off. */
+const CONSULTANT_LIMITS = {
+  documents_and_payments: {
+    text: "Can I send customers their own documents, like invoices, once they've confirmed who they are? And up to what amount can I send a payment link without asking you?",
+    choices: ['Always ask me first', 'Send verified clients their own documents; ask before payments'],
+  },
+  money_limit: {
+    text: "What's the most I should take or pay out without asking you? I'd suggest $250 to start. If you say $0, I'll always ask you first.",
+    choices: ['Always ask me first', 'Up to $250', 'Up to $500'],
+  },
+} as const;
+
+function askConsultant(interview: Interview, question: QuestionKey): void {
+  interview.state.question = question;
+  if (question === 'money_limit' || question === 'documents_and_payments') {
+    const limit = CONSULTANT_LIMITS[question];
+    say(interview, 'claude', limit.text, limit.choices.map((text, index) => ({ text, recommended: index === 0 })));
+  } else if (question === 'contact_and_after_hours') {
+    say(interview, 'claude', 'When clients write after hours, how should I handle their questions?', [
+      { text: 'Take their details for the next business day', recommended: true },
+      { text: 'Ask them to contact us during office hours', recommended: false },
+    ]);
+  } else if (question === 'hours_and_area') {
+    say(interview, 'claude', 'When should I offer intro consults for your San Jose clients?', [
+      { text: 'Weekdays during office hours', recommended: true },
+      { text: 'Ask us to confirm each time', recommended: false },
+    ]);
+  }
+}
+
+function finishQuestions(world: MockWorld, interview: Interview, suggestions = false): void {
+  interview.state.question = null;
+  if (interview.consultant) {
+    say(interview, 'claude', 'Your plan: help clients arrange an intro consult, gather new client intake, and handle retainer requests under the rules you approve. Return-status questions take their details for your team to reply. For example: “I need help with a business return” starts intake; “Can we talk about my taxes?” starts a consult request; “Where is my return?” leaves a question for your team.');
+  } else if (suggestions) {
+    say(interview, 'claude', `Your plan for ${interview.business}: answer from what you have shared and take customer details. Any limit you have not answered asks you first. For example: “Can you help with this?” leaves a request; “When can we talk?” asks for a time.`);
+  }
+  say(interview, 'claude', QUESTIONS_DONE);
+  moveTo(interview, 'tools');
+  const acceptedStripe = interview.state.messages.some(({ card }) => card?.state === 'accepted' && card.connector?.app === 'stripe' && card.connector.connectable);
+  if (acceptedStripe) {
+    const desk = world.desk(interview.state.desk_id);
+    if (!desk) throw new Error('the setup Desk must exist');
+    connectPayments(desk);
+  }
 }
 
 /** The reads and first question after the owner gives (or declines) consent. */
 function completeConsent(interview: Interview): void {
   if (interview.state.consent) say(interview, 'tool_label', MEMORY_LABEL);
-  const first = SETUP_QUESTIONS[0];
-  if (first) {
-    interview.state.question = first.key;
-    say(interview, 'claude', first.text);
+  if (interview.consultant) openConsultant(interview);
+  else {
+    const first = SETUP_QUESTIONS[0];
+    if (first) {
+      interview.state.question = first.key;
+      say(interview, 'claude', first.text);
+    }
   }
   interview.state.busy = false;
 }
@@ -524,22 +646,33 @@ export function holdNextConsent(world: MockWorld, interviewId: string): (outcome
  * the answer leaves it open, else the next question (or the end of the questions). Only the money
  * limit's own answer sets the limit.
  */
-function applyAnswer(interview: Interview, text: string): void {
+function applyAnswer(world: MockWorld, interview: Interview, text: string): void {
   const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
   say(interview, 'owner', text.trim());
   if (FOLLOW_UP_TRIGGER.test(text)) {
     say(interview, 'claude', FOLLOW_UP);
     return;
   }
-  if (interview.state.question === 'money_limit') interview.capCents = capFromAnswer(text);
+  const question = interview.state.question;
+  if (question !== null) {
+    interview.covered.add(question);
+    interview.answers[question] = text.trim();
+  }
+  if (interview.state.question === 'money_limit') interview.capCents = interview.consultant ? consultantCapFromAnswer(text) : capFromAnswer(text);
+  if (interview.consultant) {
+    interview.covered.add('quote_limit');
+    interview.covered.add('discounts');
+    const next = CONSULTANT_TOPICS.find((topic) => !interview.covered.has(topic));
+    if (next) askConsultant(interview, next);
+    else finishQuestions(world, interview);
+    return;
+  }
   const next = SETUP_QUESTIONS[at + 1];
   if (next) {
     interview.state.question = next.key;
     say(interview, 'claude', `Got it. ${next.text}`);
   } else {
-    interview.state.question = null;
-    say(interview, 'claude', QUESTIONS_DONE);
-    moveTo(interview, 'tools');
+    finishQuestions(world, interview);
   }
 }
 
@@ -555,7 +688,7 @@ export function holdNextAnswer(world: MockWorld, interviewId: string): () => voi
     const turn = interview.running;
     if (turn === null) throw new Error('no answer turn is running');
     interview.running = null;
-    applyAnswer(interview, turn.text);
+    applyAnswer(world, interview, turn.text);
   };
 }
 
@@ -583,7 +716,16 @@ function proved(draft: RulesDraft): boolean {
 function setupDraft(sv: Server, interview: Interview, desk: DeskRecord): RulesDraft {
   const open = interview.draftVersion === null ? undefined : desk.drafts.get(interview.draftVersion);
   if (open) return open.draft;
-  const drafted = sv.world.draftCards(desk, setupCards(interview.capCents), { cap: interview.capCents });
+  const cards = setupCards(interview.capCents).map((rule): RuleCard => {
+    if (!interview.consultant && !interview.usedSuggestions) return rule;
+    // An unanswered or skipped limit never inherits the scripted run's automatic permission.
+    if (rule.applies_to === 'native.quote' && interview.answers.quote_limit === undefined) return { ...rule, mode: 'ask', reason: 'Quotes ask you first.' };
+    if (rule.applies_to === 'native.release_document' && (interview.answers.documents_and_payments === undefined || interview.answers.documents_and_payments === 'Always ask me first')) return { ...rule, mode: 'ask', reason: 'Documents ask you first.' };
+    if (rule.applies_to === 'native.book' && interview.answers.hours_and_area === undefined) return { ...rule, mode: 'ask', reason: 'Bookings ask you first.' };
+    if (rule.applies_to === 'effect:pay_out' && interview.answers.money_limit === undefined) return { ...rule, mode: 'ask', reason: 'Refunds ask you first.' };
+    return rule;
+  });
+  const drafted = sv.world.draftCards(desk, cards, { cap: interview.capCents });
   const record = desk.drafts.get(drafted.version);
   if (!record) throw new Error(`setup draft ${drafted.version} was not stored`);
   // Setup's draft has nothing to compare with: its diff is null (plan 02b Task 7).
@@ -598,6 +740,17 @@ function toolRows(desk: DeskRecord, only?: ReadonlySet<string>): ToolRow[] {
 }
 
 const MOCK_PAYMENTS: ReadonlySet<string> = new Set(['payments.list_charges', 'payments.create_refund']);
+
+/** Connecting never confirms tools: both paths leave them needing owner review. */
+function connectPayments(desk: DeskRecord): void {
+  if (!desk.tools.some((tool) => MOCK_PAYMENTS.has(tool.tool))) {
+    desk.tools = [
+      ...desk.tools,
+      { ...rivera.toolProfiles.listCharges, status: 'needs_review', pending_definition_text: null, pending_sha256: null, review_reason: 'new' },
+      { ...rivera.toolProfiles.createRefund, status: 'needs_review', pending_definition_text: null, pending_sha256: null, review_reason: 'new' },
+    ];
+  }
+}
 
 /** A new interview and its Desk, made with Answering off from the owner's description. */
 function newInterview(world: MockWorld, text: string, timezone: string): Interview {
@@ -617,6 +770,10 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
   world.desks.push(desk);
   const greeting = ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}.`;
   const interview: Interview = {
+    consultant: /\b(?:CPA|accountants?|tax returns?)\b/i.test(text),
+    covered: new Set(),
+    answers: {},
+    usedSuggestions: false,
     state: {
       interview_id: world.id('setup'),
       desk_id: deskId,
@@ -779,7 +936,7 @@ export const SETUP_ROUTES: ServedRoutes = {
       interview.running = { text };
       return ok(stateOf(interview));
     }
-    applyAnswer(interview, text);
+    applyAnswer(sv.world, interview, text);
     return ok(stateOf(interview));
   },
   setupTools(sv, req) {
@@ -788,6 +945,45 @@ export const SETUP_ROUTES: ServedRoutes = {
     const connected = found.desk.tools.some((tool) => MOCK_PAYMENTS.has(tool.tool));
     return ok({ tools: toolRows(found.desk), connectable: connected ? [] : ['mock_payments'] } satisfies SetupTools);
   },
+  setupProposal(sv, req) {
+    const found = interviewOf(sv, req);
+    if (isFailure(found)) return found;
+    const { interview } = found;
+    const proposal = interview.state.messages.find((message) => message.card?.proposal_id === req.params.proposal_id)?.card;
+    if (!proposal) return NOT_FOUND;
+    if (interview.state.step !== 'questions' || interview.running !== null) return CONFLICT;
+    const body = isRecord(req.body) ? req.body : {};
+    if (req.malformed || typeof body.accept !== 'boolean') return INVALID;
+    if (Object.keys(body).some((key) => !['accept', 'title', 'amount_cents'].includes(key))) return INVALID;
+    const hasTitle = Object.hasOwn(body, 'title');
+    const hasAmount = Object.hasOwn(body, 'amount_cents');
+    if (!body.accept && (hasTitle || hasAmount)) return INVALID;
+    if (hasTitle && (
+      proposal.kind !== 'job' || proposal.job === null || typeof body.title !== 'string'
+      || [...body.title.trim()].length < 1 || [...body.title].length > 60
+    )) return INVALID;
+    if (hasAmount && (
+      proposal.kind !== 'job' || proposal.job?.config?.block !== 'purpose_payment'
+      || typeof body.amount_cents !== 'number' || !Number.isInteger(body.amount_cents)
+      || body.amount_cents < 0 || body.amount_cents > MONEY_CAP_MAX_CENTS
+    )) return INVALID;
+    proposal.state = body.accept ? 'accepted' : 'declined';
+    if (proposal.job && typeof body.title === 'string') proposal.job.title = body.title;
+    if (proposal.job?.config?.block === 'purpose_payment' && typeof body.amount_cents === 'number') proposal.job.config.amount_cents = body.amount_cents;
+    return ok(stateOf(interview));
+  },
+  setupSuggestions(sv, req) {
+    const found = interviewOf(sv, req);
+    if (isFailure(found)) return found;
+    const { interview } = found;
+    if (interview.state.step !== 'questions' || interview.state.consent === null || interview.running !== null) return CONFLICT;
+    if (req.malformed || !isRecord(req.body) || Object.keys(req.body).length !== 0) return INVALID;
+    interview.usedSuggestions = true;
+    if (!interview.covered.has('money_limit')) interview.capCents = 0;
+    for (const question of SETUP_QUESTIONS) interview.covered.add(question.key);
+    finishQuestions(sv.world, interview, true);
+    return ok(stateOf(interview));
+  },
   setupConnect(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
@@ -795,13 +991,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (req.malformed || server !== 'mock_payments') return INVALID;
     const { desk } = found;
     // Connected, and not on until the owner turns its tools on: a connect never confirmed.
-    if (!desk.tools.some((tool) => MOCK_PAYMENTS.has(tool.tool))) {
-      desk.tools = [
-        ...desk.tools,
-        { ...rivera.toolProfiles.listCharges, status: 'needs_review', pending_definition_text: null, pending_sha256: null, review_reason: 'new' },
-        { ...rivera.toolProfiles.createRefund, status: 'needs_review', pending_definition_text: null, pending_sha256: null, review_reason: 'new' },
-      ];
-    }
+    connectPayments(desk);
     return ok(toolRows(desk, MOCK_PAYMENTS));
   },
   setupRules(sv, req) {
