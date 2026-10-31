@@ -1,14 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn } from 'storybook/test';
+import { expect, fn, within } from 'storybook/test';
 
 import type { EvMessage, SseEvent, StatusEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { AgentMessage } from '../AgentMessage/AgentMessage.tsx';
+import { Button } from '../Button/Button.tsx';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { MarginNote } from '../MarginNote/MarginNote.tsx';
 import { MarginReceipt } from '../MarginReceipt/MarginReceipt.tsx';
 import { receiptFromEvent } from '../MarginReceipt/receiptTone.ts';
+import { Notice } from '../Notice/Notice.tsx';
 import { Transcript } from '../Transcript/Transcript.tsx';
 import { VisitorMessage } from '../VisitorMessage/VisitorMessage.tsx';
 import { TranscriptHeader, TranscriptRow } from './TranscriptRow.tsx';
@@ -51,6 +53,9 @@ const agentReceipt = receiptFromEvent(
   ),
 );
 const LEAD_SAVED = 'Name and phone saved to Customers as a new lead.';
+/** The public page's line for a message that didn't send, and its next step. */
+const NOT_SENT = "That didn't send. Your message is still here.";
+const TRY_AGAIN = 'Try again';
 
 /**
  * The opening of Dana's conversation as the owner reads it: her question, then the reply and its
@@ -296,5 +301,90 @@ export const NothingAttached: Story = {
       const main = row.querySelector<HTMLElement>(':scope > .cd-transcript-row__main');
       await expect(main?.getBoundingClientRect().height).toBe(row.getBoundingClientRect().height);
     }
+  },
+};
+
+/** Dana's question that didn't send: the page's error line attached under it, with "Try again". */
+function DanaNotSent({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Transcript label={`Conversation with ${dana.name}`}>
+      <TranscriptRow
+        margin={
+          <Notice
+            tone="error"
+            action={
+              <Button variant="ghost" onClick={onRetry}>
+                {TRY_AGAIN}
+              </Button>
+            }
+          >
+            {NOT_SENT}
+          </Notice>
+        }
+      >
+        <VisitorMessage text={question} />
+      </TranscriptRow>
+    </Transcript>
+  );
+}
+
+/** Where `el`'s text is drawn, rather than the box it sits in. */
+function textBox(el: Element): DOMRect {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  return range.getBoundingClientRect();
+}
+
+/**
+ * A message that didn't send keeps the rule for what is attached under a bubble on the right: the
+ * error line ends where the bubble ends, and so does its next step, under the line rather than
+ * beside it, at every width. The line is only as wide as its words, so nothing attached is wider
+ * than its lines.
+ */
+async function expectNotSentUnderTheBubble(root: HTMLElement, readingWidth: number) {
+  await expectAttachedUnder(root, '.cd-visitor-message__bubble', 'end', readingWidth);
+  const { inner, margin } = rowParts(root, '.cd-visitor-message__bubble');
+  const bubble = inner.getBoundingClientRect();
+  const alert = within(root).getByRole('alert');
+  const words = textBox(within(alert).getByText(NOT_SENT, { exact: true }));
+  const button = within(alert).getByRole('button', { name: TRY_AGAIN }).getBoundingClientRect();
+  await expect(Math.abs(words.right - bubble.right)).toBeLessThanOrEqual(1);
+  await expect(Math.abs(button.right - bubble.right)).toBeLessThanOrEqual(1);
+  await expect(button.top).toBeGreaterThanOrEqual(words.bottom);
+  // The dot starts the line at the margin's left: the margin is as wide as the line.
+  const dot = alert.querySelector<HTMLElement>('.cd-status-dot')?.getBoundingClientRect();
+  await expect(dot?.left).toBe(margin.getBoundingClientRect().left);
+  // "Try again" keeps the control height, a target a finger can hit.
+  await expect(button.height).toBe(32);
+}
+
+export const BubbleNotSent: Story = {
+  render: () => <DanaNotSent onRetry={fn()} />,
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No board draws a visitor's message that didn't send. Here the public page's error Notice and its ghost Try again are attached under Dana's bubble by N-Conv-Run1's rule for a bubble on the right: they end where the bubble ends, the button under the line.",
+  },
+  play: async ({ canvasElement }) => {
+    await expectNotSentUnderTheBubble(canvasElement, 640);
+  },
+};
+
+export const BubbleNotSentNarrow: Story = {
+  render: () => <DanaNotSent onRetry={fn()} />,
+  decorators: [
+    (Story) => (
+      <div style={{ width: 358, maxWidth: '100%' }}>
+        <Story />
+      </div>
+    ),
+  ],
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No board draws a visitor's message that didn't send. On a phone's column (358 px, a 390 px window's), the line and Try again still end where Dana's bubble ends, as they do in the reading column.",
+  },
+  play: async ({ canvasElement }) => {
+    await expectNotSentUnderTheBubble(canvasElement, 358);
   },
 };

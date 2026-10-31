@@ -12,7 +12,7 @@
 ## What the consumer provides
 
 - The words: what happened, then what to do. Never a code, a status number or server text. For errors use the static copy in `errorCopy.ts` (below), or the screen's own line for its HTTP error kinds.
-- `action` when there is a next step: a `Button` ("Try again", `NEW_CHAT_LABEL`) or a `TextLink`. It sits at the right, and drops under the words on a narrow screen.
+- `action` when there is a next step: a `Button` ("Try again", `NEW_CHAT_LABEL`) or a `TextLink`. It sits at the right, and drops under the words on a narrow screen. Attached under a bubble on the right in a `TranscriptRow` (a visitor's message that didn't send), it always sits under the words, at the right, and both end where the bubble ends (see `TranscriptRow`).
 - Keep a `waiting` or `info` notice mounted and change its words, when it should be announced as it changes. An `error` notice is an `alert` and is read out when it appears.
 
 ## Error copy (`errorCopy.ts`)

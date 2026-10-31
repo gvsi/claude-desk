@@ -36,6 +36,19 @@
   max-width: 85%;
 }
 
+/* A Notice attached there (a visitor's message that didn't send) follows the same rule: its line,
+   then its next step under it at the right, both ending where the bubble ends, at every width.
+   Beside each other, the line and the step would make what is attached as wide as both, and the
+   line would start that much further left when the step dropped under it on a phone. */
+.cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-visitor-message, .cd-agent-message)) > .cd-transcript-row__margin > .cd-notice {
+  flex-direction: column;
+  flex-wrap: nowrap;
+}
+
+.cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-visitor-message, .cd-agent-message)) > .cd-transcript-row__margin > .cd-notice > .cd-notice__action {
+  align-self: flex-end;
+}
+
 /* A row that arrived live, on a page already open: the message rises space-4 and fades in, and
    what is attached under it lands one by one, motion-stagger apart, each sliding in space-4 from
    the left (a receipt's dot grows with it, in MarginReceipt.css). From the third on they share a
