@@ -7,6 +7,9 @@
  * each look reads every heading's place, never the observers' own entries. A jump can carry headings straight
  * past the line without one coming into the observer's band or leaving it, so the hook also looks once each
  * scroll comes to rest: one look per scroll, not work on every frame.
+ *
+ * `moveToSection`, the window's move when a contents link is followed, lives here too, so the timing of a jump (when
+ * it has arrived, when the reader has taken over, how long to wait) is in one place for the mark and the move.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -16,8 +19,105 @@ const LINE = 0.4;
 /** Where a browser has no `scrollend`, how long the window has to be still for a scroll to have come to rest. */
 const REST_WAIT = 100;
 
-/** How long a link's jump holds its section as current with no word that its scroll has ended. */
+/** How long after the window last scrolled a contents link's jump stops waiting for word that it has arrived. */
 const JUMP_WAIT = 1000;
+
+/** The keys that scroll the window when nothing that takes them has focus. */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
+
+/**
+ * Calls `onDone` once a jump the page started is over by other means than arriving: the reader scrolling the window
+ * themselves (the wheel, a touch that moves, a scrolling key), or a second with no scroll, so a long glide isn't cut
+ * short and a jump that never moves doesn't wait forever. Returns what stops waiting.
+ */
+function waitForJump(onDone: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const done = () => {
+    stop();
+    onDone();
+  };
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(done, JUMP_WAIT);
+  };
+  const onKey = (event: KeyboardEvent) => {
+    if (SCROLL_KEYS.has(event.key)) done();
+  };
+  function stop() {
+    clearTimeout(timer);
+    window.removeEventListener('scroll', later);
+    window.removeEventListener('wheel', done);
+    window.removeEventListener('touchmove', done);
+    window.removeEventListener('keydown', onKey);
+  }
+  window.addEventListener('scroll', later, { passive: true });
+  window.addEventListener('wheel', done, { passive: true });
+  window.addEventListener('touchmove', done, { passive: true });
+  window.addEventListener('keydown', onKey);
+  later();
+  return stop;
+}
+
+/**
+ * Moves the window to a contents link's section: to `heading`, below its scroll margin, gliding unless `behavior` is
+ * instant. A glide heads for where the heading was when it started; if the page grows above the section on the way,
+ * as when the reading type's web font swaps in on a cold load, it ends short. So once the window has come to rest
+ * where the glide was going, a heading that has moved is followed once more. A rest short of there is an earlier
+ * scroll's or the reader's, and the reader taking over ends the watch.
+ */
+export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): void {
+  const margin = parseFloat(getComputedStyle(heading).scrollMarginTop) || 0;
+  const placeOf = () =>
+    Math.min(document.documentElement.scrollHeight - window.innerHeight, heading.getBoundingClientRect().top + window.scrollY - margin);
+  let going = placeOf();
+  heading.scrollIntoView({ behavior, block: 'start' });
+  // An instant jump has arrived already, and keeps its place as the page changes; so has a jump to where it is.
+  if (Math.abs(window.scrollY - going) <= 1) return;
+  let followedAgain = false;
+  const stopWaiting = waitForJump(() => stopResting());
+  const stopResting = onScrollRest(() => {
+    if (Math.abs(window.scrollY - going) > 1) return;
+    if (!followedAgain && Math.abs(heading.getBoundingClientRect().top - margin) > 1) {
+      followedAgain = true;
+      going = placeOf();
+      heading.scrollIntoView({ behavior, block: 'start' });
+      return;
+    }
+    stopWaiting();
+    stopResting();
+  });
+}
+
+/** What the reader does that means they have moved on from where the page put them, Back and Forward included. */
+const READER_ACTIONS = ['wheel', 'touchmove', 'pointerdown', 'keydown', 'popstate'] as const;
+
+/**
+ * Keeps the window at the section an address opened until the reading type's web font has loaded, and returns what
+ * cancels it. On a cold load the font swaps in after the page has opened there and moves the page under the window,
+ * and the browser's scroll anchoring holds the window to some other element than the heading (about 2 px off on the
+ * prediction). Once the type has loaded, the heading is followed once more, unless the reader has acted first (Back
+ * and Forward included) or the page has cancelled it.
+ */
+export function keepSectionWhileTypeLoads(heading: HTMLElement): () => void {
+  const { fonts } = document;
+  if (!fonts || fonts.status !== 'loading') return () => {};
+  const margin = parseFloat(getComputedStyle(heading).scrollMarginTop) || 0;
+  let acted = false;
+  const act = () => {
+    acted = true;
+    stop();
+  };
+  function stop() {
+    for (const kind of READER_ACTIONS) window.removeEventListener(kind, act);
+  }
+  for (const kind of READER_ACTIONS) window.addEventListener(kind, act, { passive: true });
+  void fonts.ready.then(() => {
+    stop();
+    if (acted || !heading.isConnected) return;
+    if (Math.abs(heading.getBoundingClientRect().top - margin) > 1) heading.scrollIntoView({ behavior: 'instant', block: 'start' });
+  });
+  return act;
+}
 
 /**
  * Calls `onRest` each time a scroll of the window comes to rest, and returns what stops it: on `scrollend`, or where
@@ -76,39 +176,41 @@ export function useCurrentSection(ids: readonly string[]): [current: string | nu
 
   useEffect(() => {
     const sections = key === '' ? [] : key.split('\n');
-    // While a link's jump is under way: what lets it go if the scroll never says it has ended, such as a jump to
-    // where the window already is.
-    let jump: ReturnType<typeof setTimeout> | undefined;
+    // While a link's jump is under way: the section it follows, and what stops waiting for it to arrive.
+    let held: string | undefined;
+    let stopWaiting = () => {};
     function look() {
-      if (jump === undefined) setCurrent(sectionAt(sections));
+      if (held === undefined) setCurrent(sectionAt(sections));
+    }
+    function release() {
+      held = undefined;
+      stopWaiting();
+      stopWaiting = () => {};
     }
     function letGo() {
-      clearTimeout(jump);
-      jump = undefined;
-      window.removeEventListener('scroll', waitLonger);
-    }
-    // Each scroll of the jump puts the fallback back, so a long glide isn't cut short.
-    function waitLonger() {
-      clearTimeout(jump);
-      jump = setTimeout(() => {
-        letGo();
-        look();
-      }, JUMP_WAIT);
+      release();
+      look();
     }
     following.current = (id) => {
       if (!sections.includes(id)) return;
+      stopWaiting();
+      held = id;
       setCurrent(id);
-      if (jump === undefined) window.addEventListener('scroll', waitLonger, { passive: true });
-      waitLonger();
+      // The reader scrolling on their own ends the jump, as does a second with no scroll; a jump to where the window
+      // already is never says it has arrived.
+      stopWaiting = waitForJump(letGo);
     };
     look();
     const stops = [
       onScrollRest(() => {
-        letGo();
-        look();
+        // A rest ends the jump only once it has arrived, where a look marks the section followed. A rest short of
+        // that is an earlier scroll's, such as the window's nudge when a font's metrics come in just before the click.
+        if (held !== undefined && sectionAt(sections) !== held) return;
+        if (held !== undefined) letGo();
+        else look();
       }),
       () => {
-        letGo();
+        release();
         following.current = () => {};
       },
     ];

@@ -30,7 +30,7 @@ import { Inlines } from './Inlines.tsx';
 import { DOCUMENT_LINKS, type AboutId } from './links.ts';
 import { MONTHS } from './months.ts';
 import { PrototypeLink } from './PrototypeLink.tsx';
-import { useCurrentSection } from './useCurrentSection.ts';
+import { keepSectionWhileTypeLoads, moveToSection, useCurrentSection } from './useCurrentSection.ts';
 import { useNoIndex } from './useNoIndex.ts';
 
 import './reader.css';
@@ -86,33 +86,6 @@ interface Reading {
 
 /** By router, which the app makes once per window, so each window, and each test's router, starts afresh. */
 const READING = new WeakMap<object, Reading>();
-
-/** What the reader does that means they have moved on from where the page put them, Back and Forward included. */
-const READER_ACTIONS = ['wheel', 'touchmove', 'pointerdown', 'keydown', 'popstate'] as const;
-
-/**
- * Keeps the window at the section an address opened until the reading type's web font has loaded, and returns what
- * cancels it. On a cold load the font swaps in after the page has opened there and moves the page under the window,
- * and the browser's scroll anchoring holds the window to some other element than the heading (about 2 px off on the
- * prediction). Once the type has loaded, the heading is followed once more, unless the reader has acted first.
- */
-function keepSectionWhileTypeLoads(heading: HTMLElement): () => void {
-  const { fonts } = document;
-  if (!fonts || fonts.status !== 'loading') return () => {};
-  let done = false;
-  const stop = () => {
-    done = true;
-    for (const kind of READER_ACTIONS) window.removeEventListener(kind, stop);
-  };
-  for (const kind of READER_ACTIONS) window.addEventListener(kind, stop, { passive: true });
-  void fonts.ready.then(() => {
-    if (done || !heading.isConnected) return;
-    stop();
-    const margin = parseFloat(getComputedStyle(heading).scrollMarginTop) || 0;
-    if (Math.abs(heading.getBoundingClientRect().top - margin) > 1) heading.scrollIntoView();
-  });
-  return stop;
-}
 
 /**
  * Where the window goes when a document draws. Opened by a link or in place of the current page, it starts at
@@ -303,7 +276,7 @@ function useFollowSection(onFollow?: (id: string) => void): (event: MouseEvent<H
     navigate({ pathname, search, hash: `#${id}` }, { replace: hash === `#${id}` });
     // Only this scroll glides: the page's own (opening a document, Back and Forward) stay instant. The heading's
     // scroll margin keeps it clear of the pinned bar.
-    heading.scrollIntoView({ behavior: prefersReducedMotion() ? 'instant' : 'smooth', block: 'start' });
+    moveToSection(heading, prefersReducedMotion() ? 'instant' : 'smooth');
     heading.focus({ preventScroll: true });
   };
 }

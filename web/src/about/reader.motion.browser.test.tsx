@@ -186,6 +186,86 @@ describe('ReaderPage with motion', () => {
     await screen.unmount();
   });
 
+  it('contents_link_lands_on_its_section_though_the_page_moves', async () => {
+    // The page can grow above the section while the window glides there, as when the reading type's web font
+    // swaps in on a cold load. The glide still ends with the heading at its place.
+    const screen = await renderReader('prediction');
+    const heading = headingOf('limitations');
+    const hero = document.querySelector('[data-hero]') as HTMLElement;
+    const grow = document.createElement('div');
+    grow.style.height = '29px';
+    onTestFinished(() => grow.remove());
+    await userEvent.click(linkTo('limitations'));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(heading.getBoundingClientRect().top, 'the glide is under way').toBeGreaterThan(200);
+    hero.append(grow);
+    await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
+    await screen.unmount();
+
+    // The same when the rest of a scroll just before the click arrives as the glide starts, as the window's nudge
+    // when a font's metrics come in does: that rest isn't the glide's.
+    const nudged = await renderReader('prediction');
+    const restAtTheClick = () => window.dispatchEvent(new Event('scrollend'));
+    document.addEventListener('click', restAtTheClick, { once: true });
+    await userEvent.click(linkTo('limitations'));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const grown = document.createElement('div');
+    grown.style.height = '29px';
+    onTestFinished(() => grown.remove());
+    (document.querySelector('[data-hero]') as HTMLElement).append(grown);
+    await expect
+      .poll(() => Math.abs(headingOf('limitations').getBoundingClientRect().top - 88), { timeout: 2000, message: 'after an earlier rest' })
+      .toBeLessThanOrEqual(1);
+    await nudged.unmount();
+
+    // A reader who takes over part way, scrolling the window themselves, is left where they stopped.
+    const again = await renderReader('prediction');
+    await userEvent.click(linkTo('readiness'));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const stopAt = Math.round(window.scrollY) + 200;
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: 200 }));
+    await jumpTo(stopAt);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(Math.round(window.scrollY), 'where the reader stopped').toBe(stopAt);
+    await again.unmount();
+  });
+
+  it('a_rest_from_an_earlier_scroll_doesnt_end_a_jump', async () => {
+    // The rest of a scroll just before the click arrives as the glide starts: the mark stays on the section
+    // followed, rather than going back to where the window still is.
+    const screen = await renderReader('prediction');
+    await jumpTo(placeOf('capability'));
+    await expect.poll(marked).toEqual(['#capability']);
+    const marks: string[] = [];
+    const watch = new MutationObserver((records) => {
+      for (const record of records) {
+        const el = record.target as HTMLElement;
+        if (el.getAttribute('aria-current')) marks.push(el.getAttribute('href') ?? '');
+      }
+    });
+    watch.observe(document.querySelector('nav[aria-label="On this page"]') as HTMLElement, {
+      attributes: true,
+      attributeFilter: ['aria-current'],
+      subtree: true,
+    });
+    onTestFinished(() => watch.disconnect());
+    document.addEventListener('click', () => window.dispatchEvent(new Event('scrollend')), { once: true });
+    await userEvent.click(linkTo('characteristics'));
+    const heading = headingOf('characteristics');
+    await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(marks, 'the sections marked on the way').toEqual(['#characteristics']);
+
+    // A reader who takes over part way, with the wheel, is followed: the mark is where they stop.
+    await userEvent.click(linkTo('readiness'));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 }));
+    await jumpTo(placeOf('why-its-coming') + 100);
+    await expect.poll(marked, { timeout: 500, message: 'where the reader stopped' }).toEqual(['#why-its-coming']);
+    watch.disconnect();
+    await screen.unmount();
+  });
+
   it('page_scrolls_stay_instant_with_motion', async () => {
     // The scrolls the page makes itself land in the frame the page draws, never part way, and the place the page
     // remembers for Back is where they landed.
