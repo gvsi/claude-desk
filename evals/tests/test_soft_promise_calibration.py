@@ -641,7 +641,9 @@ def test_the_kept_runs_hold_the_prompt_the_counts_and_the_spend_and_rescore(caps
     what a run writes (the header, the prompt and its sha256, each case's input sha256, the per-case
     counts and the spend) and nothing that names a key, a session or a machine, and each still
     rescores against the case file, which can tell a case whose input has changed since."""
-    kept = sorted((CASES_FILE.parent / "results").glob("*.json"))
+    # Reviewer measurements share the directory and have their own schema and tests.
+    kept = sorted(path for path in (CASES_FILE.parent / "results").glob("*.json")
+                  if not path.name.startswith("reviewer-"))
     assert {path.name for path in kept} >= {"old-main-20261031-013919.json", "new-a-20261031-014007.json",
                                             "new-a2-20261031-033811.json"}
     for path in kept:
