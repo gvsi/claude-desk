@@ -100,7 +100,7 @@ describe('verification', () => {
     // The form sits with the message that asked for the code, under its receipts.
     expect(row?.querySelector('.cd-transcript-row__margin input[autocomplete="one-time-code"]')).not.toBeNull();
     const receipts = [...(row?.querySelectorAll('.cd-transcript-row__margin .cd-margin-receipt') ?? [])].map((el) => el.textContent?.trim());
-    expect(receipts).toEqual(["Reply checked against Maria Rivera's rules", 'Verification started']);
+    expect(receipts).toEqual(['Verification started']);
     await expectScreenBasics(screen.container, { owner: false });
   });
 
@@ -215,7 +215,7 @@ describe('verification', () => {
     await expect.element(invoice).toBeVisible();
     const invoiceReceipts = (card: Element) =>
       [...(card.closest('.cd-transcript-row')?.querySelectorAll('.cd-transcript-row__margin .cd-margin-receipt') ?? [])].map((el) => el.textContent?.trim());
-    const explained = ["Reply checked against Maria Rivera's rules", "Document shared from Maria Rivera's records"];
+    const explained = ["Document shared from Maria Rivera's records"];
     await vi.waitFor(() => expect(invoiceReceipts(invoice.element())).toEqual(explained));
 
     // The same after a reload, read back from the stored conversation.
