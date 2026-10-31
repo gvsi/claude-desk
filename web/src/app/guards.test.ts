@@ -128,7 +128,10 @@ function everyFileButThisOne(): string[] {
 const MARK_PARTS = /(?<![\w-])--mark-[a-z-]*[a-z]|\bcd-mark__[a-z-]*|#d97757\b|217\s*,\s*119\s*,\s*87/i;
 const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/i;
 const MARK_FOLDER = 'ds/components/Mark/';
-const CLAY_FOLDER = 'ds/components/IntroDialog/';
+// Clay is the intro illustration's field and the field of the About pages' app icon, which counts as
+// part of the mark (owner, 2026-10-30).
+const CLAY_FOLDERS = ['ds/components/IntroDialog/', MARK_FOLDER] as const;
+const mayUseClay = (file: string) => CLAY_FOLDERS.some((folder) => file.startsWith(folder));
 const COLOR_TABLES = ['ds/tokens.json', 'ds/tokens.css', 'ds/contrast.ts', 'ds/tokens.test.ts', 'ds/guards.test.ts'];
 
 // A JavaScript name, and a reference to one of `names`: the name itself, or a namespace's member
@@ -169,10 +172,11 @@ function jsxTagsPassing(scanned: Source[], component: string, attribute: RegExp)
   });
 }
 
-// The mark's white tile: only the About pages' top bar draws it (owner, 2026-10-30), in that file's
-// `Brand`, and the design system's stories show it. A JSX `<Mark>`, under any name it is given, that
-// passes `tile`, or a spread that could carry it, counts as a use.
-const MARK_TILE_FILE = 'about/ReaderPage.tsx';
+// The mark's white tile: only the About pages' app icon draws it (owner, 2026-10-30), `MarkAppIcon`
+// in the mark's own file, and the design system's stories show it. A JSX `<Mark>`, under any name it
+// is given, that passes `tile`, or a spread that could carry it, counts as a use.
+const MARK_TILE_FILE = 'ds/components/Mark/Mark.tsx';
+const MARK_TILE_COMPONENT = 'MarkAppIcon';
 const TILE_ATTRIBUTE = /\stile\b|\{\s*\.\.\./;
 
 /** Each `<Mark …>` opening tag in a source that passes `tile` or spreads its props, as "file: tag". */
@@ -180,7 +184,7 @@ function markTiles(scanned: Source[]): string[] {
   return jsxTagsPassing(scanned, 'Mark', TILE_ATTRIBUTE);
 }
 
-/** The files that may draw the mark's tile: the About top bar's file, and the design system's stories. */
+/** The files that may draw the mark's tile: the app icon's file, and the design system's stories. */
 function mayDrawTheMarkTile(file: string): boolean {
   return file === MARK_TILE_FILE || (file.startsWith('ds/') && /\.stories\.tsx$/.test(file));
 }
@@ -484,7 +488,7 @@ describe('app source guards', () => {
     expect(functionBody(reducer?.text ?? '', 'ownerTypingDelayMs'), 'ownerTypingDelayMs is in chatReducer.ts').not.toBeNull();
   });
 
-  it('mark_tile_only_on_the_about_top_bar', () => {
+  it('mark_tile_only_in_the_app_icon', () => {
     // The matcher, on known samples first: the prop however it is written, under an imported name,
     // and a spread that could carry it; not another prop, a longer tag name or another component's.
     expect(markTiles(sample('<Mark tile />'))).toEqual(['sample.tsx: <Mark tile />']);
@@ -502,27 +506,36 @@ describe('app source guards', () => {
     expect(markTiles(sample('const { Mark: Bell } = DS;\n<Bell tile />'))).toHaveLength(1);
     expect(markTiles(sample('const $bell = Mark;\n<$bell tile />'))).toEqual(['sample.tsx: <$bell tile />']);
     expect(markTiles(sample('const Bell = MarkBanner;\n<Bell tile />\n<DS.MarkBanner tile />'))).toEqual([]);
-    // The allowlist: the About top bar's file and the design system's stories, nothing else, not even
-    // another file of the About pages.
+    // The allowlist: the app icon's file and the design system's stories, nothing else: not the About
+    // pages, whose top bar drew it until the owner moved it into the article's icon, and not another
+    // file in the mark's folder.
     expect(mayDrawTheMarkTile(MARK_TILE_FILE)).toBe(true);
     expect(mayDrawTheMarkTile('ds/components/Mark/Mark.stories.tsx')).toBe(true);
+    expect(mayDrawTheMarkTile('about/ReaderPage.tsx')).toBe(false);
+    expect(mayDrawTheMarkTile('ds/components/Mark/MarkBadge.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('about/Hero.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('about/figures/ArchitectureFigure.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('ds/components/Sidebar/Sidebar.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('ds/boards/parts.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('owner/OwnerLayout.tsx')).toBe(false);
     expect(mayDrawTheMarkTile('aboutness/Page.tsx')).toBe(false);
-    const planted: Source[] = [{ file: 'about/Hero.tsx', text: '<Mark tile />' }];
-    expect(markTiles(planted.filter(({ file }) => !mayDrawTheMarkTile(file)))).toEqual(['about/Hero.tsx: <Mark tile />']);
+    const planted: Source[] = [
+      { file: 'about/Hero.tsx', text: '<Mark tile />' },
+      { file: 'about/ReaderPage.tsx', text: '<span className="cd-about-brand">\n  <Mark tile />\n  <Wordmark preview />\n</span>' },
+    ];
+    expect(markTiles(planted.filter(({ file }) => !mayDrawTheMarkTile(file)))).toEqual([
+      'about/Hero.tsx: <Mark tile />',
+      'about/ReaderPage.tsx: <Mark tile />',
+    ]);
 
-    // Every TypeScript file under src/, the design system included. The About top bar does draw it,
-    // once, in its `Brand`, so the matcher reads the code as it is written, and nothing else does.
+    // Every TypeScript file under src/, the design system included. The app icon does draw it, once,
+    // in `MarkAppIcon`, so the matcher reads the code as it is written, and nothing else does.
     const code = everyTextFile().filter(({ file }) => /\.tsx?$/.test(file));
-    const reader = code.find(({ file }) => file === MARK_TILE_FILE);
-    expect(markTiles(reader ? [reader] : [])).toEqual([`${MARK_TILE_FILE}: <Mark tile />`]);
-    const brand = functionBody(reader?.text ?? '', 'Brand');
-    expect(brand, 'Brand is in ReaderPage.tsx').not.toBeNull();
-    expect(markTiles(sample(reader?.text.slice(...(brand ?? [0, 0])) ?? ''))).toHaveLength(1);
+    const markFile = code.find(({ file }) => file === MARK_TILE_FILE);
+    expect(markTiles(markFile ? [markFile] : [])).toHaveLength(1);
+    const icon = functionBody(markFile?.text ?? '', MARK_TILE_COMPONENT);
+    expect(icon, `${MARK_TILE_COMPONENT} is in ${MARK_TILE_FILE}`).not.toBeNull();
+    expect(markTiles(sample(markFile?.text.slice(...(icon ?? [0, 0])) ?? ''))).toHaveLength(1);
     expect(markTiles(code.filter(({ file }) => !mayDrawTheMarkTile(file)))).toEqual([]);
   });
 
@@ -570,10 +583,18 @@ describe('app source guards', () => {
     for (const file of ['ds/components/Mark/Mark.css', 'ds/components/IntroDialog/IntroDialog.css', 'ds/boards/parts.tsx', 'ds/README.md', 'about/reader.css']) {
       expect(files, file).toContain(file);
     }
+    // Clay's allowlist is two folders: the intro dialog's, and the mark's for the app icon's field.
+    expect(mayUseClay('ds/components/Mark/Mark.css')).toBe(true);
+    expect(mayUseClay('ds/components/MarkBanner/MarkBanner.css')).toBe(false);
+    expect(mayUseClay('about/reader.css')).toBe(false);
+    const plantedClay: Source[] = [{ file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' }];
+    expect(hits(CLAY_PARTS, plantedClay.filter(({ file }) => !mayUseClay(file)))).toEqual(['about/reader.css: --clay']);
     // The matchers find the real uses in their own folders, and nothing anywhere else.
     expect(hits(MARK_PARTS, everything.filter(({ file }) => file.startsWith(MARK_FOLDER))).length).toBeGreaterThan(0);
-    expect(hits(CLAY_PARTS, everything.filter(({ file }) => file.startsWith(CLAY_FOLDER))).length).toBeGreaterThan(0);
+    for (const folder of CLAY_FOLDERS) {
+      expect(hits(CLAY_PARTS, everything.filter(({ file }) => file.startsWith(folder))).length, folder).toBeGreaterThan(0);
+    }
     expect(hits(MARK_PARTS, everything.filter(({ file }) => !file.startsWith(MARK_FOLDER)))).toEqual([]);
-    expect(hits(CLAY_PARTS, everything.filter(({ file }) => !file.startsWith(CLAY_FOLDER)))).toEqual([]);
+    expect(hits(CLAY_PARTS, everything.filter(({ file }) => !mayUseClay(file)))).toEqual([]);
   });
 });

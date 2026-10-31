@@ -5,11 +5,12 @@ import './Mark.css';
 
 export type MarkProps = {
   /**
-   * Drawn size in px: 20 (the default) in the top bars and beside a name, 16 in "Powered by Claude
-   * Desk", 32 alone in an avatar's place on the intro illustration's reply card, 36 in the sidebar's
-   * lockup.
+   * Drawn size in px: 20 (the default) in the phone top bar and beside a name, 16 in "Powered by
+   * Claude Desk", 32 alone in an avatar's place on the intro illustration's reply card and in the
+   * About pages' phone bar, 36 in the lockup in the sidebar and the About pages' desktop bar. 80 and
+   * 58 are the tiled bell inside `MarkAppIcon`, two thirds of its field, and nowhere else.
    */
-  size?: 16 | 20 | 24 | 32 | 36;
+  size?: 16 | 20 | 24 | 32 | 36 | 58 | 80;
 } & (
   | {
       /**
@@ -21,7 +22,7 @@ export type MarkProps = {
       tile?: false;
     }
   | {
-      /** The white tile behind the bell, with the drawing's dark ink: only on the About pages' top bar. */
+      /** The white tile behind the bell, with the drawing's dark ink: only inside `MarkAppIcon`. */
       tile: true;
       ground?: never;
     }
@@ -75,6 +76,28 @@ export function Wordmark({ preview = false }: WordmarkProps) {
     <span className="cd-wordmark">
       <span className="cd-wordmark__name cd-type-wordmark">Claude Desk</span>
       {preview ? <Pill caps>Preview</Pill> : null}
+    </span>
+  );
+}
+
+export interface MarkAppIconProps {
+  /** `large`, 120 px, on the About pages' desktop layout; `compact`, 88 px, on their phone layout. */
+  size: 'large' | 'compact';
+}
+
+/** The tiled bell at two thirds of the icon's field. */
+const APP_ICON_BELL = { large: 80, compact: 58 } as const;
+
+/**
+ * The Claude Desk app icon (owner, 2026-10-30): the mark on its white tile, centred on a clay field
+ * whose corners are a quarter of its size. The About pages show it above the article's title. The
+ * field counts as part of the mark, so its clay stays in the mark's own files. Decorative
+ * (`aria-hidden`): the top bar above it names the product in words, and the title names the page.
+ */
+export function MarkAppIcon({ size }: MarkAppIconProps) {
+  return (
+    <span className={`cd-mark-app-icon cd-mark-app-icon--${size}`} aria-hidden="true">
+      <Mark tile size={APP_ICON_BELL[size]} />
     </span>
   );
 }

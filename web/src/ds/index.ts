@@ -53,7 +53,7 @@ export { TextField, type TextFieldProps } from './components/TextField/TextField
 // Layout
 export { Card, type CardProps } from './components/Card/Card.tsx';
 export { SectionHeader, type SectionHeaderProps } from './components/SectionHeader/SectionHeader.tsx';
-export { Mark, Wordmark, type MarkProps, type WordmarkProps } from './components/Mark/Mark.tsx';
+export { Mark, MarkAppIcon, Wordmark, type MarkAppIconProps, type MarkProps, type WordmarkProps } from './components/Mark/Mark.tsx';
 export { MARK_GEOMETRY } from './components/Mark/markGeometry.ts';
 export { ConceptFooter, type ConceptFooterProps } from './components/ConceptFooter/ConceptFooter.tsx';
 export { AppShell, type AppShellProps } from './components/AppShell/AppShell.tsx';

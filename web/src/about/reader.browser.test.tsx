@@ -228,19 +228,74 @@ describe('ReaderPage', () => {
     }
   });
 
-  it('top_bar_mark_keeps_its_white_tile', async () => {
-    // The About pages' top bar is the one place the Claude Desk mark keeps its white tile, with the
-    // drawing's dark ink on it (owner, 2026-10-30); everywhere else the bell has no tile.
-    for (const size of [DESKTOP, PHONE]) {
+  it('top_bar_shows_the_apps_lockup', async () => {
+    // The top bar shows the app's lockup (owner, 2026-10-30): the bell with no tile, in its light ink,
+    // then "Claude Desk", 36 px with the Preview badge on the desktop bar, 32 px with the name alone
+    // on the phone bar. The white tile is the article's app icon now, never the bar's.
+    for (const [size, px, badge] of [
+      [DESKTOP, '36', 'Preview'],
+      [PHONE, '32', null],
+    ] as const) {
       const where = `at ${size.width}`;
       const screen = await renderReader('proposal', { size });
-      const mark = screen.container.querySelector('header svg.cd-mark');
-      expect(mark, where).not.toBeNull();
-      const tile = mark?.querySelector(':scope > rect');
-      expect(tile, where).not.toBeNull();
-      expect(getComputedStyle(tile as Element).fill, where).toBe('rgb(255, 255, 255)');
-      expect(getComputedStyle(mark?.querySelector(':scope > g > g:last-child') as Element).fill, where).toBe('rgb(20, 20, 19)');
+      const bar = screen.container.querySelector('header');
+      const marks = [...(bar?.querySelectorAll('svg.cd-mark') ?? [])];
+      expect(marks, where).toHaveLength(1);
+      const mark = marks[0] as SVGSVGElement;
+      expect([mark.getAttribute('width'), mark.getAttribute('height')], where).toEqual([px, px]);
+      expect(mark.querySelector(':scope > rect'), where).toBeNull();
+      expect(getComputedStyle(mark.querySelector(':scope > g > g:last-child') as Element).fill, where).toBe('rgb(250, 249, 245)');
+      expect(bar?.querySelector('.cd-type-wordmark')?.textContent, where).toBe('Claude Desk');
+      expect(bar?.querySelector('.cd-pill')?.textContent ?? null, where).toBe(badge);
+      // The bell 10 px from the name on the desktop bar, as in the sidebar, 8 px on the phone bar,
+      // each centred on the other.
+      const [m, n] = [mark, bar?.querySelector('.cd-type-wordmark') as Element].map((el) => el.getBoundingClientRect()) as [DOMRect, DOMRect];
+      expect(n.left - m.right, where).toBe(size === DESKTOP ? 10 : 8);
+      expect(Math.abs(n.top + n.height / 2 - (m.top + m.height / 2)), where).toBeLessThanOrEqual(0.5);
       await screen.unmount();
+    }
+  });
+
+  it('article_opens_with_the_app_icon', async () => {
+    // The mark on its white tile is the article's app icon (owner, 2026-10-30): a clay field with
+    // corners a quarter of its size and the tiled bell at two thirds of it, centred above "About
+    // this prototype" and the title. 120 px on the desktop layout, 88 px on the phone's.
+    for (const [size, field, radius, bell, gap, top] of [
+      [DESKTOP, 120, '30px', '80', 36, '88px'],
+      [PHONE, 88, '22px', '58', 28, '36px'],
+    ] as const) {
+      for (const id of IDS) {
+        const where = `${id} at ${size.width}`;
+        const screen = await renderReader(id, { size });
+        const hero = screen.container.querySelector<HTMLElement>('[data-hero]');
+        const icon = hero?.querySelector<HTMLElement>('.cd-mark-app-icon');
+        if (!hero || !icon) throw new Error(`${where}: no app icon in the hero`);
+        expect(hero.firstElementChild?.contains(icon), `${where}: the icon comes first`).toBe(true);
+        // Decorative: the bar above names the product and the title names the page.
+        expect(icon.getAttribute('aria-hidden'), where).toBe('true');
+        const box = icon.getBoundingClientRect();
+        expect([box.width, box.height], where).toEqual([field, field]);
+        expect(getComputedStyle(icon).borderTopLeftRadius, where).toBe(radius);
+        // Its clay field is checked by the Mark's AppIcon story: clay is named only in the mark's and
+        // the intro dialog's folders. Here, a filled field that isn't the page's ground.
+        expect(getComputedStyle(icon).backgroundColor, where).not.toBe(getComputedStyle(document.body).backgroundColor);
+        expect(getComputedStyle(icon).backgroundColor, where).not.toBe('rgba(0, 0, 0, 0)');
+        const tiled = icon.querySelector('svg.cd-mark');
+        expect([tiled?.getAttribute('width'), tiled?.getAttribute('height')], where).toEqual([bell, bell]);
+        expect(getComputedStyle(tiled?.querySelector(':scope > rect') as Element).fill, where).toBe('rgb(255, 255, 255)');
+        const inner = (tiled as Element).getBoundingClientRect();
+        expect(inner.left - box.left, where).toBe(box.right - inner.right);
+        expect(inner.top - box.top, where).toBe(box.bottom - inner.bottom);
+        // Centred on the title, above the kicker by the board's gap; the hero's own space above it.
+        const kicker = hero.querySelector('.cd-about-hero__kicker') as Element;
+        const title = hero.querySelector('h1') as Element;
+        expect(kicker.getBoundingClientRect().top - box.bottom, where).toBe(gap);
+        expect(box.bottom, where).toBeLessThan(title.getBoundingClientRect().top);
+        const middle = (r: DOMRect) => r.left + r.width / 2;
+        expect(Math.abs(middle(box) - middle(title.getBoundingClientRect())), where).toBeLessThanOrEqual(0.5);
+        expect(getComputedStyle(hero).paddingTop, where).toBe(top);
+        await screen.unmount();
+      }
     }
   });
 
@@ -255,9 +310,18 @@ describe('ReaderPage', () => {
       const bar = screen.container.querySelector('header');
       const name = bar?.querySelector<HTMLElement>('.cd-type-wordmark');
       expect(name?.textContent, where).toBe('Claude Desk');
+      expect(bar?.querySelector('svg.cd-mark')?.getAttribute('width'), where).toBe('32');
       expect(name?.getBoundingClientRect().height, where).toBe(22);
       expect(bar?.querySelector('.cd-pill'), where).toBeNull();
       expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(size.width);
+      // The brand keeps the bar's 16 px side, and the link its words on one line. Below 360 px the
+      // link drops its chat icon, so the 32 px bell and the name still fit.
+      expect(bar?.querySelector('.cd-about-brand')?.getBoundingClientRect().right, where).toBeLessThanOrEqual(size.width - 16);
+      const link = bar?.querySelector<HTMLElement>('.cd-about-try');
+      expect(link?.textContent, where).toBe('Try Desk prototype');
+      expect(link?.getBoundingClientRect().height, where).toBe(32);
+      const icon = link?.querySelector('.cd-about-try__icon');
+      expect(icon ? getComputedStyle(icon).display : null, where).toBe(size.width < 360 ? 'none' : 'block');
       await screen.unmount();
     }
     const screen = await renderReader('proposal', { size: DESKTOP });

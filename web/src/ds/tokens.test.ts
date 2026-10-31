@@ -332,11 +332,13 @@ describe('design tokens', () => {
     // top bar, and the intro dialog's surface; its dark ink on the intro illustration's light card.
     add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3);
     add(['mark-ink'], ['illustration-card'], 3);
-    // The mark with its tile, on the About pages' top bar: the tile on the app, and its drawing on
-    // the tile, the ink where it crosses the clay dome included.
+    // The mark with its tile: the tile on the app, as the design system's stories show it, and its
+    // drawing on the tile, the ink where it crosses the clay dome included.
     add(['mark-tile'], ['bg-app'], 3);
     add(['mark-ink', 'mark-clay'], ['mark-tile'], 3);
     add(['mark-ink'], ['mark-clay'], 3);
+    // The About pages' app icon: its clay field, the icon's edge, on the page.
+    add(['clay'], ['bg-app'], 3);
     // The switch: its track when on, its knob on the track, on or off.
     add(['button-primary'], ['bg-app', 'bg-panel'], 3);
     add(['bg-app'], ['button-primary'], 3);

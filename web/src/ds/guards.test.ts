@@ -109,8 +109,10 @@ function rawColors(text: string, file: string): string[] {
 // own clay is guarded with its other fixed colors (MARK_COLOR).
 const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/gi;
 
-// The only folder that may use clay: the field behind the first-visit intro's illustration.
-const CLAY_FOLDERS = ['components/IntroDialog/'] as const;
+// The only folders that may use clay: the field behind the first-visit intro's illustration, and the
+// field of the About pages' app icon in the mark's folder, which counts as part of the mark (owner,
+// 2026-10-30).
+const CLAY_FOLDERS = ['components/IntroDialog/', 'components/Mark/'] as const;
 
 function mayUseClay(file: string): boolean {
   return CLAY_FOLDERS.some((folder) => file.startsWith(folder));
@@ -293,7 +295,7 @@ describe('design system source guards', () => {
     expect(findAll(sources, rawColors)).toEqual([]);
   });
 
-  it('clay_only_in_the_intro_dialog', () => {
+  it('clay_only_in_the_intro_dialog_and_the_mark', () => {
     expect(matches(CLAY)('fill: var(--clay); color: #E08968; rgb(224, 137, 104)')).toHaveLength(3);
     // A token derived from clay ("--clay-soft") counts as clay; an unrelated name doesn't.
     expect(matches(CLAY)('color: var(--clay-soft)')).toEqual(['--clay']);
@@ -301,12 +303,26 @@ describe('design system source guards', () => {
     // The allowlist is whole folders: a sibling whose name only starts the same way is outside it.
     expect(mayUseClay('components/IntroDialog/IntroDialog.css')).toBe(true);
     expect(mayUseClay('components/IntroDialogBanner/IntroDialogBanner.css')).toBe(false);
-    // The mark has its own clay (mark-clay), guarded with its other colors.
-    expect(mayUseClay('components/Mark/Mark.css')).toBe(false);
+    // The mark's folder, for the app icon's field. The bell's dome keeps its own clay (mark-clay),
+    // guarded with the mark's other colors.
+    expect(mayUseClay('components/Mark/Mark.css')).toBe(true);
+    expect(mayUseClay('components/MarkBanner/MarkBanner.css')).toBe(false);
     expect(mayUseClay('components/Sidebar/Sidebar.css')).toBe(false);
+    const planted: Source[] = [
+      { file: 'components/Sidebar/Sidebar.css', text: '.cd-sidebar__brand { background: var(--clay); }' },
+      { file: 'boards/boards.css', text: '.board-hero { background: var(--clay); }' },
+    ];
+    expect(findAll(planted.filter(({ file }) => !mayUseClay(file)), matches(CLAY))).toEqual([
+      'components/Sidebar/Sidebar.css: --clay',
+      'boards/boards.css: --clay',
+    ]);
     // The canvas boards are drawn screens, so they're held to it too.
     const scanned = [...sources, ...boardSources()];
     expect(scanned.some(({ file }) => file.startsWith('boards/'))).toBe(true);
+    // Each allowed folder does use it, so the matcher reads the code as it is written.
+    for (const folder of CLAY_FOLDERS) {
+      expect(findAll(scanned.filter(({ file }) => file.startsWith(folder)), matches(CLAY)).length, folder).toBeGreaterThan(0);
+    }
     const outsideTheAllowlist = scanned.filter(({ file }) => !mayUseClay(file));
     expect(findAll(outsideTheAllowlist, matches(CLAY))).toEqual([]);
   });

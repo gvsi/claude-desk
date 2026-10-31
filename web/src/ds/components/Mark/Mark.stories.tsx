@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
-import { Mark as DeskMark, Wordmark } from './Mark.tsx';
+import { Mark as DeskMark, MarkAppIcon, Wordmark } from './Mark.tsx';
 import { MARK_GEOMETRY } from './markGeometry.ts';
 
 const meta = {
@@ -97,7 +97,8 @@ export const OnALightGround: Story = {
 
 export const WithTile: Story = {
   parameters: {
-    canvasNote: "N-Explore-Mark-Decided (signed 2026-10-30) keeps the white tile only on the About pages' top bar.",
+    canvasNote:
+      "N-Explore-Mark-Decided (signed 2026-10-30) kept the white tile on the About pages' top bar; the owner moved it into the About pages' app icon the same day (N-Docs-Hero-Proposal, option A), the tile's only use (MarkAppIcon).",
   },
   render: () => <DeskMark tile />,
   play: async ({ canvasElement }) => {
@@ -129,5 +130,37 @@ export const WithWordmark: Story = {
     expectComputed(badge, { textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.66px', height: '20px' });
     await expect(badge.getBoundingClientRect().left - name.getBoundingClientRect().right).toBe(8);
     await expect(canvasElement.querySelector('.cd-wordmark')?.textContent).toBe('Claude DeskPreview');
+  },
+};
+
+export const AppIcon: Story = {
+  parameters: {
+    canvasNote:
+      'N-Docs-Hero-Proposal and N-Docs-Hero-Proposal-Phone (option A, signed 2026-10-30) draw the app icon above the About pages\u2019 title: the tiled bell on a clay field, 120 px on a laptop and 88 px on a phone. The boards round the corners to 29 and 21 px and draw the bell at 79 px; here the corners are a quarter of the size, 30 and 22 px, and the bell 80 px.',
+  },
+  render: () => (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 'var(--space-24)' }}>
+      <MarkAppIcon size="large" />
+      <MarkAppIcon size="compact" />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    // app_icon_is_the_tiled_bell_on_clay: decorative, a clay field with corners a quarter of its
+    // size, and the bell on its white tile centred at two thirds of it.
+    const icons = [...canvasElement.querySelectorAll<HTMLElement>('.cd-mark-app-icon')];
+    await expect(icons).toHaveLength(2);
+    for (const [icon, field, radius, bell] of [
+      [icons[0], '120px', '30px', '80'],
+      [icons[1], '88px', '22px', '58'],
+    ] as const) {
+      await expect(icon).toHaveAttribute('aria-hidden', 'true');
+      expectComputed(icon as HTMLElement, { width: field, height: field, borderTopLeftRadius: radius, backgroundColor: 'rgb(224, 137, 104)' });
+      const mark = icon?.querySelector<SVGSVGElement>(':scope > svg.cd-mark') as SVGSVGElement;
+      await expect([mark.getAttribute('width'), mark.getAttribute('height')]).toEqual([bell, bell]);
+      await expectMark(mark, { tile: true, ink: DARK_INK });
+      const [outer, inner] = [(icon as HTMLElement).getBoundingClientRect(), mark.getBoundingClientRect()];
+      await expect(inner.left - outer.left).toBe(outer.right - inner.right);
+      await expect(inner.top - outer.top).toBe(outer.bottom - inner.bottom);
+    }
   },
 };
