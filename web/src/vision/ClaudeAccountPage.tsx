@@ -1,6 +1,13 @@
 import { ClaudeMessage, Composer, MarginReceipt, PublicShell, SystemLine, Transcript, TranscriptRow, VisitorMessage } from '../ds/index.ts';
 import { brandFrom } from '../public/brand.ts';
-import { CLAUDE_ACCOUNT_ABOUT, CLAUDE_ACCOUNT_INVOICE, CLAUDE_ACCOUNT_SOURCES, CLAUDE_ACCOUNT_TURNS, RIVERA_PUBLIC_DESK } from './data.ts';
+import {
+  CLAUDE_ACCOUNT_ABOUT,
+  CLAUDE_ACCOUNT_INVOICE,
+  CLAUDE_ACCOUNT_SOURCES,
+  CLAUDE_ACCOUNT_TURNS,
+  CLAUDE_ACCOUNT_WELCOME,
+  RIVERA_PUBLIC_DESK,
+} from './data.ts';
 import { ClaudeWords, VisionFrame } from './VisionFrame.tsx';
 
 const noop = () => undefined;
@@ -8,9 +15,10 @@ const noop = () => undefined;
 /**
  * `/vision/claude-account` (N-R2-Vision-ClaudeAccount): Dana, a returning customer, back on Rivera
  * Plumbing's public page signed in with her Claude account. Claude asks to use the account for this
- * visit, it matches her contact on record, and her invoice comes as a document card only for her;
- * the receipts say both the match and her consent. It keeps the public page's rules: the AI
- * disclosure, the document only in its card, and the concept footer.
+ * visit, it matches her contact on record, Claude welcomes her back beside her last visit's booking
+ * card, and her invoice comes as a document card only for her; the receipts say both the match and
+ * her consent. It keeps the public page's rules: the AI disclosure, every booking and document only
+ * in its card, and the concept footer.
  */
 export function ClaudeAccountPage() {
   const { brand, ownerName } = brandFrom(RIVERA_PUBLIC_DESK);
@@ -44,7 +52,7 @@ export function ClaudeAccountPage() {
                 <MarginReceipt key="checked" source={s.checked} plain={t.checked} ledgerSeq={42} />,
               ]}
             >
-              <ClaudeWords text={t.matched} ownerName={ownerName} />
+              <ClaudeMessage blocks={CLAUDE_ACCOUNT_WELCOME} language="en" ownerName={ownerName} />
             </TranscriptRow>
             <TranscriptRow>
               <VisitorMessage text={t.invoice} />

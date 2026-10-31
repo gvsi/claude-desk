@@ -7,7 +7,7 @@
  * Dates, documents and bookings sit only in cards, never in Claude's words, as on every Desk.
  */
 import type { DecisionState } from '../api/contracts.ts';
-import { proseBlock, rivera } from '../ds/fixtures/index.ts';
+import { cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import type { FactCardProps, NavCount, NavKey, PhoneTab, ReceiptSource, SidebarHrefs, StatusTone } from '../ds/index.ts';
 
 /** Where each vision page lives. */
@@ -180,19 +180,30 @@ export const CLAUDE_ACCOUNT_ABOUT = [rivera.blocks.hours.en, rivera.blocks.polic
 /**
  * Dana's visit as the board draws it. On a vision Desk a Claude account counts as verified when its
  * verified email matches the contact on record, with her consent asked on each visit; the receipts
- * say both.
+ * say both. Owner's copy ruling, 2026-10-30, for invariant 2: her past visit is a booking card, not
+ * a sentence, and Claude only asks how it went.
  */
 export const CLAUDE_ACCOUNT_TURNS = {
   signedIn: 'Signed in with your Claude account.',
   ask: 'Your Claude account has a verified email. If it matches the contact Rivera Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
   yes: 'Yes, use it',
-  matched: 'Thanks, it matches. Welcome back, Dana. Last time we booked your drain clearing. How did it go?',
+  matched: 'Welcome back, Dana. How did the drain clearing go?',
   matchedReceipt: 'Matched to Dana Whitfield: the Claude account’s verified email is her contact on record, and she agreed for this visit',
   invoice: 'All fixed, thanks. Can you send me the invoice?',
   sent: 'Glad to hear it. Here’s your invoice. You let me use your Claude account for this visit, so no code was needed.',
   releasedReceipt: 'Released to Dana Whitfield, matched by her Claude account with her consent for this visit',
   checked: 'Reply checked against Maria Rivera’s rules',
 } as const;
+
+/** Dana's last visit, as the kernel renders a booking card: its start, then the job, who and the booking. */
+const DANA_LAST_VISIT = cardBlock('booking_confirmed', {
+  fact_id: 'booking:B-61',
+  title: 'Tuesday, October 20, 10:00 am',
+  lines: ['Drain clearing', 'With Maria Rivera', 'Booking B-61'],
+});
+
+/** Claude's welcome back: its words, then her last visit's booking card. */
+export const CLAUDE_ACCOUNT_WELCOME = [proseBlock(CLAUDE_ACCOUNT_TURNS.matched), DANA_LAST_VISIT];
 
 /** The message Claude sends with the invoice: its words, then the document card, only for her. */
 export const CLAUDE_ACCOUNT_INVOICE = [proseBlock(CLAUDE_ACCOUNT_TURNS.sent), rivera.blocks.document_link.en];

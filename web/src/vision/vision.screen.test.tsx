@@ -25,7 +25,7 @@ import { expectComputed } from '../ds/test/expectComputed.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../test/screen.ts';
+import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
 const TEAM_DESK = '/vision/team-desk';
 const CLAUDE_ACCOUNT = '/vision/claude-account';
@@ -42,7 +42,7 @@ const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plum
 const ACCOUNT = {
   ask: 'Your Claude account has a verified email. If it matches the contact Rivera Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
   yes: 'Yes, use it',
-  matched: 'Thanks, it matches. Welcome back, Dana. Last time we booked your drain clearing. How did it go?',
+  matched: 'Welcome back, Dana. How did the drain clearing go?',
   matchedReceipt: 'Matched to Dana Whitfield: the Claude account’s verified email is her contact on record, and she agreed for this visit',
   invoice: 'All fixed, thanks. Can you send me the invoice?',
   sent: 'Glad to hear it. Here’s your invoice. You let me use your Claude account for this visit, so no code was needed.',
@@ -267,12 +267,15 @@ describe('Vision pages against their boards', () => {
     // As the public page names its tab: the business.
     expect(document.title).toBe('Rivera Plumbing');
 
-    // The public page right under the bar, in the window's height: the brand header, the chat and the about column.
+    // The public page right under the bar: the brand header, the chat and the about column. The bar
+    // is inside the shell, so the page is the shell, at least the window's height, with nothing
+    // added outside it.
     const header = screen.getByRole('banner').element();
     expect(top(header)).toBe(bottom(bar));
     expectComputed(header, { height: '76px' });
-    expect(round(one(root, '.cd-public-shell').getBoundingClientRect().height)).toBe(window.innerHeight);
-    expectNoWindowScroll();
+    const shellHeight = round(one(root, '.cd-public-shell').getBoundingClientRect().height);
+    expect(shellHeight).toBeGreaterThanOrEqual(window.innerHeight);
+    expect(document.documentElement.scrollHeight).toBe(shellHeight);
 
     // The AI disclosure under the chat's title, as on every public page.
     const disclosure = [...main(screen).element().querySelectorAll('p')].filter((line) => line.textContent === DISCLOSURE);
@@ -282,6 +285,8 @@ describe('Vision pages against their boards', () => {
     const transcript = log.element() as HTMLElement;
     await expect.element(log.getByText('Signed in with your Claude account.', { exact: true })).toBeVisible();
     expectConversationType(transcript);
+    // Claude's words state no booking, date or promise: her past booking is its card beside them.
+    expect(await expectNoFactsInProse(transcript)).toBe(3);
     expect(some(transcript, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual([
       ACCOUNT.ask,
       ACCOUNT.matched,
@@ -299,6 +304,13 @@ describe('Vision pages against their boards', () => {
       ACCOUNT.releasedReceipt,
     ]);
     expect(transcript.querySelector('.cd-transcript-row__margin button')).toBeNull();
+
+    // Her last visit is the kernel's booking card under the welcome, in the same message: the date,
+    // the job, who and the booking.
+    const lastVisit = log.getByRole('article', { name: 'Booked' });
+    await expect.element(lastVisit).toBeVisible();
+    expect(lastVisit.element().textContent).toBe('BookedTuesday, October 20, 10:00 amDrain clearingWith Maria RiveraBooking B-61');
+    expect(lastVisit.element().closest('.cd-claude-message')?.querySelector('.cd-claude-message__prose')?.textContent).toBe(ACCOUNT.matched);
 
     // The invoice is a document card, only for her, with its download.
     const invoice = log.getByRole('article', { name: 'Document, only for you' });
