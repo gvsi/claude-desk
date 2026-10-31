@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from desk.api import link_notices
 from desk.api.deps import owner_context
-from desk.api.kernel_client import CredentialView
+from desk.api.kernel_client import CredentialView, KernelFailed
 from desk.api.link_notices import ROUTE
 from desk.api.store import MESSAGES, RUN_EVENTS, append_message
 from desk.contracts import PolicyVersion
@@ -85,6 +85,101 @@ async def test_confirm_with_no_cancelled_links_posts_nothing(api, browser, fake,
     assert response.status_code == 200, response.text
     async with engine.connect() as conn:
         assert not (await conn.execute(select(MESSAGES.c.n).where(MESSAGES.c.kind == "delivered"))).all()
+
+
+@pytest.mark.parametrize("malformed", ["other_link", "not_ok", "extra_block", "no_blocks", "other_template"])
+async def test_unexpected_notice_verdict_is_skipped_before_lock(
+        api, browser, fake, kernel_http, engine, monkeypatch, caplog, malformed):
+    owner, visitor, link = await open_link(api, browser, fake, kernel_http, engine)
+    path, version = await lower_cap(owner)
+    call = CredentialView.call
+    locks = []
+    run_lock = link_notices.run_lock
+
+    async def intercept(self, route, *args, **kwargs):
+        result = await call(self, route, *args, **kwargs)
+        if route == ROUTE and kwargs["path"]["version"] == version:
+            (notice,) = result
+            (block,) = notice.verdict.blocks
+            if malformed == "other_link":
+                block = block.model_copy(update={"fact_id": "payment_link:another-link"})
+            elif malformed == "other_template":
+                block = block.model_copy(update={"template": "payment_link"})
+            blocks = [] if malformed == "no_blocks" else [block, block] if malformed == "extra_block" else [block]
+            return [notice.model_copy(update={"verdict": notice.verdict.model_copy(
+                update={"ok": malformed != "not_ok", "blocks": blocks})})]
+        return result
+
+    async def track_lock(conn, session_id):
+        locks.append(session_id)
+        await run_lock(conn, session_id)
+
+    monkeypatch.setattr(CredentialView, "call", intercept)
+    monkeypatch.setattr(link_notices, "run_lock", track_lock)
+    response = await owner.browser.post(f"{path}/confirm", json={"version": version})
+    assert response.status_code == 200, response.text
+    assert link.state == "cancelled"
+    assert await notices(engine, visitor.ids.session_id) == []
+    async with engine.connect() as conn:
+        assert not (await conn.execute(select(MESSAGES.c.n).where(MESSAGES.c.kind == "delivered"))).all()
+    assert locks == []
+    assert f"link_notice_unexpected version={version} link_id={link.link_id}" in caplog.text
+    assert any(record.levelname == "ERROR" and "link_notice_unexpected" in record.message
+               for record in caplog.records)
+
+
+@pytest.mark.parametrize("chat", ["no_api_rows", "another_copy"])
+async def test_notice_without_a_chat_in_the_owners_copy_is_skipped(
+        api, browser, fake, kernel_http, engine, monkeypatch, caplog, chat):
+    owner, visitor, link = await open_link(api, browser, fake, kernel_http, engine)
+    target = await new_visitor(kernel_http, fake, owner.copy if chat == "no_api_rows" else None)
+    if chat == "another_copy":
+        async with engine.begin() as conn:
+            await append_message(conn, target.ids, "visitor_text", text="Another chat.", wake=False)
+    path, version = await lower_cap(owner)
+    call = CredentialView.call
+
+    async def intercept(self, route, *args, **kwargs):
+        result = await call(self, route, *args, **kwargs)
+        if route == ROUTE and kwargs["path"]["version"] == version:
+            return [notice.model_copy(update={"session_id": target.ids.session_id}) for notice in result]
+        return result
+
+    monkeypatch.setattr(CredentialView, "call", intercept)
+    response = await owner.browser.post(f"{path}/confirm", json={"version": version})
+    assert response.status_code == 200, response.text
+    assert link.state == "cancelled"
+    assert await notices(engine, visitor.ids.session_id) == []
+    assert await notices(engine, target.ids.session_id) == []
+    async with engine.connect() as conn:
+        assert not (await conn.execute(select(MESSAGES.c.n).where(MESSAGES.c.kind == "delivered"))).all()
+    assert f"link_notice_no_chat version={version} link_id={link.link_id}" in caplog.text
+
+
+async def test_confirm_conflict_after_activation_still_delivers_notices(
+        api, browser, fake, kernel_http, engine, monkeypatch):
+    owner, visitor, link = await open_link(api, browser, fake, kernel_http, engine)
+    path, version = await lower_cap(owner)
+    call = CredentialView.call
+    conflicts = []
+
+    async def intercept(self, route, *args, **kwargs):
+        result = await call(self, route, *args, **kwargs)
+        if route == "POST /policy/confirm":
+            # Another worker activated between the API's initial read and its confirm call.
+            assert result.status == "active" and result.version == version
+            conflicts.append(version)
+            raise KernelFailed(409, "conflict")
+        return result
+
+    monkeypatch.setattr(CredentialView, "call", intercept)
+    response = await owner.browser.post(f"{path}/confirm", json={"version": version})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "active"
+    assert conflicts == [version] and link.state == "cancelled"
+    (event,) = await notices(engine, visitor.ids.session_id)
+    assert [(block.template, block.fact_id) for block in event.blocks] == [
+        ("link_cancelled", f"payment_link:{link.link_id}")]
 
 
 @pytest.mark.parametrize("failure", ["connect", "422", "500"])
