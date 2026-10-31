@@ -194,6 +194,12 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("There's no service charge for that.", "lex.en.promise", "no service charge"),
     ("There's no added cost.", "lex.en.promise", "no added cost"),
     ("There's no upfront cost.", "lex.en.promise", "no upfront cost"),
+    # "no matter", "no one", "no way" and "no doubt" pass (below), but not a charge of nothing after
+    # them, nor "one" with a hyphen going on
+    ("No matter what, there's no extra charge.", "lex.en.promise", "no extra charge"),
+    ("No doubt about it: no hidden charges.", "lex.en.promise", "no hidden charges"),
+    ("There's no one-off charge.", "lex.en.promise", "no one-off charge"),
+    ("There's no one-time cost.", "lex.en.promise", "no one-time cost"),
     ("Sin recargo.", "lex.es.promise", "Sin recargo"),                              # a surcharge of nothing
     ("La visita va sin cargo extra.", "lex.es.promise", "sin cargo"),             # the word after needs no rule
     ("Se lo hacemos sin costo adicional.", "lex.es.promise", "sin costo"),
@@ -251,6 +257,12 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "One second, please.",
     "Un segundo, por favor.",
     "Le decimos qué opciones hay.",                         # "decimos" (we tell) is no "décimos"
+    "No matter the cost, call us.",                         # "no" before "matter", "one", "way" or "doubt"
+    "No one charges less.",                                 # starts no price of nothing
+    "No-one charges less.",
+    "No way it costs that much.",
+    "No doubt the cost is worth it.",
+    "No matter the charges, Maria can help.",
 ])
 def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
     assert reply_check.scan_prose(prose) == []
