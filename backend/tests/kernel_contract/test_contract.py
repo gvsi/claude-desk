@@ -104,6 +104,7 @@ from tests.kernel_contract.fake_kernel import (
     RecordedStep,
     agent_signature,
     fake_kernel_app,
+    fake_signature,
     signed_time,
 )
 
@@ -184,6 +185,36 @@ async def test_copy_owner_token_authenticates(kernel):
     assert me.session == copy.owner_session
 
     assert await refused(http.owner("not-" + copy.owner_token).whoami()) == (401, "auth")
+
+
+@pytest.mark.kernel_plan("01a")
+async def test_copy_returns_seeded_chat(kernel, ro_read):
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    chat = copy.seeded_chat
+    assert chat is not None
+    decision = chat.decision
+    assert chat.session_id == decision.session_id
+    assert chat.visitor_line == "Could you do the drain clearing at 15% off?"
+    assert (decision.outcome, decision.state, decision.visitor_plain) == (
+        "hold", "held", "Waiting for Maria Rivera to approve")
+    assert decision.action is not None
+    assert (decision.action.tool, decision.action.discount_bp, decision.action.amount_cents) == (
+        "native.quote", 1500, 15300)
+    if state is not None:
+        assert decision.signature == fake_signature(decision.model_dump(include={
+            "decision_id", "session_id", "state", "visitor_plain", "ledger_seq"}))
+    else:
+        from tests.kernel.test_decide import verify_signature
+
+        health = await http.public().call("GET /health")
+        verify_signature(health.public_key_hex, decision)
+
+    held = ro_read(ro_schema, copy.copy_id,
+                   "SELECT decision_id, session_id FROM {ro}.decisions WHERE state = 'held'")
+    assert held == [{"decision_id": decision.decision_id, "session_id": chat.session_id}]
+    read = await read_decision(http.owner(copy.owner_token), decision.decision_id)
+    assert read == decision.model_copy(update={"inbox": []})
 
 
 NOT_FINAL = {"allowed", "held", "approved", "unknown"}

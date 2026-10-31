@@ -166,6 +166,7 @@ from desk.contracts import (
     RuleCard,
     SeedDocument,
     SeedPerson,
+    SeededChat,
     SessionCreated,
     SessionState,
     ToolCall,
@@ -1906,12 +1907,15 @@ class FakeKernelState:
         owner, owner_token = self._new_session(copy_id, None, "owner", verified=True, assurance="owner_session")
         copy = Copy(copy_id=copy_id, owner_session_id=owner.session_id, desk_ids=[desk.desk_id])
         self.copies[copy_id] = copy
-        self._seed_held_request(desk)
+        held = self._seed_held_request(desk)
+        seeded_chat = SeededChat(session_id=held.session_id,
+                                 visitor_line="Could you do the drain clearing at 15% off?", decision=held)
         events, replay_id = self._replay(desk) if body.replay_night and self._night else ([], None)
         if replay_id is not None:
             self.replayed_nights[copy_id] = (replay_id, events)
         return CopyCreated(copy_id=copy_id, desk_ids=copy.desk_ids, owner_session=owner.state(),
-                           owner_token=owner_token, replayed_messages=events, replay_id=replay_id)
+                           owner_token=owner_token, seeded_chat=seeded_chat,
+                           replayed_messages=events, replay_id=replay_id)
 
     # The recorded night (Plan 01d) ----------------------------------------------------------------------------
 
