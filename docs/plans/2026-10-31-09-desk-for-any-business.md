@@ -32,9 +32,9 @@
 
 ## Seams (the contracts lanes build against; changed only through af)
 
-### The setup conversation (engine A2a, A2b, A3 ↔ web D2)
+### The setup conversation (engine A1c, A2a, A2b, A3 ↔ web D2)
 
-`SetupState` keeps its shape (`interview_id`, `desk_id`, `slug`, `step`, `consent`, `question`, `messages`). `question` is the topic waiting for an answer, as today. Each `SetupMessage` gains two fields:
+`SetupState` keeps today's fields (`interview_id`, `desk_id`, `slug`, `step`, `consent`, `question`, `messages`) and gains `busy: boolean`: true while Claude's reply to the owner's last message is still being written in the background. `question` is the topic waiting for an answer, as today. Each `SetupMessage` gains two fields:
 
 ```ts
 type SetupMessage = {
@@ -46,9 +46,10 @@ type SetupMessage = {
 type Choice = { text: string; recommended: boolean };   // 2..4 choices, each text ≤ 80, at most one recommended, listed first
 ```
 
-- A clicked choice sends today's answer request, `POST /api/owner/setup/{interview_id}/answer` with `{question, text: choice.text}`. Typing an answer still works. Only the latest Claude message's choices are live.
-- A limit question's choices come from code (`LIMIT_CHOICES`); the web can't tell them apart and needn't.
-- `tool_label` messages keep their shape; web search adds labels such as "Searched the web for Fenster & Fenster".
+- **Card messages only on request:** every setup route that answers `SetupState` (GET, consent, answer, proposals, suggestions) includes card messages only when the request carries `?cards=1`. Without it they're left out, so today's screens never show an empty bubble.
+- **Asynchronous consent (A1c):** `POST …/consent` answers 200 with the state when the reads and Claude's opening land within `CONSENT_INLINE_S` (25 s), else 202 with the state as stored and `busy: true`; the web polls GET until `busy` is false. A repeat while it runs answers 202 with no second run; a failed run puts `consent` back to null with nothing half-stored.
+- **Choices:** a click sends today's answer request, `POST /api/owner/setup/{interview_id}/answer` with `{question, text: choice.text}`; typing still works. Choices are live on the latest Claude message that has them, as long as no owner message came after it; card messages never carry choices. A limit question's choices come from code (`LIMIT_CHOICES`, none marked recommended), and choosing one sets exactly the limit it names; the web can't tell them apart and needn't.
+- `tool_label` messages keep their shape; web search adds labels such as "Searched the web".
 
 A proposal card is its own message, right after the Claude message that introduces it, one card per message, in order:
 
@@ -66,13 +67,14 @@ type JobProposal = {
   title: string;                   // ≤ 60, the owner's words: "Book a free intro consult"
   why: string;                     // ≤ 200, the value in the owner's terms
   how: string;                     // ≤ 300, how the Desk handles it
-  can_do_today: boolean;           // false: the Desk takes the details and a person replies; shown as coming later
+  autonomy: "auto" | "ask";        // the job's rule: does it on its own, or asks the owner first
+  can_do_today: boolean;           // set by code (CAPABILITIES), never the model; false shows as coming later
   config: BlockConfig | null;      // the business tool it becomes, when it has one
 };
 type BlockConfig =
   | { block: "intake"; questions: string[] }                            // 1..5, each ≤ 120
-  | { block: "typed_booking"; appointment_type: string; minutes: number }  // type ≤ 60, minutes 15..240
-  | { block: "purpose_payment"; purpose: string; amount_cents: number }    // purpose ≤ 60, 0..1_000_000
+  | { block: "typed_booking"; appointment_type: string; minutes: number }  // type ≤ 60, minutes 15..60, shown only: one booking takes one 60-minute slot
+  | { block: "purpose_payment"; purpose: string; amount_cents: number }    // purpose ≤ 60, 0..1_000_000, a kernel-priced item
   | { block: "urgent"; urgent_when: string };                           // ≤ 300
 type ConnectorKey = "google_calendar" | "gmail" | "google_drive" | "quickbooks" | "stripe" | "square" | "calendly";
 type ConnectorProposal = {
@@ -83,14 +85,19 @@ type ConnectorProposal = {
 };
 ```
 
-Routes (each answers the whole `SetupState`):
-- `POST /api/owner/setup/{interview_id}/proposals/{proposal_id}` with `{accept: boolean, title?: string, amount_cents?: number}`: accept or decline a card, optionally renaming a job (≤ 60) or changing a purpose payment's amount. A later decision replaces an earlier one. 404 for an unknown card, 409 once `step` has left `questions`.
-- `POST /api/owner/setup/{interview_id}/suggestions` with `{}`: "Use your suggestions". Every remaining topic is covered (facts as they stand, every unanswered limit asks the owner), and `step` moves to `tools`.
-- Accepted connectable connectors are connected when `step` moves to `tools`, and their tools show there `needs_review` as today.
+- **`CAPABILITIES` (code):** `can_do_today` is true for answer, intake, schedule, price, payment and urgent, and false for documents and status on Monday (a setup Desk has no one on record, no status records and no uploads).
+- **`autonomy` is a rule, never an amount:** an accepted job's autonomy is owner-confirmed input to setup's card drafting. A money job's "auto" still runs only under the limits the owner gave on the isolated limit questions.
+- **Card decisions:** `POST /api/owner/setup/{interview_id}/proposals/{proposal_id}` with `{accept: boolean, title?: string, amount_cents?: number, autonomy?: "auto" | "ask"}`. `title` (≤ 60), `amount_cents` (purpose payments) and `autonomy` are allowed only with `accept: true` (else 422), and the card comes back `accepted` with them applied. A later decision replaces an earlier one. 404 for an unknown card, 409 once `step` has left `questions`.
+- **Finalizing (one routine for the last answer and for "Use your suggestions"):** cards still `proposed` become `accepted` (declines stay); every topic not yet covered is covered, its limit asking the owner; code writes `SetupAnswers.how_we_help` (≤ 1500) from the accepted jobs, one "title: how" line each; accepted connectable connectors are connected and accepted jobs with a `config` become business tools (A5); `step` moves to `tools`.
+- `POST /api/owner/setup/{interview_id}/suggestions` with `{}` runs that routine at once.
+
+### What setup publishes for the visitor agent (A4 ↔ C1, and the public About panel)
+
+Text charter claims, each only when set: `policy:about` (the summary), `policy:service_area`, `policy:pricing`, `policy:intake`, `policy:after_hours`, `policy:urgent`, `policy:how_we_help`, and `contact`.
 
 ### Business tools (engine A5 ↔ kernel B1 to B4)
 
-`PUT /desks/{desk_id}/business_tools` with `{tools: BusinessTool[]}`, a whole replace, owner-only, ledgered without text. `BusinessTool = {tool: string /^desk\.[a-z][a-z0-9-]{0,39}$/, title: string ≤ 60, description: string ≤ 300, config: BlockConfig}`, with `BlockConfig` exactly as above. The kernel owns everything past this seam (profiles, pinning, review, Cedar naming, cards).
+`PUT /desks/{desk_id}/business_tools` with `{tools: BusinessTool[]}`, a whole replace, owner-only, ledgered without text. `BusinessTool = {tool: string /^desk\.[a-z][a-z0-9-]{0,39}$/, title: string ≤ 60, description: string ≤ 300, config: BlockConfig}`, with `BlockConfig` exactly as above. A 404 means the blocks aren't deployed: setup goes on with words only (`policy:how_we_help`). The kernel owns everything past this seam; B1 to B4 list what it must cover.
 
 ---
 
@@ -290,3 +297,82 @@ One click fills the start description: a hair salon (name to choose), Rivera Plu
 | D3 starters | cd | 2 | must |
 
 Order inside af: A8, A0, A1, A2a, A2b, A3, A4, then A5 when B lands. D2 can build against A3's schemas once A3's PR is open.
+
+---
+
+## Round 1 decisions (these win over any task text above)
+
+Lanes, as staffed: 76 (A2a, A2b), the cards lane (A3 and the finish step), 19 (A1c, A1, A1b, A5, A6), 83 (B6, then the blocks core with B1, B2, B4, B3), 4b [6d0ec3] (the web's async consent, D2, D3, D4), the prompt lab (the consultant prompts), cb (A4, C1), 4b kernel safety (B5, B7), 34 (D1) and 14 (B0). af leads and reports to 88.
+
+**Setup engine (76, the cards lane, 19)**
+- **A1c, asynchronous consent (19):** as in Seams. Consent "no" runs the understanding on the description alone.
+- **Limit turns don't plan.** Limit-topic turn models have no `next_topic`, `question`, `choices` or `skip`. After a limit topic finishes, a consultant "next step" call reads the business context and has no limit fields at all. It picks the next topic and writes its question and choices, or writes the closing plan. The closing plan never comes from a limit turn. Test: finish setup right after each limit topic.
+- **No amount reaches the owner from untrusted text before a limit question.** When the next topic is a limit, code drops the preceding reply if the reply check's number scan finds an amount, a percentage or a number word. The fixed question still asks.
+- **Limit choices:** `LIMIT_CHOICES[key](business_type)` returns `LimitChoice{text, values}` built by code, with choices for both two-field questions (`documents_and_payments`, `money_limit`). An answer that exactly matches a live choice's text applies its values and overrides the model's patch. Test: the model returns a larger amount, and the choice's amount is stored.
+- **`SetupUnderstanding.suggested`:** a facts-only patch from the homework (area, hours, contact, after-hours, pricing, prices). It has no limit fields, and `merged` drops any. The finish step merges it into fact topics not yet covered, so "Use your suggestions" right after the opening still gives a working Desk.
+- **Invalid jobs are dropped after parsing,** never failing the whole answer. `SetupUnderstanding` joins `test_schema_budget.py`.
+- **Precedence:**
+  - A follow-up (`step_done` false) wins over `next_topic`.
+  - `skip` ignores covered topics.
+  - A covered topic is never asked again.
+  - Code closes once every topic is covered.
+- **Storage:** everything in the transcript (`Entry` fields), with no migration and no DDL. Card decisions take the interview's turn guard (`_turn`), so a decision while a turn runs answers 409 and an answer is never lost to a card click. Add a reload test.
+- **Purpose payments:**
+  - Code strips the model's `amount_cents`; a proposal carries `amount_cents: null`.
+  - Accepting a purpose-payment card needs an owner-entered `amount_cents` (422 `amount_required`).
+  - The tool is held to `min(payment_link_auto_max_cents, money cap)` like `native.payment_link`. Setup's `_past_a_limit`, `_card_problems` and `rules.py`'s money targets switch to an effect-based `money_tool(tool, effects)`.
+- **`CAPABILITIES` and a setting:** `can_do_today` is code's. `config` is cleared on every card while `BUSINESS_TOOLS_ENABLED` (API setting, default off) is false. It turns on when B1 deploys.
+- **Words-only path:** `how_we_help` ("title: how" per accepted job), published by A4, is the fallback. Its test lives in A4 so it ships even if A5 is cut.
+- **Connecting accepted apps:** a failed connect logs and goes on, and the Tools step offers today's connect.
+- **A1:**
+  - Memory ids are built by code: "m-" plus a letters-only slug, de-duplicated with letter suffixes, and a fallback when empty. Test: a title with digits.
+  - A1 merges after B0.
+  - The test that an unwritten non-Rivera Desk reads empty is B0's.
+  - A1 updates README.md's "real, mocked and unfinished" row: the memory is drafted from the owner's description, connected apps are simulated, and web search is real.
+- **A1b:** search text reaches only the understanding turn. Queries are about the kind of business (Giovanni), at most 3.
+- **A6:** people only, with no document. The contact comes from the owner's answer on that turn, never `public_contact`.
+- **A7 moves to the kernel lane** (the kernel extends a Desk's slots from its hours, as the Rivera seed does), as a could. The API job worker never calls the kernel.
+
+**Kernel (83, 4b kernel safety)**
+- **Blocks core:** 83's design note (`.plan-runs/lane-briefs/plan09-kernel-blocks-design.md`) is the contract:
+  - Business tools are `kernel.tools` rows with source "business".
+  - `AnyToolName` covers the natives plus `desk.*`.
+  - The compiler generates per-Desk Cedar actions in the block's effect groups.
+  - `adapters.resolve` looks up a business tool's adapter per Desk.
+  - The hash covers {title, description, config}, so a change sends the tool back to `needs_review` and fails stale decisions closed.
+  - It adds rule targets for `desk.*`, a `business_tools` ledger kind and the `web_search` knowledge source.
+  - The master plan amendment goes through 88.
+- **Description template:** `description_confirmed` is built from a fixed template per block, with the config quoted as data. Test: an instruction planted in `how` appears only inside quotes.
+- **Money:** `moves_money` and `auto_money` become effect-based for business tools (B3).
+- **Urgent alerts:** the urgent alert kind joins `now` for any Desk with an urgent tool (B4).
+- **B6:**
+  - Up to 3 searches per setup, a 20 s deadline each, on `claude-sonnet-5-5`, with usage ledgered.
+  - What it returns is Claude's cited summary, labelled as such.
+  - Search spend follows Giovanni's approval of 3 per setup.
+- **B7, new (4b kernel safety):** `PUT /desks/{id}/charter` refuses a `policy:` text claim that holds an amount, a percentage, or discount, refund or guarantee words (the reply check's lexicon). Setup pre-filters with the same function and drops an offending claim, logged by key. Tier 1 rows, with no model calls:
+  - A website discount never reaches a policy card.
+  - A business tool config stays quoted.
+  - A visitor's text can't change a block's amount.
+  - Each new booking word (en/es).
+  - Search text never reaches a charter claim.
+
+**Visitor agent (cb):** `after_hours` is written as customer-facing text, never the owner's private instruction. C1 names its files and tests (the prompt section; `policy:` claims reach the model wrapped in `<desk_context>`). The tier 2 rate stays unmeasured until plan 02's scenarios run, which is a known gap.
+
+**Web (4b [6d0ec3], 34):**
+- A purpose-payment card needs an amount before accept.
+- Card actions are disabled while an answer is in flight.
+- **D4, new:** business tools render by title, with their config shown, in the Tools step, Rules, Needs you and visitor receipts (after B1).
+- D1 adds the "What customers will read" list of policy claims before the safety check, a should.
+
+**Rules inline:** a job card's `autonomy` is the inline rule. Rule cards themselves stay on the Rules review for Monday.
+
+**Order and checkpoints:**
+- Merge order: #326, then the web's async consent, A1c, B0 and A1, A2 (A2a + A2b), A4 with B7, C1, then A3 with D2 together, B6, then the blocks one by one.
+- Testable pivot: tonight (Giovanni's goal), with the core (A1c, A1, A2, A3, A4, B7, C1, D2, D3) live by about 23:00.
+- Cut checkpoint: if the blocks core with B1 isn't open by 02:00 Sunday, B2 to B4 go words only.
+
+## Review Ledger
+
+| Round | Seats | Findings | What changed |
+|---|---|---|---|
+| 1 | Sol, Opus | Sol 3 P1 + 9 P2; Opus 6 P1 + 12 P2 + 9 P3, overlapping | Seams v2 (busy, `?cards=1`, autonomy, code-owned capabilities, the finish step, amounts entered by the owner); limit turns don't plan; `LimitChoice`; suggested facts; transcript storage; effect-based money for business tools; B7 policy-claim scan; A7 moved to the kernel; D4 added. No P1 left open. Not re-reviewed (round cap 1); lanes build against these decisions. |
