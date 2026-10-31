@@ -1704,6 +1704,35 @@ describe("Today's unfinished setup", () => {
     expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
   });
 
+  it('leaving_setup_right_after_a_step_names_the_new_step', async () => {
+    // The owner reads setup at its tools, goes on to the rules and leaves at once, well within the
+    // few seconds Today counts the Desks it read as fresh: the card names the rules, not the tools.
+    const state = await deskAtTools();
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    // The bar names the business once the copy's Desks are read, at the tools.
+    await expect.element(screen.getByText('Okafor Plumbing', { exact: true }).first()).toBeVisible();
+    const startedAt = performance.now();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(0);
+    // The draft is in: the API has moved setup on to the rules.
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect
+      .element(
+        card.getByText(
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          { exact: true },
+        ),
+      )
+      .toBeVisible();
+    expect(card.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('3Rules');
+    expect(performance.now() - startedAt, 'the card read the new step within the Desks\' fresh window').toBeLessThan(5_000);
+  });
+
   it('unfinished_setup_fits_a_laptop_and_a_phone', async () => {
     // On a laptop "Continue setup" sits at the words' right, level with their top. On a phone the
     // card still comes first, and the button drops under the words, from their left edge, as Today's
