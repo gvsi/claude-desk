@@ -1,6 +1,7 @@
-import { beforeAll, expect, it, vi } from 'vitest';
+import { beforeAll, expect, it, onTestFinished, vi } from 'vitest';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
+import { cleanup } from 'vitest-browser-react';
 
 import { ROUTES } from '../api/routes.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
@@ -9,14 +10,29 @@ import { rivera } from '../ds/fixtures/index.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
-import { expectSkeletonLoad, expectSkeletonStill, type SkeletonAnchor } from '../test/skeleton.ts';
-import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll } from '../test/screen.ts';
-import { watchTop } from '../test/watch.ts';
+import { expectSkeletonLoad, expectSkeletonStill, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
+import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
+import { watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
 
 beforeAll(loadWebFonts);
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
+
+/** Count even waiting layers mounted during a navigation, including one removed before the next frame. */
+function watchTodayLayers(): () => number {
+  const layers = new Set<Element>();
+  const observer = new MutationObserver((records) => {
+    for (const record of records) for (const node of record.addedNodes) {
+      if (!(node instanceof Element)) continue;
+      if (node.matches('.cd-today-opening .cd-skeleton-screen__layer')) layers.add(node);
+      node.querySelectorAll('.cd-today-opening .cd-skeleton-screen__layer').forEach((layer) => layers.add(layer));
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => observer.disconnect());
+  return () => layers.size;
+}
 
 it('today_reload_after_the_held_request_is_answered', async () => {
   const held = [...mockStore.world.decisions.values()].find((item) => item.decision.reason_plain === rivera.decisions.held.reason_plain)!;
@@ -87,6 +103,7 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'week-title', page: '.cd-week__heading' },
   { name: 'week-bar-0', page: '.cd-week__bar' },
 ];
+const TODAY_CONTENT_ANCHORS = TODAY_ANCHORS.filter(({ name }) => name !== 'owner-footer');
 const WIDE_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'reviewer-bar', page: '.cd-reviewer-bar', size: true },
   { name: 'sidebar-mark', page: '.cd-sidebar__brand .cd-mark' },
@@ -101,6 +118,132 @@ const PHONE_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'top-mark', page: '.cd-app-shell__topbar .cd-mark' },
   { name: 'menu', page: '.cd-app-shell__menu' },
 ];
+
+it('switching_desks_opens_on_todays_shape at 1440', async () => {
+  const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks', pollScale: 100 });
+  await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
+  await expectSkeletonLoad({
+    status: 'Opening your Desk',
+    anchors: TODAY_CONTENT_ANCHORS,
+    stays: ['.cd-owner-layout__footer', '.cd-reviewer-bar', '.cd-sidebar'],
+    open: async () => {
+      await screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' }).click();
+      await screen.getByRole('button', { name: 'Main line', exact: true }).click();
+    },
+    release: () => reads.forEach((read) => read.release()),
+  });
+  expectNoHorizontalScroll();
+  expectNoWindowScroll();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('switching_desks_opens_on_todays_shape at 390', async () => {
+  const { screen, router } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, {
+    seed: 'rivera_two_desks', viewport: 'phone', pollScale: 100,
+  });
+  await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
+  await expectSkeletonLoad({
+    status: 'Opening your Desk',
+    anchors: TODAY_CONTENT_ANCHORS,
+    stays: ['.cd-owner-layout__footer', '.cd-reviewer-bar', '.cd-app-shell__topbar'],
+    open: async () => { await router.navigate(TODAY); },
+    release: () => reads.forEach((read) => read.release()),
+  });
+  expectNoHorizontalScroll();
+  expectNoWindowScroll();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('reload_is_one_skeleton_then_today', async () => {
+  await cleanup();
+  const pages = watchPages();
+  const ownLayers = watchTodayLayers();
+  const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  await expectSkeletonLoad({
+    status: 'Opening your Desk',
+    anchors: [...WIDE_ANCHORS, ...TODAY_ANCHORS],
+    open: async () => { await renderRoute(TODAY, { pollScale: 100 }); },
+    release: needsYou.release,
+  });
+  expect(pages()).toEqual(['loading', 'today']);
+  expect(ownLayers()).toBe(0);
+});
+
+it.each(['desktop', 'phone'] as const)('deadline_hands_off_to_todays_skeleton at %s', { timeout: 10_000 }, async (viewport) => {
+  const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  const gaps = watchSkeletonGaps('.cd-greeting__title');
+  const { screen } = await renderRoute(TODAY, { viewport, pollScale: 100 });
+  const fullLayer = '.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer';
+  await vi.waitFor(() => expect(document.querySelector(`${fullLayer}[data-state="shown"]`)).not.toBeNull());
+  await nextFrames();
+  const anchors = TODAY_CONTENT_ANCHORS;
+  const before = anchors.map(({ name }) => document.querySelector(`${fullLayer} [data-skeleton-anchor="${name}"]`)!.getBoundingClientRect());
+  await expectSkeletonLoad({
+    status: 'Opening your Desk', continues: true, anchors,
+    open: async () => {
+      await vi.waitFor(() => expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 5_000 });
+      await expect.element(viewport === 'desktop' ? screen.getByRole('navigation', { name: 'Main' }) : screen.getByRole('button', { name: 'Menu', exact: true })).toBeVisible();
+      for (const [i, { name }] of anchors.entries()) {
+        const after = document.querySelector(`.cd-today-opening [data-skeleton-anchor="${name}"]`)!.getBoundingClientRect();
+        for (const edge of ['top', 'left', 'width', 'height'] as const) {
+          expect(Math.abs(before[i]![edge] - after[edge]), `${name} ${edge} across the handoff`).toBeLessThanOrEqual(2);
+        }
+      }
+    },
+    release: needsYou.release,
+  });
+  expect(gaps()).toBe(0);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('switching_to_a_desk_already_read_skips_the_skeleton', async () => {
+  const { screen, router } = await renderRoute(TODAY, { seed: 'rivera_two_desks', pollScale: 100 });
+  await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
+  await router.navigate(`/app/${RIVERA.emergenciesDeskId}/today`);
+  await expect.element(screen.getByRole('region', { name: 'Since last night' }).getByText('A quiet night', { exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
+  const ownLayers = watchTodayLayers();
+  await router.navigate(TODAY);
+  await expect.element(screen.getByRole('heading', { name: 'Needs you', exact: true })).toBeVisible();
+  await nextFrames();
+  expect(ownLayers()).toBe(0);
+  expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+  reads.forEach((read) => read.release());
+});
+
+it('todays_hold_still_under_reduced_motion', async () => {
+  const { screen, router } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks', pollScale: 100 });
+  await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  await expectSkeletonStill({
+    status: 'Opening your Desk',
+    anchors: TODAY_CONTENT_ANCHORS,
+    open: async () => { await router.navigate(TODAY); },
+    release: needsYou.release,
+  });
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('deadline_failure_ends_todays_skeleton', { timeout: 10_000 }, async () => {
+  const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  mockStore.inject({ route: 'needsYou', status: 503, times: 2 });
+  const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+  await vi.waitFor(() => expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 5_000 });
+  needsYou.release();
+  const needs = screen.getByRole('region', { name: 'Needs you', exact: true });
+  await expect.element(needs.getByRole('alert')).toBeVisible();
+  await expect.element(needs.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  expect(mockStore.requests.filter(({ key }) => key === 'needsYou')).toHaveLength(2);
+  await expectScreenBasics(document.body, { owner: true });
+});
 
 it('reload_opens_on_the_frames_shape at 1440', async () => {
   const reads = [

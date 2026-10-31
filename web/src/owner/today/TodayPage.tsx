@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useLocation, useNavigate } from 'react-router';
 
 import { ownerErrorCopy } from '../../api/http.ts';
-import { Greeting, LoadingLine, NAV_LABELS } from '../../ds/index.ts';
+import { Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
@@ -19,6 +19,7 @@ import { greetingPresence } from './presence.ts';
 import { requestInHash } from './requestLink.ts';
 import { SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
+import { TodaySkeleton } from './TodaySkeleton.tsx';
 
 import './Today.css';
 
@@ -37,7 +38,7 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
  * days. Today opens no visitor chat itself, and has no composer: changing a rule by asking Claude
  * lives on Rules. An address that names a held request (`#request-<id>`, as the Demo inbox links an
  * owner's alert) brings that request's card into view and focus. Until what the page first shows is
- * read, it holds the loading line alone, so it opens drawn however the owner came to it.
+ * read, it holds its own shapes, so it opens drawn however the owner came to it.
  */
 export function TodayPage() {
   const { business, desk, reachPlace } = useOwnerDesk();
@@ -47,7 +48,7 @@ export function TodayPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const opening = useTodayOpening(deskId);
-  // Back to Today while it was still opening, one line high, couldn't reach the owner's place on it.
+  // Back to Today restores the owner's place once the page has drawn its real content.
   useLayoutEffect(() => {
     if (!opening) reachPlace(location.key);
   }, [opening, reachPlace, location.key]);
@@ -159,49 +160,40 @@ export function TodayPage() {
       );
   };
 
-  // Where the greeting will be, and nothing in the right column, which stacks under the page on a
-  // narrow window and would be pushed down once the page is drawn. The heading, for assistive
-  // technology, names the page as the sidebar does until the greeting takes its place.
-  if (opening) {
-    return (
-      <div className="cd-today">
-        <div className="cd-today__main">
-          <h1 className="cd-sr-only">Today</h1>
-          <LoadingLine>Opening your Desk</LoadingLine>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="cd-today" onClick={followInAppLinks(navigate)}>
-      <div className="cd-today__main">
-        <div className="cd-today__greeting">
-          <Greeting
-            text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
-            presence={today.data ? greetingPresence(live) : undefined}
-            link={{ label: link, onCopy: copyLink }}
-          />
-          <p className="cd-sr-only" role="status">
-            {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
-          </p>
+    <>
+      {opening ? <h1 className="cd-sr-only">Today</h1> : null}
+      <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton />} className="cd-today-opening">
+        <div className="cd-today" onClick={followInAppLinks(navigate)}>
+          <div className="cd-today__main">
+            <div className="cd-today__greeting">
+              <Greeting
+                text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
+                presence={today.data ? greetingPresence(live) : undefined}
+                link={{ label: link, onCopy: copyLink }}
+              />
+              <p className="cd-sr-only" role="status">
+                {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
+              </p>
+            </div>
+            <ThingsToTry firstHeld={firstHeld} onFocusRequest={focusFirstHeld} />
+            {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
+              <NeedsYou
+                held={held}
+                callbacks={callbacks}
+                answers={answers}
+                readAt={readAt}
+                registerCard={registerCard}
+                answeredFocus={answeredFocus}
+                readFailure={readFailure}
+              />
+            ) : null}
+            {live.length > 0 ? <LiveNow live={live} /> : null}
+            <SinceLastNight />
+          </div>
+          <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
         </div>
-        <ThingsToTry firstHeld={firstHeld} onFocusRequest={focusFirstHeld} />
-        {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
-          <NeedsYou
-            held={held}
-            callbacks={callbacks}
-            answers={answers}
-            readAt={readAt}
-            registerCard={registerCard}
-            answeredFocus={answeredFocus}
-            readFailure={readFailure}
-          />
-        ) : null}
-        {live.length > 0 ? <LiveNow live={live} /> : null}
-        <SinceLastNight />
-      </div>
-      <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
-    </div>
+      </SkeletonScreen>
+    </>
   );
 }

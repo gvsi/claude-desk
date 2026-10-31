@@ -72,8 +72,7 @@ export function useNeedsYou(deskId: string, { retryOnMount = true }: ReadOptions
  * When the last read ahead of each Desk's Today gives up (a `Date.now()` time), per app (its query
  * client, so a reload starts afresh), until the Desk's Today next opens and takes it: the first
  * visit's page, or the owner's loading page on a reload (`useTodayReadAhead`), starts reading and
- * then opens Today, which waits no longer than that, so a visit has one deadline however many pages
- * wait on it.
+ * then releases the frame. Today's own skeleton keeps waiting for its reads to settle.
  */
 const readAheadDeadlines = new WeakMap<QueryClient, Map<string, number>>();
 
@@ -89,8 +88,8 @@ function deadlinesOf(queryClient: QueryClient): Map<string, number> {
 /**
  * Reads what a Desk's Today first shows (the copy's Desks, its Today, Needs you and Demo inbox) at once, for up
  * to `capMs`, so a page can open onto a Today that is already drawn. A read that fails or runs long
- * is left to Today, which shows and retries it as it always does; this never throws. The Desk's
- * Today, opened next, waits no later than this does (`useTodayOpening`).
+ * is left to Today; this never throws. The Desk's Today, opened next, keeps its own skeleton until
+ * its reads settle (`useTodayOpening`).
  */
 export async function readTodayAhead(queryClient: QueryClient, deskId: string, capMs: number): Promise<void> {
   const deadline = Date.now() + capMs;
@@ -120,7 +119,7 @@ async function readTodayUntil(queryClient: QueryClient, deskId: string, deadline
  * what Today first shows, so the loading page stays meanwhile and Today then opens drawn: one
  * loading step. The reads go out with the Desks', and the wait ends no later than the deadline of
  * the read ahead that opened the frame (a first visit's page), else `READ_AHEAD_MS` from the frame's
- * first render. It leaves that deadline for Today, which waits no later.
+ * first render. Today's own skeleton continues if its reads are still out.
  */
 export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
   const queryClient = useQueryClient();
@@ -156,26 +155,20 @@ export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
  * you), so it keeps its sections back and they open together rather than one by one, each pushing
  * the next down, when the owner comes from another Desk or another page. A first visit's page and a
  * reload's loading page read them first (`readTodayAhead`, `useTodayReadAhead`). Reads already in,
- * or failed, open it at once; else it waits no later than the read ahead that opened it gives up,
- * or `READ_AHEAD_MS` from when it opened. Once open, it stays open.
+ * or failed, open it at once; else its skeleton continues until both reads settle, even past the
+ * frame's `READ_AHEAD_MS` deadline (plan 08c, decision 7). Once open, it stays open.
  */
 export function useTodayOpening(deskId: string): boolean {
   const queryClient = useQueryClient();
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
   const read = (today.data !== undefined || today.isError) && (needsYou.data !== undefined || needsYou.isError);
-  const [deadline] = useState(() => deadlinesOf(queryClient).get(deskId) ?? Date.now() + READ_AHEAD_MS);
-  const [open, setOpen] = useState(() => read || Date.now() >= deadline);
+  const [open, setOpen] = useState(read);
   if (read && !open) setOpen(true);
   // Taken once Today has it: the Desk's next Today is a later visit, with a wait of its own.
   useEffect(() => {
     deadlinesOf(queryClient).delete(deskId);
   }, [queryClient, deskId]);
-  useEffect(() => {
-    if (open) return undefined;
-    const timer = setTimeout(() => setOpen(true), deadline - Date.now());
-    return () => clearTimeout(timer);
-  }, [open, deadline]);
   return !open;
 }
 

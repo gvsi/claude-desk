@@ -671,6 +671,8 @@ Two stacked design PRs, in order of value, so the signed boards ship first:
 
 ## Review Ledger
 
+Ruling (Task 7): past #186's 3 s deadline the frame lands and Today's own skeleton continues until Today's reads settle (decision 7); #186's two tests updated to that sequence.
+
 Ruling (Task 2): the link pill's width is data-dependent (random slug); its position and height land, its width changes once.
 
 **Plan review, round 1** (Opus 5.5 and GPT-6.1 Sol; the Fable seat is paused). Changes:

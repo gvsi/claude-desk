@@ -19,6 +19,7 @@ import { worker } from '../mocks/browser.ts';
 import { copyOut } from '../mocks/readModels.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
+import { holdReads } from '../test/holdReads.ts';
 import { renderRoute, VIEWPORTS } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 import { pageNow, watchFor, watchPages } from '../test/watch.ts';
@@ -234,24 +235,26 @@ describe('Arrival', () => {
   });
 
   it('slow_first_visit_waits_out_one_read_ahead', { timeout: 20_000 }, async () => {
-    // On a slow network the visit has one 3 s read ahead, whichever page waits on it. The Desks
-    // come in after it and Needs you later still: Today opens as soon as the Desks are in, still
-    // reading Needs you, rather than wait out a second 3 s on the owner's loading page.
+    // The frame still gets one 3 s read ahead. Plan 08c decision 7 replaces #186's partial Today
+    // with Today's own skeleton until Needs you settles; Desks arriving at 3.4 s must release the
+    // frame immediately, rather than start another 3 s full-page wait.
     delayNextRead(ROUTES.desks.path, 3_400);
-    delayNextRead(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId), 10_000);
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
     const started = performance.now();
     const { screen, router } = await renderRoute('/');
     const pages = watchPages();
-    // Today itself, not the still preview of it behind the intro dialog.
-    const todayDrawn = () => document.querySelector('.cd-today:not(.cd-today--skeleton)') !== null && document.querySelector('.cd-today-preview') === null;
-    await expect.poll(todayDrawn, { timeout: 10_000, interval: 50 }).toBe(true);
+    await expect.element(screen.getByRole('navigation', { name: 'Main' }), { timeout: 10_000 }).toBeVisible();
     const drawnAt = performance.now() - started;
     expect(router.state.location.pathname).toBe(TODAY);
-    // Once the Desks were in, at 3.4 s; a second full wait would draw Today at 6 s or later.
+    // Once the Desks were in, at 3.4 s; a second full wait would draw the frame at 6 s or later.
     expect(drawnAt).toBeGreaterThan(3_400);
     expect(drawnAt).toBeLessThan(5_000);
-    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today without its held request']));
+    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening']));
+    expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
     expect(heldCard(screen).elements()).toHaveLength(0);
+    needsYou.release();
+    await expect.element(heldCard(screen)).toBeVisible();
+    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening', 'today']));
   });
 
   it('returning_owner_leaving_while_today_is_read_stays', async () => {
