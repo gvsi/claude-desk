@@ -58,7 +58,7 @@ from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 
-from desk.contracts import ExecResult, LedgerEvent, NormalizedAction, Principal
+from desk.contracts import ExecResult, Fact, LedgerEvent, NormalizedAction, Principal
 from desk.db.models import Action as ActionRow
 from desk.db.models import Approval, Business, Desk, Execution, Person, Tool
 from desk.db.models import Decision as DecisionRow
@@ -93,6 +93,14 @@ async def _after_intent() -> None:
 
 
 # ---- The rows an execution works on --------------------------------------------------------------
+
+class UndeclaredPrivateData(AdapterFailure):
+    """An adapter declared not to release private data returned some (`undeclared_private_data`):
+    the action settles `failed`, ledgered with that reason, and nothing it returned is kept."""
+
+    def __init__(self) -> None:
+        super().__init__("undeclared_private_data")
+
 
 class Checked(NamedTuple):
     """The rules version a re-check ran against, and its money cap: what the `execute` entries of
@@ -666,12 +674,13 @@ async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tu
 
     An adapter declared not to release private data that returns some anyway
     (`undeclared_private_data`) fails closed: logged by its tool and action alone, never the data,
-    and raised as `AdapterFailure`, so T2 rolls back everything the adapter wrote and settles the
-    action `failed` with nothing delivered, and a reconciliation leaves it unknown."""
+    and raised as `UndeclaredPrivateData`, so T2 rolls back everything the adapter wrote and settles
+    the action `failed` with nothing delivered, and a reconciliation settles it `failed` likewise,
+    for good (`_ask_adapter`)."""
     if undeclared_private_data(target, result):
         log.error("adapter_undeclared_private_data tool=%s action_id=%s", target.action.tool,
                   target.action.action_id)
-        raise AdapterFailure("undeclared_private_data")
+        raise UndeclaredPrivateData()
     readers = labels.session_readers(target.session_row)
     facts = [fact for fact in result.facts if labels.can_read(fact.label, readers)]
     keys = target.adapter.model_view_keys if target.adapter is not None else frozenset()
@@ -723,18 +732,27 @@ async def session_ended(ctx: KernelCtx, decision: DecisionRow) -> str | None:
 
 
 def undeclared_private_data(target: _Target, result: AdapterResult) -> bool:
-    """Whether an adapter declared not to release private data returned some: a document fact (a
-    document's title or link), or a fact a visitor's or agent's session reads only as its verified
-    person, not as itself or as the public. A fact labelled for the session as well as its person
-    (`labels.new_fact_label`: a quote, a booking) is the session's own; one it can't read at all
-    is dropped by `_visible`. An owner session's own setup results aren't a person's data."""
+    """Whether an adapter declared not to release private data returned some, for a visitor's or
+    agent's session: a document fact (a document's title or link), or a fact naming a person as a
+    reader or its record owner, unless that person is the session's own verified person and the
+    session reads the fact as itself (`labels.new_fact_label`: the label of a quote or a booking
+    made in a verified session). Another person's reader or ownership, or a fact the session reads
+    only as its person, is never the session's own. An owner session's own setup results aren't a
+    person's data."""
     adapter, session = target.adapter, target.session_row
     if adapter is None or adapter.releases_private_data or session.kind == "owner":
         return False
-    as_person, as_itself = labels.session_readers(session), {"public", f"session:{session.session_id}"}
-    return any(fact.kind == "document"
-               or (labels.can_read(fact.label, as_person) and not labels.can_read(fact.label, as_itself))
-               for fact in result.facts)
+    own = labels.new_fact_label(session).record_owner              # the session's verified person, if any
+    as_itself = {"public", f"session:{session.session_id}"}
+
+    def private(fact: Fact) -> bool:
+        people = {reader for reader in fact.label.readers if reader.startswith("person:")}
+        if not people and fact.label.record_owner is None:
+            return False
+        return (own is None or people - {f"person:{own}"} != set() or fact.label.record_owner not in (None, own)
+                or not labels.can_read(fact.label, as_itself))
+
+    return any(fact.kind == "document" or private(fact) for fact in result.facts)
 
 # ---- Reconciliation ---------------------------------------------------------------------------------
 
@@ -795,7 +813,18 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     that can't say leaves it `unknown`. A failure while recording is raised, and the rollback
     takes back the adapter's `on_failed` with the record. Rows another transaction holds (a
     running execution holds both) are skipped, never waited on; a lock this transaction holds
-    already is no wait. Each entry names the version and cap the row recorded in T1 (`_checked`)."""
+    already is no wait. Each entry names the version and cap the row recorded in T1 (`_checked`).
+
+    An action that releases private data is recovered only into a session that still stands for
+    its person, as T2 runs it: the session's row is held `FOR SHARE` first, before the decision's
+    (`repo.py`), and if the session no longer stands (`auth.session_stands`, `session_ended`) the
+    adapter isn't asked and nothing it holds is exposed: the action is settled
+    `refused_at_execution` with the plain reason, once `on_failed` has run."""
+    tool = (await ctx.db.execute(ctx.repo.scoped(select(ActionRow.tool).where(
+        ActionRow.action_id == action_id)))).scalar_one_or_none()
+    private = tool is None or releases_private_data(tool)
+    if private and not await _hold_session_for(ctx, decision_id):
+        return False
     decision = (await ctx.db.scalars(ctx.repo.scoped(
         select(DecisionRow).where(DecisionRow.decision_id == decision_id)
         .with_for_update(skip_locked=True).execution_options(populate_existing=True)))).one_or_none()
@@ -809,6 +838,9 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     target = await _target(ctx, decision)
     target.checked = _checked(execution)
     orphaned = execution.state == "intent"
+    if private and not await auth.session_stands(ctx, _named(target), None):
+        ended = await session_ended(ctx, decision) or "session_closed"          # "session_closed": its Desk's gone
+        return await _refused_in_recovery(ctx, target, execution, ended, orphaned=orphaned)
     outcome = await _ask_adapter(ctx, target, action_id)
     if orphaned:
         await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
@@ -818,13 +850,52 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     return True
 
 
+
+async def _hold_session_for(ctx: KernelCtx, decision_id: str) -> bool:
+    """The decision's session row, held `FOR SHARE` before the decision's (`repo.py`), so no write
+    that closes it commits while a private result is recovered; False when another transaction
+    holds it outright (a closing write, a decision, an execution that writes the session), which
+    the reconciliation skips rather than waits for, as it does the decision and the execution."""
+    session_id = (await ctx.db.execute(ctx.repo.scoped(select(DecisionRow.session_id).where(
+        DecisionRow.decision_id == decision_id)))).scalar_one_or_none()
+    if session_id is None:
+        return False
+    return (await ctx.db.scalars(ctx.repo.scoped(select(SessionRow).where(SessionRow.session_id == session_id)
+                                                 .with_for_update(read=True, skip_locked=True)
+                                                 .execution_options(populate_existing=True)))).one_or_none() is not None
+
+
+async def _refused_in_recovery(ctx: KernelCtx, target: _Target, execution: Execution, ended: str, *,
+                               orphaned: bool) -> bool:
+    """A private action's outcome, recovered once its session no longer stands for its person: the
+    adapter isn't asked. An intent is first `unknown` (ledgered as orphaned); then, once `on_failed`
+    has run, the action is `refused_at_execution` with the plain reason `ended` and nothing in its
+    result, ledgered as reconciled. If `on_failed` fails, what `prepare` reserved may stand, so it
+    stays `unknown` for the next try."""
+    action_id = target.action.action_id
+    if orphaned:
+        await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
+    try:
+        async with ctx.db.begin_nested():
+            await _undo(ctx, target)
+    except Exception as exc:
+        repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
+        return True
+    await _finish(ctx, target, execution, _no_result(action_id, "failed"), "refused_at_execution",
+                  _summary(target, "refused_at_execution", reason="session_ended", check=ended, reconciled=True),
+                  status=f"refused_{ended}")
+    return True
+
 async def _ask_adapter(ctx: KernelCtx, target: _Target,
                        action_id: str) -> tuple[ExecResult, str, dict[str, Any]] | None:
     """What the adapter's `reconcile` says happened to an orphan, as its result, the decision's
     state and what its `execute` entry adds, ledgering nothing: a result is `executed`, rebuilt as
     the session may see it (`_visible`, which flags a canary); None is `failed`, once `on_failed`
-    has undone what `prepare` reserved. None when it can't say (no adapter, `AdapterUnknown` or any
-    error), with whatever its hooks wrote taken back."""
+    has undone what `prepare` reserved. A result an adapter declared not to release private data
+    mustn't carry (`UndeclaredPrivateData`) is `failed` too, for good, with nothing in it and its
+    reason in the entry, once whatever `reconcile` wrote is taken back and `on_failed` has run.
+    None when it can't say (no adapter, `AdapterUnknown` or any other error), with whatever its
+    hooks wrote taken back."""
     if target.adapter is None:
         log.warning("reconcile_no_adapter action_id=%s", action_id)
         return None
@@ -836,6 +907,14 @@ async def _ask_adapter(ctx: KernelCtx, target: _Target,
                 return _no_result(action_id, "failed"), "failed", {}
             visible, flagged = await _visible(ctx, target, result)
             return visible, "executed", flagged
+    except UndeclaredPrivateData:                   # its writes taken back with the savepoint; terminal
+        try:
+            async with ctx.db.begin_nested():
+                await _undo(ctx, target)
+        except Exception as exc:                    # what `prepare` reserved may stand: still unknown
+            repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
+            return None
+        return _no_result(action_id, "failed"), "failed", {"reason": "undeclared_private_data"}
     except AdapterUnknown:
         log.info("reconcile_still_unknown action_id=%s", action_id)
     except Exception as exc:                        # still unknown; the next read tries again

@@ -18,7 +18,8 @@ import pytest
 from sqlalchemy import select
 
 from desk.contracts import Claim, Fact, Label
-from desk.db.models import DocumentLink, Execution, Quote
+from desk.db.models import Approval, DocumentLink, Execution, Quote
+from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_service import adapters, execute
 from desk.kernel_service.adapters.base import AdapterResult
@@ -29,9 +30,9 @@ from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of, verify_se
 from .test_adapters import quote_args, rivera
 from .test_approvals import add_person, answered
 from .test_compiler import card
-from .test_decide import decided, desk_with, open_visitor
+from .test_decide import decided, desk_with, open_visitor, set_session
 from .test_desk_writes import updated
-from .test_execute import executed
+from .test_execute import executed, read
 from .test_release_document import DANA, TOOL, confirmed, documents
 
 ASK_FOR_DOCUMENTS = card("ask-docs", TOOL, mode="ask", who="record_owner")
@@ -148,24 +149,38 @@ def test_every_adapter_declares_whether_it_releases_private_data(registry):
         adapters.register(undecided, replace=True)
 
 
-@pytest.mark.parametrize("fact_kind", ["person_only", "document"])
+def undeclared_fact(fact_kind: str, session_id: str, dana: str, bob: str) -> Fact:
+    """A fact an adapter declared not to release private data must never return, for a session
+    verified as Dana: one she reads only as her person, a document's, one Bob reads as well as her
+    session, or one Bob owns."""
+    kind, readers, record_owner = {
+        "person_only": ("quote", ["owner", f"person:{dana}"], dana),
+        "document": ("document", ["owner", f"session:{session_id}"], None),
+        "another_persons": ("quote", ["owner", f"person:{bob}", f"session:{session_id}"], bob),
+        "another_persons_record": ("quote", ["owner", f"session:{session_id}"], bob),
+    }[fact_kind]
+    return Fact(fact_id="quote:fake-1", kind=kind, status="available", source="kernel",
+                claims=[Claim(key="title", kind="text", value=SECRET)],
+                label=Label(readers=readers, record_owner=record_owner))
+
+
+@pytest.mark.parametrize("fact_kind", ["person_only", "document", "another_persons", "another_persons_record"])
 async def test_an_adapter_that_releases_undeclared_private_data_fails_closed(app, client, registry, caplog, fact_kind):
     """An adapter declared not to release private data whose result carries a fact the session reads
-    only as its person, or a document's, fails closed: the action is settled failed, nothing is
-    delivered, and the log names the tool and the action, never the data."""
+    only as its person, a document's, or one naming another person as a reader or its owner, fails
+    closed: the action is settled failed, nothing is delivered, and the log names the tool and the
+    action, never the data. Only the session's own verified person may join a fact the session
+    reads as itself (as a quote's label does)."""
     caplog.set_level(logging.INFO, logger="desk.kernel_service")
     quote = FakeAdapter("native.quote")                          # declared not to release private data
     rows = await desk_with(app, [quote], [card("quote", "native.quote")])
     visitor = await open_visitor(client, rows)
     person_id = await add_person(app, rows, "dana", "Dana Whitfield")
+    bob = await add_person(app, rows, "bob", "Bob Okafor")
     await verify_session(app, rows.copy_id, visitor.session_id, person_id)
     allowed = await decided(client, visitor, "native.quote", {"qty": 1})
     assert allowed.outcome == "allow", allowed.reason_plain
-    readers = (["owner", f"person:{person_id}"] if fact_kind == "person_only"
-               else ["owner", f"session:{visitor.session_id}"])
-    secret = Fact(fact_id="quote:fake-1", kind="quote" if fact_kind == "person_only" else "document",
-                  status="available", source="kernel", claims=[Claim(key="title", kind="text", value=SECRET)],
-                  label=Label(readers=readers, record_owner=person_id if fact_kind == "person_only" else None))
+    secret = undeclared_fact(fact_kind, visitor.session_id, person_id, bob)
     quote.script["execute"] = AdapterResult(facts=[secret], model_view={"ok": True})
 
     result = await executed(client, visitor, allowed)
@@ -180,3 +195,106 @@ async def test_an_adapter_that_releases_undeclared_private_data_fails_closed(app
     logged = [record.getMessage() for record in caplog.records]
     assert f"adapter_undeclared_private_data tool=native.quote action_id={allowed.action.action_id}" in logged
     assert not any(SECRET in message for message in logged)
+
+
+async def test_a_session_may_read_its_own_persons_fact_as_itself(app, client, registry):
+    """The one exception the declaration allows: a fact labelled for the session and its own verified
+    person, who owns it, as every fact an adapter writes in a verified session is
+    (`labels.new_fact_label`). It is delivered."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    visitor = await open_visitor(client, rows)
+    person_id = await add_person(app, rows, "dana", "Dana Whitfield")
+    await verify_session(app, rows.copy_id, visitor.session_id, person_id)
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
+    own = Fact(fact_id="quote:own-1", kind="quote", status="available", source="kernel",
+               claims=[Claim(key="title", kind="text", value="Drain clearing")],
+               label=Label(readers=["owner", f"session:{visitor.session_id}", f"person:{person_id}"],
+                           record_owner=person_id))
+    quote.script["execute"] = AdapterResult(facts=[own], model_view={"ok": True})
+
+    result = await executed(client, visitor, allowed)
+
+    assert (result.state, [fact.fact_id for fact in result.facts]) == ("succeeded", ["quote:own-1"])
+
+
+async def verified_fake_desk(app, client, fake: FakeAdapter, cards):
+    """A copy whose Desk runs `fake` under `cards`, a visitor verified as Dana on it, and Bob."""
+    rows = await desk_with(app, [fake], cards)
+    visitor = await open_visitor(client, rows)
+    dana = await add_person(app, rows, "dana", "Dana Whitfield")
+    bob = await add_person(app, rows, "bob", "Bob Okafor")
+    await verify_session(app, rows.copy_id, visitor.session_id, dana)
+    return rows, visitor, dana, bob
+
+
+async def test_a_reconciled_result_with_undeclared_private_data_settles_failed_once(app, client, registry, caplog):
+    """An outcome nobody knew, reconciled into a result an adapter declared not to release private
+    data mustn't carry (a fact Bob reads): the action settles `failed` with nothing in it, ledgered
+    with the reason, and stays settled: the next read asks the adapter nothing."""
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    quote = FakeAdapter("native.quote")
+    rows, visitor, dana, bob = await verified_fake_desk(app, client, quote, [card("quote", "native.quote")])
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
+    quote.script["execute"] = RuntimeError("the provider's answer was lost")
+    assert (await executed(client, visitor, allowed)).state == "unknown"
+    quote.script["reconcile"] = AdapterResult(facts=[undeclared_fact("another_persons", visitor.session_id, dana, bob)],
+                                              model_view={"ok": True})
+
+    first, again = await read(client, rows.owner, allowed), await read(client, rows.owner, allowed)
+
+    assert (first.state, again.state) == ("failed", "failed")
+    assert quote.calls.count("reconcile") == 1
+    [execution] = await rows_of(app, rows.copy_id, select(Execution).where(
+        Execution.decision_id == allowed.decision_id))
+    assert (execution.state, execution.result.facts, execution.result.model_view) == ("failed", [], {})
+    settled = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"][-1]
+    assert (settled.summary["state"], settled.summary["reason"], settled.summary.get("reconciled")) == (
+        "failed", "undeclared_private_data", True)
+    logged = [record.getMessage() for record in caplog.records]
+    assert f"adapter_undeclared_private_data tool=native.quote action_id={allowed.action.action_id}" in logged
+    assert not any(SECRET in message for message in logged)
+
+
+@pytest.mark.parametrize("entry", ["read", "startup", "approved_reconciliation"])
+async def test_a_private_result_is_never_recovered_into_a_session_that_ended(app, client, registry, frozen_clock,
+                                                                              entry):
+    """An approved release whose outcome nobody knew, reconciled after its session closed: the
+    reconciliation checks the session as T2 does, holding its row first, and settles the action
+    `refused_at_execution` with the plain reason, exposing nothing; the adapter isn't asked. So for a
+    read of the decision, startup reconciliation, and the approval form of `/execute`."""
+    release = FakeAdapter("native.quote", releases_private_data=True)     # stands in for a private release
+    rows, visitor, dana, bob = await verified_fake_desk(app, client, release,
+                                                        [card("ask-quote", "native.quote", mode="ask")])
+    held = await decided(client, visitor, "native.quote", {"qty": 1})
+    assert held.state == "held", held.reason_plain
+    release.script["execute"] = RuntimeError("the provider's answer was lost")
+    answered_now = await answered(client, rows.owner, held.decision_id, "allow_once")
+    assert answered_now.execution.state == "unknown"
+    mine = Fact(fact_id="quote:fake-1", kind="quote", status="available", source="kernel",
+                claims=[Claim(key="title", kind="text", value=SECRET)],
+                label=Label(readers=["owner", f"person:{dana}"], record_owner=dana))
+    release.script["reconcile"] = AdapterResult(facts=[mine], model_view={"ok": True})
+    await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())     # a contact change, say
+
+    if entry == "read":
+        await read(client, rows.owner, held)
+    elif entry == "startup":
+        await execute.reconcile_at_startup(app.state.kernel)
+    else:
+        [approval] = await rows_of(app, rows.copy_id, select(Approval).where(Approval.decision_id == held.decision_id))
+        response = await client.post("/execute", headers=rows.owner, json={
+            "decision_id": held.decision_id, "session_id": visitor.session_id, "approval_id": approval.approval_id})
+        assert response.status_code == 200, response.text
+        assert (response.json()["state"], response.json()["facts"], response.json()["model_view"]) == ("failed", [], {})
+
+    assert "reconcile" not in release.calls
+    [decision] = await rows_of(app, rows.copy_id, select(DecisionRow).where(
+        DecisionRow.decision_id == held.decision_id))
+    assert (decision.state, decision.visitor_plain) == (
+        "refused_at_execution", "Not shared: their session ended when their contact changed")
+    [execution] = await rows_of(app, rows.copy_id, select(Execution).where(Execution.decision_id == held.decision_id))
+    assert (execution.state, execution.result.facts, execution.result.model_view) == ("failed", [], {})
+    settled = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"][-1]
+    assert (settled.summary["state"], settled.summary["reason"], settled.summary["check"],
+            settled.summary.get("reconciled")) == ("refused_at_execution", "session_ended", "contact_changed", True)

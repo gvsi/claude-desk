@@ -61,7 +61,12 @@ Plan 01c's new payment link (step 7) may follow a mandate reservation (step 10).
 the first time in the strongest mode the transaction will need, since going from `FOR SHARE` to
 `FOR UPDATE` waits like a new lock. Reading a row without a lock (the session a decision names,
 say) waits for nothing and can come at any point. Reconciliation takes the decision and the
-execution `SKIP LOCKED`, so it skips an execution that is running rather than wait for it.
+execution `SKIP LOCKED`, so it skips an execution that is running rather than wait for it. For an
+action that releases private data it first holds the session row `FOR SHARE SKIP LOCKED`
+(`execute._hold_session_for`), in step 1's place, so no write that closes the session commits
+while the result is recovered; a read or an answer that already holds the decision asks for the
+session row only `SKIP LOCKED` too, which waits for nothing, and skips the reconciliation when
+another transaction holds the row outright.
 
 A decision holds the session row through its review on purpose: the closed, generation and mode
 checks then hold for the whole decision, and a take-over or hand-back comes before it (409) or
