@@ -252,6 +252,38 @@ describe('setup', () => {
     await expect.element(connectorRow(screen, 'Payments').getByText('On', { exact: true })).toBeVisible();
   });
 
+  it('tool_confirm_conflicts_fail_closed', async () => {
+    const state = await interviewAtTools();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: /^(Connect|Add) Stripe$/ }).click();
+    await expect.element(screen.getByRole('button', { name: 'Turn it on' })).toBeVisible();
+    const mark = mockStore.requests.length;
+    const tools = ['payments.list_charges', 'payments.create_refund'];
+
+    // Rules that can't be checked: the review says so, and nothing is drafted or turned on.
+    mockStore.inject({ route: 'confirmTool', status: 409, body: { error: 'rules_cannot_be_checked' } });
+    await screen.getByRole('button', { name: 'Turn it on' }).click();
+    await expect.element(screen.getByText(RULES_UNAVAILABLE_COPY, { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Confirm and turn on' }).elements()).toHaveLength(0);
+    expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
+
+    // The rules changed after the change was drafted: the tools are asked for once more, and the
+    // new draft is shown to confirm; nothing is on until it is.
+    await screen.getByRole('button', { name: 'Turn it on' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Confirm and turn on' })).toBeVisible();
+    mockStore.inject({ route: 'confirmRules', status: 409, body: { error: 'rules_changed_since_draft' } });
+    await screen.getByRole('button', { name: 'Confirm and turn on' }).click();
+    await expect.element(screen.getByText('Your rules changed since this was drafted. Check the new version.', { exact: true })).toBeVisible();
+    expect(requests('confirmTool', mark)).toHaveLength(3);
+    expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
+    const redrafted = [...deskOf(state).drafts.keys()].at(-1);
+    await screen.getByRole('button', { name: 'Confirm and turn on' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    expect(requests('confirmRules', mark).map((r) => r.body).at(-1)).toEqual({ version: redrafted });
+    expect(statuses(state, tools)).toEqual(['enabled', 'enabled']);
+    await expect.element(connectorRow(screen, 'Stripe').getByText('On', { exact: true })).toBeVisible();
+  });
+
   it('rules_step_groups_and_checks', async () => {
     const state = await interviewAtTools();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -459,8 +491,20 @@ describe('setup', () => {
   it('go_live_shows_the_link', async () => {
     const state = await interviewAtPreview();
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+
+    // Going live failed, and the interview, read again, says it isn't live: it says so and stays here.
+    mockStore.inject({ route: 'goLive', status: 503 });
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    const unreachable = ownerErrorCopy(new ApiError('unavailable', { route: 'goLive', method: 'POST', status: 503, code: 'kernel_unavailable' }));
+    await expect.element(screen.getByText(unreachable, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' })).toBeVisible();
+    expect(deskOf(state).summary.answering).toBe(false);
+
+    // Its answer lost, but it went live: read again, the live step shows.
+    mockStore.inject({ route: 'goLive', status: 'network', afterCommit: true });
     await screen.getByRole('button', { name: 'Go live' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(deskOf(state).summary.answering).toBe(true);
     await expect.element(screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true })).toBeVisible();
 
     // The link is the API's `public_url`, and "Open" opens it in a new tab.
