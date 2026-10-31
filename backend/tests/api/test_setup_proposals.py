@@ -299,11 +299,12 @@ async def test_accepted_autonomy_is_drafting_data_and_never_a_money_limit(monkey
     monkeypatch.setattr(setup, "ask_model", ask)
     payment = job("payment", autonomy="auto", config={"block": "purpose_payment", "purpose": "Retainer", "amount_cents": 100})
     answers = SetupAnswers(summary="Tax advice")
-    assert await setup.draft_cards(None, record, "office", answers, [], post, jobs=[payment]) is None
+    assert await setup.draft_cards(None, record, "office", answers, [], post, jobs=[{"job": payment.job, "title": payment.title,
+                                                                                "autonomy": payment.autonomy, "amount_cents": 100}]) is None
     message = captured[0]
     data = json.loads(html.unescape(message.split("<answers>")[1].split("</answers>")[0]))
     assert data["accepted_jobs"][0]["autonomy"] == "auto"
-    assert data["accepted_jobs"][0]["config"]["amount_cents"] == 100
+    assert data["accepted_jobs"][0]["amount_cents"] == 100
     assert answers.auto_money_cap_cents == 0 and answers.payment_link_auto_max_cents is None
     drafted = DraftedRules(cards=[RuleCardDraft(applies_to="native.payment_link", mode="auto", who="anyone",
                                                max_amount_cents=100, reason="Send the retainer link")])
@@ -405,12 +406,14 @@ def test_business_tool_setting_is_explicit_and_defaults_off(monkeypatch, value, 
     assert Settings.from_env().business_tools_enabled is False
 
 
-async def test_rules_drafting_receives_only_accepted_jobs(proposals, model):
+@pytest.mark.parametrize("owner_decided", [False, True])
+async def test_rules_drafting_receives_only_owner_decided_jobs(proposals, model, owner_decided):
     from tests.api.test_setup_rules import drafted, settled
 
     owner, state, ids = proposals
     path = f"/api/owner/setup/{state['interview_id']}"
-    assert (await owner.browser.post(path + f"/proposals/{ids[0]}", json={"accept": True, "autonomy": "auto"})).status_code == 200
+    if owner_decided:
+        assert (await owner.browser.post(path + f"/proposals/{ids[0]}", json={"accept": True, "autonomy": "auto"})).status_code == 200
     assert (await owner.browser.post(path + f"/proposals/{ids[1]}", json={"accept": False})).status_code == 200
     assert (await owner.browser.post(path + "/suggestions", json={})).status_code == 200
     model.add(drafted(), drafted())
@@ -419,8 +422,10 @@ async def test_rules_drafting_receives_only_accepted_jobs(proposals, model):
     request = next(request for request in model.requests if request.route == setup.CARD_DRAFT_ROUTE)
     message = request.messages[0]["content"][0]["text"]
     data = json.loads(html.unescape(message.split("<answers>")[1].split("</answers>")[0]))
-    assert [job["job"] for job in data["accepted_jobs"]] == ["schedule"]
-    assert data["accepted_jobs"][0]["autonomy"] == "auto"
+    expected = [{"job": "schedule", "title": "Book an intro", "autonomy": "auto"}] if owner_decided else []
+    assert data.get("accepted_jobs", []) == expected
+    assert "Book a free slot" not in message
+    assert "Meet new clients" not in message
 
 
 @pytest.mark.parametrize("app_key, declined", [("stripe", True), ("square", False), ("google_calendar", False)])

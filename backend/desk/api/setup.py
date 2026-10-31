@@ -428,6 +428,7 @@ class Entry(BaseModel):
     pending: str | None = None
     held_policy_keys: list[str] | None = None   # latest charter write's snapshot; [] clears an earlier hold
     connected_apps: list[ConnectorKey] | None = None
+    owner_decided: bool = False
 
 
 def proposal_entries(jobs: Iterable[JobProposal | dict], connectors: Iterable[ConnectorProposal], *,
@@ -601,7 +602,7 @@ def _stored(interview: Interview) -> dict:
             # Omit only top-level nulls and empty additions; nested card nulls are part of its payload.
             "transcript": [entry.model_dump(mode="json", exclude={name for name, value in entry
                                                                  if value is None or
-                                                                 (name in {"choices", "covered", "planned", "dropped", "cards"}
+                                                                 (name in {"choices", "covered", "planned", "dropped", "cards", "owner_decided"}
                                                                   and not value)})
                            for entry in interview.transcript],
             "draft_cards": [card.model_dump(mode="json") for card in interview.draft_cards],
@@ -1153,10 +1154,11 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
         seen = _stored(interview)
         if not interview.business_tools_enabled:
             _clear_configs(interview)
-        card = next((entry.card for entry in interview.transcript
-                     if entry.card is not None and entry.card.proposal_id == proposal_id), None)
-        if card is None:
+        entry = next((entry for entry in interview.transcript
+                      if entry.card is not None and entry.card.proposal_id == proposal_id), None)
+        if entry is None:
             raise ApiProblem(404, "not_found")
+        card = entry.card
         if card.job is None and (decision.title is not None or decision.autonomy is not None):
             raise ApiProblem(422, "invalid")
         config = card.job.config if card.job is not None else None
@@ -1167,6 +1169,7 @@ async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, interview_id: st
                 config.amount_cents = decision.amount_cents
             if config.amount_cents is None:
                 raise ApiProblem(422, "amount_required")
+        entry.owner_decided = True
         card.state = "accepted" if decision.accept else "declined"
         if card.job is not None:
             if decision.title is not None:
@@ -1966,6 +1969,21 @@ def accepted_jobs(interview: Interview) -> list[JobProposal]:
             if entry.card is not None and entry.card.state == "accepted" and entry.card.job is not None]
 
 
+def owner_job_answers(interview: Interview) -> list[dict[str, object]]:
+    """Only explicit card decisions supply job data to rules drafting."""
+    answers = []
+    for entry in interview.transcript:
+        card = entry.card
+        if not entry.owner_decided or card is None or card.state != "accepted" or card.job is None:
+            continue
+        job = card.job
+        answer = {"job": job.job, "title": job.title, "autonomy": job.autonomy}
+        if isinstance(job.config, PurposePaymentConfig) and job.config.amount_cents is not None:
+            answer["amount_cents"] = job.config.amount_cents
+        answers.append(answer)
+    return answers
+
+
 def finish(interview: Interview) -> None:
     """Accept remaining proposals and cover unanswered topics at their safe defaults, without I/O."""
     for entry in interview.transcript:
@@ -2352,7 +2370,7 @@ def _card(index: int, draft: RuleCardDraft) -> RuleCard:
 async def draft_cards(model: ModelClient, record: Record, business_type: BusinessType, answers: SetupAnswers,
                       tools: list[dict],
                       post: Callable[[list[RuleCard]], Awaitable[PolicyVersion | None]], *,
-                      jobs: list[JobProposal] | None = None) -> PolicyVersion | None:
+                      jobs: list[dict[str, object]] | None = None) -> PolicyVersion | None:
     """Claude's rule cards from the answers (route `card_draft`), ids `card-1`…, for the `tools` offered (every
     enabled tool but the utility cards' ones, as `{tool, effects}`) or an effect, as `post` drafts them on the kernel.
     A draft code can't use (no card, a target not offered, a card the contract refuses, a card against the owner's
@@ -2363,8 +2381,9 @@ async def draft_cards(model: ModelClient, record: Record, business_type: Busines
     drafts the template cards."""
     cap = answers.auto_money_cap_cents
     owner_answers = answers.model_dump(mode="json", exclude_defaults=True)
+    owner_answers.pop("how_we_help", None)
     if jobs:
-        owner_answers["accepted_jobs"] = [job.model_dump(mode="json") for job in jobs]
+        owner_answers["accepted_jobs"] = jobs
     message = _user("\n\n".join([card_draft_head(business_type, cap), wrap(TOOLS_TAG, json.dumps(tools)),
                                  wrap(ANSWERS_TAG, json.dumps(owner_answers))]))
     posted: list[PolicyVersion] = []
@@ -2472,7 +2491,7 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
             return await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
 
         version = await draft_cards(model, recorder(engine, owner, CARD_DRAFT_ROUTE), business_type, answers,
-                                    await _rule_tools(owner, desk_id), post, jobs=accepted_jobs(interview))
+                                    await _rule_tools(owner, desk_id), post, jobs=owner_job_answers(interview))
     else:
         version = await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
     if (version is None or version.status == "rejected") and cards != template:
