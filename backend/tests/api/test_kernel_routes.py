@@ -24,6 +24,7 @@ import desk.api
 from desk.api.kernel_client import PROVING_ROUTES, SET_FIELDS_ONLY, STREAM_ROUTES
 from desk.kernel_api import KERNEL_ROUTES
 from desk.kernel_service.app import KernelSettings, create_app
+from tests.kernel.test_app import LATER_ROUTES
 
 # The routes the API calls that the kernel doesn't serve yet, by `KERNEL_ROUTES` key, each with the kernel plan whose
 # "Produced" list adds it: 01b, the kernel's verification and owner data plan, and 01c, its payments, agents and setup
@@ -181,6 +182,19 @@ def seam_problems(called: Set[str], served: Set[str], pending: Mapping[str, str]
     return problems
 
 
+def tag_problems(pending: Mapping[str, str], later: Mapping[str, Set[str]]) -> list[str]:
+    """Each pending route whose plan isn't the one the kernel's own list of routes its later plans serve
+    (`LATER_ROUTES` in tests/kernel/test_app.py) gives it."""
+    plan_of = {key: plan for plan, keys in later.items() for key in keys}
+    problems = []
+    for key, plan in sorted(pending.items()):
+        if key not in plan_of:
+            problems.append(f"{key} is pending ({plan}) but the kernel's LATER_ROUTES doesn't list it")
+        elif plan_of[key] != plan:
+            problems.append(f"{key} is pending ({plan}) but the kernel's LATER_ROUTES has it in {plan_of[key]}")
+    return problems
+
+
 def test_the_kernel_serves_every_route_the_api_calls():
     called, unreadable = api_routes()
     assert unreadable == []
@@ -189,6 +203,7 @@ def test_the_kernel_serves_every_route_the_api_calls():
             "GET /document_links/{token}"} <= called
     kernel = create_app(KernelSettings(database_url="postgresql+asyncpg://unused/unused"))
     assert seam_problems(called, served_routes(kernel), PENDING_KERNEL_ROUTES) == []
+    assert tag_problems(PENDING_KERNEL_ROUTES, LATER_ROUTES) == []
 
 
 def test_an_unlisted_route_the_kernel_doesnt_serve_fails_with_its_name():
@@ -306,3 +321,11 @@ def test_a_catch_all_serves_nothing_it_isnt():
     kernel.mount("/", inner)                                           # a mount ahead of a route takes its requests
     kernel.get("/demo_inbox")(lambda: [])
     assert served_routes(kernel) == set()
+
+
+def test_a_pending_route_tagged_with_another_plan_than_the_kernels_fails():
+    later = {"01b": {"GET /demo_inbox"}, "01c": {"POST /agents/demo"}}
+    assert tag_problems({"GET /demo_inbox": "01b", "POST /agents/demo": "01b"}, later) == [
+        "POST /agents/demo is pending (01b) but the kernel's LATER_ROUTES has it in 01c"]
+    assert tag_problems({"POST /handoffs/{id}/done": "01b"}, later) == [
+        "POST /handoffs/{id}/done is pending (01b) but the kernel's LATER_ROUTES doesn't list it"]
