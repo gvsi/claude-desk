@@ -17,7 +17,7 @@ import { HELD_PROSE, SCRIPT, matchRule, type RuleName } from '../mocks/script.ts
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../test/screen.ts';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -565,7 +565,9 @@ describe('public chat page', () => {
         await say(screen, text);
         await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
       }
-      expect(document.scrollingElement?.scrollTop, viewport).toBeGreaterThan(0);
+      // The conversation scrolled in its own region to get there; the page itself never scrolls.
+      expect(chatScroller().scrollTop, viewport).toBeGreaterThan(0);
+      expectNoWindowScroll();
 
       // Narrowing the window at the end (a phone turned, a window made smaller) rewraps the rows,
       // and the newest still ends above the composer, with nothing sent.
@@ -576,12 +578,13 @@ describe('public chat page', () => {
       }
 
       // A visitor reading back up stays where they are while the chat goes on...
-      window.scrollTo(0, 0);
+      const region = chatScroller();
+      region.scrollTo({ top: 0, behavior: 'instant' });
       await sleep(100);
       mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
       await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
       await sleep(100);
-      expect(document.scrollingElement?.scrollTop, viewport).toBe(0);
+      expect(region.scrollTop, viewport).toBe(0);
 
       // ...until they send: then the end of the conversation comes back into view.
       await say(screen, 'Can you call me back?');
@@ -592,37 +595,36 @@ describe('public chat page', () => {
   it('moving_back_up_holds_as_the_chat_goes_on', async () => {
     const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
     await ready(screen);
-    for (const text of ['How much is drain clearing?', 'Can someone come Tuesday afternoon?', 'Book the first one', 'Can I get 15% off if I pay cash?']) {
+    // The held request first, so its "Cancel this request" is far back up the conversation by the end.
+    for (const text of ['Can I get 15% off if I pay cash?', 'How much is drain clearing?', 'Can someone come Tuesday afternoon?', 'Book the first one']) {
       await say(screen, text);
       await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
     }
-    const ask = screen.getByRole('button', { name: 'Ask for Maria Rivera' }).element();
-    const askInView = () => {
-      const { top, bottom } = ask.getBoundingClientRect();
-      return top >= 0 && bottom <= innerHeight;
-    };
-    expect(askInView(), 'the chat has scrolled past "Ask for Maria Rivera"').toBe(false);
+    const region = chatScroller();
+    const cancel = screen.getByRole('button', { name: 'Cancel this request' }).element() as HTMLElement;
+    const cancelInView = () => shownIn(cancel, region);
+    expect(cancelInView(), 'the chat has scrolled past "Cancel this request"').toBe(false);
 
     // A visitor at the end moves back up with the keyboard, and Maria joins in that same moment:
-    // the page scrolls at once, but its scroll event comes only with the browser's next frame (here
-    // a whole frame away, from inside this one's callbacks), after the chat has already gone on.
-    // They stay where they moved to.
-    const atTheEnd = document.scrollingElement?.scrollTop ?? 0;
+    // the conversation scrolls at once, but its scroll event comes only with the browser's next
+    // frame (here a whole frame away, from inside this one's callbacks), after the chat has already
+    // gone on. They stay where they moved to.
+    const atTheEnd = region.scrollTop;
     let movedTo = atTheEnd;
     await new Promise<void>((resolve) => {
       requestAnimationFrame(() => {
-        ask.focus();
-        movedTo = document.scrollingElement?.scrollTop ?? 0;
+        cancel.focus();
+        movedTo = region.scrollTop;
         mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
         resolve();
       });
     });
-    expect(movedTo, 'focus moved the page up').toBeLessThan(atTheEnd);
+    expect(movedTo, 'focus moved the conversation up').toBeLessThan(atTheEnd);
     await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
     await sleep(100);
-    expect(document.activeElement).toBe(ask);
-    expect(document.scrollingElement?.scrollTop).toBe(movedTo);
-    expect(askInView(), '"Ask for Maria Rivera", where the visitor moved to, stays in view').toBe(true);
+    expect(document.activeElement).toBe(cancel);
+    expect(region.scrollTop).toBe(movedTo);
+    expect(cancelInView(), '"Cancel this request", where the visitor moved to, stays in view').toBe(true);
   });
 
   it('newest_row_follows_a_shorter_window', async () => {
@@ -633,16 +635,20 @@ describe('public chat page', () => {
       await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
     }
 
-    // The window gets shorter at the end of the chat (a panel docks, a browser bar opens): the
-    // page doesn't scroll and nothing around the conversation changes size, so the end slips under
-    // the composer with no scroll event and nothing for the page to see.
-    const atTheEnd = document.scrollingElement?.scrollTop ?? 0;
+    // The window gets shorter at the end of the chat (a panel docks, a browser bar opens, a phone's
+    // keyboard opens). The page is the window's height, so the conversation's region shrinks from
+    // the bottom, under the composer, with no scroll event: left as it was, the end would slip under
+    // the composer. The shell changing size is the page's cue, so the end comes back above the
+    // composer at once, with nothing sent or arriving, and the page itself still doesn't scroll.
+    const region = chatScroller();
+    const atTheEnd = region.scrollTop;
     await page.viewport(VIEWPORTS.desktop.width, 640);
-    await sleep(200);
-    expect(document.scrollingElement?.scrollTop, 'the page did not scroll').toBe(atTheEnd);
-    expect(endUnderTheComposer(screen), 'the end is under the composer').toBeGreaterThan(48);
+    expect(innerHeight).toBe(640);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    expect(region.scrollTop - atTheEnd, 'the conversation scrolled up by what the window lost').toBeGreaterThan(48);
+    expectNoWindowScroll();
 
-    // The visitor never moved, so the chat going on brings the end back above the composer.
+    // The visitor never moved, so the end stays above the composer as the chat goes on.
     mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
     await expect.element(screen.getByText('Maria Rivera joined the chat', { exact: true })).toBeInTheDocument();
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
@@ -692,21 +698,22 @@ describe('public chat page', () => {
     // The window narrows in one step at the end of the chat (a split view, a window snapped
     // narrower), and the visitor cancels their held request in that same moment, before the
     // browser tells the page the shell changed size. The rows rewrap taller: the browser's scroll
-    // anchoring moves the page down to keep the rows on screen where they were, and the end slips
-    // under the composer. The visitor never moved, so the end comes back above the composer and
-    // stays there as the chat goes on.
+    // anchoring moves the conversation down to keep the rows on screen where they were, and the
+    // end slips under the composer. The visitor never moved, so the end comes back above the
+    // composer and stays there as the chat goes on.
     const cancel = screen.getByRole('button', { name: 'Cancel this request' }).element() as HTMLButtonElement;
-    const atTheEnd = document.scrollingElement?.scrollTop ?? 0;
+    const region = chatScroller();
+    const atTheEnd = region.scrollTop;
     let anchoredTo = atTheEnd;
     const narrowed = () => {
-      anchoredTo = document.scrollingElement?.scrollTop ?? 0;
+      anchoredTo = region.scrollTop;
       cancel.click();
     };
     window.addEventListener('resize', narrowed, { once: true });
     onTestFinished(() => window.removeEventListener('resize', narrowed));
     await page.viewport(380, VIEWPORTS.desktop.height);
     await expect.element(screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
-    expect(anchoredTo, 'scroll anchoring moved the page down as the rows rewrapped').toBeGreaterThan(atTheEnd);
+    expect(anchoredTo, 'scroll anchoring moved the conversation down as the rows rewrapped').toBeGreaterThan(atTheEnd);
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
 
     mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Maria Rivera' });
@@ -1179,7 +1186,8 @@ describe('public chat page', () => {
 
 /**
  * The end of the conversation (its last row, receipt or notice) sits right above the composer that
- * stays at the bottom of the window: in view, and not hidden under it.
+ * stays at the bottom of the window: in view, and not hidden under it, nor above the top of the
+ * conversation's scroll region, under the chat's head.
  */
 function expectEndAboveTheComposer(screen: RenderResult): void {
   const { composer, conversation } = conversationAndComposer(screen);
@@ -1190,7 +1198,26 @@ function expectEndAboveTheComposer(screen: RenderResult): void {
   const rows = conversation.querySelectorAll('.cd-transcript-row');
   const last = rows[rows.length - 1]?.getBoundingClientRect();
   expect(last?.bottom ?? 0).toBeLessThanOrEqual(top);
-  expect(last?.bottom ?? 0).toBeGreaterThan(0);
+  expect(last?.bottom ?? 0).toBeGreaterThan(Math.max(0, chatScroller().getBoundingClientRect().top));
+}
+
+/**
+ * The element whose own scrolling moves the conversation: the shell's scroll region, between the
+ * chat's head and the composer. Never the page, which doesn't scroll.
+ */
+function chatScroller(): HTMLElement {
+  for (let node = document.querySelector('[role="log"]')?.parentElement; node && node !== document.body; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if (overflowY === 'auto' || overflowY === 'scroll') return node;
+  }
+  throw new Error('the conversation has no scroll region of its own');
+}
+
+/** Whether `el` is wholly in the part of `region` on screen. */
+function shownIn(el: Element, region: Element): boolean {
+  const box = el.getBoundingClientRect();
+  const shown = region.getBoundingClientRect();
+  return box.top >= shown.top && box.bottom <= shown.bottom;
 }
 
 /** How far the end of the conversation reaches under the top of the composer area, in pixels. */
