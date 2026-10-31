@@ -525,6 +525,33 @@ async def test_unread_results_are_the_last_responses_until_claude_reads_them(api
     assert await unread_results(api_conn, ids.session_id) is None
 
 
+async def test_a_carried_result_stays_in_each_summary_until_claude_answers(api_conn, ids):
+    """Two fresh contexts in a row before Claude answers: each summary carries the result it hadn't read, since a
+    context with no answer yet still has its predecessor's results unread. Claude's answer, in any context, reads
+    them."""
+    await start_fresh_context(api_conn, ids, TOOLS, system=SYSTEM)
+    await append_message(api_conn, ids, "visitor_text", text="Book me in.")
+    await prepare_model_input(api_conn, ids.session_id)
+    assistant_n = await append_assistant(api_conn, ids, [tool_use("toolu_book", "native__book", slot_id="s-1")],
+                                         generation=0)
+    booked = {"outcome": "done", "decision_id": "d-1", "result": {}, "fact_ids": []}
+    await append_tool_results(api_conn, ids, assistant_n, [tool_result("toolu_book", booked)])
+    line = "result of native__book: " + json.dumps(booked)
+
+    summaries = []
+    for _ in range(2):                                   # two boundaries, and no answer between them
+        await start_fresh_context(api_conn, ids, TOOLS, system=SYSTEM)
+        summaries.append((await prepare_model_input(api_conn, ids.session_id)).messages[0]["content"][0]["text"])
+    assert all(line in summary for summary in summaries), summaries
+    assert (await unread_results(api_conn, ids.session_id)).results == [("native__book", tool_result("toolu_book",
+                                                                                                      booked))]
+
+    await append_assistant(api_conn, ids, [{"type": "text", "text": "You're booked."}], generation=0)
+    assert await unread_results(api_conn, ids.session_id) is None
+    await start_fresh_context(api_conn, ids, TOOLS, system=SYSTEM)
+    assert line not in (await prepare_model_input(api_conn, ids.session_id)).messages[0]["content"][0]["text"]
+
+
 async def test_a_carried_result_is_one_escaped_line_of_the_summary(api_conn, ids):
     """A tool result is untrusted text (a website, a document): carried into a fresh context's summary, it is one
     line, escaped like any wrapped text, so it can't close the summary or open a line of its own."""

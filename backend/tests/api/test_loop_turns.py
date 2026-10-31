@@ -790,6 +790,24 @@ async def test_a_context_opened_before_prompts_were_frozen_starts_a_fresh_one(ap
     assert await frozen_systems(api_conn, caller.session_id) == [(0, None), (1, conversation_system(RIVERA))]
 
 
+async def test_two_prompt_changes_before_claude_answers_keep_the_unread_result(api_conn, caller, monkeypatch):
+    """Claude found open times beside a reply, then two deploys changed the prompt before it answered again (the
+    model was unavailable in between): each fresh context's summary carries the result it hadn't read."""
+    await said(api_conn, caller, "When can someone come?")
+    model = ScriptedModel([response(thinking(), tool_use("native__find_slots", {"days": 3}, id="toolu_slots"),
+                                    reply("Let me look.", id="toolu_say"))])
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    summaries = []
+    for rule, model in (("one", ScriptedModel([unavailable()])), ("two", ScriptedModel([response(reply("Yes."))]))):
+        monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + f"\n- Rule {rule}.")
+        await said(api_conn, caller, "Still there?")
+        await run_turn(api_conn, caller, model)
+        summaries.append(model.requests[0].messages[0]["content"][0]["text"])
+    assert all("result of native__find_slots: " in summary for summary in summaries), summaries
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1, 2]
+
+
 def sent(server: FakeMessagesApi) -> list[dict]:
     """The bodies the fake Messages API was sent."""
     return [json.loads(request.content) for request in server.requests]

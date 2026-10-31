@@ -120,8 +120,8 @@ class OpenToolUse:
 
 @dataclass(frozen=True)
 class UnreadResults:
-    """The results row answering the current model context's last assistant row, which Claude hasn't read (no
-    assistant row follows it): its `n`, each call's result but `send_reply`'s (whose replies the transcript keeps) as
+    """The results row answering Claude's last response, which Claude hasn't read (no assistant row follows it, in
+    any context): its `n`, each call's result but `send_reply`'s (whose replies the transcript keeps) as
     (tool name, `tool_result` block) in block order, and whether a `send_reply` call of that response put a reply on
     screen."""
 
@@ -443,15 +443,13 @@ async def unanswered_tool_use(conn: AsyncConnection, session_id: str) -> OpenToo
 
 
 async def unread_results(conn: AsyncConnection, session_id: str) -> UnreadResults | None:
-    """The results Claude hasn't read yet in the current model context (`UnreadResults`); None when its last assistant
-    row has no results row yet, or a later assistant row read them, or the context has no assistant row."""
-    current = await _current_context(conn, session_id)
-    if current is None:
-        return None
+    """The results Claude hasn't read yet (`UnreadResults`), read across the session's contexts (`model_seq` runs
+    through them all): the results row answering Claude's last response, in whatever context it was written, so a
+    fresh context with no answer yet still has its predecessor's results unread. None when the last response has no
+    results row yet, or there is no response."""
     last = (await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.model_content).where(
-        MESSAGES.c.session_id == session_id, MESSAGES.c.model_context == current,
-        MESSAGES.c.kind.in_(("model_assistant", "model_tool_results"))).order_by(MESSAGES.c.model_seq.desc())
-        .limit(2))).all()
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind.in_(("model_assistant", "model_tool_results")))
+        .order_by(MESSAGES.c.model_seq.desc()).limit(2))).all()
     if [row.kind for row in last] != ["model_tool_results", "model_assistant"]:
         return None
     results, assistant = last
