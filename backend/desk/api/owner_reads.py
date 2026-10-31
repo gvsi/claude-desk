@@ -79,7 +79,6 @@ REPLY_WHY = {
     "canary": "it quoted a private document",
     "unsupported_language": "it wasn't in English or Spanish",
     "check_unavailable": "the checkpoint wasn't available",
-    # Proposed wording awaiting the owner's sign-off.
     "uncertain_language": "it didn't read clearly as English or Spanish",
 }
 

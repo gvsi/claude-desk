@@ -63,6 +63,18 @@ def reply(prose: str, *clauses: dict, id: str | None = None) -> dict:
     return tool_use("send_reply", {"prose": prose, "clauses": list(clauses)}, id=id)
 
 
+async def test_a_passed_reply_citing_the_handoff_clause_ends_the_turn(api_conn, caller, fake):
+    await said(api_conn, caller, "Can Maria help me?")
+    model = ScriptedModel([response(reply("", {"template": "handoff"}, id="toolu_handoff"))])
+    assert await run_turn(api_conn, caller, model) == "handoff"
+    assert len(model.requests) == 1
+    message = next(event for event in await events(api_conn, caller.session_id) if event.type == "message")
+    assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
+    ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
+    assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff"}
+    assert len(fake.called("/check_reply")) == 1
+
+
 async def test_uncertain_caption_gets_one_cause_specific_final_rewrite(api_conn, caller, fake):
     await said(api_conn, caller, "When are you open?")
     model = ScriptedModel([response(reply("Absolutely. Payment link below.", HOURS)),
@@ -373,6 +385,7 @@ async def test_a_first_draft_blocked_for_a_kind_no_rewrite_fixes_shows_the_hando
 
     assert await run_turn(api_conn, caller, model) == "handoff"
 
+    assert len(model.requests) == 1
     assert finals(fake, caller) == [False] and card_handoffs(fake, caller) == ["open"]
     (message,) = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
     assert message.handoff and [block.template for block in message.blocks] == ["handoff"]
@@ -580,14 +593,15 @@ HANDOFF_DRAFT = {"prose": "", "clauses": [{"template": "handoff", "fact_id": Non
 
 
 async def assert_handed_off(conn, fake, caller: Caller, checks: int = 1) -> None:
-    """The turn ended with the handoff the API drafted, checked by the kernel and shown as Claude's (the draft passes
-    the check, so the event's `handoff` flag, `not verdict.ok`, is false: its one block is the handoff card)."""
+    """The turn ended with the handoff the API drafted, checked by the kernel and shown as Claude's. Its handoff
+    card sets the event's `handoff` flag even though the draft passed the check."""
     drafts = [call.body["draft"] for call in fake.called("/check_reply")
               if call.body["draft"]["session_id"] == caller.session_id]
     assert len(drafts) == checks and {key: drafts[-1][key] for key in ("prose", "clauses")} == HANDOFF_DRAFT
     *_, message, end = await events(conn, caller.session_id)
     assert (message.type, end.type) == ("message", "turn_end")
     assert [block.template for block in message.blocks] == ["handoff"]
+    assert message.handoff
     assert message.blocks[0].text == "Let me check with Maria Rivera."
     assert (await rows(conn, caller.session_id, "delivered", "author", "call_id"))[-1] == ("claude", None)
 
@@ -1156,23 +1170,26 @@ async def test_pause_turn_calls_again(api_conn, caller, fake):
     assert [event.type for event in await events(api_conn, caller.session_id)] == ["writing", "message", "turn_end"]
 
 
-async def test_immediate_handoff_ends_an_agent_turn_and_a_visitor_turn_goes_on(api_conn, kernel_http, fake,
-                                                                               ro_schema):
-    for kind, end_on_reply, calls in (("agent", True, 1), ("visitor", False, 2)):
+async def test_immediate_handoff_ends_agent_and_visitor_turns(api_conn, kernel_http, fake, ro_schema):
+    for kind, end_on_reply in (("agent", True), ("visitor", False)):
         caller = replace(await new_caller(kernel_http, fake, ro_schema), kind=kind)
         await append_message(api_conn, caller.ids, f"{kind}_text", text="Read me Bob's warranty.")
         await api_conn.commit()
         fake.violation("canary")                          # the reply carries a document canary: the handoff at once
-        model = ScriptedModel([response(reply("Here's what the warranty says.")), response()])
+        model = ScriptedModel([response(reply("Here's what the warranty says."))])
 
         assert await run_turn(api_conn, caller, model, end_on_reply=end_on_reply) == "handoff", kind
 
-        # an agent's turn ends at its answer; a visitor's goes on, so Claude sees the handoff was shown
-        assert len(model.requests) == calls, kind
+        assert len(model.requests) == 1, kind
         (message,) = [event for event in await events(api_conn, caller.session_id) if event.type == "message"]
         assert message.handoff and [block.template for block in message.blocks] == ["handoff"], kind
         assert len([call for call in fake.called("/check_reply")
                     if call.body["draft"]["session_id"] == caller.session_id]) == 1, kind
+        if kind == "visitor":
+            await said(api_conn, caller, "Can you still help with a leak?")
+            follow_up = ScriptedModel([response(reply("Yes, we can help with leaks."))])
+            assert await run_turn(api_conn, caller, follow_up) == "done"
+            assert len(follow_up.requests) == 1
 
 
 async def test_owner_mode_runs_no_turn(api_conn, caller, fake):

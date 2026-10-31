@@ -599,14 +599,14 @@ def _feedback(verdict: ReplyVerdict, clauses: list[Clause]) -> list[dict]:
         if rule_id in CLAUSE_RULE_IDS:
             matches = [(index, clause) for index, clause in enumerate(clauses)
                        if clause.template == violation.span and (
-                           clause.fact_id in violation.fact_ids if violation.fact_ids else clause.fact_id is None)]
-            if matches:
-                _, clause = matches[0]
-                item.update(template=clause.template)
+                           not violation.fact_ids or clause.fact_id in violation.fact_ids)]
+            # Empty metadata can also mean the kernel couldn't store the cited ID (for example, a NUL).
+            # Don't infer an omitted ID from it, or forward an ID the kernel couldn't name.
+            if len(matches) == 1 and (violation.fact_ids or matches[0][1].fact_id is None):
+                index, clause = matches[0]
+                item.update(clause_index=index, template=clause.template)
                 if clause.fact_id is not None:
                     item["fact_id"] = clause.fact_id
-                if len(matches) == 1:
-                    item["clause_index"] = matches[0][0]
         feedback.append(item)
     return feedback
 
@@ -637,6 +637,8 @@ async def _show(conn: AsyncConnection, caller: Caller, verdict: ReplyVerdict, ca
     if seq is None:
         return ToolOutcome(dict(NOT_RUN), True, fenced=True, **timing)
     result = dict(DELIVERED_HANDOFF) if reply.handoff else {"outcome": "delivered", "message_id": verdict.message_id}
+    if not verdict.ok and not reply.handoff:
+        result["prose_shown"] = False
     return ToolOutcome(result, reply.handoff, delivered="handoff" if reply.handoff else "reply",
                        message_id=verdict.message_id, **timing)
 
@@ -656,7 +658,7 @@ async def hand_off(conn: AsyncConnection, caller: Caller, generation: int, *,
 
 async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, tool_input: Any, attempt: int, *,
                      call_left: bool = True, call_id: str | None = None) -> ToolOutcome:
-    """Claude's reply: checked by the kernel, then shown through `deliver()` only as the kernel passed it.
+    """Claude's reply: checked by the kernel, then shown through `deliver()` as the kernel's verdict permits.
 
     Claude may rewrite only attempt 1, and only while the turn has a model call left (`call_left`); that check alone
     is sent with `final` false, every other one final, for every kind of session. A non-final reply blocked with
@@ -664,11 +666,13 @@ async def send_reply(conn: AsyncConnection, caller: Caller, generation: int, too
     `REWRITE_INSTRUCTION`. Any other block, an immediate-handoff kind (`canary`, `unsupported_language`,
     `session_paused`, `check_unavailable`) or a final check's, shows the verdict's blocks with no further kernel
     call: checked cards alone when they survive, otherwise the handoff the kernel opened for the owner.
+    Any shown handoff clause ends the turn as `delivered_handoff`, even when the draft passed. A failed check
+    that keeps only cards answers `delivered` with `prose_shown` false, so Claude knows its prose wasn't shown.
     Input that doesn't fit the tool never reaches the kernel:
     Claude gets one rewrite while it can, then the handoff. `call_id` is the `send_reply` call's `tool_use` ID;
     without one (Claude's plain text) the reply is the API's.
 
-    A draft the check stopped is kept for the owner (module docstring): committed with the handoff shown in its place,
+    A draft the check stopped is kept for the owner (module docstring): committed with the checked cards or handoff shown,
     or, on a block Claude may rewrite, carried on the outcome (`kept`) for the caller to keep with the call's result.
     Nothing is left open on `conn` either way, so no lock of the session outlives the call."""
     if attempt not in (1, 2):

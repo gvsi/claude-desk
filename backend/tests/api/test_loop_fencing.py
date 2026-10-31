@@ -988,11 +988,9 @@ async def test_recovered_replies_answer_from_what_was_delivered(api_conn, engine
     *_, (results,) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
     (message_id,) = [ref for ref, call in await rows(api_conn, caller.session_id, "delivered", "ref_id", "call_id")
                      if call == "toolu_shown"]
-    (fallback_id,) = [ref for ref, call in await rows(api_conn, caller.session_id, "delivered", "ref_id", "call_id")
-                      if call == "toolu_bad"]
     assert [(result["tool_use_id"], json.loads(result["content"]), result["is_error"]) for result in results] == [
         ("toolu_shown", {"outcome": "delivered", "message_id": message_id}, False),
-        ("toolu_bad", {"outcome": "delivered", "message_id": fallback_id}, False),
+        ("toolu_bad", {"outcome": "delivered_handoff"}, True),
         ("toolu_lost", {"outcome": "not_run"}, True)]
 
     # a reply that never showed leaves the visitor unanswered: Claude is asked again, and reads why

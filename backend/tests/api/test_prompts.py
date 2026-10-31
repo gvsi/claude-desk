@@ -178,6 +178,12 @@ def test_reply_correction_uses_fixed_codes_and_the_same_plain_text_instruction()
     assert REPLY_DIAGNOSTICS["language_uncertain"].startswith("Write at least one full sentence")
 
 
+def test_reply_prompt_explains_when_only_cards_were_shown():
+    text = conversation_system(RIVERA)[0]["text"]
+    assert ('If send_reply answers "delivered" with prose_shown false, only the cards were shown; '
+            "don't refer to that prose later.") in text
+
+
 PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_system", "SEND_REPLY_TOOL",
                 "REPLY_DIAGNOSTICS", "REPLY_RULE_IDS", "INVALID_REPLY_DIAGNOSTIC", "INVALID_REPLY_SHAPES",
                 "REPLY_EXAMPLES",

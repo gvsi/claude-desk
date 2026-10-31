@@ -135,7 +135,8 @@ charge_confirmed (a charge fact), callback_confirmed (a handoff fact). verify_pr
 {reply_examples}
 - If send_reply answers "blocked", your draft was not shown. Submit one corrected reply using its fixed diagnostic \
 codes and instruction. Keep useful current, readable cards, correct the flagged prose or clause, and do not repeat \
-a business action to repair its presentation. If it answers "delivered_handoff", the handoff was shown and the turn is done.
+a business action to repair its presentation. If it answers "delivered_handoff", the handoff was shown and the turn is done. \
+If send_reply answers "delivered" with prose_shown false, only the cards were shown; don't refer to that prose later.
 
 Acting for the business
 - Use the tools to quote, find open times, book, take details, arrange a callback and send documents. Every call \

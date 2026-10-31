@@ -80,6 +80,32 @@ async def delivered(conn: AsyncConnection, session_id: str) -> list[list[str | N
 
 
 @pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("source", ["api_fallback", "model_clause"])
+async def test_a_passing_handoff_clause_is_delivered_as_a_handoff(kernel, ro_read, conn, source):
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    if source == "api_fallback":
+        outcome = await tools.hand_off(conn, caller, 0)
+    else:
+        outcome = await tools.send_reply(conn, caller, 0, {"prose": "", "clauses": [{"template": "handoff"}]},
+                                         1, call_id="toolu_handoff")
+    assert outcome.result == {"outcome": "delivered_handoff"}
+    assert outcome.delivered == "handoff" and outcome.is_error
+    assert await delivered(conn, session_id) == [["handoff"]]
+    (payload,) = (await conn.execute(text(
+        "SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"), {"s": session_id})).one()
+    assert payload["handoff"]
+    entries = (await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])).entries
+    assert [entry.event.summary["ok"] for entry in entries
+            if entry.event.kind == "reply" and entry.event.session_id == session_id] == [True]
+    assert [(kind, status) for _, kind, status in session_handoffs(ro_read, ro_schema, copy, session_id)] == [
+        ("card", "open")]
+    assert await handed_to_you(http, copy) == 1
+
+
+@pytest.mark.kernel_plan("01b")
 async def test_a_rewritten_first_draft_opens_no_handoff_through_the_api(kernel, ro_read, conn):
     """A blocked first draft the API will rewrite is sent with `final` false: it shows nothing, and the kernel records
     it as not final and opens no handoff and no alert. The clean rewrite, sent as final, is what the visitor sees,
@@ -149,9 +175,11 @@ async def test_payment_caption_rewrites_through_the_api_and_keeps_final_cards(ke
     corrected = await tools.send_reply(conn, caller, 0, {**draft, "prose": "Here is the link to pay."}, 2,
                                        call_id="toolu_corrected")
     assert corrected.result["outcome"] == "delivered" and corrected.delivered == "reply"
+    assert "prose_shown" not in corrected.result
     assert [check["final"] for check in caller.kernel.checks] == [False, True]
     final = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_kept")
     assert final.result["outcome"] == "delivered" and final.delivered == "reply" and not final.is_error
+    assert final.result["prose_shown"] is False
     assert await delivered(conn, session_id) == [[None, "payment_link"], ["payment_link"]]
     assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
     stored = await conn.execute(text("SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"

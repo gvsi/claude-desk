@@ -521,9 +521,9 @@ class _Turn:
         await conn.commit()
         if stop is not None:
             return stop
-        if shown and (self.delivered == "reply" or self.end_on_reply):
+        if shown:
             return self._ended()
-        return None                                        # Claude reads its results (or the handoff) and goes on
+        return None                                        # Claude reads its results and goes on
 
     async def _route(self, block: dict) -> ToolOutcome:
         """One call, decided and run on a pooled connection of its own, so its status shows as soon as it is known.

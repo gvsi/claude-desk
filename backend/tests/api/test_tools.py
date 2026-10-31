@@ -43,6 +43,17 @@ from tests.kernel_contract.fake_kernel import fake_kernel_app, route_keys
 EVENT = TypeAdapter(SseEvent)
 
 
+@pytest.mark.parametrize("missing_fact_clause", [True, False])
+def test_feedback_omits_clause_references_when_fact_metadata_is_empty(missing_fact_clause):
+    from types import SimpleNamespace
+
+    clauses = [Clause(template="quote", fact_id="bad\u0000id"), *([Clause(template="quote")] if missing_fact_clause else [])]
+    verdict = SimpleNamespace(violations=[
+        Violation(kind="unknown_fact", rule_id="no_such_fact", span="quote", fact_ids=[]) for _ in clauses])
+    assert tools._feedback(verdict, clauses) == [
+        {"kind": "unknown_fact", "rule_id": "no_such_fact"} for _ in clauses]
+
+
 def test_feedback_never_echoes_checker_payloads_or_untrusted_validation_keys():
     from types import SimpleNamespace
 
@@ -55,8 +66,7 @@ def test_feedback_never_echoes_checker_payloads_or_untrusted_validation_keys():
     feedback = tools._feedback(verdict, clauses)
     assert secret not in json.dumps(feedback)
     assert feedback[0] == {"kind": "soft_promise", "rule_id": "other"}
-    assert feedback[1] == {"kind": "unknown_fact", "rule_id": "template_mismatch", "template": "quote",
-                           "fact_id": "quote:known"}
+    assert feedback[1] == {"kind": "unknown_fact", "rule_id": "template_mismatch"}
     assert "clause_index" not in feedback[1]
     invalid = tools._draft({"prose": "Hello", "clauses": [{"template": "quote", "fact_id": 9}]})
     assert invalid == [{"kind": "invalid_input", "rule_id": "other", "field": "clauses.0.fact_id",
@@ -598,7 +608,8 @@ async def test_final_prose_failure_delivers_checked_cards_without_handoff(api_co
     assert first.result["violations"][0] == {"kind": "number_in_prose", "rule_id": "digit"}
     assert [e for e in await events(api_conn, caller.session_id) if e.type == "message"] == []
     second = await send_reply(api_conn, caller, 0, draft, 2, call_id="toolu_final")
-    assert second.result["outcome"] == "delivered" and second.delivered == "reply" and not second.is_error
+    assert second.result == {"outcome": "delivered", "message_id": second.message_id, "prose_shown": False}
+    assert second.delivered == "reply" and not second.is_error
     message = (await events(api_conn, caller.session_id))[-1]
     assert not message.handoff and [b.template for b in message.blocks] == ["quote"]
     assert len(await stopped_drafts(api_conn, caller.session_id)) == 1
@@ -732,7 +743,7 @@ async def test_reply_rejects_owner_said_and_bad_input(api_conn, caller, fake):
     # wrong twice: the handoff, checked as the API's own draft and recorded as what the call put on screen
     twice = await send_reply(api_conn, caller, 0, cases[0][0], 2, call_id="toolu_bad")
     assert (twice.result, twice.is_error, twice.delivered) == (
-        {"outcome": "delivered", "message_id": twice.message_id}, False, "reply")
+        {"outcome": "delivered_handoff"}, True, "handoff")
     assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
                                    "clauses": [{"template": "handoff", "fact_id": None}]}]
     (message,) = await events(api_conn, caller.session_id)
@@ -746,7 +757,7 @@ async def test_bad_input_on_the_turns_last_call_hands_off_at_once(api_conn, call
     bad = {"prose": "Maria says yes.", "clauses": [{"template": "owner_said", "fact_id": "owner:S-1"}]}
     outcome = await send_reply(api_conn, caller, 0, bad, 1, call_left=False, call_id="toolu_bad")
     assert (outcome.result, outcome.is_error, outcome.delivered) == (
-        {"outcome": "delivered", "message_id": outcome.message_id}, False, "reply")
+        {"outcome": "delivered_handoff"}, True, "handoff")
     assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
                                    "clauses": [{"template": "handoff", "fact_id": None}]}]
     assert [call.body.get("final", True) for call in fake.called("/check_reply")] == [True]

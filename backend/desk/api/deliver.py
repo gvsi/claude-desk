@@ -3,8 +3,8 @@
 A visitor sees a reply only after the kernel checked it, and a status only as the kernel signed it. Both
 reach the session as one of the four signed events, which only this module builds:
 
-- `Reply(verdict, author, via, call_id)`: a `ReplyVerdict` becomes `EvMessage` (`handoff` when the check
-  failed and shows a handoff clause) and a `delivered` row carrying the event's `seq`
+- `Reply(verdict, author, via, call_id)`: a `ReplyVerdict` becomes `EvMessage` (`handoff` when its shown
+  blocks include the handoff clause) and a `delivered` row carrying the event's `seq`
   and, for Claude's `send_reply`, the call's ID. A verdict checked at a generation the session has since
   left (a take-over, a hand-back) is dropped: nothing is shown and None is returned. `via` says who
   produced it and fixes the author: `model` (Claude's `send_reply`) and `api` (a handoff the loop asked for, or a
@@ -61,8 +61,8 @@ class Reply:
 
     @property
     def handoff(self) -> bool:
-        """The flag stored on the delivered event; a passed draft citing the clause is still a reply."""
-        return not self.verdict.ok and any(block.template == "handoff" for block in self.verdict.blocks)
+        """The flag stored on the delivered event: its shown blocks include the handoff clause."""
+        return any(block.template == "handoff" for block in self.verdict.blocks)
 
     def __post_init__(self) -> None:
         if self.via not in AUTHOR_BY_VIA or AUTHOR_BY_VIA[self.via] != self.author:
