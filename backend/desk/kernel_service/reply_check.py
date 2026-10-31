@@ -106,6 +106,7 @@ VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
 PUBLIC_POLICY_MAX_COUNT = 40
 PUBLIC_POLICY_MAX_CHARS = 8_000
+FREE_WORDS = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
 KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed", "link_cancelled"})   # only the kernel issues these
 NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one number: "1.234,56", "10:30"
 NO_CANARIES = labels.NO_CANARIES
@@ -465,7 +466,13 @@ def _prose_hits(text: str, canaries: Mapping[str, str] = NO_CANARIES, names: Ite
     return sorted(hits, key=lambda hit: (hit[0], hit[2]))
 
 
-def scan_public_text(text: str) -> list[str]:
+def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words: frozenset[str]) -> bool:
+    """Only a whole promise match equal to an explicitly allowed folded word may pass."""
+    return (rule.startswith("lex.") and rule.endswith(".promise")
+            and _fold(text[start:end])[0].casefold() in allow_words)
+
+
+def scan_public_text(text: str, allow_words: frozenset[str] = frozenset()) -> list[str]:
     """Rule IDs for public text: the prose scan with no canaries, names or booking card.
 
     Both lexicons run, whatever the text's language. Positive evidence of another language
@@ -474,26 +481,31 @@ def scan_public_text(text: str) -> list[str]:
     policy cards render the original text, whereas the prose scan reads normalized text.
     Pure: no reads or writes, and no matched text returned to callers that record a refusal.
     """
-    rules = {violation.rule_id for violation in scan_prose(text)}
-    if lang.positive_other_language(shown(text)):
+    normalized = shown(text)
+    rules = {rule for start, end, rule, _ in _prose_hits(normalized)
+             if not _allowed_public_hit(normalized, start, end, rule, allow_words)}
+    if lang.positive_other_language(normalized):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
     return sorted(rules)
 
 
-def scan_public_policies(values: Mapping[str, str]) -> dict[str, list[str]]:
+def scan_public_policies(values: Mapping[str, str],
+                         allow_words: Mapping[str, frozenset[str]] = {}) -> dict[str, list[str]]:
     """Scan policies individually and as adjacent paragraphs/cards, separated by a newline.
 
     Keys sort like their `charter:<key>` fact IDs on the public page (C collation). Offsets
     refer to normalized pieces, so Unicode expansion cannot shift a hit onto another key.
     Keep full match ranges for attribution, even when a violation's display span is truncated.
-    Only contributing keys and rule IDs leave the scan.
+    Only contributing keys and rule IDs leave the scan. Allowed words apply to one key only;
+    matches or their required right context crossing a key boundary remain refused.
     """
-    return _scan_public_parts(sorted(values.items()))
+    return _scan_public_parts(sorted(values.items()), allow_words)
 
 
-def _scan_public_parts(values: Sequence[tuple[str | None, str]]) -> dict[str, list[str]]:
+def _scan_public_parts(values: Sequence[tuple[str | None, str]],
+                       allow_words: Mapping[str, frozenset[str]] = {}) -> dict[str, list[str]]:
     """The public-text rules in the supplied rendering order, attributed to policy IDs.
 
     A None key is reply prose: it supplies context, but its own refusals stay with the
@@ -502,7 +514,7 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]]) -> dict[str, li
     fields: dict[str, set[str]] = {}
     for key, value in values:
         if key is not None:
-            fields.setdefault(key, set()).update(scan_public_text(value))
+            fields.setdefault(key, set()).update(scan_public_text(value, allow_words.get(key, frozenset())))
     ranges: list[tuple[str | None, int, int]] = []
     pieces: list[str] = []
     offset = 0
@@ -521,6 +533,7 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]]) -> dict[str, li
     boundaries = [high for _, _, high in ranges]
     starts = [low for _, low, _ in ranges]
     for start, end, rule, _ in hits:
+        match_end = end
         # Ordinary matches already carry their full range from the single combined scan.
         # Only a positive lookahead may depend on text beyond that range ("libres" /
         # "para todos"). Find its shortest preserving right context at a card boundary.
@@ -529,7 +542,12 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]]) -> dict[str, li
                 if any(match.holds_at(boundary) for match in right_context[start, end, rule]):
                     end = boundary
                     break
-        for key, low, high in ranges[bisect_right(boundaries, start):bisect_left(starts, end)]:
+        contributors = ranges[bisect_right(boundaries, start):bisect_left(starts, end)]
+        if any(key is not None and low <= start and end <= high
+               and _allowed_public_hit(combined, start, match_end, rule, allow_words.get(key, frozenset()))
+               for key, low, high in contributors):
+            continue
+        for key, low, high in contributors:
             if key is not None and low < high:
                 fields[key].add(rule)
     return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}

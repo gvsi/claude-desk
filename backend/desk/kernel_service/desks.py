@@ -427,7 +427,8 @@ def policy_values(charter: Sequence[Claim]) -> dict[str, str]:
 
 
 async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str, str],
-                                desk_id: str | None = None) -> None:
+                                desk_id: str | None = None, *,
+                                allow_words: Mapping[str, frozenset[str]] = {}) -> None:
     """Refuse public prose the reply check would reject, before writing any of it.
 
     Detail and the post-rollback ledger entry name only refused keys and sorted rule IDs.
@@ -441,7 +442,7 @@ async def refuse_public_promises(ctx: KernelCtx, part: str, values: Mapping[str,
         limit = "policy_text_limit"
     if limit is not None:
         raise KernelFailure(422, "invalid", limit, detail={"charter": [limit]})
-    fields = reply_check.scan_public_policies(values)
+    fields = reply_check.scan_public_policies(values, allow_words=allow_words)
     if not fields:
         return
     desk_ids = [desk_id] if desk_id is not None else list(await ctx.db.scalars(ctx.repo.scoped(

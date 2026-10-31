@@ -7,18 +7,34 @@ from sqlalchemy import select
 
 from desk.contracts import Claim
 from desk.db.models import Fact as FactRow
-from desk.kernel_service import labels, reply_check
+from desk.kernel_service import desks, labels, reply_check
+from desk.kernel_service.repo import KernelFailure
 from desk.kernel_service.seed import rivera_seed
 
 from .helpers import kernel_ctx
 from .test_adapters import rivera
 from .test_desk_writes import desks_of, entries_of, facts_of, new_desk, post_desk, put_part
 from .test_decide import open_visitor
-from .test_reply_check import (assert_handed_off, checked, clause, own_quote, public_key, reply_entries,
-                               verify_verdict)
+from .test_reply_check import (PUBLIC_ALLOW_WORD_CASES, assert_handed_off, checked, clause, own_quote,
+                               public_key, reply_entries, verify_verdict)
 
 
 POLICY_KEYS = ("about", "service_area", "pricing", "intake", "after_hours", "urgent", "how_we_help", "custom")
+
+
+@pytest.mark.parametrize(("values", "fields"), PUBLIC_ALLOW_WORD_CASES)
+async def test_public_promise_refusal_passes_per_key_allow_words(app, client, values, fields):
+    copy = await rivera(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        if fields:
+            with pytest.raises(KernelFailure) as failure:
+                await desks.refuse_public_promises(ctx, "business_tools", values, copy.desk_id,
+                                                    allow_words={"a:title": reply_check.FREE_WORDS})
+            assert (failure.value.status, failure.value.code, failure.value.detail) == (422, "invalid", fields)
+        else:
+            await desks.refuse_public_promises(ctx, "business_tools", values, copy.desk_id,
+                                               allow_words={"a:title": reply_check.FREE_WORDS})
 
 
 @pytest.mark.parametrize("parts", [

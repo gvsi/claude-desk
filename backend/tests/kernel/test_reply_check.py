@@ -1825,6 +1825,39 @@ def test_public_policy_language_checks_the_combined_rendering():
     assert reply_check.scan_public_policies(parts) == {key: ["language"] for key in parts}
 
 
+PUBLIC_ALLOW_WORD_CASES = [
+    ({"a:title": "Book a free intro consult"}, {}),
+    ({"a:title": "Book a $0 intro consult"}, {"a:title": ["currency", "digit"]}),
+    ({"a:title": "Free consult, 50% off"}, {"a:title": ["digit", "percent_sign"]}),
+    ({"b:type": "free"}, {"b:type": ["lex.en.promise"]}),
+    ({"a:title": "Free", "b:type": "to all new clients"},
+     {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
+    ({"a:title": "Intro consult no", "b:type": "charge"},
+     {"a:title": ["lex.en.promise"], "b:type": ["lex.en.promise"]}),
+    ({"a:title": "discount"}, {"a:title": ["lex.en.promise"]}),
+    ({"a:title": "frее"}, {"a:title": ["language", "mixed_script"]}),
+    ({"a:title": "free dollars"}, {"a:title": ["lex.en.money"]}),
+    ({"a:title": "free Monday"}, {"a:title": ["lex.en.date"]}),
+    ({"a:title": "free guarantee"}, {"a:title": ["lex.en.promise"]}),
+]
+
+
+@pytest.mark.parametrize(("values", "fields"), PUBLIC_ALLOW_WORD_CASES)
+def test_public_policy_allow_words_are_scoped_to_a_whole_hit_in_one_key(values, fields):
+    allowed = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
+    assert reply_check.scan_public_policies(values, allow_words={"a:title": allowed}) == fields
+    if len(values) == 1 and "a:title" in values:
+        assert reply_check.scan_public_text(values["a:title"], allow_words=allowed) == fields.get("a:title", [])
+
+
+@pytest.mark.parametrize("word", ["free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas",
+                                  "FREE", "frée", "GRÁTUITA", "Ｆｒｅｅ"])
+def test_public_text_allows_only_explicit_owner_words_with_reply_folding(word):
+    assert reply_check.FREE_WORDS == frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
+    assert reply_check.scan_public_text(word, allow_words=reply_check.FREE_WORDS) == []
+    assert reply_check.scan_public_text(word)  # default callers remain strict
+
+
 
 @pytest.mark.parametrize("phrase", ["We offer free consultations. ", "You are free to all clients. "])
 def test_public_policy_maximum_size_scan_stays_below_one_second(monkeypatch, phrase):
