@@ -46,6 +46,7 @@ If a task seems to require breaking one of these, stop and raise it with the pro
   - Every implementer runs on GPT-6.1 Sol at high reasoning (owner, 2026-10-31): `codex exec -C <worktree> -s danger-full-access -c model=gpt-6.1-sol -c model_reasoning_effort=high "<prompt>" < /dev/null`.
   - Planning stays on Opus 5.5. Reviews use the Sol seat alone. The Opus seat joins only for a critical or very complex PR: the kernel/API trust boundary, money, verification, approvals, the ledger, the reply check, the evals gate's scoring, or a change the Sol seat flags as hard to judge.
   - Easy or low-risk tasks use Sol at high for planning too.
+  - Every Sol implementer's prompt says "You are the implementer: never launch `claude` or `codex`, and never start subagents." A Sol run that reads the plan-execution skill can otherwise cast itself as coordinator and launch an Opus implementer through `claude -p`.
   - The UI tester's and the UX craft reviewer's sweeps keep their cadence and run through `codex exec` on Sol at high.
   - It limits Claude usage only; GPT work runs as normal. Web-only fixes that don't touch money, verification, approvals or the reply check count as low-risk. Task reviews run on Sol.
   - To pause work, stop it at a safe point with its work committed on its branch, so it resumes with nothing lost. The orchestrating session messages only the lanes whose work changes, never every lane at once.
