@@ -136,6 +136,23 @@ function groundOf(el: HTMLElement): string {
 }
 
 /**
+ * about_opens_the_scroll_region: too narrow for the about column beside the chat, it is the first
+ * thing in the conversation's scroll region, under the chat's head and above the conversation, the
+ * region's full width.
+ */
+async function expectAboutAtopTheConversation(root: HTMLElement, about: HTMLElement, width: number): Promise<void> {
+  const region = about.closest<HTMLElement>('.cd-public-shell__scroll');
+  const head = root.querySelector<HTMLElement>('.cd-public-shell__chat-head');
+  const log = root.querySelector<HTMLElement>('[role="log"]');
+  if (!region || !head || !log) throw new Error('the about column is not in the scroll region, or there is no chat head or log');
+  await expect(region.firstElementChild).toBe(about);
+  await expect(about.getBoundingClientRect().top).toBe(head.getBoundingClientRect().bottom);
+  await expect(log.getBoundingClientRect().top).toBeGreaterThanOrEqual(about.getBoundingClientRect().bottom);
+  await expect(about.getBoundingClientRect().width).toBe(width);
+  expectComputed(about, { borderTopWidth: '0px', borderLeftWidth: '0px', borderBottomWidth: '1px' });
+}
+
+/**
  * public_rows_fill_the_chat: on the public page each conversation row takes the chat column's full
  * width, so the last row ends where the composer ends, rather than at the owner app's reading width.
  */
@@ -223,7 +240,7 @@ export const Rivera: Story = {
   },
 };
 
-/** A small tablet's width, where the about column has moved under the chat. */
+/** A small tablet's width, where there is no room for the about column beside the chat. */
 const TABLET = 800;
 
 export const Tablet: Story = {
@@ -236,13 +253,13 @@ export const Tablet: Story = {
   ],
   parameters: {
     canvas: 'none',
-    canvasNote: 'No board shows the public page at 800 px; the about column of N-Public-Rivera-Run1 moves under the chat, and the rows still fill the chat column.',
+    canvasNote:
+      'No board shows the public page at 800 px. There is no room for the about column of N-Public-Rivera-Run1 beside the chat, and the page never scrolls, so the column opens the conversation\'s scroll region, above the first message; the rows still fill the chat column.',
   },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByTestId('tablet').getBoundingClientRect().width).toBe(TABLET);
-    const main = canvas.getByRole('main');
     const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });
-    await expect(about.getBoundingClientRect().top).toBeGreaterThanOrEqual(main.getBoundingClientRect().bottom);
+    await expectAboutAtopTheConversation(canvasElement, about, TABLET);
     await expectRowsFillTheChat(canvasElement);
   },
 };
@@ -286,7 +303,8 @@ export const Compact: Story = {
   ],
   parameters: {
     canvas: 'none',
-    canvasNote: 'No board shows the public page on a phone; the about column of N-Public-Rivera-Run1 moves under the chat, and the gutters are 16 px.',
+    canvasNote:
+      "N-Public-Rivera-Run1 on a phone, with 16 px gutters. The phone board draws the about column under the footer on a page that scrolls; the page never scrolls now, so the column opens the conversation's scroll region instead, above the first message, and scrolls away as the chat goes on.",
   },
   play: async ({ canvas, canvasElement }) => {
     const phone = canvas.getByTestId('phone');
@@ -300,11 +318,11 @@ export const Compact: Story = {
     const main = canvas.getByRole('main');
     expectComputed(main, { paddingLeft: '16px', paddingRight: '16px' });
     await expect(lineReading(main, DISCLOSURE.en)).toBeVisible();
-    // The about column comes after the chat, full width.
+    // The about column opens the conversation's scroll region, the phone's full width, with the
+    // gutters inside it.
     const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });
-    const footer = within(main).getByText('Concept prototype by Giovanni Alcantara, not an Anthropic product');
-    await expect(about.getBoundingClientRect().top).toBeGreaterThanOrEqual(footer.getBoundingClientRect().bottom);
-    await expect(about.getBoundingClientRect().width).toBe(PHONE);
+    await expectAboutAtopTheConversation(canvasElement, about, PHONE);
+    expectComputed(about, { paddingLeft: '16px', paddingRight: '16px' });
   },
 };
 
@@ -380,22 +398,30 @@ export const InertAsk: Story = {
     const ask = within(main).getByRole('button', { name: 'Ask for Maria Rivera' });
     await expect(head).toContainElement(ask);
     expectComputed(ask, { height: '32px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
-    // A polite live region waits under the chat's head, empty and taking no room until the first press.
+    // A polite live region waits in the chat's pinned head, empty and taking no room until the first
+    // press: the head keeps its height.
     const lines = [...canvasElement.querySelectorAll<HTMLElement>('.cd-vision-inert-line')];
     await expect(lines).toHaveLength(1);
     const status = lines[0] as HTMLElement;
     await expect(status).toHaveAttribute('role', 'status');
     await expect(status).toHaveTextContent(/^$/);
     await expect(status.getBoundingClientRect().height).toBeLessThanOrEqual(1);
-    await expect(head).not.toContainElement(status);
+    await expect(head).toContainElement(status);
+    const headHeight = head.getBoundingClientRect().height;
+    const title = head.querySelector<HTMLElement>('.cd-public-shell__chat-title')!;
+    const rowBottom = () => Math.max(title.getBoundingClientRect().bottom, ask.getBoundingClientRect().bottom);
     await userEvent.click(ask);
     await expect(ask).toHaveFocus();
     await expect(args.onAskForOwner).not.toHaveBeenCalled();
     // vision_inert_line_on_first_press: the first press fills it with the one line, in a secondary
-    // caption 8 px under the chat's head.
+    // caption on a row of its own in the pinned head, 8 px under the title and Ask, above the
+    // head's hairline, the column's width.
     await expect(status).toHaveTextContent(VISION_INERT_LINE);
     expectComputed(status, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
-    await expect(Math.round(status.getBoundingClientRect().top - head.getBoundingClientRect().bottom)).toBe(8);
+    await expect(Math.round(status.getBoundingClientRect().top - rowBottom())).toBe(8);
+    await expect(status.getBoundingClientRect().bottom).toBeLessThanOrEqual(head.getBoundingClientRect().bottom);
+    await expect(Math.round(status.getBoundingClientRect().width)).toBe(Math.round(head.getBoundingClientRect().width));
+    await expect(Math.round(head.getBoundingClientRect().height - headHeight)).toBe(8 + 17);
     // Enter on it sends nothing either, and a second press changes nothing: still the one line.
     await userEvent.keyboard('{Enter}');
     await expect(args.onAskForOwner).not.toHaveBeenCalled();

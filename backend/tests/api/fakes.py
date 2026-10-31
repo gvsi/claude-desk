@@ -30,7 +30,14 @@ from datetime import UTC, datetime
 
 import httpx2
 
-from desk.api.model import CONVERSATION_MODEL, ModelRequest, ModelResponse, ModelUnavailable, ModelUsage
+from desk.api.model import (
+    CONVERSATION_MODEL,
+    ModelRequest,
+    ModelResponse,
+    ModelUnavailable,
+    ModelUsage,
+    ThinkingBoundElsewhere,
+)
 
 FINISHED_AT = datetime(2026, 10, 30, 17, 0, tzinfo=UTC)
 USAGE = ModelUsage(input_tokens=1500, cache_read_input_tokens=4500, cache_creation_input_tokens=0, output_tokens=350)
@@ -79,6 +86,15 @@ def unavailable(finished_at: datetime = FINISHED_AT, model: str = CONVERSATION_M
     failed = ModelResponse(content=[], stop_reason="error", usage=None, latency_ms=30_000, finished_at=finished_at,
                            model=model)
     return ModelUnavailable(failed, "OverloadedError")
+
+
+def bound_elsewhere(path: str | None = "messages.1.content.0", finished_at: datetime = FINISHED_AT,
+                    model: str = CONVERSATION_MODEL) -> ThinkingBoundElsewhere:
+    """What `AnthropicModel` raises for the 400 saying a replayed thinking block is bound to a different
+    conversation, naming the refused block's `path`."""
+    failed = ModelResponse(content=[], stop_reason="error", usage=None, latency_ms=400, finished_at=finished_at,
+                           model=model)
+    return ThinkingBoundElsewhere(failed, "BadRequestError", path=path)
 
 
 @dataclass

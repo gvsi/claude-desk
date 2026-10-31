@@ -247,13 +247,13 @@ describe('Demo inbox', () => {
     expect(sheet.element().textContent).not.toMatch(/\d{1,2}:\d{2}/);
     await expectScreenBasics(screen.container, { owner: false });
 
-    // Escape closes it. Its button, under the conversation, counts the code and opens it again,
-    // focus on Close; closing goes back to the button.
+    // Escape closes it. Its button, under the conversation in its scroll region, counts the code
+    // and opens it again, focus on Close; closing goes back to the button.
     await userEvent.keyboard('{Escape}');
     await expect.element(sheet).not.toBeInTheDocument();
     const button = screen.getByRole('button', { name: 'Demo inbox 1 entry' });
     await expect.element(button).toBeVisible();
-    expect(button.element().closest('.cd-public-shell__conversation, .cd-public-shell__column')).not.toBeNull();
+    expect(button.element().closest('.cd-public-shell__scroll .cd-public-shell__conversation')).not.toBeNull();
     await button.click();
     const again = screen.getByRole('dialog', { name: 'Demo inbox' });
     const close = again.getByRole('button', { name: 'Close' });

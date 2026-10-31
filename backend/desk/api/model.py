@@ -18,7 +18,9 @@ real ones, on the Anthropic SDK with `max_retries=2`; tests use `tests/api/fakes
 
 Every SDK error (after the SDK's retries), a stream cut halfway, and an answer that doesn't parse raise
 `ModelUnavailable`, which carries the call's `ModelResponse` so its usage row can still be written
-(`metrics.record_model_call`). A response's `finished_at` is the call's finish and `latency_ms` its duration.
+(`metrics.record_model_call`). The 400 for a replayed thinking block bound to a different conversation raises it as
+`ThinkingBoundElsewhere`, known by its message (`THINKING_BINDING_400`), so the loop can start a fresh context. A
+response's `finished_at` is the call's finish and `latency_ms` its duration.
 
 **The provider.** `make_model(settings)` builds the client `Settings.model_provider` names: `AnthropicModel` on
 the Claude API, or `BedrockModel` on Amazon Bedrock for local evals, which sends the same body with the model
@@ -76,6 +78,12 @@ _BEDROCK_SERVED_NAMES = {served: name for name, profile in BEDROCK_MODEL_IDS.ite
 _KEY = re.compile(r"[!-~]+")
 _REGION = re.compile(r"[a-z]{2}(-[a-z]+)+-[0-9]+")
 TOOL_CHANGES_BETA = "mid-conversation-tool-changes-2026-07-01"
+# How the Messages API's 400 for a replayed thinking block whose conversation changed (its system prompt, tools or an
+# earlier message) is known: its message says the block "is bound to a different conversation"
+# (`ThinkingBoundElsewhere`).
+THINKING_BINDING_400 = "bound to a different conversation"
+# Where that 400 says the refused block is: a path into the request, never its content.
+_BINDING_PATH = re.compile(r"\bmessages\.\d+(?:\.content\.\d+)?")
 EPHEMERAL = {"type": "ephemeral"}
 # Tool fields no model call sends (see the module docstring).
 REFUSED_TOOL_FIELDS = frozenset({"eager_input_streaming", "strict"})
@@ -225,6 +233,27 @@ class ModelUnavailable(Exception):
         self.response = response
 
 
+class ThinkingBoundElsewhere(ModelUnavailable):
+    """A 400 saying a replayed thinking block is bound to a different conversation (`THINKING_BINDING_400`): the
+    history sent isn't the one the block was made in. Still a `ModelUnavailable` wherever that is caught; the loop
+    starts a fresh model context and calls once more. `path` is the refused block's place in the request, such as
+    `messages.7.content.0`, as the 400 names it (None when it names none): it holds no content, so it can be logged."""
+
+    def __init__(self, response: ModelResponse, reason: str, *, path: str | None = None):
+        super().__init__(response, reason)
+        self.path = path
+
+
+def _thinking_bound_elsewhere(error: Exception) -> bool:
+    return isinstance(error, anthropic.BadRequestError) and THINKING_BINDING_400 in error.message
+
+
+def _binding_path(error: Exception) -> str | None:
+    """The refused block's path in a thinking-binding 400's message, as `messages.7.content.0`."""
+    found = _BINDING_PATH.search(str(getattr(error, "message", "")))
+    return found.group(0) if found else None
+
+
 class ModelClient(Protocol):
     async def call(self, request: ModelRequest) -> ModelResponse: ...
 
@@ -266,6 +295,9 @@ class _SdkModel:
             else:
                 message = await self._client.messages.create(**kwargs)
         except (anthropic.AnthropicError, httpx2.HTTPError) as error:   # a stream cut halfway raises httpx2's own
+            if _thinking_bound_elsewhere(error):
+                raise ThinkingBoundElsewhere(self._failed(request, started), type(error).__name__,
+                                             path=_binding_path(error)) from None
             raise ModelUnavailable(self._failed(request, started), type(error).__name__) from None
         usage = message.usage
         response = ModelResponse(

@@ -146,7 +146,7 @@ const meta = {
       'Beyond what the kernel’s templates and lines render today, and drawn as a vision of what they could carry: the code prompt’s “to the email on the application” (the kernel writes “I’ll send a code to the contact on record.”); the open-times card’s title “Rough-in inspection”, its permit line and its time ranges (the kernel writes “Times that are open” and one start time per slot); the hours card’s “Inspections, …” line and the contact card’s second line (the kernel writes each window of the hours, unlabelled, and the contact verbatim, as one line); the system line’s “sent to the email on the application” (the app writes “Verified with a code”); and the receipts “Reply checked against the City’s rules”, “Code sent to the email on the application”, “Read from your own permit file” and “Times read from the inspection calendar” (the kernel’s visitor lines are “Reply checked against {owner}’s rules”, “Verification started” and “Times read from {owner}’s calendar”, and no tool reads a permit file). The permit answer is one reply drawn as prose, card, prose, card, where the kernel delivers a reply’s prose, then its cards.',
       'By the owner’s vision-copy ruling (2026-10-30: follow the product’s rules, keep the warmth), two lines differ from the board: Claude’s garage reply reads “Whether your garage conversion needs a permit is a plan checker’s decision. I’ve asked Permit Center staff, and the answer will show up here.” where the board writes “…, so I’ve asked one to get back to you.”, and its receipt is the kernel’s visitor line for a hold, “Waiting for Permit Center staff to approve”, where the board writes “Held for a person: whether work needs a permit is a staff decision”; the hold’s reason shows only on owner screens.',
       'The AI disclosure is the shell’s own sentence, which can’t be changed or turned off, where the board writes DisclosureLine’s shorter “Meridian Bay Permits answers with Claude, an AI.”; it takes a second line, so the page is 18 px longer.',
-      'The permit status and the next steps are FactCards, at most 420 px wide, padded 12 px 14 px, with a 14 px icon and the fact in body type, where the board draws them in the reply card’s look (520 px, padded 16 px, a 16 px icon, the headline in section type); each is 109 px tall where the board’s is 115 px. With the disclosure, the page is 1491 px where the signed render drew 1485 px; the board is now drawn 1512 × 1491 on the canvas, and its render is captured at its full height.',
+      'The permit status and the next steps are FactCards, at most 420 px wide, padded 12 px 14 px, with a 14 px icon and the fact in body type, where the board draws them in the reply card’s look (520 px, padded 16 px, a 16 px icon, the headline in section type); each is 109 px tall where the board’s is 115 px. With the disclosure, the page unrolled is 1491 px where the signed render drew 1485 px; the board is now drawn 1512 × 1491 on the canvas, and its render is captured at its full height. In the story the page is the window’s height, as every public page is, and the conversation scrolls between the pinned chat head and the composer.',
       'The footer’s “Powered by” mark is the bell, where the board draws the earlier counter mark.',
     ].join(' '),
   },
@@ -174,10 +174,13 @@ export const Board: Story = {
     // A fictional office: no vision page names a real one.
     await expect(canvasElement.textContent).not.toMatch(/Oakland/);
 
-    // The page runs past the window, as the board draws it: the shell is the page, nothing outside it.
+    // The page is the window's height, as every public page is: the header, the AI disclosure and the
+    // composer stay in view, and only the conversation scrolls. Unrolled, the page is the one the
+    // board draws: the window's height and what the conversation's scroll region holds past it.
     const shellHeight = Math.round(one(canvasElement, '.cd-public-shell').getBoundingClientRect().height);
-    await expect(document.documentElement.scrollHeight).toBe(shellHeight);
-    await expect(shellHeight).toBe(PAGE_HEIGHT);
+    await expect([shellHeight, document.documentElement.scrollHeight]).toEqual([982, 982]);
+    const scroller = one(canvasElement, '.cd-public-shell__scroll');
+    await expect(shellHeight + scroller.scrollHeight - scroller.clientHeight).toBe(PAGE_HEIGHT);
     await expect(document.documentElement.scrollWidth).toBe(document.documentElement.clientWidth);
 
     // The AI disclosure under the chat's title, and the staff to ask for.
@@ -282,7 +285,7 @@ export const Board: Story = {
     // Ask for Permit Center staff asks for no one, and keeps the focus.
     await userEvent.click(askStaff);
     await expect(askStaff).toHaveFocus();
-    const askLine = one(main, '.cd-public-shell__chat-head + .cd-vision-inert-line');
+    const askLine = one(main, '.cd-public-shell__chat-head > .cd-vision-inert-line');
     await expect(askLine).toHaveAttribute('role', 'status');
     await expect(askLine).toHaveTextContent(VISION_INERT_LINE);
     // A suggestion picks nothing, and keeps the focus.
