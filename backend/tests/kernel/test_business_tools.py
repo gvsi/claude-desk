@@ -169,6 +169,21 @@ async def test_batches_refuse_duplicates_limits_canaries_and_other_copies(app, c
     assert await business_rows(app, other) == {}
 
 
+async def test_refused_batches_ledger_only_a_refusal_code(app, client):
+    copy = await rivera(app, client)
+    [document, *_] = await rows_of(app, copy.copy_id, select(Document).where(Document.desk_id == copy.desk_id))
+    for batch, code in [([intake(), intake()], 'business_tools_duplicate'),
+                        ([intake(description=document.canary)], 'business_tools_canary'),
+                        ([intake(title='Guaranteed help')], 'public_promise')]:
+        assert (await put(client, copy, batch)).status_code == 422
+        events = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']
+        assert events[-1].summary == {'tools': [], 'refused': code}
+        assert await business_rows(app, copy) == {}
+    assert (await put(client, copy, [])).status_code == 200
+    events = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'business_tools']
+    assert events[-1].summary == {'tools': []}
+
+
 async def test_intake_step_one_refuses_unknown_extra_and_wrong_answer_count(app, client):
     copy, other = await rivera(app, client), await rivera(app, client)
     assert (await put(client, copy, [intake()])).status_code == 200

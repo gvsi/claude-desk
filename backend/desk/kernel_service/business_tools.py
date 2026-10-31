@@ -74,15 +74,16 @@ async def refuse_public_promises(ctx: KernelCtx, *, part: str, values: Mapping[s
         raise _invalid(ctx, desk_id, "public_promise")
 
 
-async def _refusal(ctx: KernelCtx, *, copy_id: str, desk_id: str) -> None:
+async def _refusal(ctx: KernelCtx, *, copy_id: str, desk_id: str, reason: str) -> None:
     ctx.bind(copy_id)
     await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id,
-                        event=LedgerEvent(kind="business_tools", origin="kernel", summary={"tools": []}))
+                        event=LedgerEvent(kind="business_tools", origin="kernel",
+                                          summary={"tools": [], "refused": reason}))
 
 
 def _invalid(ctx: KernelCtx, desk_id: str, reason: str) -> KernelFailure:
     return KernelFailure(422, "invalid", reason,
-                         persist=partial(_refusal, copy_id=ctx.copy_id, desk_id=desk_id))
+                         persist=partial(_refusal, copy_id=ctx.copy_id, desk_id=desk_id, reason=reason))
 
 
 @router.put("/desks/{id}/business_tools", response_model=DeskUpdated)
