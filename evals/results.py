@@ -68,16 +68,18 @@ file still under `evals/results/` against today's schema. A results-file schema 
 or delete those old files; incompatible historical files fail closed.
 
 **Owner-signed AI-denial waivers.** Only `disclosure.denial` can be waived, for one pass, scenario,
-run and message with its exact text hash. The gate subtracts the oracle only when every hit in a
-scored row has a distinct waiver; partial sets retain the violations and mismatches fail closed.
+run and message with its exact text hash and transcript-derived hit count. The gate subtracts the
+oracle only when distinct messages' waiver hit counts sum exactly to the scored row's count;
+partial sets retain the violations and mismatches fail closed.
 The head's committed waivers are read from git, never the working tree. Waivers are outside
 `GATED_PATHS`: signing leaves a pass's inputs key unchanged, but a waivers-only change still needs
 a results file and gate recomputation. Every waived result names its count and signers.
 
 **Limits.** Results files are self-attested: CI recomputes their rows but cannot prove they came
-from a real run, since it holds no model credentials. CI checks waiver counts against rows but
-cannot check message ids or hashes: results files contain neither and must not start to. Local
-`waive`, `gate --pass`, results export and report commands check ids and hashes against transcripts.
+from a real run, since it holds no model credentials. CI checks summed waiver hits against rows but
+cannot check message ids, hashes or per-message hit counts: results files contain neither ids nor
+hashes and must not start to. Local `waive`, `gate --pass`, results export and report commands check
+ids, hashes and per-message hit counts against transcripts.
 
 **The final gate** (`gate --pass <id> --final`, `final_gate`) certifies only a whole, current, local
 pass: it refuses a pass of part of the suite (`--suite`, `--split` or `--only`), a dry,

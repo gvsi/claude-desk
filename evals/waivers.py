@@ -1,7 +1,8 @@
 """Owner attestations for strict AI-denial flags, bound to one pass and message.
 
-Only disclosure.denial is waivable. Local commands reconcile the flagged message and its exact
-text with transcripts; CI can reconcile only counts because results files contain no message ids.
+Only disclosure.denial is waivable. Local commands reconcile each flagged message, its exact
+text and hit count with transcripts; CI can reconcile only summed hits because results files
+contain no message ids.
 Message text is the blocks' text, in delivery order, joined by two newlines without normalization.
 """
 
@@ -9,6 +10,7 @@ import json
 import hashlib
 import re
 import shlex
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -34,6 +36,7 @@ class Waiver(BaseModel):
     rep: StrictInt = Field(ge=1)
     oracle: Literal["disclosure.denial"]
     message_id: NonEmpty
+    hits: StrictInt = Field(ge=1)
     message_sha256: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
     reason: NonEmpty
     signed_off_by: NonEmpty
@@ -54,6 +57,7 @@ class FlaggedMessage:
     scenario_id: str
     rep: int
     message_id: str
+    hits: int
     text: str
     visitor_before: str
     other_messages: tuple[str, ...]
@@ -102,7 +106,9 @@ def _flags(p: Any, root: Path) -> tuple[list[FlaggedMessage], list[str]]:
                 raise ValueError("the transcript doesn't hold the row's verdict")
             turns = TypeAdapter(list[Turn]).validate_python(artifact["turns"])
             messages = [(i, m) for i, turn in enumerate(turns) for m in _messages(turn)]
-            seen = set()
+            flagged = {}
+            hit_counts: Counter[str] = Counter()
+            block_hits: Counter[tuple[str, str]] = Counter()
             for violation in verdict.violations:
                 if violation.oracle != "disclosure.denial":
                     continue
@@ -112,15 +118,19 @@ def _flags(p: Any, root: Path) -> tuple[list[FlaggedMessage], list[str]]:
                     raise ValueError("a disclosure.denial flag names no message id")
                 mid = evidence[1]
                 matches = [(i, m) for i, m in messages if m.message_id == mid]
-                if len(matches) != 1 or mid in seen:
-                    raise ValueError(f"flagged message {mid} is absent, ambiguous or flagged more than once")
+                if len(matches) != 1:
+                    raise ValueError(f"flagged message {mid} is absent or ambiguous")
                 i, message = matches[0]
-                if (evidence[2] and int(evidence[2]) != i + 1) or not any(
-                        violation.evidence[evidence.end():] == repr(b.text)
-                        for b in message.blocks if b.kind == "prose"):
+                block_text = violation.evidence[evidence.end():]
+                block_hits[(mid, block_text)] += 1
+                if (evidence[2] and int(evidence[2]) != i + 1) or block_hits[(mid, block_text)] > sum(
+                        block_text == repr(b.text) for b in message.blocks if b.kind == "prose"):
                     raise ValueError(f"flagged message {mid} doesn't match its evidence text or turn")
-                seen.add(mid)
-                flags.append(FlaggedMessage(row.scenario_id, row.rep, mid, _text(message), turns[i].visitor_text,
+                flagged[mid] = (i, message)
+                hit_counts[mid] += 1
+            for mid, (i, message) in flagged.items():
+                flags.append(FlaggedMessage(row.scenario_id, row.rep, mid, hit_counts[mid],
+                            _text(message), turns[i].visitor_text,
                             tuple(_text(m) for m in _messages(turns[i]) if m.message_id != mid),
                             turns[i + 1].visitor_text if i + 1 < len(turns) else None))
         except (OSError, ValueError, KeyError, TypeError) as error:
@@ -147,13 +157,15 @@ def write_review(p: Any, *, root: Path = REPO_ROOT) -> Path:
     hits = sum(r.violations.count("disclosure.denial") for r in p.runs)
     runs = sum("disclosure.denial" in r.violations for r in p.runs)
     parts = [f"# AI-denial review for pass `{p.pass_id}`",
-             f"{hits} flagged messages in {runs} run{'s' if runs != 1 else ''}.",
+             f"{len(flags)} flagged message{'s' if len(flags) != 1 else ''} in "
+             f"{runs} run{'s' if runs != 1 else ''} ({hits} hits).",
              "Read each refusal and its surrounding turns before signing. Only disclosure.denial can be waived."]
     for flag in flags:
         command = (f"python -m evals.run waive --pass {shlex.quote(p.pass_id)} "
                    f"--message {shlex.quote(flag.message_id)} "
                    '--reason "<why this is a correct refusal>" --signed-off-by "<owner name>"')
         parts += [f"## {flag.scenario_id}, run {flag.rep}, message `{flag.message_id}`",
+                  f"Denial hits: {flag.hits}",
                   "Visitor before:\n\n" + _quote(flag.visitor_before),
                   "Flagged message (full text):\n\n" + _quote(flag.text),
                   "Other Desk messages in this turn:\n\n" + (
@@ -193,7 +205,7 @@ def sign_waivers(pass_id: str, message_ids: list[str], *, reason: str, signed_of
             raise WaiverRefused(f"message {mid} is not flagged uniquely for disclosure.denial in pass {pass_id}")
         flag = matches[0]
         added.append(Waiver(pass_id=pass_id, scenario_id=flag.scenario_id, rep=flag.rep,
-                            oracle="disclosure.denial", message_id=mid, message_sha256=flag.sha256,
+                            oracle="disclosure.denial", message_id=mid, hits=flag.hits, message_sha256=flag.sha256,
                             reason=reason, signed_off_by=signed_off_by, signed_at=datetime.now(UTC)))
     path = root / WAIVERS_PATH
     # Preserve every existing entry as JSON data, including its timestamp spelling, not a reserialized model.
@@ -213,8 +225,9 @@ def checked_waivers(p: Any, waivers: list[Waiver], *, root: Path = REPO_ROOT) ->
     for waiver in selected:
         key = (waiver.scenario_id, waiver.rep, waiver.message_id)
         matches = [f for f in flags if (f.scenario_id, f.rep, f.message_id) == key]
-        if key in seen or len(matches) != 1 or matches[0].sha256 != waiver.message_sha256:
+        if (key in seen or len(matches) != 1 or matches[0].sha256 != waiver.message_sha256
+                or matches[0].hits != waiver.hits):
             raise WaiverRefused(f"waiver for {waiver.scenario_id} run {waiver.rep} message {waiver.message_id} "
-                                "doesn't match a unique flagged message and its exact text hash")
+                                "doesn't match a unique flagged message, its hit count and exact text hash")
         seen.add(key)
     return waivers
