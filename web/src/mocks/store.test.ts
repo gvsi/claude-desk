@@ -876,6 +876,31 @@ describe('the scripted Desk', () => {
     expect(linkCancelledBlock({ title: 'Leak repair', amount_cents: 5 }, 'es').title).toBe('$0.05');
   });
 
+  it('handoff_card_opens_none_while_a_request_waits_for_the_owner', async () => {
+    // As the kernel's reply check does (plan 01b, the owner's decision of 2026-10-31): while the chat
+    // has a held request waiting for the owner, whose alert and item she already has, the card opens
+    // no handoff, so she sees one item and gets one alert. Once the hold is answered, it opens one.
+    const { session } = await openChat();
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    await send('Can I get 15% off if I pay cash?');
+    await drain();
+    const held = [...mockStore.world.decisions.values()].find((d) => d.decision.session_id === session.session_id && d.decision.state === 'held');
+    expect(held).toBeDefined();
+    const inbox = mockStore.world.inbox.length;
+
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toEqual([]);
+    expect(mockStore.world.inbox.slice(inbox).map(({ entry }) => entry.body)).not.toContain('A visitor is waiting in a conversation the Desk handed to you.');
+
+    expect((await call('answer', { params: { decision_id: held?.decision.decision_id ?? '' }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    // Answering it may itself show the card (the mock's reply after a deny does), which now opens one.
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+  });
+
   it('handoff_card_opens_an_owner_handoff_as_the_kernel_does', async () => {
     // As the kernel's reply check does (plan 01b): a reply of Claude's that shows the handoff card
     // opens an owner handoff of kind `card` for the chat, unless one of either kind is open there.

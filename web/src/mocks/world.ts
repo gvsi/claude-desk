@@ -972,7 +972,10 @@ export class MockWorld {
     const sessionId = session.state.session_id;
     const open = [...this.handoffs.values()].some((h) => h.handoff.session_id === sessionId && h.handoff.status === 'open');
     if (open) return;
-    // Pending in the kernel (the owner's decision): it will also open none while the chat has a held request; add that guard here when it lands.
+    // None while the chat has a held request waiting for the owner, whose alert and item she already
+    // has (the kernel's `awaits_the_owner`, the owner's decision of 2026-10-31).
+    const awaitsTheOwner = [...this.decisions.values()].some((d) => d.decision.session_id === sessionId && d.decision.state === 'held');
+    if (awaitsTheOwner) return;
     const desk = this.deskOf(session);
     const handoffId = this.id('handoff');
     this.handoffs.set(handoffId, {
