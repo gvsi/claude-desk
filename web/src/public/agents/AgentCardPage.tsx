@@ -93,10 +93,11 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
   const session = useAgentSession(slug);
 
   // The public page's "Send an agent" link lands on the panel once the page has drawn it. The panel
-  // leads the page, so it is usually in view already: the page moves only when it isn't, and the
-  // title and the AI disclosure above it stay on screen.
+  // leads the page, so it is usually in view already: the page moves only when some of its card
+  // isn't, and as little as brings the card in (its top first, for a card taller than the window),
+  // so the title and the AI disclosure above it stay on screen when they can.
   useLayoutEffect(() => {
-    if (hash === `#${SEND_ID}`) document.getElementById(SEND_ID)?.scrollIntoView({ block: 'nearest' });
+    if (hash === `#${SEND_ID}`) document.getElementById(SEND_ID)?.closest('section')?.scrollIntoView({ block: 'nearest' });
   }, [hash]);
 
   return (
