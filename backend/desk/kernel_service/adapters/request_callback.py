@@ -7,8 +7,9 @@ a window that is the Desk's next open hour (`desks.next_open_window`), or none, 
 the kernel's time, with a `handoff:<id>` fact labelled for the session (the callback confirmed card)
 whose only claims are the window, so no visitor text reaches a card. The kernel keeps one open
 handoff per session, so first it closes the session's open ones, the handoff card's or an earlier
-call-back's (`close_open`), each exactly as the owner's mark of done closes one: `done`, its fact
-expired, ledgered `desk_data` `{part: "handoffs", refs: [its id]}`. A row's kind never changes,
+call-back's (`close_open`), each as the owner's mark of done closes one: `done`, its fact
+expired, ledgered `desk_data` `{part: "handoffs", refs: [its id], replaced_by: <this call-back's
+handoff id>}`, which tells the owner's history it was replaced, not marked done by the owner. A row's kind never changes,
 so an owner's stale mark of done on the card answers 409, never closing the call-back, and each
 call-back's reconciliation finds its own row by its action. A session may hold several open from
 before, or from the previous release during a deploy, and all of them close. The execution holds
@@ -130,7 +131,8 @@ class RequestCallbackAdapter:
         await ctx.db.flush()
         for row in closed:
             await ledger.append(ctx, copy_id=action.copy_id, desk_id=action.desk_id, event=LedgerEvent(
-                kind="desk_data", origin="kernel", summary={"part": "handoffs", "refs": [row.handoff_id]}))
+                kind="desk_data", origin="kernel",
+                summary={"part": "handoffs", "refs": [row.handoff_id], "replaced_by": handoff_id}))
         await demo_inbox.alert_owner(ctx, action.desk_id, "callback", render.owner_preview("callback"),
                                      alert_body(window, args))
         return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, handoff_id))

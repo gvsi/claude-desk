@@ -436,6 +436,14 @@ def closed_entries(entries: list[LedgerEntry]) -> list[list[str]]:
             and entry.event.summary.get("part") == "handoffs" and "kind" not in entry.event.summary]
 
 
+def replaced_entries(entries: list[LedgerEntry]) -> list[tuple[list[str], str | None]]:
+    """Each closing entry's handoffs and the call-back that replaced them, None for the owner's own
+    mark of done, so the owner's history can tell the two apart."""
+    return [(entry.event.summary["refs"], entry.event.summary.get("replaced_by")) for entry in entries
+            if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "handoffs"
+            and "kind" not in entry.event.summary]
+
+
 async def test_a_call_back_request_closes_the_open_card_handoff_and_opens_its_own(app, client, frozen_clock):
     """A call-back request in a conversation the card already handed to the owner closes the card's
     handoff, as the owner's mark of done closes one and ledgered as it is, and opens its own, of kind
@@ -458,7 +466,8 @@ async def test_a_call_back_request_closes_the_open_card_handoff_and_opens_its_ow
     assert (called.window_start, called.window_end) == (datetime(2026, 10, 30, 11, tzinfo=TZ),
                                                         datetime(2026, 10, 30, 12, tzinfo=TZ))
     assert (rows[card.handoff_id].created_at, called.created_at) == (frozen_clock.now(), frozen_clock.now())
-    assert closed_entries(await ledger_rows(app, copy)) == [[card.handoff_id]]   # as the owner's mark is ledgered
+    # as the owner's mark is ledgered, naming the call-back that replaced it
+    assert replaced_entries(await ledger_rows(app, copy)) == [([card.handoff_id], called.handoff_id)]
     [fact] = result.facts
     assert (fact.fact_id, fact.kind, fact.status) == (f"handoff:{called.handoff_id}", "handoff", "committed")
     assert len(await handoff_alerts(app, copy)) == 1                         # the card's, not repeated
@@ -497,7 +506,7 @@ async def test_a_second_call_back_request_closes_the_first(app, client, frozen_c
     facts = {row.fact_id: row.status for row in await rows_of(app, copy.copy_id, select(Fact).where(
         Fact.kind == "handoff"))}
     assert facts == {first.facts[0].fact_id: "expired", second.facts[0].fact_id: "committed"}
-    assert closed_entries(await ledger_rows(app, copy)) == [[earlier.handoff_id]]
+    assert replaced_entries(await ledger_rows(app, copy)) == [([earlier.handoff_id], later.handoff_id)]
     assert len([alert for alert in await owner_alerts(client, copy) if "Sam Lee" in alert.body]) == 2
     reconciled = await run(app, copy.copy_id, first_decision, "reconcile")
     assert reconciled.model_view == first.model_view                       # its own row, closed
@@ -541,7 +550,9 @@ async def test_a_session_holding_several_open_handoffs_has_them_closed_by_the_ne
     rows = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
     assert rows == {"handoff-zzzz": ("callback", "done"), "handoff-aaaa": ("callback", "done"),
                     result.model_view["handoff_id"]: ("callback", "open")}
-    assert sorted(closed_entries(await ledger_rows(app, copy))) == [["handoff-aaaa"], ["handoff-zzzz"]]
+    replacing = result.model_view["handoff_id"]
+    assert sorted(replaced_entries(await ledger_rows(app, copy))) == [(["handoff-aaaa"], replacing),
+                                                                     (["handoff-zzzz"], replacing)]
 
 
 # ---- A held request awaiting the owner (the owner's decision of 2026-10-31) ---------------------------
