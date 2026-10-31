@@ -9,7 +9,8 @@ file, and each answer counted against what the case expects.
 `make evals-soft-promise MAX_USD=<dollars> [SAMPLES=5] [PROMPT_REF=<ref> | PROMPT_FILE=<path>]` runs it.
 `--rescore` calls no model and spends nothing: it scores the answers a run saved in its results file
 against the case file as it is now (each case's expectation, and whether the code check blocks it, in
-this tree) and prints the table; a case the run never asked about is not run.
+this tree) and prints the table; a case the run never asked about is not run, and a case whose input
+(its language, prose and cards) isn't the one the run recorded is stale, its answers never scored.
 It spends money: each call is one Haiku 5.5 call on the Claude API, estimated at $0.0005
 (`PER_CALL_USD`, over four times the master plan's $0.00011 for one check, so an estimate errs high).
 
@@ -48,19 +49,29 @@ and the spend as the Desk's and the Claude API's. A calibration's row counts aga
 limit but never measures what a tier 2 run costs (`passes.CALIBRATION_PREFIX`).
 
 Results. `evals/out/soft-promise/<label>-<time>.json` (git-ignored; a run the records cite is copied
-into `evals/calibration/results/` and committed) holds the run (the prompt, where it came from and its
-sha256, the commit, the model, samples, estimate, spend, calls, whether the cap stopped it and whether
-the spend went past it) and, per case, its expectation, whether the code check blocks it, the samples asked for (`requested`), the
-count of each verdict over the samples taken (`pass`; `flag`, promises_beyond_cards alone; `flag_ai`,
-denies_being_ai alone; `flag_both`; and `error`, no verdict) and its errors by status. A sample meets
-`pass` with neither flag, `flag` with promises_beyond_cards set and `flag_ai` with denies_being_ai set,
-whatever the other flag says, since either blocks the reply; an error meets nothing. A case's outcome
+into `evals/calibration/results/` and committed) opens with a header (`about`, `RESULTS_ABOUT`) and
+holds the run (the prompt, where it came from and its sha256, the commit, the model, samples,
+estimate, spend, calls, whether the cap stopped it and whether the spend went past it) and, per case,
+the sha256 of the input its calls sent (`input_sha256`: the request's one message, with the reply's
+language, prose and cards), its expectation, whether the code check blocks it, the samples asked for
+(`requested`), the count of each verdict over the samples taken (`pass`; `flag`,
+promises_beyond_cards alone; `flag_ai`, denies_being_ai alone; `flag_both`; and `error`, no verdict),
+its errors by status and its outcome. The saved `expected`, `code_blocked` and `outcome` are as of the
+run, from the case file and the code check as they were then; `--rescore` against the case file as
+it is now is the authority, as the header says. In a rescore, a case whose saved `input_sha256`
+isn't the sha256 of the input it sends now, or which has none (a run that didn't record it), is
+`stale`, and none of its answers is scored.
+
+A sample meets `pass` with neither flag, `flag` with promises_beyond_cards set and `flag_ai` with
+denies_being_ai set, whatever the other flag says, since either blocks the reply; an error meets
+nothing. A case's outcome
 is `all` only when every sample asked for met its expectation, else `some` or `none`; a case the cap
 left with fewer samples than asked for is `incomplete`, and one with none `not_run`, whatever they
 answered. A `code` case meets its expectation when the code check blocks it, whatever the model
 answers. The printed table gives, for each group, how many cases met their expectation in all the
-samples asked for, in some and in none, and how many are incomplete or not run, with the cases the
-code check blocks on rows of their own, and then each case not met in every sample asked for.
+samples asked for, in some and in none, and how many are incomplete or not run (and, in a rescore,
+stale), with the cases the code check blocks on rows of their own, and then each case not met in
+every sample asked for.
 """
 
 import argparse
@@ -115,6 +126,13 @@ VERDICTS = ("pass", "flag", "flag_ai", "flag_both", "error")
 # A sample meets `flag` when promises_beyond_cards is set and `flag_ai` when denies_being_ai is,
 # whatever the other flag says: either one blocks the reply, so `flag_both` meets both.
 MEETS = {"pass": {"pass"}, "flag": {"flag", "flag_both"}, "flag_ai": {"flag_ai", "flag_both"}}
+# The header every results file opens with (`RunResult.about`).
+RESULTS_ABOUT = (
+    "One run of the soft-promise check: its answers to each case. Each case's expected, code_blocked and outcome "
+    "are as of the run, from the case file and the code check as they were then. `python -m "
+    "evals.calibration.soft_promise --rescore <this file>` scores the answers against the case file as it is now "
+    "and is the authority; a case whose input_sha256 (of the language, prose and cards its calls sent) the case "
+    "file no longer matches is stale there, and its answers aren't scored.")
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 API_KEY = re.compile(r"[!-~]+")          # one run of printable ASCII, as the kernel takes a key
 EPSILON = 1e-9                            # dollars: sums of spend, bounds and estimates compared with a cap
@@ -280,12 +298,23 @@ def call_input(case: Case) -> SoftPromiseInput:
     return SoftPromiseInput(language=case.language, prose=reply_check.shown(case.prose), cards=list(case.cards))
 
 
+def request_message(data: SoftPromiseInput) -> str:
+    """The request's one message, as the kernel sends it: `data` as JSON with its keys sorted."""
+    return json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+
+
+def input_sha256(data: SoftPromiseInput) -> str:
+    """The sha256 of the input a call sends: the request's one message, which holds the reply's
+    language, its prose and its cards' texts."""
+    return hashlib.sha256(request_message(data).encode()).hexdigest()
+
+
 def call_bound(system: str, data: SoftPromiseInput) -> float:
     """An upper bound on one call's cost, in dollars: at most one input token for every
     `CHARS_PER_TOKEN` characters of the system prompt and of the request's one message (`data` as
     the kernel sends it), plus `REQUEST_TOKENS`, all at the higher of the input and cache-write
     prices, and the most the check may answer, `SOFT_PROMISE_MAX_TOKENS` at the output price."""
-    message = json.dumps(data.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
+    message = request_message(data)
     input_tokens = math.ceil((len(system) + len(message)) / CHARS_PER_TOKEN) + REQUEST_TOKENS
     rates = PRICES[decisions.SOFT_PROMISE_MODEL]
     return (input_tokens * max(rates["input"], rates["cache_write"])
@@ -336,11 +365,15 @@ class CaseResult(BaseModel):
     id: str
     group: str
     language: str
+    input_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")      # what the calls sent (`input_sha256`)
     expected: str
     code_blocked: bool
     requested: int = Field(ge=1)                              # the samples the run asked for
     verdicts: dict[str, int] = Field(default_factory=lambda: dict.fromkeys(VERDICTS, 0))
     errors: dict[str, int] = Field(default_factory=dict)      # calls with no verdict, by status
+    # A rescore's alone, never written: the saved answers are to another input than the case's now
+    # (`changed`) or to one the run didn't record (`unrecorded`), so none of them is scored.
+    stale: Literal["changed", "unrecorded"] | None = Field(None, exclude=True)
 
     @computed_field   # type: ignore[prop-decorator]
     @property
@@ -350,10 +383,13 @@ class CaseResult(BaseModel):
 
     @computed_field   # type: ignore[prop-decorator]
     @property
-    def outcome(self) -> Literal["all", "some", "none", "incomplete", "not_run"]:
+    def outcome(self) -> Literal["all", "some", "none", "incomplete", "not_run", "stale"]:
         """Whether the case met its expectation in all the samples asked for, some or none; a case
         with fewer samples than asked for is `incomplete`, and one with none `not_run`, whatever
-        they answered. A `code` case meets it when the code check blocks it."""
+        they answered. A `code` case meets it when the code check blocks it. In a rescore, a case
+        whose saved answers aren't to its input now is `stale`, whatever it expects."""
+        if self.stale is not None:
+            return "stale"
         if self.expected == "code":
             return "all" if self.code_blocked else "none"
         if not self.samples:
@@ -377,8 +413,9 @@ class PromptRecord(BaseModel):
 
 
 class RunResult(BaseModel):
-    """A finished run, as its results file holds it."""
+    """A finished run, as its results file holds it, opening with what its fields are worth."""
 
+    about: str = RESULTS_ABOUT
     label: str
     created_at: datetime
     git_sha: str | None
@@ -480,11 +517,12 @@ async def run(config: Config, deps: Deps) -> tuple[RunResult, Path]:
 
     now = deps.now()
     stamp = now.astimezone(UTC).strftime("%Y%m%d-%H%M%S")
-    tallies = {case.id: CaseResult(id=case.id, group=case.group, language=case.language, expected=case.expected,
+    inputs = {case.id: call_input(case) for case in cases}
+    tallies = {case.id: CaseResult(id=case.id, group=case.group, language=case.language,
+                                   input_sha256=input_sha256(inputs[case.id]), expected=case.expected,
                                    code_blocked=code_blocked(case), requested=config.samples) for case in cases}
     checker = AnthropicDecisions(_WithSystem(deps.client(key), prompt.text))
     meter = _Meter(config.max_usd)
-    inputs = {case.id: call_input(case) for case in cases}
     bounds = {case.id: call_bound(prompt.text, inputs[case.id]) for case in cases}
     jobs = [case for _ in range(config.samples) for case in cases]   # every case's sample before the next
     position = 0
@@ -545,6 +583,7 @@ class Row:
     none: int
     incomplete: int            # fewer samples than asked for
     not_run: int
+    stale: int                 # a rescore's: answers to another input than the case's now, never scored
     errors: int                # samples with no verdict
 
 
@@ -555,7 +594,7 @@ def table(case_results: Sequence[CaseResult]) -> list[Row]:
     def row(label: str, members: list[CaseResult]) -> Row:
         outcomes = Counter(member.outcome for member in members)
         return Row(label, len(members), outcomes["all"], outcomes["some"], outcomes["none"], outcomes["incomplete"],
-                   outcomes["not_run"], sum(member.verdicts.get("error", 0) for member in members))
+                   outcomes["not_run"], outcomes["stale"], sum(member.verdicts.get("error", 0) for member in members))
 
     rows = []
     for group in [*dict.fromkeys(result.group for result in case_results), None]:
@@ -567,29 +606,35 @@ def table(case_results: Sequence[CaseResult]) -> list[Row]:
     return rows
 
 
-def render(rows: Sequence[Row], *, samples: int) -> list[str]:
+def render(rows: Sequence[Row], *, samples: int, rescored: bool = False) -> list[str]:
+    """The table; a rescore's has a column for its stale cases."""
     width = max(len("group"), *(len(row.label) for row in rows))
+    stale = ", or whose input changed since the run or went unrecorded (stale, never scored)" if rescored else ""
     return [
         f"Each group's cases that met their expectation in all {samples} samples, in some and in none, and "
-        "those with fewer samples (incomplete) or none (not run); the code check blocks the code-blocked ones "
-        "before the model reads them:",
-        f"{'group':<{width}}  cases  all  some  none  incomplete  not run  errors",
+        f"those with fewer samples (incomplete) or none (not run){stale}; the code check blocks the code-blocked "
+        "ones before the model reads them:",
+        f"{'group':<{width}}  cases  all  some  none  incomplete  not run  {'stale  ' if rescored else ''}errors",
         *(f"{row.label:<{width}}  {row.cases:>5}  {row.all:>3}  {row.some:>4}  {row.none:>4}  {row.incomplete:>10}  "
-          f"{row.not_run:>7}  {row.errors:>6}" for row in rows),
+          f"{row.not_run:>7}  {f'{row.stale:>5}  ' if rescored else ''}{row.errors:>6}" for row in rows),
     ]
 
 
-def scored(case_results: Sequence[CaseResult], *, samples: int) -> list[str]:
+STALE = {"changed": "stale, its input has changed since the run, so its answers aren't scored",
+         "unrecorded": "stale, the run recorded no input for it, so its answers aren't scored"}
+
+
+def scored(case_results: Sequence[CaseResult], *, samples: int, rescored: bool = False) -> list[str]:
     """The table, then each case not met in every sample asked for, with its answers."""
-    lines = render(table(case_results), samples=samples)
+    lines = render(table(case_results), samples=samples, rescored=rescored)
     missed = [result for result in case_results if result.outcome != "all"]
     if missed:
         lines += ["", "Cases not met in every sample asked for:"]
         for result in missed:
             counts = ", ".join(f"{verdict} {count}" for verdict, count in result.verdicts.items() if count)
+            answers = STALE[result.stale] if result.stale else f"{counts or 'not run'} of {result.requested} samples"
             lines.append(f"  {result.id} ({result.group}, expected {result.expected}"
-                         f"{', code-blocked' if result.code_blocked else ''}): "
-                         f"{counts or 'not run'} of {result.requested} samples")
+                         f"{', code-blocked' if result.code_blocked else ''}): {answers}")
     return lines
 
 
@@ -614,11 +659,13 @@ def report(outcome: RunResult, path: Path) -> list[str]:
 # Rescoring saved answers
 
 class _SavedCase(BaseModel):
-    """A case's answers as a results file holds them; what else it says, its expectation and whether
-    the code check blocked it then included, is computed again."""
+    """A case's answers as a results file holds them, and the input they answered (None when the run
+    didn't record it); what else it says, its expectation and whether the code check blocked it then
+    included, is computed again."""
 
     model_config = ConfigDict(extra="ignore")
     id: str
+    input_sha256: str | None = None
     verdicts: dict[Literal["pass", "flag", "flag_ai", "flag_both", "error"], Annotated[int, Field(ge=0)]]
     errors: dict[str, Annotated[int, Field(ge=0)]] = Field(default_factory=dict)
 
@@ -636,7 +683,9 @@ def rescore(saved: Path, cases_file: Path) -> list[str]:
     """The answers in `saved`, a run's results file, scored against the cases in `cases_file` as it
     is now: each case's expectation and whether the code check blocks it come from the case file and
     this tree, the samples asked for from the run, and a case the run never asked about is not run.
-    No model is called and nothing is written."""
+    A case whose saved answers are to another input than the one it sends now, or to one the run
+    didn't record, is stale: none of its answers is scored. No model is called and nothing is
+    written."""
     try:
         run_ = _SavedRun.model_validate_json(saved.read_bytes())
     except (OSError, ValidationError):
@@ -648,17 +697,21 @@ def rescore(saved: Path, cases_file: Path) -> list[str]:
     cases = load_cases(cases_file)
     case_results = []
     for case in cases:
-        result = CaseResult(id=case.id, group=case.group, language=case.language, expected=case.expected,
+        result = CaseResult(id=case.id, group=case.group, language=case.language,
+                            input_sha256=input_sha256(call_input(case)), expected=case.expected,
                             code_blocked=code_blocked(case), requested=run_.samples)
         if (answers := answered.get(case.id)) is not None:
-            result.verdicts = {verdict: answers.verdicts.get(verdict, 0) for verdict in VERDICTS}
-            result.errors = dict(answers.errors)
+            if answers.input_sha256 != result.input_sha256:
+                result.stale = "unrecorded" if answers.input_sha256 is None else "changed"
+            else:
+                result.verdicts = {verdict: answers.verdicts.get(verdict, 0) for verdict in VERDICTS}
+                result.errors = dict(answers.errors)
         case_results.append(result)
     gone = [case_id for case_id in answered if case_id not in {case.id for case in cases}]
     lines = [f"soft-promise rescore: the answers in {saved.name} ({run_.calls} calls to {run_.model}, {run_.samples} "
              f"samples of each case, with the prompt in {run_.prompt.source}, sha256 {run_.prompt.sha256[:12]}) "
              f"against {cases_file.name} as it is now; no model called", "",
-             *scored(case_results, samples=run_.samples)]
+             *scored(case_results, samples=run_.samples, rescored=True)]
     if gone:
         lines += ["", f"saved answers for cases the case file no longer holds: {', '.join(gone)}"]
     return lines

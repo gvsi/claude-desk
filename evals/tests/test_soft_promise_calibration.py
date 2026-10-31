@@ -371,8 +371,8 @@ def test_the_prompt_comes_from_this_tree_a_ref_or_a_file(tmp_path: Path):
 
 def result(case_id: str, group: str, expected: str, *, code: bool = False, errors: dict[str, int] | None = None,
            requested: int = 3, **verdicts: int) -> CaseResult:
-    return CaseResult(id=case_id, group=group, language="en", expected=expected, code_blocked=code,
-                      requested=requested,
+    return CaseResult(id=case_id, group=group, language="en", input_sha256="0" * 64, expected=expected,
+                      code_blocked=code, requested=requested,
                       verdicts={name: verdicts.get(name, 0) for name in ("pass", "flag", "flag_ai", "flag_both",
                                                                            "error")},
                       errors=errors or {})
@@ -450,6 +450,19 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
     assert measured_per_run(read_spend(deps.spend_file), "anthropic") is None
 
     data = results_file(deps)
+    # the file opens by saying its expectations, code check results and outcomes are as of the run,
+    # and that a rescore against the case file as it is now is the authority
+    assert list(data)[0] == "about"
+    assert all(words in data["about"] for words in ("expected, code_blocked and outcome", "as of the run",
+                                                   "--rescore", "the authority", "input_sha256", "stale"))
+    # each case holds the sha256 of the input it sent: the request's one message, with its language,
+    # prose and cards
+    sent = {json.loads(request["messages"][0]["content"])["prose"]:
+            hashlib.sha256(request["messages"][0]["content"].encode()).hexdigest()
+            for request in deps.client.client.requests}
+    assert {c["id"]: c["input_sha256"] for c in data["cases"]} == {
+        "offer-book": sent["Pick one and I'll book it."],
+        "promise-sort": sent["Maria will sort everything out for you."]}
     assert (data["label"], data["samples"], data["calls"], data["estimated_calls"]) == ("trial", 2, 4, 1)
     assert data["spend_usd"] == total and not data["stopped_by_cap"] and not data["over_cap"]
     assert (data["prompt"]["source"], data["prompt"]["text"]) == ("this tree", decisions.SOFT_PROMISE_SYSTEM)
@@ -473,28 +486,34 @@ def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: 
 
 def test_rescore_scores_saved_answers_against_the_case_file_as_it_is_now(deps: Deps, tmp_path: Path,
                                                                          capsys: pytest.CaptureFixture[str]):
-    # a run of two cases, two samples each: the offer passed both times, the promise was flagged once
-    # and timed out once
-    answers = iter(["flag", TimeoutError()])
-    deps.client = Factory(FakeClient(lambda prose: "pass" if "book" in prose else next(answers)))
+    # a run of three cases, two samples each: the offer passed both times, the promise was flagged
+    # once and timed out once, and the Spanish claim, whose prose the code check blocks, was flagged
+    # both times
+    offer, promise, claim = (
+        case("offer-book", "Pick one and I'll book it.", cards=(OPEN_TIMES,)),
+        case("promise-sort", "Maria will sort everything out for you.", group="plain_promises", expected="flag"),
+        case("claim-es-booked", "Ya le reservé la primera hora.", group="past_tense_claims", language="es",
+             expected="flag", cards=(OPEN_TIMES,)))
+    deps.cases = write_cases(tmp_path / "then.yaml", offer, promise, claim)
+    promised = iter(["flag", TimeoutError()])
+    answers = {offer["prose"]: lambda: "pass", promise["prose"]: lambda: next(promised), claim["prose"]: lambda: "flag"}
+    deps.client = Factory(FakeClient(lambda prose: answers[prose]()))
     assert main(["--samples", "2", "--max-usd", "1", "--label", "saved"], deps) == 0
     [saved] = list(deps.out_dir.glob("*.json"))
     spend_text = deps.spend_file.read_text()
     capsys.readouterr()
-    # the saved answers as a case file that has changed since would have them: the promise's answers
-    # stand for a Spanish claim whose prose the code check blocks, though the saved file says it
-    # doesn't, and a case the file no longer holds was answered too
+    # a rescore reads neither the expectation nor the code check result the saved file holds, which
+    # are as of the run: here they are made wrong, and a case the case file no longer holds was
+    # answered too
     data = json.loads(saved.read_text())
-    offer, promise = data["cases"]
-    promise.update(id="claim-es-booked", group="past_tense_claims", language="es")
-    assert promise["code_blocked"] is False
-    data["cases"].append({**offer, "id": "promise-gone"})
+    saved_offer, saved_promise, saved_claim = data["cases"]
+    assert saved_claim["code_blocked"] is True
+    saved_claim.update(code_blocked=False, expected="pass", outcome="none")
+    saved_promise.update(code_blocked=True, expected="code", outcome="all")
+    data["cases"].append({**saved_offer, "id": "promise-gone"})
     saved.write_text(json.dumps(data))
     deps.cases = write_cases(
-        tmp_path / "now.yaml",
-        case("offer-book", "Pick one and I'll book it.", cards=(OPEN_TIMES,), expected="flag"),   # was pass
-        case("claim-es-booked", "Ya le reservé la primera hora.", group="past_tense_claims", language="es",
-             expected="flag", cards=(OPEN_TIMES,)),
+        tmp_path / "now.yaml", {**offer, "expected": "flag"}, promise, claim,                # the offer was pass
         case("promise-new", "Maria will take care of it.", group="plain_promises", expected="flag"))   # never run
     deps.client = Factory(FakeClient(lambda prose: pytest.fail("a rescore calls no model")))
     assert main(["--rescore", str(saved)], deps) == 0
@@ -502,12 +521,14 @@ def test_rescore_scores_saved_answers_against_the_case_file_as_it_is_now(deps: D
     out = capsys.readouterr().out
     assert deps.client.keys == [] and deps.client.client.requests == []                # no call, no key read
     assert deps.spend_file.read_text() == spend_text and list(deps.out_dir.glob("*.json")) == [saved]
-    assert f"the answers in {saved.name}" in out and "4 calls" in out
-    assert re.search(r"^offers\s+1\s+0\s+0\s+1\s+0\s+0\s+0$", out, re.MULTILINE)
-    assert re.search(r"^past_tense_claims, code-blocked\s+1\s+0\s+1\s+0\s+0\s+0\s+1$", out, re.MULTILINE)
-    assert re.search(r"^plain_promises\s+1\s+0\s+0\s+0\s+0\s+1\s+0$", out, re.MULTILINE)
+    assert f"the answers in {saved.name}" in out and "6 calls" in out
+    # cases, all, some, none, incomplete, not run, stale, errors
+    assert re.search(r"^offers\s+1\s+0\s+0\s+1\s+0\s+0\s+0\s+0$", out, re.MULTILINE)
+    assert re.search(r"^plain_promises\s+2\s+0\s+1\s+0\s+0\s+1\s+0\s+1$", out, re.MULTILINE)
+    assert re.search(r"^past_tense_claims, code-blocked\s+1\s+1\s+0\s+0\s+0\s+0\s+0\s+0$", out, re.MULTILINE)
     assert "offer-book (offers, expected flag): pass 2 of 2 samples" in out
-    assert "claim-es-booked (past_tense_claims, expected flag, code-blocked): flag 1, error 1 of 2 samples" in out
+    assert "promise-sort (plain_promises, expected flag): flag 1, error 1 of 2 samples" in out
+    assert "claim-es-booked" not in out.split("Cases not met")[1]
     assert "promise-new (plain_promises, expected flag): not run of 2 samples" in out
     assert "saved answers for cases the case file no longer holds: promise-gone" in out
     # a rescore takes no run option, and a file that isn't a run's results is refused
@@ -516,6 +537,55 @@ def test_rescore_scores_saved_answers_against_the_case_file_as_it_is_now(deps: D
     (tmp_path / "other.json").write_text('{"cases": "none"}')
     assert main(["--rescore", str(tmp_path / "other.json")], deps) == 1
     assert "other.json isn't a soft-promise run's results" in capsys.readouterr().err
+
+
+def test_rescore_never_scores_a_case_whose_input_changed_since_the_run(deps: Deps, tmp_path: Path,
+                                                                        capsys: pytest.CaptureFixture[str]):
+    cases = (
+        case("offer-book", "Pick one and I'll book it.", cards=(OPEN_TIMES,)),
+        case("offer-es", "Elija el horario que le convenga y se lo reservo.", language="es", cards=(OPEN_TIMES,)),
+        case("offer-message", "Want me to take a message?"),
+        case("promise-sort", "Maria will sort everything out for you.", group="plain_promises", expected="flag"),
+        case("promise-today", "Maria will fix it today.", group="plain_promises", expected="code"))
+    deps.cases = write_cases(tmp_path / "then.yaml", *cases)
+    deps.client = Factory(FakeClient(lambda prose: "flag" if "Maria" in prose else "pass"))
+    assert main(["--samples", "2", "--max-usd", "1"], deps) == 0
+    [saved] = list(deps.out_dir.glob("*.json"))
+    capsys.readouterr()
+    # every case met its expectation in both samples; one was saved with no input recorded, as a run
+    # from before inputs were recorded would have it
+    data = json.loads(saved.read_text())
+    assert [c["outcome"] for c in data["cases"]] == ["all"] * 5
+    del data["cases"][4]["input_sha256"]
+    saved.write_text(json.dumps(data))
+    # since the run, one case's cards, another's language and a third's prose changed; the promise's
+    # input didn't
+    offer_book, offer_es, offer_message, promise_sort, promise_today = cases
+    deps.cases = write_cases(
+        tmp_path / "now.yaml",
+        {**offer_book, "cards": [OPEN_TIMES + "\nMonday, November 2, 8:00 am"]},
+        {**offer_es, "language": "en"},
+        {**offer_message, "prose": "Want me to take a message for Maria?"},
+        promise_sort, promise_today)
+    assert main(["--rescore", str(saved)], deps) == 0
+
+    out = capsys.readouterr().out
+    # cases, all, some, none, incomplete, not run, stale, errors: no stale case is scored, whatever
+    # its saved answers, and a `code` case saved with no input is stale too
+    assert re.search(r"^offers\s+3\s+0\s+0\s+0\s+0\s+0\s+3\s+0$", out, re.MULTILINE)
+    assert re.search(r"^plain_promises\s+1\s+1\s+0\s+0\s+0\s+0\s+0\s+0$", out, re.MULTILINE)
+    assert re.search(r"^plain_promises, code-blocked\s+1\s+0\s+0\s+0\s+0\s+0\s+1\s+0$", out, re.MULTILINE)
+    assert re.search(r"^total\s+4\s+1\s+0\s+0\s+0\s+0\s+3\s+0$", out, re.MULTILINE)
+    assert "stale" in out.split("\n\n")[1].splitlines()[0]          # the table's heading says what stale means
+    changed = "stale, its input has changed since the run, so its answers aren't scored"
+    missed = out.split("Cases not met in every sample asked for:\n")[1].splitlines()
+    assert missed == [
+        f"  offer-book (offers, expected pass): {changed}",
+        f"  offer-es (offers, expected pass): {changed}",
+        f"  offer-message (offers, expected pass): {changed}",
+        "  promise-today (plain_promises, expected code, code-blocked): stale, the run recorded no input for it, so "
+        "its answers aren't scored",
+    ]
 
 
 def test_the_kept_runs_hold_the_prompt_the_counts_and_the_spend_and_rescore(capsys: pytest.CaptureFixture[str]):
