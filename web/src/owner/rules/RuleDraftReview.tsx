@@ -19,6 +19,7 @@ import {
   type RulesLinkProps,
 } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
+import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { cancelsLinksFor, changeRows } from './changeRows.ts';
@@ -48,7 +49,6 @@ const NOT_CONFIRMED = "We couldn't confirm whether your change went through. Ope
 const NOT_OPEN = "This draft isn't open anymore. Ask for the change again from Rules.";
 
 const rulesPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/rules`;
-const connectorsPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/connectors`;
 
 /** The breadcrumb's link through the router, so the app stays loaded. */
 function RouterLink({ href, children, ...rest }: RulesLinkProps) {
@@ -122,7 +122,10 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
   const rows = useMemo(() => changeRows(draft, people.data ?? null, tools ?? []), [draft, people.data, tools]);
   const turningOn = draft.turnedOn.length > 0;
   const heading = title ?? (onlyTheLimit(draft) ? 'Change your payment limit' : 'Review the change');
-  const root = turningOn ? { label: 'Connectors', href: connectorsPath(deskId) } : { label: 'Rules', href: rulesPath(deskId) };
+  // Where the trail starts, and where keeping the rules goes when there is nothing to go back to: a
+  // turn-on's Connectors page once those pages are built (`connectorPageHref`), else Rules.
+  const connectors = turningOn ? connectorPageHref(deskId, 'connectors') : undefined;
+  const root = connectors === undefined ? { label: 'Rules', href: rulesPath(deskId) } : { label: 'Connectors', href: connectors };
 
   const finish = (outcome: 'confirmed' | 'kept') => {
     if (onDone) onDone(outcome);
