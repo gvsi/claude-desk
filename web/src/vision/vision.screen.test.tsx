@@ -350,7 +350,7 @@ describe('Vision pages against their boards', () => {
     await expect.element(held.getByText('Web chat, 2 min ago', { exact: true })).toBeVisible();
     const live = owner.getByRole('region', { name: 'Live now' });
     expect(live.getByRole('listitem').elements().map((row) => row.textContent)).toEqual(['Lucía HerreraVisitor', 'Alex Kim’s assistantAgent']);
-    const tabs = owner.getByRole('navigation', { name: 'Main' }).getByRole('link').elements();
+    const tabs = owner.getByRole('navigation', { name: "The owner app's tabs" }).getByRole('link').elements();
     expect(tabs.map((tab) => tab.textContent)).toEqual(['Today', 'Chats', 'Rules', 'Safety', 'More']);
     expect(tabs.map((tab) => tab.getAttribute('aria-current'))).toEqual(['page', null, null, null, null]);
     // The tab bar at the foot of the owner's screen.
