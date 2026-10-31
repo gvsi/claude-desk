@@ -238,6 +238,42 @@ it('crossing_1024_px_keeps_the_draft', async () => {
   await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('complementary'));
   expect(panel().querySelector('textarea'), 'the same composer').toBe(box);
   expect(box.value).toBe('Turn off Payments');
+
+  // And across the sheet's own breakpoint: docked over the scrim at 768, the whole window at 639,
+  // docked again at 640. The same composer keeps the draft and the focus all the way.
+  for (const { width, docked } of [
+    { width: TABLET.width, docked: true },
+    { width: 639, docked: false },
+    { width: 640, docked: true },
+  ]) {
+    await page.viewport(width, TABLET.height);
+    await vi.waitFor(() => expect(window.innerWidth).toBe(width));
+    await vi.waitFor(() => expect(panel().getAttribute('role'), `${width} px`).toBe('dialog'));
+    expect(panel().querySelector('textarea'), `${width} px: the same composer`).toBe(box);
+    expect(box.value, `${width} px: the draft`).toBe('Turn off Payments');
+    expect(document.activeElement, `${width} px: focus stays on the composer`).toBe(box);
+    if (docked) {
+      expectDockedOverTheScrim(width, TABLET.height);
+    } else {
+      const whole = panel().getBoundingClientRect();
+      expect([whole.left, whole.top, whole.width, whole.height], `${width} px: the whole window`).toEqual([0, 0, width, TABLET.height]);
+      expectNoScrim(width);
+    }
+    expectNoSidewaysScroll(width);
+  }
+});
+
+it('docked_over_the_scrim_with_the_top_bar', async () => {
+  // At 700 px the top bar replaces the sidebar's column, and the sheet is still the panel's 400 px
+  // at the window's right edge, over the scrim, with everything behind it out of reach.
+  await page.viewport(700, TABLET.height);
+  act(() => root.render(<AskClaude />));
+  await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
+  expect(container.querySelector('.cd-app-shell__menu'), 'the top bar').not.toBeNull();
+  expect(container.querySelector('.cd-app-shell__column'), 'no sidebar column').toBeNull();
+  expectDockedOverTheScrim(700, TABLET.height);
+  expectNoSidewaysScroll(700);
+  await expectModal();
 });
 
 /** Open the sheet from the page, walk it from the keyboard, close it with Escape: focus returns to the opener. */

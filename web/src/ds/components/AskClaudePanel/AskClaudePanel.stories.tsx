@@ -138,7 +138,7 @@ export const Phone: Story = {
   render: (args) => <RulesScreen {...args} />,
   parameters: {
     canvasNote:
-      'No board draws the panel on a phone: under 1024 px it is a modal sheet over the whole window, with no seam; the page behind is inert, focus moves into it and stays there, and returns to what opened it.',
+      'No board draws the panel on a phone: under 640 px it is a modal sheet over the whole window, with no seam (from 640 to 1023 px, see Tablet); the page behind is inert, focus moves into it and stays there, and returns to what opened it.',
   },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const width = window.innerWidth;
