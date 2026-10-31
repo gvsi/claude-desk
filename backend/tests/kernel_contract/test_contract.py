@@ -93,6 +93,7 @@ from desk.kernel_api import (
     VerifyStartRequest,
     WhoAmI,
 )
+from desk.money_cap import lower_to_cap
 from tests.kernel_contract import ro_tables
 from tests.kernel_contract.fake_kernel import (
     FAKE_ROUTES,
@@ -2391,6 +2392,74 @@ async def test_a_draft_holds_its_auto_money_cards_to_its_cap(kernel, ro_read):
     assert (confirmed.status, confirmed.auto_money_cap_cents) == ("active", 2_000)
     assert versions() == [{"version": active["version"], "status": "superseded", "auto_money_cap_cents": 0},
                           {"version": version.version, "status": "active", "auto_money_cap_cents": 2_000}]
+
+
+def policy_rows(ro_read, ro_schema: str, copy: CopyCreated) -> list[dict]:
+    return ro_read(ro_schema, copy.copy_id, "SELECT version, status, auto_money_cap_cents FROM {ro}.policy_versions"
+                                            " WHERE desk_id = %s ORDER BY version", (copy.desk_ids[0],))
+
+
+def charge_card(cents: int) -> RuleCard:
+    return RuleCard(card_id="card-charge", applies_to="effect:charge", mode="auto", who="anyone",
+                    max_amount_cents=cents, reason="Payments up to $300 go through without asking.")
+
+
+@pytest.mark.kernel_plan("01b")   # the money cap on each rules version, Plan 01b's
+async def test_card_above_the_draft_cap_is_422(kernel, ro_read):
+    """The kernel holds a draft's cards to the draft's own money cap, whatever the API sends: lowering the Rivera cap
+    from $500 to $100 with an active $300 auto `effect:charge` card carried as it is, as an API that skipped the
+    lowering would send it, is 422 `invalid` with nothing drafted. The same cards lowered by
+    `desk.money_cap.lower_to_cap` draft at $100, the card at $100 and saying so."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    desk_id = copy.desk_ids[0]
+    seeded = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    first = await draft(owner, desk_id, [*owner_cards(seeded), charge_card(30_000)], seeded["version"])
+    proved_or_skip(first)
+    assert first.auto_money_cap_cents == 50_000
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=first.version))
+    active = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    kept, before = owner_cards(active), policy_rows(ro_read, ro_schema, copy)
+
+    def at_100(cards: list[RuleCard]):
+        return owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
+                                                                   expected_parent=active["version"],
+                                                                   auto_money_cap_cents=10_000))
+
+    assert await refused(at_100(kept)) == (422, "invalid")
+    assert policy_rows(ro_read, ro_schema, copy) == before
+    lowered = await at_100(lower_to_cap(kept, kept, 10_000, "en"))
+    proved_or_skip(lowered)
+    (charge,) = [card for card in lowered.cards if card.card_id == "card-charge"]
+    assert (lowered.auto_money_cap_cents, charge.max_amount_cents, charge.reason) == (
+        10_000, 10_000, "Up to $100, your payment limit.")
+
+
+@pytest.mark.kernel_plan("01b")   # the money cap on each rules version, Plan 01b's
+async def test_cap_changes_only_at_confirm(kernel, ro_read):
+    """A draft at a new money cap carries it, and the Desk's cap stays its active version's until the owner confirms
+    the draft: raising the Rivera cap from $500 to $800 drafts a version at $800 while the active one stays at $500;
+    confirming it supersedes the $500 version, and the Desk's cap is $800."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    desk_id = copy.desk_ids[0]
+    active = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    raised = await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=owner_cards(active),
+                                                                       expected_parent=active["version"],
+                                                                       auto_money_cap_cents=80_000))
+    proved_or_skip(raised)
+    assert raised.auto_money_cap_cents == 80_000
+    assert policy_rows(ro_read, ro_schema, copy) == [
+        {"version": active["version"], "status": "active", "auto_money_cap_cents": 50_000},
+        {"version": raised.version, "status": "proved", "auto_money_cap_cents": 80_000}]
+    confirmed = await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id,
+                                                                              version=raised.version))
+    assert (confirmed.status, confirmed.auto_money_cap_cents) == ("active", 80_000)
+    assert policy_rows(ro_read, ro_schema, copy) == [
+        {"version": active["version"], "status": "superseded", "auto_money_cap_cents": 50_000},
+        {"version": raised.version, "status": "active", "auto_money_cap_cents": 80_000}]
 
 
 def verification_card(ro_read, ro_schema: str, copy: CopyCreated) -> tuple[dict, list[RuleCard], RuleCard]:
