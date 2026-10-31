@@ -30,9 +30,11 @@ import {
   remember,
   restoreKept,
   stoppedInPreview,
+  uncountedAnswer,
   type Kept,
   type Reading,
   type Thing,
+  type UncountedAnswer,
 } from './doneSignals.ts';
 
 /** A thing seen done in this view, and whether it was already done at load, so its check draws still. */
@@ -45,6 +47,8 @@ export interface DoneSignals {
   done: Readonly<Partial<Record<Thing, Done>>>;
   /** How many of the four are done. */
   count: number;
+  /** How the latest answer given on this page ended, when "Answer a held request" doesn't count it. */
+  uncounted: UncountedAnswer | null;
 }
 
 export interface UseDoneSignalsOptions {
@@ -89,6 +93,7 @@ const keptByApp = new WeakMap<QueryClient, Kept>();
 
 export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOptions): DoneSignals {
   const queryClient = useQueryClient();
+  const answeredHere = [...answered];
   // The copy's Desks as the owner's frame reads them, never read again here.
   const desks = useDesks(deskId, { passive: true });
   const businesses = desks.data;
@@ -157,7 +162,7 @@ export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOpti
     answer: {
       settled: reading && fresh(ledger),
       done: reading && record !== undefined && answeredOnRecord(record),
-      inView: reading && deskId === seeded && answeredInView(answered),
+      inView: reading && deskId === seeded && answeredInView(answeredHere),
     },
     create: {
       settled: enabled && copy !== undefined,
@@ -168,5 +173,9 @@ export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOpti
   const remembered = remember(memory, now);
   const next = remembered === memory ? knowing : { ...knowing, memory: remembered };
   if (next !== kept) setKept(next);
-  return { done: remembered.done, count: THINGS.filter((thing) => remembered.done[thing] !== undefined).length };
+  return {
+    done: remembered.done,
+    count: THINGS.filter((thing) => remembered.done[thing] !== undefined).length,
+    uncounted: uncountedAnswer(answeredHere, reading && deskId === seeded),
+  };
 }

@@ -21,6 +21,7 @@ import {
   remember,
   restoreKept,
   stoppedInPreview,
+  uncountedAnswer,
   type Reading,
   type Thing,
 } from './doneSignals.ts';
@@ -344,5 +345,24 @@ describe('what the list keeps across visits to Today', () => {
     const kept = keepFor({ startedWith: null, seen: new Set(), memory: NOTHING_DONE }, listedDesks(copy));
     expect(keepFor(kept, ['desk-em'])).toBe(kept);
     expect([...keepFor(kept, ['desk-em', 'desk-new']).seen]).toEqual(['desk-main', 'desk-em', 'desk-new']);
+  });
+});
+
+describe('an answer given here that the list does not count', () => {
+  it('a late answer is how the request ended: expired or cancelled', () => {
+    expect(uncountedAnswer([{ state: 'expired' }], true)).toBe('expired');
+    expect(uncountedAnswer([{ state: 'cancelled' }], false)).toBe('cancelled');
+  });
+
+  it('an answer that went through is uncounted only where the list does not count answers', () => {
+    expect(uncountedAnswer([{ state: 'executed' }], false)).toBe('answered');
+    expect(uncountedAnswer([{ state: 'denied' }], false)).toBe('answered');
+    expect(uncountedAnswer([{ state: 'executed' }], true)).toBeNull();
+  });
+
+  it('the latest answer given here says it, and none says nothing', () => {
+    expect(uncountedAnswer([{ state: 'expired' }, { state: 'cancelled' }], true)).toBe('cancelled');
+    expect(uncountedAnswer([], true)).toBeNull();
+    expect(uncountedAnswer([{ state: 'held' }], false)).toBeNull();
   });
 });

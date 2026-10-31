@@ -143,6 +143,22 @@ export function answeredInView(decisions: Iterable<Pick<Decision, 'state'>>): bo
   return false;
 }
 
+/** How an answer given here ended when "Answer a held request" doesn't count it. */
+export type UncountedAnswer = 'expired' | 'cancelled' | 'answered';
+
+/**
+ * How the latest answer given here ended, when "Answer a held request" doesn't count it: the request
+ * had expired, or the visitor had cancelled it, before the answer reached it; or the answer went
+ * through where the list doesn't count answers (`countsHere` false: a Desk besides the one the copy
+ * started with). Null when there is none, or when the list counts it.
+ */
+export function uncountedAnswer(decisions: readonly Pick<Decision, 'state'>[], countsHere: boolean): UncountedAnswer | null {
+  const latest = decisions.at(-1);
+  if (latest === undefined) return null;
+  if (latest.state === 'expired' || latest.state === 'cancelled') return latest.state;
+  return ANSWERED.has(latest.state) && !countsHere ? 'answered' : null;
+}
+
 /** The copy's Desks in the order the API lists them, the order they were made. */
 export function listedDesks(businesses: readonly BusinessOut[]): string[] {
   return businesses.flatMap((b) => b.desks.map((d) => d.desk_id));

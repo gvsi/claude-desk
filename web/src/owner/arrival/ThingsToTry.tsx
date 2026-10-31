@@ -9,8 +9,8 @@ import { VISION_PATHS } from '../../vision/data.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, useToday } from '../useDesks.ts';
-import { doneCaption } from './doneSignals.ts';
-import { ATTACK_IDEAS, THINGS_TO_TRY } from './ideas.ts';
+import { doneCaption, type UncountedAnswer } from './doneSignals.ts';
+import { ATTACK_IDEAS, THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
 import { useDoneSignals, type Done } from './useDoneSignals.ts';
 
 export interface ThingsToTryProps {
@@ -27,13 +27,18 @@ export interface ThingsToTryProps {
 
 const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 
-/** A thing's done state as its row draws it: the line that takes the detail's place, and whether it was done at load. */
-interface RowDone extends Done {
+/**
+ * How a row ended, as it draws it: the line that takes the detail's place; whether it ticked (done,
+ * with a check and a Done pill) or only settled (an answer the list doesn't count: its line alone);
+ * and whether it was so at load.
+ */
+interface RowEnd extends Done {
   line: string;
+  ticks: boolean;
 }
 
-function rowDone(done: Done | undefined, line: string): RowDone | null {
-  return done === undefined ? null : { ...done, line };
+function rowDone(done: Done | undefined, line: string): RowEnd | null {
+  return done === undefined ? null : { ...done, line, ticks: true };
 }
 
 /** What happened to the attack idea the owner picked. */
@@ -69,7 +74,9 @@ function routerClick(go: () => void) {
  * Today's "Things to try": four ways into the demo, each with its next step, ticked off in place as
  * the owner does it, and counted in the line under the heading; then a link to where this is going,
  * the labelled vision pages. "Answer a held request" waits until something is held, and stays once
- * it's done. The public page always opens in a new tab, never on Today. "Hide this list" is
+ * it's answered: ticked when the answer counts, or settled in its slot with how the answer ended when
+ * it doesn't (a request that had expired or been cancelled, or an answer given on a Desk the list
+ * doesn't count). The public page always opens in a new tab, never on Today. "Hide this list" is
  * remembered in this browser when it can be, and a hidden list reads nothing.
  */
 export function ThingsToTry({ firstHeld, answered, onFocusRequest }: ThingsToTryProps) {
@@ -79,6 +86,12 @@ export function ThingsToTry({ firstHeld, answered, onFocusRequest }: ThingsToTry
   const titleId = useId();
   const [hidden, setHidden] = useState(() => readLocal('thingsToTryHidden') === 'true');
   const signals = useDoneSignals({ enabled: !hidden, deskId: desk.desk_id, answered });
+  // How the last answer given here that the list doesn't count ended, kept while nothing is held, so
+  // the row stays settled with its line after the answered card is dismissed.
+  const [settledAs, setSettledAs] = useState<UncountedAnswer | null>(null);
+  const waiting = firstHeld?.decision != null;
+  if (waiting && settledAs !== null) setSettledAs(null);
+  else if (!waiting && signals.uncounted !== null && signals.uncounted !== settledAs) setSettledAs(signals.uncounted);
   // After hiding or showing, focus goes to the button that undoes it, rather than to the page.
   const toggleRef = useRef<HTMLDivElement>(null);
   const moveFocus = useRef(false);
@@ -107,10 +120,13 @@ export function ThingsToTry({ firstHeld, answered, onFocusRequest }: ThingsToTry
 
   const link = customerLink(desk.slug, desk.desk_id);
   const ownerName = today.data?.greeting_name ?? firstName(business.owner_display_name);
-  // "Answer a held request": done once answered, else waiting while a request is held (or its
-  // answer is still out), else not drawn.
+  // "Answer a held request": done once answered; else waiting while a request is held (or its answer
+  // is still out); else settled, in its slot, by an answer given here that the list doesn't count;
+  // else not drawn.
   const answerDone = rowDone(signals.done.answer, ANSWER.done);
-  const answerRow = answerDone !== null ? 'done' : firstHeld?.decision ? 'waiting' : 'absent';
+  const answerEnd: RowEnd | null =
+    answerDone ?? (!waiting && settledAs !== null ? { line: UNCOUNTED_ANSWER_LINES[settledAs], ticks: false, atLoad: false } : null);
+  const answerRow = answerDone !== null ? 'done' : waiting ? 'waiting' : answerEnd !== null ? 'settled' : 'absent';
 
   return (
     <section className="cd-things" aria-labelledby={titleId}>
@@ -134,15 +150,15 @@ export function ThingsToTry({ firstHeld, answered, onFocusRequest }: ThingsToTry
             icon="conversations"
             title={CHAT.title}
             detail="Your public page opens in a new tab. Ask about a leak, a price or a time."
-            done={rowDone(signals.done.chat, CHAT.done)}
+            end={rowDone(signals.done.chat, CHAT.done)}
           >
             <Button variant="secondary" href={link} external>
               Open your public page
             </Button>
           </Thing>
-          <BreakIt link={link} ownerName={ownerName} done={rowDone(signals.done.break, BREAK.done)} />
+          <BreakIt link={link} ownerName={ownerName} end={rowDone(signals.done.break, BREAK.done)} />
           {answerRow === 'absent' ? null : (
-            <Thing icon="clock" title={ANSWER.title} held detail={heldLine(firstHeld?.held_by)} done={answerDone}>
+            <Thing icon="clock" title={ANSWER.title} held detail={heldLine(firstHeld?.held_by)} end={answerEnd}>
               <Button variant="secondary" onClick={onFocusRequest}>
                 Open the request
               </Button>
@@ -152,7 +168,7 @@ export function ThingsToTry({ firstHeld, answered, onFocusRequest }: ThingsToTry
             icon="plus"
             title={CREATE.title}
             detail="Describe a business in a few sentences. Claude drafts the rules, and you confirm them."
-            done={rowDone(signals.done.create, CREATE.done)}
+            end={rowDone(signals.done.create, CREATE.done)}
           >
             <Button variant="secondary" href="/app/setup" onClick={routerClick(() => void navigate('/app/setup'))}>
               Start a Desk
@@ -175,8 +191,8 @@ interface ThingProps {
   detail: ReactNode;
   /** Shown under the detail, across the row. */
   below?: ReactNode;
-  /** Set once the thing is done: its row ticks off. */
-  done?: RowDone | null;
+  /** Set once the row has ended: it ticks off when its thing is done, or settles with its line alone. */
+  end?: RowEnd | null;
   /** The row's next step, at its right. */
   children: ReactNode;
 }
@@ -298,42 +314,47 @@ function useTickInPlace(done: boolean, eases: boolean) {
 
 /**
  * One thing to try. Once it's done, its icon gives way to a check, its detail to its done line and
- * its next step to a Done pill, in place, at the height it had until the check has drawn. The check draws once when it's
- * done in view; it is drawn still when it was already done at load, or done before this row was
- * drawn (a list shown again).
+ * its next step to a Done pill, in place, at the height it had until the check has drawn. A row that
+ * settles instead (an answer the list doesn't count) keeps its icon, and its detail gives way to its
+ * line, with no check, no pill and no next step, in the same settle. The check draws, and the line
+ * comes in, when the row ends in view; a row that ended at load, or before it was drawn (a list
+ * shown again), is drawn still.
  */
-function Thing({ icon, title, held = false, detail, below, done = null, children }: ThingProps) {
-  const [drawnDone] = useState(done !== null);
-  const ticked = done !== null && !done.atLoad && !drawnDone;
-  const { ref, titleRef, settling, onFocus, onBlur } = useTickInPlace(done !== null, ticked);
+function Thing({ icon, title, held = false, detail, below, end = null, children }: ThingProps) {
+  const [drawnEnded] = useState(end !== null);
+  const inView = end !== null && !end.atLoad && !drawnEnded;
+  const { ref, titleRef, settling, onFocus, onBlur } = useTickInPlace(end !== null, inView);
   return (
     <li ref={ref} className={settling ? 'cd-things__item cd-things__item--settling' : 'cd-things__item'} onFocus={onFocus} onBlur={onBlur}>
       <span className="cd-things__icon">
-        {done === null ? <Icon name={icon} size={16} /> : <Icon name="check" size={16} className={ticked ? 'cd-things__check cd-things__check--draws' : 'cd-things__check'} />}
+        {end?.ticks ? (
+          <Icon name="check" size={16} className={inView ? 'cd-things__check cd-things__check--draws' : 'cd-things__check'} />
+        ) : (
+          <Icon name={icon} size={16} />
+        )}
       </span>
       <div className="cd-things__text">
         <h3 ref={titleRef} className="cd-things__item-title cd-type-control" tabIndex={-1}>
           {title}
-          {held && done === null ? <StatusDot tone="held" /> : null}
+          {held && end === null ? <StatusDot tone="held" /> : null}
         </h3>
-        <p className={ticked ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'}>
-          {done === null ? detail : done.line}
+        <p className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'}>
+          {end === null ? detail : end.line}
         </p>
       </div>
       <div className="cd-things__action">
-        {done === null ? (
-          children
-        ) : (
+        {end === null ? children : null}
+        {end?.ticks ? (
           // The done line already says it in words, so the pill isn't read twice.
-          <span className={ticked ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden="true">
+          <span className={inView ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden="true">
             <Pill>
               <StatusDot tone="handled" />
               Done
             </Pill>
           </span>
-        )}
+        ) : null}
       </div>
-      {below && done === null ? <div className="cd-things__below">{below}</div> : null}
+      {below && end === null ? <div className="cd-things__below">{below}</div> : null}
     </li>
   );
 }
@@ -344,7 +365,7 @@ function Thing({ icon, title, held = false, detail, below, done = null, children
  * and this page cuts the new tab's link back to it. A browser that blocks the tab gets a link to
  * open it by hand; a clipboard that refuses leaves the idea selected to copy by hand.
  */
-function BreakIt({ link, ownerName, done }: { link: string; ownerName: string; done: RowDone | null }) {
+function BreakIt({ link, ownerName, end }: { link: string; ownerName: string; end: RowEnd | null }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
   const ideaRef = useRef<HTMLParagraphElement>(null);
@@ -409,7 +430,7 @@ function BreakIt({ link, ownerName, done }: { link: string; ownerName: string; d
         </>
       }
       below={below}
-      done={done}
+      end={end}
     >
       <Button
         variant="secondary"

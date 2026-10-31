@@ -1376,25 +1376,69 @@ describe('Things to try ticks off', () => {
     expect(animated()).toEqual([]);
   });
 
-  it('late_answer_ticks_nothing', async () => {
-    // The answer comes back 409: the request had already expired. That isn't an answer.
+  it.each([
+    ['expired', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
+    ['cancelled', 'The visitor cancelled before you answered. Nothing was done.', 'Cancelled before you answered. Nothing was done.'],
+  ] as const)('late_answer_settles_the_row_in_its_slot_when_%s', async (state, cardLine, rowLine) => {
+    // The answer comes back 409: the request had already ended. That isn't an answer, so nothing
+    // ticks; the row stays in its slot and says how it ended.
     const { screen } = await renderRoute(TODAY);
     const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
     const held = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === rivera.decisions.held.reason_plain)?.decision;
     if (!held) throw new Error('the seed holds the 15% quote');
-    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...held, state: 'expired', answers: [] } } });
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...held, state, answers: [] } } });
     const card = heldCard(screen);
+    const item = row.element() as HTMLElement;
+    const watching = watchTheList(item, things.element(), screen.getByRole('region', { name: 'Needs you' }).element(), rowLine);
     await card.getByRole('button', { name: 'Allow this time' }).click();
-    await expect.element(card.getByText('This request expired before you answered. Nothing was done.', { exact: true })).toBeVisible();
+    const frames = await watching;
 
-    // Let Today read a while: nothing ticks, and the line still says how long it takes.
-    const reads = { needsYou: requests('needsYou').length, ledger: requests('ledger').length };
-    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(reads.needsYou + 6);
+    await expect.element(card.getByText(cardLine, { exact: true })).toBeVisible();
+    expectSettledInItsSlot(frames, item);
+    expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
+    await expect.element(row.getByText(rowLine, { exact: true })).toBeVisible();
+    // No check, no pill and no button: the card right below has the request.
+    expect(row.getByRole('button').elements()).toHaveLength(0);
+    expect(item.querySelector('.cd-things__check, .cd-pill, .cd-status-dot')).toBeNull();
+    // Focus stays with the card that was answered.
+    expect(card.element().contains(document.activeElement)).toBe(true);
+    // Nothing ticks, and the line still says how long it takes.
+    const reads = requests('needsYou').length;
+    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(reads + 6);
     expect(things.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
-    expect(things.getByText('Done', { exact: true }).elements()).toHaveLength(0);
     await expect.element(things.getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
-    // The record was read again meanwhile, and showed no answer either.
-    expect(requests('ledger').length).toBeGreaterThan(reads.ledger);
+    await expect.element(row.getByText(rowLine, { exact: true })).toBeVisible();
+  });
+
+  it('answer_on_a_second_desk_settles_the_row_in_its_slot', async () => {
+    // On Emergencies, a visitor asks for 50% off, and the Desk holds it for Maria there.
+    const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
+    const things = thingsToTry(screen);
+    await expect.element(things).toBeVisible();
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.emergenciesSlug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.emergenciesSlug }, body: { text: 'Can I get 50% off if I pay cash?' } });
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' }), { timeout: 3_000 }).toBeVisible();
+    const held = [...mockStore.world.decisions.values()].find((d) => d.deskId === RIVERA.emergenciesDeskId && d.decision.state === 'held')?.decision;
+    if (!held) throw new Error('Emergencies holds a request');
+    const card = screen.getByRole('article', { name: `Held for you: ${held.reason_plain}`, exact: true });
+
+    // Answered here, on a Desk the tour doesn't count: the answer went through, and the row says so in its slot.
+    const item = row.element() as HTMLElement;
+    const watching = watchTheList(item, things.element(), screen.getByRole('region', { name: 'Needs you' }).element(), ANSWERED_LINE);
+    await card.getByRole('button', { name: 'Allow this time' }).click();
+    const frames = await watching;
+
+    await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    expectSettledInItsSlot(frames, item);
+    await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    expect(row.getByRole('button').elements()).toHaveLength(0);
+    expect(item.querySelector('.cd-things__check, .cd-pill, .cd-status-dot')).toBeNull();
+    expect(card.element().contains(document.activeElement)).toBe(true);
+    // It isn't counted: the count is the copy's second Desk alone.
+    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
   });
 
   it('reload_after_answering_is_done_at_once', async () => {
@@ -1638,6 +1682,10 @@ interface ListFrame {
   checkDrawing: boolean;
   /** The least height the row keeps, as its inline style says it ('' for none). */
   kept: string;
+  /** The row says the line the watch waits for. */
+  showing: boolean;
+  /** Where the row starts, below the top of the list's section. */
+  rowTop: number;
   /** Where `next` starts, below the top of the list's section. */
   below: number;
 }
@@ -1671,6 +1719,35 @@ function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): v
   expect(row.style.minHeight).toBe('');
 }
 
+/**
+ * A row that settled with a line and no check: it stayed in the list in its slot, what follows held
+ * its place as the line came in, then moved up one way only, by way of places between, to where the
+ * row's own height puts it.
+ */
+function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement): void {
+  expect(frames.every((frame) => frame.drawn), 'the row stayed in the list').toBe(true);
+  const top = frames[0]?.rowTop ?? 0;
+  expect(frames.every((frame) => Math.abs(frame.rowTop - top) < 0.5), 'the row kept its slot').toBe(true);
+  const from = frames[0]?.below ?? 0;
+  const to = frames.at(-1)?.below ?? 0;
+  const first = frames.findIndex((frame) => frame.showing);
+  expect(first).toBeGreaterThan(-1);
+  expect(Math.abs((frames[first]?.below ?? 0) - from), 'held as the line came in').toBeLessThan(0.5);
+  expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
+  for (const [i, frame] of frames.entries()) {
+    const step = frame.below - (frames[i - 1]?.below ?? frame.below);
+    expect(step, `moved down at frame ${i}`).toBeLessThan(0.5);
+  }
+  expect(to).toBeLessThan(from);
+  if (from - to > TOO_SMALL_TO_EASE) {
+    expect(
+      frames.some((frame) => frame.below < from - 0.5 && frame.below > to + 0.5),
+      'eased through places between, never in one jump',
+    ).toBe(true);
+  }
+  expect(row.style.minHeight).toBe('');
+}
+
 /** How long a row may take to tick and settle before the watch gives up. */
 const TICK_TIMEOUT_MS = 5_000;
 
@@ -1690,10 +1767,12 @@ function watchTheList(row: Element, list: Element, next: Element, doneLine: stri
         drawing: animations.length > 0,
         checkDrawing: animations.some((a) => (a as CSSAnimation).animationName === 'cd-things-check-draw' && a.playState === 'running'),
         kept: row instanceof HTMLElement ? row.style.minHeight : '',
+        showing: row.textContent.includes(doneLine),
+        rowTop: row.getBoundingClientRect().top - list.getBoundingClientRect().top,
         below: next.getBoundingClientRect().top - list.getBoundingClientRect().top,
       };
       frames.push(frame);
-      const done = row.textContent.includes(doneLine);
+      const done = frame.showing;
       const quiet = list.getAnimations({ subtree: true }).length === 0 && next.getAnimations({ subtree: true }).length === 0;
       still = done && quiet ? still + 1 : 0;
       if (still >= 2) resolve(frames);
