@@ -1970,20 +1970,33 @@ def finish(interview: Interview) -> None:
     """Accept remaining proposals and cover unanswered topics at their safe defaults, without I/O."""
     for entry in interview.transcript:
         if entry.card is not None and entry.card.state == "proposed":
-            entry.card.state = "accepted"
+            config = entry.card.job.config if entry.card.job is not None else None
+            unpriced = isinstance(config, PurposePaymentConfig) and config.amount_cents is None
+            entry.card.state = "declined" if unpriced else "accepted"
     remaining = set(QUESTION_KEYS) - interview.covered
     suggested = interview.suggested
     if suggested is not None:
-        topics = {"summary": "what_you_do", "business_name": "what_you_do", "owner_display_name": "what_you_do",
-                  "hours": "hours_and_area", "service_area": "hours_and_area", "price_items": "quote_limit",
+        topics = {"hours": "hours_and_area", "service_area": "hours_and_area", "price_items": "quote_limit",
                   "public_contact": "contact_and_after_hours", "after_hours": "contact_and_after_hours",
-                  "pricing": "what_you_do", "intake": "what_you_do", "urgent": "what_you_do"}
+                  "pricing": "what_you_do"}
         patch = SetupPatch.model_validate({name: value for name, value in suggested
-                                          if name in LIMIT_QUESTIONS or topics.get(name) in remaining})
+                                          if topics.get(name) in remaining and value
+                                          and not getattr(interview.answers, name)})
         # A fact merge drops every limit, even if a stored suggestion somehow carries one.
         interview.answers = merged(interview.answers, patch, "what_you_do")
     interview.cover(remaining)
-    interview.answers.how_we_help = "\n".join(f"{job.title}: {job.how}" for job in accepted_jobs(interview))[:1500] or None
+    jobs = [job for job in accepted_jobs(interview) if job.can_do_today]
+    # Reserve complete titles and separators before sharing the remaining space between descriptions.
+    included = []
+    reserved = 0
+    for job in jobs:
+        needed = len(job.title) + 2 + bool(included)
+        if reserved + needed <= 1500:
+            included.append(job)
+            reserved += needed
+    how_budget = (1500 - reserved) // len(included) if included else 0
+    interview.answers.how_we_help = "\n".join(f"{job.title}: {job.how[:how_budget]}"
+                                               for job in included) or None
     interview.step = "tools"
 
 

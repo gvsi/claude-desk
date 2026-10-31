@@ -171,10 +171,15 @@ def test_finish_writes_how_we_help():
     state = interview_with(SetupAnswers(summary="Tax advice"), entries)
     setup.finish(state)
     assert state.answers.how_we_help == "Book an intro: Book a free slot"
-    entries = setup.proposal_entries([job(title="T" * 60, how="H" * 300) for _ in range(5)], [])
+    titles = [str(index) + "T" * 59 for index in range(5)]
+    entries = setup.proposal_entries([job(title=title, how="H" * 300) for title in titles], [])
     state = interview_with(SetupAnswers(summary="Tax advice"), entries)
     setup.finish(state)
-    assert state.answers.how_we_help == "\n".join(["T" * 60 + ": " + "H" * 300] * 5)[:1500]
+    lines = state.answers.how_we_help.splitlines()
+    assert len(lines) == 5
+    assert all(line.startswith(title + ": ") and line[len(title) + 2:]
+               for title, line in zip(titles, lines, strict=True))
+    assert len(state.answers.how_we_help) <= 1500
 
 
 async def test_use_your_suggestions_finishes_with_every_limit_asking(proposals, model, engine):
@@ -229,7 +234,7 @@ async def test_finish_connects_an_accepted_stripe_card_and_goes_on_if_it_fails(p
     monkeypatch.setattr(setup, "_put_business_tools", put)
     reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions", json={})
     assert reply.status_code == 200, reply.text
-    assert calls == [("connect", state["desk_id"]), ("put", state["desk_id"], ["schedule", "payment"])]
+    assert calls == [("connect", state["desk_id"]), ("put", state["desk_id"], ["schedule"])]
 
 
 @pytest.mark.parametrize("action", ["decision", "suggestions"])
@@ -440,3 +445,50 @@ async def test_finish_connects_only_accepted_connectable_apps(monkeypatch, app_k
     setup.finish(state)
     await setup.after_finish(SimpleNamespace(desk=lambda desk_id: desk_id), state)
     assert calls == [(state.desk_id, [])]
+
+
+@pytest.mark.parametrize("suggested_prices", [[{"title": "Hourly", "unit_cents": 6000}], []])
+async def test_suggestions_keep_owner_facts_given_on_another_topic(proposals, model, engine, suggested_prices):
+    from tests.api.test_setup_questions import answer, turn
+
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    reply = await answer(owner, model, interview_id, "We work in Berkeley and charge $80 hourly.",
+                         turn(service_area="Berkeley", price_items=[{"title": "Hourly", "unit_cents": 8000}]))
+    assert reply.status_code == 200, reply.text
+    record = await stored(engine, interview_id)
+    assert "quote_limit" not in {key for entry in record["transcript"] for key in entry.get("covered", [])}
+    suggested = setup.SuggestedFacts(service_area="Oakland", hours=[], public_contact="hello@example.test",
+                                     after_hours="Take a message", price_items=suggested_prices)
+    entry = setup.Entry(role="claude", text="Suggested facts", suggested=suggested)
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
+                               " WHERE interview_id = :id"), {
+            "transcript": json.dumps(record["transcript"] + [entry.model_dump(mode="json")]), "id": interview_id})
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
+    assert reply.status_code == 200, reply.text
+    saved = (await stored(engine, interview_id))["answers"]
+    assert saved["price_items"] == record["answers"]["price_items"]
+    assert saved["service_area"] == "Berkeley"
+    assert saved["public_contact"] == "hello@example.test"
+
+
+@pytest.mark.parametrize("kind", ["documents", "status"])
+def test_how_we_help_omits_jobs_unavailable_today(kind):
+    entries = setup.proposal_entries([job(kind, title="Unavailable job", config=None), job()], [])
+    entries[0].card.state = "accepted"
+    state = interview_with(SetupAnswers(summary="Tax advice"), entries)
+    setup.finish(state)
+    assert state.answers.how_we_help == "Book an intro: Book a free slot"
+
+
+def test_finish_declines_an_unpriced_purpose_payment():
+    payment = job("payment", title="Pay a retainer", config={
+        "block": "purpose_payment", "purpose": "Retainer", "amount_cents": 5000})
+    entries = setup.proposal_entries([payment, job()], [], business_tools_enabled=True)
+    assert entries[0].card.job.config.amount_cents is None
+    state = interview_with(SetupAnswers(summary="Tax advice"), entries)
+    setup.finish(state)
+    assert entries[0].card.state == "declined"
+    assert [accepted.title for accepted in setup.accepted_jobs(state)] == ["Book an intro"]
+    assert state.answers.how_we_help == "Book an intro: Book a free slot"
