@@ -59,7 +59,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-R2-Chat-Link-Cancelled',
     canvasNote: [
-      'Built against the board in review; sign-off pending.',
+      'Signed on 2026-10-30.',
       'A payment link a confirmed rule change cancelled, in the chat: the Desk’s own message carries only the link_cancelled reply card, with the payment link’s icon and “Payment link cancelled”, then the kernel’s block: the amount, what the link was for and the kernel’s line.',
       'The board also draws the test-payment note; a cancelled link moves no money, so the card has none. The board draws the card under Claude’s words in the same message; Claude’s words are Claude’s own message here, before the Desk’s. The receipts’ lines are the board’s, and the kernel writes them.',
     ].join(' '),
