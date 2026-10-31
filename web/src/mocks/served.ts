@@ -106,7 +106,7 @@ export interface ErrorBody {
   cancel_reason?: CancelReason | null;
   /** A setup confirm's 409: the same rules, drafted again on the rules now in force. */
   draft?: RulesDraft;
-  /** Seconds to wait before sending again: a keyed setup start's 409 `in_progress`. */
+  /** Seconds to wait before sending again: a setup start's 409 `in_progress`. */
   retry_after?: number;
 }
 
@@ -737,7 +737,7 @@ const SERVED: ServedRoutes = {
     if (req.malformed || !isDemoAgentTask(task) || key === false) return INVALID;
     // A repeat with the client's key answers the run the first started and starts nothing; the key
     // with another task, session or Desk is a conflict (plan 02b).
-    const held = key === null ? null : sv.agents.keyed(key, task, visitor.session, visitor.desk.summary.slug);
+    const held = sv.agents.keyed(key, task, visitor.session, visitor.desk.summary.slug);
     if (held === 'conflict') return failWith(409, 'conflict');
     const runId = held ?? sv.agents.start(sv.world, visitor.desk, visitor.session, task, key);
     return ok({ run_id: runId } satisfies AgentRunStarted, 202);

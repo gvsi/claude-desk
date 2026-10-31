@@ -17,9 +17,13 @@ interface Started {
   about: string | null;
 }
 
+/** How many starts this file has sent, which gives each its own client key. */
+let starts = 0;
+
 /** A new interview from `description`: what the new Desk is called, Claude's first words and the line about it. */
 async function started(description: string): Promise<Started> {
-  const answer = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles' } });
+  const body = { description, timezone: 'America/Los_Angeles', idempotency_key: `start-${++starts}` };
+  const answer = await mockStore.dispatch('startSetup', { body });
   if ('network' in answer || answer.status !== 201) throw new Error('the mock starts a setup');
   const state = answer.body as SetupState;
   const desk = mockStore.world.desks.find((d) => d.summary.desk_id === state.desk_id);

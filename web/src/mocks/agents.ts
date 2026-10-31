@@ -245,7 +245,7 @@ export class AgentRuns {
    * run whose turns land `AGENT_TURN_GAP_MS` apart until it is `done`. Returns the run's id, which
    * a repeat with the same client `key` finds again (`keyed`).
    */
-  start(world: MockWorld, desk: DeskRecord, launcher: SessionRecord, task: DemoAgentTask, key: string | null = null): string {
+  start(world: MockWorld, desk: DeskRecord, launcher: SessionRecord, task: DemoAgentTask, key: string): string {
     const agent = world.addSession(desk, { agent: AGENT_NAME });
     const run: DemoAgentRun = {
       run_id: world.id('run'),
@@ -257,7 +257,7 @@ export class AgentRuns {
     };
     const record: { run: DemoAgentRun; timer: ReturnType<typeof setTimeout> | null } = { run, timer: null };
     this.runs.set(run.run_id, record);
-    if (key !== null) this.keys.set(key, { runId: run.run_id, task, sessionId: run.launcher_session_id, slug: run.slug, at: Date.now() });
+    this.keys.set(key, { runId: run.run_id, task, sessionId: run.launcher_session_id, slug: run.slug, at: Date.now() });
     const steps = turnsFor(world, desk, agent, task);
     const tick = () => {
       record.timer = setTimeout(() => {

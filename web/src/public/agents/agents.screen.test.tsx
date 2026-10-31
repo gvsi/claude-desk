@@ -356,7 +356,7 @@ describe('agents page', () => {
   it('agent_page_opens_a_session_first', async () => {
     // The mock, like the API, refuses to send an agent for a browser with no chat.
     mockStore.reset('rivera');
-    const refused = await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'book_visit' } });
+    const refused = await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
     expect(refused).toMatchObject({ status: 401 });
 
     // A fresh render: the page opens a session before it sends the agent, and the agent goes once.
