@@ -5,14 +5,15 @@ These tests run against the local Postgres (`docker compose up -d db`) after
 desk_admin; privilege checks connect as the role under test. Every write is rolled back, except
 the rows `committed_copies` commits as desk_admin (another role sees only committed rows) and
 removes afterwards. A migration taken down and up runs in a scratch database of its own, made
-next to the suite's and dropped afterwards (`scratch`, `scratch_database`); the suite's database
-is never downgraded.
+next to the suite's and dropped afterwards (`new_scratch`, under the `scratch` and
+`scratch_database` fixtures); the suite's database is never downgraded.
 """
 
 import hashlib
 import re
 import warnings
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -646,44 +647,67 @@ MONEY_CAP_REVISION = "01b_3b_money_cap"
 
 
 def alembic_config() -> Config:
-    config = Config()
+    config = Config()                                     # no file, so alembic's env.py leaves logging alone
     config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
     return config
 
 
 @dataclass
 class Scratch:
-    """A database of the migration tests' own, next to the suite's, migrated from empty to head and
-    dropped once they have run: a test migrates it down and back up, never the suite's database."""
+    """A database of a migration test's own, next to the suite's and dropped once it has run: a test
+    migrates it down and back up, never the suite's database, which a local kernel and API run on."""
 
-    url: URL                              # a `URL`, whose repr masks the password, as `scratch_database`'s
+    url: URL                              # a `URL`, whose repr masks the password; rendered with it only where used
     conn: psycopg.Connection              # as desk_admin, autocommitted
 
     def migrate(self, step: Callable[[Config, str], None], revision: str) -> None:
         """Alembic's `step` (`command.upgrade`, `downgrade` or `stamp`) to `revision` on this
-        database: env.py migrates the database ADMIN_DATABASE_URL names."""
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setenv("ADMIN_DATABASE_URL", self.url.render_as_string(hide_password=False))
-            step(alembic_config(), revision)
+        database, in one transaction on a connection of its own, which env.py migrates on
+        (`config.attributes["connection"]`). A lock it can't get fails the test, never hangs it."""
+        engine = create_engine(self.url, poolclass=NullPool)
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SET lock_timeout = '5s'"))
+                connection.commit()
+                config = alembic_config()
+                config.attributes["connection"] = connection
+                with connection.begin():                              # alembic runs inside it; it commits here
+                    step(config, revision)
+        finally:
+            engine.dispose()
 
 
-@pytest.fixture(scope="module")
-def scratch(admin) -> Iterator[Scratch]:
-    base = make_url(database_url("ADMIN"))
-    name = f"{base.database}_migrations_{uuid4().hex[:8]}"
+@contextmanager
+def new_scratch(admin: psycopg.Connection) -> Iterator[Scratch]:
+    """An empty scratch database, dropped afterwards with any connection still open to it."""
+    suite = make_url(database_url("ADMIN"))
+    name = f"{suite.database}_migrate_{uuid4().hex[:8]}"
     admin.execute(SQL("CREATE DATABASE {}").format(Identifier(name)))
     try:
-        url = base.set(database=name)
+        url = suite.set(database=name)
         with psycopg.connect(libpq_url(url.render_as_string(hide_password=False)), autocommit=True) as conn:
-            made = Scratch(url, conn)
-            made.migrate(command.upgrade, "head")
-            yield made
+            yield Scratch(url, conn)
     finally:
         admin.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(name)))
 
 
+@pytest.fixture(scope="module")
+def scratch(admin) -> Iterator[Scratch]:
+    """A scratch database at head, shared by the module's migration tests: each leaves it at head."""
+    with new_scratch(admin) as made:
+        made.migrate(command.upgrade, "head")
+        yield made
+
+
+@pytest.fixture
+def scratch_database(admin) -> Iterator[Scratch]:
+    """An empty scratch database of the test's own, for a test that migrates it up from nothing."""
+    with new_scratch(admin) as made:
+        yield made
+
+
 def test_the_scratch_database_never_shows_its_password(scratch):
-    # as `scratch_database`'s URL: a failure under --showlocals may print the fixture, never the password
+    # a failure under --showlocals may print the fixture, never the password
     password = make_url(database_url("ADMIN")).password
     shown = bool(password) and password in repr(scratch)     # a bool, so a failure can't print it either
     assert password and not shown, "the scratch database's repr holds the admin password"
@@ -862,27 +886,6 @@ def test_only_an_owner_alert_names_a_decision(kernel_tx):
         kernel_tx.expunge_all()
 
 
-ALEMBIC_DIR = Path(__file__).resolve().parents[1] / "alembic"
-
-
-@pytest.fixture
-def scratch_database(admin) -> Iterator[URL]:
-    """An empty database next to the suite's, for a migration test to take up and down; its admin URL.
-
-    The suite's own database is the one a local kernel and API run on, so no test ever downgrades it.
-    Dropped afterwards, with any connection still open to it. The URL stays a `URL`, whose repr masks
-    the password, and is rendered with it only where it is used, so a failure under `--showlocals`
-    never prints it.
-    """
-    suite = make_url(database_url("ADMIN"))
-    name = f"{suite.database}_migrate_{uuid4().hex[:8]}"
-    admin.execute(SQL("CREATE DATABASE {}").format(Identifier(name)))
-    try:
-        yield suite.set(database=name)
-    finally:
-        admin.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(name)))
-
-
 def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:
     """Whether the database behind `conn` has kernel.demo_inbox.decision_id, and whether it has its check."""
     (checks,) = conn.execute("SELECT count(*) FROM pg_constraint WHERE conrelid = 'kernel.demo_inbox'::regclass"
@@ -893,31 +896,15 @@ def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:
 def test_inbox_decision_id_migration_goes_down_and_up(admin, scratch_database):
     # 0012_inbox_decision_id adds the column and its check; its downgrade takes both away, and head brings them back.
     # It all happens in a scratch database: the suite's own stays at head throughout
-    config = Config()                                     # no file, so alembic's env.py leaves logging alone
-    config.set_main_option("script_location", str(ALEMBIC_DIR))
-    engine = create_engine(scratch_database, poolclass=NullPool)
-    try:
-        with (engine.connect() as connection,
-              psycopg.connect(libpq_url(scratch_database.render_as_string(hide_password=False)),
-                              autocommit=True) as scratch):
-            connection.execute(text("SET lock_timeout = '5s'"))     # a lock it can't get fails the test, never hangs it
-            connection.commit()
-            config.attributes["connection"] = connection             # env.py migrates on this connection
-
-            def migrate(step, revision: str) -> None:
-                with connection.begin():                              # alembic runs inside it; it commits here
-                    step(config, revision)
-
-            migrate(command.upgrade, "head")
-            assert migrated(scratch) == (True, True)
-            migrate(command.downgrade, "0012_inbox_decision_id-1")   # to whatever 0012 revises
-            assert migrated(scratch) == (False, False)
-            assert migrated(admin) == (True, True)                   # the suite's own database never went down
-            migrate(command.upgrade, "head")
-            assert migrated(scratch) == (True, True)
-            assert nullable_columns(scratch, "kernel", "demo_inbox")["decision_id"] is True
-    finally:
-        engine.dispose()
+    scratch = scratch_database.conn
+    scratch_database.migrate(command.upgrade, "head")
+    assert migrated(scratch) == (True, True)
+    scratch_database.migrate(command.downgrade, "0012_inbox_decision_id-1")   # to whatever 0012 revises
+    assert migrated(scratch) == (False, False)
+    assert migrated(admin) == (True, True)                                    # the suite's own never went down
+    scratch_database.migrate(command.upgrade, "head")
+    assert migrated(scratch) == (True, True)
+    assert nullable_columns(scratch, "kernel", "demo_inbox")["decision_id"] is True
 
 
 def assert_refused_before_the_database(session: Session, row: Base) -> None:
