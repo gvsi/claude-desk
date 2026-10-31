@@ -584,8 +584,15 @@ const SERVED: ServedRoutes = {
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > MESSAGE_MAX) return INVALID;
     // Claude's answer, and the change it drafts when the owner asked for one, merged into the active
     // rules. Claude reads the Desk's held requests too, newest first, as Needs you lists them.
+    const cap = desk.policy.auto_money_cap_cents ?? 0;
     const held = needsYou(sv.world, desk)
-      .flatMap((item) => (item.decision?.action ? [{ tool: item.decision.action.tool, reasonPlain: item.decision.reason_plain, heldBy: item.held_by }] : []))
+      .flatMap((item) => {
+        const action = item.decision?.action;
+        if (!item.decision || !action) return [];
+        const money = action.effects.some((effect) => MONEY_EFFECTS.has(effect));
+        const aboveLimit = money && action.amount_cents != null && action.amount_cents > cap;
+        return [{ tool: action.tool, reasonPlain: item.decision.reason_plain, heldBy: item.held_by, aboveLimit }];
+      })
       .reverse();
     const reply = ruleChatReply(text, desk.policy.cards, held);
     if (reply.add.length === 0) return ok({ answer: reply.answer, draft: null } satisfies RuleChatOut);

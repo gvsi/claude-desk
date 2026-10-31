@@ -841,7 +841,12 @@ export interface HeldForChat {
   tool: ToolName;
   reasonPlain: string;
   heldBy: string | null;
+  /** It moves more money than the payment limit, which no rule goes past, so no rule could let it through. */
+  aboveLimit: boolean;
 }
+
+/** Why a hold no rule of the owner's decided waits, in the kernel's words for the default ask (`DEFAULT_REASON`, `kernel_service/compiler.py`). */
+const DEFAULT_ASK_REASON = 'Not covered by a rule yet, so it asks you.';
 
 /**
  * What the owner calls each tool's requests, so Claude knows which hold a question names: the API's
@@ -867,9 +872,9 @@ const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
  * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rule for
  * anyone to weekdays, so weekend quotes ask; "Quote water heater installs up to $600" adds a
  * quote rule up to that amount); "Why was this refund held?" is answered about the newest held
- * request of the tool it names, with the rule that held it; another question is answered with no
- * draft, and anything else says what Claude can draft. `active` is the Desk's active rules, and
- * `held` its held requests, newest first.
+ * request of the tool it names, with the rule that held it, and an offer to draft one unless it is
+ * above the payment limit; another question is answered with no draft, and anything else says what
+ * Claude can draft. `active` is the Desk's active rules, and `held` its held requests, newest first.
  */
 export function ruleChatReply(text: string, active: readonly RuleCard[], held: readonly HeldForChat[] = []): RuleChatReply {
   const lower = text.toLowerCase();
@@ -906,11 +911,10 @@ export function ruleChatReply(text: string, active: readonly RuleCard[], held: r
   }
   const asked = hasWord(lower, 'why') || hasWord(lower, 'held') ? held.find((h) => hasWord(lower, TOOL_LABELS[h.tool] ?? h.tool)) : undefined;
   if (asked !== undefined) {
-    const why = asked.heldBy === null ? 'No rule you set covers it, so it waited for your answer.' : `It was held by your rule: ${asked.heldBy}`;
-    return {
-      answer: `${asked.reasonPlain} ${why} If you'd like requests like this to go through on their own, ask me to draft that rule.`,
-      add: [],
-    };
+    const why = asked.heldBy === null ? DEFAULT_ASK_REASON : `It was held by your rule: ${asked.heldBy}`;
+    // Above the payment limit no rule lets it through, so drafting one is no answer.
+    const offer = asked.aboveLimit ? '' : " If you'd like requests like this to go through on their own, ask me to draft that rule.";
+    return { answer: `${asked.reasonPlain} ${why}${offer}`, add: [] };
   }
   if (lower.trim().endsWith('?')) {
     return {
