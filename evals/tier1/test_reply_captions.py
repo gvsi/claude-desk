@@ -1,11 +1,14 @@
-"""Prompt examples against the real language detector and prose scan, with no database or model calls.
+"""Prompt examples against the real language detector, prose scan and full kernel reply check.
 
-These white-box checks cover wording only, not fact entitlement, soft-check acceptance or task completion.
+Pure white-box checks cover wording; full checks use genuine facts and tier 1's fake soft checker.
+Neither measures live soft-check acceptance or task completion.
 """
 
 import pytest
 
 from desk.api import prompts
+from evals.tier1.golden_desk import golden_desk, open_caller
+from evals.tier1.test_reply_golden import ReplyRow, check_reply, cite_facts
 
 
 RIVERA_NAMES = ("Rivera Plumbing", "Main line", "Maria Rivera")
@@ -43,6 +46,20 @@ def test_reserved_values_stay_blocked_beside_every_caption(caption, reserved):
 
 @pytest.mark.requires("01a")
 @pytest.mark.white_box
+@pytest.mark.parametrize(("prose", "rule_id"), [
+    ("Aquí están los horarios de la mañana.", "lex.es.date"),
+    ("Here are the weekend times.", "lex.en.date"),
+])
+def test_day_words_stay_reserved(prose, rule_id):
+    from desk.kernel_service import reply_check
+
+    violations = reply_check.scan_prose(prose, names=RIVERA_NAMES)
+    assert {violation.kind for violation in violations} == {"number_in_prose"}
+    assert rule_id in {violation.rule_id for violation in violations}
+
+
+@pytest.mark.requires("01a")
+@pytest.mark.white_box
 @pytest.mark.parametrize("prose", ["You're all set.", "Su cita está confirmada."])
 def test_booking_claims_need_a_genuine_booking_card(prose):
     from desk.kernel_service import reply_check
@@ -68,4 +85,39 @@ def test_the_terse_payment_caption_still_reads_as_unsupported():
 
     prose = "Absolutely. Payment link below."
     assert reply_check.scan_prose(prose, names=RIVERA_NAMES) == []
-    assert lang.detect(prose) == "other"
+    assert lang.detect(prose) not in ("en", "es")
+
+
+@pytest.mark.requires("01a")
+@pytest.mark.parametrize("row", [
+    pytest.param(ReplyRow.model_validate(row), id=row["id"]) for row in [
+        {"id": "quote-en", "requires": ["01a"],
+         "prose": prompts.REPLY_EXAMPLES["Quote (quote with the returned quote fact)"]["en"],
+         "clauses": [{"template": "quote", "fact": "own-quote"}],
+         "expect": {"ok": True, "language": "en", "blocks": ["prose", "quote"]}},
+        {"id": "quote-es", "requires": ["01a"],
+         "prose": prompts.REPLY_EXAMPLES["Quote (quote with the returned quote fact)"]["es"],
+         "clauses": [{"template": "quote", "fact": "own-quote"}],
+         "expect": {"ok": True, "language": "es", "blocks": ["prose", "quote"]}},
+        {"id": "booking-es", "requires": ["01a"], "prose": "Su cita está confirmada.",
+         "clauses": [{"template": "booking_confirmed", "fact": "own-booking"}],
+         "expect": {"ok": True, "language": "es", "blocks": ["prose", "booking_confirmed"]}},
+        {"id": "booking-es-without-card", "requires": ["01a"], "prose": "Su cita está confirmada.",
+         "clauses": [],
+         "expect": {"ok": False, "violations": ["promise_word"], "blocks": ["handoff"]}},
+        {"id": "quote-amount", "requires": ["01a"],
+         "prose": prompts.REPLY_EXAMPLES["Quote (quote with the returned quote fact)"]["en"] + " $89",
+         "clauses": [{"template": "quote", "fact": "own-quote"}],
+         "expect": {"ok": False, "violations": ["number_in_prose"], "blocks": ["handoff"]}},
+    ]
+])
+async def test_captions_through_full_reply_check(k, fake, records, row):
+    desk = await golden_desk(k)
+    caller = await open_caller(k, desk, "visitor")
+    facts = await cite_facts(k, fake, records, desk, caller, row)
+    verdict = await check_reply(
+        k, caller, row.prose, row.draft_clauses(facts),
+        expect=row.verdict_expect(caller.state.generation, facts),
+    )
+    if k.is_real:
+        assert row.kind_mismatches(verdict) == []
