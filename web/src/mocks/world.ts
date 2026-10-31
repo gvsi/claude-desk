@@ -10,6 +10,7 @@ import type {
   DemoInboxEntry,
   EvDemoInbox,
   EvMessage,
+  KnowledgeItem,
   LedgerEntry,
   LedgerEvent,
   OpenStatus,
@@ -233,6 +234,14 @@ export class MockWorld {
   readonly decisions = new Map<string, DecisionRecord>();
   readonly handoffs = new Map<string, HandoffRecord>();
   readonly leads: LeadRecord[] = [];
+  /** What the owner told each Desk, by Desk and `item_id`, as the kernel stored it. */
+  readonly knowledge = new Map<string, { deskId: string; item: KnowledgeItem }>();
+  /**
+   * Whether the kernel keeps an item to the owner whatever readers it's posted with, as it does one
+   * holding a customer's private data (kernel verification fixes, plan 01b Task 6c). It never does
+   * unless a test says so.
+   */
+  keepsKnowledgeOwnerOnly: (item: KnowledgeItem) => boolean = () => false;
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
   /**

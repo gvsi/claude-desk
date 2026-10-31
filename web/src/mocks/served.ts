@@ -6,7 +6,7 @@
  * cookies: kept in the store for the screen tests' one page, real ones on the dev server. Nothing
  * here is a credential.
  */
-import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
+import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type KnowledgeItem, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type {
   AgentRunStarted,
@@ -57,6 +57,22 @@ const DEMO_CODE_SHAPE = /^\d{6}$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const KNOWLEDGE_SOURCES: ReadonlySet<unknown> = new Set(['website', 'upload', 'setup', 'memory_import']);
+
+/** A `KnowledgeItem` as the contracts have it: an id, a known source, a title, a text and readers. */
+function isKnowledgeItem(value: unknown): value is KnowledgeItem {
+  if (!isRecord(value) || !isRecord(value.label)) return false;
+  const { readers } = value.label;
+  return (
+    typeof value.item_id === 'string' &&
+    value.item_id !== '' &&
+    KNOWLEDGE_SOURCES.has(value.source) &&
+    typeof value.title === 'string' &&
+    typeof value.text === 'string' &&
+    (readers === undefined || (Array.isArray(readers) && readers.every((reader) => typeof reader === 'string')))
+  );
+}
 
 /**
  * The cookies a request carries, as the API reads who is asking from them, and the ones its answer
@@ -638,6 +654,18 @@ const SERVED: ServedRoutes = {
     const version = req.params.version ?? '';
     const record = /^\d{1,9}$/.test(version) ? desk.drafts.get(Number(version)) : undefined;
     return record ? ok(record.draft) : NOT_FOUND;
+  },
+  addKnowledge(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const item = isRecord(req.body) ? req.body.item : undefined;
+    if (req.malformed || !isKnowledgeItem(item)) return INVALID;
+    // Posted again under its id, it replaces the item. The label is the one the kernel keeps, with
+    // every field, as the API's models send them (readers default to the owner's).
+    const readers = sv.world.keepsKnowledgeOwnerOnly(item) ? ['owner'] : [...(item.label.readers ?? ['owner'])];
+    const stored: KnowledgeItem = { ...item, label: { readers, record_owner: item.label.record_owner ?? null } };
+    sv.world.knowledge.set(`${desk.summary.desk_id}:${item.item_id}`, { deskId: desk.summary.desk_id, item: stored });
+    return ok(stored);
   },
   people(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
+import type { DecisionState, EvMessage, KnowledgeItem, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
@@ -49,6 +49,7 @@ import {
 import { RIVERA } from './seed.ts';
 import { holdNextStart } from './setup.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
+import { validateContract } from './validate.ts';
 
 const slug = RIVERA.slug;
 const deskId = RIVERA.deskId;
@@ -1289,6 +1290,43 @@ describe('rules and tools', () => {
     expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} Not covered by a rule yet, so it asks you.`);
     record.decision.card_ids = ['rv-refund'];
     expect(await ask('Why was this refund held?')).toBe(`${refund.reason_plain} It was held by your rule: Refunds to a customer wait for your answer.`);
+  });
+
+  it('knowledge_answers_what_the_kernel_keeps', async () => {
+    const note: KnowledgeItem = {
+      item_id: 'note-0f2c',
+      source: 'setup',
+      title: 'We don’t service tankless water heaters older than 15 years.',
+      text: 'We don’t service tankless water heaters older than 15 years. Suggest a replacement quote instead.',
+      label: { readers: ['owner'] },
+    };
+    const add = (item: unknown) => call('addKnowledge', { params: { desk_id: deskId }, body: { item } });
+
+    // Stored as posted, and answered with the stored item, which is a contract KnowledgeItem: its
+    // label with every field, as the API sends it.
+    const labelled = (readers: string[]) => ({ ...note, label: { readers, record_owner: null } });
+    const kept = await add(note);
+    expect(kept).toEqual({ status: 200, body: labelled(['owner']) });
+    expect(validateContract('KnowledgeItem', kept.body)).toEqual([]);
+    // Posted again under its id with the public label: it replaces the item, and says so.
+    expect((await add({ ...note, label: { readers: ['public'] } })).body).toEqual(labelled(['public']));
+    expect([...mockStore.world.knowledge.values()].map((stored) => stored.item.label.readers)).toEqual([['public']]);
+
+    // The kernel keeps an item to the owner whatever it's posted with, when a test says it does.
+    mockStore.world.keepsKnowledgeOwnerOnly = (item) => item.item_id === note.item_id;
+    const forced = await add({ ...note, label: { readers: ['public'] } });
+    expect(forced.body).toEqual(labelled(['owner']));
+    expect(validateContract('KnowledgeItem', forced.body)).toEqual([]);
+
+    // Not an item: refused, nothing stored.
+    for (const bad of [undefined, { ...note, title: 3 }, { ...note, label: { readers: 'public' } }, { ...note, source: 'gossip' }, { ...note, item_id: '' }]) {
+      expect((await add(bad)).status).toBe(422);
+    }
+    expect(mockStore.world.knowledge.size).toBe(1);
+
+    // Another copy's owner reaches none of it.
+    mockStore.reset('rivera', { signedIn: false });
+    expect((await add(note)).status).toBe(401);
   });
 
   it('people_mark_replayed_leads', async () => {
