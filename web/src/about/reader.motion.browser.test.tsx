@@ -374,6 +374,24 @@ describe('ReaderPage with motion', () => {
     await screen.unmount();
   });
 
+  it('back_during_a_contents_glide_stops_it', async () => {
+    // Part way through the glide to "Readiness", the reader goes Back: the address no longer names the section, and the
+    // window stops where it is rather than going on there. (A memory router has no browser to restore the reader's
+    // place; the end-to-end test checks that Back's restore wins.)
+    const screen = await renderReader('prediction');
+    await jumpTo(1800);
+    followLink('readiness');
+    await expect.poll(() => window.scrollY > 1810, { interval: 5 }).toBe(true);
+    at.navigate?.(-1);
+    await expect.poll(() => at.path).toBe('/about/prediction');
+    await untilStill();
+    const stopped = Math.round(window.scrollY);
+    expect(stopped, 'the window stopped short of the section').toBeLessThan(placeOf('readiness') - 400);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(Math.round(window.scrollY), 'and stays there').toBe(stopped);
+    await screen.unmount();
+  });
+
   it('page_scrolls_stay_instant_with_motion', async () => {
     // The scrolls the page makes itself land in the frame the page draws, never part way, and the place the page
     // remembers for Back is where they landed.

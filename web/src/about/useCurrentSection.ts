@@ -8,8 +8,9 @@
  * past the line without one coming into the observer's band or leaving it, so the hook also looks once each
  * scroll comes to rest: one look per scroll, not work on every frame.
  *
- * `moveToSection`, the window's move when a contents link is followed, lives here too, so the timing of a jump (when
- * it has arrived, when the reader has taken over, how long to wait) is in one place for the mark and the move.
+ * The page's own moves of the window live here too, so the mark and the moves share one account of who moved it:
+ * `moveToSection` for a contents link, `keepSectionWhileTypeLoads` for an address's section. Both go through one
+ * owner, `place`, of where the page means the window to be.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -26,17 +27,33 @@ const JUMP_WAIT = 1000;
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 /**
- * Waits on a jump the page started, for the ways it can end other than arriving: the reader scrolling the window
- * themselves (the wheel, a touch that moves, a scrolling key) or going Back or Forward calls `onTakenOver`; a second with no scroll calls
- * `onQuiet`, so a long glide isn't cut short and a jump that never moves doesn't wait forever. Returns what stops
- * waiting.
+ * Calls `onScroll` whenever the reader sets out to move the window themselves: the wheel, a touch that moves, a key
+ * that scrolls, or Back and Forward. The one test of the reader moving on, for the page's own moves and the contents
+ * list's mark alike. Returns what stops listening.
+ */
+function onReaderScroll(onScroll: (event: Event) => void): () => void {
+  const onKey = (event: KeyboardEvent) => {
+    if (SCROLL_KEYS.has(event.key)) onScroll(event);
+  };
+  window.addEventListener('wheel', onScroll, { passive: true });
+  window.addEventListener('touchmove', onScroll, { passive: true });
+  window.addEventListener('popstate', onScroll);
+  window.addEventListener('keydown', onKey);
+  return () => {
+    window.removeEventListener('wheel', onScroll);
+    window.removeEventListener('touchmove', onScroll);
+    window.removeEventListener('popstate', onScroll);
+    window.removeEventListener('keydown', onKey);
+  };
+}
+
+/**
+ * Waits on a jump the page started, for the ways it can end other than arriving: the reader moving on calls
+ * `onTakenOver`; a second with no scroll calls `onQuiet`, so a long glide isn't cut short and a jump that never moves
+ * doesn't wait forever. Returns what stops waiting.
  */
 function waitForJump(onTakenOver: () => void, onQuiet: () => void): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const takenOver = () => {
-    stop();
-    onTakenOver();
-  };
   const later = () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
@@ -44,22 +61,16 @@ function waitForJump(onTakenOver: () => void, onQuiet: () => void): () => void {
       onQuiet();
     }, JUMP_WAIT);
   };
-  const onKey = (event: KeyboardEvent) => {
-    if (SCROLL_KEYS.has(event.key)) takenOver();
-  };
+  const stopListening = onReaderScroll(() => {
+    stop();
+    onTakenOver();
+  });
   function stop() {
     clearTimeout(timer);
     window.removeEventListener('scroll', later);
-    window.removeEventListener('wheel', takenOver);
-    window.removeEventListener('touchmove', takenOver);
-    window.removeEventListener('popstate', takenOver);
-    window.removeEventListener('keydown', onKey);
+    stopListening();
   }
   window.addEventListener('scroll', later, { passive: true });
-  window.addEventListener('wheel', takenOver, { passive: true });
-  window.addEventListener('touchmove', takenOver, { passive: true });
-  window.addEventListener('popstate', takenOver);
-  window.addEventListener('keydown', onKey);
   later();
   return stop;
 }
@@ -80,143 +91,149 @@ function atPlaceOf(heading: HTMLElement): boolean {
 }
 
 /**
- * Moves the window to a contents link's section, and returns what cancels the watch it keeps, as when navigation
- * changes the reading place: to `heading`, below its scroll margin, gliding unless `behavior` is instant. A glide heads for where the heading was when it started; if the page grows above the section on the way,
- * as when the reading type's web font swaps in on a cold load, it ends short. So once the window has come to rest
- * where the glide was going, a heading that has moved is followed once more. A rest short of there is an earlier
- * scroll's or the reader's, and the reader taking over ends the watch.
+ * What ends the wait on the reading type for an address's section: any pointer or key, as well as a scroll, Back and
+ * Forward included. Only that wait uses it; the reader moving on otherwise is `onReaderScroll`.
  */
-export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): () => void {
-  let going = placeOf(heading);
-  heading.scrollIntoView({ behavior, block: 'start' });
-  const stopKeeping = keepSectionWhileTypeLoads(heading, behavior);
-  // An instant jump has arrived already, and keeps its place as the page changes; so has a jump to where it is.
-  if (Math.abs(window.scrollY - going) <= 1) return stopKeeping;
-  let followedAgain = false;
-  const stopWaiting = waitForJump(stop, stop);
-  // A rest is heard from the scroll's end, or from the window going still: a browser can skip the end of a glide
-  // that starts while an earlier scroll's end is still due. Either only counts where the glide was going.
-  const stopResting = onScrollRest(rested);
-  const stopStill = onStill(rested);
-  function rested() {
-    if (Math.abs(window.scrollY - going) > 1) return;
-    if (!followedAgain && !atPlaceOf(heading)) {
-      followedAgain = true;
-      going = placeOf(heading);
-      heading.scrollIntoView({ behavior, block: 'start' });
-      return;
-    }
-    stop();
-  }
-  function stop() {
-    stopWaiting();
-    stopResting();
-    stopStill();
-  }
-  return () => {
-    stop();
-    stopKeeping();
-  };
-}
-
-/** What the reader does that means they have moved on from where the page put them, Back and Forward included. */
 const READER_ACTIONS = ['wheel', 'touchmove', 'pointerdown', 'keydown', 'popstate'] as const;
 
+/** How many times one hold follows its heading again when the page has moved it, so a page that keeps changing can't loop. */
+const FOLLOWS = 3;
+
+/** Where the page means the window to be: the heading it last moved the window to, by a contents link or an address. */
+interface Place {
+  heading: HTMLElement;
+  /** The page is moving the window there now, in a glide or a correction that hasn't come to rest. */
+  moving: boolean;
+  /** The page is waiting on the reading type, to follow the heading again once its swap has moved the page. */
+  keeping: boolean;
+  /** Ends it; `stopGlide` also stops a glide still under way, as when navigation leaves the section. */
+  end: (stopGlide?: boolean) => void;
+}
+
+/** The one owner of where the page means the window to be. One at a time: a new move or keep ends the one before. */
+let place: Place | null = null;
+
 /**
- * Keeps the window at a section the page moved to (by an address, or a contents link) until the reading type's web
- * font has loaded, and returns what cancels it. On a cold load the font swaps in after the page has moved there and
- * shifts the page under the window, and the browser's scroll anchoring holds the window to some other element than
- * the heading (about 2 px off after an address, about 30 px after a contents link). Once the type has loaded and the
- * window has come to rest, a heading that has moved is followed once more, in `behavior`, unless the reader has acted
- * first (Back and Forward included) or the page has cancelled it.
+ * Whether a scroll now is the page's, not the reader's: the page is moving the window to its place, or waiting on the
+ * type (whose swap, and the browser's anchoring of the window through it, shift the page under the window), or the
+ * window is still at the place, the page's end allowed for. A scroll that leaves the place otherwise is the reader's.
+ */
+function scrollIsThePages(): boolean {
+  return place !== null && (place.moving || place.keeping || atPlaceOf(place.heading));
+}
+
+/**
+ * Takes the window to `heading` (when `move`) and holds it there as the page means it to be, until the reader moves on,
+ * the window is moved off it, a new move or keep starts, or the returned function ends it.
+ *
+ * A move heads for where the heading is when it starts; if the page grows above the section on the way, it ends short,
+ * so once it has come to rest where it was going, a heading that has moved is followed again. While the reading type
+ * is still loading, the hold waits for it: its swap shifts the page under the window, and the browser's anchoring
+ * holds the window to some other element than the heading, so once the type has loaded and the window is at rest, the
+ * heading is followed again, unless the reader has acted first.
+ */
+function hold(heading: HTMLElement, behavior: ScrollBehavior, move: boolean): () => void {
+  place?.end();
+  const { fonts } = document;
+  const self: Place = { heading, moving: false, keeping: Boolean(fonts && fonts.status === 'loading'), end };
+  place = self;
+  let going = placeOf(heading);
+  let follows = 0;
+  let rest: ReturnType<typeof setTimeout> | undefined;
+  let quiet: ReturnType<typeof setTimeout> | undefined;
+
+  /** Moves the window to the heading; the page is moving it until it comes to rest there. */
+  function go() {
+    going = placeOf(heading);
+    heading.scrollIntoView({ behavior, block: 'start' });
+    self.moving = Math.abs(window.scrollY - going) > 1;
+    if (self.moving) arm();
+  }
+  /**
+   * The move's own timers, armed by its start and each of its scrolls: a rest heard as the window going still (a
+   * browser can skip the end of a glide that starts while an earlier scroll's end is still due), and a quiet second
+   * after which a move that never arrived is over.
+   */
+  function arm() {
+    clearTimeout(rest);
+    clearTimeout(quiet);
+    rest = setTimeout(rested, REST_WAIT);
+    quiet = setTimeout(() => {
+      if (!self.moving) return;
+      self.moving = false;
+      if (!atPlaceOf(heading)) end();
+    }, JUMP_WAIT);
+  }
+  /** At rest where the move was going: arrived. A rest anywhere else is an earlier scroll's or a frame that came late. */
+  function rested() {
+    if (!self.moving || Math.abs(window.scrollY - going) > 1) return;
+    self.moving = false;
+    clearTimeout(quiet);
+    settle();
+  }
+  /** Follows the heading again if the page has moved it, unless the type is still to come. */
+  function settle() {
+    if (!heading.isConnected) return end();
+    if (self.keeping || atPlaceOf(heading) || follows >= FOLLOWS) return;
+    follows += 1;
+    go();
+  }
+  function onScroll() {
+    if (self.moving) arm();
+    // Off its place, with nothing the page is waiting for: the reader moved the window, as by dragging the scrollbar.
+    else if (!self.keeping && !atPlaceOf(heading)) end();
+  }
+  function onAction() {
+    if (!self.keeping) return;
+    self.keeping = false;
+    if (!move) end();
+  }
+  const stops = [
+    onScrollRest(rested),
+    onReaderScroll((event) => end(event.type === 'popstate')),
+    () => {
+      clearTimeout(rest);
+      clearTimeout(quiet);
+      window.removeEventListener('scroll', onScroll);
+      for (const kind of READER_ACTIONS) window.removeEventListener(kind, onAction);
+    },
+  ];
+  window.addEventListener('scroll', onScroll, { passive: true });
+  if (self.keeping) for (const kind of READER_ACTIONS) window.addEventListener(kind, onAction, { passive: true });
+  function end(stopGlide = false) {
+    if (place !== self) return;
+    place = null;
+    // A glide carries on by itself; an instant move to where the window is now stops it, and history's restore of the
+    // reader's place on Back still wins.
+    if (stopGlide && self.moving) window.scrollTo({ top: window.scrollY, behavior: 'instant' });
+    for (const stop of stops) stop();
+  }
+  if (move) go();
+  void fonts?.ready.then(() => {
+    if (place !== self || !self.keeping) return;
+    self.keeping = false;
+    if (!self.moving) settle();
+  });
+  return () => end(true);
+}
+
+/**
+ * Moves the window to a contents link's section: to `heading`, below its scroll margin, gliding unless `behavior` is
+ * instant, and holds it there (`hold`). Returns what ends the hold and stops the glide, as when navigation changes the
+ * reading place.
+ */
+export function moveToSection(heading: HTMLElement, behavior: ScrollBehavior): () => void {
+  return hold(heading, behavior, true);
+}
+
+/**
+ * Keeps the window at a section an address opened until the reading type's web font has loaded (`hold`): on a cold
+ * load its swap shifts the page under the window, about 2 px on the prediction. Ended by the reader's first pointer or
+ * key as well as a scroll, Back and Forward included, or by the returned function, as when the document goes.
  */
 export function keepSectionWhileTypeLoads(heading: HTMLElement, behavior: ScrollBehavior = 'instant'): () => void {
-  const { fonts } = document;
-  if (!fonts || fonts.status !== 'loading') return () => {};
-  let acted = false;
-  let typeLoaded = false;
-  const act = () => {
-    acted = true;
-    stop();
-  };
-  // A glide still under way, or a jump's scroll still settling, is let finish first: the heading is followed again
-  // once the type has loaded and the window has gone still.
-  const stopStill = onStill(() => {
-    if (typeLoaded) followAgain();
-  });
-  function stop() {
-    for (const kind of READER_ACTIONS) window.removeEventListener(kind, act);
-    stopStill();
-  }
-  function followAgain() {
-    stop();
-    if (acted || !heading.isConnected) return;
-    if (!atPlaceOf(heading)) movedByThePage(() => heading.scrollIntoView({ behavior, block: 'start' }));
-  }
-  for (const kind of READER_ACTIONS) window.addEventListener(kind, act, { passive: true });
-  void fonts.ready.then(() => {
-    if (acted) return;
-    typeLoaded = true;
-    if (stillNow()) followAgain();
-  });
-  return act;
-}
-
-/**
- * Whether the window is moving because the page moved it, not the reader: a correction still settling, until the
- * window goes still or the reader acts.
- */
-let pageMoving = false;
-
-/**
- * Moves the window by the page's own hand, and marks it so until the window has gone still, so the scroll isn't taken
- * for the reader scrolling on.
- */
-function movedByThePage(move: () => void): void {
-  pageMoving = true;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  // Settled once the window has gone still, or at once when the reader acts: their scroll is theirs, not the page's.
-  const settled = () => {
-    clearTimeout(timer);
-    pageMoving = false;
-    window.removeEventListener('scroll', later);
-    for (const kind of READER_ACTIONS) window.removeEventListener(kind, settled);
-  };
-  const later = () => {
-    clearTimeout(timer);
-    timer = setTimeout(settled, REST_WAIT);
-  };
-  window.addEventListener('scroll', later, { passive: true });
-  for (const kind of READER_ACTIONS) window.addEventListener(kind, settled, { passive: true });
-  later();
-  move();
-}
-
-/** When the window last scrolled, by the page's clock. */
-let lastScroll = Number.NEGATIVE_INFINITY;
-
-/** Whether the window has been still for a moment. */
-function stillNow(): boolean {
-  return performance.now() - lastScroll >= REST_WAIT;
-}
-
-/**
- * Calls `onStill` each time the window goes still: once no scroll has been heard for a moment. Unlike `scrollend`,
- * this never goes missing; a glide's frames come more often than that, so it doesn't fire part way. Returns what
- * stops it.
- */
-function onStill(onStill: () => void): () => void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const onScroll = () => {
-    lastScroll = performance.now();
-    clearTimeout(timer);
-    timer = setTimeout(onStill, REST_WAIT);
-  };
-  window.addEventListener('scroll', onScroll, { passive: true });
-  return () => {
-    clearTimeout(timer);
-    window.removeEventListener('scroll', onScroll);
-  };
+  if (document.fonts?.status !== 'loading') return () => {};
+  return hold(heading, behavior, false);
 }
 
 /**
@@ -291,23 +308,25 @@ export function useCurrentSection(ids: readonly string[]): [current: string | nu
       stopWaiting();
       stopWaiting = () => {};
     }
+    // What stops listening for the reader moving on from an arrived jump.
+    let stopListening = () => {};
     function scrolledOn() {
-      // The page following the section again once the type has loaded is not the reader scrolling on.
-      if (pageMoving) return;
-      forget();
+      // A scroll the page made, or that keeps the window where the page means it to be, isn't the reader's.
+      if (!scrollIsThePages()) forget();
     }
     function forget() {
       arrived = false;
       window.removeEventListener('scroll', scrolledOn);
-      for (const kind of READER_ACTIONS) window.removeEventListener(kind, forget);
+      stopListening();
+      stopListening = () => {};
     }
     function arrive() {
       release();
       arrived = true;
       window.addEventListener('scroll', scrolledOn, { passive: true });
-      // The reader acting is them moving on, even while the page's own correction is still settling: what they scroll
-      // to is marked by the rule again, once their scroll rests.
-      for (const kind of READER_ACTIONS) window.addEventListener(kind, forget, { passive: true });
+      // The reader moving on, even while the page's own correction is still settling: what they scroll to is marked by
+      // the rule again, once their scroll rests.
+      stopListening = onReaderScroll(forget);
     }
     function letGo() {
       release();

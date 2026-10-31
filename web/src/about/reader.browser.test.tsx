@@ -187,6 +187,16 @@ async function jumpTo(y: number): Promise<void> {
   await rested;
 }
 
+/**
+ * The section the 40% rule names where the window is now, read from the page: the last section whose heading's top
+ * is above 40% of the window. Away from the page's end, where the last section is marked instead.
+ */
+function byTheRule(): string {
+  const line = window.innerHeight * 0.4;
+  const above = [...document.querySelectorAll<HTMLElement>('article h2[id]')].filter((heading) => heading.getBoundingClientRect().top <= line);
+  return flat(above[above.length - 1]?.textContent);
+}
+
 /** Two frames: long enough for what the page heard to have been acted on. */
 async function twoFrames(): Promise<void> {
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -790,6 +800,79 @@ describe('ReaderPage', () => {
     await screen.unmount();
   });
 
+  it('a_font_correction_keeps_the_followed_mark_with_scroll_anchoring_on', async () => {
+    // As above, with the browser's scroll anchoring left on, as a reader has it: anchoring moves the window to the end
+    // of the grown page by itself. That scroll keeps the window where the page means it to be, so the mark stays.
+    const loaded = typeStillLoading();
+    const screen = await renderReader('proposal');
+    const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    await expect.poll(marked).toEqual(['v1 (location)']);
+    followContentsLink('business-path');
+    const end = () => Math.round(document.documentElement.scrollHeight - window.innerHeight);
+    await expect.poll(() => Math.round(window.scrollY)).toBe(end());
+    await expect.poll(marked).toEqual(['Business path (location)']);
+    await twoFrames();
+    const before = Math.round(window.scrollY);
+    swapType();
+    await expect.poll(() => Math.round(window.scrollY), { message: 'anchoring kept the window at the end' }).toBe(end());
+    expect(Math.round(window.scrollY), 'anchoring moved the window').toBeGreaterThan(before);
+    loaded();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(marked(), 'after the type loaded').toEqual(['Business path (location)']);
+    await screen.unmount();
+  });
+
+  it('a_click_or_a_key_that_doesnt_scroll_keeps_the_followed_mark', async () => {
+    // Following "Business path" stops at the proposal's end, where it stays marked. A click elsewhere or a key that
+    // doesn't scroll isn't the reader scrolling on: when the page next looks, the mark is still there.
+    const screen = await renderReader('proposal');
+    const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    followContentsLink('business-path');
+    await expect.poll(() => Math.round(window.scrollY)).toBe(Math.round(document.documentElement.scrollHeight - window.innerHeight));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect.poll(marked).toEqual(['Business path (location)']);
+    window.dispatchEvent(new PointerEvent('pointerdown'));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x' }));
+    // Something that makes the page look again without the reader scrolling: a scroll coming to rest.
+    window.dispatchEvent(new Event('scrollend'));
+    await twoFrames();
+    expect(marked(), 'after a click and a key').toEqual(['Business path (location)']);
+    await screen.unmount();
+  });
+
+  it('a_contents_link_ends_an_addresss_keep', async () => {
+    // Opened at "Characteristics" while the type loads, then "Limitations" followed by a click alone, as assistive
+    // technology activates a link (no pointer or key events). Once the type loads, the page keeps Limitations, and
+    // never goes back to Characteristics on the way.
+    withoutScrollAnchoring();
+    const loaded = typeStillLoading();
+    const screen = await renderReader('prediction', { hash: '#characteristics' });
+    await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+    followContentsLink('limitations');
+    await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
+    const visits: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element, ...args: unknown[]) {
+      visits.push(this.id);
+      return (original as (...a: unknown[]) => void).apply(this, args);
+    } as typeof Element.prototype.scrollIntoView;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+    swapType();
+    loaded();
+    await expect.poll(() => Math.abs(offsetOf('limitations')), { message: 'kept at Limitations' }).toBeLessThanOrEqual(1);
+    await twoFrames();
+    expect(visits, 'sections the page moved to once the type loaded').not.toContain('characteristics');
+    await screen.unmount();
+  });
+
   it('a_reader_scrolling_during_a_correction_is_followed', async () => {
     // Following "Business path" stops at the proposal's end, where it stays marked. The type loads on a grown page and
     // the page follows the section to the new end; while that move is still settling, the reader scrolls up with the
@@ -820,7 +903,11 @@ describe('ReaderPage', () => {
     await corrected;
     window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 }));
     await jumpTo(placeOf('who-its-for-and-the-problem') + 100);
-    await expect.poll(marked, { message: 'where the reader stopped' }).toEqual(['Who it’s for and the problem (location)']);
+    // Where the reader stopped, the rule names another section than the one the page was keeping (which one depends on
+    // the page's type and the window's height).
+    const there = byTheRule();
+    expect(there, 'the rule names another section where the reader stopped').not.toBe('Business path');
+    await expect.poll(marked, { message: 'where the reader stopped' }).toEqual([`${there} (location)`]);
     await screen.unmount();
   });
 
