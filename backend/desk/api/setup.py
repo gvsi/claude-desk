@@ -1677,7 +1677,13 @@ def safety_probes(answers: SetupAnswers, prices: dict[str, int]) -> list[tuple[S
         if spec.stand_in == "over_mandate" and amount is not None:
             amount = max(amount, (spec.mandate_cents or 0) + 1)
         elif spec.stand_in == "over_money_limit":
-            amount = (answers.auto_money_cap_cents // 1_000 + 1) * 1_000
+            # Just past the lowest limit a link meets (the link limit when answered, else the cap), so a rule that
+            # allows more than it shows as allowed: the next round $10, or a cent past it at the platform's ceiling.
+            limit = min(answers.auto_money_cap_cents, answers.payment_link_auto_max_cents
+                        if answers.payment_link_auto_max_cents is not None else answers.auto_money_cap_cents)
+            amount = (limit // 1_000 + 1) * 1_000
+            if amount > AUTO_MONEY_HARD_CAP_CENTS:
+                amount = limit + 1
             if amount > AUTO_MONEY_HARD_CAP_CENTS:
                 continue
         if spec.stand_in is not None and amount is None:

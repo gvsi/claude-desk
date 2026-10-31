@@ -857,6 +857,21 @@ async def test_safety_check_reports_kernel_outcomes_verbatim(app, browser, fake,
     assert check.rows[2].tries == "Send me a payment link."
 
 
+def test_the_money_probe_tries_just_past_the_lower_of_the_link_limit_and_the_cap():
+    # A $100 link limit under a $500 cap: the probe asks for the next round $10 past $100, so a rule that wrongly
+    # allows links up to $500 shows as allowed instead of hiding behind the cap.
+    answers = SetupAnswers(summary="Tax work.", auto_money_cap_cents=50_000, payment_link_auto_max_cents=10_000)
+    (amount,) = [probe.amount_cents for spec, probe in safety_probes(answers, {"tax-return": 80_000})
+                 if spec.stand_in == "over_money_limit"]
+    assert amount == 11_000
+    # At the platform's ceiling, a lower link limit still gets its probe.
+    answers = SetupAnswers(summary="Tax work.", auto_money_cap_cents=AUTO_MONEY_HARD_CAP_CENTS,
+                           payment_link_auto_max_cents=10_000)
+    (amount,) = [probe.amount_cents for spec, probe in safety_probes(answers, {"tax-return": 80_000})
+                 if spec.stand_in == "over_money_limit"]
+    assert amount == 11_000
+
+
 def test_safety_check_leaves_out_an_impossible_above_cap_amount():
     answers = SetupAnswers(summary="Tax work.", auto_money_cap_cents=AUTO_MONEY_HARD_CAP_CENTS,
                            payment_link_auto_max_cents=AUTO_MONEY_HARD_CAP_CENTS)
