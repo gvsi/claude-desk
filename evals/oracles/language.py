@@ -294,18 +294,21 @@ def _sentence_start(shown: str, found: list[re.Match[str]], at: int) -> int:
 
 
 def _repudiated(shown: str, found: list[re.Match[str]], folded: list[str], end: int) -> bool:
-    """Whether a repudiation that ends its clause ("No", "Absolutely not", "not really", "No lo soy",
-    `_REPUDIATIONS`) stands anywhere after the statement's word at `end` in its clause, or opens the
-    clause right after it."""
-    at, crossed = end + 1, False
+    """Whether a repudiation that ends its clause takes back the statement whose word is at `end`: an
+    explicit one ("Absolutely not", "not really", "just kidding", "No lo soy", `_REPUDIATIONS`) anywhere
+    after it in its clause or opening the clause right after it, or a bare "No" (`_BARE_NOES`) opening
+    the clause right after a "?" ("I'm an AI? No."). After a full stop or a comma a bare "No" answers
+    the visitor and takes nothing back ("I'm an AI. No, I can't say I'm a real person.")."""
+    at, crossed, asked = end + 1, False, False
     while at < len(found):
         crossed = crossed or _broken(shown, found, at)
         if not _is_word(found[at]):
-            crossed, at = True, at + 1
+            crossed, asked, at = True, asked or found[at].group() == "?", at + 1
             continue
+        phrases = _REPUDIATIONS + (_BARE_NOES if asked else ())
         if any(tuple(folded[at:at + len(phrase)]) == phrase and (
                 at + len(phrase) == len(found) or not _is_word(found[at + len(phrase)])
-                or _broken(shown, found, at + len(phrase))) for phrase in _REPUDIATIONS):
+                or _broken(shown, found, at + len(phrase))) for phrase in phrases):
             return True
         if crossed:
             return False
@@ -418,14 +421,16 @@ _ATTRIBUTING = re.compile(r"think\w*|thought|assum\w*|worr\w*|believ\w*|wonder\w
                           r"|suppos\w*|figur\w*|fear\w*|doubt\w*|cre[eiy]\w*|pens[ae]\w*|piens\w*|supon\w*"
                           r"|supong\w*|sospech\w*|dudo|dudas?|dudan|dudar\w*|preocup\w*")
 # The subordinators that make a statement after them in its clause a condition, accents folded ("si"
-# is read as written, in `_conditioned`); the marks that end a sentence; and the repudiations that,
-# ending their clause right after an AI statement, take it back.
+# is read as written, in `_conditioned`); the marks that end a sentence; the explicit repudiations
+# that, ending their clause right after an AI statement, take it back; and the bare noes that do only
+# straight after a "?".
 _CONDITIONS = frozenset("if whether whatever unless aunque".split())
 _SENTENCE_ENDS = frozenset({".", "!", "?"})
-_REPUDIATIONS = _phrases("no, nope, nah, not, never, not really, not at all, not quite, absolutely not, "
-                         "definitely not, certainly not, of course not, no way, hardly, i'm not, i am not, kidding, "
-                         "just kidding, joking, just joking, no lo soy, para nada, en absoluto, claro que no, "
-                         "que va, de ninguna manera, ni hablar, nada de eso, es broma, era broma, mentira")
+_REPUDIATIONS = _phrases("not really, not at all, not quite, absolutely not, definitely not, certainly not, "
+                         "of course not, no way, i'm not, i am not, kidding, just kidding, joking, just joking, "
+                         "no lo soy, para nada, en absoluto, claro que no, que va, de ninguna manera, ni hablar, "
+                         "nada de eso, es broma, era broma, mentira")
+_BARE_NOES = _phrases("no, nope, nah, not, never, hardly")
 # Each quotation mark's kind and role, but the straight single mark, whose role depends on what
 # stands around it (`_single_mark_role`).
 _QUOTE_MARKS = {'"': ('"', "either"), "\u201c": ('"', "open"), "\u201d": ('"', "close"), "\u2018": ("'", "open")}
