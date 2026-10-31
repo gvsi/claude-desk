@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { request } from '../api/http.ts';
 import { UNREACHABLE_COPY } from '../ds/index.ts';
+import { writeLocal } from '../lib/storage.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
@@ -71,7 +72,9 @@ describe('App', () => {
   });
 
   it('owner_401_replaces_the_page_with_the_passcode', async () => {
-    // Signed out, so whatever the owner page asks for on its way in is a 401 too, never a success.
+    // A browser that never had a copy (an earlier test's owner page would have stored that it had),
+    // signed out, so whatever the owner page asks for on its way in is a 401 too, never a success.
+    writeLocal('hadOwnerCopy', null);
     const { router } = await renderRoute('/app/d1/today', { seed: { name: 'rivera', signedIn: false } });
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 401 }));
     await expect(request('today', { params: { desk_id: 'd1' } })).rejects.toMatchObject({ kind: 'unauthorized' });
