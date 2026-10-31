@@ -5,9 +5,9 @@
 //   node scripts/gen-contracts.mjs          write contracts.gen.ts
 //   node scripts/gen-contracts.mjs --check  exit 1 if contracts.gen.ts is stale
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { compile } from 'json-schema-to-typescript';
 
@@ -123,6 +123,8 @@ async function main(args) {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Run as a command, also through a symlinked path: Node resolves this module's own URL to the real
+// path, so the path it was started with is resolved the same way before the two are compared.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.exitCode = await main(process.argv.slice(2));
 }

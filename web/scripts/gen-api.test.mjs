@@ -2,10 +2,11 @@
 // The API type generator (gen-api.mjs) on small documents: the API's own schemas become types,
 // contract schemas are imported from contracts.ts instead, and every operation names its 2xx
 // schemas. Anything it can't name fails, so a stale or odd document never becomes loose types. The
-// command's --check fails when openapi.gen.ts is stale or missing, and writes nothing.
+// command's --check fails when openapi.gen.ts is stale or missing, and writes nothing, and the
+// command runs when started through a symlinked path too.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -258,6 +259,16 @@ describe('gen-api', () => {
     expect(run.status).toBe(2);
     expect(run.stderr).toContain('Unknown argument: --chek. Use --check to verify without writing.');
     expect(run.stdout).not.toContain('Wrote');
+  });
+
+  it('command_runs_through_a_symlinked_path', () => {
+    // Run from a folder that links to scripts/, the command still runs rather than doing nothing.
+    const dir = mkdtempSync(path.join(tmpdir(), 'gen-api-link-'));
+    made.push(dir);
+    symlinkSync(path.dirname(SCRIPT), path.join(dir, 'scripts'), 'dir');
+    const run = spawnSync(process.execPath, [path.join(dir, 'scripts', 'gen-api.mjs'), '--chek'], { encoding: 'utf8' });
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain('Unknown argument: --chek.');
   });
 });
 
