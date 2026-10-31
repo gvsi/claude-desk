@@ -793,8 +793,12 @@ describe('The preview behind the intro dialog', () => {
   });
 
   it('preview_makes_no_request', async () => {
+    document.title = 'Claude Desk';
     const { screen } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
     await expect.element(introDialog(screen)).toBeVisible();
+    // The dialog is the page here: the Today drawn behind it names nothing, so the tab keeps the
+    // app's own name.
+    expect(document.title).toBe('Claude Desk');
     // Long enough for every read Today polls to have gone out several times over, had the preview
     // sent one: only the arrival's own question about the copy went out.
     await new Promise((resolve) => setTimeout(resolve, 1_000));

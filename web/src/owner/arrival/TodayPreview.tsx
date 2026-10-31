@@ -84,7 +84,7 @@ function StillToday() {
             }
           >
             <div className="cd-owner-layout">
-              <TodayPage />
+              <TodayPage namesTheTab={false} />
             </div>
           </AppShell>
         </OwnerDeskProvider>
