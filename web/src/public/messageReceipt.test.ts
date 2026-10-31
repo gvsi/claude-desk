@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 
-import type { EvMessage, SessionState } from '../api/contracts.ts';
+import type { EvMessage } from '../api/contracts.ts';
 import { messageReceiptVisible } from './messageReceipt.ts';
 
 it('only_external_reply_checks_are_hidden_for_every_contract_shape', () => {
@@ -12,12 +12,11 @@ it('only_external_reply_checks_are_hidden_for_every_contract_shape', () => {
     { author: 'owner', handoff: false, external: true },
     { author: 'owner', handoff: true, external: true },
   ];
-  const kinds: (SessionState['kind'] | undefined)[] = ['visitor', 'agent', 'owner', undefined];
   for (const { author, handoff, external } of cases) {
-    for (const kind of kinds) {
+    for (const ownerPreview of [false, true]) {
       // The words may be anything: the contract's author and verdict identify the receipt.
       const message: Pick<EvMessage, 'author' | 'handoff' | 'visitor_plain'> = { author, handoff, visitor_plain: 'Unmatched kernel line' };
-      expect(messageReceiptVisible(message, kind), `${author}, handoff=${handoff}, session=${kind}`).toBe(kind === 'owner' ? true : external);
+      expect(messageReceiptVisible(message, ownerPreview), `${author}, handoff=${handoff}, ownerPreview=${ownerPreview}`).toBe(ownerPreview || external);
     }
   }
 });

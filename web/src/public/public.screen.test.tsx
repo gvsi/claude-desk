@@ -308,27 +308,26 @@ describe('public chat page', () => {
     expectReceiptsUnderTheirMessages(phone.screen);
   });
 
-  it('reply_check_visibility_follows_session_kind_live_and_after_reload', async () => {
-    const observed: { kind: string; language: string; live: string[]; reloaded: string[] }[] = [];
+  it('reply_check_visibility_follows_owner_preview_live_and_after_reload', async () => {
+    const observed: { ownerPreview: boolean; language: string; live: string[]; reloaded: string[] }[] = [];
     const expected: typeof observed = [];
-    for (const kind of ['visitor', 'owner'] as const) {
+    for (const ownerPreview of [false, true]) {
       for (const language of ['en', 'es'] as const) {
-        const path = kind === 'owner' ? `${PAGE}?preview=${RIVERA.deskId}` : PAGE;
-        const options = { language: language === 'es' ? 'es-MX' : 'en-US' };
-        if (kind === 'owner') {
-          mockStore.reset('rivera');
-          await request('openPreview', { params: { desk_id: RIVERA.deskId } });
-          const preview = mockStore.visitorSession(RIVERA.slug);
-          if (!preview) throw new Error('the preview is open');
-          // The mock marks previews with ownerPreview; serve the API's owner-session contract.
-          preview.state = { ...preview.state, kind: 'owner', assurance: 'owner_session' };
-        }
-        const first = await renderRoute(path, { ...options, ...(kind === 'visitor' ? { seed: 'rivera' as const } : {}) });
+        // Today's "Chat as a customer" opens this preview address as the signed-in owner.
+        const path = ownerPreview ? `${PAGE}?preview=${RIVERA.deskId}` : PAGE;
+        const options = {
+          language: language === 'es' ? 'es-MX' : 'en-US',
+          viewport: language === 'es' ? 'phone' as const : 'desktop' as const,
+        };
+        const first = await renderRoute(path, { ...options, seed: { name: 'rivera', signedIn: ownerPreview } });
         await ready(first.screen);
         await say(first.screen, language === 'en' ? 'Can I get 15% off if I pay cash?' : '¿Me hacen un descuento?');
         const chat = mockStore.visitorSession(RIVERA.slug);
         if (!chat) throw new Error('the session is open');
-        expect(chat.state.kind).toBe(kind);
+        expect(chat.state.kind).toBe('visitor');
+        expect(chat.ownerPreview).toBe(ownerPreview);
+        expect(requests('openPreview')).toHaveLength(ownerPreview ? 1 : 0);
+        expect(requests('openSession')).toHaveLength(ownerPreview ? 0 : 1);
         mockStore.world.takeOver(chat);
         mockStore.world.say(chat, language === 'en' ? 'Hi, it is Maria.' : 'Hola, soy Maria.');
         const waiting = language === 'en' ? 'Waiting for Maria Rivera to approve' : 'Esperando la aprobación de Maria Rivera';
@@ -340,15 +339,16 @@ describe('public chat page', () => {
         const live = first.screen.getByText(checked, { exact: true }).elements().map((el) => el.textContent ?? '');
         const before = document.querySelector('[role="log"]')?.textContent;
 
-        // Changing the preview query cannot change receipt visibility: the API session owns it.
-        const second = await renderRoute(kind === 'owner' ? PAGE : `${PAGE}?preview=${RIVERA.deskId}`, options);
+        const second = await renderRoute(path, options);
         await ready(second.screen);
         await expect.element(second.screen.getByText(written, { exact: true })).toBeVisible();
         await expect.element(second.screen.getByText(waiting, { exact: true })).toBeVisible();
         expect(shownMessages()).toHaveLength(2);
         expect(document.querySelector('[role="log"]')?.textContent).toBe(before);
-        observed.push({ kind, language, live, reloaded: second.screen.getByText(checked, { exact: true }).elements().map((el) => el.textContent ?? '') });
-        expected.push({ kind, language, live: kind === 'owner' ? [checked] : [], reloaded: kind === 'owner' ? [checked] : [] });
+        expect(mockStore.visitorSession(RIVERA.slug)?.state.session_id).toBe(chat.state.session_id);
+        expect(requests('openPreview')).toHaveLength(ownerPreview ? 1 : 0);
+        observed.push({ ownerPreview, language, live, reloaded: second.screen.getByText(checked, { exact: true }).elements().map((el) => el.textContent ?? '') });
+        expected.push({ ownerPreview, language, live: ownerPreview ? [checked] : [], reloaded: ownerPreview ? [checked] : [] });
       }
     }
     expect(observed).toEqual(expected);
