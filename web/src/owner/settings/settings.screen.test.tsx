@@ -374,6 +374,37 @@ describe('Settings', () => {
     expect(sawNotFound()).toBe(false);
     expect(requests('deleteDesk')).toHaveLength(1);
   });
+
+  it('deleted_desk_closes_its_chats_holds_and_links', async () => {
+    // Main line, when Maria deletes it here, has Dana's chat with her refund held for Maria and a
+    // payment link open in it.
+    const { screen, router } = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
+    const refund = mockStore.world.addHeldRefund();
+    const chat = mockStore.world.sessions.get(refund.session_id);
+    if (!chat) throw new Error("Dana's refund has a chat");
+    const token = mockStore.world.issueLink(chat, { title: 'Deposit', amountCents: 2000, language: 'en' });
+    await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+
+    // Its chat is closed to whatever an owner tab still open on it sends, as the kernel closes a
+    // deleted Desk's sessions...
+    const closed = { status: 409, body: { error: 'kernel', code: 'closed' } };
+    const params = { session_id: chat.state.session_id };
+    const at = { params, body: { generation: chat.state.generation } };
+    for (const key of ['takeover', 'handback', 'resume', 'ownerTyping'] as const) expect(await mockStore.dispatch(key, at), key).toEqual(closed);
+    expect(await mockStore.dispatch('ownerMessage', { params, body: { text: 'Still there?', kind: 'whisper' } })).toEqual(closed);
+    expect(await mockStore.dispatch('conversation', { params })).toEqual(closed);
+    expect(await mockStore.dispatch('decision', { params: { decision_id: refund.decision_id } })).toEqual(closed);
+    // ...the refund, allowed now, is refused at execution, so nothing runs...
+    expect(await mockStore.dispatch('answer', { params: { decision_id: refund.decision_id }, body: { answer: 'allow_once' } })).toMatchObject({
+      status: 200,
+      body: { decision: { state: 'refused_at_execution' }, execution_state: null, card_diff: null },
+    });
+    // ...and the link was cancelled with the Desk, so it can't be paid.
+    expect(await mockStore.dispatch('completePayment', { params: { token } })).toMatchObject({ status: 409, body: { state: 'cancelled' } });
+    expect(mockStore.world.links.get(token)?.view.state).toBe('cancelled');
+  });
 });
 
 describe('Settings against its boards', () => {
