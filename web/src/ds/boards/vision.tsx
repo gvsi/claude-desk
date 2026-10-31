@@ -314,7 +314,7 @@ export function ClaudeAccountChat() {
       language="en"
       onAskForOwner={fn()}
       about={CLAUDE_ACCOUNT_ABOUT}
-      composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />}
+      composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} inertSend />}
     >
       <Transcript label="Conversation with Rivera Plumbing">
         <SystemLine text="Signed in with your Claude account." />
@@ -377,7 +377,14 @@ function OwnerPhone() {
           <p className="board-quiet cd-type-caption">{rivera.business.name}</p>
           <h2 className="cd-type-greeting board-vision-phone__greeting">Good morning, Maria</h2>
         </div>
-        <ApprovalCard decision={rivera.decisions.held} heldBy={rivera.ruleCards['rv-quote'].reason} waiting="Web chat, 2 min ago" onAnswer={fn()} />
+        {/* A vision page sends nothing: the answers keep their look and do nothing. */}
+        <ApprovalCard
+          decision={rivera.decisions.held}
+          heldBy={rivera.ruleCards['rv-quote'].reason}
+          waiting="Web chat, 2 min ago"
+          onAnswer={fn()}
+          inertAnswers
+        />
         <section aria-labelledby="board-vision-phone-live">
           <h3 id="board-vision-phone-live" className="cd-type-control board-vision-phone__live-title">
             Live now
@@ -429,7 +436,7 @@ function VisitorPhone() {
         </Transcript>
       </div>
       <div className="board-vision-phone__composer">
-        <Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} />
+        <Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} inertSend />
         <p className="board-quiet cd-type-caption board-vision-phone__disclosure">This chat is with Claude, an AI.</p>
       </div>
     </PhoneFrame>

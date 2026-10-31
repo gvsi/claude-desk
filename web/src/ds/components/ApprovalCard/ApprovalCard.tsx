@@ -100,6 +100,12 @@ export interface ApprovalCardProps {
   pending?: boolean;
   /** The answer may not have gone through: `true` shows the card's line, a string the screen's own. */
   error?: boolean | string;
+  /**
+   * Vision pages only, which make no requests: the answers keep their look, focus and tab order, a
+   * menu still opens, and choosing an answer does nothing. The card never locks or shows a spinner,
+   * and `onAnswer` is never called.
+   */
+  inertAnswers?: boolean;
 }
 
 /** The click that is waiting for its result, and the screen's `pending` and `error` it last saw. */
@@ -167,7 +173,17 @@ function statusLine(state: DecisionState): string {
  * plain button; a side with two opens a menu of them. After an answer or an event, the final line
  * takes the place of "Waiting for your answer" with its receipt dot, and the answers go.
  */
-export function ApprovalCard({ decision, heldBy, context, waiting, personName, onAnswer, pending = false, error }: ApprovalCardProps) {
+export function ApprovalCard({
+  decision,
+  heldBy,
+  context,
+  waiting,
+  personName,
+  onAnswer,
+  pending = false,
+  error,
+  inertAnswers = false,
+}: ApprovalCardProps) {
   const offered = offeredAnswers(decision);
   const showAnswers = offered.length > 0;
   const failed = error === true || (typeof error === 'string' && error !== '');
@@ -212,7 +228,8 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
   }, [showAnswers]);
 
   const answer = (value: ApprovalAnswer) => {
-    if (waitingForResult) return;
+    // A vision page's card: the answer goes nowhere, so nothing waits for it.
+    if (inertAnswers || waitingForResult) return;
     answeredHere.current = true;
     clicks.current += 1;
     const click = clicks.current;

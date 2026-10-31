@@ -109,5 +109,14 @@ export const Board: Story = {
       download,
       within(main).getByRole('textbox', { name: 'Message Rivera Plumbing' }),
     ]);
+
+    // A vision page sends nothing: typed words stay after Send and after Enter.
+    const composer = within(main).getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    await userEvent.type(composer, 'Thanks again');
+    await userEvent.click(within(main).getByRole('button', { name: 'Send' }));
+    await expect(composer).toHaveValue('Thanks again');
+    await userEvent.click(composer);
+    await userEvent.keyboard('{Enter}');
+    await expect(composer).toHaveValue('Thanks again');
   },
 };

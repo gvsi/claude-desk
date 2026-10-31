@@ -155,6 +155,34 @@ export const Visitor: Story = {
   },
 };
 
+/** On a vision page, which makes no requests: typing works, and Send sends nothing and keeps the text. */
+export const InertSend: Story = {
+  args: { inertSend: true },
+  parameters: {
+    canvas: 'N-R2-Vision-Phone',
+    canvasNote: 'The visitor’s composer on the phone and Claude account vision pages: the words stay where they were typed.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    // inert_send_keeps_the_text: Send keeps its look, empty and not, but neither it nor Enter sends.
+    const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const send = canvas.getByRole('button', { name: 'Send' });
+    await expect(send).toBeDisabled();
+    await userEvent.click(input);
+    await userEvent.keyboard('Thanks');
+    await expect(send).toBeEnabled();
+    await userEvent.keyboard('{Enter}');
+    await expect(input).toHaveValue('Thanks');
+    await userEvent.click(send);
+    await expect(input).toHaveValue('Thanks');
+    await expect(send).toBeEnabled();
+    await expect(send).toHaveFocus();
+    await expect(args.onSend).not.toHaveBeenCalled();
+    // Clearing the words disables Send again, as on a real page.
+    await userEvent.clear(input);
+    await expect(send).toBeDisabled();
+  },
+};
+
 export const Whisper: Story = {
   args: {
     variant: 'whisper',

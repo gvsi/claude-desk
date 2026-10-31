@@ -317,6 +317,38 @@ export const TwoPlainButtons: Story = {
   },
 };
 
+/** On a vision page, which makes no requests: the answers look and focus as ever, and do nothing. */
+export const InertAnswers: Story = {
+  args: { inertAnswers: true },
+  parameters: {
+    canvas: 'N-R2-Vision-Phone',
+    canvasNote: 'The held quote on the phone vision page: the answers keep their look and tab order, and pressing one sends nothing.',
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // inert_answers_send_nothing: a click and a key press each leave the card as it was.
+    const group = canvas.getByRole('group', { name: 'Your answer' });
+    const [allow, deny] = answerButtons(canvasElement) as [HTMLElement, HTMLElement];
+    expectComputed(allow, SECONDARY);
+    expectComputed(deny, DANGER);
+    await userEvent.click(allow);
+    await expect(allow).toHaveFocus();
+    await userEvent.tab();
+    await expect(deny).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onAnswer).not.toHaveBeenCalled();
+    await expect(group).not.toHaveAttribute('aria-busy');
+    for (const button of [allow, deny]) {
+      await expect(button).not.toHaveAttribute('aria-disabled');
+      await expect(button).not.toHaveAttribute('aria-busy');
+      await expect(button).toBeEnabled();
+    }
+    await expect(canvasElement.querySelector('.cd-button__spinner')).toBeNull();
+    await expect(canvas.queryByText('Sending your answer')).toBeNull();
+    await expect(canvas.getByText('Waiting for your answer')).toBeVisible();
+    await expect(answerButtons(canvasElement).map((button) => button.textContent)).toEqual(['Allow this time', 'Deny this time']);
+  },
+};
+
 export const DenyMenu: Story = {
   args: consultationArgs,
   parameters: {

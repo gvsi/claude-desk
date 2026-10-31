@@ -30,6 +30,11 @@ export interface ComposerProps {
   onAttach?: () => void;
   /** Adds "Speak instead". */
   onSpeak?: () => void;
+  /**
+   * Vision pages only, which make no requests: typing works and Send keeps its look, but Send and
+   * Enter do nothing. `onSend` is never called and the text stays.
+   */
+  inertSend?: boolean;
 }
 
 const SEND_LABEL = {
@@ -59,6 +64,7 @@ export function Composer({
   onSend,
   onAttach,
   onSpeak,
+  inertSend = false,
 }: ComposerProps) {
   const id = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -82,7 +88,8 @@ export function Composer({
   }, [value]);
 
   const send = () => {
-    if (!canSend) return;
+    // A vision page's composer: the words go nowhere, so they stay.
+    if (!canSend || inertSend) return;
     onSend(text);
     setValue('');
   };
@@ -130,6 +137,7 @@ export function Composer({
       shape="round"
       disabled={!canSend}
       onClick={() => {
+        if (inertSend) return;
         send();
         // The button is disabled once the text clears, so the next message starts in the text box.
         inputRef.current?.focus();

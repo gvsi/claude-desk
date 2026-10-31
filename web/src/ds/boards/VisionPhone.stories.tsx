@@ -90,6 +90,22 @@ export const Board: Story = {
       within(composer.closest('.cd-composer') as HTMLElement).getByRole('button', { name: 'Send' }),
     ]);
 
+    // A vision page sends nothing: an answer leaves the held quote as it was, and Send keeps the words.
+    const allow = within(held).getByRole('button', { name: 'Allow this time' });
+    const deny = within(held).getByRole('button', { name: 'Deny this time' });
+    await userEvent.click(allow);
+    await expect(within(held).getByRole('group', { name: 'Your answer' })).not.toHaveAttribute('aria-busy');
+    for (const answer of [allow, deny]) {
+      await expect(answer).not.toHaveAttribute('aria-disabled');
+      await expect(answer).not.toHaveAttribute('aria-busy');
+    }
+    await expect(within(held).getByText('Waiting for your answer')).toBeVisible();
+    await userEvent.click(within(visitor).getByRole('button', { name: 'Send' }));
+    await expect(composer).toHaveValue('Thanks');
+    await userEvent.click(composer);
+    await userEvent.keyboard('{Enter}');
+    await expect(composer).toHaveValue('Thanks');
+
     // Nothing scrolls sideways, and the footer follows the phones.
     await expect(document.documentElement.scrollWidth).toBe(document.documentElement.clientWidth);
     await expectFooter(canvasElement);
