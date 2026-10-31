@@ -1121,6 +1121,40 @@ async def test_text_written_while_the_owner_had_the_chat_sets_the_turns_language
     assert html.escape(words, quote=False) in json.dumps(request.messages, ensure_ascii=False)   # Claude reads it now
 
 
+@pytest.mark.parametrize("stop", ["paused", "over_budget"])
+async def test_a_turn_that_hands_off_without_claude_sends_its_message_first(api_conn, kernel_http, fake, ro_schema,
+                                                                            clock, stop):
+    """A paused session's turn, and one past today's model budget, hand off with no model call, and the kernel renders
+    that handoff card in the session's language. So the turn sends its newest message first: a Spanish message after
+    an English reply gets the handoff in Spanish (GitHub issue #121)."""
+    caller = await new_caller(kernel_http, fake, ro_schema)
+    await said(api_conn, caller, "Hi, do you clear drains?")
+    assert await run_turn(api_conn, caller, ScriptedModel([response(reply("Happy to help with your drain."))])) == (
+        "done")
+    if stop == "paused":
+        fake.set_mode(caller.session_id, "paused")             # the breaker's third strike
+    else:                                                      # $100 of Opus today, past the $80 daily budget
+        await api_conn.execute(text(
+            "INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens, cache_write_tokens,"
+            " output_tokens, latency_ms, stop_reason, created_at) VALUES ('copy-earlier', 'conversation',"
+            " 'claude-opus-5-5', 0, 0, 0, 5000000, 900, 'end_turn', :at)"), {"at": clock()})
+        await api_conn.commit()
+    words = "¿Pueden venir mañana a revisar el desagüe?"
+    await said(api_conn, caller, words)
+    fake.calls.clear()
+    model = ScriptedModel()
+
+    assert await run_turn(api_conn, caller, model, production=stop == "over_budget", clock=clock) == "handoff"
+
+    (sent,) = fake.called(TURN)
+    assert sent.body == {"generation": fake.sessions[caller.session_id].generation, "text": words, "desk_id": None}
+    routes = [call.route for call in fake.calls]
+    assert routes.index(TURN) < routes.index("POST /check_reply") and model.requests == []
+    *_, message, end = await events(api_conn, caller.session_id)
+    assert (message.type, end.type) == ("message", "turn_end")
+    assert [block.text for block in message.blocks] == ["Déjame consultarlo con Maria Rivera."]
+
+
 async def test_a_turns_message_is_cut_to_the_kernels_limit(api_conn, caller, fake):
     long = "Hola, necesito ayuda con el desagüe. " * 70
     assert len(long) > 2000

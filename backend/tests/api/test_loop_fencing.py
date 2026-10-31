@@ -1164,9 +1164,10 @@ def context_path(caller: Caller) -> str:
 ], ids=["closed", "stale_generation", "invalid", "unavailable"])
 async def test_the_turn_routes_refusals_end_the_turn_as_contexts_do(api_conn, kernel_http, fake, ro_schema, status,
                                                                     code, ended, shown):
-    """The turn's first kernel call, `POST /sessions/{session_id}/turn`, runs just before `/context`, and the same
-    answer from either ends the turn the same way: a closed session with the session error, a stale generation
-    silently, anything else as the kernel being unavailable. Claude is never called and no tool runs."""
+    """The turn's first kernel call, `POST /sessions/{session_id}/turn`, runs right after the session and mode checks,
+    and the same answer from it or from `/context` ends the turn the same way: a closed session with the session
+    error, a stale generation silently, anything else as the kernel being unavailable. Claude is never called and no
+    tool runs. The turn's first call comes before Claude starts writing, so its refusal shows no `writing`."""
     seen = {}
     for refused in (turn_path, context_path):
         visitor = await new_visitor(kernel_http, fake)
@@ -1184,15 +1185,16 @@ async def test_the_turn_routes_refusals_end_the_turn_as_contexts_do(api_conn, ke
         seen[refused.__name__] = (outcome, events_shown, model.requests)
         if refused is turn_path:
             assert kernel.answered(context_path(caller)) == [] and fake.called("/decide") == []
-    assert seen["turn_path"] == seen["context_path"] == (ended, shown, [])
+    assert seen["context_path"] == (ended, shown, [])
+    assert seen["turn_path"] == (ended, [event for event in shown if event != ("writing", None)], [])
 
 
 async def test_a_take_over_or_a_close_just_before_the_turn_starts_ends_it(api_conn, kernel_http, fake, ro_schema):
     """The session moved on between `/whoami` and the turn's first call: a take-over (a new generation) makes the
     kernel refuse the turn as stale, and the turn ends silently; a closed conversation ends with the session error.
     Either way nothing reaches Claude, and `/context` isn't read."""
-    for change, ended, shown in (("take_over", "fenced", ["writing", "turn_end"]),
-                                 ("close", "session_ended", ["writing", "error", "turn_end"])):
+    for change, ended, shown in (("take_over", "fenced", ["turn_end"]),
+                                 ("close", "session_ended", ["error", "turn_end"])):
         visitor = await new_visitor(kernel_http, fake)
         session_id = visitor.ids.session_id
 

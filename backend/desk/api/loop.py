@@ -3,11 +3,12 @@ Plan 02a, Task 5).
 
 `run_turn(conn, caller, model)` answers what is waiting in a session. It reads the session's mode and generation
 from the kernel (`GET /whoami`), sends it the visitor's or agent's newest message so it renders the turn in that
-message's language (`POST /sessions/{session_id}/turn`), reads the session's tools and facts (`GET /context`), brings
-the model context up to date (a `desk_context` row when the facts change, tool changes, or a fresh context, which a
-changed system prompt opens too), then calls Claude on the system prompt and tools the context froze, and acts on each response by its stop
-reason. Claude only proposes: every tool call goes through `/decide` (`tools.route_call`),
-and every reply through `/check_reply` and `deliver()` (`tools.send_reply`).
+message's language (`POST /sessions/{session_id}/turn`, before a paused or over-budget turn's handoff too), reads the
+session's tools and facts (`GET /context`), brings the model context up to date (a `desk_context` row when the facts
+change, tool changes, or a fresh context, which a changed system prompt opens too), then calls Claude on the system
+prompt and tools the context froze, and acts on each response by its stop reason. Claude only proposes: every tool
+call goes through `/decide` (`tools.route_call`), and every reply through `/check_reply` and `deliver()`
+(`tools.send_reply`).
 
 `run_pending(caller, model, ...)` is how a request starts turns (Task 6): one session's turns run one at a time,
 under the turn lock (`turn_lock`), until no work is waiting (an agent's request runs one turn at most).
@@ -208,6 +209,9 @@ class _Turn:
         self.generation = session.generation
         if session.mode == "owner":                        # the owner took over: Claude stays quiet
             return "not_ai"
+        refused = await self._start()                      # first, even for a handoff: it speaks the turn's language
+        if refused is not None:
+            return refused
         if session.mode == "paused":                       # the breaker tripped: the kernel's handoff, no model call
             await clear_wake(conn, caller.session_id)
             await conn.commit()
@@ -222,9 +226,6 @@ class _Turn:
         if self.visitor:
             await emit(conn, caller.ids, EvWriting(type="writing"))
             await conn.commit()
-        refused = await self._start()
-        if refused is not None:
-            return refused
         try:
             context = await caller.kernel.call("GET /context/{session_id}?desk_id=",
                                                path={"session_id": caller.session_id})
@@ -244,12 +245,14 @@ class _Turn:
                 return outcome
 
     async def _start(self) -> TurnOutcome | None:
-        """Tell the kernel the turn's language before any tool runs (GitHub issue #121): the newest visitor or agent
+        """Tell the kernel the turn's language before anything is rendered in it (GitHub issue #121), right after the
+        session and mode checks, so a paused or over-budget turn's handoff speaks it too: the newest visitor or agent
         message reaching Claude this turn (`store.latest_said`), whether or not it woke the turn, cut to the
         contract's `TURN_TEXT_CHARS`, goes to `POST /sessions/{session_id}/turn`, and the kernel keeps the language
-        it detects as the session's, which the turn's receipts and the reply check's fallback then speak. A turn with
-        no such message sends nothing. The text is untrusted and goes only to the kernel's detector: nothing here logs or
-        keeps it. How the turn ends when the kernel refuses, as it would on `/context` (`_failed`), else None."""
+        it detects as the session's, which the turn's receipts and cards and the reply check's fallback then speak. A
+        turn with no such message sends nothing. The text is untrusted and goes only to the kernel's detector:
+        nothing here logs or keeps it. How the turn ends when the kernel refuses, as it would on `/context`
+        (`_failed`), else None."""
         conn, caller = self.conn, self.caller
         said = await latest_said(conn, caller.session_id)
         await conn.commit()
