@@ -6,6 +6,7 @@ that says or suggests the writer is a human. A flag blocks the reply, and so doe
 (a timeout, an API error, a refusal, output that isn't a verdict): the check fails closed.
 """
 
+import asyncio
 import json
 import logging
 
@@ -13,11 +14,12 @@ import anthropic
 import httpx
 import pytest
 
-from desk.kernel_service import decisions
+from desk.kernel_service import decisions, ledger
 from desk.kernel_service.decisions import (SOFT_PROMISE_SCHEMA, SOFT_PROMISE_SYSTEM, AnthropicDecisions,
                                            SoftPromiseInput, SoftPromiseVerdict)
 
 from .fakes import FakeAnthropicClient, FakeDecisions, model_message
+from .helpers import connections_of, ledger_rows, until_waiting
 from .test_adapters import visitor_of
 from .test_decide import open_visitor
 from .test_handoff_card import BLOCKED, BLOCKED_ES, CLEAN, HANDOFF_CARD, handoffs_of
@@ -303,3 +305,82 @@ async def test_a_session_with_no_handoff_of_its_own_is_shown_no_card(app, client
     assert not (await checked(client, other, BLOCKED)).ok
     assert (await checked(client, visitor, CLEAN)).ok
     assert reviewer.soft_inputs[-1].cards == []
+
+
+REPLY_HERE = "Maria Rivera will reply here."   # backed only by an open handoff's card
+
+
+async def test_a_handoff_marked_done_while_the_model_reads_backs_nothing(app, client, reviewer):
+    """The open handoff is read without a lock, so the model never holds one, and the owner may
+    mark it done while the model reads the draft. A reply the model then passes on the card's
+    strength isn't shown: with the handoff gone nothing backs the card's words, so the reply fails
+    as the check would have failed it without the card, and the handoff card in its place opens
+    a new handoff."""
+    copy, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, BLOCKED)).ok                     # the card opens one
+    [first] = await handoffs_of(app, copy)
+    asked, answer, shown = asyncio.Event(), asyncio.Event(), []
+    soft_promise = reviewer.soft_promise
+
+    async def slow_model(data):
+        shown.append(data.cards)
+        asked.set()
+        await answer.wait()                                      # the model answers only once the test lets it
+        return await soft_promise(data)                          # and passes the prose
+
+    reviewer.soft_promise = slow_model
+    checking = asyncio.create_task(checked(client, visitor, REPLY_HERE))
+    try:
+        await asyncio.wait_for(asked.wait(), 5)
+        assert shown == [[HANDOFF_CARD["en"]]]                   # the model reads the open handoff's card
+        response = await asyncio.wait_for(handoff_done(client, first.handoff_id, copy.owner), 5)
+        assert response.status_code == 200, response.text       # the check holds nothing the owner waits for
+    finally:
+        answer.set()                                             # never left waiting on the model
+    verdict = await asyncio.wait_for(checking, 5)
+
+    assert [(v.kind, v.span, v.rule_id) for v in verdict.violations] == [
+        ("soft_promise", REPLY_HERE, "soft.handoff_closed")]
+    assert_handed_off(verdict)                                   # the prose isn't shown; the card is
+    statuses = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
+    [second] = [handoff_id for handoff_id in statuses if handoff_id != first.handoff_id]
+    assert statuses == {first.handoff_id: ("card", "done"), second: ("card", "open")}
+    [entry] = (await reply_entries(app, copy))[-1:]
+    assert (entry.seq, entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (
+        verdict.ledger_seq, False, ["soft.handoff_closed"])
+    assert entry.event.summary["soft_promise"]["status"] == "ok"            # the model's call is on record
+
+
+async def test_the_handoff_a_reply_leans_on_is_held_until_it_is_recorded(app, client, reviewer, monkeypatch):
+    """A reply that passed on an open handoff's card holds that handoff `FOR SHARE` from its
+    final check to its commit: the owner's mark of done waits for the verdict, then goes ahead."""
+    copy, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, BLOCKED)).ok                     # the card opens one
+    [first] = await handoffs_of(app, copy)
+    append, appending, go_on = ledger.append, asyncio.Event(), asyncio.Event()
+
+    async def pause_at_the_verdict(ctx, *, copy_id, desk_id, event):
+        if event.kind == "reply":
+            appending.set()
+            await go_on.wait()
+        return await append(ctx, copy_id=copy_id, desk_id=desk_id, event=event)
+
+    monkeypatch.setattr(ledger, "append", pause_at_the_verdict)
+    checking = asyncio.create_task(checked(client, visitor, REPLY_HERE))
+    closing = None
+    try:
+        await asyncio.wait_for(appending.wait(), 5)
+        with connections_of(app) as pids:
+            closing = asyncio.create_task(handoff_done(client, first.handoff_id, copy.owner))
+            await until_waiting(app, closing, pids, "kernel.handoffs")
+        assert not closing.done()                                # the owner's mark waits for the verdict
+    finally:
+        go_on.set()                                              # never left holding the handoff
+    verdict = await asyncio.wait_for(checking, 5)
+    response = await asyncio.wait_for(closing, 5)
+
+    assert (verdict.ok, [(block.kind, block.text) for block in verdict.blocks]) == (True, [("prose", REPLY_HERE)])
+    assert response.status_code == 200, response.text
+    assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(first.handoff_id, "done")]
+    kinds = [(entry.event.kind, entry.event.summary.get("part")) for entry in await ledger_rows(app, copy)]
+    assert kinds[-2:] == [("reply", None), ("desk_data", "handoffs")]       # the verdict first, then the mark

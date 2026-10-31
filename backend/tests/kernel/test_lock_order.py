@@ -403,6 +403,17 @@ async def test_a_reply_check_that_opens_a_handoff_keeps_the_lock_order(app, clie
     assert all(map(in_lock_order, log.transactions))
 
 
+async def test_a_reply_backed_by_an_open_handoff_keeps_the_lock_order(app, client, frozen_clock):
+    _, visitor = await visitor_of(app, client)
+    assert not (await checked(client, visitor, "That will be $180.")).ok          # the card opens a handoff
+    frozen_clock.advance(1)
+    with lock_log(app) as log:
+        assert (await checked(client, visitor, "Maria Rivera will reply here.")).ok
+    # a reply that passed on the open handoff's card: the session row, then that handoff FOR SHARE, held to the
+    # commit, then the verdict's entry
+    assert log.transactions == [["sessions", "handoffs", "ledger_heads"]]
+
+
 async def test_an_allowed_verification_start_runs_in_the_lock_order(app, client):
     _, visitor = await visitor_of(app, client)
     allowed = await decided(client, visitor, "native.start_verification", {"contact": "dana@example.com"})
