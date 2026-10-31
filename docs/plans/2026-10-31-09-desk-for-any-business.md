@@ -87,7 +87,7 @@ type ConnectorProposal = {
 
 - **`CAPABILITIES` (code):** `can_do_today` is true for answer, intake, schedule, price, payment and urgent, and false for documents and status on Monday (a setup Desk has no one on record, no status records and no uploads).
 - **`autonomy` is a rule, never an amount:** an accepted job's autonomy is owner-confirmed input to setup's card drafting. A money job's "auto" still runs only under the limits the owner gave on the isolated limit questions.
-- **Card decisions:** `POST /api/owner/setup/{interview_id}/proposals/{proposal_id}` with `{accept: boolean, title?: string, amount_cents?: number, autonomy?: "auto" | "ask"}`. `title` (≤ 60), `amount_cents` (purpose payments) and `autonomy` are allowed only with `accept: true` (else 422), and the card comes back `accepted` with them applied. A later decision replaces an earlier one. 404 for an unknown card, 409 once `step` has left `questions`.
+- **Card decisions:** `POST /api/owner/setup/{interview_id}/proposals/{proposal_id}` with `{accept: boolean, title?: string, amount_cents?: number, autonomy?: "auto" | "ask"}`. `title` (≤ 60), `amount_cents` (purpose payments) and `autonomy` are allowed only with `accept: true` (else 422), and the card comes back `accepted` with them applied. Only the pending card can be decided (409 otherwise); the decision runs Claude's next turn (see "Card flow" below). 404 for an unknown card, 409 once `step` has left `questions`.
 - **Finalizing (one routine for the last answer and for "Use your suggestions"):** cards still `proposed` become `accepted` (declines stay); every topic not yet covered is covered, its limit asking the owner; code writes `SetupAnswers.how_we_help` (≤ 1500) from the accepted jobs, one "title: how" line each; accepted connectable connectors are connected and accepted jobs with a `config` become business tools (A5); `step` moves to `tools`.
 - `POST /api/owner/setup/{interview_id}/suggestions` with `{}` runs that routine at once.
 
@@ -382,6 +382,35 @@ Lanes, as staffed: 76 (A2a, A2b), the cards lane (A3 and the finish step), 19 (A
   - the About labels (About us, Pricing, Getting started, After hours, Urgent help, How we help);
   - the web search strings;
   - the safety check's "6 of 6 stopped", with each row keeping "Blocked" or "Asks you".
+
+## Card flow (owner rulings, 2026-10-31 afternoon; these win over the Seams above)
+
+- **One thing per turn.**
+  - The opening says the business back and outlines the plan in words, with no cards. Planned jobs and connectors stay hidden.
+  - Each Claude turn then asks exactly one thing: a question (choices docked above the composer, numbered, with keys, "Something else…" and a dismiss), or one proposal card inline in the transcript.
+- **A card is the question.**
+  - "Set it up", "Not now" or "Connect" answers it, and Claude replies and asks the next thing.
+  - Typing in the composer also answers it (`POST …/answer` with `{question: null, card, text}`). Claude may accept, decline, re-propose an updated card (the old one becomes `changed` with `superseded_by`), or answer a question and keep it pending.
+- **SetupState fields:** `pending_card` names the card awaiting an answer, and `question` is null while one is. Without `?cards=1`, setup never asks with a card (topics only) and accepts the plan unshown at finish.
+- **Card fields:** a short title, one plain line (`how`), and rows: Who (`who`), Uses and Next for you (fixed words by kind), Asks (intake questions). A payment card has one owner-entered Amount.
+- **Apps:**
+  - Every catalog app connects on accept: Stripe for real, the others simulated with the Mock badge.
+  - A simulated app adds no capability, and Claude never claims one.
+  - Claude says "connecting", never "connected".
+- **Prerequisites first:** bookings need opening hours, quotes and payments need prices (and Stripe), and documents need a client on record.
+- **Suggested facts:**
+  - Facts finish fills from Claude's homework are listed in `SetupAnswers.suggested_fields`.
+  - They never reach drafting as the owner's words, and are never published as `policy:` claims until the owner confirms them.
+  - Fields the owner set or cleared are never refilled.
+- **Fixed words Giovanni signed:**
+  - card labels: "Set it up" / "Set up", "Changed below", "Connected", "Something else…", the key hint, the row labels and the Uses / Next-for-you values;
+  - "Use your suggestions";
+  - the payment line "I'll ask you before any payment. You can set an amount I handle on my own, now or later in Rules.";
+  - the limit questions and choices;
+  - the web search labels;
+  - the typed-booking card, receipt and alert;
+  - the intake receipt and hold sentences;
+  - "free" allowed only in business tools' title and appointment type.
 
 ## Review Ledger
 
