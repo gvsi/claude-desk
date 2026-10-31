@@ -471,8 +471,9 @@ describe('Demo inbox', () => {
 
   it('owner_inbox_that_failed_as_a_left_first_visit_read_ahead_is_read_again', { timeout: 15_000 }, async () => {
     // The owner leaves the first visit's page while it still reads Today ahead, here waiting on a
-    // slow Today, after the inbox's read and its retry failed there. Once that read ahead's wait is
-    // over, Today opened from another page reads the inbox again rather than open on that failure.
+    // slow Today, after the inbox's read and its retry failed there. The page forgets its read ahead
+    // as it goes, so Today opened later from another page reads the inbox again rather than open on
+    // that failure as if it were its own.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
     let slowToday = true;
     worker.use(
@@ -488,11 +489,34 @@ describe('Demo inbox', () => {
     await vi.waitFor(() => expect(requests('ownerInbox')).toHaveLength(2));
     await router.navigate(`/app/${RIVERA.deskId}/rules`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await new Promise((resolve) => setTimeout(resolve, READ_AHEAD_MS));
 
     await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Today' }).click();
     await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(3);
+  });
+
+  it('owner_inbox_that_failed_as_a_capped_read_ahead_isnt_sent_again', { timeout: 15_000 }, async () => {
+    // A returning owner's first visit reads Today ahead, here past its cap: Today is slow, and the
+    // inbox's read and its retry fail. Today opens once the cap is reached, on that failure, without
+    // sending the inbox's read again: it is this visit's own.
+    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
+    let slowToday = true;
+    worker.use(
+      http.get(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId), async () => {
+        if (slowToday) {
+          slowToday = false;
+          await new Promise((resolve) => setTimeout(resolve, READ_AHEAD_MS + 1_500));
+        }
+        return undefined;
+      }),
+    );
+    const { screen, router } = await renderRoute('/', { retryScale: 0 });
+    await expect.poll(() => router.state.location.pathname, { timeout: READ_AHEAD_MS + 2_000 }).toBe(`/app/${RIVERA.deskId}/today`);
+    const line = screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    // Time for a read on mount to go out, had Today sent the failed one again.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(requests('ownerInbox')).toHaveLength(2);
   });
 
   it('owner_inbox_still_out_as_today_opens_says_so', { timeout: 15_000 }, async () => {

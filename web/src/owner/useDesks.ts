@@ -155,6 +155,14 @@ export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
 }
 
 /**
+ * Forgets the read ahead of `deskId`'s Today, for a page left before Today opened from it: the
+ * Desk's next Today, a later visit, has a wait of its own, and reads again what failed before.
+ */
+export function forgetReadAhead(queryClient: QueryClient, deskId: string): void {
+  deadlinesOf(queryClient).delete(deskId);
+}
+
+/**
  * Whether a Desk's Today, just opened, is still reading what it first shows (its Today and Needs
  * you, and the copy's Demo inbox), so it keeps its sections back and they open together rather than
  * one by one, each pushing the next down, when the owner comes from another Desk or another page. A first visit's page and a
@@ -164,12 +172,13 @@ export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
  */
 export function useTodayOpening(deskId: string): boolean {
   const queryClient = useQueryClient();
-  // Whether this visit's Today was read ahead (a first visit's page, a reload's loading page) and
-  // that read ahead's wait isn't over: then a failed inbox read is this opening's own, and Today opens
-  // on it without sending it again, as it does with its other reads. Otherwise a failed inbox read
-  // is an earlier visit's (the copy's inbox outlives the page, and nothing reads it while its sheet
-  // is closed), and this opening reads it again.
-  const [readAheadForThisVisit] = useState(() => (deadlinesOf(queryClient).get(deskId) ?? 0) > Date.now());
+  // Whether this visit's Today was read ahead (a first visit's page, a reload's loading page), whose
+  // deadline Today takes as it opens, past its cap or not: then a failed inbox read is this opening's
+  // own, and Today opens on it without sending it again, as it does with its other reads. A page left
+  // before Today took its deadline forgets it. Otherwise a failed inbox read is an earlier visit's
+  // (the copy's inbox outlives the page, and nothing reads it while its sheet is closed), and this
+  // opening reads it again.
+  const [readAheadForThisVisit] = useState(() => deadlinesOf(queryClient).has(deskId));
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
   // Read here only as Today opens, unless it was just read: the inbox itself reads it again while its
