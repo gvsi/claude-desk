@@ -223,18 +223,23 @@ describe('Settings', () => {
     expect(sawNotFound()).toBe(false);
 
     // A delete whose answer was lost but which went through is never reported as failed: the copy
-    // is read again, and without the Desk the owner moves on as from a 204.
+    // is read again, and without the Desk the owner moves on as from a 204, with no "not found" on the way.
     const lost = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
+    await expect.element(main(lost.screen).getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
+    const lostSawNotFound = watchFor("This page doesn't exist");
     mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
     await main(lost.screen).getByRole('button', { name: 'Delete this Desk' }).click();
     await lost.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => lost.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+    await expect.element(lost.screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
     expect(lost.screen.getByText(UNAVAILABLE).elements()).toEqual([]);
+    expect(lostSawNotFound()).toBe(false);
 
     // Both answers lost: the delete went through, and the read after it failed too. The page says it
     // can't confirm the delete, offers no second delete, and reads the copy again when asked.
     const unsure = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
     await expect.element(main(unsure.screen).getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
+    const unsureSawNotFound = watchFor("This page doesn't exist");
     mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
     mockStore.inject({ route: 'desks', status: 'network' });
     await main(unsure.screen).getByRole('button', { name: 'Delete this Desk' }).click();
@@ -246,11 +251,25 @@ describe('Settings', () => {
     expect(main(unsure.screen).getByRole('button', { name: 'Delete this Desk' }).elements()).toEqual([]);
     expect(unsure.router.state.location.pathname).toBe(GENERAL);
     expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
+
+    // Another read of the copy's Desks lands meanwhile, without the Desk (here Answering's own, after
+    // a change whose answer was lost). The page still says it can't confirm the delete, rather than
+    // "not found", until the owner reloads.
+    mockStore.inject({ route: 'setAnswering', status: 'network', afterCommit: true });
     const reads = requests('desks').length;
+    await main(unsure.screen).getByRole('switch', { name: 'Answering' }).click();
+    await expect.poll(() => requests('desks').length).toBeGreaterThan(reads);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect.element(unconfirmed).toHaveTextContent(`${UNCONFIRMED}Reload`);
+    expect(unsure.router.state.location.pathname).toBe(GENERAL);
+
+    const before = requests('desks').length;
     await unconfirmed.getByRole('button', { name: 'Reload' }).click();
     await expect.poll(() => unsure.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-    expect(requests('desks').length).toBeGreaterThan(reads);
+    await expect.element(unsure.screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+    expect(requests('desks').length).toBeGreaterThan(before);
     expect(requests('deleteDesk')).toHaveLength(1);
+    expect(unsureSawNotFound()).toBe(false);
 
     // Deleted elsewhere (another tab) since the page was read: the delete answers not found, which
     // means it is gone, so the owner moves on as from a 204.

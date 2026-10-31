@@ -51,7 +51,7 @@ function timeZoneWords(zone: string): string {
  * Today, or setup when it was the last one.
  */
 export function GeneralPage() {
-  const { business, desk, setAnswering } = useOwnerDesk();
+  const { business, desk, setAnswering, holdDesk } = useOwnerDesk();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const businessId = useId();
@@ -104,18 +104,27 @@ export function GeneralPage() {
     // Still there: the page shows the Desks as just read, and an earlier read still out can't undo that.
     await queryClient.cancelQueries({ queryKey: DESKS_KEY });
     queryClient.setQueryData(DESKS_KEY, read);
+    holdDesk(false);
     setUnconfirmed(false);
     stillThere();
   };
 
   const remove = useMutation({
     mutationFn: () => request('deleteDesk', { params: { desk_id: desk.desk_id } }),
-    onMutate: () => setFailure(null),
+    onMutate: () => {
+      setFailure(null);
+      // Until the delete is settled, a read of the copy without this Desk leaves this page up to say
+      // how it went, rather than "not found"; leaving it, or finding the Desk still there, lets go.
+      holdDesk(true);
+    },
     onSuccess: () => leave(),
     onError: async (err) => {
       const kind = err instanceof ApiError ? err.kind : null;
       // An ended session returns to the start, as on every owner page.
-      if (kind === 'unauthorized') return;
+      if (kind === 'unauthorized') {
+        holdDesk(false);
+        return;
+      }
       // Not found: it was deleted already, from another tab or by a delete whose answer was lost.
       if (kind === 'not_found') {
         await leave();
@@ -126,8 +135,12 @@ export function GeneralPage() {
         setFailure(ownerErrorCopy(err));
       };
       // A lost answer may still have deleted it: the copy without this Desk says it did.
-      if (isUncertain(err)) await settle(failed);
-      else failed();
+      if (isUncertain(err)) {
+        await settle(failed);
+        return;
+      }
+      holdDesk(false);
+      failed();
     },
   });
 

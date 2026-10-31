@@ -36,6 +36,18 @@ export interface OwnerDeskContext {
    * calls too, so they always agree, with its quick change and its lines when a change didn't save.
    */
   setAnswering: (on: boolean) => void;
+  /**
+   * Keeps this Desk's pages up while `on`, even once a read of the copy no longer lists the Desk,
+   * so a page settling a delete of it says how the delete went instead of "not found". Off, a read
+   * without the Desk is "not found" again.
+   */
+  holdDesk: (on: boolean) => void;
+}
+
+/** The business and Desk a frame shows. */
+interface ShownDesk {
+  business: BusinessOut;
+  desk: DeskSummary;
 }
 
 /** The business and Desk the owner is on, for a page under `/app/:deskId`. */
@@ -98,25 +110,28 @@ export function OwnerLayout() {
 /**
  * One Desk's frame, mounted afresh for each Desk, so the copy's Desks are read again whenever the
  * owner lands on a Desk they don't list (a new copy's, a Desk just made). Only that fresh read can
- * say the Desk isn't the owner's.
+ * say the Desk isn't the owner's, unless a page holds the Desk (`holdDesk`) while it settles a
+ * delete: then the frame stays up as it last was, and the page moves on once it knows.
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
   const found = desks.data ? findDesk(desks.data, deskId) : null;
+  const [held, setHeld] = useState<ShownDesk | null>(null);
+  const shown = found ?? held;
 
-  if (found) return <DeskFrame businesses={desks.data ?? []} business={found.business} desk={found.desk} />;
+  if (shown) return <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />;
   if (desks.isError) return <OwnerState error={desks.error} onRetry={() => void desks.refetch()} />;
   if (desks.data && !desks.isFetching) return <NotFound />;
   return <OwnerState />;
 }
 
-interface DeskFrameProps {
+interface DeskFrameProps extends ShownDesk {
   businesses: BusinessOut[];
-  business: BusinessOut;
-  desk: DeskSummary;
+  /** Holds this business and Desk on screen, or lets them go (null). */
+  onHold: (shown: ShownDesk | null) => void;
 }
 
-function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
+function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const location = useLocation();
@@ -213,6 +228,7 @@ function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
     .filter(Boolean)
     .join(' ');
   const setAnswering = (on: boolean) => answering.mutate(on);
+  const holdDesk = (on: boolean) => onHold(on ? { business, desk } : null);
   const sidebar = (
     <OwnerSidebar
       businesses={businesses}
@@ -243,7 +259,7 @@ function DeskFrame({ businesses, business, desk }: DeskFrameProps) {
             <Notice tone="error">{notice}</Notice>
           </div>
         ) : null}
-        <Outlet context={{ business, desk, setAnswering } satisfies OwnerDeskContext} />
+        <Outlet context={{ business, desk, setAnswering, holdDesk } satisfies OwnerDeskContext} />
         {fill ? null : (
           <footer className="cd-owner-layout__footer">
             <ConceptFooter />
