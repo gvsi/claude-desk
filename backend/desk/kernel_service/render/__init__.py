@@ -2,10 +2,12 @@
 
 Status lines (`status`) are fixed templates, one per decision state plus the reply receipts
 (an owner's say has its own two: written by the owner, or not sent, which only the owner sees)
-and `tool_unavailable`, the line a `refused_at_execution` takes when a connected tool's server
-can't be reached; a decision's status line is never a receipt (`DECISION_STATUS_KEYS`); they
-name the business's owner and nothing else, so they never carry an amount, a date or a
-limit. An action a visitor or agent asked for that ran says what was done, one line per tool
+and two variants: `tool_unavailable`, the line a `refused_at_execution` takes when a connected
+tool's server can't be reached, and `refused_over_mandate`, the line a refusal takes when the
+baseline's mandate rule alone refused an agent's charge above what its mandate has left; a
+decision's status line is never a receipt (`DECISION_STATUS_KEYS`); they name the business's
+owner and nothing else, so they never carry an amount, a date or a limit's value. An action a
+visitor or agent asked for that ran says what was done, one line per tool
 (`executed_status`), in place of the generic executed line, which only the owner's own setup
 actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
 messages and the Demo inbox's code entry, the one text that carries a code. A session reads them

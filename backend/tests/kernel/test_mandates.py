@@ -35,6 +35,7 @@ from desk.db.models import Mandate as MandateRow
 from desk.db.models import MandateReservation, PaymentLink
 from desk.db.session import database_url, libpq_url
 from desk.kernel_service import execute, mandates, payments
+from desk.kernel_service.adapters.charge_mandate import ChargeMandateAdapter
 from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FrozenClock
@@ -42,7 +43,7 @@ from .helpers import draft_and_confirm, ledger_rows, rows_of
 from .test_adapters import Rivera, quote_args, rivera
 from .test_agent_auth import Agent, SignedTurn, mint, open_agent, turn
 from .test_approvals import answered, post_answer
-from .test_decide import decided, open_visitor
+from .test_decide import decided, open_visitor, set_session, verify_signature
 from .test_desk_writes import LOPEZ_DESK, new_desk, post_desk
 from .test_execute import executed, post_execute, read
 from .test_link_completion import cancelled_links, charged, charges, completed, post_cancel
@@ -233,6 +234,59 @@ async def test_expired_mandate_refuses(desk_prove, app, client, frozen_clock):
         assert (refused.outcome, refused.card_ids) == ("refuse", []), (tool, refused.reason_plain)
     assert await reservations(app, setup.desk.copy_id) == [] and agent_charges(setup.desk.copy_id) == []
     assert mandate_spend(setup.desk.copy_id) == [(0, 0)]
+
+
+MANDATE_RULE = "B.agent_charge_within_mandate"
+OVER_THE_LIMIT = {"en": "Refused: over the signed limit for this agent",
+                  "es": "Rechazado: supera el límite firmado para este agente"}
+
+
+@pytest.mark.solver
+@pytest.mark.parametrize("language", ["en", "es"])
+async def test_an_agent_over_its_mandate_is_told_it_is_over_the_signed_limit(desk_prove, app, client, frozen_clock,
+                                                                             language):
+    """A charge above what the agent's mandate has left is refused by the baseline's mandate rule
+    alone, and its receipt says so in the session's language rather than the generic refusal."""
+    setup = await agent_desk(app, client, frozen_clock)
+    await set_session(app, setup.desk, setup.session_id, last_language=language)
+    signed = setup.turn()
+    refused = await asked(client, signed, CHARGE, await quoted(client, signed, "visit"))   # $25 on a $20 mandate
+    assert (refused.outcome, refused.state, refused.policy_ids) == ("refuse", "refused", [MANDATE_RULE])
+    assert refused.action.amount_cents == 2_500
+    # the receipt says why, in the session's language: the line is the decision's own, signed and read back
+    assert refused.visitor_plain == OVER_THE_LIMIT[language]
+    verify_signature((await client.get("/health")).json()["public_key_hex"], refused)
+    assert (await read(client, signed.headers, refused)).visitor_plain == OVER_THE_LIMIT[language]
+    # the owner's account is unchanged
+    assert "The always-on safety rules don't allow it." in refused.reason_plain
+
+
+@pytest.mark.solver
+@pytest.mark.parametrize("case", ["no_mandate", "no_amount"])
+async def test_other_mandate_refusals_keep_the_generic_line(desk_prove, app, client, frozen_clock, monkeypatch, case):
+    """The mandate rule also refuses an agent that holds no mandate (here its mandate has expired, so
+    the session keeps the tool but the principal has no `mandate_remaining_cents`) and a charge with
+    no amount. Neither is over a signed limit, so each keeps the generic refusal line."""
+    setup = await agent_desk(app, client, frozen_clock)
+    if case == "no_mandate":
+        frozen_clock.travel(await expiry_of(app, setup) + timedelta(seconds=1))
+    else:
+        normalize = ChargeMandateAdapter.normalize
+
+        async def no_amount(self, nctx, args):
+            return (await normalize(self, nctx, args)).model_copy(update={"amount_cents": None})
+
+        monkeypatch.setattr(ChargeMandateAdapter, "normalize", no_amount)
+    signed = setup.turn()
+    refused = await asked(client, signed, CHARGE, await quoted(client, signed))      # the $20 deposit
+    assert (refused.outcome, refused.state) == ("refuse", "refused"), refused.reason_plain
+    assert MANDATE_RULE in refused.policy_ids
+    if case == "no_mandate":
+        assert (refused.policy_ids, refused.action.amount_cents) == ([MANDATE_RULE], 2_000)
+    else:
+        assert refused.action.amount_cents is None
+    assert refused.visitor_plain == "Not something I can do here"
+    assert "The always-on safety rules don't allow it." in refused.reason_plain
 
 
 async def rivera_agent(app: FastAPI, client: httpx.AsyncClient, frozen_clock: FrozenClock) -> AgentDesk:

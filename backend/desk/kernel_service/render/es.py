@@ -17,6 +17,7 @@ STATUS: dict[str, str] = {
     "allowed": "Revisado con las reglas de {owner}",
     "held": "Esperando la aprobación de {owner}",
     "refused": "No es algo que pueda hacer aquí",
+    "refused_over_mandate": "Rechazado: supera el límite firmado para este agente",
     "approved": "{owner} lo aprobó",
     "denied": "{owner} decidió no seguir adelante",
     "expired": "Esta solicitud venció",

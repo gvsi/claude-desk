@@ -17,6 +17,8 @@ STATUS: dict[str, str] = {
     "allowed": "Checked against {owner}'s rules",
     "held": "Waiting for {owner} to approve",
     "refused": "Not something I can do here",
+    # refused's line when the baseline's mandate rule alone refused an agent's charge above what its mandate has left
+    "refused_over_mandate": "Refused: over the signed limit for this agent",
     "approved": "{owner} approved this",
     "denied": "{owner} decided not to go ahead",
     "expired": "This request timed out",

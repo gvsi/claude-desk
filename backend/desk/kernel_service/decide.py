@@ -675,6 +675,7 @@ class _Call:
     args: BaseModel | None = None
     action: NormalizedAction | None = None
     quotes: dict[str, str] = field(default_factory=dict)
+    mandate_remaining_cents: int | None = None   # what an agent's mandate had left, as the request was built
 
     @property
     def policy_version(self) -> int:
@@ -753,10 +754,10 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
         return await _refuse(ctx, call, "version_outdated", args_json=args_json)
     if ctx.policies.versions.use(call.version_row):
         return await _refuse(ctx, call, "version_unloadable", args_json=args_json)
+    call.mandate_remaining_cents = await mandates.session_remaining(ctx, session_row, principal.desk_id)
     request = cedar_request(principal, call.action, tz=call.business.timezone, now=ctx.clock.now(),
                             auto_money_cap_cents=call.auto_money_cap_cents,
-                            mandate_remaining_cents=await mandates.session_remaining(ctx, session_row,
-                                                                                     principal.desk_id))
+                            mandate_remaining_cents=call.mandate_remaining_cents)
     evaluation = await evaluate(ctx, call.version_row, request,
                                 review_source=lambda pending: _review(ctx, call, pending))
     if evaluation.errored:
@@ -880,11 +881,30 @@ def _reason_plain(call: _Call, outcome: str, reason: str | None, evaluation: Eva
     return " ".join(parts)
 
 
+MANDATE_POLICY = "B.agent_charge_within_mandate"     # the baseline's bound on an agent's charge
+
+
+def _status_key(call: _Call, state: str, reason: str | None, evaluation: Evaluation | None) -> str:
+    """The status line a new decision is stored with: its state's, except for a refusal the
+    evaluation made (no early `reason`) with the baseline's mandate rule as its only deciding
+    policy, for an agent holding a mandate whose charge is above what that mandate had left
+    (`refused_over_mandate`). Any other refusal by that rule (no mandate, no amount), or one
+    another policy also decided, keeps the generic line, so the line never names a cause that
+    isn't the real one."""
+    action, left = call.action, call.mandate_remaining_cents
+    over = (state == "refused" and reason is None and evaluation is not None
+            and evaluation.policy_ids == [MANDATE_POLICY] and call.principal.kind == "agent"
+            and left is not None and action is not None and action.amount_cents is not None
+            and action.amount_cents > left)
+    return "refused_over_mandate" if over else state
+
+
 async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str | None = None,
                  args_json: dict[str, Any] | None = None, evaluation: Evaluation | None = None) -> Decision:
     """Writes the decision (and its action, when one was normalized) with its ledger entries, the
-    breaker's strike and the owner's alerts, in the caller's transaction, and signs it. A twin call
-    that committed first wins: its decision is returned instead."""
+    breaker's strike and the owner's alerts, in the caller's transaction, and signs it with its
+    status line (`_status_key`). A twin call that committed first wins: its decision is returned
+    instead."""
     principal, session_row, action = call.principal, call.session_row, call.action
     now = ctx.clock.now()
     state = STATE_OF[outcome]
@@ -902,7 +922,8 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         policy_ids=evaluation.policy_ids if evaluation and reason is None else [],
         review=evaluation.review if evaluation else None,
         reason_plain=_reason_plain(call, outcome, reason, evaluation),
-        visitor_plain=render.status(state, render.language(session_row.last_language),
+        visitor_plain=render.status(_status_key(call, state, reason, evaluation),
+                                    render.language(session_row.last_language),
                                     owner=call.business.owner_display_name),
         expires_at=now + LIFETIME[outcome], ledger_seq=0, created_at=now, updated_at=now,
         action_id=action.action_id if action else None)
