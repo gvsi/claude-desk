@@ -457,6 +457,25 @@ async def test_cards_that_would_change_verification_get_the_one_retry_then_the_t
     assert len(card_drafts(model)) == 6 and not any(changes_always_on(card) for card in posted.cards)
 
 
+async def test_a_refused_template_card_is_named_to_the_owner(app, browser, fake, kernel_http, model, engine,
+                                                             monkeypatch):
+    # The template cards are setup's last resort, so a template card the API refuses (one that would change starting
+    # a verification: the shipped templates carry none, so one is made to here) is the owner's error to see, as the
+    # kernel refusing the template is: 422 naming the card, with nothing sent to the kernel.
+    send_never = RuleCard(card_id="setup-send-never", applies_to="effect:send_message", mode="never", who="anyone",
+                          reason="Nothing is sent to customers.")
+    templated = template_cards
+    monkeypatch.setattr("desk.api.setup.template_cards",
+                        lambda business_type, answers: [*templated(business_type, answers), send_never])
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.calls.clear()
+    model.add(unparseable(), unparseable())            # Claude's cards can't be used: the template's turn
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert (reply.status_code, reply.json()) == (422, {"error": "changes_always_on", "card_ids": ["setup-send-never"]})
+    assert fake.called("POST /policy/draft") == []
+    assert (await stored(engine, state["interview_id"]))["draft_version"] is None
+
+
 def test_template_caps_money_and_honors_no_documents():
     def answered(**fields) -> SetupAnswers:
         values = {"summary": "Rivera Plumbing.", "hours": [window.window() for window in HOURS],

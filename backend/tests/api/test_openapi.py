@@ -16,7 +16,8 @@ OWN_ERROR_BODIES = {("system_health", "503"): ("HealthOut",),
                     **{(operation, "422"): ("AboveMoneyCap", "ChangesAlwaysOn", "ApiError")
                        for operation in ("owner_rule_chat", "owner_draft_rules", "owner_draft_preset",
                                          "owner_draft_suggestion")},
-                    ("owner_draft_money_cap", "422"): ("ChangesAlwaysOn", "ApiError"),
+                    **{(operation, "422"): ("ChangesAlwaysOn", "ApiError")
+                       for operation in ("owner_draft_money_cap", "owner_setup_rules", "owner_setup_confirm")},
                     ("proxy_complete_payment", "409"): ("PaymentConflict",),
                     ("proxy_cancel_payment", "409"): ("PaymentConflict",),
                     # every A2A answer says it comes from an AI, its errors included

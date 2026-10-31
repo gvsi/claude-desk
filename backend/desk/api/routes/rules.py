@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from desk.api import rules, versions
+from desk.api import rules
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, owner_ctx, require_model_budget, runtime
 from desk.api.ratelimit import RateLimitLedger
 from desk.api.routes.setup import PROVING_RESPONSES, proving_answer
@@ -150,8 +150,8 @@ Work = Callable[[OwnerCtx, Runtime], Awaitable[Any]]
 async def _drafting(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *, body: BaseModel | None = None,
                     admit: Callable[[], Awaitable[None]] | None = None, changes_rules: bool = False) -> Any:
     """`work` on one of the copy's Desks through `proving_answer`; a card above the money cap, or one that would change
-    starting a verification, is 422. New work counts on `admit`, by default the copy's `drafts` limit (drafting and
-    confirming call no model, but the kernel proves each)."""
+    starting a verification (answered by `proving_answer`), is 422. New work counts on `admit`, by default the copy's
+    `drafts` limit (drafting and confirming call no model, but the kernel proves each)."""
     started = monotonic()
     desk_id = ctx.desk(desk_id)
 
@@ -166,8 +166,6 @@ async def _drafting(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *
                                     changes_rules=changes_rules)
     except rules.AboveMoneyCap as above:
         return JSONResponse(AboveMoneyCap(cap_cents=above.cap_cents).model_dump(mode="json"), status_code=422)
-    except versions.ChangesAlwaysOn as always_on:
-        return JSONResponse(ChangesAlwaysOn(card_ids=always_on.card_ids).model_dump(mode="json"), status_code=422)
 
 
 @policy_router.post("/chat", response_model=RuleChatOut, responses=DRAFTING_RESPONSES)
