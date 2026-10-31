@@ -51,8 +51,8 @@ export function TodayPage() {
   useLayoutEffect(() => {
     if (!opening) reachPlace(location.key);
   }, [opening, reachPlace, location.key]);
-  const today = useToday(deskId);
-  const needsYou = useNeedsYou(deskId);
+  const today = useToday(deskId, { retryOnMount: false });
+  const needsYou = useNeedsYou(deskId, { retryOnMount: false });
   const answers = useAnswer(deskId);
   // An answered card moves to "Answered just now", and focus that fell to the page follows it.
   const answeredFocus = useAnsweredFocus(answers.answered);

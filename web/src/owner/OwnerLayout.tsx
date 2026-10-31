@@ -229,7 +229,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const today = useToday(deskId);
+  // Mounted with Today on a reload: a failed read of it is Today's to show, not to send again.
+  const today = useToday(deskId, { retryOnMount: false });
   // Ask Claude, beside the page that opened it (the Rules page, a tool's page).
   const askClaude = useAskClaudeHost(deskId, business.owner_display_name);
   const layout = useRef<HTMLDivElement>(null);

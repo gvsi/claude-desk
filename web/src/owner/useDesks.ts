@@ -45,19 +45,26 @@ export function useDesks(deskId: string) {
   });
 }
 
-/**
- * A Desk's Today, polled while the tab is shown. A part of the Today page passes `retryOnMount:
- * false`: it mounts once the page has read Today (`useTodayOpening`), and a read that failed isn't
- * sent again just because it mounted, which would show it loading again; the part shows the failure
- * until a poll or "Try again" reads Today again.
- */
-export function useToday(deskId: string, { retryOnMount = true }: { retryOnMount?: boolean } = {}) {
+/** How a screen reads Today or Needs you. */
+export interface ReadOptions {
+  /**
+   * Whether a read that failed is sent again as this screen mounts (React Query's `retryOnMount`,
+   * default true). Everything that mounts with Today passes false, as Today opens on what its first
+   * reads found, a failure included: sent again, the read would start over as loading, and Today
+   * would hold again, or a part of it look as if it were still loading. One reader left on would be
+   * enough to send it. A poll or "Try again" still reads it again.
+   */
+  retryOnMount?: boolean;
+}
+
+/** A Desk's Today, polled while the tab is shown. */
+export function useToday(deskId: string, { retryOnMount = true }: ReadOptions = {}) {
   return useQuery({ ...todayQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('today'), retryOnMount });
 }
 
 /** What waits for the owner on a Desk: held requests and open callbacks, polled. */
-export function useNeedsYou(deskId: string) {
-  return useQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('needsYou') });
+export function useNeedsYou(deskId: string, { retryOnMount = true }: ReadOptions = {}) {
+  return useQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('needsYou'), retryOnMount });
 }
 
 /**
@@ -124,14 +131,19 @@ export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
   // the spent deadline for the Desk's next Today, a later visit with a wait of its own.
   useEffect(() => {
     if (!first.wanted) return undefined;
-    deadlinesOf(queryClient).set(deskId, first.deadline);
-    if (!first.reading) return undefined;
+    const deadlines = deadlinesOf(queryClient);
+    deadlines.set(deskId, first.deadline);
     let live = true;
-    void readTodayUntil(queryClient, deskId, first.deadline).then(() => {
-      if (live) setReading(false);
-    });
+    if (first.reading) {
+      void readTodayUntil(queryClient, deskId, first.deadline).then(() => {
+        if (live) setReading(false);
+      });
+    }
     return () => {
       live = false;
+      // Left before Today took it (Back, another Desk, a Desk that isn't the owner's): it goes with
+      // the loading page, rather than cut short the wait of a Today opened later.
+      if (deadlines.get(deskId) === first.deadline) deadlines.delete(deskId);
     };
   }, [first, queryClient, deskId]);
   return reading;
@@ -147,8 +159,8 @@ export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
  */
 export function useTodayOpening(deskId: string): boolean {
   const queryClient = useQueryClient();
-  const today = useToday(deskId);
-  const needsYou = useNeedsYou(deskId);
+  const today = useToday(deskId, { retryOnMount: false });
+  const needsYou = useNeedsYou(deskId, { retryOnMount: false });
   const read = (today.data !== undefined || today.isError) && (needsYou.data !== undefined || needsYou.isError);
   const [deadline] = useState(() => deadlinesOf(queryClient).get(deskId) ?? Date.now() + READ_AHEAD_MS);
   const [open, setOpen] = useState(() => read || Date.now() >= deadline);

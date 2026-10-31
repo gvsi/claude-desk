@@ -525,6 +525,29 @@ describe('Today', () => {
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
+  it('leaving_the_loading_page_leaves_no_deadline_behind', { timeout: 15_000 }, async () => {
+    // A reload of Today left before Today opened (here for another Desk, while the copy's Desks are
+    // still being read) takes its read ahead with it: the Desk's Today, opened later, waits for its
+    // reads on its own loading line, rather than open at once on that long-gone deadline.
+    const desks = holdReads(ROUTES.desks.path);
+    const needsYou = holdReads(needsYouPath);
+    const { screen, router } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
+    await vi.waitFor(() => expect(desks.held()).toBe(1));
+    expectLoadingPage();
+    await router.navigate(`/app/${RIVERA.emergenciesDeskId}/conversations`);
+    desks.release();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+    // Past the reload's 3 s.
+    await new Promise((resolve) => setTimeout(resolve, 3_200));
+
+    await router.navigate(TODAY);
+    // Time for Today to be drawn, had it opened without Needs you.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expectTodayOpening();
+    needsYou.release();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+  });
+
   it('back_to_today_returns_to_its_place_once_drawn', async () => {
     // Back to Today once Needs you has left the app's memory: Today opens on its loading line, one
     // line high, where the owner's place on the page can't be reached yet, and goes to it once
@@ -567,6 +590,64 @@ describe('Today', () => {
     const since = region(screen, 'Since last night');
     await expect.element(since.getByText(UNAVAILABLE, { exact: true }), { timeout: 1_500 }).toBeVisible();
     await expect.element(since.getByRole('button', { name: 'Try again' })).toBeVisible();
+  });
+
+  it('reload_with_a_failed_read_shows_one_loading_step', { timeout: 15_000 }, async () => {
+    // A reload where Today's own read fails, and its one retry a second later: the owner's loading
+    // page until then, and Today opens on the failure, drawn, without a second loading step or
+    // sending the failed read again as it opens. Polls far apart, so none lands meanwhile.
+    await cleanup();
+    const pages = watchPages();
+    mockStore.inject({ route: 'today', status: 503, times: 10_000 });
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const since = region(screen, 'Since last night');
+    await expect.element(since.getByText(UNAVAILABLE, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    // Time for a read on mount to go out, had Today sent one.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(pages()).toEqual(['loading', 'today']);
+    expect(requests('today')).toHaveLength(2);
+  });
+
+  it('reload_with_needs_you_failing_shows_one_loading_step', { timeout: 15_000 }, async () => {
+    // The same when what needs the owner can't be read: one loading step, then Today, saying so.
+    await cleanup();
+    const pages = watchPages();
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const line = region(screen, 'Needs you').getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(pages()).toEqual(['loading', 'today without its held request']);
+    expect(requests('needsYou')).toHaveLength(2);
+  });
+
+  it('a_failed_read_is_read_again_on_try_again', { timeout: 15_000 }, async () => {
+    // Opened on a failed read of Today, the briefing's "Try again" still reads it again. Only the
+    // first read and its retry fail; polls far apart, so none lands meanwhile.
+    mockStore.inject({ route: 'today', status: 503, times: 2 });
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const since = region(screen, 'Since last night');
+    await expect.element(since.getByText(UNAVAILABLE, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    expect(requests('today')).toHaveLength(2);
+
+    await since.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(since.getByRole('listitem').first()).toBeVisible();
+    expect(requests('today')).toHaveLength(3);
+  });
+
+  it('a_failed_read_is_read_again_by_the_polls', { timeout: 15_000 }, async () => {
+    // And the polls read both again on their own: the failures show, then what was read.
+    mockStore.inject({ route: 'today', status: 503, times: 2 });
+    mockStore.inject({ route: 'needsYou', status: 503, times: 2 });
+    const sawFailure = watchFor(UNAVAILABLE);
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first(), { timeout: 5_000 }).toBeVisible();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    expect(sawFailure()).toBe(true);
+    expect(requests('today').length).toBeGreaterThan(2);
+    expect(requests('needsYou').length).toBeGreaterThan(2);
   });
 
   it('needs_you_read_failure_says_so', async () => {
