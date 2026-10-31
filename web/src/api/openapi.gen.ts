@@ -2,8 +2,24 @@
 // Source: backend/desk/api/openapi.json. Run `npm run gen:api` after it changes.
 // Only the API-owned schemas are here; contract types come from src/api/contracts.ts.
 
-import type { Decision, EvHeld, EvMessage, EvReceipt, EvResolved, Health, HoursWindow, RuleCard, SessionState } from './contracts.ts';
+import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, Violation } from './contracts.ts';
 
+/**
+ * An A2A error answer's body (Plan 02b, "Errors"): what went wrong, and that the answer comes from an AI.
+ */
+export interface A2AError {
+  code: string;
+  disclosure: "ai";
+}
+/**
+ * 422 from a drafting route: a new or changed card would take or pay out more on its own than the Desk's money
+ * cap, `cap_cents` (0 when unset), so nothing was drafted ("That's above your limit of $X. Raise the limit
+ * first.").
+ */
+export interface AboveMoneyCap {
+  error?: "above_money_cap";
+  cap_cents: number;
+}
 /**
  * `GET /api/public/desks/{slug}/agent_card`: built by code from `PUBLIC_ORIGIN` and the slug, with no model
  * text; what agents may do here, and the AI disclosure, are the kernel's `PublicDesk.agent_card`.
@@ -23,6 +39,23 @@ export interface AgentCardSigning {
   algorithm: "Ed25519";
   encoding: "lowercase hex";
   ts_window_s: number;
+}
+/**
+ * 202: the built-in agent is on its way; poll `GET .../send_agent/{run_id}` for its run (Plan 02b).
+ */
+export interface AgentRunStarted {
+  run_id: string;
+}
+/**
+ * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), which carries nothing, since
+ * the agent's own words are never shown (the panel titles it), or the Desk's answer to it, with the blocks and
+ * signed statuses the kernel checked and the Desk showed the agent.
+ */
+export interface AgentTurn {
+  author: "agent" | "desk";
+  n: number;
+  blocks: RenderedBlock[];
+  receipts: (EvReceipt | EvHeld | EvResolved)[];
 }
 /**
  * 409: the request was no longer waiting for an answer (answered before, expired or cancelled); `decision` is
@@ -68,7 +101,7 @@ export interface ApprovalAnswerOut {
  * An attempt the checkpoint stopped (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its
  * `decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the
  * kernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;
- * `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one.
+ * `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b).
  */
 export interface Attempt {
   ref_id: string;
@@ -77,8 +110,22 @@ export interface Attempt {
   card_ids: string[];
   origin: "kernel" | "api";
   created_at: string;
-  triage: string | null;
+  triage: Triage | null;
   ledger_seq: number;
+}
+/**
+ * A stopped attempt, summarized for the owner (route `triage`): what the person seemed to be after, and a
+ * category for the Safety page's filters. AI-written, for the owner alone.
+ */
+export interface Triage {
+  /**
+   * One or two short, plain sentences for the owner.
+   */
+  summary: string;
+  /**
+   * What kind of attempt it was.
+   */
+  category: "impersonation" | "discount_push" | "private_data" | "code_redirect" | "injection" | "over_limit" | "other";
 }
 /**
  * "Since last night": from 18:00 yesterday in the business's time zone (`since`) to now. `total` is the length of
@@ -146,6 +193,28 @@ export interface CancelAccepted {
   decision_id: string;
 }
 /**
+ * How a draft's cards differ from the active version's, by `card_id`, default cards left out; `changed` pairs
+ * each card before and after.
+ */
+export interface CardDiff {
+  added: RuleCard[];
+  removed: RuleCard[];
+  changed: [unknown, unknown][];
+}
+/**
+ * A reply of Claude's exactly as it was sent to the kernel's reply check: its prose and its clauses.
+ */
+export interface CheckedDraft {
+  prose: string;
+  clauses: Clause[];
+}
+/**
+ * `POST /api/owner/policy/{desk_id}/confirm`: the drafted version the owner read and confirms.
+ */
+export interface ConfirmRulesIn {
+  version: number;
+}
+/**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
  * anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
  * preview.
@@ -173,6 +242,68 @@ export interface CopyRequest {
   passcode: string;
 }
 /**
+ * A card of the active rules that covers a tool: its own (`shared` false), or one on an effect the tool has, which
+ * every tool with that effect shares. A default card is the compiler's ask for a tool no card for anyone covers.
+ */
+export interface CoveringCard {
+  card_id: string;
+  mode: "auto" | "ask" | "never";
+  reason: string;
+  shared: boolean;
+}
+/**
+ * `GET /api/public/desks/{slug}/send_agent/{run_id}`: a built-in agent's run as its launcher's panel shows it,
+ * kept in the process's memory for an hour (Plan 02b).
+ */
+export interface DemoAgentRun {
+  run_id: string;
+  launcher_session_id: string;
+  slug: string;
+  task: "book_visit" | "quote_and_deposit" | "push_the_limit";
+  state: "running" | "done" | "failed";
+  turns: AgentTurn[];
+}
+/**
+ * `POST /api/owner/desks/{desk_id}/documents`: a document for the Desk, the owner's alone or a customer's on
+ * record (`record_owner_ref`), released only through the kernel's single-use links.
+ */
+export interface DocumentIn {
+  document: SeedDocument;
+}
+/**
+ * `POST /api/owner/policy/{desk_id}/draft`: cards to add to the active owner cards, such as an approval's
+ * `card_diff`; a card with the ID of an active one takes its place. Each card is bounded as `DraftCardsIn`'s are,
+ * and so is the Desk's count of owner cards once these are added: beyond any bound, 422 `invalid`.
+ */
+export interface DraftAddIn {
+  /**
+   * @minItems 1
+   * @maxItems 60
+   */
+  add: [RuleCard, ...RuleCard[]];
+}
+/**
+ * `POST /api/owner/policy/{desk_id}/draft`: the owner cards as they should stand, on the version they were read
+ * from (the kernel answers 409 `conflict` once another is active). At most 60 cards (default asks need not be
+ * sent: the kernel adds its own), each `card_id` at most 128 characters and each `reason` at most 200, as a rules
+ * chat writes them; beyond any of these, 422 `invalid`. A card the kernel drafted for one person or agent from an
+ * approval keeps its reason as the kernel wrote it, however long the name it quotes.
+ */
+export interface DraftCardsIn {
+  /**
+   * @maxItems 60
+   */
+  cards: RuleCard[];
+  expected_parent: number;
+}
+/**
+ * `POST /api/owner/conversations/{session_id}/{takeover,handback,resume,typing}`: the session's generation as the
+ * owner last read it; a change made at a generation the session has since left is refused.
+ */
+export interface GenerationIn {
+  generation: number;
+}
+/**
  * An open callback request (`kernel_ro.handoffs`). `reason` is "<name> · <contact> · <reason>" as the visitor
  * typed them (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one.
  */
@@ -189,6 +320,23 @@ export interface Handoff {
 export interface HealthOut {
   ok: boolean;
   kernel: Health | null;
+}
+/**
+ * `POST /api/owner/desks/{desk_id}/knowledge`: something the owner tells Claude about the business (untrusted
+ * text, never policy), owner-only (`Label(readers=["owner"])`) or public (`Label(readers=["public"])`); posting an
+ * item again under its `item_id` replaces it, so marking one public is posting it with the public label.
+ */
+export interface KnowledgeIn {
+  item: KnowledgeItem;
+}
+/**
+ * Details a visitor left: the name and note as they typed them (untrusted text, either may be missing).
+ */
+export interface Lead {
+  lead_id: string;
+  display_name: string | null;
+  note: string | null;
+  created_at: string;
 }
 /**
  * 202: the visitor's message is stored; Claude's answer arrives on the event stream.
@@ -224,24 +372,354 @@ export interface NeedsYouSession {
   assurance: "none" | "demo_code" | "owner_session";
 }
 /**
+ * `POST /api/owner/conversations/{session_id}/messages`: the owner's words, said to the visitor once the owner has
+ * taken the conversation over (`say`), or a private note for Claude (`whisper`).
+ */
+export interface OwnerMessageIn {
+  text: string;
+  kind: "say" | "whisper";
+}
+/**
  * `GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as
  * the owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).
+ * `typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,
+ * kept in the API's memory and shown to the owner alone.
  */
 export interface OwnerTranscript {
   state: SessionState;
   items: OwnerTranscriptItem[];
+  typing_until: string | null;
 }
 /**
- * The owner's view adds the AI-written translation and triage, which never reach a visitor.
+ * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
+ * draft of Claude's the reply check stopped.
+ *
+ * `cursor` is where the item stands for `after`: its own `n`, or later once a translation or triage was written onto
+ * it, when the item comes again with the same `n` (replace it) and the later cursor (advance `after` to the largest
+ * one read). Items come in transcript order (`n`), each once per read.
+ *
+ * A `stopped_draft` item (Plan 02b) stands where the check stopped the draft, before the rewrite or the handoff that
+ * followed: its `stopped_draft` holds the draft and why it was stopped, and it has no `text` or `event`. Every other
+ * item's `stopped_draft` is null.
  */
 export interface OwnerTranscriptItem {
   n: number;
-  kind: "visitor_text" | "agent_text" | "delivered" | "status" | "whisper";
+  kind:
+    | "visitor_text"
+    | "agent_text"
+    | "delivered"
+    | "status"
+    | "whisper"
+    | "owner_joined"
+    | "owner_left"
+    | "stopped_draft";
   created_at: string;
   text: string | null;
-  event: (EvMessage | EvReceipt | EvHeld | EvResolved) | null;
+  event: (EvMessage | EvReceipt | EvHeld | EvResolved | EvOwnerJoined | EvOwnerLeft) | null;
+  cursor: number;
   owner_translation: string | null;
-  triage: string | null;
+  triage: Triage | null;
+  stopped_draft: StoppedDraft | null;
+}
+/**
+ * A reply of Claude's the kernel's reply check stopped (Plan 02b): the draft as the check had it, and each
+ * violation the check found, with the span of the draft it matched (a canary's is "document text", never the canary),
+ * the facts it concerns and the rule that matched. It is the owner's alone: no visitor read or event, no model
+ * context, no reply check, no job and no log line carries it.
+ */
+export interface StoppedDraft {
+  draft: CheckedDraft;
+  violations: Violation[];
+}
+/**
+ * 409 from the checkout's complete or cancel: the link is no longer `issued`. `state` is how it reads now and
+ * `cancel_reason` why it was cancelled, `rules_changed` when a rule change cancelled it, so the checkout page can say
+ * so (master plan, "Payment links").
+ */
+export interface PaymentConflict {
+  error?: "kernel";
+  code?: "conflict";
+  state: "issued" | "paid" | "expired" | "cancelled" | "unknown";
+  cancel_reason: "rules_changed" | null;
+}
+/**
+ * `GET /api/owner/desks/{desk_id}/people`: the people on record, in the order they were added, and the leads,
+ * newest first.
+ */
+export interface PeopleOut {
+  people: PersonOnRecord[];
+  leads: Lead[];
+}
+/**
+ * Someone on record on the Desk. Verification codes go only to their contact, which leaves the kernel masked.
+ */
+export interface PersonOnRecord {
+  person_id: string;
+  display_name: string;
+  masked_contact: string;
+}
+/**
+ * `POST /api/owner/policy/{desk_id}/preset`: "Ask me first for everything" (`ask_first`) or "Recommended rules"
+ * (`auto`).
+ */
+export interface PresetIn {
+  preset: "ask_first" | "auto";
+}
+/**
+ * 202: the rules are still being drafted or checked. Send `retry` again in a few seconds: it picks up the same
+ * work, or its answer once done.
+ */
+export interface ProvingPending {
+  retry: ProvingRetry;
+}
+/**
+ * The request to send again, unchanged: its path and its JSON body (None when it has none).
+ */
+export interface ProvingRetry {
+  path: string;
+  body: Record<string, unknown> | null;
+}
+/**
+ * Which of Today's sections count recorded history: the night the kernel replayed into the copy when it was made
+ * (Plan 01d), which the owner's screens label "Includes recorded history". A replay holds only finished things, so
+ * `needs_you` stays false; it keeps the shape the web reads.
+ */
+export interface RecordedHistory {
+  needs_you: boolean;
+  briefing: boolean;
+  this_week: boolean;
+}
+/**
+ * `GET /api/owner/desks/{desk_id}/reports?days=n`: the last `n` local dates in the business's time zone, today
+ * included, counted as Today's "Last 7 days" is. `bookings` are the bookings made; `paid_cents` the money paid,
+ * through payment links and agents' spending limits; `handled_by_claude` and `needed_you` split the conversations
+ * into those Claude handled alone and those the owner stepped into. `recorded_history` is true when any of these
+ * counts includes the night the kernel replayed into the copy (as `RecordedHistory` is for Today).
+ */
+export interface Reports {
+  bookings: number;
+  paid_cents: number;
+  handled_by_claude: number;
+  needed_you: number;
+  recorded_history: boolean;
+}
+/**
+ * `POST /api/owner/policy/{desk_id}/chat`: what the owner asks Claude about the rules, in their own words.
+ */
+export interface RuleChatIn {
+  text: string;
+}
+/**
+ * Claude's reply to the owner (AI-written, owner-facing) and, when they asked for a change, the draft the kernel
+ * compiled and proved; None for a question, with nothing drafted.
+ */
+export interface RuleChatOut {
+  answer: string;
+  draft: RulesDraft | null;
+}
+/**
+ * A rules version the kernel compiled and proved, for the owner to read and confirm: its owner cards (default
+ * asks left out), how they differ from the active version's (None in setup), the money cap its money cards are held
+ * to, the kernel's proof, and a summary.
+ */
+export interface RulesDraft {
+  version: number;
+  cards: RuleCard[];
+  diff: CardDiff | null;
+  auto_money_cap_cents: number;
+  proof: ProofReport;
+  summary: RulesSummary;
+}
+/**
+ * A draft's cards in the owner's words: each card's reason, by what it does (once each).
+ */
+export interface RulesSummary {
+  on_its_own: string[];
+  asks_you: string[];
+  never: string[];
+}
+/**
+ * 409 from a confirm: the rules changed after the draft was made, so the same cards were drafted again on the
+ * rules now in force, and `draft` is the new version to read and confirm.
+ */
+export interface RulesChanged {
+  error?: "rules_changed_since_draft";
+  draft: RulesDraft;
+}
+/**
+ * `GET /api/owner/desks/{desk_id}/rules`: the active rules version, each tool of the Desk with the cards that
+ * cover it, and the preset the active owner cards are, if they are exactly one (else None: there is no "custom"
+ * state).
+ */
+export interface RulesView {
+  active: PolicyVersion;
+  tools: ToolRow[];
+  preset: ("ask_first" | "auto") | null;
+}
+/**
+ * A tool of the Desk as the kernel lists it (`kernel_ro.tools`): its effects, whether it can be undone, its
+ * status (`needs_review` until the owner confirms a connected tool), the description Claude sees and, for a
+ * connected tool, the hash of the definition it is pinned to and a changed definition waiting for review; and the
+ * active rules' cards that cover it, default asks included, in card order (Plan 02b, Task 9).
+ */
+export interface ToolRow {
+  tool: string;
+  source: "native" | "mcp";
+  effects: string[];
+  reversible: boolean;
+  status: "enabled" | "needs_review" | "disabled";
+  description_confirmed: string;
+  definition_sha256: string | null;
+  pending_definition_text: string | null;
+  pending_sha256: string | null;
+  cards: CoveringCard[];
+}
+/**
+ * `POST /api/owner/policy/setup/{id}/safety_check`: what a bad actor would try against the drafted rules,
+ * run nowhere. `total` counts the rows tried (one lacking a stand-in price is left out), `blocked` those stopped, and
+ * `seconds` how long the kernel took.
+ */
+export interface SafetyCheck {
+  rows: SafetyRow[];
+  blocked: number;
+  total: number;
+  seconds: number;
+}
+/**
+ * One thing a bad actor would try (`label`, and `tries`, what they'd say), the kernel's verdict on it against
+ * the drafted rules (its outcome and `reason_plain`, shown verbatim), and whether it was stopped: refused, or held
+ * for the owner where that stops it, and never when it depends on the reviewer agreeing.
+ */
+export interface SafetyRow {
+  label: string;
+  tries: string;
+  result: ProbeResult;
+  blocked: boolean;
+}
+export interface SendAgentIn {
+  task: "book_visit" | "quote_and_deposit" | "push_the_limit";
+}
+/**
+ * `POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
+ * (`SetupState.question` when it was asked), so an answer sent twice can't answer the question after it.
+ */
+export interface SetupAnswerIn {
+  question:
+    | "what_you_do"
+    | "hours_and_area"
+    | "quote_limit"
+    | "discounts"
+    | "documents_and_payments"
+    | "money_limit"
+    | "contact_and_after_hours";
+  text: string;
+}
+/**
+ * `POST /api/owner/setup/{id}/consent`: whether Claude may read the owner's Claude memory and website.
+ */
+export interface SetupConsentIn {
+  allow: boolean;
+}
+/**
+ * One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
+ * owner's memory or website (`tool_label`).
+ */
+export interface SetupMessage {
+  role: "claude" | "owner" | "tool_label";
+  text: string;
+}
+/**
+ * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
+ * and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
+ * the owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,
+ * spaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked.
+ */
+export interface SetupStartIn {
+  description: string;
+  timezone: string;
+  owner_display_name?: string | null;
+}
+/**
+ * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
+ * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
+ * before consent and after the last one) and the conversation so far.
+ */
+export interface SetupState {
+  interview_id: string;
+  desk_id: string;
+  slug: string;
+  step: "questions" | "tools" | "rules" | "situations" | "safety_check" | "preview" | "live";
+  consent: boolean | null;
+  question:
+    | (
+        | "what_you_do"
+        | "hours_and_area"
+        | "quote_limit"
+        | "discounts"
+        | "documents_and_payments"
+        | "money_limit"
+        | "contact_and_after_hours"
+      )
+    | null;
+  messages: SetupMessage[];
+}
+/**
+ * `GET /api/owner/setup/{id}/tools`: the new Desk's tools, and the connection it can still add (the
+ * mock payments server, until it is connected).
+ */
+export interface SetupTools {
+  tools: ToolRow[];
+  connectable: "mock_payments"[];
+}
+/**
+ * `POST /api/owner/desks/{desk_id}/tools/simulate_change`: the connected tool whose definition the demo changes.
+ */
+export interface SimulateChangeIn {
+  tool:
+    | "native.quote"
+    | "native.find_slots"
+    | "native.book"
+    | "native.release_document"
+    | "native.payment_link"
+    | "native.charge_mandate"
+    | "native.capture_lead"
+    | "native.request_callback"
+    | "native.start_verification"
+    | "native.fetch_website"
+    | "native.read_memory"
+    | "payments.list_charges"
+    | "payments.create_refund";
+}
+/**
+ * A situation Claude wrote to try against the drafted rules: who brings it, the probe code built for it (a
+ * hypothetical caller and request, run nowhere) and what the owner's answers say should happen.
+ */
+export interface Situation {
+  title: string;
+  who: "public" | "verified" | "agent" | "after_hours";
+  probe: Probe;
+  expected: "allow" | "allow_if_reviewed" | "hold" | "refuse";
+}
+/**
+ * What the drafted rules do with a situation (`result`, the kernel's), and whether that matches what was
+ * planned: a plan of `allow_if_reviewed` matches a result that depends on the reviewer, decided by an auto rule
+ * with `review`; any other plan matches the same outcome when it doesn't depend on the reviewer.
+ */
+export interface SituationResult {
+  situation: Situation;
+  result: ProbeResult;
+  matches: boolean;
+}
+/**
+ * A rule the owner's own approvals suggest: they approved `count` requests of `tool` in the last 30 days and no
+ * auto card covers it, so `card` would let Claude handle them. `text` is the owner-facing line; on a money tool the
+ * card allows no more than the largest amount approved, and never more than the money cap.
+ */
+export interface Suggestion {
+  tool: string;
+  count: number;
+  text: string;
+  card: RuleCard;
 }
 /**
  * "Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
@@ -269,7 +747,7 @@ export interface WeekDay {
 }
 /**
  * `GET /api/owner/desks/{desk_id}/today`, computed from the rows on each read. `live` holds the conversations with
- * activity in the last 5 minutes.
+ * activity in the last 5 minutes; `recorded_history` says which sections count replayed rows.
  */
 export interface Today {
   greeting_name: string;
@@ -277,16 +755,70 @@ export interface Today {
   live: ConversationSummary[];
   briefing: Briefing;
   this_week: ThisWeek;
+  recorded_history: RecordedHistory;
 }
 /**
- * One transcript entry as the visitor sees it: their own words, or an event the API delivered.
+ * One decision on a tool, as its page lists it: whose session asked (`display_name` as `NeedsYouSession`'s,
+ * untrusted when a visitor typed it), the outcome and where the request stands, the kernel's owner text, when it was
+ * decided and its ledger entry. `replayed` is true for a decision from the night the kernel replayed into the copy
+ * (recorded history), and for one whose ledger entry can't be read, which is never shown as live.
+ */
+export interface ToolDecisionRow {
+  decision_id: string;
+  session_id: string;
+  display_name: string | null;
+  outcome: "allow" | "hold" | "refuse";
+  state:
+    | "allowed"
+    | "held"
+    | "refused"
+    | "approved"
+    | "denied"
+    | "expired"
+    | "cancelled"
+    | "executed"
+    | "failed"
+    | "unknown"
+    | "refused_at_execution";
+  reason_plain: string;
+  created_at: string;
+  ledger_seq: number;
+  replayed: boolean;
+}
+/**
+ * `GET /api/owner/desks/{desk_id}/tools/{tool}/decisions`: a page of the tool's decisions on the Desk, newest
+ * first; `next_before` is the cursor for the next page, None on the last.
+ */
+export interface ToolDecisions {
+  items: ToolDecisionRow[];
+  next_before: string | null;
+}
+/**
+ * One transcript entry as the visitor sees it: their own words, or an event the API delivered or emitted.
+ *
+ * `owner_joined` and `owner_left` (Plan 02b) are where the owner took the conversation over and handed it back, each
+ * with the event the visitor's stream got then (`EvOwnerJoined` names the owner as the kernel had them), at that
+ * moment; a resume after a breaker pause has none. A client that doesn't know a kind skips the item.
  */
 export interface TranscriptItem {
   n: number;
-  kind: "visitor_text" | "agent_text" | "delivered" | "status" | "whisper";
+  kind: "visitor_text" | "agent_text" | "delivered" | "status" | "whisper" | "owner_joined" | "owner_left";
   created_at: string;
   text: string | null;
-  event: (EvMessage | EvReceipt | EvHeld | EvResolved) | null;
+  event: (EvMessage | EvReceipt | EvHeld | EvResolved | EvOwnerJoined | EvOwnerLeft) | null;
+}
+export interface VerifyCheckIn {
+  code: string;
+}
+/**
+ * `POST /api/public/desks/{slug}/verify/check`: the session as the kernel has it once the code was right, verified
+ * as the contact on record (assurance `demo_code`).
+ */
+export interface VerifyChecked {
+  state: SessionState;
+}
+export interface VerifyStartIn {
+  contact: string;
 }
 /**
  * `POST /api/public/desks/{slug}/sessions`: the session the visitor cookie now holds, and whether it is the one
@@ -305,6 +837,13 @@ export interface VisitorTranscript {
   items: TranscriptItem[];
   last_seq: number;
 }
+/**
+ * The Desk answers the public now, at `public_url`.
+ */
+export interface WentLive {
+  public_url: string;
+  slug: string;
+}
 
 /**
  * Every operation the API serves, as "METHOD /path", with the schema each 2xx answer carries by
@@ -317,9 +856,21 @@ export const API_OPERATIONS = {
   "POST /api/owner/start_over": { 200: "CopyOut" },
   "GET /api/owner/me": { 200: "CopyOut" },
   "GET /api/owner/desks": { 200: "BusinessOut[]" },
+  "POST /api/owner/desks": { 201: "DeskCreated" },
+  "DELETE /api/owner/desks/{desk_id}": { 204: null },
   "PUT /api/owner/desks/{desk_id}/answering": { 200: "DeskUpdated" },
+  "PUT /api/owner/desks/{desk_id}/business": { 200: "DeskUpdated" },
+  "PUT /api/owner/desks/{desk_id}/charter": { 200: "DeskUpdated" },
+  "PUT /api/owner/desks/{desk_id}/hours": { 200: "DeskUpdated" },
+  "PUT /api/owner/desks/{desk_id}/prices": { 200: "DeskUpdated" },
+  "PUT /api/owner/desks/{desk_id}/calendar": { 200: "DeskUpdated" },
+  "PUT /api/owner/desks/{desk_id}/people": { 200: "DeskUpdated" },
+  "GET /api/owner/desks/{desk_id}/people": { 200: "PeopleOut" },
+  "PUT /api/owner/desks/{desk_id}/notifications": { 200: "DeskUpdated" },
+  "POST /api/owner/desks/{desk_id}/preview_session": { 200: "VisitorSession" },
   "GET /api/owner/desks/{desk_id}/today": { 200: "Today" },
   "GET /api/owner/desks/{desk_id}/briefing": { 200: "BriefingList" },
+  "GET /api/owner/desks/{desk_id}/reports": { 200: "Reports" },
   "GET /api/owner/desks/{desk_id}/conversations": { 200: "ConversationSummary[]" },
   "GET /api/owner/conversations/{session_id}": { 200: "OwnerTranscript" },
   "GET /api/owner/desks/{desk_id}/safety": { 200: "Attempt[]" },
@@ -329,11 +880,52 @@ export const API_OPERATIONS = {
   "POST /api/owner/handoffs/{handoff_id}/done": { 200: "DeskUpdated" },
   "GET /api/owner/decisions/{decision_id}": { 200: "Decision" },
   "POST /api/owner/approvals/{decision_id}/answer": { 200: "ApprovalAnswerOut" },
+  "POST /api/owner/conversations/{session_id}/takeover": { 200: "SessionState" },
+  "POST /api/owner/conversations/{session_id}/handback": { 200: "SessionState" },
+  "POST /api/owner/conversations/{session_id}/resume": { 200: "SessionState" },
+  "POST /api/owner/conversations/{session_id}/messages": { 200: "OwnerMessageResult" },
+  "POST /api/owner/conversations/{session_id}/typing": { 204: null },
+  "POST /api/owner/setup": { 201: "SetupState" },
+  "GET /api/owner/setup/{id}": { 200: "SetupState" },
+  "POST /api/owner/setup/{id}/consent": { 200: "SetupState" },
+  "POST /api/owner/setup/{id}/answer": { 200: "SetupState" },
+  "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
+  "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
   "GET /api/public/{slug}": { 200: "PublicDesk" },
   "GET /api/public/desks/{slug}/agent_card": { 200: "AgentCardOut" },
   "POST /api/public/desks/{slug}/sessions": { 200: "VisitorSession" },
   "GET /api/public/desks/{slug}/session": { 200: "VisitorTranscript" },
   "POST /api/public/desks/{slug}/messages": { 202: "MessageAccepted" },
+  "POST /api/public/desks/{slug}/typing": { 204: null },
   "GET /api/public/desks/{slug}/events": { 200: null },
   "POST /api/public/desks/{slug}/decisions/{decision_id}/cancel": { 202: "CancelAccepted" },
+  "POST /api/public/desks/{slug}/verify/start": { 200: "VerifyStarted" },
+  "POST /api/public/desks/{slug}/verify/check": { 200: "VerifyChecked" },
+  "GET /api/public/desks/{slug}/demo_inbox": { 200: "DemoInboxEntry[]" },
+  "POST /api/public/desks/{slug}/agents/key": { 200: "DemoAgentIssued" },
+  "POST /api/public/desks/{slug}/send_agent": { 202: "AgentRunStarted" },
+  "GET /api/public/desks/{slug}/send_agent/{run_id}": { 200: "DemoAgentRun" },
+  "GET /api/d/{token}": { 200: null },
+  "GET /api/pay/{token}": { 200: "PaymentLinkView" },
+  "POST /api/pay/{token}/complete": { 200: "PaymentLinkStateResult" },
+  "POST /api/pay/{token}/cancel": { 200: "PaymentLinkStateResult" },
+  "POST /api/a2a/{slug}": { 200: "A2AResponse" },
+  "POST /api/owner/policy/setup/{id}/rules": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/setup/{id}/situations": { 200: "SituationResult[]", 202: "ProvingPending" },
+  "POST /api/owner/policy/setup/{id}/safety_check": { 200: "SafetyCheck", 202: "ProvingPending" },
+  "POST /api/owner/policy/setup/{id}/confirm": { 200: "PolicyVersion", 202: "ProvingPending" },
+  "POST /api/owner/policy/setup/{id}/go_live": { 200: "WentLive", 202: "ProvingPending" },
+  "GET /api/owner/desks/{desk_id}/rules": { 200: "RulesView" },
+  "GET /api/owner/desks/{desk_id}/rules/drafts/{version}": { 200: "RulesDraft" },
+  "GET /api/owner/desks/{desk_id}/suggestions": { 200: "Suggestion[]" },
+  "GET /api/owner/desks/{desk_id}/tools/{tool}/decisions": { 200: "ToolDecisions" },
+  "POST /api/owner/desks/{desk_id}/tools/connect": { 200: "ToolRow[]" },
+  "POST /api/owner/desks/{desk_id}/tools/simulate_change": { 200: "ToolProfile" },
+  "POST /api/owner/desks/{desk_id}/knowledge": { 200: "KnowledgeItem" },
+  "POST /api/owner/desks/{desk_id}/documents": { 201: "DocumentCreated" },
+  "POST /api/owner/policy/{desk_id}/chat": { 200: "RuleChatOut", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/draft": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/preset": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/suggestions/{tool}": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/confirm": { 200: "PolicyVersion", 202: "ProvingPending" },
 } as const;

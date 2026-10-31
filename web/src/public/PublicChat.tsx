@@ -57,6 +57,8 @@ export interface PublicChatProps {
   previewDeskId?: string;
   /** Called with the chat's session once it is open. */
   onSession?: (session: SessionState) => void;
+  /** Links under "For AI agents" in the about column, on the public page itself. */
+  aboutLinks?: { label: string; href: string }[];
 }
 
 /** Cards that report something done: their executed receipt draws the check. */
@@ -440,7 +442,7 @@ function PublicState({ embedded, language, children }: { embedded: boolean; lang
   );
 }
 
-export function PublicChat({ slug, embedded = false, previewDeskId, onSession }: PublicChatProps) {
+export function PublicChat({ slug, embedded = false, previewDeskId, onSession, aboutLinks }: PublicChatProps) {
   const chat = useVisitorChat(slug, previewDeskId);
   // Page chrome follows the browser; each message's cards follow the message's own language.
   const [language] = useState(browserLanguage);
@@ -635,6 +637,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession }:
         openStatus={openStatus}
         onAskForOwner={askForOwner}
         about={desk.charter}
+        aboutLinks={aboutLinks}
         footer={!embedded}
         composer={
           <div ref={composerRef} onInput={visitorTyping.onInput}>

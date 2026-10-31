@@ -72,6 +72,38 @@ export const Situations: Story = {
   },
 };
 
+/** The kernel reports a planned reviewer-conditional situation as a hold that depends on review. */
+const HELD_FOR_REVIEW: SituationRowProps = {
+  title: 'An agent pays the service call deposit',
+  who: 'Alex Kim’s assistant, signed limit',
+  outcome: 'hold',
+  dependsOnReview: true,
+  reason: 'Within its signed limit, checked by the reviewer.',
+  matches: true,
+};
+
+export const HeldForReview: Story = {
+  render: () => (
+    <ul aria-label="Real situations" style={{ maxWidth: 686, margin: 0, padding: 0, listStyle: 'none' }}>
+      <li>
+        <SituationRow {...HELD_FOR_REVIEW} />
+      </li>
+    </ul>
+  ),
+  parameters: {
+    canvasNote: 'The board’s second-look row, as the kernel reports it: a hold that depends on Claude’s second look (`allow_if_reviewed`).',
+  },
+  play: async ({ canvas }) => {
+    // second_look_whatever_the_outcome: the second-look words and the board's handled dot come from
+    // `dependsOnReview` alone, so a reviewer-conditional hold doesn't read "Asks you".
+    const row = within(canvas.getByRole('list', { name: 'Real situations' })).getByRole('listitem').firstElementChild as HTMLElement;
+    const outcome = row.querySelector<HTMLElement>('.cd-situation-row__outcome')!;
+    await expect(outcome.textContent).toBe('Does it if Claude’s second look agrees');
+    await expect(outcome.querySelector('.cd-status-dot--handled')).not.toBeNull();
+    await expect(row).not.toHaveTextContent('Asks you');
+  },
+};
+
 export const Phone: Story = {
   render: () => (
     <ul aria-label="Real situations" style={{ maxWidth: 326, margin: 0, padding: 0, listStyle: 'none' }}>

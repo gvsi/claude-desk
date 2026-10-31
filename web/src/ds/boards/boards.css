@@ -1169,6 +1169,11 @@
   margin-top: var(--space-20);
 }
 
+/* In a stack, whose gap already sets the answers 20 px under what comes before. */
+.board-setup__stack > .board-setup__actions {
+  margin-top: 0;
+}
+
 .board-setup__summary {
   margin: var(--space-20) 0 0;
   color: var(--text-primary);
@@ -1179,8 +1184,16 @@
   color: var(--text-secondary);
 }
 
-/* The agents page: the brand header, then one 760 px column 32 px under it, its cards 16 px apart,
-   and the footer at the window's foot. */
+/* What follows the title, 20 px under it and 20 px apart, as the questions and tools boards draw it. */
+.board-setup__stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  margin-top: var(--space-20);
+}
+
+/* The agents page: the brand header, then one size-agents-column (760 px) column 32 px under it,
+   its cards 16 px apart, and the footer at the window's foot. */
 .board-agents {
   display: flex;
   flex-direction: column;
@@ -1194,7 +1207,7 @@
   flex-direction: column;
   box-sizing: border-box;
   width: 100%;
-  max-width: calc(760px + 2 * var(--space-40));
+  max-width: calc(var(--size-agents-column) + 2 * var(--space-40));
   margin: 0 auto;
   padding: var(--space-32) var(--space-40) var(--space-20);
 }
@@ -1209,9 +1222,9 @@
   margin-top: var(--space-16);
 }
 
+/* The AI disclosure (DisclosureLine), 16 px under the title; the line sets its own type and ink. */
 .board-agents__disclosure {
   margin-top: var(--space-16);
-  color: var(--text-secondary);
 }
 
 .board-agents__cards {

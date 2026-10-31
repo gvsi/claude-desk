@@ -1,0 +1,1213 @@
+"""Setup, part 2 (Plan 02b, Task 7): the new Desk's parts and rule cards, the situations and safety check tried against
+the draft, the confirm, and going live.
+
+Claude drafts rule cards from the owner's answers; code checks them (a target the Desk has, the contract's limits, the
+answered money cap, no money going out on its own), keeps the Ask me first preset's utility cards in every draft, and
+falls back to template cards when Claude's draft can't be used twice (by code or the kernel, which refuses a card that
+would change starting a verification) or its proof is rejected. The kernel compiles and
+proves every draft: the API sends cards, never Cedar. The proving routes answer 202 once their wait passes, and the
+same request sent again joins the work or takes its answer; a proof that timed out or ran bounded is "Rules can't be
+checked right now". Answering stays off through the confirm, and only going live turns it on.
+
+The app runs on FakeKernel with a scripted model; `PROVING_WAIT_S` is shortened where a test waits past it. The batch
+`{desk_id}/tools/confirm` route and the draft's `auto_money_cap_cents` wait for the kernel contracts that carry them.
+"""
+
+import asyncio
+import json
+import logging
+import re
+from collections.abc import AsyncIterator
+from datetime import UTC, date, datetime, time, timedelta
+from time import monotonic
+from zoneinfo import ZoneInfo
+
+import httpx
+import pytest
+from fastapi import FastAPI
+from procrastinate.testing import InMemoryConnector
+from sqlalchemy import text as sql
+
+from desk.api import proving
+from desk.api.deps import ApiProblem
+from desk.api.main import create_app
+from desk.api.prompts import (
+    CARD_DRAFT_SYSTEM,
+    CARD_ERRORS,
+    CARDS_REFUSED,
+    DRAFT_RETRY,
+    QUESTION_KEYS,
+    SITUATIONS_SYSTEM,
+    DraftedRules,
+    DraftedSituations,
+    HoursAnswer,
+    PriceAnswer,
+    RuleCardDraft,
+    SetupAnswers,
+    SituationDraft,
+)
+from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow
+from desk.api.setup import after_hours_start, calendar_slots, price_items
+from desk.api.setup_templates import SAFETY_PROBES, template_cards
+from desk.contracts import ITEM_ID_PATTERN, SLOT_ID_PATTERN, HoursWindow, PolicyVersion, RuleCard
+from desk.kernel_api import PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest
+from desk.presets import PRESETS
+from tests.api.fakes import ScriptedModel, gated, response
+from tests.api.fakes import text as text_block
+from tests.api.test_setup_questions import (
+    Owner,
+    answer,
+    begin,
+    consent,
+    cut_short,
+    idle_in_transaction,
+    new_owner,
+    structured,
+    turn,
+)
+from tests.kernel_contract.fake_kernel import changes_always_on, fake_kernel_app, tool_profile
+
+WEEKDAYS = ["mon", "tue", "wed", "thu", "fri"]
+HOURS = [HoursAnswer(days=WEEKDAYS, start="08:00", end="18:00"), HoursAnswer(days=["sat"], start="09:00", end="13:00")]
+PRICES = [PriceAnswer(title="Service call deposit", unit_cents=2_000),
+          PriceAnswer(title="Leak repair", unit_cents=25_000),
+          PriceAnswer(title="Water heater flush", unit_cents=15_000)]
+CAP = 30_000                                       # the owner's money cap: $300
+# What each question's turn patches into the answers.
+PATCHES: dict[str, dict] = {
+    "what_you_do": {"summary": "Rivera Plumbing fixes leaks and water heaters around Oakland."},
+    "hours_and_area": {"hours": HOURS, "service_area": "Oakland and Berkeley"},
+    "quote_limit": {"quote_auto_max_cents": 50_000, "price_items": PRICES},
+    "discounts": {"discount_auto_max_bp": 1_000},
+    "documents_and_payments": {"documents": "verified_owner", "payment_link_auto_max_cents": 100_000},
+    "money_limit": {"auto_money_cap_cents": CAP, "refunds": "ask"},
+    "contact_and_after_hours": {"public_contact": "(510) 555-0142", "after_hours": "Take a message."},
+}
+UTILITY = [card.card_id for card in PRESETS["ask_first"]]
+GOOD_CARDS = [
+    RuleCardDraft(applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=50_000, max_discount_bp=1_000,
+                  reason="Quotes from your prices up to $500, with up to 10% off."),
+    RuleCardDraft(applies_to="native.book", mode="auto", who="anyone", hours=HOURS[0],
+                  reason="Weekday visits in your opening hours are booked on their own."),
+    RuleCardDraft(applies_to="native.release_document", mode="auto", who="record_owner",
+                  reason="Customers get their own documents once they confirm it's them."),
+    RuleCardDraft(applies_to="effect:charge", mode="auto", who="anyone", max_amount_cents=CAP,
+                  reason="Takes payments up to $300 on its own."),
+    RuleCardDraft(applies_to="effect:pay_out", mode="ask", who="anyone", reason="Refunds ask you first."),
+]
+
+
+@pytest.fixture
+def model() -> ScriptedModel:
+    return ScriptedModel()
+
+
+@pytest.fixture
+async def app(db, fake, api_settings, clock, model) -> AsyncIterator[FastAPI]:
+    app = create_app(api_settings, kernel_transport=httpx.ASGITransport(app=fake_kernel_app(fake)), model=model,
+                     clock=clock, jobs_connector=InMemoryConnector())
+    async with app.router.lifespan_context(app):
+        yield app
+
+
+def drafted(*cards: RuleCardDraft) -> object:
+    return structured(DraftedRules(cards=list(cards)))
+
+
+def unparseable() -> object:
+    return response(text_block('{"cards": [{"applies_to": "native.quote"}]}'))
+
+
+async def ready(app, browser, kernel_http, model: ScriptedModel, *, business_type: str = "trade",
+                **changes) -> tuple[Owner, dict]:
+    """An owner whose setup answered every question (consent declined): the state at step `tools`. `changes` replace
+    a patched field's value (None leaves it unanswered)."""
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type=business_type)
+    await consent(owner, state["interview_id"], False)
+    for key in QUESTION_KEYS:
+        patch = {name: changes.get(name, value) for name, value in PATCHES[key].items()}
+        reply = await answer(owner, model, state["interview_id"], f"About {key}.",
+                             turn(**{name: value for name, value in patch.items() if value is not None}))
+        assert reply.status_code == 200, reply.text
+    state = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")).json()
+    assert state["step"] == "tools"
+    return owner, state
+
+
+def policy(state: dict, step: str) -> str:
+    return f"/api/owner/policy/setup/{state['interview_id']}/{step}"
+
+
+async def settled(owner: Owner, path: str, tries: int = 40) -> httpx.Response:
+    """Re-post `path` while it answers 202, as the owner app does (each re-post waits up to `PROVING_WAIT_S`)."""
+    for _ in range(tries):
+        reply = await owner.browser.post(path)
+        if reply.status_code != 202:
+            return reply
+        assert reply.json() == {"retry": {"path": path, "body": None}}
+    raise AssertionError(f"{path} still answers 202 after {tries} re-posts")
+
+
+async def drafted_rules(owner: Owner, model: ScriptedModel, state: dict, *cards: RuleCardDraft) -> RulesDraft:
+    model.add(drafted(*(cards or GOOD_CARDS)))
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert reply.status_code == 200, reply.text
+    return RulesDraft.model_validate(reply.json())
+
+
+async def stored(engine, interview_id: str) -> dict:
+    async with engine.connect() as conn:
+        row = (await conn.execute(sql("SELECT step, answers, draft_cards, draft_version FROM app.setup_interviews"
+                                      " WHERE interview_id = :id"), {"id": interview_id})).mappings().one()
+    return dict(row)
+
+
+async def usage_routes(engine) -> list[str]:
+    async with engine.connect() as conn:
+        return list((await conn.execute(sql("SELECT route FROM app.model_calls ORDER BY created_at, route"))).scalars())
+
+
+def owner_cards(body: dict) -> list[dict]:
+    return [card for card in body["cards"] if not card["card_id"].startswith("preset-")]
+
+
+def money_cards(cards: list[RuleCard]) -> list[RuleCard]:
+    return [card for card in cards if card.mode == "auto" and card.applies_to in (
+        "effect:charge", "effect:pay_out", "native.payment_link", "native.charge_mandate", "payments.create_refund")]
+
+
+CEDAR = re.compile(r"\b(permit|forbid)\s*\(|\bwhen\s*\{|\bunless\s*\{|principal\s+is\b")
+
+
+async def test_rules_are_drafted_as_cards_and_compiled_by_the_kernel(app, browser, fake, kernel_http, model, engine):
+    owner, state = await ready(app, browser, kernel_http, model)
+    desk_id = state["desk_id"]
+    active = fake.desks[desk_id].policy_version
+    draft = await drafted_rules(owner, model, state)
+
+    # The Desk's parts reach the kernel first, then the cards: setup's checked RuleCards after the preset's.
+    routes = [call.route for call in fake.calls]
+    parts = ["PUT /desks/{id}/charter", "PUT /desks/{id}/hours", "PUT /desks/{id}/prices", "PUT /desks/{id}/calendar",
+             "PUT /desks/{id}/notifications"]
+    assert all(routes.count(part) == 1 for part in parts)
+    assert max(routes.index(part) for part in parts) < routes.index("POST /policy/draft")
+    (posted,) = fake.called("POST /policy/draft")
+    assert posted.headers["x-owner-session"] == owner.token
+    request = PolicyDraftRequest.model_validate(posted.body)
+    assert (request.desk_id, request.expected_parent) == (desk_id, active)
+    assert [card.card_id for card in request.cards] == [*UTILITY, "card-1", "card-2", "card-3", "card-4", "card-5"]
+    assert request.cards[len(UTILITY)] == RuleCard(
+        card_id="card-1", applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=50_000,
+        max_discount_bp=1_000, reason="Quotes from your prices up to $500, with up to 10% off.")
+    assert request.cards[len(UTILITY) + 1].hours == HoursWindow(days=WEEKDAYS, start=time(8), end=time(18))
+    # No request the API sent the kernel carries Cedar: rules are cards, compiled by the kernel.
+    assert not any(CEDAR.search(json.dumps(call.body)) for call in fake.calls if call.body is not None)
+
+    # The owner reads the kernel's version: its owner cards, its proof, and a summary in their words.
+    version = fake.desks[desk_id].versions[draft.version]
+    assert (draft.version, version.status, version.parent) == (version.version, "proved", active)
+    assert draft.cards == [card for card in version.cards if not card.is_default] == request.cards
+    assert draft.diff is None and draft.proof == version.proof and draft.proof.ok
+    assert draft.auto_money_cap_cents == CAP
+    assert "Quotes from your prices up to $500, with up to 10% off." in draft.summary.on_its_own
+    assert "Refunds ask you first." in draft.summary.asks_you and not draft.summary.never
+    assert fake.desks[desk_id].policy_version == active                   # nothing activates on a draft
+
+    # One drafting call, on its own route, with the tools and answers wrapped as information.
+    (call,) = [request for request in model.requests if request.route == "card_draft"]
+    assert (call.model, call.effort, call.output_schema) == ("claude-opus-5-5", "medium", DraftedRules)
+    assert call.system[0]["text"] == CARD_DRAFT_SYSTEM
+    (message,) = call.messages
+    sent = message["content"][0]["text"]
+    assert sent.startswith("Business type: trade\nThe money cap: $300\n\n<tools>")
+    assert "<answers>" in sent and "Take a message." in sent
+    assert (await usage_routes(engine)).count("card_draft") == 1
+    row = await stored(engine, state["interview_id"])
+    assert (row["step"], row["draft_version"]) == ("rules", draft.version)
+    assert [card["card_id"] for card in row["draft_cards"]] == ["card-1", "card-2", "card-3", "card-4", "card-5"]
+
+
+def sent_tools(model: ScriptedModel) -> list[dict]:
+    """The `<tools>` the card drafting call offered."""
+    (call, *_) = [request for request in model.requests if request.route == "card_draft"]
+    found = re.search(r"<tools>(.*?)</tools>", call.messages[0]["content"][0]["text"], re.S)
+    return json.loads(found.group(1))
+
+
+async def test_setup_cards_keep_the_presets_utility_cards(app, browser, fake, kernel_http, model):
+    # Claude is offered no utility tool: those keep the Ask me first preset's cards.
+    owner, state = await ready(app, browser, kernel_http, model)
+    on_slots = RuleCardDraft(applies_to="native.find_slots", mode="ask", who="anyone", reason="Open times ask you.")
+    model.add(drafted(*GOOD_CARDS, on_slots), drafted(*GOOD_CARDS, on_slots))
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert reply.status_code == 200, reply.text
+    offered = {tool["tool"] for tool in sent_tools(model)}
+    assert offered and not offered & {card.applies_to for card in PRESETS["ask_first"]}
+
+    # A card of Claude's own on a utility tool can't be used: one retry naming it, then the template cards, after the
+    # preset's utility cards exactly as the preset has them. No card of setup's own is a preset card.
+    retry = model.requests[-1].messages[-1]["content"][0]["text"]
+    assert retry == DRAFT_RETRY.format(errors="- cards.5: applies_to is not a tool from <tools> or an effect")
+    (posted,) = fake.called("POST /policy/draft")
+    request = PolicyDraftRequest.model_validate(posted.body)
+    assert request.cards[:len(UTILITY)] == PRESETS["ask_first"]
+    own = request.cards[len(UTILITY):]
+    template = template_cards("trade", SetupAnswers.model_validate((await stored(
+        app.state.runtime.database(), state["interview_id"]))["answers"]))
+    assert own == template and not any(card.card_id.startswith("preset-") for card in own)
+    assert RulesDraft.model_validate(reply.json()).cards == request.cards
+
+
+async def test_invalid_cards_retry_then_fall_back_to_a_template(app, browser, fake, kernel_http, model, engine):
+    # An answer that doesn't fit gets one retry with what is wrong; a fitting retry is used as drafted.
+    owner, state = await ready(app, browser, kernel_http, model)
+    model.add(unparseable())
+    draft = await drafted_rules(owner, model, state)
+    calls = [request for request in model.requests if request.route == "card_draft"]
+    assert len(calls) == 2
+    retry = calls[1].messages[-1]["content"][0]["text"]
+    assert retry.startswith("That answer didn't fit the format:\n- cards.0.mode: Field required")
+    assert [card["card_id"] for card in owner_cards(draft.model_dump())] == ["card-1", "card-2", "card-3", "card-4",
+                                                                             "card-5"]
+
+    # Two answers that don't fit: the template cards, from the owner's answers; nothing more is asked of the model.
+    owner, state = await ready(app, browser, kernel_http, model)
+    model.add(unparseable(), unparseable())
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert reply.status_code == 200, reply.text
+    draft = RulesDraft.model_validate(reply.json())
+    answers = SetupAnswers.model_validate((await stored(engine, state["interview_id"]))["answers"])
+    assert owner_cards(draft.model_dump(mode="json")) == [card.model_dump(mode="json")
+                                                          for card in template_cards("trade", answers)]
+    assert len([request for request in model.requests if request.route == "card_draft"]) == 4
+    assert (await usage_routes(engine)).count("card_draft") == 4
+    assert [card["card_id"] for card in (await stored(engine, state["interview_id"]))["draft_cards"]] == [
+        "setup-quote", "setup-booking", "setup-documents", "setup-charge", "setup-pay-out"]
+
+    # Cards that fit but that the kernel refuses as invalid get the same one retry, then the template cards; the
+    # kernel refusing those as well is the owner's error to see, not another try.
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.calls.clear()
+    fake.fail("POST /policy/draft", "422", times=2)
+    drafting = len(card_drafts(model))
+    model.add(drafted(*GOOD_CARDS))
+    draft = await drafted_rules(owner, model, state)
+    assert [card.card_id for card in draft.cards[len(UTILITY):]] == [
+        "setup-quote", "setup-booking", "setup-documents", "setup-charge", "setup-pay-out"]
+    assert len(fake.called("POST /policy/draft")) == 3 and len(card_drafts(model)) == drafting + 2
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.calls.clear()
+    fake.fail("POST /policy/draft", "422", times=3)
+    model.add(drafted(*GOOD_CARDS), drafted(*GOOD_CARDS))
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert (reply.status_code, reply.json()) == (422, {"error": "kernel", "code": "invalid"})
+    assert len(fake.called("POST /policy/draft")) == 3 and len(card_drafts(model)) == drafting + 4
+
+
+async def test_cards_cut_short_are_unavailable_even_when_their_text_fits(app, browser, fake, kernel_http, model,
+                                                                          engine):
+    # Claude's cards stopped before they finished (`max_tokens`), though their text happens to fit: Claude couldn't
+    # answer, so nothing is retried, stored or drafted, and the same request sent again drafts afresh.
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.calls.clear()
+    model.add(cut_short(DraftedRules(cards=GOOD_CARDS)))
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert (reply.status_code, reply.json()) == (503, {"error": "model_unavailable"})
+    assert len(card_drafts(model)) == 1 and fake.called("POST /policy/draft") == []
+    row = await stored(engine, state["interview_id"])
+    assert (row["step"], row["draft_cards"] or [], row["draft_version"]) == ("tools", [], None)
+    assert (await usage_routes(engine)).count("card_draft") == 1
+
+    draft = await drafted_rules(owner, model, state)
+    assert [card.card_id for card in draft.cards[len(UTILITY):]] == ["card-1", "card-2", "card-3", "card-4", "card-5"]
+
+
+# A card past one of the owner's answered limits, by the tool or by the effect that covers it, and its error line.
+QUOTE_LIMIT = "max_amount_cents must be set and at most quote_auto_max_cents in <answers> (0 when unanswered)"
+DISCOUNT_LIMIT = "max_discount_bp is above discount_auto_max_bp in <answers> (0 when unanswered)"
+DOCUMENTS_RULE = 'documents go out on their own only when documents in <answers> is "verified_owner"'
+LINK_LIMIT = ("max_amount_cents is above payment_link_auto_max_cents in <answers> or the money cap, whichever is lower "
+              "(0 when unanswered)")
+# An owner's "never" answer, which the template keeps with a `never` card: any other card on what it covers is refused.
+DOCUMENTS_NONE = 'documents is "none" in <answers>: a card on documents uses never'
+REFUNDS_NEVER = 'refunds is "never" in <answers>: a card on money going out uses never'
+PAST_A_LIMIT = [
+    ({}, RuleCardDraft(applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=50_001,
+                       reason="Bigger quotes."), QUOTE_LIMIT),
+    ({}, RuleCardDraft(applies_to="native.quote", mode="auto", who="anyone", reason="Any quote."), QUOTE_LIMIT),
+    ({"quote_auto_max_cents": None},
+     RuleCardDraft(applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=100, reason="Quotes."),
+     QUOTE_LIMIT),
+    ({}, RuleCardDraft(applies_to="effect:change", mode="auto", who="anyone", reason="Changes on their own."),
+     QUOTE_LIMIT),
+    ({}, RuleCardDraft(applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=50_000,
+                       max_discount_bp=1_001, reason="Quotes with discounts."), DISCOUNT_LIMIT),
+    ({"documents": "ask"}, RuleCardDraft(applies_to="native.release_document", mode="auto", who="record_owner",
+                                         reason="Documents go out."), DOCUMENTS_RULE),
+    ({"documents": "none"}, RuleCardDraft(applies_to="effect:private_data", mode="auto", who="record_owner",
+                                          reason="Private records go out."), DOCUMENTS_NONE),
+    ({"documents": "none"}, RuleCardDraft(applies_to="native.release_document", mode="ask", who="anyone",
+                                          reason="Sending a document asks you first."), DOCUMENTS_NONE),
+    ({"refunds": "never"}, RuleCardDraft(applies_to="effect:pay_out", mode="ask", who="anyone",
+                                         reason="Refunds ask you first."), REFUNDS_NEVER),
+    ({"payment_link_auto_max_cents": 10_000},
+     RuleCardDraft(applies_to="native.payment_link", mode="auto", who="anyone", max_amount_cents=10_001,
+                   reason="Payment links."), LINK_LIMIT),
+    ({"payment_link_auto_max_cents": 10_000},
+     RuleCardDraft(applies_to="effect:charge", mode="auto", who="anyone", max_amount_cents=20_000,
+                   reason="Payments."), LINK_LIMIT),
+]
+
+
+@pytest.mark.parametrize(("changes", "past", "error"), PAST_A_LIMIT)
+async def test_a_card_past_an_answered_limit_gets_the_one_retry_then_the_template(app, browser, fake, kernel_http,
+                                                                                 model, engine, changes, past, error):
+    owner, state = await ready(app, browser, kernel_http, model, **changes)
+    answers = SetupAnswers.model_validate((await stored(engine, state["interview_id"]))["answers"])
+    within = [card for card in GOOD_CARDS if not _past(card, answers)]
+    model.add(drafted(*within, past), drafted(*within))
+    draft = await rules_reply(owner, state)
+    retry = card_drafts(model)[-1].messages[-1]["content"][0]["text"]
+    assert retry == DRAFT_RETRY.format(errors=f"- cards.{len(within)}: {error}")
+    assert [card.applies_to for card in draft.cards[len(UTILITY):]] == [card.applies_to for card in within]
+
+    # Past it twice: the template cards, which follow every answered limit.
+    owner, state = await ready(app, browser, kernel_http, model, **changes)
+    model.add(drafted(*within, past), drafted(*within, past))
+    draft = await rules_reply(owner, state)
+    assert draft.cards[len(UTILITY):] == template_cards("trade", answers)
+
+
+def _past(card: RuleCardDraft, answers: SetupAnswers) -> bool:
+    """Whether one of `GOOD_CARDS` goes past what `answers` allow (when a case answers lower limits)."""
+    if card.applies_to == "native.quote":
+        return (card.max_amount_cents or 0) > (answers.quote_auto_max_cents or 0)
+    if card.applies_to == "native.release_document":
+        return answers.documents != "verified_owner"
+    if card.applies_to == "effect:pay_out":
+        return answers.refunds == "never"
+    if card.applies_to == "effect:charge":
+        return card.max_amount_cents > min(answers.payment_link_auto_max_cents or 0, answers.auto_money_cap_cents)
+    return False
+
+
+# A card on `effect:send_message`, the one effect of starting a verification, so it covers that tool too: the kernel
+# refuses a set holding an `ask` one (Plan 01b), since it would hold every verification.
+SEND_ASKS = RuleCardDraft(applies_to="effect:send_message", mode="ask", who="anyone",
+                          reason="Messages to customers ask you first.")
+VERIFICATION_TARGETS = ("native.start_verification", "effect:send_message")
+
+
+def card_drafts(model: ScriptedModel) -> list:
+    return [request for request in model.requests if request.route == "card_draft"]
+
+
+async def rules_reply(owner: Owner, state: dict) -> RulesDraft:
+    """The rules draft, with the drafting answers already scripted."""
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert reply.status_code == 200, reply.text
+    return RulesDraft.model_validate(reply.json())
+
+
+async def test_cards_the_kernel_refuses_get_the_one_retry_then_the_template(app, browser, fake, kernel_http, model,
+                                                                          engine):
+    # Claude's cards fit, but one would change starting a verification: the kernel refuses the set (422 `invalid`,
+    # naming no card). Claude gets its one retry, told the kernel refused them, and its fixed cards are drafted.
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.calls.clear()
+    model.add(drafted(*GOOD_CARDS, SEND_ASKS), drafted(*GOOD_CARDS))
+    draft = await rules_reply(owner, state)
+    calls = card_drafts(model)
+    assert len(calls) == 2
+    assert calls[1].messages[-1]["content"][0]["text"] == DRAFT_RETRY.format(errors=CARDS_REFUSED)
+    assert json.loads(calls[1].messages[-2]["content"][0]["text"])["cards"][-1]["applies_to"] == "effect:send_message"
+    posted = [PolicyDraftRequest.model_validate(call.body) for call in fake.called("POST /policy/draft")]
+    assert [card.card_id for card in posted[0].cards[len(UTILITY):]] == [f"card-{n}" for n in range(1, 7)]
+    assert [card.card_id for card in posted[1].cards[len(UTILITY):]] == [f"card-{n}" for n in range(1, 6)]
+    assert len(posted) == 2 and draft.cards == posted[1].cards
+    assert [card["card_id"] for card in (await stored(engine, state["interview_id"]))["draft_cards"]] == [
+        f"card-{n}" for n in range(1, 6)]
+
+    # Refused again after the retry: the template cards, which carry no card on verification but the presets' own,
+    # so setup never fails for it.
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.calls.clear()
+    model.add(drafted(*GOOD_CARDS, SEND_ASKS), drafted(*GOOD_CARDS, SEND_ASKS))
+    draft = await rules_reply(owner, state)
+    answers = SetupAnswers.model_validate((await stored(engine, state["interview_id"]))["answers"])
+    assert draft.cards[len(UTILITY):] == template_cards("trade", answers)
+    assert [card for card in draft.cards if card.applies_to in VERIFICATION_TARGETS] == [
+        card for card in PRESETS["ask_first"] if card.applies_to == "native.start_verification"]
+    assert len(card_drafts(model)) == 4 and len(fake.called("POST /policy/draft")) == 3
+
+    # The retry is the one every draft gets: spent on an answer that didn't fit, a set the kernel then refuses is the
+    # template's, with no third drafting call.
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.calls.clear()
+    model.add(unparseable(), drafted(*GOOD_CARDS, SEND_ASKS))
+    draft = await rules_reply(owner, state)
+    assert all(card.card_id.startswith("setup-") for card in draft.cards[len(UTILITY):])
+    assert len(card_drafts(model)) == 6 and len(fake.called("POST /policy/draft")) == 2
+
+
+def test_template_caps_money_and_honors_no_documents():
+    def answered(**fields) -> SetupAnswers:
+        values = {"summary": "Rivera Plumbing.", "hours": [window.window() for window in HOURS],
+                  "quote_auto_max_cents": 50_000, "discount_auto_max_bp": 1_000, "documents": "verified_owner",
+                  "payment_link_auto_max_cents": 100_000, "auto_money_cap_cents": 50_000, "refunds": "ask", **fields}
+        return SetupAnswers(**values)
+
+    def by_target(cards: list[RuleCard]) -> dict[str, RuleCard]:
+        return {card.applies_to: card for card in cards}
+
+    # A $1,000 payment link limit under a $500 cap takes payments on their own up to $500, the lower of the two.
+    cards = by_target(template_cards("trade", answered()))
+    assert cards["effect:charge"].model_dump(include={"mode", "who", "max_amount_cents"}) == {
+        "mode": "auto", "who": "anyone", "max_amount_cents": 50_000}
+    assert cards["effect:charge"].reason == "Takes payments up to $500 on its own; above that it asks you."
+    assert by_target(template_cards("trade", answered(payment_link_auto_max_cents=20_000)))[
+        "effect:charge"].max_amount_cents == 20_000
+    assert (cards["native.quote"].max_amount_cents, cards["native.quote"].max_discount_bp) == (50_000, 1_000)
+    assert cards["native.book"].hours == HOURS[0].window()
+    assert (cards["native.release_document"].mode, cards["native.release_document"].who) == ("auto", "record_owner")
+    assert cards["effect:pay_out"].mode == "ask"
+
+    # A cap of $0, or no payment link limit, asks for every payment; "none" never sends a document; "never" refunds.
+    for answers in (answered(auto_money_cap_cents=0), answered(payment_link_auto_max_cents=None)):
+        charge = by_target(template_cards("trade", answers))["effect:charge"]
+        assert (charge.mode, charge.max_amount_cents) == ("ask", None)
+    cards = by_target(template_cards("office", answered(documents="none", refunds="never", hours=[],
+                                                        quote_auto_max_cents=None, discount_auto_max_bp=None)))
+    assert cards["native.release_document"].mode == "never"
+    assert cards["effect:pay_out"].mode == "never"
+    assert (cards["native.quote"].mode, cards["native.book"].mode) == ("ask", "ask")
+    assert cards["native.book"].reason == "Appointments ask you first."
+    assert by_target(template_cards("trade", answered(documents=None)))["native.release_document"].mode == "ask"
+
+    # Setup's own ids, one plain sentence each.
+    for business_type in ("trade", "office", "landlord", "other"):
+        for card in template_cards(business_type, answered()):
+            assert card.card_id.startswith("setup-") and not card.is_default
+            assert card.reason.endswith(".") and "!" not in card.reason and card.reason.count(". ") == 0
+
+    # No template card is on starting a verification or its effect, so a template draft, after the presets' utility
+    # cards, carries the presets' own card for it alone, which the kernel never refuses.
+    (verification,) = [card for card in PRESETS["ask_first"] if card.applies_to == "native.start_verification"]
+    for business_type in ("trade", "office", "landlord", "other"):
+        for answers in (answered(), answered(documents="none", refunds="never", hours=[], auto_money_cap_cents=0),
+                        answered(documents=None, quote_auto_max_cents=None, payment_link_auto_max_cents=None)):
+            cards = [*PRESETS["ask_first"], *template_cards(business_type, answers)]
+            assert [card for card in cards if card.applies_to in VERIFICATION_TARGETS] == [verification]
+            assert not any(changes_always_on(card) for card in cards)
+
+
+async def test_setup_drafts_at_the_answered_money_cap(app, browser, fake, kernel_http, model, engine):
+    # Claude drafts at the owner's answered cap ($300), and the draft the owner reads is held to it.
+    owner, state = await ready(app, browser, kernel_http, model)
+    draft = await drafted_rules(owner, model, state)
+    assert draft.auto_money_cap_cents == CAP
+    assert all(card.max_amount_cents <= CAP for card in money_cards(draft.cards))
+
+    # An auto money card above the cap, or one that pays money out on its own (the owner's answers allow no refund
+    # without asking), can't be used: one retry naming each, then the template, which takes payments up to the lower
+    # of the payment link limit and the cap.
+    over = RuleCardDraft(applies_to="effect:charge", mode="auto", who="anyone", max_amount_cents=CAP + 1,
+                         reason="Takes payments up to $300.01 on its own.")
+    refunds = RuleCardDraft(applies_to="payments.create_refund", mode="auto", who="verified", max_amount_cents=100,
+                            reason="Refunds up to $1 on their own.")
+    pay_out = RuleCardDraft(applies_to="effect:pay_out", mode="auto", who="anyone", max_amount_cents=100,
+                            reason="Money up to $1 goes out on its own.")
+    for card in (over, refunds, pay_out):
+        owner, state = await ready(app, browser, kernel_http, model)
+        if card is refunds:                              # the payments server connected and its tools enabled
+            fake._put_tool(fake.desks[state["desk_id"]], tool_profile("payments.create_refund"))
+            fake.flush()
+        model.add(drafted(*GOOD_CARDS[:3], card), drafted(*GOOD_CARDS[:3], card))
+        reply = await owner.browser.post(policy(state, "rules"))
+        assert reply.status_code == 200, reply.text
+        retry = model.requests[-1].messages[-1]["content"][0]["text"]
+        problem = CARD_ERRORS["above_cap"] if card is over else CARD_ERRORS["pay_out"]
+        assert retry == DRAFT_RETRY.format(errors=f"- cards.3: {problem}")
+        draft = RulesDraft.model_validate(reply.json())
+        assert draft.auto_money_cap_cents == CAP
+        own = [card for card in draft.cards if not card.card_id.startswith("preset-")]
+        assert all(card.card_id.startswith("setup-") for card in own)
+        assert [card.model_dump(include={"applies_to", "mode", "max_amount_cents"}) for card in money_cards(own)] == [
+            {"applies_to": "effect:charge", "mode": "auto", "max_amount_cents": CAP}]
+
+
+async def test_setup_redrafts_keep_the_answered_cap(app, browser, fake, kernel_http, model, engine):
+    # The template fallback after a rejected proof is drafted at the answered cap, and so is the redraft after a
+    # confirm finds the rules changed: each draft the owner reads is held to $300, from the same stored cards.
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.proof(ok=False, times=1)
+    first = await drafted_rules(owner, model, state)
+    assert first.auto_money_cap_cents == CAP and first.proof.ok
+    assert all(card.card_id.startswith(("preset-", "setup-")) for card in first.cards)
+    assert [card.max_amount_cents for card in money_cards(first.cards)] == [CAP]
+
+    fake.never(state["desk_id"], "native.capture_lead")      # the rules change before the owner confirms
+    reply = await owner.browser.post(policy(state, "confirm"))
+    assert reply.status_code == 409, reply.text
+    again = RulesDraft.model_validate(reply.json()["draft"])
+    assert again.auto_money_cap_cents == CAP
+    assert again.cards == first.cards
+    assert [card.max_amount_cents for card in money_cards(again.cards)] == [CAP]
+    posted = [PolicyDraftRequest.model_validate(call.body) for call in fake.called("POST /policy/draft")]
+    assert len(posted) == 3 and posted[1].cards == posted[2].cards
+    assert posted[2].expected_parent == fake.desks[state["desk_id"]].policy_version != posted[1].expected_parent
+
+
+async def test_rejected_proof_falls_back_to_a_template_once(app, browser, fake, kernel_http, model, engine):
+    # Claude's cards fail their proof, then the template's do too: the owner reads the rejected template draft, with
+    # the proof's counterexample, and nothing is tried a third time.
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.proof(ok=False)
+    draft = await drafted_rules(owner, model, state)
+    posted = [PolicyDraftRequest.model_validate(call.body) for call in fake.called("POST /policy/draft")]
+    assert [card.card_id for card in posted[0].cards[len(UTILITY):]] == ["card-1", "card-2", "card-3", "card-4",
+                                                                         "card-5"]
+    assert all(card.card_id.startswith("setup-") for card in posted[1].cards[len(UTILITY):]) and len(posted) == 2
+    version = fake.desks[state["desk_id"]].versions[draft.version]
+    assert (version.status, draft.proof.ok) == ("rejected", False)
+    assert draft.cards == posted[1].cards
+    assert any(check.counterexample_plain for check in draft.proof.checks)
+    row = await stored(engine, state["interview_id"])
+    assert [card["card_id"] for card in row["draft_cards"]] == [card.card_id for card in posted[1].cards[len(UTILITY):]]
+
+    # Sent again, it answers the same rejected draft with no drafting call; a rejected draft can't be confirmed.
+    calls = len(model.requests)
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert reply.status_code == 200, reply.text
+    assert RulesDraft.model_validate(reply.json()).version == draft.version and len(model.requests) == calls
+    reply = await owner.browser.post(policy(state, "confirm"))
+    assert (reply.status_code, reply.json()["error"]) == (409, "conflict")
+    assert fake.called("POST /policy/confirm") == []
+
+
+async def test_bounded_mode_reports_rules_cannot_be_checked(app, browser, fake, kernel_http, model, engine):
+    # A proof that only ran bounded ("checked on N cases") or timed out can't be confirmed: "Rules can't be checked
+    # right now", with no template fallback and nothing noted as drafted.
+    for kind in ({"method": "bounded"}, {"timed_out": True}):
+        owner, state = await ready(app, browser, kernel_http, model)
+        fake.proof(**kind, times=1)
+        model.add(drafted(*GOOD_CARDS))
+        reply = await owner.browser.post(policy(state, "rules"))
+        assert (reply.status_code, reply.json()) == (409, {"error": "rules_cannot_be_checked"})
+        assert len(fake.called("POST /policy/draft")) == 1
+        row = await stored(engine, state["interview_id"])
+        assert (row["step"], row["draft_version"]) == ("tools", None)
+        assert [card["card_id"] for card in row["draft_cards"]] == ["card-1", "card-2", "card-3", "card-4", "card-5"]
+        reply = await owner.browser.post(policy(state, "confirm"))
+        assert (reply.status_code, reply.json()["error"]) == (409, "conflict")
+        assert fake.called("POST /policy/confirm") == []
+
+        # Sent again, the same stored cards go to the kernel, with no drafting call: a bounded draft is the same
+        # draft again, and a timed-out proof is proved again, now in time.
+        calls = len(model.requests)
+        reply = await owner.browser.post(policy(state, "rules"))
+        first, second = [PolicyDraftRequest.model_validate(call.body) for call in fake.called("POST /policy/draft")]
+        assert first == second and len(model.requests) == calls
+        if "method" in kind:
+            assert (reply.status_code, reply.json()) == (409, {"error": "rules_cannot_be_checked"})
+        else:
+            assert reply.status_code == 200, reply.text
+            assert RulesDraft.model_validate(reply.json()).proof.method == "symcc"
+        fake.calls.clear()
+
+
+async def test_proving_timeout_rereads_the_same_draft(app, browser, fake, kernel_http, model, monkeypatch):
+    monkeypatch.setattr(proving, "PROVING_WAIT_S", 0.3)
+    owner, state = await ready(app, browser, kernel_http, model)
+    path = policy(state, "rules")
+
+    # A proof still running past the wait answers 202, naming the same request to send again; sent again, it joins
+    # the same work: one kernel draft, one drafting call.
+    release = fake.gate("POST /policy/draft")
+    model.add(drafted(*GOOD_CARDS))
+    started = monotonic()
+    reply = await owner.browser.post(path)
+    assert reply.status_code == 202 and monotonic() - started < 2
+    assert reply.json() == {"retry": {"path": path, "body": None}}
+    reply = await owner.browser.post(reply.json()["retry"]["path"])
+    assert reply.status_code == 202 and len(fake.called("POST /policy/draft")) == 1
+    release.set()
+    reply = await settled(owner, path)
+    assert reply.status_code == 200, reply.text
+    assert len(fake.called("POST /policy/draft")) == 1
+    assert len([request for request in model.requests if request.route == "card_draft"]) == 1
+
+    # The kernel gives no answer in time: "Rules can't be checked right now". The owner's retry posts the same stored
+    # cards on the same parent, byte for byte, and gets the draft; Claude isn't asked again.
+    monkeypatch.setattr(proving, "PROVING_WAIT_S", 25)
+    owner, state = await ready(app, browser, kernel_http, model)
+    fake.calls.clear()
+    fake.fail("POST /policy/draft", "timeout", times=1)
+    model.add(drafted(*GOOD_CARDS))
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert (reply.status_code, reply.json()) == (409, {"error": "rules_cannot_be_checked"})
+    calls = len(model.requests)
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert reply.status_code == 200, reply.text
+    first, second = fake.called("POST /policy/draft")
+    assert json.dumps(first.body) == json.dumps(second.body) and len(model.requests) == calls
+    assert PolicyDraftRequest.model_validate(second.body).expected_parent == fake.desks[state["desk_id"]].policy_version
+    assert RulesDraft.model_validate(reply.json()).proof.ok
+
+
+async def idle(app: FastAPI) -> None:
+    """Wait until no proving work is running in the app."""
+    for _ in range(200):
+        if all(entry.task is None for entry in app.state.runtime.proving._entries.values()):
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("proving work is still running")
+
+
+async def test_an_error_after_a_202_reaches_the_next_retry(app, browser, fake, kernel_http, model, monkeypatch,
+                                                           caplog):
+    # Claude's situations can't be used twice, and the second answer comes after the request answered 202: the next
+    # re-post hears that Claude couldn't answer, and Claude isn't asked a third time.
+    caplog.set_level(logging.DEBUG, logger=proving.__name__)
+    owner, state = await ready(app, browser, kernel_http, model)
+    await drafted_rules(owner, model, state)
+    monkeypatch.setattr(proving, "PROVING_WAIT_S", 0.3)
+    path = policy(state, "situations")
+    release = asyncio.Event()
+    model.add(unparseable(), gated(unparseable(), release))
+    reply = await owner.browser.post(path)
+    assert reply.status_code == 202
+    release.set()
+    await idle(app)
+
+    def asked() -> int:
+        return len([request for request in model.requests if request.route == "situations"])
+
+    reply = await owner.browser.post(path)
+    assert (reply.status_code, reply.json()["error"], asked()) == (503, "model_unavailable", 2)
+
+    # Heard once: the re-post after that runs the work again.
+    model.add(structured(DraftedSituations(situations=SITUATIONS)))
+    reply = await owner.browser.post(path)
+    assert (reply.status_code, asked()) == (200, 3), reply.text
+
+    # The kernel's proof outlasts the wait and then gets no answer in time: the retry hears "Rules can't be checked
+    # right now", and the one after re-posts the stored cards.
+    owner, state = await ready(app, browser, kernel_http, model)
+    path = policy(state, "rules")
+    fake.calls.clear()
+    release = fake.gate("POST /policy/draft")
+    fake.fail("POST /policy/draft", "timeout", times=1)
+    model.add(drafted(*GOOD_CARDS))
+    reply = await owner.browser.post(path)
+    assert reply.status_code == 202
+    release.set()
+    await idle(app)
+    reply = await owner.browser.post(path)
+    assert (reply.status_code, reply.json()) == (409, {"error": "rules_cannot_be_checked"})
+    assert len(fake.called("POST /policy/draft")) == 1
+    reply = await owner.browser.post(path)
+    assert reply.status_code == 200, reply.text
+    assert len(fake.called("POST /policy/draft")) == 2
+
+    # Both are answers the app gives, not failures to log.
+    assert [record for record in caplog.records if record.name == proving.__name__] == []
+
+
+async def test_slow_drafting_answers_202_within_25_s(app, browser, fake, kernel_http, model, engine, monkeypatch):
+    monkeypatch.setattr(proving, "PROVING_WAIT_S", 0.5)
+    owner, state = await ready(app, browser, kernel_http, model)
+    path = policy(state, "rules")
+
+    # Claude's drafting outlasts the wait: 202 at the wait, counted from the request's start, drafting included.
+    release = asyncio.Event()
+    slow = gated(drafted(*GOOD_CARDS), release)
+    model.add(slow)
+    started = monotonic()
+    reply = await owner.browser.post(path)
+    waited = monotonic() - started
+    assert reply.status_code == 202 and 0.5 <= waited < 2, (reply.status_code, waited)
+    assert slow.entered.is_set() and fake.called("POST /policy/draft") == []
+
+    # Drafting finishes and the proof is slow too: a retry joins the same work and answers 202 at its own wait; the
+    # next one, once the proof is done, takes the draft. One drafting call in all; the parts went to the kernel once.
+    proof = fake.gate("POST /policy/draft")
+    release.set()
+    reply = await owner.browser.post(path)
+    assert reply.status_code == 202
+    proof.set()
+    reply = await settled(owner, path)
+    assert reply.status_code == 200, reply.text
+    assert RulesDraft.model_validate(reply.json()).proof.ok
+    assert len([request for request in model.requests if request.route == "card_draft"]) == 1
+    assert (await usage_routes(engine)).count("card_draft") == 1
+    assert len(fake.called("PUT /desks/{id}/prices")) == 1 and len(fake.called("POST /policy/draft")) == 1
+
+
+async def test_drafting_and_situations_keep_no_transaction_open_while_claude_answers(app, browser, fake, kernel_http,
+                                                                                     model, db):
+    # The proving work's reads end before each model call, so no transaction waits on Claude; each call is bounded.
+    owner, state = await ready(app, browser, kernel_http, model)
+    for step, answered in (("rules", drafted(*GOOD_CARDS)),
+                           ("situations", structured(DraftedSituations(situations=SITUATIONS)))):
+        release = asyncio.Event()
+        slow = gated(answered, release)
+        model.add(slow)
+        reply = asyncio.create_task(owner.browser.post(policy(state, step)))
+        try:
+            await asyncio.wait_for(slow.entered.wait(), 5)
+            assert idle_in_transaction(db) == 0, step
+        finally:
+            release.set()
+        first = await reply
+        if first.status_code == 202:
+            first = await settled(owner, policy(state, step))
+        assert first.status_code == 200, first.text
+    for route in ("card_draft", "situations"):
+        (call,) = [request for request in model.requests if request.route == route]
+        assert 0 < call.timeout_s <= 60
+
+
+async def test_safety_check_reports_kernel_outcomes_verbatim(app, browser, fake, kernel_http, model, engine):
+    owner, state = await ready(app, browser, kernel_http, model)
+    draft = await drafted_rules(owner, model, state)
+    reply = await owner.browser.post(policy(state, "safety_check"))
+    assert reply.status_code == 200, reply.text
+    check = SafetyCheck.model_validate(reply.json())
+
+    # Each row is what a bad actor would try, with the kernel's own verdict on the draft, word for word: the same
+    # probes sent to the kernel again get the same results.
+    assert [(row.label, row.tries) for row in check.rows] == [(probe.label, probe.tries) for probe in SAFETY_PROBES]
+    (posted,) = fake.called("POST /policy/{version}/probe")
+    assert posted.path.endswith(f"/policy/{draft.version}/probe")
+    request = PolicyProbeRequest.model_validate(posted.body)
+    again = await kernel_http.owner(owner.token).call("POST /policy/{version}/probe", request,
+                                                      path={"version": draft.version})
+    assert [row.result for row in check.rows] == again
+    assert (check.blocked, check.total) == (6, 6) and check.seconds >= 0
+    assert [row.result.outcome for row in check.rows] == ["refuse", "refuse", "hold", "refuse", "hold", "refuse"]
+
+    # The stand-ins: the largest item, 80% off it, at least a cent over the agent's $20 limit, a cent over the lower
+    # of the payment link limit and the money cap, and a tool the Desk never had.
+    probes = request.probes
+    assert probes[2].call.args == {"items": [{"item_id": "leak-repair", "qty": 1}], "requested_discount_bp": 8_000}
+    assert (probes[2].amount_cents, probes[3].amount_cents, probes[3].agent_mandate_remaining_cents) == (
+        25_000, 25_000, 2_000)
+    assert (probes[3].actor, probes[4].amount_cents, probes[5].call.tool) == ("agent", CAP + 1,
+                                                                              "admin.export_customers")
+    assert [(probe.who, probe.resource_owner) for probe in probes[:2]] == [("anyone", "other"), ("verified", "other")]
+    assert (await stored(engine, state["interview_id"]))["step"] == "safety_check"
+
+    # A row the reviewer would decide isn't blocked, though the kernel holds it: auto if the reviewer agrees (the owner
+    # answered that any discount may go out on its own, so the card is within it).
+    owner, state = await ready(app, browser, kernel_http, model, discount_auto_max_bp=10_000)
+    lenient = RuleCardDraft(applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=50_000,
+                            max_discount_bp=10_000, review=True, reason="Quotes with any discount, if the reviewer "
+                                                                        "agrees.")
+    await drafted_rules(owner, model, state, lenient, *GOOD_CARDS[1:])
+    check = SafetyCheck.model_validate((await owner.browser.post(policy(state, "safety_check"))).json())
+    deal = check.rows[2]
+    assert (deal.result.outcome, deal.result.depends_on_review, deal.blocked) == ("hold", True, False)
+    assert (check.blocked, check.total) == (5, 6)
+
+    # With no price list, the rows that need a price to stand in are left out, and the total says so.
+    owner, state = await ready(app, browser, kernel_http, model, price_items=None)
+    await drafted_rules(owner, model, state)
+    check = SafetyCheck.model_validate((await owner.browser.post(policy(state, "safety_check"))).json())
+    assert [row.label for row in check.rows] == [probe.label for probe in SAFETY_PROBES if probe.stand_in in (
+        None, "over_money_limit")]
+    assert (check.blocked, check.total) == (4, 4)
+
+
+TIMEZONE = "America/Los_Angeles"
+SITUATIONS = [
+    SituationDraft(title="A new customer asks for a quote on a leak repair", who="public", tool="native.quote",
+                   item_id="leak-repair", own_record=False, expected="allow"),
+    SituationDraft(title="A customer asks for 30% off a water heater flush", who="public", tool="native.quote",
+                   item_id="water-heater-flush", requested_discount_bp=3_000, own_record=False, expected="allow"),
+    SituationDraft(title="Someone asks to book a visit after closing", who="after_hours", tool="native.book",
+                   own_record=False, expected="hold"),
+    SituationDraft(title="A returning customer books a Saturday visit", who="verified", tool="native.book",
+                   own_record=False, expected="hold"),
+    SituationDraft(title="A customer's assistant pays the service call deposit", who="agent",
+                   tool="native.payment_link", item_id="service-call-deposit", own_record=False, expected="allow"),
+    SituationDraft(title="A customer asks for their own invoice", who="verified", tool="native.release_document",
+                   own_record=True, expected="allow"),
+]
+
+
+async def test_situation_mismatch_is_flagged(app, browser, fake, kernel_http, model, engine, clock):
+    # Saturday visits are booked on their own if the reviewer agrees.
+    owner, state = await ready(app, browser, kernel_http, model)
+    saturday = RuleCardDraft(applies_to="native.book", mode="auto", who="anyone", hours=HOURS[1], review=True,
+                             reason="Saturday morning visits are booked if the reviewer agrees.")
+    draft = await drafted_rules(owner, model, state, GOOD_CARDS[0], saturday, *GOOD_CARDS[2:])
+    model.add(structured(DraftedSituations(situations=SITUATIONS)))
+    reply = await owner.browser.post(policy(state, "situations"))
+    assert reply.status_code == 200, reply.text
+    results = [SituationResult.model_validate(each) for each in reply.json()]
+
+    # A situation planned without a second look matches only when the kernel's outcome is the one planned and doesn't
+    # wait on the reviewer: 30% off asks the owner, not as planned; the Saturday booking is held for the reviewer,
+    # though planned to ask, so it doesn't count.
+    assert [(each.result.outcome, each.result.depends_on_review, each.matches) for each in results] == [
+        ("allow", False, True), ("hold", False, False), ("hold", False, True), ("hold", True, False),
+        ("allow", False, True), ("allow", False, True)]
+    assert [each.situation.title for each in results] == [each.title for each in SITUATIONS]
+    (posted,) = fake.called("POST /policy/{version}/probe")
+    assert posted.path.endswith(f"/policy/{draft.version}/probe")
+    assert [each.situation.probe for each in results] == PolicyProbeRequest.model_validate(posted.body).probes
+
+    # The after-hours case happens when code says: Friday's next day with hours is Saturday, which closes at 13:00
+    # (that minute is outside); the model has no say in when.
+    after = results[2].situation.probe
+    local = after.starts_at.astimezone(ZoneInfo(TIMEZONE))
+    assert local == datetime(2026, 10, 31, 13, 0, tzinfo=ZoneInfo(TIMEZONE))
+    assert after.starts_at == after_hours_start([window.window() for window in HOURS], TIMEZONE, clock())
+    assert after.call.args == {"slot_id": "S-20261031-1300"}
+    assert "starts_at" not in SituationDraft.model_fields
+    own = results[5].situation.probe
+    assert (own.who, own.resource_owner, own.actor) == ("record_owner", "caller", "visitor")
+    agent = results[4].situation.probe
+    assert (agent.actor, agent.amount_cents, agent.agent_mandate_remaining_cents) == ("agent", 2_000, 2_000)
+
+    # One call on its own route, with the draft, the prices and the answers wrapped as information.
+    (call,) = [request for request in model.requests if request.route == "situations"]
+    assert (call.system[0]["text"], call.effort, call.output_schema) == (SITUATIONS_SYSTEM, "medium",
+                                                                         DraftedSituations)
+    sent = call.messages[0]["content"][0]["text"]
+    assert sent.startswith("Business type: trade\n\n<rules>") and "<prices>" in sent and "<answers>" in sent
+    assert '"leak-repair": 25000' in sent and "card-1" not in sent
+    assert (await stored(engine, state["interview_id"]))["step"] == "situations"
+    assert (await usage_routes(engine)).count("situations") == 1
+
+
+async def test_a_planned_second_look_matches_a_reviewed_rule(app, browser, fake, kernel_http, model, engine):
+    # Payments go out on their own if Claude's second look agrees. A situation planned that way (the agent's
+    # deposit, as on the signed setup board) matches; one planned as an unconditional "does it" that the same rule
+    # decides doesn't, and neither does one whose outcome differs.
+    owner, state = await ready(app, browser, kernel_http, model)
+    reviewed = RuleCardDraft(applies_to="effect:charge", mode="auto", who="anyone", max_amount_cents=CAP, review=True,
+                             reason="Takes payments up to $300 on its own if Claude's second look agrees.")
+    await drafted_rules(owner, model, state, *GOOD_CARDS[:3], reviewed, GOOD_CARDS[4])
+    planned = [
+        SituationDraft(title="A customer's assistant pays the service call deposit", who="agent",
+                       tool="native.payment_link", item_id="service-call-deposit", own_record=False,
+                       expected="allow_if_reviewed"),
+        SituationDraft(title="A customer asks for a link to pay the deposit", who="public", tool="native.payment_link",
+                       item_id="service-call-deposit", own_record=False, expected="allow"),
+        SituationDraft(title="A customer asks for 30% off a water heater flush", who="public", tool="native.quote",
+                       item_id="water-heater-flush", requested_discount_bp=3_000, own_record=False, expected="allow"),
+        SituationDraft(title="A new customer asks for a quote on a leak repair", who="public", tool="native.quote",
+                       item_id="leak-repair", own_record=False, expected="allow_if_reviewed"),
+        SituationDraft(title="Someone asks to book a visit after closing", who="after_hours", tool="native.book",
+                       own_record=False, expected="hold"),
+        SituationDraft(title="A customer asks for their own invoice", who="verified", tool="native.release_document",
+                       own_record=True, expected="allow"),
+    ]
+    model.add(structured(DraftedSituations(situations=planned)))
+    reply = await owner.browser.post(policy(state, "situations"))
+    assert reply.status_code == 200, reply.text
+    results = [SituationResult.model_validate(each) for each in reply.json()]
+    assert [(each.situation.expected, each.result.outcome, each.result.depends_on_review, each.matches)
+            for each in results] == [
+        ("allow_if_reviewed", "hold", True, True),       # the second look, as planned
+        ("allow", "hold", True, False),                  # planned without one
+        ("allow", "hold", False, False),                 # asks the owner instead
+        ("allow_if_reviewed", "allow", False, False),    # does it with no second look
+        ("hold", "hold", False, True),
+        ("allow", "allow", False, True)]
+
+
+async def test_confirm_keeps_answering_off(app, browser, fake, kernel_http, model, engine):
+    owner, state = await ready(app, browser, kernel_http, model)
+    draft = await drafted_rules(owner, model, state)
+    answering = len(fake.called("PUT /desks/{id}/answering"))
+    reply = await owner.browser.post(policy(state, "confirm"))
+    assert reply.status_code == 200, reply.text
+
+    # The drafted version is active, and with it its cards; nothing answers the public until the owner goes live.
+    active = PolicyVersion.model_validate(reply.json())
+    desk = fake.desks[state["desk_id"]]
+    assert (active.version, active.status, desk.policy_version) == (draft.version, "active", draft.version)
+    (confirmed,) = fake.called("POST /policy/confirm")
+    assert PolicyConfirmRequest.model_validate(confirmed.body) == PolicyConfirmRequest(desk_id=state["desk_id"],
+                                                                                       version=draft.version)
+    assert confirmed.headers["x-owner-session"] == owner.token
+    assert desk.answering is False and len(fake.called("PUT /desks/{id}/answering")) == answering
+    assert (await stored(engine, state["interview_id"]))["step"] == "preview"
+
+    # Once confirmed, the rules steps are done: drafting again or confirming again is a conflict.
+    for step in ("rules", "safety_check"):
+        reply = await owner.browser.post(policy(state, step))
+        assert (reply.status_code, reply.json()["error"]) == (409, "conflict")
+
+
+async def test_confirm_conflict_returns_a_new_draft_to_confirm(app, browser, fake, kernel_http, model, engine,
+                                                              monkeypatch):
+    # The rules change between the draft and the confirm: the same cards are drafted again on the rules now in force,
+    # and the owner gets that draft to confirm instead. Nothing was activated.
+    owner, state = await ready(app, browser, kernel_http, model)
+    draft = await drafted_rules(owner, model, state)
+    desk = fake.desks[state["desk_id"]]
+    fake.never(state["desk_id"], "native.capture_lead")
+    changed = desk.policy_version
+    reply = await owner.browser.post(policy(state, "confirm"))
+    assert reply.status_code == 409 and reply.json()["error"] == "rules_changed_since_draft"
+    again = RulesDraft.model_validate(reply.json()["draft"])
+    assert again.version != draft.version and again.cards == draft.cards and again.proof.ok
+    assert desk.versions[again.version].parent == changed == desk.policy_version
+    assert (await stored(engine, state["interview_id"]))["draft_version"] == again.version
+    assert len([request for request in model.requests if request.route == "card_draft"]) == 1
+
+    # Confirming again activates the new draft, with Answering still off.
+    reply = await owner.browser.post(policy(state, "confirm"))
+    assert reply.status_code == 200, reply.text
+    assert (PolicyVersion.model_validate(reply.json()).version, desk.policy_version) == (again.version,
+                                                                                         again.version)
+    assert desk.answering is False
+
+    # A redraft slower than the wait: the confirm answers 202, and its retry gets the new draft to confirm (it isn't
+    # activated behind the owner's back); the confirm after that activates it.
+    owner, state = await ready(app, browser, kernel_http, model)
+    draft = await drafted_rules(owner, model, state)
+    desk = fake.desks[state["desk_id"]]
+    fake.never(state["desk_id"], "native.capture_lead")
+    monkeypatch.setattr(proving, "PROVING_WAIT_S", 0.3)
+    release = fake.gate("POST /policy/draft")
+    reply = await owner.browser.post(policy(state, "confirm"))
+    assert reply.status_code == 202
+    release.set()
+    reply = await settled(owner, reply.json()["retry"]["path"])
+    assert reply.status_code == 409 and reply.json()["error"] == "rules_changed_since_draft", reply.text
+    again = RulesDraft.model_validate(reply.json()["draft"])
+    assert desk.policy_version != again.version
+    reply = await owner.browser.post(policy(state, "confirm"))
+    assert reply.status_code == 200, reply.text
+    assert desk.policy_version == again.version
+
+
+async def test_a_confirm_whose_answer_was_lost_moves_on_when_sent_again(app, browser, fake, kernel_http, model,
+                                                                         engine):
+    # The kernel activates the draft but its answer never arrives: the owner hears the kernel is unavailable, and
+    # the rules are in force all the same.
+    owner, state = await ready(app, browser, kernel_http, model)
+    draft = await drafted_rules(owner, model, state)
+    desk = fake.desks[state["desk_id"]]
+    fake.drop_response("POST /policy/confirm")
+    reply = await owner.browser.post(policy(state, "confirm"))
+    assert (reply.status_code, reply.json()["error"], reply.json()["code"]) == (503, "kernel", "kernel_unavailable")
+    assert desk.policy_version == draft.version and desk.answering is False
+    assert (await stored(engine, state["interview_id"]))["step"] == "rules"
+
+    # Sent again, the confirm finds its draft already active: it moves setup on without asking the kernel to activate
+    # anything again, answers that version, and Answering stays off until the owner goes live.
+    reply = await owner.browser.post(policy(state, "confirm"))
+    assert reply.status_code == 200, reply.text
+    active = PolicyVersion.model_validate(reply.json())
+    assert (active.version, active.status, active.cards) == (draft.version, "active",
+                                                             desk.versions[draft.version].cards)
+    assert len(fake.called("POST /policy/confirm")) == 1
+    assert desk.answering is False
+    assert (await stored(engine, state["interview_id"]))["step"] == "preview"
+    reply = await owner.browser.post(policy(state, "go_live"))
+    assert reply.status_code == 200, reply.text
+    assert desk.answering is True
+
+
+async def test_go_live_needs_a_confirmed_draft_and_turns_answering_on(app, browser, fake, kernel_http, model, engine,
+                                                                       api_settings):
+    owner, state = await ready(app, browser, kernel_http, model)
+    desk = fake.desks[state["desk_id"]]
+
+    # Before the rules are confirmed, nothing goes live: not at the questions' end, nor with only a draft.
+    reply = await owner.browser.post(policy(state, "go_live"))
+    assert (reply.status_code, reply.json()["error"]) == (409, "conflict")
+    await drafted_rules(owner, model, state)
+    reply = await owner.browser.post(policy(state, "go_live"))
+    assert (reply.status_code, reply.json()["error"]) == (409, "conflict")
+    assert desk.answering is False and not any(call.body == {"on": True}
+                                               for call in fake.called("PUT /desks/{id}/answering"))
+
+    # Confirmed, the owner takes the Desk live: Answering on, through the kernel, at the Desk's public address.
+    assert (await owner.browser.post(policy(state, "confirm"))).status_code == 200
+    reply = await owner.browser.post(policy(state, "go_live"))
+    assert reply.status_code == 200, reply.text
+    assert reply.json() == {"public_url": f"{api_settings.public_origin}/d/{state['slug']}", "slug": state["slug"]}
+    on = fake.called("PUT /desks/{id}/answering")[-1]
+    assert (on.body, on.path, on.headers["x-owner-session"]) == ({"on": True}, f"/desks/{state['desk_id']}/answering",
+                                                                  owner.token)
+    assert desk.answering is True
+    assert (await stored(engine, state["interview_id"]))["step"] == "live"
+    reply = await owner.browser.post(policy(state, "rules"))
+    assert (reply.status_code, reply.json()["error"]) == (409, "conflict")
+
+
+async def test_calendar_follows_hours_in_the_business_time_zone(app, browser, fake, kernel_http, model):
+    # The new Desk's calendar: an hour's slot in each opening hour on the 14 days after today, by the business's
+    # clock: Saturday 31 October opens at 09:00 Pacific daylight time, Monday 2 November at 08:00 standard time.
+    owner, state = await ready(app, browser, kernel_http, model)
+    await drafted_rules(owner, model, state)
+    (posted,) = fake.called("PUT /desks/{id}/calendar")
+    slots = {slot["slot_id"]: datetime.fromisoformat(slot["starts_at"]) for slot in posted.body["calendar_slots"]}
+    assert all(re.fullmatch(SLOT_ID_PATTERN, slot_id) for slot_id in slots)
+    assert len(slots) == 10 * 10 + 2 * 4                  # ten weekdays of ten hours, two Saturday mornings of four
+    assert slots["S-20261031-0900"] == datetime(2026, 10, 31, 16, 0, tzinfo=UTC)
+    assert slots["S-20261102-0800"] == datetime(2026, 11, 2, 16, 0, tzinfo=UTC)
+    assert min(slots) == "S-20261031-0900" and max(slots) == "S-20261113-1700"
+    assert {slot["minutes"] for slot in posted.body["calendar_slots"]} == {60}
+    assert set(fake.desks[state["desk_id"]].slots) == set(slots)
+
+    # Another time zone, a window to midnight and one that fits a single hour: each slot named by its local start.
+    hours = [HoursWindow(days=["sun"], start=time(21), end=time(0)), HoursWindow(days=["mon"], start=time(9, 30),
+                                                                                 end=time(11))]
+    madrid = calendar_slots(hours, "Europe/Madrid", date(2026, 10, 30))
+    assert [slot.slot_id for slot in madrid] == ["S-20261101-2100", "S-20261101-2200", "S-20261101-2300",
+                                                 "S-20261102-0930", "S-20261108-2100", "S-20261108-2200",
+                                                 "S-20261108-2300", "S-20261109-0930"]
+    assert madrid[0].starts_at == datetime(2026, 11, 1, 20, 0, tzinfo=UTC)
+    assert madrid[3].starts_at.utcoffset() == timedelta(hours=1)
+    assert calendar_slots([], "Europe/Madrid", date(2026, 10, 30)) == []
+
+
+async def test_price_item_ids_are_slugs(app, browser, fake, kernel_http, model):
+    owner, state = await ready(app, browser, kernel_http, model)
+    await drafted_rules(owner, model, state)
+    (posted,) = fake.called("PUT /desks/{id}/prices")
+    assert [(item["item_id"], item["title"], item["unit_cents"]) for item in posted.body["price_items"]] == [
+        ("service-call-deposit", "Service call deposit", 2_000), ("leak-repair", "Leak repair", 25_000),
+        ("water-heater-flush", "Water heater flush", 15_000)]
+
+    # ASCII-folded, lowercase letters, digits and "-", at most 40; a repeat gets "-2", "-3"; nothing left is "item".
+    long = "Emergency call-out on a public holiday weekend night"
+    titles = ["Reparación de calentador", "Reparación de calentador", "Reparación  de calentador!", "水道", "",
+              "100% Drain clearing (2 hrs)", long, long]
+    items = price_items([PriceAnswer(title=title or "-", unit_cents=100) for title in titles])
+    assert [item.item_id for item in items] == [
+        "reparacion-de-calentador", "reparacion-de-calentador-2", "reparacion-de-calentador-3", "item", "item-2",
+        "100-drain-clearing-2-hrs", "emergency-call-out-on-a-public-holiday-w",
+        "emergency-call-out-on-a-public-holiday-2"]
+    assert all(re.fullmatch(ITEM_ID_PATTERN, item.item_id) for item in items)
+    assert [item.title for item in items][:3] == titles[:3]
+
+
+async def test_setup_lists_tools_and_connects_mock_payments_for_review(app, browser, fake, kernel_http, model):
+    owner, state = await ready(app, browser, kernel_http, model)
+    tools = f"/api/owner/setup/{state['interview_id']}/tools"
+    listed = SetupTools.model_validate((await owner.browser.get(tools)).json())
+    assert listed.connectable == ["mock_payments"]
+    assert {row.tool for row in listed.tools} == set(fake.desks[state["desk_id"]].tools)
+    assert all(row.source == "native" and row.status == "enabled" for row in listed.tools)
+
+    # Connected, the payments tools come back pinned by their definition's hash and waiting for the owner's review;
+    # until then Claude drafts no card for them.
+    reply = await owner.browser.post(f"{tools}/connect")
+    assert reply.status_code == 200, reply.text
+    connected = [ToolRow.model_validate(row) for row in reply.json()]
+    assert [(row.tool, row.status) for row in connected] == [("payments.create_refund", "needs_review"),
+                                                             ("payments.list_charges", "needs_review")]
+    assert all(row.definition_sha256 for row in connected)
+    listed = SetupTools.model_validate((await owner.browser.get(tools)).json())
+    assert listed.connectable == [] and {row.tool for row in connected} <= {row.tool for row in listed.tools}
+    await drafted_rules(owner, model, state)
+    assert not {tool["tool"] for tool in sent_tools(model)} & {row.tool for row in connected}
+
+    # Once the rules are confirmed, setup connects nothing more; another copy's interview is not found.
+    assert (await owner.browser.post(policy(state, "confirm"))).status_code == 200
+    reply = await owner.browser.post(f"{tools}/connect")
+    assert (reply.status_code, reply.json()["error"]) == (409, "conflict")
+    other, _ = await ready(app, browser, kernel_http, model)
+    assert (await other.browser.get(tools)).status_code == 404
+    assert (await other.browser.post(f"{tools}/connect")).status_code == 404
+
+
+async def test_an_answer_error_is_kept_for_one_retry_without_its_frames():
+    # Work that answers with an error after its request got 202: the next re-post hears it once, without the frames
+    # it was raised in (they held the owner's credential); the one after runs the work again.
+    class Changed(proving.AnswerError):
+        pass
+
+    runs, release = [], asyncio.Event()
+    secret = "owner-token"
+
+    async def work() -> str:
+        runs.append(secret)
+        await release.wait()
+        try:
+            raise KeyError(secret)
+        except KeyError:
+            raise Changed("rules changed") from None
+
+    async def admit() -> None:
+        pass
+
+    tasks = proving.Proving()
+    key = ("desk-1", "/api/owner/policy/setup/setup-1/confirm", "")
+    assert await tasks.run(key, work, deadline=monotonic() + 0.05, admit=admit) is proving.PENDING
+    release.set()
+    await asyncio.sleep(0.01)
+    kept = tasks._entries[key].error
+    assert isinstance(kept, Changed) and kept.__traceback__ is None and kept.__context__ is None
+    with pytest.raises(Changed):
+        await tasks.run(key, work, deadline=monotonic() + 1, admit=admit)
+    assert key not in tasks._entries and len(runs) == 1
+    with pytest.raises(Changed):
+        await tasks.run(key, work, deadline=monotonic() + 1, admit=admit)
+    assert len(runs) == 2
+
+
+async def test_a_plain_work_error_is_kept_for_one_retry_and_an_unexpected_one_is_logged(caplog):
+    # Every error the work ends with after its request got 202 is kept for the next re-post, as an answer error is,
+    # without the frames it was raised in. One the app answers with (a 409 here) logs nothing; any other is logged
+    # when it lands, since no request may be waiting to hear it.
+    runs, release = [], asyncio.Event()
+    secret = "owner-token"
+    errors = [ApiProblem(409, "rules_cannot_be_checked"), ApiProblem(409, "rules_cannot_be_checked"),
+              RuntimeError("the work broke")]
+
+    async def work() -> str:
+        runs.append(secret)
+        await release.wait()
+        try:
+            raise KeyError(secret)
+        except KeyError:
+            raise errors[len(runs) - 1]      # its context holds the secret, which the kept error drops
+
+    async def admit() -> None:
+        pass
+
+    tasks = proving.Proving(answers=(ApiProblem,))
+    key = ("desk-1", "/api/owner/policy/setup/setup-1/rules", "")
+    caplog.set_level(logging.DEBUG, logger=proving.__name__)
+    assert await tasks.run(key, work, deadline=monotonic() + 0.05, admit=admit) is proving.PENDING
+    release.set()
+    await asyncio.sleep(0.01)
+    kept = tasks._entries[key].error
+    assert kept is errors[0] and kept.__traceback__ is None and kept.__context__ is None
+    assert [record for record in caplog.records if record.name == proving.__name__] == []
+    with pytest.raises(ApiProblem):
+        await tasks.run(key, work, deadline=monotonic() + 1, admit=admit)
+    assert key not in tasks._entries and len(runs) == 1
+
+    # Heard once: the next re-post runs the work again, and a waiting request hears its error without keeping it.
+    with pytest.raises(ApiProblem):
+        await tasks.run(key, work, deadline=monotonic() + 1, admit=admit)
+    assert key not in tasks._entries and len(runs) == 2
+
+    # An error the app doesn't answer with is logged as it lands, and kept for one re-post the same way.
+    release.clear()
+    assert await tasks.run(key, work, deadline=monotonic() + 0.05, admit=admit) is proving.PENDING
+    release.set()
+    await asyncio.sleep(0.01)
+    (logged,) = [record for record in caplog.records if record.name == proving.__name__]
+    assert logged.levelno == logging.ERROR and logged.exc_info[1] is errors[2]
+    # The exception text as the handler formatted it when the line was written: the error and where it was raised,
+    # without the error it was raised while handling, whose message holds the secret.
+    assert logged.exc_text is not None and "RuntimeError: the work broke" in logged.exc_text
+    assert secret not in logged.exc_text
+    kept = tasks._entries[key].error
+    assert kept is errors[2] and kept.__traceback__ is None and kept.__context__ is None
+    with pytest.raises(RuntimeError):
+        await tasks.run(key, work, deadline=monotonic() + 1, admit=admit)
+    assert key not in tasks._entries and len(runs) == 3

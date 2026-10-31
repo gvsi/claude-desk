@@ -20,8 +20,15 @@ shell exports changes nothing:
   Bedrock credential) and `AWS_REGION`. A tier 1 process, which refused real models, refuses it.
 
 Either way `KERNEL_URL` is the kernel target's, `PASSCODE_HASH` the hash of a fresh passcode the
-target keeps in `passcode` (the app holds only the hash), and `a2a_loopback` the target's own base
-URL, so the built-in agent's A2A calls reach this app. Errors name a variable, never its value.
+target keeps in `passcode` (the app holds only the hash), `a2a_loopback` the target's own base
+URL, so the built-in agent's A2A calls reach this app, and `replay_night` is false, so eval copies
+never replay the recorded night (Plan 01d). Errors name a variable, never its value.
+
+The job queue is the database's, shared by every case, so a triage or translation job one case
+left waiting would run in the next case's worker, against that case's fake model. `start()`
+cancels every annotation job waiting before its worker runs, and `stop()` every one still waiting
+once its worker stopped (`cancel_waiting_annotations`); the resume queue's jobs are left as they
+are.
 
 The served app also answers `GET /openapi.json` with its own OpenAPI document (`serve_openapi`),
 which Plan 05a's conformance case compares with the committed export. Only this target adds it:
@@ -39,15 +46,16 @@ from typing import Any, Literal
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from desk.api.jobs import ANNOTATION_QUEUE, jobs_app
 from desk.api.main import create_app
 from desk.api.passcode import hash_passcode
 from desk.api.settings import PROVIDERS, Settings
-from desk.db.session import database_url
+from desk.db.session import database_url, procrastinate_connector
 from evals.fakes import LoopbackServer
 from evals.tier1 import targets
 from evals.tier1.targets import DUMMY_KEY, REPO_ROOT, KernelTarget, TargetError
 
-__all__ = ["DeskApiTarget", "make_api_target", "serve_openapi", "target_settings"]
+__all__ = ["DeskApiTarget", "cancel_waiting_annotations", "make_api_target", "serve_openapi", "target_settings"]
 
 ENV_FILE = REPO_ROOT / ".env"
 MODELS = ("fake", "real")
@@ -81,7 +89,7 @@ def target_settings(
     if not kernel.url:
         raise TargetError("the API runs over a running kernel: start() the kernel target first")
     common: dict[str, Any] = {"api_database_url": api_dsn, "passcode_hash": passcode_hash, "kernel_url": kernel.url,
-                              "a2a_loopback": base_url}
+                              "a2a_loopback": base_url, "replay_night": False}
     if models == "fake":
         if kernel.fake is None:
             raise TargetError("an API target with fake models needs the kernel target's fake model server: "
@@ -129,6 +137,7 @@ class DeskApiTarget:
         port another process took meanwhile is tried again on a fresh one (`START_TRIES` in all)."""
         if self._server is not None:
             raise TargetError("the API target is already running")
+        await cancel_waiting_annotations(self.api_dsn)       # none an earlier case left runs in this one
         for tried in range(1, START_TRIES + 1):
             port = _free_port()
             base_url = f"http://127.0.0.1:{port}"
@@ -152,10 +161,22 @@ class DeskApiTarget:
 
     async def stop(self) -> None:
         """Stop the app: its lifespan stops the job worker first, then closes the pools and its
-        model client."""
+        model client. Then the annotation jobs still waiting are cancelled, so none runs in the
+        next case."""
         server, self._server = self._server, None
         if server is not None:
             await asyncio.to_thread(server.stop)
+            await cancel_waiting_annotations(self.api_dsn)
+
+
+async def cancel_waiting_annotations(api_dsn: str) -> int:
+    """Cancel every triage and translation job waiting (`todo`) in the job queue at `api_dsn`, as
+    the API's role, with Procrastinate's own cancel; how many it cancelled. A job a worker is
+    running is left to it."""
+    queue = jobs_app(procrastinate_connector(api_dsn), schedule=False)
+    async with queue.open_async():
+        waiting = await queue.job_manager.list_jobs_async(queue=ANNOTATION_QUEUE, status="todo")
+        return sum([await queue.job_manager.cancel_job_by_id_async(job.id) for job in waiting])
 
 
 def serve_openapi(app: FastAPI) -> FastAPI:

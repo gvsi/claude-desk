@@ -24,11 +24,13 @@ from desk.api.store import (
     transcript,
     UnansweredToolUse,
     unanswered_tool_use,
-    wrap,
 )
 from desk.api.deliver import Reply, Status, deliver
-from desk.api.schemas import OwnerTranscriptItem, TranscriptItem
-from desk.contracts import ReplyDraft, ToolCall
+from desk.api.prompts import Triage, wrap
+from desk.api.schemas import CheckedDraft, OwnerTranscriptItem, StoppedDraft, TranscriptItem
+from desk.api.sse import emit
+from desk.contracts import Clause, ReplyDraft, ToolCall, Violation
+from desk.events import EvOwnerJoined, EvOwnerLeft
 from desk.kernel_api import CheckReplyRequest, DecideRequest
 from tests.api.conftest import new_visitor
 
@@ -63,9 +65,9 @@ def tool_results(message: dict) -> list[dict]:
 APP_COLUMNS = {
     "messages": {"n", "message_id", "copy_id", "desk_id", "session_id", "kind", "author", "text", "blocks", "language",
                  "owner_translation", "visibility", "wake", "model_context", "model_seq", "model_content", "ref_id",
-                 "call_id", "event_seq", "generation", "created_at"},
+                 "call_id", "event_seq", "generation", "created_at", "replay_id"},
     "run_events": {"id", "copy_id", "desk_id", "session_id", "kind", "seq", "type", "payload", "handled_at",
-                   "created_at"},
+                   "created_at", "replay_id"},
     "setup_interviews": {"interview_id", "copy_id", "desk_id", "business_type", "step", "consent", "answers",
                          "transcript", "draft_cards", "draft_version", "created_at", "updated_at"},
     "a2a_turns": {"agent_key_id", "session_id", "nonce", "copy_id", "desk_id", "status", "http_status", "response",
@@ -467,7 +469,8 @@ async def test_transcript_projects_each_audience(api_conn, kernel_http, fake, vi
                            generation=0)                              # never shown as written
     await deliver(api_conn, ids, Reply(verdict, "claude", "api"), ro_schema=ro_schema)
     await deliver(api_conn, ids, Status(held, "held"), ro_schema=ro_schema)
-    await append_message(api_conn, ids, "triage", ref_id=held.decision_id, text="Pushed for a discount.")
+    pushed = Triage(summary="Pushed for a discount.", category="discount_push")
+    await append_message(api_conn, ids, "triage", ref_id=held.decision_id, text=pushed.model_dump_json())
     await append_message(api_conn, ids, "whisper", text="Offer a callback instead.")
     await append_message(api_conn, ids, "note", text="The visitor verified.")
     await append_message(api_conn, ids, "owner_say", text="I'll call you at noon.")
@@ -487,11 +490,49 @@ async def test_transcript_projects_each_audience(api_conn, kernel_http, fake, vi
     assert all(type(item) is OwnerTranscriptItem for item in owner)
     assert [(item.kind, item.text, item.owner_translation, item.triage) for item in owner] == [
         ("visitor_text", "Hola, ¿cuánto cuesta?", "Hi, how much is it?", None), ("delivered", None, None, None),
-        ("status", None, None, "Pushed for a discount."), ("whisper", "Offer a callback instead.", None, None)]
+        ("status", None, None, pushed), ("whisper", "Offer a callback instead.", None, None)]
     # the cursor: only what came after it
     assert [item.n for item in await transcript(api_conn, ids, "owner", after=asked)] == [item.n for item in owner[1:]]
     with pytest.raises(ValueError):
         await transcript(api_conn, ids, "model")
+
+
+async def test_the_owner_joining_and_leaving_hold_their_event(api_conn, ids):
+    # a take-over's or a hand-back's row is the event the visitor's stream got, read back as it was published; it has
+    # no text and no model block, so it is no work for Claude and no model context ever holds it
+    for kind in ("owner_joined", "owner_left"):
+        with pytest.raises(ValueError):
+            await append_message(api_conn, ids, kind)
+    joined, left = EvOwnerJoined(type="owner_joined", name="Maria Rivera"), EvOwnerLeft(type="owner_left")
+    await append_message(api_conn, ids, "owner_joined", event_seq=await emit(api_conn, ids, joined))
+    await append_message(api_conn, ids, "owner_left", event_seq=await emit(api_conn, ids, left))
+    for audience in ("visitor", "owner"):
+        assert [(item.kind, item.text, item.event) for item in await transcript(api_conn, ids, audience)] == [
+            ("owner_joined", None, joined), ("owner_left", None, left)]
+    assert not await has_pending(api_conn, ids.session_id)
+
+
+async def test_a_stopped_drafts_row_is_checked_when_written(api_conn, ids):
+    # a stopped draft's row holds the draft, the check's violations and the attempt it shows (`ledger_seq`, an integer
+    # or null for none), and nothing else: a row with a key its model doesn't know, at any depth, an attempt that is
+    # only coercible to an integer, or no attempt, is refused when written, so the owner's read never meets one; that
+    # read is the draft and its violations alone
+    clause = Clause(template="hours", fact_id="f-hours")
+    stopped = StoppedDraft(draft=CheckedDraft(prose="I promise it's fixed by noon.", clauses=[clause]), violations=[
+        Violation(kind="promise_word", span="I promise", rule_id="fake.promise_word")])
+    row = {**stopped.model_dump(mode="json"), "ledger_seq": 7}
+    draft = row["draft"]
+    for wrong in ({**row, "visitor": "Ana"}, {**row, "draft": {**draft, "visitor": "Ana"}},
+                  {**row, "draft": {**draft, "clauses": [{**draft["clauses"][0], "visitor": "Ana"}]}},
+                  {**row, "violations": [{**row["violations"][0], "visitor": "Ana"}]},
+                  *({**row, "ledger_seq": seq} for seq in ("seven", "7", 7.0, True)), stopped.model_dump(mode="json")):
+        with pytest.raises(ValueError):
+            await append_message(api_conn, ids, "stopped_draft", text=json.dumps(wrong), ref_id="message-1")
+    assert await transcript(api_conn, ids, "owner") == []
+    await append_message(api_conn, ids, "stopped_draft", text=json.dumps(row), ref_id="message-1")
+    (item,) = await transcript(api_conn, ids, "owner")
+    assert (type(item.stopped_draft), item.stopped_draft) == (StoppedDraft, stopped)
+    assert set(item.model_dump(mode="json")["stopped_draft"]) == {"draft", "violations"}
 
 
 async def test_unscoped_reads_take_the_copy_from_the_apis_rows(api_conn, kernel_http, fake, ro_schema):

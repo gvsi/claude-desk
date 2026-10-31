@@ -1,7 +1,8 @@
-/* CopyField: a value in mono a developer copies. Inline, the value sits on its line (inset 12 px,
-   no box) with the copy button at its right; block, the value is in a quiet box 6 px under its
-   label, with the button 10 px under it and a note beside the button. Narrow, an inline button
-   drops under the value. */
+/* CopyField: a value in mono a developer copies. Inline, the value sits in an outlined box a
+   control's 32 px tall (a 1 px line-field outline at the control radius, no fill, the words 12 px
+   in) with the copy button 8 px after it; block, the value is in a quiet box 6 px under its label,
+   with the button 10 px under it and a note beside the button. Narrow, an inline button drops 8 px
+   under the value. */
 
 .cd-copy-field {
   container: cd-copy-field / inline-size;
@@ -23,7 +24,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-8) var(--space-16);
+  gap: var(--space-8);
   min-width: 0;
 }
 
@@ -37,7 +38,12 @@
 }
 
 .cd-copy-field--inline .cd-copy-field__value {
-  padding-left: var(--space-12);
+  display: flex;
+  align-items: center;
+  min-height: var(--size-control);
+  padding: var(--space-4) var(--space-12);
+  border: 1px solid var(--line-field);
+  border-radius: var(--radius-control);
 }
 
 .cd-copy-field--inline .cd-copy-field__row > .cd-button {

@@ -15,7 +15,9 @@ message, whatever the session's mode, also counts toward `visitor_post` (per ses
 what a message costs when it starts no model turn, a stored row and, in a paused chat, a handoff the kernel checks and
 ledgers. A limit with no window keeps its count for the conversation: hits never leave it one by one, and the count is
 let go only once a day has passed since its last hit (`CONVERSATION_IDLE_S`), by when the kernel has closed the
-session unless other requests kept it open, so the memory it holds stays bounded.
+session unless other requests kept it open, so the memory it holds stays bounded. Each owner translation a
+conversation sets off (a visitor's or an agent's message, or a reply of Claude's in another language) is a model call
+too, so a conversation gets at most `translate` of them an hour; past it the owner reads what was sent, untranslated.
 
 Per-IP limits take the key from `deps.client_ip`, which answers None for a caller exempt from them (a
 loopback peer: the built-in agent, and any loopback peer outside production); every other limit needs a key.
@@ -61,9 +63,13 @@ LIMITS: dict[str, Limit] = {
     "visitor_turn_conversation": Limit(30, None, "session"),   # the same messages, per conversation
     "visitor_post": Limit(120, 600, "session"),     # any visitor message, in every mode: a backstop on what each costs
     "verify": Limit(10, 600, "session"),
+    # owner translations a conversation sets off (`jobs.translating`): two a turn, the message and Claude's reply
+    "translate": Limit(60, 3600, "session"),
     "demo_agent": Limit(5, 3600, "copy"),
     "setup_turn": Limit(80, 3600, "copy"),
     "owner_ai": Limit(40, 3600, "copy"),
+    "drafts": Limit(40, 3600, "copy"),              # rules drafted (but by chat, on owner_ai) and confirmed: each proved
+    "new_desk": Limit(10, 3600, "copy"),            # a Desk the owner makes outside setup
     "a2a": Limit(30, 300, "agent_key"),             # counted once the kernel accepted the signature
 }
 

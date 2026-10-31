@@ -235,6 +235,26 @@ async def test_structured_kwargs_use_output_config_format():
         assert failed.value.response.usage == ModelUsage(300, 0, 0, 80) and failed.value.response.parsed is None
 
 
+async def test_a_request_can_bound_each_try():
+    """A request's `timeout_s` bounds each try the SDK makes, on the structured routes and the conversation alike
+    (the annotation jobs' Haiku calls give up rather than hold their worker); the body sent is the same. Without
+    one, the client's own timeout applies."""
+    server = FakeMessagesApi(message({"type": "text", "text": json.dumps(GOOD_PLAN)}),
+                             stream_events({"type": "text", "text": "Hello"}, stop_reason="end_turn", usage=USAGE),
+                             message({"type": "text", "text": json.dumps(GOOD_PLAN)}))
+    model = AnthropicModel("test-key", base_url="https://model.test", http_client=server.client())
+
+    await model.call(structured(timeout_s=30.0))
+    await model.call(conversation(timeout_s=30.0))
+    await model.call(structured())
+
+    bounded, streamed, unbounded = (request.extensions["timeout"] for request in server.requests)
+    assert bounded == streamed == dict.fromkeys(("connect", "read", "write", "pool"), 30.0)
+    assert unbounded == anthropic.DEFAULT_TIMEOUT.as_dict() and unbounded["read"] > 30.0
+    assert json.loads(server.requests[0].content) == json.loads(server.requests[2].content) == build_kwargs(
+        structured())
+
+
 async def test_api_errors_become_model_unavailable():
     overloaded = httpx2.Response(529, headers={"retry-after-ms": "1"},
                                  json={"type": "error", "error": {"type": "overloaded_error", "message": "Overloaded"}})

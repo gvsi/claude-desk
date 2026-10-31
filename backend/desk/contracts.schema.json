@@ -471,6 +471,26 @@
         "owner_token": {
           "title": "Owner Token",
           "type": "string"
+        },
+        "replayed_messages": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ReplayedEvent"
+          },
+          "title": "Replayed Messages",
+          "type": "array"
+        },
+        "replay_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Replay Id"
         }
       },
       "required": [
@@ -484,7 +504,13 @@
     },
     "CreateCopyRequest": {
       "additionalProperties": false,
-      "properties": {},
+      "properties": {
+        "replay_night": {
+          "default": false,
+          "title": "Replay Night",
+          "type": "boolean"
+        }
+      },
       "title": "CreateCopyRequest",
       "type": "object"
     },
@@ -3134,6 +3160,69 @@
         "text"
       ],
       "title": "RenderedBlock",
+      "type": "object"
+    },
+    "ReplayedEvent": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "shown_at": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$",
+          "title": "Shown At",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "visitor_message",
+            "reply",
+            "receipt"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Text"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReplyVerdict"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Decision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "session_id",
+        "shown_at",
+        "kind",
+        "text",
+        "verdict",
+        "decision"
+      ],
+      "title": "ReplayedEvent",
       "type": "object"
     },
     "ReplyDraft": {

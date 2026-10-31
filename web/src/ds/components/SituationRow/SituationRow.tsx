@@ -17,7 +17,11 @@ const OUTCOME_WORDS = {
   refuse: 'Never',
 } as const satisfies Record<Outcome, string>;
 
-/** An automatic outcome that holds only when Claude's second look agrees. */
+/**
+ * A situation Claude handles only when its second look agrees. The kernel reports a planned one as
+ * a hold that depends on review (`allow_if_reviewed`), so these words and the handled dot follow
+ * `dependsOnReview`, whatever the outcome, as N-R2-Setup-09-Situations draws it.
+ */
 const SECOND_LOOK = 'Does it if Claude’s second look agrees';
 
 export interface SituationRowProps {
@@ -27,7 +31,7 @@ export interface SituationRowProps {
   who: string;
   /** What the draft rules do in it: the probe's `outcome`. */
   outcome: Outcome;
-  /** The probe's `depends_on_review`: an automatic outcome that needs Claude's second look to agree. */
+  /** The probe's `depends_on_review`: Claude does it only if its second look agrees. It sets the words and the dot, whatever `outcome` says. */
   dependsOnReview: boolean;
   /** The kernel's `reason_plain`, as written. */
   reason: string;
@@ -42,7 +46,8 @@ export interface SituationRowProps {
  * is drawn with a hairline over it; put each in a list item.
  */
 export function SituationRow({ title, who, outcome, dependsOnReview, reason, matches }: SituationRowProps) {
-  const words = outcome === 'allow' && dependsOnReview ? SECOND_LOOK : OUTCOME_WORDS[outcome];
+  const words = dependsOnReview ? SECOND_LOOK : OUTCOME_WORDS[outcome];
+  const tone = dependsOnReview ? 'handled' : OUTCOME_TONES[outcome];
   return (
     <div className="cd-situation-row">
       <div className="cd-situation-row__grid">
@@ -53,7 +58,7 @@ export function SituationRow({ title, who, outcome, dependsOnReview, reason, mat
         </div>
         <div className="cd-situation-row__result">
           <p className="cd-situation-row__outcome cd-type-meta">
-            <StatusDot tone={OUTCOME_TONES[outcome]} />
+            <StatusDot tone={tone} />
             <span>{words}</span>
           </p>
           <p className="cd-situation-row__reason cd-type-meta">{reason}</p>

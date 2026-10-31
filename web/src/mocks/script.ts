@@ -147,12 +147,13 @@ const callbackCards: Record<'window' | 'open', Record<Language, CardBlock>> = {
 };
 
 /**
- * Booking the first time offered: Claude's checked words carry no price or date, and the kernel's
- * card says what was booked. The Spanish card is the design system fixture's.
+ * Booking the first time offered: Claude's checked words carry no price or date and promise
+ * nothing the card doesn't back, and the kernel's card says what was booked. The Spanish card is
+ * the design system fixture's.
  */
 const bookedProse: Record<Language, RenderedBlock> = {
-  en: proseBlock("Maria will text you when she's on her way."),
-  es: proseBlock('Maria te enviará un mensaje cuando vaya de camino.'),
+  en: proseBlock("You're all set. Here's your visit."),
+  es: proseBlock('Ya está todo listo. Aquí tienes tu visita.'),
 };
 
 const bookedCard: Record<Language, CardBlock> = {

@@ -25,19 +25,35 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Address: Story = {
-  parameters: { canvasNote: 'The endpoint under “Connect your own agent”: the address in mono with “Copy address” at the right of its line.' },
+  parameters: { canvasNote: 'The endpoint under “Connect your own agent”: the address in mono in its outlined box, with “Copy address” at the right of its line.' },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const value = canvasElement.querySelector<HTMLElement>('code')!;
     await expect(value.textContent).toBe(ENDPOINT);
     await expect(value).toHaveAttribute('data-copy', 'code');
     // A page translator leaves it alone, as it does the full trace.
     await expect(value).toHaveAttribute('translate', 'no');
-    expectComputed(value, { fontFamily: /^"JetBrains Mono"/, fontSize: '13px', lineHeight: '20px', paddingLeft: '12px', backgroundColor: 'rgba(0, 0, 0, 0)' });
-    // The button at the right of the line, a screen's main size, centered on the address.
+    // inline_value_is_outlined: the address in a box as every signed board with one draws it (the
+    // agents page, its phone board and the setup's live link): a 1 px line-field outline at the
+    // control radius, no fill, a control's 32 px tall, the words 12 px in.
+    expectComputed(value, {
+      fontFamily: /^"JetBrains Mono"/,
+      fontSize: '13px',
+      lineHeight: '20px',
+      paddingLeft: '12px',
+      paddingRight: '12px',
+      backgroundColor: 'rgba(0, 0, 0, 0)',
+      borderTopWidth: '1px',
+      borderTopStyle: 'solid',
+      borderTopColor: 'rgba(250, 249, 245, 0.36)',
+      borderTopLeftRadius: '8px',
+    });
+    await expect(value.getBoundingClientRect().height).toBe(32);
+    // The button 8 px after the box, at the right of the line, a screen's main size, centered on the address.
     const button = canvas.getByRole('button', { name: 'Copy address' });
     expectComputed(button, { height: '40px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
     const row = button.parentElement!.getBoundingClientRect();
     await expect(Math.round(button.getBoundingClientRect().right)).toBe(Math.round(row.right));
+    await expect(Math.round(button.getBoundingClientRect().left - value.getBoundingClientRect().right)).toBe(8);
     const mid = (box: DOMRect) => Math.round(box.top + box.height / 2);
     await expect(mid(value.getBoundingClientRect())).toBe(mid(button.getBoundingClientRect()));
 
@@ -145,7 +161,11 @@ export const Phone: Story = {
   play: async ({ canvas, canvasElement }) => {
     const value = canvasElement.querySelector<HTMLElement>('code')!;
     const button = canvas.getByRole('button', { name: 'Copy address' });
-    await expect(button.getBoundingClientRect().top).toBeGreaterThanOrEqual(value.getBoundingClientRect().bottom);
+    // The outlined box across the line, 32 px, and the button 8 px under it at its own width.
+    const field = value.parentElement!.getBoundingClientRect();
+    await expect([Math.round(value.getBoundingClientRect().width), value.getBoundingClientRect().height]).toEqual([Math.round(field.width), 32]);
+    await expect(Math.round(button.getBoundingClientRect().top - value.getBoundingClientRect().bottom)).toBe(8);
+    await expect(Math.round(button.getBoundingClientRect().left)).toBe(Math.round(value.getBoundingClientRect().left));
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };

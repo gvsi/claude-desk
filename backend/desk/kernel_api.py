@@ -63,8 +63,8 @@ class KernelRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-class CreateCopyRequest(KernelRequest):       # POST /copies: {}; the API checks the passcode first
-    pass
+class CreateCopyRequest(KernelRequest):       # POST /copies; the API checks the passcode first
+    replay_night: bool = False                # the kernel replays the recorded night only when asked
 
 class CreateDeskRequest(KernelRequest):       # POST /desks (activates the ask_first preset)
     business: BusinessSeed

@@ -9,6 +9,8 @@ copy finds nothing here too, so a test can't pass on a read the real views would
 writes the rows as `desk_admin` through `FakeRO.write` before it answers.
 """
 
+from datetime import datetime
+
 import psycopg
 from psycopg import sql
 from psycopg.rows import tuple_row
@@ -80,6 +82,14 @@ class FakeRO:
                 values = [tuple(self._value(view, column, row[column]) for column in columns) for row in batch]
                 cursor.executemany(self._upserts[view], values)
 
+    def delete(self, keys: dict[str, list[tuple]]) -> None:
+        """Remove each row by its view's key (`RO_KEYS`), by view: a part a `PUT` replaced, say."""
+        with self._conn.transaction(), self._conn.cursor() as cursor:
+            for view, batch in keys.items():
+                where = sql.SQL(" AND ").join(sql.SQL("{} = %s").format(sql.Identifier(key)) for key in RO_KEYS[view])
+                statement = sql.SQL("DELETE FROM {} WHERE {}").format(sql.Identifier(FAKE_RO_SCHEMA, view), where)
+                cursor.executemany(statement, batch)
+
 
 def create_fake_ro(conn: psycopg.Connection) -> FakeRO:
     """Rebuild schema fake_kernel_ro (as desk_admin, on a migrated database) and return its writer."""
@@ -108,3 +118,14 @@ def create_fake_ro(conn: psycopg.Connection) -> FakeRO:
         conn.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO desk_api").format(schema))
         conn.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO desk_api").format(schema))
     return FakeRO(conn, types)
+
+
+def mark_replayed(conn: psycopg.Connection, desk_id: str, seq: int, at: datetime, *,
+                  recording: str = "night-marked-by-hand") -> None:
+    """Mark the Desk's ledger entry `seq` in fake_kernel_ro as the kernel's replay marks one (Plan 01d: its
+    `summary.replayed`, shown at `at`): recorded history a test makes by hand, where the recorded night has none of
+    its kind. Fails unless it marked exactly that one entry."""
+    update = sql.SQL("UPDATE {} SET event = jsonb_set(event, '{{summary,replayed}}', %s)"
+                     " WHERE desk_id = %s AND seq = %s").format(sql.Identifier(FAKE_RO_SCHEMA, "ledger_entries"))
+    marked = conn.execute(update, (Jsonb({"at": at.isoformat(), "recording": recording}), desk_id, seq))
+    assert marked.rowcount == 1, f"no ledger entry {seq} of {desk_id} to mark replayed"

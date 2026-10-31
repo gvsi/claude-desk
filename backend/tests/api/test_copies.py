@@ -14,6 +14,7 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request, Response
 from procrastinate.testing import InMemoryConnector
 
+from desk.api.agents import a2a_client
 from desk.api.cookies import clear_visitor_cookie, set_owner_cookie, set_visitor_cookie
 from desk.api.deps import SHARED_BUCKET, ApiProblem, OwnerCtx, client_ip, owner_ctx, public_origin, require_model_budget
 from desk.api.main import app_factory, create_app
@@ -359,6 +360,8 @@ async def test_production_requires_secrets(monkeypatch, passcode_hash, clock):
         create_app(settings, kernel_transport=httpx.MockTransport(lambda request: httpx.Response(200)))
     with pytest.raises(RuntimeError, match="job queue connector"):         # production's jobs live in Postgres
         create_app(settings, jobs_connector=InMemoryConnector())
+    with pytest.raises(RuntimeError, match="A2A transport"):    # the built-in agent reaches the endpoint over HTTP
+        a2a_client(settings, httpx.MockTransport(lambda request: httpx.Response(200)))
 
     # The lifespan reaches the kernel only over HTTP on 127.0.0.1, before it opens anything else.
     app = create_app(production_settings(passcode_hash, kernel_url="http://localhost:8701"))

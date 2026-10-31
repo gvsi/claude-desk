@@ -163,6 +163,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['illustration-ink'], ['illustration-avatar'], 4.5, 'The initials on an intro illustration card.'),
   ...pairs(['illustration-handled'], ['illustration-card'], 3, "The check and the receipt dots on the intro illustration's light cards."),
   ...pairs(['line-field'], ['bg-surface', 'bg-app'], 3, "A text field's outline, its boundary, on a dialog or a page."),
+  ...pairs(['line-field'], ['fill-card'], 3, "The outline of an inline CopyField's value, such as the agents page's address, in a card.", 'bg-app'),
   ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'A danger button in a card, such as Deny this time on a held request, at rest and on hover.', 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['fill-card'], 4.5, 'A danger-ghost button in a card: a refusal in red words with no fill.', 'bg-app'),
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, 'A danger-ghost button in a card while it is hovered.', 'fill-card', { under: 'bg-app' }),
@@ -180,6 +181,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['text-primary'], ['fill-secondary'], 4.5, "Try again on an entry that failed to open, inside the Demo inbox's sheet.", 'fill-card', { under: 'bg-surface' }),
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "The count on the Demo inbox's button.", 'fill-secondary', { under: 'bg-app' }),
   ...pairs(['text-primary'], ['fill-secondary'], 4.5, "Code in a card on the agents page: a CodeBlock or a CopyField's box, and a secondary button's label beside it.", 'fill-card', { under: 'bg-app' }),
+  ...pairs(['text-primary', 'text-secondary'], ['fill-card'], 4.5, "An agent's signed limit in the agents page's \"Send an agent\" card: its amounts, their names and whose wallet signed it, on its own fill over the card's.", 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['bg-surface'], 4.5, "Deny's answers in its menu on a held request, This time and Always, in red words on the raised surface."),
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, "Deny's answers in its menu while one is hovered or has focus.", 'bg-surface'),
 ]);

@@ -19,7 +19,6 @@ import type {
   PolicyVersion,
   PublicDesk,
   SessionState,
-  ToolConfirmed,
   ToolProfile,
 } from './contracts.ts';
 import type {
@@ -51,6 +50,7 @@ import type {
   PasscodeBody,
   PaymentLinkOut,
   PeopleOut,
+  PolicyVersionOut,
   PresetBody,
   Reports,
   RuleChatOut,
@@ -65,6 +65,7 @@ import type {
   TextBody,
   Today,
   ToolBody,
+  ToolConfirmedOut,
   ToolRow,
   VerifyChecked,
   VerifyCodeBody,
@@ -211,8 +212,8 @@ interface RouteShapes {
   draftRules: { body: DraftAddBody; response: RulesDraft };
   draftPreset: { body: PresetBody; response: RulesDraft };
   draftSuggestion: { body: undefined; response: RulesDraft };
-  confirmRules: { body: ConfirmRulesBody; response: PolicyVersion };
-  confirmTool: { body: ConfirmToolBody; response: ToolConfirmed };
+  confirmRules: { body: ConfirmRulesBody; response: PolicyVersionOut };
+  confirmTool: { body: ConfirmToolBody; response: ToolConfirmedOut };
   setupRules: { body: undefined; response: RulesDraft };
   setupSituations: { body: undefined; response: SituationResult[] };
   setupSafetyCheck: { body: undefined; response: SafetyCheck };

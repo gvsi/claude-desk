@@ -23,9 +23,11 @@
 | `outcome` | Words | Dot |
 | --- | --- | --- |
 | `allow` | Does it | `status-handled` |
-| `allow` with `dependsOnReview` | Does it if Claude’s second look agrees | `status-handled` |
 | `hold` | Asks you | `status-held` |
 | `refuse` | Never | `status-refused` |
+| any, with `dependsOnReview` | Does it if Claude’s second look agrees | `status-handled` |
+
+- `dependsOnReview` alone decides the second-look row, whatever `outcome` says: the kernel reports a planned situation that waits on Claude's second look (`allow_if_reviewed`) as `outcome: 'hold'` with `depends_on_review: true`, and the signed board draws it as "Does it if Claude’s second look agrees" beside a handled dot.
 
 - When `matches` is false, "Not what we planned" in `caption`, `text-primary`, 6 px under who is asking, beside a 2 px `status-held` bar, 8 px from it. The words carry it; the bar only echoes them.
 - Below 560 px of row width, as on a phone, the outcome and reason drop under who is asking, 8 px under it, from the same edge.
@@ -43,6 +45,6 @@
 | `title` | `string` | Required. The situation. |
 | `who` | `string` | Required. Who is asking in it. |
 | `outcome` | `'allow' \| 'hold' \| 'refuse'` | Required. The probe's outcome. |
-| `dependsOnReview` | `boolean` | Required. The probe's `depends_on_review`. |
+| `dependsOnReview` | `boolean` | Required. The probe's `depends_on_review`; it sets the second-look words and dot, whatever `outcome` is. |
 | `reason` | `string` | Required. The kernel's `reason_plain`. |
 | `matches` | `boolean` | Required. False adds "Not what we planned". |

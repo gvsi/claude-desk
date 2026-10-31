@@ -343,6 +343,8 @@ export interface CopyCreated {
   desk_ids: string[];
   owner_session: SessionState;
   owner_token: string;
+  replayed_messages?: ReplayedEvent[];
+  replay_id?: string | null;
 }
 export interface SessionState {
   session_id: string;
@@ -352,7 +354,43 @@ export interface SessionState {
   mode: "ai" | "owner" | "paused";
   generation: number;
 }
-export interface CreateCopyRequest {}
+export interface ReplayedEvent {
+  session_id: string;
+  shown_at: string;
+  kind: "visitor_message" | "reply" | "receipt";
+  text: string | null;
+  verdict: ReplyVerdict | null;
+  decision: Decision | null;
+}
+export interface ReplyVerdict {
+  ok: boolean;
+  language: "en" | "es";
+  blocks: RenderedBlock[];
+  violations: Violation[];
+  message_id: string;
+  generation: number;
+  visitor_plain: string;
+  ledger_seq: number;
+  signature: string;
+}
+export interface Violation {
+  kind:
+    | "number_in_prose"
+    | "promise_word"
+    | "soft_promise"
+    | "unknown_fact"
+    | "unentitled_fact"
+    | "stale_fact"
+    | "canary"
+    | "unsupported_language"
+    | "session_paused";
+  span: string;
+  fact_ids?: string[];
+  rule_id: string;
+}
+export interface CreateCopyRequest {
+  replay_night?: boolean;
+}
 export interface CreateDeskRequest {
   business: BusinessSeed;
   desk: DeskSeed;
@@ -623,32 +661,6 @@ export interface OwnerMessageResult {
   message_id: string;
   verdict: ReplyVerdict | null;
   ledger_seq: number;
-}
-export interface ReplyVerdict {
-  ok: boolean;
-  language: "en" | "es";
-  blocks: RenderedBlock[];
-  violations: Violation[];
-  message_id: string;
-  generation: number;
-  visitor_plain: string;
-  ledger_seq: number;
-  signature: string;
-}
-export interface Violation {
-  kind:
-    | "number_in_prose"
-    | "promise_word"
-    | "soft_promise"
-    | "unknown_fact"
-    | "unentitled_fact"
-    | "stale_fact"
-    | "canary"
-    | "unsupported_language"
-    | "session_paused";
-  span: string;
-  fact_ids?: string[];
-  rule_id: string;
 }
 export interface PaymentLinkActionRequest {}
 export interface PaymentLinkStateResult {

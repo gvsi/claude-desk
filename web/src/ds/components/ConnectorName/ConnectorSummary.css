@@ -1,0 +1,24 @@
+/* ConnectorSummary: the words beside a connector's tile in a list to choose from. The name in
+   weight 520, its badge 8 px off (the inline name's space and 4 px), then 2 px under it the one
+   line in secondary meta, wrapping as it must. The list's row places the tile and these words. */
+
+.cd-connector-summary {
+  min-width: 0;
+}
+
+.cd-connector-summary__name {
+  display: block;
+  font-weight: 520;
+}
+
+.cd-connector-summary__name .cd-connector-name > .cd-pill,
+.cd-connector-summary__name .cd-connector-name__built-in {
+  margin-left: var(--space-4);
+}
+
+.cd-connector-summary__description {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}

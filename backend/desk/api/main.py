@@ -5,20 +5,27 @@
 `create_app` builds the model client through `make_model` (the Claude API, or Amazon Bedrock for local evals)
 before the app, so a provider without its credential, or `ANTHROPIC_CUSTOM_HEADERS` set, refuses to start. The
 lifespan opens the kernel client, checks it is the production one when it must be, then opens the database engine,
-the turn locks' pool, the run events listener, the turn runner and the job queue with its worker (`jobs.py`), and
-closes them in the reverse order, the worker's jobs and the runner's turns first, with the model client it built
-(never an injected one) last. Building the app sets the job queue's loggers (`procrastinate` and its children) to
-WARNING and filters them (`JobRecords`): Procrastinate names each job with its arguments below WARNING and when a job
-fails, and the resume job's signed decision quotes the visitor. In production the app refuses to start without its
-secrets (the API key, the passcode hash and the public origin, which `Settings` requires), with a Bedrock setting or
-credential (refused by `Settings`) and with any test hook: `ANTHROPIC_BASE_URL` (refused by `Settings`), an injected
-clock, model, kernel transport or job queue connector. A passcode hash that isn't one refuses to start anywhere.
+the turn locks' pool, the run events listener, the turn runner, the built-in agent's client of the public A2A
+endpoint and its runs (`agents.py`), and the job queue with its two workers (`jobs.py`), and closes them in the reverse
+order: the workers' jobs, the owner's rule drafting and proving work still running (`proving.py`), the agent's runs
+and the runner's turns first, with the model client it built (never an injected one) last. Building the app sets the
+job queue's loggers (`procrastinate` and its children) to WARNING and filters them (`JobRecords`): Procrastinate names
+each job with its arguments below WARNING and when a job fails, and the resume job's signed decision quotes the
+visitor. It also redacts link tokens from every log record the process makes (`log_redaction`), uvicorn's access log
+included. In production the app refuses to start without its secrets (the API key, the passcode hash and the public
+origin, which `Settings` requires), with a Bedrock setting or credential (refused by `Settings`) and with any test
+hook: `ANTHROPIC_BASE_URL` (refused by `Settings`), an injected clock, model, kernel transport or job queue connector,
+or an A2A transport set on the runtime (refused when the lifespan starts). A passcode hash that isn't one refuses to
+start anywhere.
 
 Every error answer is an `ApiError` ("Errors"): a kernel refusal keeps its status with `{error: "kernel",
 code}`, an unreachable kernel is 503 `{error: "kernel", code}` (`seed_unproved`, `internal`, else
 `kernel_unavailable`), a limit is 429 `{error: "rate_limited", retry_after}`, and a body that doesn't fit is
-422 `{error: "invalid"}`, never echoing what was sent. A visitor route whose cookie names no open session on its
-Desk answers 401 `{error: "no_session"}` and clears that cookie.
+422 `{error: "invalid"}`, never echoing what was sent. Two paths answer otherwise. A document link (`/api/d/…`) opens
+in a browser tab no screen covers: its refusals keep their status but read as static copy unless JSON is asked for
+(`proxy.document_refusal`). The A2A endpoint (`/api/a2a/…`) answers an agent, and every answer it gives says it comes
+from an AI: its errors are `{code, disclosure: "ai"}` (`a2a.error_response`), whatever raised them. A visitor route
+whose cookie names no open session on its Desk answers 401 `{error: "no_session"}` and clears that cookie.
 """
 
 import asyncio
@@ -28,21 +35,23 @@ from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from desk.api import a2a, log_redaction
+from desk.api.agents import DemoAgents, a2a_client
 from desk.api.cookies import clear_visitor_cookie
 from desk.api.deps import ApiProblem, Runtime, runtime
-from desk.api.jobs import WORKER, JobEnv, jobs_app, run_worker
+from desk.api.jobs import WORKERS, JobEnv, jobs_app, run_worker
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable, assert_production_safe
 from desk.api.loop import TURN_LOCK_POOL_SIZE
 from desk.api.model import make_model
 from desk.api.passcode import check_passcode_hash
 from desk.api.ratelimit import RateLimited, RateLimiter, StreamSlots
-from desk.api.routes import owner, public
+from desk.api.routes import agents, owner, proxy, public, rules, setup
 from desk.api.runner import TurnRunner
 from desk.api.schemas import ApiError, HealthOut, operation_ids
 from desk.api.settings import Settings
@@ -55,8 +64,9 @@ logger = logging.getLogger(__name__)
 POOL_SIZE, MAX_OVERFLOW, POOL_TIMEOUT_S = 20, 10, 5
 KERNEL_CODES = frozenset({"seed_unproved", "internal"})
 JOB_QUEUE_LOGGER = "procrastinate"
-# The worker's loggers, which don't exist until it starts: its module's, where a failed job is logged, and its own.
-JOB_WORKER_LOGGERS = (f"{JOB_QUEUE_LOGGER}.worker", f"{JOB_QUEUE_LOGGER}.worker.{WORKER}")
+# The workers' loggers, which don't exist until they start: their module's, where a failed job is logged, and each
+# worker's own.
+JOB_WORKER_LOGGERS = (f"{JOB_QUEUE_LOGGER}.worker", *(f"{JOB_QUEUE_LOGGER}.worker.{name}" for name in WORKERS))
 # What a record that carries a job keeps: a record's own fields, and the action and worker Procrastinate adds.
 JOB_RECORD_FIELDS = frozenset(vars(logging.LogRecord("", logging.NOTSET, "", 0, "", (), None))) | {"action", "worker"}
 
@@ -115,45 +125,53 @@ def _refuse_test_hooks(settings: Settings, hooks: dict[str, Any]) -> None:
                 raise RuntimeError(f"an injected {name} is a test hook; production refuses it")
 
 
-def _error(status: int, error: str, *, code: str | None = None, retry_after: int | None = None,
-           headers: dict[str, str] | None = None) -> JSONResponse:
-    body = ApiError(error=error, code=code, retry_after=retry_after).model_dump(exclude_none=True)
-    return JSONResponse(body, status_code=status, headers=headers)
+def _error(request: Request, status: int, error: str, *, code: str | None = None, retry_after: int | None = None,
+           headers: dict[str, str] | None = None) -> Response:
+    """The error answer: an `ApiError`, on a document link the static copy a browser tab shows, and on the A2A endpoint
+    an `A2AError`, which says the answer comes from an AI."""
+    if request.url.path.startswith(a2a.A2A_PATH):
+        return a2a.error_response(status, code or error, headers=headers)
+    body = ApiError(error=error, code=code, retry_after=retry_after)
+    refusal = proxy.document_refusal(request, status, body, headers)
+    if refusal is not None:
+        return refusal
+    return JSONResponse(body.model_dump(exclude_none=True), status_code=status, headers=headers)
 
 
 def _install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiProblem)
-    async def api_problem(request: Request, problem: ApiProblem) -> JSONResponse:
-        response = _error(problem.status, problem.error, code=problem.code, retry_after=problem.retry_after)
+    async def api_problem(request: Request, problem: ApiProblem) -> Response:
+        response = _error(request, problem.status, problem.error, code=problem.code, retry_after=problem.retry_after)
         if problem.clear_visitor is not None:
             clear_visitor_cookie(response, problem.clear_visitor)
         return response
 
     @app.exception_handler(RateLimited)
-    async def rate_limited(request: Request, limited: RateLimited) -> JSONResponse:
-        return _error(429, "rate_limited", retry_after=limited.retry_after,
+    async def rate_limited(request: Request, limited: RateLimited) -> Response:
+        return _error(request, 429, "rate_limited", retry_after=limited.retry_after,
                       headers={"Retry-After": str(limited.retry_after)})
 
     @app.exception_handler(KernelFailed)
-    async def kernel_failed(request: Request, failure: KernelFailed) -> JSONResponse:
-        return _error(failure.status, "kernel", code=failure.code)
+    async def kernel_failed(request: Request, failure: KernelFailed) -> Response:
+        return _error(request, failure.status, "kernel", code=failure.code)
 
     @app.exception_handler(KernelUnavailable)
-    async def kernel_unavailable(request: Request, failure: KernelUnavailable) -> JSONResponse:
-        return _error(503, "kernel", code=failure.code if failure.code in KERNEL_CODES else "kernel_unavailable")
+    async def kernel_unavailable(request: Request, failure: KernelUnavailable) -> Response:
+        return _error(request, 503, "kernel",
+                      code=failure.code if failure.code in KERNEL_CODES else "kernel_unavailable")
 
     @app.exception_handler(RequestValidationError)
-    async def invalid(request: Request, error: RequestValidationError) -> JSONResponse:
-        return _error(422, "invalid")
+    async def invalid(request: Request, error: RequestValidationError) -> Response:
+        return _error(request, 422, "invalid")
 
     @app.exception_handler(StarletteHTTPException)
-    async def http_error(request: Request, error: StarletteHTTPException) -> JSONResponse:
+    async def http_error(request: Request, error: StarletteHTTPException) -> Response:
         name = {404: "not_found", 405: "method_not_allowed"}.get(error.status_code, "http_error")
-        return _error(error.status_code, name, headers=getattr(error, "headers", None))
+        return _error(request, error.status_code, name, headers=getattr(error, "headers", None))
 
     @app.exception_handler(Exception)
-    async def internal(request: Request, error: Exception) -> JSONResponse:
-        return _error(500, "internal")
+    async def internal(request: Request, error: Exception) -> Response:
+        return _error(request, 500, "internal")
 
 
 system = APIRouter(generate_unique_id_function=operation_ids("system"))
@@ -184,6 +202,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
     _refuse_test_hooks(settings, {"kernel transport": kernel_transport, "model": model, "clock": clock,
                                   "job queue connector": jobs_connector})
     _quiet_job_queue_logs()
+    log_redaction.install()
     if settings.passcode_hash is not None:
         try:
             check_passcode_hash(settings.passcode_hash)
@@ -217,20 +236,29 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
             stack.push_async_callback(lock_engine.dispose)
             listener = await stack.enter_async_context(Listener(settings.api_database_url))
             runner = TurnRunner(state.model, engine=engine, lock_engine=lock_engine, production=settings.production,
-                                clock=state.clock)
+                                clock=state.clock, jobs=jobs, limiter=state.limiter)
             stack.push_async_callback(runner.close)        # no turn outlives the pools it runs on
+            agent_client = a2a_client(settings, state.a2a_transport)
+            stack.push_async_callback(agent_client.aclose)
+            agents = DemoAgents(state.model, a2a=agent_client, engine=engine, clock=state.clock,
+                                production=settings.production)
+            stack.push_async_callback(agents.close)        # before its client, the runner and the pools
+            stack.push_async_callback(state.proving.close)  # no proving work outlives the pools it runs on
             await stack.enter_async_context(jobs.open_async())
             worker = asyncio.create_task(run_worker(jobs, JobEnv(engine=engine, ro_schema=settings.kernel_ro_schema,
-                                                                 clock=state.clock)), name="desk-jobs-worker")
+                                                                 clock=state.clock, model=state.model,
+                                                                 production=settings.production)),
+                                         name="desk-jobs-worker")
             stack.push_async_callback(_stop, worker)        # first out: no job outlives the pools it runs on
             state.kernel, state.engine, state.listener, state.runner = kernel, engine, listener, runner
+            state.agents = agents
             if settings.passcode_hash is None:
                 logger.warning("PASSCODE_HASH is not set, so no passcode creates a copy "
                                "(make one with: cd backend && uv run python scripts/hash_passcode.py)")
             try:
                 yield
             finally:
-                state.kernel = state.engine = state.listener = state.runner = None
+                state.kernel = state.engine = state.listener = state.runner = state.agents = None
 
     app = FastAPI(title="Claude Desk API", version="0.1.0", lifespan=lifespan, openapi_url=None, docs_url=None,
                   redoc_url=None)
@@ -238,7 +266,20 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
     _install_error_handlers(app)
     app.include_router(system)
     app.include_router(owner.router)
+    app.include_router(setup.router)
     app.include_router(public.router)
+    app.include_router(proxy.router)
+    app.include_router(agents.router)
+    app.include_router(setup.policy_router)
+    app.include_router(rules.router)
+    app.include_router(rules.policy_router)
+
+    def openapi() -> dict[str, Any]:
+        if app.openapi_schema is None:
+            app.openapi_schema = agents.with_request_schemas(FastAPI.openapi(app))
+        return app.openapi_schema
+
+    app.openapi = openapi
     return app
 
 

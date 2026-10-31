@@ -49,7 +49,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 - Space with the steps `space-2` to `space-40`. Pad cards with `space-16` to `space-20`; pad content with `space-40` at the sides on desktop and `space-16` on a phone.
 - Lay out the owner app with a `size-sidebar` sidebar and content no wider than `size-content`. A conversation is a `size-reading` column, with each message's receipts attached under it.
-- Make controls `size-control` tall and a screen's main action `size-control-main`; nav rows are `size-nav-row`, icons `size-icon`, avatars `size-avatar`, and the public page's brand header `size-brand-header`. The first-visit intro dialog is `size-intro` wide, its illustration half `size-intro-illustration`. A reading page's text column is `size-article-measure` wide, with `size-article-side` for the column beside it. The Ask Claude panel beside a page is `size-side-panel` wide, and a section's `SubNav` beside its content, as on Settings, `size-sub-nav`. On the connector pages, the add flow's sign-in and review draw a connector's tile `size-connector-title-tile`, a connection's details put their terms in a `size-connection-term` column, and a tool's recent requests their times in a `size-recent-when` column.
+- Make controls `size-control` tall and a screen's main action `size-control-main`; nav rows are `size-nav-row`, icons `size-icon`, avatars `size-avatar`, and the public page's brand header `size-brand-header`. The first-visit intro dialog is `size-intro` wide, its illustration half `size-intro-illustration`. A reading page's text column is `size-article-measure` wide, with `size-article-side` for the column beside it. The Ask Claude panel beside a page is `size-side-panel` wide, and a section's `SubNav` beside its content, as on Settings, `size-sub-nav`. The agents page is one `size-agents-column` column. On the connector pages, the add flow's sign-in and review draw a connector's tile `size-connector-title-tile`, a connection's details put their terms in a `size-connection-term` column, and a tool's recent requests their times in a `size-recent-when` column.
 - Round controls with `radius-control`; cards, dialogs and bubbles with `radius-card`; the composer with `radius-composer`; pills, chips, switches and avatars with `radius-full`.
 - Use `shadow-composer` on the composer and nowhere else. The first-visit intro dialog, the connector picker and the connector sign-in sit over `scrim` and lift with `shadow-dialog`, as do the popover menus (an approval's answers, `OutcomeMenu`, `PresetMenu`) over the page. `Dialog` sits over `scrim` with no shadow, as N-Run2-Settings-DeleteDesk draws it.
 
@@ -71,7 +71,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Show prices, dates, times, discounts and bookings only in typed reply cards rendered from checked facts. Claude's own words can't state a price, date or discount, can't make a promise the cards don't back, and can confirm a booking only next to a booking card. A card shows exactly the fields it receives; nothing in the design system computes or formats money or dates.
 - The one clock time a visitor reads outside a card is the public page's open status: "Open now, until 6:00 pm", the kernel's own words in the business's time zone, shown verbatim in the header. The page never works out a time itself.
 - Give each card template fixed English and Spanish chrome with no amounts, dates or promises. Every card about money moving (a payment link, a paid link, a charge or a refund) and the checkout always say "Test payment, no money moves" / "Pago de prueba, no se mueve dinero".
-- Draw a card as `fill-card` with a `line-card` border at `radius-card`, at most 520 px wide, and never put a card inside another card.
+- Draw a card as `fill-card` with a `line-card` border at `radius-card`, at most 520 px wide, and never put a card inside another card. The one exception is the agents page's "Send an agent" card, which holds the agent's run and so the Desk's reply cards: `Card`'s `holdsCards`, at the top level only, one level deep, and allowed in the web app only in its `SendAgentPanel` (the guard `only_the_send_agent_panel_holds_cards`).
 
 ## Iconography
 
@@ -103,6 +103,7 @@ Text and links, 4.5:1:
 | `fill-secondary-hover` over `bg-surface` | 7.6 | 4.7 | not used | not used |
 | `fill-card` over `bg-panel` | 12.0 | 6.6 | 6.0 | 6.3 |
 | `fill-card` over `bg-surface` | 11.0 | not used | not used | 5.7 |
+| `fill-card` over `fill-card` over `bg-app` | 12.0 | 6.6 | not used | not used |
 | `fill-count` over `bg-panel` | not used | 6.3 | not used | not used |
 | `fill-count` over `bg-selected` | not used | 5.0 | not used | not used |
 | `fill-hover` over `bg-muted` | 9.7 | not used | not used | not used |
@@ -131,7 +132,7 @@ Focus rings and status dots, 3:1 (`ring-composer` is `accent-blue`):
 
 The mark's tile, `mark-tile`, reads 17.2 on `bg-app`, 15.9 on `bg-panel` and 14.5 on `bg-surface` (the intro dialog). On the tile, `mark-ink` reads 18.4 and `mark-clay` 3.1, and the ink reads 5.9 where it crosses the clay.
 
-`line-field`, a text field's outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1).
+`line-field`, a text field's outline, reads 3.1 on `bg-surface` and 3.2 on `bg-app` (3:1), and 3.2 on `fill-card` over `bg-app`, where it outlines an inline `CopyField`'s value in a card.
 
 On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 
@@ -154,7 +155,7 @@ On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illu
 
 - No glows, gradients, orbs, shimmer or gradient washes.
 - No all-caps eyebrows or labels, and no letter-spaced capitals.
-- No card on card, no colored tiles and no colored left borders on cards.
+- No card on card (the agents page's "Send an agent" card, `holdsCards`, is the one exception), no colored tiles and no colored left borders on cards.
 - No large areas of status color: dots and thin bars only.
 - No staggered page-entrance cascades.
 - No emoji, sparkles or "AI" icons, and no Claude or Anthropic logos.

@@ -3,10 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { EV_ERROR_CODES, KERNEL_ERROR_CODES, type EvError, type KernelErrorCode } from '../../../api/contracts';
 import { rivera } from '../../fixtures';
 import {
+  AGENT_START_LOST_COPY,
   CHANGED_REFRESHED,
   CHAT_ENDED_COPY,
+  DEMO_BUDGET_COPY,
   NEW_CHAT_LABEL,
   RATE_LIMITED_COPY,
+  RELOAD_PAGE_LABEL,
+  SETUP_START_LOST_COPY,
   UNREACHABLE_COPY,
   errorCopy,
   evErrorCopy,
@@ -139,6 +143,19 @@ describe('static error copy', () => {
     }
   });
 
+  it('agent_page_copy_word_for_word', () => {
+    // Starting an agent whose answer was lost: it may be running, so sending it again may run it twice.
+    expect(AGENT_START_LOST_COPY).toEqual({
+      en: 'The agent may have started, but we lost the answer. If you reload and send it again, it may run twice.',
+      es: 'Puede que el agente haya empezado, pero perdimos la respuesta. Si recargas y lo envías de nuevo, puede ejecutarse dos veces.',
+    });
+    expect(RELOAD_PAGE_LABEL).toEqual({ en: 'Reload the page', es: 'Recargar la página' });
+    expect(DEMO_BUDGET_COPY).toEqual({
+      en: 'The demo has used its budget for now. Try again later.',
+      es: 'La demo agotó su presupuesto por ahora. Inténtalo más tarde.',
+    });
+  });
+
   it('error_copy_never_shows_a_code', () => {
     // The matcher finds a code however it is written, so the check below can't pass by matching nothing.
     expect(shownCodes('Error: kernel_unavailable')).toEqual(['kernel_unavailable']);
@@ -149,12 +166,22 @@ describe('static error copy', () => {
     const lines = [
       ...KERNEL_ERROR_CODES.flatMap((code) => LANGUAGES.map((language) => errorCopy(code, language))),
       ...EV_ERROR_CODES.flatMap((code) => LANGUAGES.map((language) => evErrorCopy(errorEvent(code), language))),
-      ...[UNREACHABLE_COPY, CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY, CHANGED_REFRESHED].flatMap((pair) => [pair.en, pair.es]),
+      ...[UNREACHABLE_COPY, CHAT_ENDED_COPY, NEW_CHAT_LABEL, RATE_LIMITED_COPY, CHANGED_REFRESHED, AGENT_START_LOST_COPY, RELOAD_PAGE_LABEL, DEMO_BUDGET_COPY].flatMap((pair) => [
+        pair.en,
+        pair.es,
+      ]),
     ];
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.filter((line) => shownCodes(line).length > 0)).toEqual([]);
     // The plain-word exception covers one sentence of one line, the owner's auth line in English,
     // so it can't quietly spread to another line.
     expect(lines.filter((line) => PLAIN_PHRASES.some((phrase) => line.includes(phrase)))).toEqual([errorCopy('auth', 'en')]);
+  });
+
+  it('setup_start_lost_copy_word_for_word', () => {
+    // Starting setup whose answer was lost: the setup interview may already exist, so starting it
+    // again may leave two drafts. An owner line, in English only, as owner screens are.
+    expect(SETUP_START_LOST_COPY).toBe('Setup may have started, but we lost the answer. If you reload and start again, you may get two drafts.');
+    expect(shownCodes(SETUP_START_LOST_COPY)).toEqual([]);
   });
 });

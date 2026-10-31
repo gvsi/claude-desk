@@ -1,6 +1,7 @@
 """The API's HTTP contract: the committed OpenAPI document Plan 04's client is built from."""
 
 import json
+import re
 
 from scripts.export_openapi import OPENAPI_PATH, export_openapi
 
@@ -8,7 +9,17 @@ ROUTERS = {"system", "owner", "public", "agents", "proxy"}
 ERROR = {"$ref": "#/components/schemas/ApiError"}
 # The error answers whose body is a model of its own (or one of several), by (operation, status).
 OWN_ERROR_BODIES = {("system_health", "503"): ("HealthOut",),
-                    ("owner_answer_approval", "409"): ("AlreadyResolved", "ApiError")}
+                    ("owner_answer_approval", "409"): ("AlreadyResolved", "ApiError"),
+                    ("owner_setup_confirm", "409"): ("RulesChanged", "ApiError"),
+                    # a rule change above the money cap names the cap the owner must raise first
+                    **{(operation, "422"): ("AboveMoneyCap", "ApiError")
+                       for operation in ("owner_rule_chat", "owner_draft_rules", "owner_draft_preset",
+                                         "owner_draft_suggestion")},
+                    ("proxy_complete_payment", "409"): ("PaymentConflict",),
+                    ("proxy_cancel_payment", "409"): ("PaymentConflict",),
+                    # every A2A answer says it comes from an AI, its errors included
+                    **{("agents_a2a_request", status): ("A2AError",)
+                       for status in ("400", "401", "409", "422", "429", "500", "503")}}
 
 
 def typed(schema: dict) -> bool:
@@ -31,6 +42,10 @@ def test_every_route_has_typed_responses():
     assert set(schemas["ApiError"]["properties"]) == {"error", "code", "retry_after"}
     assert "HTTPValidationError" not in schemas            # a bad body is an ApiError too
     assert set(schemas["AlreadyResolved"]["properties"]) == {"error", "decision"}
+    assert set(schemas["PaymentConflict"]["properties"]) == {"error", "code", "state", "cancel_reason"}
+    assert {"state", "cancel_reason"} <= set(schemas["PaymentConflict"]["required"])   # the checkout reads both
+    assert schemas["A2AError"]["properties"]["disclosure"] == {"const": "ai", "title": "Disclosure", "type": "string"}
+    assert schemas["A2AResponse"]["properties"]["disclosure"]["const"] == "ai"
 
     operations = {op["operationId"]: (path, method, op)
                   for path, item in document["paths"].items() for method, op in item.items()}
@@ -58,3 +73,46 @@ def test_every_route_has_typed_responses():
                 assert schema == ERROR, (operation_id, status)
         if op.get("requestBody"):
             assert "422" in responses, operation_id                         # a body that doesn't fit
+
+
+def test_document_refusals_are_copy_or_json():
+    """A document link's refusals are static copy for its browser tab, or the `ApiError` for a request asking JSON."""
+    responses = export_openapi()["paths"]["/api/d/{token}"]["get"]["responses"]
+    assert set(responses) == {"200", "404", "422", "429", "503"}
+    assert responses["200"]["content"] == {"application/octet-stream": {}}
+    for status in ("404", "422", "429", "503"):
+        assert responses[status]["content"] == {"application/json": {"schema": ERROR},
+                                                "text/plain": {"schema": {"type": "string"}}}, status
+
+
+def test_a2a_request_body_is_documented():
+    """The A2A endpoint reads its raw body itself (the agent signs those bytes), so its model is documented by hand."""
+    document = export_openapi()
+    body = document["paths"]["/api/a2a/{slug}"]["post"]["requestBody"]
+    assert body == {"required": True, "content": {"application/json": {
+        "schema": {"$ref": "#/components/schemas/A2ARequest"}}}}
+    schemas = document["components"]["schemas"]
+    assert set(schemas["A2ARequest"]["properties"]) == {"desk_slug", "session_id", "message", "mandate",
+                                                        "verify_code"}
+    assert "Mandate" in schemas
+
+
+# Path parameters are named after their resource, `id` for a setup interview (master plan, "Shared seams").
+PATH_PARAMETERS = {"desk_id", "session_id", "decision_id", "handoff_id", "slug", "token", "version", "run_id", "tool",
+                   "id"}
+SETUP_PATHS = {"/api/owner/setup/{id}", "/api/owner/setup/{id}/consent", "/api/owner/setup/{id}/answer",
+               "/api/owner/setup/{id}/tools", "/api/owner/setup/{id}/tools/connect",
+               *(f"/api/owner/policy/setup/{{id}}/{step}"
+                 for step in ("rules", "situations", "safety_check", "confirm", "go_live"))}
+
+
+def test_path_parameters_are_named_after_their_resource():
+    document = export_openapi()
+    named = {name for path in document["paths"] for name in re.findall(r"{(\w+)}", path)}
+    assert named <= PATH_PARAMETERS, sorted(named - PATH_PARAMETERS)
+    setup = {path for path in document["paths"] if "/setup/" in path}
+    assert setup == SETUP_PATHS
+    for path in setup:
+        for operation in document["paths"][path].values():
+            assert [(parameter["name"], parameter["in"]) for parameter in operation.get("parameters", [])
+                    if parameter["in"] == "path"] == [("id", "path")], path

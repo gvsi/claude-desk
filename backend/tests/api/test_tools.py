@@ -16,6 +16,8 @@ from desk.api.deliver import Status
 from desk.api.kernel_client import KernelHttp
 from desk.api.prompts import REWRITE_INSTRUCTION, SEND_REPLY_TOOL
 from desk.api.runner import TurnRunner
+from desk.api.schemas import StoppedDraft
+from desk.api.store import KeptDraft
 from desk.api.tools import (
     TOOL_CHANGE_MODE,
     Caller,
@@ -194,8 +196,9 @@ async def test_hold_returns_at_once(api_conn, caller, fake):
 
     decision = outcome.status.decision
     assert outcome.status == Status(decision, "held") and decision.state == "held"
+    # Claude reads the kernel's own status line, unchanged
     assert outcome.result == {"outcome": "held_for_owner", "decision_id": decision.decision_id,
-                              "message": "I've asked Maria Rivera to look at this."}
+                              "message": fake.decisions[decision.decision_id].decision.visitor_plain}
     assert outcome.is_error is False
     assert routes(fake, "/decide", "/execute", "GET /decisions/{id}") == ["POST /decide"]      # nothing waits
     assert await events(api_conn, caller.session_id) == [receipt(decision, "held")]
@@ -208,8 +211,8 @@ async def test_refuse_is_an_error_result(api_conn, caller, fake):
     for outcome in (private, unknown):
         decision = outcome.status.decision
         assert decision.state == "refused" and outcome.status.phase == "receipt"
-        assert outcome.result == {"outcome": "refused", "decision_id": decision.decision_id,
-                                  "message": "That isn't something I can do here."}
+        assert outcome.result == {"outcome": "refused", "decision_id": decision.decision_id,     # the kernel's line
+                                  "message": fake.decisions[decision.decision_id].decision.visitor_plain}
         assert outcome.is_error is True and not (outcome.fenced or outcome.unavailable or outcome.turn_over)
     assert unknown.status.decision.action is None
     assert routes(fake, "/execute") == []
@@ -288,12 +291,13 @@ async def test_execute_timeout_polls_and_never_redecides(api_conn, caller, fake,
     assert ran.result["result"] == fake.decisions[decision.decision_id].result.model_view
     assert await events(api_conn, caller.session_id) == [receipt(decision)]
 
-    # the kernel can't be reached to run it: ten reads, no new decision, and the decision left for a later request
+    # the kernel can't be reached to run it: ten reads, no new decision, and the decision left for a later request,
+    # the call left open (`unread`) for that request to find by its call ID
     fake.calls.clear()
     fake.fail("/execute", "connect")
     stuck = await route_call(api_conn, caller, 0, tool_use("native__find_slots", {"days": 3}))
-    assert (stuck.result, stuck.is_error, stuck.unavailable, stuck.status) == ({"outcome": "unavailable"}, True,
-                                                                               True, None)
+    assert (stuck.result, stuck.is_error, stuck.unavailable, stuck.unread, stuck.status) == (
+        {"outcome": "unavailable"}, True, True, True, None)
     assert routes(fake, "/decide", "/decisions/by_call", "GET /decisions/{id}") == [
         "POST /decide", *["GET /decisions/{id}"] * tools.EXECUTE_POLLS]
     (pending,) = [record.decision for record in fake.decisions.values()
@@ -442,7 +446,7 @@ async def test_an_execute_conflict_is_answered_from_what_the_read_shows(api_conn
         "unknown": ({"outcome": "unknown", **said["unknown"]}, True),
         "succeeded": ({"outcome": "done", **said["succeeded"]}, False),       # no stored result: never repeated
         "expired": ({"outcome": "refused", **said["expired"]}, True)}
-    assert said["unknown"]["message"] == "I'm still checking whether that went through."
+    assert said["unknown"]["message"] == fake.decisions[decisions["unknown"].decision_id].decision.visitor_plain
     assert routes(fake, "/execute") == ["POST /execute"] * 3
     assert await events(api_conn, caller.session_id) == [receipt(decision) for decision in decisions.values()]
     assert await control_rows(api_conn, caller.session_id) == [("decision_pending",
@@ -527,6 +531,13 @@ async def delivered_rows(conn, session_id: str) -> list[tuple]:
     return [tuple(row) for row in rows]
 
 
+async def stopped_drafts(conn, session_id: str) -> list[tuple[str, dict]]:
+    """The session's stopped drafts kept for the owner, as (the verdict's message_id, the kept draft and violations)."""
+    rows = await conn.execute(text("SELECT ref_id, text FROM app.messages"
+                                   " WHERE session_id = :s AND kind = 'stopped_draft' ORDER BY n"), {"s": session_id})
+    return [(ref_id, json.loads(kept)) for ref_id, kept in rows]
+
+
 async def test_checked_reply_is_delivered(api_conn, caller, fake):
     outcome = await send_reply(api_conn, caller, 0, {"prose": "Happy to help with your drain.", "clauses": [
         {"template": "hours", "fact_id": "charter:hours"}]}, 1, call_id="toolu_reply")
@@ -551,6 +562,15 @@ async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
         {"kind": "number_in_prose", "span": "$89 for the visit."}]}
     assert (first.is_error, first.delivered, first.status) == (True, None, None)
     assert await events(api_conn, caller.session_id) == []                  # nothing is shown
+    # The owner keeps the draft and each violation in full. The outcome carries them, with the verdict's message ID and
+    # its ledger entry (nothing is shown in the draft's place, so its triage shows on it), for the turn to keep with
+    # the call's result: nothing is written here, and no lock is taken.
+    (entry,) = [entry for entry in fake.desks[caller.desk_id].ledger if entry.event.kind == "reply"]
+    assert first.kept == KeptDraft(message_id=entry.event.summary["message_id"], ledger_seq=entry.seq,
+                                   stopped=StoppedDraft.model_validate({"draft": draft, "violations": [
+        {"kind": "number_in_prose", "span": "89 for the visit.", "fact_ids": [], "rule_id": "digit"},
+        {"kind": "number_in_prose", "span": "$89 for the visit.", "fact_ids": [], "rule_id": "currency"}]}))
+    assert await stopped_drafts(api_conn, caller.session_id) == []
 
     second = await send_reply(api_conn, caller, 0, draft, 2, call_id="toolu_2")
     (message,) = await events(api_conn, caller.session_id)
@@ -559,6 +579,10 @@ async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
     assert (second.result, second.is_error, second.delivered) == ({"outcome": "delivered_handoff"}, True, "handoff")
     assert len(check_drafts(fake)) == 2                                     # the verdict's handoff, no third check
     assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_2", message.message_id, 1)]
+    # The second try's draft is kept with the handoff shown in its place, naming that verdict; the handoff, not the
+    # draft, shows its triage (no ledger entry on the row), and the outcome carries nothing more to keep.
+    ((ref_id, kept),) = await stopped_drafts(api_conn, caller.session_id)
+    assert (ref_id, kept["draft"], kept["ledger_seq"], second.kept) == (message.message_id, draft, None, None)
 
 
 async def test_immediate_handoff_kinds_skip_the_rewrite(api_conn, kernel_http, fake, ro_schema):
@@ -587,6 +611,10 @@ async def test_immediate_handoff_kinds_skip_the_rewrite(api_conn, kernel_http, f
         (message,) = await events(api_conn, caller.session_id)
         assert message.handoff and [block.template for block in message.blocks] == ["handoff"], kind
         assert prose not in json.dumps(outcome.result), kind                       # no span goes back to Claude
+        # The owner keeps the draft and why, a pause included: every `ok: false` verdict on a draft of Claude's.
+        ((ref_id, kept),) = await stopped_drafts(api_conn, caller.session_id)
+        assert (ref_id, kept["draft"], [violation["kind"] for violation in kept["violations"]]) == (
+            message.message_id, {"prose": prose, "clauses": []}, [kind]), kind
 
 
 class Replayed(httpx.AsyncBaseTransport):

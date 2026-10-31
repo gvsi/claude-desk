@@ -18,7 +18,7 @@ export interface OutcomeGroupRow {
 export interface OutcomeGroupsProps {
   /** The rules by outcome. A group with none is left out. */
   rows: Readonly<Partial<Record<RuleMode, readonly OutcomeGroupRow[]>>>;
-  /** The payment limit's line (`MoneyLimit` with `prominent`), in a card of its own above the groups. */
+  /** The payment limit's line (`MoneyLimit` with `prominent` and no `onEdit`), in a card of its own above the groups. */
   moneyLimit?: ReactNode;
 }
 

@@ -23,10 +23,11 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from desk.api.jobs import RESUME_AFTER_ANSWER, TRANSLATE_MESSAGE, TRIAGE_ATTEMPT, WORKERS, jobs_app
 from desk.api.model import ANTHROPIC_API_URL, AnthropicModel, BedrockModel, make_model
 from desk.api.passcode import check_passcode, hash_passcode
 from desk.api.settings import Settings
-from desk.db.session import database_url, libpq_url
+from desk.db.session import database_url, libpq_url, procrastinate_connector
 from desk.kernel_api import Health
 from evals.client import DeskClient
 from evals.tier1 import api_impl, targets
@@ -70,6 +71,7 @@ async def test_fake_settings_ignore_the_environment(monkeypatch: pytest.MonkeyPa
     assert settings.api_database_url == DSN
     assert (settings.public_origin, settings.trusted_proxy_hops, settings.kernel_ro_schema) == (
         "http://localhost:5173", 0, "kernel_ro")
+    assert settings.replay_night is False          # eval copies never replay the recorded night (Plan 01d)
     model = make_model(settings)   # what create_app builds from them
     try:
         assert type(model) is AnthropicModel
@@ -98,10 +100,12 @@ async def test_real_settings_take_the_providers_credential_from_dotenv(monkeypat
     assert (claude.anthropic_api_key, claude.anthropic_base_url, claude.bedrock_bearer_token) == (
         "sk-ant-from-dotenv", None, None)
     assert (claude.kernel_url, claude.passcode_hash, claude.a2a_loopback) == (KERNEL.url, PASSCODE_HASH, BASE_URL)
+    assert claude.replay_night is False
     bedrock = real_settings("bedrock", env_file)
     assert (bedrock.desk_env, bedrock.model_provider, bedrock.aws_region) == ("dev", "bedrock", "us-east-1")
     assert (bedrock.bedrock_bearer_token, bedrock.anthropic_api_key, bedrock.anthropic_base_url) == (
         "bedrock-from-dotenv", None, None)
+    assert bedrock.replay_night is False
     models = [make_model(claude), make_model(bedrock)]
     try:
         assert [type(model) for model in models] == [AnthropicModel, BedrockModel]
@@ -161,7 +165,7 @@ def test_target_refuses_what_it_cant_run(monkeypatch: pytest.MonkeyPatch):
 STAND_IN_COPY = "copy-stand-in"
 OWNER_STATE = {"session_id": "session-owner", "kind": "owner", "verified": True, "assurance": "owner_session",
                "mode": "ai", "generation": 0}
-WORKER_START_S = 10.0   # how long the job worker may take to register once the app is serving
+WORKER_START_S = 10.0   # how long the job workers may take to register once the app is serving
 
 
 class StandInKernel:
@@ -222,10 +226,10 @@ async def job_workers(dsn: str) -> set[int]:
     return {row[0] for row in rows}
 
 
-async def registered_worker(dsn: str, before: set[int]) -> set[int]:
-    """The workers registered since `before`, once there is one."""
+async def registered_workers(dsn: str, before: set[int], count: int) -> set[int]:
+    """The workers registered since `before`, once there are `count` of them."""
     deadline = asyncio.get_running_loop().time() + WORKER_START_S
-    while not (new := await job_workers(dsn) - before) and asyncio.get_running_loop().time() < deadline:
+    while len(new := await job_workers(dsn) - before) < count and asyncio.get_running_loop().time() < deadline:
         await asyncio.sleep(0.05)
     return new
 
@@ -236,8 +240,9 @@ async def test_target_serves_health_and_a_copy_over_the_kernel_target(
     """`make_api_target(k, models="fake")` over a started `KernelTarget`: the app serves on its own
     loopback port, on the kernel target's clock, with a model client at the kernel target's fake
     model server though the shell names Bedrock; `/api/health` carries the kernel's `Health`; only
-    the target's passcode gives a copy and its owner cookie; it serves its own OpenAPI document; the
-    job worker runs until `stop()`, and then nothing is left serving."""
+    the target's passcode gives a copy and its owner cookie; it serves its own OpenAPI document; both
+    job workers (the resume job's and the annotations') run until `stop()`, and then nothing is left
+    serving."""
     for name in ("MODEL_PROVIDER", "BEDROCK_BEARER_TOKEN", "AWS_REGION"):
         monkeypatch.setenv(name, SHELL[name])
     k = await KernelTarget(models="fake").start()
@@ -270,11 +275,12 @@ async def test_target_serves_health_and_a_copy_over_the_kernel_target(
                 # The stand-in's copy has no kernel_ro rows, so it lists no Desks.
                 assert await client.enter() == {"copy_id": STAND_IN_COPY, "desks": []}
                 assert client.cookies() == [("desk_owner", "/api/owner")]
-            worker = await registered_worker(api.api_dsn, before)
-            assert len(worker) == 1, f"the API's job worker didn't register within {WORKER_START_S} s"
+            workers = await registered_workers(api.api_dsn, before, len(WORKERS))
+            assert len(workers) == len(WORKERS) == 2, (
+                f"the API's job workers didn't register within {WORKER_START_S} s")
         finally:
             await api.stop()
-        assert not worker & await job_workers(api.api_dsn), "the job worker outlived stop()"
+        assert not workers & await job_workers(api.api_dsn), "a job worker outlived stop()"
         with pytest.raises(httpx.ConnectError):
             async with httpx.AsyncClient(trust_env=False) as plain:
                 await plain.get(api.base_url + "/api/health")
@@ -340,3 +346,40 @@ async def test_start_tries_a_fresh_port_when_its_port_was_taken(monkeypatch: pyt
         assert len(apps) == 3 and all(model_closed(app) for app in apps)
         assert (refused.app, refused.settings, refused.base_url) == (None, None, "")
         await refused.stop()                                     # nothing to stop
+
+
+# Annotation jobs a case leaves in the job queue
+
+async def job_statuses(dsn: str, *job_ids: int) -> list[str | None]:
+    """Each job's status in the job queue's database, read as the API's role; None for one that isn't there."""
+    async with await psycopg.AsyncConnection.connect(libpq_url(dsn)) as conn:
+        rows = await (await conn.execute("SELECT id, status FROM procrastinate.procrastinate_jobs WHERE id = ANY(%s)",
+                                         (list(job_ids),))).fetchall()
+    found = dict(rows)
+    return [found.get(job_id) for job_id in job_ids]
+
+
+async def test_start_and_stop_cancel_the_annotation_jobs_left_waiting():
+    """The job queue is the database's, shared by every case, so a triage or translation job one case
+    left waiting would run in the next case's worker, against that case's fake model: `start()`
+    cancels each one waiting before its worker runs, and `stop()` each one still waiting once its
+    worker stopped. A job on the resume queue is left as it is."""
+    dsn = database_url("API")
+    queue = jobs_app(procrastinate_connector(dsn), schedule=False)
+    async with queue.open_async():
+        left = await queue.configure_task(TRANSLATE_MESSAGE).defer_async(copy_id="copy-left", message_id="message-1")
+        resume = await queue.configure_task(RESUME_AFTER_ANSWER, schedule_in={"hours": 1}).defer_async(
+            copy_id="copy-left", desk_id="desk-left", session_id="session-left", decision={})
+        try:
+            api = api_impl.make_api_target(KERNEL, models="fake")
+            await api.start()
+            try:
+                assert await job_statuses(dsn, left, resume) == ["cancelled", "todo"]
+                # one the running worker hasn't reached yet
+                waiting = await queue.configure_task(TRIAGE_ATTEMPT, schedule_in={"hours": 1}).defer_async(
+                    copy_id="copy-left", desk_id="desk-left", session_id="session-left", ref_id="7", ref_kind="reply")
+            finally:
+                await api.stop()
+            assert await job_statuses(dsn, waiting, resume) == ["cancelled", "todo"]
+        finally:
+            await queue.job_manager.cancel_job_by_id_async(resume, delete_job=True)

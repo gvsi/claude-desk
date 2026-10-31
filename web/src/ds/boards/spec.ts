@@ -390,3 +390,16 @@ export async function expectSettingsPage(root: HTMLElement, current: (typeof SET
   await expect(Math.round(contentBox.top)).toBe(Math.round(navBox.top));
   return content;
 }
+
+/**
+ * The agents page's AI disclosure under its title: `DisclosureLine`'s sentence for Rivera
+ * Plumbing, once, in its meta type and the secondary ink, 16 px under the title.
+ */
+export async function expectAgentsDisclosure(root: HTMLElement): Promise<void> {
+  const line = one(root, '.cd-disclosure-line');
+  await expect(line.textContent).toBe('Rivera Plumbing answers with Claude, an AI.');
+  await expect(line).toHaveAttribute('lang', 'en');
+  expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+  const title = within(root).getByRole('heading', { level: 1 });
+  await expect(Math.round(line.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(16);
+}

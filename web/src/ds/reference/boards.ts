@@ -66,12 +66,20 @@ export const REFERENCE_BOARDS = [
   // Customers: the list loading, and the list on a phone.
   'N-Run2-People-Loading',
   'N-Run2-People-Phone',
-  // Setup: real situations and the safety check, each a page longer than the window.
+  // Setup: an answer that couldn't be sent, kept with Try again; the tools step, a page longer
+  // than the window; real situations and the safety check, each a page longer than the window.
+  'N-R2-Setup-04-Answer-Failed',
+  'N-R2-Setup-05-Tools',
   'N-R2-Setup-09-Situations',
   'N-R2-Setup-11-Safety',
   // The agents page: the page itself, longer than the window, and the demo key shown once.
   'N-R2-Agents-01-Page',
   'N-R2-Agents-02-Demo-Key',
+  // Sending the built-in agent, signed on 2026-10-30: the panel with its signed spending limit.
+  'N-R2-Agents-03-Send',
+  // The agent's run inside the same card, its reply cards held there, and a charge over its limit.
+  'N-R2-Agents-04-Run',
+  'N-R2-Agents-05-Over-Limit',
   // The chat: a payment link a rule change cancelled.
   'N-R2-Chat-Link-Cancelled',
   // The Demo inbox as a sheet: a visitor's from the bottom of a phone, the owner's beside Today.
@@ -79,10 +87,11 @@ export const REFERENCE_BOARDS = [
   'N-R2-Inbox-Sheet-Owner',
   // Share: the link, the printable card and the ready-made words.
   'N-Run2-Share',
-  // Settings, signed on 2026-10-30: General, deleting a Desk over it, Notifications, Billing, and
-  // General on a phone, as a page taller than the phone's window.
+  // Settings, signed on 2026-10-30: General, deleting a Desk over it, Knowledge, Notifications,
+  // Billing, and General on a phone, as a page taller than the phone's window.
   'N-Run2-Settings-General',
   'N-Run2-Settings-DeleteDesk',
+  'N-Run2-Settings-Knowledge',
   'N-Run2-Settings-Notifications',
   'N-Run2-Settings-Billing',
   'N-Run2-Settings-Phone',
@@ -123,16 +132,22 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-Conn-24-Phone-Connectors': 'phone',
   'N-Run2-People-Loading': 'laptop',
   'N-Run2-People-Phone': 'phone',
+  'N-R2-Setup-04-Answer-Failed': 'laptop',
+  'N-R2-Setup-05-Tools': 'laptop-1100',
   'N-R2-Setup-09-Situations': 'laptop-1100',
   'N-R2-Setup-11-Safety': 'laptop-1150',
   'N-R2-Agents-01-Page': 'laptop-1500',
   'N-R2-Agents-02-Demo-Key': 'laptop',
+  'N-R2-Agents-03-Send': 'laptop',
+  'N-R2-Agents-04-Run': 'laptop-1150',
+  'N-R2-Agents-05-Over-Limit': 'laptop',
   'N-R2-Chat-Link-Cancelled': 'laptop',
   'N-R2-Inbox-Sheet-Public': 'phone',
   'N-R2-Inbox-Sheet-Owner': 'laptop',
   'N-Run2-Share': 'laptop',
   'N-Run2-Settings-General': 'laptop',
   'N-Run2-Settings-DeleteDesk': 'laptop',
+  'N-Run2-Settings-Knowledge': 'laptop',
   'N-Run2-Settings-Notifications': 'laptop',
   'N-Run2-Settings-Billing': 'laptop',
   'N-Run2-Settings-Phone': 'phone-900',

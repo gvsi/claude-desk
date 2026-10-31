@@ -20,7 +20,7 @@ from sqlalchemy import text as sql
 from sqlalchemy.exc import DBAPIError
 
 from desk.api import jobs
-from desk.api.jobs import RESUME_AFTER_ANSWER
+from desk.api.jobs import RESUME_AFTER_ANSWER, TRANSLATE_MESSAGE
 from desk.api.main import create_app
 from desk.api.routes import public
 from desk.db.tables import APP_TABLES
@@ -104,9 +104,11 @@ async def test_no_credential_at_rest_after_a_full_flow(app, browser, fake, model
     assert (await visitor.post(f"/api/public/desks/{slug}/messages", json={"text": said[2]})).status_code == 202
     await runner.drain()
     await jobs_done(jobs_connector)
-    assert len(model.requests) == 3 and [job["task_name"] for job in jobs_connector.jobs.values()] == [
-        "desk.resume_after_answer"]
+    assert len(model.requests) == 3 and sorted(job["task_name"] for job in jobs_connector.jobs.values()) == [
+        RESUME_AFTER_ANSWER, *[TRANSLATE_MESSAGE] * len(said)]                 # each message's translation too
     assert said[0] in json.dumps([job["args"] for job in jobs_connector.jobs.values()])   # quoted for the owner
+    assert [sorted(job["args"]) for job in jobs_connector.jobs.values() if job["task_name"] == TRANSLATE_MESSAGE] == [
+        ["copy_id", "message_id"]] * len(said)                                 # a translation holds only IDs
 
     secrets = {f"{who} token{form}": value for who, held in (("owner", owner_token), ("visitor", token))
                for form, value in (("", held), (" hash", hashlib.sha256(held.encode()).hexdigest()))}
@@ -157,7 +159,7 @@ async def test_a_failed_resume_job_logs_no_arguments(app, browser, fake, model, 
     monkeypatch.setattr(jobs, "resume_after_answer", fails)
     answered = await owner.post(f"/api/owner/approvals/{decision_id}/answer", json={"answer": "allow_once"})
     assert answered.status_code == 200
-    (job,) = await jobs_done(jobs_connector)
+    (job,) = [job for job in await jobs_done(jobs_connector) if job["task_name"] == RESUME_AFTER_ANSWER]
     assert job["status"] == "failed" and said in json.dumps(job["args"])     # what the job held quoted the visitor
 
     assert [(record.name, record.levelname, record.getMessage()) for record in caplog.records

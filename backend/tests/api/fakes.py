@@ -9,7 +9,10 @@ request it was sent (`requests`). An item is:
 - `gated(item, release)`, which waits for the `asyncio.Event` `release` before playing `item`; its `entered`
   event is set once the call is waiting, so a test can act while a model call is in flight.
 
-A call with nothing left to play fails the test.
+A call with nothing left to play fails the test. The routes the API's jobs call (`JOB_ROUTES`: triage and owner
+translations, Plan 02b's Task 10) play from scripts of their own (`ScriptedModel(..., triage=..., translation=...)`,
+or `jobs[route]`) and are recorded in `job_requests`, so a job running beside a turn never takes the turn's answers;
+a job call nobody scripted gets no answer, as from an unavailable model, and the job stores nothing.
 
 `FakeMessagesApi(*answers)` stands in for the Messages API behind the SDK's own HTTP client (an
 `httpx2.MockTransport`): it records each request and gives the next scripted answer, the last one again once
@@ -71,10 +74,10 @@ def response(*blocks: dict, stop_reason: str | None = None, usage: ModelUsage = 
                          finished_at=finished_at, model=model, parsed=parsed)
 
 
-def unavailable(finished_at: datetime = FINISHED_AT) -> ModelUnavailable:
+def unavailable(finished_at: datetime = FINISHED_AT, model: str = CONVERSATION_MODEL) -> ModelUnavailable:
     """What `AnthropicModel` raises once the SDK gives up (an overloaded API, say)."""
     failed = ModelResponse(content=[], stop_reason="error", usage=None, latency_ms=30_000, finished_at=finished_at,
-                           model=CONVERSATION_MODEL)
+                           model=model)
     return ModelUnavailable(failed, "OverloadedError")
 
 
@@ -89,21 +92,35 @@ def gated(item: object, release: asyncio.Event) -> Gated:
     return Gated(item, release)
 
 
-class ScriptedModel:
-    """A `ModelClient` that plays a script (module docstring)."""
+# The routes the API's jobs call, off any turn or request (Plan 02b, Task 10).
+JOB_ROUTES = ("triage", "translation")
 
-    def __init__(self, script: Iterable[object] = ()):
+
+class ScriptedModel:
+    """A `ModelClient` that plays a script, and the job routes' scripts apart from it (module docstring)."""
+
+    def __init__(self, script: Iterable[object] = (), *, triage: Iterable[object] = (),
+                 translation: Iterable[object] = ()):
         self.script = deque(script)
         self.requests: list[ModelRequest] = []
+        self.jobs: dict[str, deque] = {"triage": deque(triage), "translation": deque(translation)}
+        self.job_requests: list[ModelRequest] = []
 
     def add(self, *items: object) -> None:
         self.script.extend(items)
 
-    async def call(self, request: ModelRequest) -> ModelResponse:
+    def _next(self, request: ModelRequest) -> object:
+        if request.route in self.jobs:
+            self.job_requests.append(copy.deepcopy(request))
+            script = self.jobs[request.route]
+            return script.popleft() if script else unavailable(model=request.model)
         self.requests.append(copy.deepcopy(request))
         if not self.script:
             raise AssertionError(f"the scripted model has nothing left for call {len(self.requests)}")
-        item = self.script.popleft()
+        return self.script.popleft()
+
+    async def call(self, request: ModelRequest) -> ModelResponse:
+        item = self._next(request)
         if isinstance(item, Gated):
             item.entered.set()
             await item.release.wait()

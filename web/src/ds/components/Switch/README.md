@@ -11,7 +11,7 @@
 
 - `label`, the setting's name. It is the switch's accessible name.
 - `description`, one line saying what "on" means ("Claude answers under your rules"). It is the accessible description, so the name stays short.
-- `checked` and `onChange`. The switch is controlled: it calls `onChange` with the new value and shows the `checked` the screen passes back, so a screen that is still saving can keep the old value until the save lands.
+- `checked` and `onChange`. The switch is controlled: it calls `onChange` with the new value and shows the `checked` the screen passes back, so a screen that is still saving can keep the old value until the save lands. While it saves, `waiting` makes the switch ignore presses.
 
 ## Props
 
@@ -21,5 +21,6 @@
 | `description` | `string` | `.cd-type-caption` in `text-secondary`; `aria-describedby`. |
 | `checked` | `boolean` | Required; `aria-checked`. |
 | `onChange` | `(checked: boolean) => void` | Required. Click, Enter and Space all call it. |
+| `waiting` | `boolean` | A change is being saved: `aria-busy` and `aria-disabled`, focus kept, presses ignored, and the look of the state last passed. |
 
 The row is a `button` with `role="switch"` and fills its container's width. On: a `button-primary` track with a `bg-app` knob at the end. Off: a `fill-secondary` track with a `text-secondary` knob at the start, so the state reads from the knob's place and contrast, not from color alone. The row takes `fill-hover` on hover, and the knob slides at `motion-fast`; nothing moves under reduced motion.

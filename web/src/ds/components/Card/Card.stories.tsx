@@ -96,3 +96,55 @@ export const WithStatusHeader: Story = {
     await expect(dot).toHaveAttribute('aria-hidden', 'true');
   },
 };
+
+/**
+ * A card that holds cards: the agents page's "Send an agent" card holds the agent's run, and the
+ * Desk's reply cards sit in it, one level deep (N-R2-Agents-04-Run).
+ */
+export const HoldsCards: Story = {
+  name: 'Holds cards',
+  args: {
+    as: 'section',
+    label: 'Send an agent',
+    padding: 16,
+    holdsCards: true,
+    children: (
+      <>
+        <h2 className="cd-type-section" style={{ margin: 0 }}>
+          Send an agent
+        </h2>
+        <p className="cd-type-meta" style={{ margin: 'var(--space-2) 0 var(--space-10)', color: 'var(--text-secondary)' }}>
+          Book the earliest visit
+        </p>
+        <div style={{ maxWidth: 520 }}>
+          <Card as="article" label="Booked" padding={16}>
+            <p className="cd-type-body" style={{ margin: 0, fontWeight: 520 }}>
+              Thursday, October 29
+            </p>
+            <p className="cd-type-meta" style={{ margin: 'var(--space-2) 0 0', color: 'var(--text-secondary)' }}>
+              Arriving 2:00 pm to 4:00 pm
+            </p>
+          </Card>
+        </div>
+      </>
+    ),
+  },
+  render: (args) => (
+    <div style={{ maxWidth: 760 }}>
+      <Card {...args} />
+    </div>
+  ),
+  parameters: {
+    canvas: 'N-R2-Agents-04-Run',
+    canvasNote: 'The “Send an agent” card holding one reply card, with the run’s messages and receipts left out; the board story draws them.',
+  },
+  play: async ({ canvas }) => {
+    // Both are cards, in the card look; the held one sits inside the frame's 16 px.
+    const frame = canvas.getByRole('region', { name: 'Send an agent' });
+    const held = canvas.getByRole('article', { name: 'Booked' });
+    expectComputed(frame, { ...CARD_LOOK, paddingTop: '16px', paddingLeft: '16px' });
+    expectComputed(held, { ...CARD_LOOK, paddingTop: '16px', paddingLeft: '16px' });
+    await expect(frame).toContainElement(held);
+    await expect(Math.round(held.getBoundingClientRect().left - frame.getBoundingClientRect().left)).toBe(17);
+  },
+};

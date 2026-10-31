@@ -37,6 +37,9 @@ PROVING_TIMEOUT_S = 60.0     # compiling and proving a policy version
 PROVING_ROUTES = frozenset({"POST /policy/draft", "POST /tools/confirm", "POST /policy/{version}/probe"})
 # Routes whose answer is bytes, not JSON: fetched only with stream(), since a document link is single use.
 STREAM_ROUTES = frozenset({"GET /document_links/{token}"})
+# Routes whose body carries only the fields the caller set, so a kernel that predates a field still takes a request
+# that leaves it out: a copy asks for the recorded night (Plan 01d) only by setting `replay_night`.
+SET_FIELDS_ONLY = frozenset({"POST /copies"})
 
 ENDS_SESSION = frozenset({"auth", "not_found", "closed"})            # the turn ends with error{code: "session"}
 SILENT = frozenset({"stale_generation", "mode_owner", "mode_paused"})  # the turn ends with turn_end only
@@ -210,7 +213,7 @@ class KernelHttp:
         params.update(parse_qsl(fixed))
         content = None
         if body is not None:
-            content = body.model_dump_json().encode()
+            content = body.model_dump_json(exclude_unset=route in SET_FIELDS_ONLY).encode()
             headers = {**headers, "Content-Type": "application/json"}
         return self._client.build_request(method, url, params=params, headers=headers, content=content,
                                           timeout=self._timeout(route))

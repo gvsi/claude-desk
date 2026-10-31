@@ -8,8 +8,17 @@
  */
 import type { ApprovalAnswer, Decision, DeskUpdated, PaymentLinkState, PaymentLinkStateResult, RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
-import type { ApprovalAnswerOut, CancelAccepted, CancelReason, MessageAccepted, VerifyChecked, VisitorSession } from '../api/views.ts';
-import { RIVERA_MONEY_CAP_CENTS } from '../ds/fixtures/index.ts';
+import type {
+  AgentRunStarted,
+  ApprovalAnswerOut,
+  CancelAccepted,
+  CancelReason,
+  MessageAccepted,
+  ToolConfirmEntry,
+  VerifyChecked,
+  VisitorSession,
+} from '../api/views.ts';
+import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
 import {
   attempts,
   briefingList,
@@ -21,8 +30,10 @@ import {
   needsYou,
   ownerTranscript,
   paymentLinkOut,
+  peopleOut,
   publicDesk,
   reports,
+  rulesView,
   today,
   visitorTranscript,
 } from './readModels.ts';
@@ -122,6 +133,8 @@ const NO_OWNER = failWith(401, 'no_owner_session');
 const NO_SESSION = failWith(401, 'no_session');
 const NOT_FOUND = failWith(404, 'not_found');
 const INVALID = failWith(422, 'invalid');
+/** A deleted Desk's chat, decision or callback request, as the kernel refuses one once its Desk is gone (plan 01b). */
+const CLOSED = failWith(409, 'kernel', { code: 'closed' });
 
 const ANSWERS: ReadonlySet<string> = new Set<ApprovalAnswer>(['allow_once', 'deny_once', 'allow_person', 'deny_always']);
 
@@ -143,6 +156,21 @@ function isRuleCard(value: unknown): value is RuleCard {
   );
 }
 
+/**
+ * A `confirmTool` batch as the API takes one (plan 02b Task 7): one or more tools, each named once
+ * with the hash of the definition the owner confirms, and whether to turn them on.
+ */
+function toolBatch(body: unknown): { entries: ToolConfirmEntry[]; enable: boolean } | null {
+  if (!isRecord(body) || typeof body.enable !== 'boolean' || !Array.isArray(body.tools) || body.tools.length === 0) return null;
+  const entries: ToolConfirmEntry[] = [];
+  for (const entry of body.tools as unknown[]) {
+    if (!isRecord(entry) || typeof entry.tool !== 'string' || typeof entry.definition_sha256 !== 'string' || entry.definition_sha256 === '') return null;
+    if (entries.some((seen) => seen.tool === entry.tool)) return null;
+    entries.push({ tool: entry.tool as ToolConfirmEntry['tool'], definition_sha256: entry.definition_sha256 });
+  }
+  return { entries, enable: body.enable };
+}
+
 /** A turn's step as queued, with the session's generation then: a take-over since fences it off (`Server.tick`). */
 type Scheduled = { step: Step; language: Language; text: string; generation: number };
 
@@ -160,6 +188,8 @@ export interface CopyNaming {
 /** The API's side of one copy: the copy itself and the turns in progress. */
 export class Server {
   world: MockWorld;
+  /** The built-in agent's runs in this copy. */
+  readonly agents = new AgentRuns();
   private readonly turns = new Map<string, { queue: Scheduled[]; timer: ReturnType<typeof setTimeout> | null }>();
 
   constructor(
@@ -184,6 +214,27 @@ export class Server {
   stopTurns(): void {
     for (const turn of this.turns.values()) if (turn.timer !== null) clearTimeout(turn.timer);
     this.turns.clear();
+    this.agents.stop();
+  }
+
+  /**
+   * Deletes `desk` from the copy. Each of its chats ends as a closed session ends a visitor's turn
+   * (master "Fail-closed behavior"): `error{code: "session"}` on its stream, then `turn_end` when a
+   * turn was in progress, which says nothing more. Then the stream is done with it.
+   */
+  deleteDesk(desk: DeskRecord): void {
+    for (const session of this.world.sessionsOf(desk.summary.desk_id)) {
+      const sessionId = session.state.session_id;
+      const turn = this.turns.get(sessionId);
+      // A step is waiting, or more are queued (the Desk went while one of them was being sent).
+      const running = turn !== undefined && (turn.timer !== null || turn.queue.length > 0);
+      if (turn?.timer != null) clearTimeout(turn.timer);
+      this.turns.delete(sessionId);
+      this.world.emit(session, { type: 'error', code: 'session' });
+      if (running) this.world.emit(session, { type: 'turn_end' });
+      session.listeners.clear();
+    }
+    this.world.deleteDesk(desk);
   }
 
   /** The session the request's visitor cookie names for `slug`, or why there is none. */
@@ -247,6 +298,7 @@ function ownerSession(sv: Server, req: Req): SessionRecord | Failure {
   if (!req.cookies.owner) return NO_OWNER;
   const session = sv.world.sessions.get(req.params.session_id ?? '');
   if (!session) return NOT_FOUND;
+  if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
   const generation = isRecord(req.body) ? req.body.generation : undefined;
   if (req.malformed || !Number.isSafeInteger(generation)) return INVALID;
   if (generation !== session.state.generation) return failWith(409, 'kernel', { code: 'stale_generation' });
@@ -290,6 +342,12 @@ const SERVED: ServedRoutes = {
     desk.summary.answering = on;
     return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
   },
+  deleteDesk(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    sv.deleteDesk(desk);
+    return NO_CONTENT;
+  },
   openPreview(sv, req) {
     // Always a new preview chat, as the API's is (plan 02b): its owner-path request never carries
     // the visitor cookie, which is scoped to the Desk's public path, so the page reads the chat it
@@ -326,6 +384,11 @@ const SERVED: ServedRoutes = {
     if (record.decision.state !== 'held') return failWith(409, 'already_resolved', { decision: record.decision });
     const given = answer as ApprovalAnswer;
     if (!(record.decision.answers ?? []).includes(given)) return failWith(422, 'kernel', { code: 'invalid' });
+    // Its Desk is gone: refused at execution, or denied, and no follow-up, since its chat is closed.
+    // No card is drafted for a Desk that's gone.
+    if (sv.world.deletedDesks.has(record.deskId)) {
+      return ok({ decision: sv.world.answerClosed(record, given), execution_state: null, card_diff: null } satisfies ApprovalAnswerOut);
+    }
     const session = sv.world.sessions.get(record.decision.session_id);
     const decision = sv.world.answer(record, given);
     if (session) sv.runTurn(session, afterAnswer(given, decision), session.language, '');
@@ -340,6 +403,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const record = sv.world.handoffs.get(req.params.handoff_id ?? '');
     if (!record) return NOT_FOUND;
+    if (sv.world.deletedDesks.has(record.deskId)) return CLOSED;
     if (record.handoff.status !== 'open') return failWith(409, 'kernel', { code: 'conflict' });
     sv.world.closeHandoff(record);
     return ok({ desk_id: record.deskId, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
@@ -354,6 +418,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const session = sv.world.sessions.get(req.params.session_id ?? '');
     if (!session) return NOT_FOUND;
+    if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
     const after = Number(req.query.get('after') ?? '0');
     return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0, sv.world.now()));
   },
@@ -379,6 +444,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const session = sv.world.sessions.get(req.params.session_id ?? '');
     if (!session) return NOT_FOUND;
+    if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
     const text = isRecord(req.body) ? req.body.text : undefined;
     const kind = isRecord(req.body) ? req.body.kind : undefined;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > MESSAGE_MAX || !OWNER_KINDS.has(kind)) return INVALID;
@@ -391,6 +457,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const session = sv.world.sessions.get(req.params.session_id ?? '');
     if (!session) return NOT_FOUND;
+    if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
     const generation = isRecord(req.body) ? req.body.generation : undefined;
     if (req.malformed || !Number.isSafeInteger(generation)) return INVALID;
     if (session.state.mode !== 'owner') return failWith(409, 'take_over_first');
@@ -401,7 +468,8 @@ const SERVED: ServedRoutes = {
   decision(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
     const record = sv.world.decisions.get(req.params.decision_id ?? '');
-    return record ? ok(record.decision) : NOT_FOUND;
+    if (!record) return NOT_FOUND;
+    return sv.world.deletedDesks.has(record.deskId) ? CLOSED : ok(record.decision);
   },
   ownerInbox(sv, req) {
     // Everything the copy's Demo inbox holds, as the kernel's owner form answers.
@@ -420,11 +488,51 @@ const SERVED: ServedRoutes = {
     if (isFailure(desk)) return desk;
     const add = isRecord(req.body) ? req.body.add : undefined;
     if (req.malformed || !Array.isArray(add) || add.length === 0 || !add.every(isRuleCard)) return INVALID;
-    // The kernel won't draft a card that takes more money on its own than the Desk's limit allows.
-    if (add.some((card) => card.mode === 'auto' && (card.max_amount_cents ?? 0) > RIVERA_MONEY_CAP_CENTS)) {
-      return failWith(422, 'above_money_cap', { cap_cents: RIVERA_MONEY_CAP_CENTS });
+    // The kernel won't draft a card that takes more money on its own than the active version's limit allows.
+    const cap = desk.policy.auto_money_cap_cents ?? 0;
+    if (add.some((card) => card.mode === 'auto' && (card.max_amount_cents ?? 0) > cap)) {
+      return failWith(422, 'above_money_cap', { cap_cents: cap });
     }
     return ok(sv.world.draft(desk, add));
+  },
+  rules(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    return isFailure(desk) ? desk : ok(rulesView(desk));
+  },
+  ruleDraft(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    // Only an open draft of this Desk: an active, superseded or unknown version is not a draft.
+    const version = req.params.version ?? '';
+    const record = /^\d{1,9}$/.test(version) ? desk.drafts.get(Number(version)) : undefined;
+    return record ? ok(record.draft) : NOT_FOUND;
+  },
+  people(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    return isFailure(desk) ? desk : ok(peopleOut(sv.world, desk));
+  },
+  confirmRules(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const version = isRecord(req.body) ? req.body.version : undefined;
+    if (req.malformed || !Number.isSafeInteger(version)) return INVALID;
+    const confirmed = sv.world.confirmDraft(desk, version as number);
+    if (confirmed === 'not_found') return NOT_FOUND;
+    // Drafted from rules that have changed since, or a tool it turns on changed again since: the
+    // kernel refuses and nothing changes. The API answers every kernel 409 on confirm the same way.
+    if (confirmed === 'stale' || confirmed === 'conflict') return failWith(409, 'rules_changed_since_draft');
+    return ok(confirmed);
+  },
+  confirmTool(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const batch = req.malformed ? null : toolBatch(req.body);
+    if (batch === null) return INVALID;
+    const confirmed = sv.world.confirmTools(desk, batch.entries, batch.enable);
+    if (confirmed === 'not_found') return NOT_FOUND;
+    // Another hash than the one listed, or turning verification off: the kernel refuses, and nothing changes.
+    if (confirmed === 'conflict') return failWith(409, 'kernel', { code: 'conflict' });
+    return ok(confirmed);
   },
   publicDesk(sv, req) {
     const desk = sv.world.deskBySlug(req.params.slug);
@@ -490,6 +598,31 @@ const SERVED: ServedRoutes = {
     // Only the codes this chat started, as the kernel's session form answers: never the owner's alerts.
     const sessionId = visitor.session.state.session_id;
     return ok(sv.world.inbox.filter((record) => record.sessionId === sessionId && record.entry.kind === 'verification_code').map((record) => record.entry));
+  },
+  agentCard(sv, req) {
+    // Built by code from the mock's public origin and the slug; no cookie is read.
+    const desk = sv.world.deskBySlug(req.params.slug);
+    return desk ? ok(agentCardOut(desk.summary.slug)) : NOT_FOUND;
+  },
+  agentKey(sv, req) {
+    // A demo key for this browser's chat with the Desk, shown once and kept nowhere.
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    return isFailure(visitor) ? visitor : ok(demoAgentIssued(sv.world, visitor.desk));
+  },
+  sendAgent(sv, req) {
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    const task = isRecord(req.body) ? req.body.task : undefined;
+    if (req.malformed || !isDemoAgentTask(task)) return INVALID;
+    const runId = sv.agents.start(sv.world, visitor.desk, visitor.session, task);
+    return ok({ run_id: runId } satisfies AgentRunStarted, 202);
+  },
+  agentRun(sv, req) {
+    // Only the chat that sent the agent reads its run; for anyone else there is none.
+    const visitor = sv.visitor(req.params.slug, req.cookies);
+    if (isFailure(visitor)) return visitor;
+    const run = sv.agents.read(req.params.run_id, visitor.session.state.session_id);
+    return run ? ok(run) : NOT_FOUND;
   },
   events(sv, req) {
     // A 200 opens the stream (handlers.ts); `listen` replays and follows it.
