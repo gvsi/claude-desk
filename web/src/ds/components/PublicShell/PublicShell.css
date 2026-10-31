@@ -1,27 +1,36 @@
-/* PublicShell: the public page. A brand header in the business's colors (--brand-* from the
-   props, the accent only as the 2 px rule under it), with the kernel's open status at its right;
-   under it the chat column (at most 680 px, centered) and the about column at the right on the
-   panel, 300 px as on the board.
+/* PublicShell: the public page, a column the window's height. A brand header in the business's
+   colors (--brand-* from the props, the accent only as the 2 px rule under it), with the kernel's
+   open status at its right; under it the chat (at most 680 px, centered) and the about column at
+   the right on the panel, 300 px as on the board.
 
-   The shell is an inline-size container: below 900 px wide the about column moves under the chat,
-   below 720 px the gutters are 16 px, and below 640 px the open status has its own line under the
-   name. The
-   composer and the footer stay at the bottom of the window while the conversation scrolls above
-   them. */
+   The document never scrolls. The brand header and the chat's head with the AI disclosure stay at
+   the top and the composer and the footer at the bottom, and only the conversation's scroll region
+   scrolls between them, so the disclosure is always in view. Below 900 px wide there is no room for
+   the about column beside the chat, so it opens the scroll region instead, above the first message
+   (the component moves it there). Below 520 px tall the brand header and the footer scroll with the
+   conversation, and only the chat's head and the composer stay put (see "A short shell" below).
+
+   The shell is an inline-size container: below 720 px the gutters are 16 px, and below 640 px the
+   open status has its own line under the name. */
 
 .cd-public-shell {
   container: cd-public-shell / inline-size;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  min-height: 100dvh;
+  /* 100vh where the browser has no dynamic viewport units. 100dvh follows a phone's toolbars as
+     they show and hide, so the composer stays above them. */
+  height: 100vh;
+  height: 100dvh;
   background: var(--bg-app);
   color: var(--text-primary);
 }
 
-/* Inside an owner screen: as tall as the panel that holds it. */
+/* Inside an owner screen: the height of the panel that holds it. In a panel with a set height the
+   conversation scrolls inside the shell; in a panel that grows with what it holds, the shell grows
+   with the conversation. */
 .cd-public-shell--embedded {
-  min-height: 100%;
+  height: 100%;
 }
 
 /* A banner, such as the vision bar, keeps its own height above the header, inside the shell's. */
@@ -128,34 +137,43 @@
   color: var(--brand-ink-secondary);
 }
 
-/* The chat and the about column. */
+/* The chat and the about column, the rest of the window's height. The gutter is 40 px, 16 px on a
+   narrow shell. */
 .cd-public-shell__body {
+  --cd-public-gutter: var(--space-40);
   display: flex;
   flex: 1 1 auto;
   align-items: stretch;
   min-height: 0;
 }
 
+/* The chat's head, its scroll region and the composer area, top to bottom. */
 .cd-public-shell__chat {
   display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   box-sizing: border-box;
   min-width: 0;
-  padding: 0 var(--space-40);
+  min-height: 0;
+  padding: 0 var(--cd-public-gutter);
 }
 
-.cd-public-shell__column {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
+/* The chat's head, the conversation, the composer area and the footer are each the chat's column:
+   at most the reading width and the gutter, centered. */
+.cd-public-shell__chat-head,
+.cd-public-shell__conversation,
+.cd-public-shell__composer,
+.cd-public-shell__footer {
+  box-sizing: border-box;
   width: 100%;
-  min-width: 0;
   max-width: calc(var(--size-reading) + var(--space-40));
-  margin: 0 auto;
+  margin-right: auto;
+  margin-left: auto;
 }
 
 .cd-public-shell__chat-head {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
   align-items: center;
   column-gap: var(--space-16);
@@ -188,27 +206,69 @@
   flex: none;
 }
 
+/* The conversation's scroll region, the one part of the page that scrolls: between the chat's head
+   and the composer area, the chat's full width (out to the edges of its gutters, so the scrollbar
+   sits at the chat's edge and the wheel scrolls it anywhere over the chat). It is positioned, so
+   anything absolutely placed in it, such as a receipt's screen-reader label, scrolls with it
+   instead of stretching the document behind the shell. Keeping the newest message in view is the
+   page's job; the shell only gives it the room to scroll. */
+.cd-public-shell__scroll {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0 calc(-1 * var(--cd-public-gutter));
+  padding: 0 var(--cd-public-gutter);
+  overflow-y: auto;
+}
+
+/* Its focus ring inside its edges, where nothing around it clips the ring. */
+.cd-public-shell__scroll:focus-visible {
+  outline-offset: calc(-1 * var(--space-2));
+}
+
+/* The conversation runs down to the composer area however short it is, so the end of a short chat
+   is right above the composer. */
 .cd-public-shell__conversation {
   /* The chat column is the reading width here, so conversation rows fill it, as the composer does. */
   --cd-row-max: 100%;
-  flex: 1 1 auto;
+  flex: 1 0 auto;
   min-width: 0;
   padding-top: var(--space-20);
 }
 
-/* The composer and the footer: held at the bottom of the window over the app background. */
+/* The composer, at the bottom of the window under the scroll region, and the footer under it, 8 px
+   apart (as is anything a board passes in the composer's slot with it). */
 .cd-public-shell__composer {
-  position: sticky;
-  bottom: 0;
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: var(--space-8);
   padding: var(--space-16) 0;
-  background: var(--bg-app);
 }
 
-/* The about column. */
+.cd-public-shell__composer:not(:last-child) {
+  padding-bottom: var(--space-8);
+}
+
+.cd-public-shell__footer {
+  flex: none;
+  padding-bottom: var(--space-16);
+}
+
+/* A long draft scrolls inside the composer's text box once the box is a sixth of the shell's height
+   (two lines at least, and never more than the composer's own six), so it never pushes the chat's
+   head and the disclosure off the screen and leaves the conversation room on a short shell. The
+   shell writes its height as --cd-public-shell-height. */
+.cd-public-shell__composer .cd-composer__input {
+  max-height: min(6lh, max(2lh, calc(var(--cd-public-shell-height, 100dvh) / 6)));
+}
+
+/* The about column, at the right of the chat from the header to the window's foot. A long charter
+   scrolls in the column, on its own. */
 .cd-public-shell__about {
+  position: relative;
   display: flex;
   flex: 0 0 300px;
   flex-direction: column;
@@ -216,9 +276,24 @@
   box-sizing: border-box;
   width: 300px;
   min-width: 0;
+  min-height: 0;
   padding: var(--space-24) var(--space-24) var(--space-20);
+  overflow-y: auto;
   border-left: 1px solid var(--line-hairline);
   background: var(--bg-panel);
+}
+
+/* Too narrow for the column beside the chat: it opens the scroll region, above the first message,
+   the region's full width on the panel, with a hairline between it and the conversation. */
+.cd-public-shell__scroll > .cd-public-shell__about {
+  flex: none;
+  width: auto;
+  margin: 0 calc(-1 * var(--cd-public-gutter));
+  padding-right: var(--cd-public-gutter);
+  padding-left: var(--cd-public-gutter);
+  overflow-y: visible;
+  border-bottom: 1px solid var(--line-hairline);
+  border-left: 0;
 }
 
 .cd-public-shell__blocks {
@@ -261,18 +336,64 @@
   overflow-wrap: anywhere;
 }
 
-/* Narrow: the about column moves under the chat, full width, with a hairline above it. */
-@container cd-public-shell (max-width: 899.98px) {
-  .cd-public-shell__body {
-    flex-direction: column;
-  }
+/* A short shell (below 520 px tall, or too full for its height: the component decides and sets the
+   class): the brand header and the footer can't stay pinned and leave the conversation room, so
+   they scroll with it.
+   The shell itself scrolls, and its scroll region grows with the conversation; the chat's head with
+   the disclosure sticks to the top of the shell and the composer to its bottom, a little tighter,
+   over the app ground. Their ground runs out into the gutters (a shadow as wide as the gutter, cut
+   to their height), so the about column passing under them doesn't show beside them. */
+.cd-public-shell--short {
+  overflow-y: auto;
+  /* What scrolls into view, by focus or by Page Up and Page Down, does so between the chat's head and
+     the composer, not under them. */
+  scroll-padding-top: var(--cd-public-head-height, 0);
+  scroll-padding-bottom: var(--cd-public-composer-height, 0);
+}
 
-  .cd-public-shell__about {
-    flex: none;
-    width: auto;
-    border-top: 1px solid var(--line-hairline);
-    border-left: 0;
-  }
+/* The chat's head and the composer are always in view, so focus in them (Ask for the owner, the
+   text box) scrolls nothing: their parts reach back over the padding that keeps the rest from
+   under them. */
+.cd-public-shell--short .cd-public-shell__chat-head * {
+  scroll-margin-top: calc(-1 * var(--cd-public-head-height, 0px));
+}
+
+.cd-public-shell--short .cd-public-shell__composer * {
+  scroll-margin-bottom: calc(-1 * var(--cd-public-composer-height, 0px));
+}
+
+.cd-public-shell--short .cd-public-shell__body {
+  flex: 1 0 auto;
+}
+
+.cd-public-shell--short .cd-public-shell__scroll {
+  flex: 1 0 auto;
+  overflow-y: visible;
+}
+
+.cd-public-shell--short .cd-public-shell__chat-head,
+.cd-public-shell--short .cd-public-shell__composer {
+  position: sticky;
+  z-index: 1;
+  background: var(--bg-app);
+  box-shadow: 0 0 0 var(--cd-public-gutter) var(--bg-app);
+  clip-path: inset(0 calc(-1 * var(--cd-public-gutter)));
+}
+
+/* At the top of a chat, the brand header, the chat's head and a composer holding a long draft can be
+   taller than the shell together. The chat's head then stays over the composer, so the composer can
+   never cover the AI disclosure. */
+.cd-public-shell--short .cd-public-shell__chat-head {
+  top: 0;
+  z-index: 2;
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-8);
+}
+
+.cd-public-shell--short .cd-public-shell__composer {
+  bottom: 0;
+  padding-top: var(--space-8);
+  padding-bottom: var(--space-8);
 }
 
 /* Narrow, as each state of the handoff board is at 640 px, a phone, or the owner's side panel: 16 px gutters. */
@@ -284,14 +405,8 @@
 }
 
 @container cd-public-shell (max-width: 719.98px) {
-  .cd-public-shell__chat {
-    padding-right: var(--space-16);
-    padding-left: var(--space-16);
-  }
-
-  .cd-public-shell__about {
-    padding-right: var(--space-16);
-    padding-left: var(--space-16);
+  .cd-public-shell__body {
+    --cd-public-gutter: var(--space-16);
   }
 }
 

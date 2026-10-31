@@ -20,6 +20,7 @@ import {
   MarginReceipt,
   NEW_CHAT_LABEL,
   Notice,
+  PUBLIC_SHELL_SCROLLER_EVENT,
   PersonMessage,
   PublicShell,
   RATE_LIMITED_COPY,
@@ -36,10 +37,10 @@ import {
 import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { brandFrom } from './brand.ts';
-import type { ChatRow, SendFailure } from './chatReducer.ts';
+import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
-import { useVisitorChat } from './PublicChatProvider.tsx';
+import { useVisitorChat, type ChatStatus } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
 import { VerifyInline } from './verify/VerifyInline.tsx';
@@ -202,21 +203,37 @@ function scrollerOf(el: Element): Element {
   return document.scrollingElement ?? document.documentElement;
 }
 
-/** Where the conversation is scrolled: the element whose scrolling moves it, and how far down. */
+/**
+ * Where the conversation is scrolled: the element whose scrolling moves it, how far down, and the
+ * size of the shell around it ("390x844"), which tells whether the page has changed size since.
+ */
 interface ScrollerAt {
   scroller: Element;
   top: number;
+  shellSize: string;
 }
 
 /** Where the element whose scrolling moves `el` stands now. */
 function scrollerAt(el: Element): ScrollerAt {
   const scroller = scrollerOf(el);
-  return { scroller, top: scroller.scrollTop };
+  const shell = el.closest(SHELL)?.getBoundingClientRect();
+  return { scroller, top: scroller.scrollTop, shellSize: shell ? `${Math.round(shell.width)}x${Math.round(shell.height)}` : '' };
 }
 
 /** The design system's classes for the shell around the page and its composer area, which stays at the bottom of the window. */
 const SHELL = '.cd-public-shell';
 const COMPOSER_AREA = '.cd-public-shell__composer';
+
+/**
+ * Whether a visitor who was at the end, where the page last knew they were (`seen`), has moved
+ * away from it to stand where the conversation is now: only by moving it up, in the same scroller,
+ * with the shell the same size. The page changing size moves the conversation too, before the page
+ * hears of the new size: the browser's scroll anchoring moves it down or up as the rows rewrap, and
+ * the shell switching scrollers leaves it where the new scroller was. Nothing lies below the end.
+ */
+function leftTheEnd(seen: ScrollerAt, now: ScrollerAt): boolean {
+  return now.scroller === seen.scroller && now.shellSize === seen.shellSize && now.top < seen.top;
+}
 
 /**
  * How much of the conversation, up to `end`, is hidden under the composer that stays at the bottom
@@ -266,12 +283,32 @@ interface NewestInView {
  * the page makes at once, such as focus moving up with the keyboard, sends its event only with the
  * next frame, and a reply arriving in between would otherwise take the visitor back down to the
  * end. The page changing size moves the end under the composer, and doesn't count as the visitor
- * moving away. It can scroll the conversation too: when the window narrows and the rows rewrap
- * taller, the browser's scroll anchoring moves the conversation down to keep the rows on screen
- * where they were. So while the visitor is at the end, only a move up counts as them leaving it;
- * once they have moved back, any move counts.
+ * moving away. It can scroll the conversation too, and that scroll's event can come before the page
+ * sees the new size: when the window narrows or widens the rows rewrap, and the browser's scroll
+ * anchoring moves the conversation down or up to keep the rows on screen where they were. And the
+ * shell can switch which of its parts scrolls the conversation (going short or tall), which leaves
+ * it where the new scroller was; the shell says so with its own event, and the end comes back. So
+ * while the visitor is at the end, only a move up of the same scroller, with the shell the same
+ * size, counts as them leaving it (`leftTheEnd`); once they have moved back, any move counts. Only
+ * the conversation's own scroller counts at all, looked up afresh each time: not the about column
+ * beside the chat, the composer's text box, or a part of the shell that has just stopped scrolling
+ * the conversation. The trade-off: a visitor's scroll up in the very frame the shell changes size,
+ * before the page has seen the new size, is taken for the browser's and the end comes back once; a
+ * scroll gesture goes on past that frame and is followed from there.
+ *
+ * Until the conversation has `started` there is no newest message to keep in view, so nothing is
+ * pinned and the conversation's scroll region stays at its start: on a phone, where the about
+ * column opens the region above the first message, a new chat opens with the column's heading in
+ * view, not scrolled to the empty end below it. A chat that empties again (the visitor starts a new
+ * one after theirs ended) goes back to its start the same way, rather than where the browser left
+ * the region as the old rows went, and its end is followed again from its first message.
  */
-function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): NewestInView {
+function useNewestInView(
+  end: RefObject<HTMLElement | null>,
+  composer: RefObject<HTMLElement | null>,
+  shown: boolean,
+  started: boolean,
+): NewestInView {
   const atTheEnd = useRef(true);
   /** Where the conversation's scroller stood when the page last knew where the visitor was. */
   const seenAt = useRef<ScrollerAt | null>(null);
@@ -281,10 +318,24 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
     seenAt.current = end.current ? scrollerAt(end.current) : null;
   }, [end]);
 
+  // A conversation that had started and is empty again goes back to its start, at once, and its
+  // end is followed again from its first message.
+  const wasStarted = useRef(started);
+  useLayoutEffect(() => {
+    const emptied = wasStarted.current && !started;
+    wasStarted.current = started;
+    if (!emptied || !end.current) return;
+    atTheEnd.current = true;
+    const scroller = scrollerOf(end.current);
+    if (scroller === document.scrollingElement) window.scrollTo({ top: 0, behavior: 'instant' });
+    else scroller.scrollTo({ top: 0, behavior: 'instant' });
+    noteSeen();
+  }, [started, end, noteSeen]);
+
   // Brings the end of the conversation up to the composer, at once and never animated, while the
-  // visitor is at the end, and notes that they still are.
+  // visitor is at the end of a conversation that has started, and notes that they still are.
   const pin = useCallback(() => {
-    if (!atTheEnd.current || !end.current || !composer.current) return;
+    if (!started || !atTheEnd.current || !end.current || !composer.current) return;
     const hidden = hiddenUnderComposer(end.current, composer.current);
     if (hidden > 0) {
       const scroller = scrollerOf(end.current);
@@ -292,7 +343,7 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
       else scroller.scrollBy({ top: hidden, behavior: 'instant' });
     }
     noteSeen();
-  }, [end, composer, noteSeen]);
+  }, [started, end, composer, noteSeen]);
 
   // Whether the visitor is at the end, as the page stands now.
   const notePlace = useCallback(() => {
@@ -301,35 +352,57 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
   }, [end, composer, noteSeen]);
 
   // Whether the conversation has scrolled since the page last knew where the visitor was, in a way
-  // that may have moved them. Its scroller changing is not the visitor moving: setup's preview
-  // scrolls the page until the conversation overflows the panel around it, and the panel from then
-  // on. While the visitor is at the end, only a move up counts: nothing lies below the end, and the
-  // browser's scroll anchoring moves the conversation down when the rows above grow.
+  // that may have moved them. Its scroller changing is not the visitor moving: the shell switches
+  // scrollers as it goes short or tall, and setup's preview scrolls the page until the conversation
+  // overflows the panel around it, and the panel from then on. While the visitor is at the end, only
+  // `leftTheEnd` counts.
   const scrolledSinceSeen = useCallback((): boolean => {
     const seen = seenAt.current;
     if (!seen || !end.current) return false;
     const now = scrollerAt(end.current);
-    if (now.scroller !== seen.scroller) return false;
-    return atTheEnd.current ? now.top < seen.top : now.top !== seen.top;
+    if (atTheEnd.current) return leftTheEnd(seen, now);
+    return now.scroller === seen.scroller && now.top !== seen.top;
   }, [end]);
+
+  // A scroll event, of the conversation's own scroller only. While the visitor is at the end, a
+  // scroll that isn't them leaving it (`leftTheEnd`) keeps them there, and the resize or the shell's
+  // switch that moved the conversation brings the end back; anything else is weighed by where the
+  // end now is.
+  const noteScroll = useCallback(
+    (event: Event) => {
+      if (!end.current) return;
+      const now = scrollerAt(end.current);
+      const scrolled = event.target === document ? document.scrollingElement : event.target;
+      if (scrolled !== now.scroller) return;
+      const seen = seenAt.current;
+      if (atTheEnd.current && seen !== null && !leftTheEnd(seen, now)) noteSeen();
+      else notePlace();
+    },
+    [end, noteSeen, notePlace],
+  );
 
   useEffect(() => {
     // Captured on the document, so the page's scrolling and an embedding panel's both count.
-    document.addEventListener('scroll', notePlace, { capture: true, passive: true });
-    return () => document.removeEventListener('scroll', notePlace, { capture: true });
-  }, [notePlace]);
+    document.addEventListener('scroll', noteScroll, { capture: true, passive: true });
+    return () => document.removeEventListener('scroll', noteScroll, { capture: true });
+  }, [noteScroll]);
 
   // The page changing size moves the end without a render: the shell rewraps when the window or
-  // the panel around it resizes, and the composer area grows with what is typed. Watched while the
-  // shell is `shown`.
+  // the panel around it resizes, and the composer area grows with what is typed. So does the shell
+  // switching which of its parts scrolls the conversation, which it says with its own event. Watched
+  // while the shell is `shown`.
   useEffect(() => {
     const shell = shown ? end.current?.closest(SHELL) : null;
     const area = composer.current?.closest(COMPOSER_AREA);
-    if (typeof ResizeObserver === 'undefined' || !shell) return undefined;
-    const observer = new ResizeObserver(pin);
-    observer.observe(shell);
-    if (area) observer.observe(area);
-    return () => observer.disconnect();
+    if (!shell) return undefined;
+    shell.addEventListener(PUBLIC_SHELL_SCROLLER_EVENT, pin);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(pin);
+    observer?.observe(shell);
+    if (area) observer?.observe(area);
+    return () => {
+      shell.removeEventListener(PUBLIC_SHELL_SCROLLER_EVENT, pin);
+      observer?.disconnect();
+    };
   }, [shown, end, composer, pin]);
 
   // Just before each change, if the visitor may have moved.
@@ -348,6 +421,15 @@ function useNewestInView(end: RefObject<HTMLElement | null>, composer: RefObject
   }, [noteSeen]);
 
   return { follow, beforeChange };
+}
+
+/**
+ * Whether the conversation has anything in it yet: a row, receipts before the first message,
+ * "Claude is writing", the owner typing, or a notice under it.
+ */
+function conversationStarted(state: ChatState, status: ChatStatus): boolean {
+  if (state.rows.length > 0 || state.leading.length > 0 || state.writing || state.ownerTyping !== null) return true;
+  return state.error !== null || status === 'unavailable' || state.connection !== 'open';
 }
 
 /** The latest row whose message carries the kernel's verify card, by its key, or null. */
@@ -386,7 +468,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const { openStatus, desk } = useOpenStatus(slug, chat.desk);
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const newest = useNewestInView(endRef, composerRef, desk !== null);
+  const newest = useNewestInView(endRef, composerRef, desk !== null, conversationStarted(chat.state, chat.status));
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);
   // The chat can be written in: it loaded, and its session hasn't ended.
