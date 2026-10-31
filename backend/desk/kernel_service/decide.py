@@ -711,7 +711,7 @@ def free_text(adapter: Adapter, args: BaseModel) -> dict[str, str]:
         if isinstance(value, str) and value:
             texts[name] = value
         elif isinstance(value, list) and value and all(isinstance(item, str) for item in value):
-            texts[name] = json.dumps(value, ensure_ascii=False)
+            texts.update({f"{name}[{index}]": item for index, item in enumerate(value) if item})
     return texts
 
 
