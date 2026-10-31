@@ -2935,6 +2935,20 @@ async function consultantAt(kind = 'opening'): Promise<SetupState> {
 }
 
 describe('consultant setup', () => {
+  it('collapses_the_old_card_to_changed_below_when_typing_reproposes_it', async () => {
+    const state = await consultantAt('schedule');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.fill('Make it 15 minutes, and check with me before booking.');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByText('Changed below', { exact: true })).toBeVisible();
+    expect(screen.getByRole('article', { name: 'Book a free intro consult', exact: true }).elements()).toHaveLength(0);
+    const oldTitle = screen.getByText('Book a free intro consult', { exact: true }).element();
+    expect(getComputedStyle(oldTitle).textDecorationLine).toBe('line-through');
+    await expect.element(screen.getByRole('article', { name: 'Request a free intro call', exact: true })).toBeVisible();
+    await expect.element(box).toHaveFocus();
+  });
+
   it('dismisses_the_question_with_escape_and_keeps_composer_and_other_words_literal', async () => {
     const state = await consultantAt();
     const question = state.messages.findLast((message) => message.choices?.length)!;

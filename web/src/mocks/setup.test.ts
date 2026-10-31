@@ -103,6 +103,27 @@ async function cpaAt(kind: string): Promise<SetupState> {
 }
 
 describe('setup consultant run and decisions', () => {
+  it('reproposes_a_typed_change_with_a_new_id_and_preserves_the_changed_card_on_finish', async () => {
+    let state = await cpaAt('schedule');
+    const id = state.interview_id;
+    const old = structuredClone(state.messages.at(-1)!.card!);
+    state = await setupState('setupAnswer', id, { question: null, card: old.proposal_id, text: 'Make it 15 minutes, and check with me before booking.' });
+    const updated = state.messages.at(-1)!.card!;
+    expect(updated.proposal_id).not.toBe(old.proposal_id);
+    expect(updated).toMatchObject({ state: 'proposed', superseded_by: null, job: { title: 'Request a free intro call', autonomy: 'ask', config: { minutes: 15 } } });
+    expect(state.pending_card).toBe(updated.proposal_id);
+    const changed = state.messages.find(({ card }) => card?.proposal_id === old.proposal_id)!.card!;
+    expect(changed).toEqual({ ...old, state: 'changed', superseded_by: updated.proposal_id });
+    state = await setupState('setupAnswer', id, { question: null, card: updated.proposal_id, text: 'How would that work?' });
+    expect(state.pending_card).toBe(updated.proposal_id);
+    expect(state.messages.find(({ card }) => card?.proposal_id === updated.proposal_id)?.card?.state).toBe('proposed');
+    state = await setupState('setupSuggestions', id, {});
+    expect(state.messages.find(({ card }) => card?.proposal_id === old.proposal_id)?.card).toEqual(changed);
+    expect(state.messages.find(({ card }) => card?.proposal_id === updated.proposal_id)?.card?.state).toBe('accepted');
+    expect(state.messages.filter(({ role }) => role === 'claude').every(({ text }) => !/\bDone\b/i.test(text))).toBe(true);
+    expect(await mockStore.dispatch('setupRules', { params: { id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
+  });
+
   it('a_read_without_cards_never_names_a_hidden_pending_card', async () => {
     const state = await cpaAt('schedule');
     const response = await mockStore.dispatch('setup', { params: { id: state.interview_id } });
@@ -171,7 +192,8 @@ describe('setup consultant run and decisions', () => {
     let state = await cpaAt('payment');
     const payment = state.pending_card!;
     state = await setupState('setupAnswer', state.interview_id, { question: null, card: payment, text: '$750.00' });
-    expect(state.messages.find(({ card }) => card?.proposal_id === payment)?.card).toMatchObject({ state: 'accepted', job: { config: { amount_cents: 75000 } } });
+    expect(state.messages.find(({ card }) => card?.proposal_id === payment)?.card).toMatchObject({ state: 'changed', superseded_by: state.pending_card, job: { config: { amount_cents: null } } });
+    expect(state.messages.at(-1)?.card).toMatchObject({ state: 'proposed', job: { config: { amount_cents: 75000 } } });
     await setupState('setupSuggestions', state.interview_id, {});
     const response = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
     expect(response).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });

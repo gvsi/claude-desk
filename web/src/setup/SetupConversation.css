@@ -321,3 +321,19 @@
   margin: 0;
   color: var(--text-secondary);
 }
+
+.cd-setup-superseded {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  padding: var(--space-8) var(--space-12);
+  border: 1px dashed var(--line-hairline);
+  border-radius: var(--radius-card);
+  color: var(--text-secondary);
+}
+
+.cd-setup-superseded__title {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}

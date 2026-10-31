@@ -525,6 +525,7 @@ function say(interview: Interview, role: SetupMessage['role'], text: string, cho
 }
 
 /** The CPA fixture's proposals, made once so their ids remain stable throughout the interview. */
+const proposalId = () => `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
 function consultantProposals(): ProposalCard[] {
   const jobs: JobProposal[] = [
     {
@@ -561,7 +562,7 @@ function consultantProposals(): ProposalCard[] {
     ...jobs.map((job) => ({ kind: 'job' as const, job, connector: null })),
     ...connectors.map((connector) => ({ kind: 'connector' as const, job: null, connector })),
   ];
-  return fields.map((proposal) => ({ ...proposal, proposal_id: `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`, state: 'proposed' }));
+  return fields.map((proposal) => ({ ...proposal, proposal_id: proposalId(), state: 'proposed', superseded_by: null }));
 }
 
 /** Signed board words, shared by all fixture paths. */
@@ -573,7 +574,8 @@ export const CPA_COPY = {
   first: 'First, who do you work with most? I’ll lead with that when people ask what you do.',
   clients: ['Both, about evenly', 'Mostly individuals', 'Mostly small businesses'],
   consult: 'Got it. Want me to book free 20-minute intro consults? People pick an open time, and you get the details.',
-  intake: 'Done: the Desk books intro consults on its own. Next, should it ask new clients three questions before their consult, so you know what they need?',
+  intake: 'Great, I’ll set it up this way. Next, the questions new clients answer before their call.',
+  updated: 'Sure. Here’s the updated version.',
   retainer: 'Got it. Once you’ve priced the work, want the Desk to send the client a retainer link?',
   stripe: 'Good. Stripe can take those retainers by card. Connect it?',
   optIn: 'Got it. One thing about money: with no amount set, I ask you before every payment. If you’d like, you can set an amount I take on my own, now or later in Rules.',
@@ -645,6 +647,7 @@ function finishQuestions(world: MockWorld, interview: Interview, suggestions = f
     const has = (kind: JobProposal['job']) => jobs.some(({ job }) => job === kind);
     const standard = ['schedule', 'intake', 'payment', 'status'].every((kind) => has(kind as JobProposal['job']))
       && jobs.filter(({ job }) => job === 'schedule' || job === 'intake').every(({ autonomy }) => autonomy === 'auto')
+      && jobs.some(({ config }) => config?.block === 'typed_booking' && config.minutes === 20)
       && jobs.find(({ job }) => job === 'payment')?.autonomy === 'ask' && interview.capCents === 0;
     const closing = standard ? CPA_COPY.closing : [
       CPA_COPY.closing[0],
@@ -716,15 +719,50 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
   if (!ownerStored) say(interview, 'owner', text.trim());
   if (interview.state.pending_card) {
     const card = interview.proposals.find((card) => card.proposal_id === interview.state.pending_card)!;
-    const payment = card.job?.config?.block === 'purpose_payment' ? card.job.config : null;
-    // A bare owner-entered amount prices this job only; it never answers the money-limit turn.
-    if (payment && /^\$?\d[\d,]*(?:\.\d{1,2})?$/.test(text.trim())) {
+    const words = text.trim();
+    const updated = structuredClone(card);
+    const payment = updated.job?.config?.block === 'purpose_payment' ? updated.job.config : null;
+    let changed = false;
+    // A bare owner-entered amount re-proposes this job only; it never answers the money limit.
+    if (payment && /^\$?\d[\d,]*(?:\.\d{1,2})?$/.test(words)) {
       const cents = consultantCap(text);
-      if (cents > 0 || /^(?:\$)?0(?:\.0{1,2})?$/.test(text.trim())) payment.amount_cents = cents;
+      if (cents > 0 || /^(?:\$)?0(?:\.0{1,2})?$/.test(words)) {
+        payment.amount_cents = cents;
+        changed = true;
+      }
     }
-    const unpriced = payment?.amount_cents === null;
-    card.state = unpriced || /^(?:no\b|not now\b|skip\b|decline\b)/i.test(text.trim()) ? 'declined' : 'accepted';
-    nextConsultant(interview);
+    const booking = updated.job?.config?.block === 'typed_booking' ? updated.job.config : null;
+    if (booking && updated.job && /^(?:make|change|set|check|ask)\b/i.test(words)) {
+      const minutes = words.match(/\b(\d+)\s*(?:minutes?|mins?)\b/i)?.[1];
+      if (minutes && Number(minutes) >= 15 && Number(minutes) <= 60) booking.minutes = Number(minutes);
+      if (/check with me|ask me|approve/i.test(words)) updated.job.autonomy = 'ask';
+      const previousMinutes = card.job?.config?.block === 'typed_booking' ? card.job.config.minutes : null;
+      changed = booking.minutes !== previousMinutes || updated.job.autonomy !== card.job?.autonomy;
+      if (changed) {
+        updated.job.title = updated.job.autonomy === 'ask' ? 'Request a free intro call' : 'Book a free intro call';
+        updated.job.how = updated.job.autonomy === 'ask'
+          ? `New clients ask for a time within your opening hours, and you approve each ${booking.minutes}-minute call.`
+          : `New clients pick a time within your opening hours and book a ${booking.minutes}-minute call.`;
+      }
+    }
+    if (changed) {
+      updated.proposal_id = proposalId();
+      updated.state = 'proposed';
+      updated.superseded_by = null;
+      card.state = 'changed';
+      card.superseded_by = updated.proposal_id;
+      interview.proposals.splice(interview.proposals.indexOf(card) + 1, 0, updated);
+      interview.state.pending_card = updated.proposal_id;
+      say(interview, 'claude', CPA_COPY.updated);
+      interview.state.messages.push({ role: 'claude', text: '', choices: [], card: updated });
+    } else if (!/[?]/.test(words) && /^(?:yes\b|accept\b|set it up\b|connect\b|no\b|not now\b|skip\b|decline\b)/i.test(words)) {
+      const unpriced = payment?.amount_cents === null;
+      card.state = unpriced || /^(?:no\b|not now\b|skip\b|decline\b)/i.test(words) ? 'declined' : 'accepted';
+      nextConsultant(interview);
+    } else {
+      // Questions and unknown words leave the proposal pending, with no permission granted.
+      say(interview, 'claude', card.job?.how ?? card.connector!.why);
+    }
     return;
   }
   if (FOLLOW_UP_TRIGGER.test(text)) {

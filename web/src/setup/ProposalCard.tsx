@@ -75,6 +75,13 @@ export function ProposalCard({ proposal, live, disabled, busyAction, failed, amo
       setError(copy.amountError);
     }
   }, [amountRequired]);
+  if (proposal.state === 'changed') return (
+    <p className="cd-setup-superseded cd-type-meta">
+      <Icon name="history" size={16} />
+      <span className="cd-setup-superseded__title">{job?.title ?? connector!.label}</span>
+      <span>{copy.changed}</span>
+    </p>
+  );
   const editing = live && !failed && (changing || accepting);
   const connectorView = connector
     ? {

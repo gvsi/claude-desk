@@ -499,7 +499,8 @@ export type Choice = { text: string; recommended: boolean };
 export type ProposalCard = {
   proposal_id: string;
   kind: 'job' | 'connector';
-  state: 'proposed' | 'accepted' | 'declined';
+  state: 'proposed' | 'accepted' | 'declined' | 'changed';
+  superseded_by: string | null;
   job: JobProposal | null;
   connector: ConnectorProposal | null;
 };

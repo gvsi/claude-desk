@@ -3,7 +3,7 @@ import type { ProposalCard, SetupMessage, SetupState } from '../api/views.ts';
 import { decisionBody, isCard, liveChoices } from './conversation.ts';
 
 const payment: ProposalCard = {
-  proposal_id: 'p-000000000001', kind: 'job', state: 'proposed', connector: null,
+  proposal_id: 'p-000000000001', kind: 'job', state: 'proposed', superseded_by: null, connector: null,
   job: {
     job: 'payment', title: 'Collect a retainer', why: 'Start the engagement.', how: 'Send a payment link.', can_do_today: true, autonomy: 'ask',
     config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: 50_000 },
