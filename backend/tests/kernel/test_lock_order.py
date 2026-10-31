@@ -6,11 +6,12 @@ kernel transactions never deadlock.
 Two tests race requests that once took a pair of rows in opposite orders: the session and the
 decision rows, and an adapter's row and the ledger head. The others record the row locks each
 transaction of a path takes (`LockLog`) and check that they come in that order: executions and
-their reconciliation (a private action's too, refused once its session closed), answers, cancels
-and reads, a verification start allowed or approved, a right code checked, a document link
-opened, a person removed or given another contact, a Desk deleted, and a handoff closed, after
-the Desk row an owner's write holds first; and Plan 01c's payment paths, over the real adapters
-and the mock payments server.
+their reconciliation (a private action's too, once its session closed: its adapter asked, then
+the action withheld, refused or left unknown by what it answers), answers, cancels and reads, a
+verification start allowed or approved, a right code checked, a document link opened, a person
+removed or given another contact, a Desk deleted, and a handoff closed, after the Desk row an
+owner's write holds first; and Plan 01c's payment paths, over the real adapters and the mock
+payments server.
 """
 
 import asyncio

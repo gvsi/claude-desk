@@ -14,6 +14,7 @@ what it did stands, since it may have acted outside the kernel, but nothing it r
 session, now or on a later read.
 """
 
+import json
 import logging
 
 import pytest
@@ -376,26 +377,30 @@ async def test_a_reconciled_result_with_undeclared_private_data_is_withheld_once
     logged_by_tool_and_action(caplog, allowed.action.action_id)
 
 
-@pytest.mark.parametrize("entry", ["read", "startup", "approved_reconciliation"])
-async def test_a_private_result_is_never_recovered_into_a_session_that_ended(app, client, registry, frozen_clock,
-                                                                              entry):
-    """An approved release whose outcome nobody knew, reconciled after its session closed: the
-    reconciliation checks the session as T2 does, holding its row first, asks the adapter once,
-    which answers that the release never went through, and settles the action
-    `refused_at_execution` with the plain reason, exposing nothing. So for a read of the decision,
-    startup reconciliation, and the approval form of `/execute`. What a release that did go through
-    records instead is `test_a_refused_private_recovery_asks_the_adapter_once_and_delivers_nothing`'s."""
+async def lost_private_release(app, client):
+    """A Desk whose stand-in releases private data, a visitor verified as Dana, and her request,
+    held, approved by the owner and lost on the way: its outcome nobody knows (`unknown`)."""
     release = FakeAdapter("native.quote", releases_private_data=True)     # stands in for a private release
-    rows, visitor, dana, bob = await verified_fake_desk(app, client, release,
-                                                        [card("ask-quote", "native.quote", mode="ask")])
+    rows, visitor, dana, _ = await verified_fake_desk(app, client, release,
+                                                      [card("ask-quote", "native.quote", mode="ask")])
     held = await decided(client, visitor, "native.quote", {"qty": 1})
     assert held.state == "held", held.reason_plain
     release.script["execute"] = RuntimeError("the provider's answer was lost")
     answered_now = await answered(client, rows.owner, held.decision_id, "allow_once")
     assert answered_now.execution.state == "unknown"
-    release.script["reconcile"] = None                                    # the release never went through
-    await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())     # a contact change, say
+    return release, rows, visitor, dana, held
 
+
+def danas(dana: str) -> Fact:
+    """The private result a release that went through returns: a fact Dana reads as her person."""
+    return Fact(fact_id="quote:fake-1", kind="quote", status="available", source="kernel",
+                claims=[Claim(key="title", kind="text", value=SECRET)],
+                label=Label(readers=["owner", f"person:{dana}"], record_owner=dana))
+
+
+async def recovered_by(app, client, rows, visitor, held, entry: str) -> dict | None:
+    """Reconciles the lost release through `entry`: a read of the decision, startup reconciliation,
+    or the approval form of `/execute`, whose answer (the stored result) it returns."""
     if entry == "read":
         await read(client, rows.owner, held)
     elif entry == "startup":
@@ -405,8 +410,27 @@ async def test_a_private_result_is_never_recovered_into_a_session_that_ended(app
         response = await client.post("/execute", headers=rows.owner, json={
             "decision_id": held.decision_id, "session_id": visitor.session_id, "approval_id": approval.approval_id})
         assert response.status_code == 200, response.text
-        assert (response.json()["state"], response.json()["facts"], response.json()["model_view"]) == ("failed", [], {})
+        return response.json()
+    return None
 
+
+@pytest.mark.parametrize("entry", ["read", "startup", "approved_reconciliation"])
+async def test_a_private_result_is_never_recovered_into_a_session_that_ended(app, client, registry, frozen_clock,
+                                                                              entry):
+    """An approved release whose outcome nobody knew, reconciled after its session closed: the
+    reconciliation checks the session as T2 does, holding its row first, asks the adapter once,
+    which answers that the release never went through, and settles the action
+    `refused_at_execution` with the plain reason, exposing nothing. So for a read of the decision,
+    startup reconciliation, and the approval form of `/execute`. What a release that did go through
+    records instead is `test_a_private_result_recovered_after_its_session_ended_is_withheld`'s."""
+    release, rows, visitor, dana, held = await lost_private_release(app, client)
+    release.script["reconcile"] = None                                    # the release never went through
+    await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())     # a contact change, say
+
+    answer = await recovered_by(app, client, rows, visitor, held, entry)
+
+    if answer is not None:
+        assert (answer["state"], answer["facts"], answer["model_view"]) == ("failed", [], {})
     assert release.calls.count("reconcile") == 1
     [decision] = await rows_of(app, rows.copy_id, select(DecisionRow).where(
         DecisionRow.decision_id == held.decision_id))
@@ -431,6 +455,38 @@ RECOVERED = {
 }
 
 
+@pytest.mark.parametrize("entry", ["read", "startup", "approved_reconciliation"])
+async def test_a_private_result_recovered_after_its_session_ended_is_withheld(app, client, registry, frozen_clock,
+                                                                              entry):
+    """The same recovery when the release did go through and the adapter returns Dana's private
+    result: on a read, at startup and through the approval form of `/execute` alike, what it did is
+    recorded as it happened, `executed` with the executed line and no undo, and nothing it returned
+    is delivered: the stored result, and the approval form's answer, hold no facts, an empty
+    `model_view` and no inbox notices, and the entry says it was withheld because the session
+    ended."""
+    release, rows, visitor, dana, held = await lost_private_release(app, client)
+    release.script["reconcile"] = AdapterResult(facts=[danas(dana)], model_view={"ok": True})
+    await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())     # a contact change, say
+
+    answer = await recovered_by(app, client, rows, visitor, held, entry)
+
+    state, line, execution_state, settled = RECOVERED["result"]
+    if answer is not None:
+        assert (answer["state"], answer["facts"], answer["model_view"], answer["inbox"]) == (
+            execution_state, [], {}, [])
+        assert SECRET not in json.dumps(answer)
+    assert release.calls.count("reconcile") == 1 and "on_failed" not in release.calls
+    [decision] = await rows_of(app, rows.copy_id, select(DecisionRow).where(
+        DecisionRow.decision_id == held.decision_id))
+    assert (decision.state, decision.visitor_plain) == (state, line)
+    [execution] = await rows_of(app, rows.copy_id, select(Execution).where(Execution.decision_id == held.decision_id))
+    assert (execution.state, execution.result.facts, execution.result.model_view, execution.result.inbox) == (
+        execution_state, [], {}, [])
+    last = [entry.event for entry in await ledger_rows(app, rows) if entry.event.kind == "execute"][-1]
+    assert last.summary == {"decision_id": held.decision_id, "action_id": held.action.action_id, **CHECKED,
+                            **settled}
+
+
 @pytest.mark.parametrize("answer", ["result", "none", "unknown"])
 async def test_a_refused_private_recovery_asks_the_adapter_once_and_delivers_nothing(app, client, registry,
                                                                                      frozen_clock, answer):
@@ -441,18 +497,9 @@ async def test_a_refused_private_recovery_asks_the_adapter_once_and_delivers_not
     withheld because the session ended, with nothing narrowed. It didn't: undone once, then
     `refused_at_execution` with the plain reason. It can't say: still `unknown`, nothing delivered,
     for the next try."""
-    release = FakeAdapter("native.quote", releases_private_data=True)     # stands in for a private release
-    rows, visitor, dana, bob = await verified_fake_desk(app, client, release,
-                                                        [card("ask-quote", "native.quote", mode="ask")])
-    held = await decided(client, visitor, "native.quote", {"qty": 1})
-    assert held.state == "held", held.reason_plain
-    release.script["execute"] = RuntimeError("the provider's answer was lost")
-    assert (await answered(client, rows.owner, held.decision_id, "allow_once")).execution.state == "unknown"
-    mine = Fact(fact_id="quote:fake-1", kind="quote", status="available", source="kernel",
-                claims=[Claim(key="title", kind="text", value=SECRET)],
-                label=Label(readers=["owner", f"person:{dana}"], record_owner=dana))
-    release.script["reconcile"] = {"result": AdapterResult(facts=[mine], model_view={"ok": True}), "none": None,
-                                   "unknown": AdapterUnknown("the provider can't say yet")}[answer]
+    release, rows, visitor, dana, held = await lost_private_release(app, client)
+    release.script["reconcile"] = {"result": AdapterResult(facts=[danas(dana)], model_view={"ok": True}),
+                                   "none": None, "unknown": AdapterUnknown("the provider can't say yet")}[answer]
     await set_session(app, rows, visitor.session_id, closed_at=frozen_clock.now())     # a contact change, say
 
     decision = await read(client, rows.owner, held)
