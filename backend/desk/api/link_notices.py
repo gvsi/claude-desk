@@ -36,6 +36,10 @@ async def tell_cancelled_links(owner: "OwnerCtx", engine: AsyncEngine, desk_id: 
             continue
         for notice in notices:
             try:
+                if (not notice.verdict.ok or [(block.template, block.fact_id) for block in notice.verdict.blocks]
+                        != [("link_cancelled", f"payment_link:{notice.link_id}")]):
+                    logger.error("link_notice_unexpected version=%s link_id=%s", version, notice.link_id)
+                    continue
                 async with engine.connect() as conn:
                     await run_lock(conn, notice.session_id)
                     session = await kernel_session(conn, notice.session_id, owner.ro.schema)
