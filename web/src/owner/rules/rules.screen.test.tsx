@@ -251,14 +251,12 @@ describe('rules page', () => {
     expect(router.state.location.pathname).toBe(`${DESK}/rules/drafts/${version}`);
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
     await expect.element(trail.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
-    // Quotes stay automatic: any row of Quote's reads "Automatic", and none moves Quote to "Ask me first"
-    // (the preset's own quote rule is the same as Rivera's, so it has none).
+    // Quotes stay automatic: the preset's own quote rule is the same as Rivera's, so no row names
+    // Quote, alone or among the tools a shared rule covers, and none moves it to "Ask me first".
     const rows = reviewRows(screen);
     expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows.filter((r) => r.title === 'Quote')) {
-      expect(row.after).toContain('Automatic');
-      expect(row.after).not.toContain('Ask me first');
-    }
+    expect(rows.map((r) => r.title)).not.toContain('');
+    expect(rows.filter((r) => /\bQuote\b/.test(r.title))).toEqual([]);
     // Nothing changes until it is confirmed.
     expect(desk().policy.version).toBe(7);
     await screen.getByRole('button', { name: 'Confirm change' }).click();
