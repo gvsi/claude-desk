@@ -63,6 +63,7 @@ from desk.api.store import (
     latest_pending,
     latest_said,
     lock_key,
+    newest_row,
     prepare_model_input,
     start_fresh_context,
     unanswered_tool_use,
@@ -265,15 +266,16 @@ class _Turn:
             await emit(conn, caller.ids, EvWriting(type="writing"))
         await conn.commit()
 
-    async def _tell_waiting(self) -> TurnOutcome | None:
+    async def _tell_waiting(self, through: int | None = None) -> TurnOutcome | None:
         """Tell the kernel the turn's language before anything is rendered in it (GitHub issue #121): the newest
-        visitor or agent message waiting for the next model call (`store.latest_said`), whether or not it woke the
-        turn, goes to `POST /sessions/{session_id}/turn` (`_tell`), and the kernel keeps the language it detects as
-        the session's, which the turn's receipts and cards and the reply check's fallback then speak. The turn calls
-        it right after the session and mode checks, so a paused or over-budget turn's handoff speaks it too, and
-        before each model call (`_call`), where it sends only a message newer than the last it sent. Nothing waiting,
-        nothing sent. How the turn ends when the kernel refuses, as it would on `/context`, else None."""
-        said = await latest_said(self.conn, self.caller.session_id)
+        visitor or agent message waiting for the next model call (`store.latest_said`, up to `through` when given),
+        whether or not it woke the turn, goes to `POST /sessions/{session_id}/turn` (`_tell`), and the kernel keeps
+        the language it detects as the session's, which the turn's receipts and cards and the reply check's fallback
+        then speak. The turn calls it right after the session and mode checks, so a paused or over-budget turn's
+        handoff speaks it too, and before each model call (`_call`), where it sends only a message newer than the last
+        it sent. Nothing waiting, nothing sent. How the turn ends when the kernel refuses, as it would on `/context`,
+        else None."""
+        said = await latest_said(self.conn, self.caller.session_id, through=through)
         await self.conn.commit()
         return await self._tell(said)
 
@@ -339,19 +341,18 @@ class _Turn:
         failure, is None.
 
         A visitor or agent message newer than the one the turn last sent `/turn` (one sent while the turn ran) joins
-        this call, so it goes to `/turn` first (`_tell`): looked up before the call places it, so a refusal leaves it
-        waiting for a turn, as `/context`'s does, and taken from what the call placed should one land in between.
-        A refusal ends the turn: its outcome is returned in place of a response."""
+        this call, so it goes to `/turn` first (`_tell_waiting`), while it still waits: a refusal leaves it waiting
+        for a turn, as `/context`'s does, and ends this one (its outcome is returned in place of a response). The
+        call places rows only up to the session's newest row as the look began (`store.newest_row`), so a message
+        landing after the look keeps waiting for the next call, which tells the kernel first."""
         conn, caller = self.conn, self.caller
         while True:
-            refused = await self._tell_waiting()           # a newer message, while it still waits
+            through = await newest_row(conn, caller.session_id)      # this call places nothing written after it
+            refused = await self._tell_waiting(through)
             if refused is not None:
                 return refused
-            model_input = await prepare_model_input(conn, caller.session_id)
+            model_input = await prepare_model_input(conn, caller.session_id, through=through)
             await conn.commit()
-            refused = await self._tell(model_input.said)   # one that landed as the call placed the rows
-            if refused is not None:
-                return refused
             self.model_calls += 1
             try:
                 response = await self.model.call(ModelRequest(route="conversation", system=model_input.system,

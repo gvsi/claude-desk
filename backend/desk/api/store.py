@@ -108,13 +108,11 @@ class Said:
 @dataclass(frozen=True)
 class ModelInput:
     """A model call's request as the current context holds it: the system prompt it froze (None for a context opened
-    before contexts froze one), its frozen tools and its messages; and `said`, the newest visitor or agent message
-    this call placed in the context, if any, whose language the loop tells the kernel (`loop`)."""
+    before contexts froze one), its frozen tools and its messages."""
 
     system: list[dict] | None
     tools: list[dict]
     messages: list[dict]
-    said: Said | None = None
 
 
 @dataclass(frozen=True)
@@ -421,11 +419,13 @@ async def _place(conn: AsyncConnection, ns: Sequence[int], context: int, first_s
                            .values(model_context=context, model_seq=first_seq + offset))
 
 
-async def _pending(conn: AsyncConnection, session_id: str) -> list[Any]:
-    """Rows the model hasn't been sent yet, in the order they were written; recorded history never is."""
-    return list(await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.text).where(
+async def _pending(conn: AsyncConnection, session_id: str, through: int | None = None) -> list[Any]:
+    """Rows the model hasn't been sent yet, in the order they were written, up to `through` when given; recorded
+    history never is."""
+    bound = [] if through is None else [MESSAGES.c.n <= through]
+    return list(await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_seq.is_(None),
-        MESSAGES.c.model_content.is_not(None), NOT_REPLAYED).order_by(MESSAGES.c.n)))
+        MESSAGES.c.model_content.is_not(None), NOT_REPLAYED, *bound).order_by(MESSAGES.c.n)))
 
 
 async def unanswered_tool_use(conn: AsyncConnection, session_id: str) -> OpenToolUse | None:
@@ -582,20 +582,20 @@ async def context_tools(conn: AsyncConnection, session_id: str) -> tuple[list[di
     return start["tools"], [(change["type"], change["tool"]["name"]) for (change,) in changes]
 
 
-async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelInput:
+async def prepare_model_input(conn: AsyncConnection, session_id: str, *, through: int | None = None) -> ModelInput:
     """Give the waiting rows their place (user-turn rows, then tool changes) and build the current context's
     request: its frozen system prompt and tools, and its messages. Raises `UnansweredToolUse` while a tool call has
-    no result."""
+    no result. With `through` (a `newest_row` the caller read), only rows up to it are placed, and any written since
+    keep waiting for the next call: the loop tells the kernel the newest message it will place before it places it."""
     await _lock_transcript(conn, session_id)
     current = await _current_context(conn, session_id)
     if current is None:
         raise NoModelContext(session_id)
     await _refuse_open_tool_use(conn, session_id)
-    pending = await _pending(conn, session_id)
+    pending = await _pending(conn, session_id, through)
     ordered = [row.n for row in pending if row.kind != "tool_change"] + [
         row.n for row in pending if row.kind == "tool_change"]
     await _place(conn, ordered, current, await _next_seq(conn, session_id))
-    said = next((Said(row.n, row.text) for row in reversed(pending) if row.kind in SAID_KINDS), None)
 
     rows = await conn.execute(select(MESSAGES.c.kind, MESSAGES.c.model_content).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_context == current).order_by(MESSAGES.c.model_seq))
@@ -630,7 +630,7 @@ async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelIn
         else:
             user.append(row.model_content)
     close_gap()
-    return ModelInput(system=system_prompt, tools=tools, messages=messages, said=said)
+    return ModelInput(system=system_prompt, tools=tools, messages=messages)
 
 
 async def append_assistant(conn: AsyncConnection, ids: Ids, content: list[dict], *, generation: int) -> int:
@@ -694,14 +694,24 @@ async def latest_pending(conn: AsyncConnection, session_id: str) -> int | None:
         MESSAGES.c.model_content.is_not(None)))).scalar_one()
 
 
-async def latest_said(conn: AsyncConnection, session_id: str) -> Said | None:
+async def newest_row(conn: AsyncConnection, session_id: str) -> int | None:
+    """The `n` of the session's newest row, or None for a session with none. A session's rows commit in the order of
+    their `n` (`append_message`), so a row committed after this read has a larger one: it is the cutoff a model call
+    places rows up to (`prepare_model_input(through=)`), read before the loop looks for the message to tell the
+    kernel (`latest_said(through=)`)."""
+    return (await conn.execute(select(func.max(MESSAGES.c.n)).where(
+        MESSAGES.c.session_id == session_id))).scalar_one()
+
+
+async def latest_said(conn: AsyncConnection, session_id: str, *, through: int | None = None) -> Said | None:
     """The newest visitor or agent message the session's next model call places in its context (the rows `_pending`
-    finds), whether or not it woke the turn: text written while the owner had the chat wakes nothing, yet reaches
-    Claude with the next turn. The turn tells the kernel its language (`loop`). None when no such message waits (only
-    a whisper, an action update or a note does)."""
+    finds, up to `through` when given), whether or not it woke the turn: text written while the owner had the chat
+    wakes nothing, yet reaches Claude with the next turn. The turn tells the kernel its language (`loop`). None when
+    no such message waits (only a whisper, an action update or a note does)."""
+    bound = [] if through is None else [MESSAGES.c.n <= through]
     found = (await conn.execute(select(MESSAGES.c.n, MESSAGES.c.text).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind.in_(SAID_KINDS),
-        MESSAGES.c.model_seq.is_(None), MESSAGES.c.model_content.is_not(None), NOT_REPLAYED)
+        MESSAGES.c.model_seq.is_(None), MESSAGES.c.model_content.is_not(None), NOT_REPLAYED, *bound)
         .order_by(MESSAGES.c.n.desc()).limit(1))).first()
     return None if found is None else Said(found.n, found.text)
 

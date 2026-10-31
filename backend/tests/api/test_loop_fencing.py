@@ -20,7 +20,7 @@ from desk.api.loop import TURN_LOCK_POOL_SIZE, run_pending, turn_lock
 from desk.api.prompts import conversation_system
 from desk.api.runner import TurnRunner
 from desk.api.sse import emit
-from desk.api.store import append_assistant, has_pending, lock_key, prepare_model_input
+from desk.api.store import append_assistant, append_message, has_pending, lock_key, prepare_model_input
 from desk.api.tools import Caller, send_reply
 from desk.contracts import ToolCall
 from desk.db.session import API_CONNECT_OPTIONS, database_url
@@ -1219,6 +1219,48 @@ async def test_the_turn_routes_refusals_end_the_turn_as_contexts_do(api_conn, en
             assert len(kernel.answered(turn_path(caller))) == 2
     assert seen["context"] == seen["newer"] == (ended, shown, [])
     assert seen["start"] == (ended, [event for event in shown if event != ("writing", None)], [])
+
+
+@pytest.mark.parametrize(("status", "code", "outcome"), [(500, "internal", "kernel_unavailable"),
+                                                       (409, "stale_generation", "fenced")],
+                         ids=["unavailable", "stale_generation"])
+async def test_a_message_landing_as_a_call_places_its_rows_waits_when_its_turn_is_refused(
+        api_conn, engine, caller, visitor, fake, monkeypatch, status, code, outcome):
+    """A message that lands while a model call places the waiting rows (after the loop looked for a newer one) isn't
+    placed by that call: it waits for the next call, which sends it to `/turn` first. When that `/turn` is refused, the
+    message is still unplaced and waiting, so it wakes a retry, as a refused `/context` leaves it; Claude never read
+    it."""
+    words = "Hola, ¿pueden venir mañana?"
+    await said(api_conn, caller, "Hi, do you clear drains?")
+    placing = loop.prepare_model_input
+    newer = []
+
+    async def admit_newer(conn, session_id, **bounds):     # the visitor writes again as the first call places rows
+        if not newer:
+            async with engine.connect() as incoming:
+                newer.append(await append_message(incoming, caller.ids, "visitor_text", text=words))
+                await incoming.commit()
+        return await placing(conn, session_id, **bounds)
+
+    monkeypatch.setattr(loop, "prepare_model_input", admit_newer)
+    kernel = Kernel(fake)
+    turns = []
+
+    async def refuse_newer(request: httpx.Request) -> None:
+        turns.append(request)
+        if len(turns) == 2:                                   # the newer message's `/turn`
+            kernel.refuse[request.url.path] = (status, code)
+
+    kernel.before[turn_path(caller)] = refuse_newer
+    model = ScriptedModel([response(tool_use("native__find_slots", {"days": 3}, id="toolu_slots"))])
+    async with KernelHttp("http://fake-kernel", transport=kernel) as http:
+        result = await loop.run_turn(api_conn, replace(caller, kernel=http.session(visitor.token)), model)
+
+    found = dict(await rows(api_conn, caller.session_id, "visitor_text", "n", "model_seq"))
+    assert found[newer[0]] is None, f"the refused /turn's message was placed: {found}"
+    assert await has_pending(api_conn, caller.session_id)
+    assert (result, len(turns), len(model.requests)) == (outcome, 2, 1)
+    assert words not in json.dumps(model.requests[0].messages, ensure_ascii=False)
 
 
 async def test_a_take_over_or_a_close_just_before_the_turn_starts_ends_it(api_conn, kernel_http, fake, ro_schema):

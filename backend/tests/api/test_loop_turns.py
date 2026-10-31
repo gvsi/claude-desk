@@ -1161,31 +1161,6 @@ async def test_a_message_sent_mid_turn_goes_to_the_kernel_before_claude_reads_it
                                           "Horarios tomados del calendario de Maria Rivera")
 
 
-async def test_a_message_placed_after_the_last_look_still_goes_first(api_conn, caller, visitor, fake, monkeypatch):
-    """Should a message land between the loop's look at what waits and the model call placing it, the call's input
-    names it, and `/turn` still goes before Claude reads it."""
-    async def found_nothing(conn, session_id: str) -> None:   # every look the loop takes misses it
-        return None
-
-    monkeypatch.setattr(loop_module, "latest_said", found_nothing)
-    words = "¿Tienen citas mañana por la tarde?"
-    await said(api_conn, caller, words)
-    model = ScriptedModel([response(reply("Sí, con gusto."))])
-    calls_before_turn = []
-
-    async def watch(path: str) -> None:
-        calls_before_turn.append(len(model.requests))
-
-    paths = {f"/sessions/{caller.session_id}/turn"}
-    async with KernelHttp("http://fake-kernel", transport=Watching(fake, paths, watch)) as http:
-        assert await run_turn(api_conn, replace(caller, kernel=http.session(visitor.token)), model) == "done"
-
-    (sent,) = fake.called(TURN)
-    assert sent.body["text"] == words and calls_before_turn == [0]
-    routes = [call.route for call in fake.calls]
-    assert routes.index(CONTEXT) < routes.index(TURN)         # sent once the call had placed it
-
-
 @pytest.mark.parametrize("stop", ["paused", "over_budget"])
 async def test_a_turn_that_hands_off_without_claude_sends_its_message_first(api_conn, kernel_http, fake, ro_schema,
                                                                             clock, monkeypatch, stop):
