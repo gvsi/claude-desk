@@ -59,8 +59,11 @@ class FakeAdapter:
     model_view_keys = frozenset({"ok", "qty"})
 
     def __init__(self, tool: ToolName = "native.quote", *, effects: Iterable[Effect] = ("change",),
-                 resource_kind: str = "desk", reversible: bool = True, status: str = "enabled"):
+                 resource_kind: str = "desk", reversible: bool = True, status: str = "enabled",
+                 releases_private_data: bool = False):
         mcp = tool in MCP_TOOLS
+        # declared as every adapter declares it: a stand-in that releases a person's data says so
+        self.releases_private_data = releases_private_data
         self.profile = ToolProfile(
             tool=tool, source="mcp" if mcp else "native", effects=list(effects), reversible=reversible,
             adapter="tests.kernel.fakes.FakeAdapter", resource_kind=resource_kind,

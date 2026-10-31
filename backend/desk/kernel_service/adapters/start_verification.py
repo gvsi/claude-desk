@@ -44,6 +44,7 @@ class StartVerificationAdapter:
     Args = StartVerificationArgs
     free_text_fields = frozenset({"contact"})
     model_view_keys = frozenset({"status"})
+    releases_private_data = False         # the code goes to the contact on record; the session learns nothing
     locks_session = True                  # `verification.start` locks the session row FOR UPDATE
 
     async def normalize(self, nctx: NormalizeCtx, args: StartVerificationArgs) -> Normalized:

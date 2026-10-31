@@ -21,6 +21,13 @@ An adapter whose `execute` writes the session's own rows (a verification start) 
 row `FOR UPDATE` rather than `FOR SHARE`, so two of them in one session take turns.
 
 `model_view_keys` are the only keys of a result's `model_view` that reach Claude.
+
+`releases_private_data` (required, a bool every adapter class sets itself) says whether its result
+gives the session data that only a verified, entitled person may see, data it reads only as its
+person (a document link). An approved hold of such an action runs only while its session still
+stands for that person (`execute.session_ended`); every other approved hold runs for a closed
+session too, as step 6 lets it. The execute path holds an adapter to its word: one declared not to
+release private data whose result carries some fails closed (`execute.undeclared_private_data`).
 """
 
 from collections.abc import Iterable
@@ -91,6 +98,7 @@ class Adapter(Protocol):
 
     profile: ToolProfile
     Args: type[BaseModel]                 # extra="forbid", strict=True
+    releases_private_data: bool           # its result gives the session data it reads only as its person
     free_text_fields: frozenset[str]      # args that may carry visitor text: quoted, labelled untrusted, cut for the reviewer
     model_view_keys: frozenset[str]
 

@@ -59,6 +59,8 @@ def _check(adapter: Adapter) -> None:
         raise ValueError(f"{profile.tool}: free_text_fields names fields of its Args model")
     if not isinstance(adapter.model_view_keys, frozenset):
         raise ValueError(f"{profile.tool}: model_view_keys is a frozenset")
+    if not isinstance(getattr(adapter, "releases_private_data", None), bool):
+        raise ValueError(f"{profile.tool}: an adapter declares releases_private_data, True or False")
 
 
 # The native adapters register themselves when imported, so importing this package gives the kernel

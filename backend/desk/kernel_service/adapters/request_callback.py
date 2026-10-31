@@ -74,6 +74,7 @@ class RequestCallbackAdapter:
     Args = RequestCallbackArgs
     free_text_fields = frozenset({"name", "contact", "reason"})
     model_view_keys = frozenset({"fact_id", "handoff_id"})
+    releases_private_data = False         # the session's own callback request
 
     async def normalize(self, nctx: NormalizeCtx, args: RequestCallbackArgs) -> Normalized:
         return Normalized(resource=ResourceRef(kind="desk", id=nctx.desk_row.desk_id, owner_person_id=None))

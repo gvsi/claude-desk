@@ -1180,7 +1180,9 @@ def test_status_lines_are_digit_free():
     states = {"allowed", "held", "refused", "approved", "denied", "expired", "cancelled", "executed", "failed",
               "unknown", "refused_at_execution"}
     receipts = {"reply_checked", "reply_handed_off", "owner_said", "owner_say_blocked"}   # a reply's, an owner say's
-    assert render.STATUS_KEYS == states | receipts                         # one line per decision state
+    # why an approved release of private data went nowhere: its session no longer stood for its person
+    reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed"}
+    assert render.STATUS_KEYS == states | receipts | reasons               # one line per decision state
     for lang in ("en", "es"):
         for key in render.STATUS_KEYS:
             line = render.status(key, lang, owner="Maria Rivera")

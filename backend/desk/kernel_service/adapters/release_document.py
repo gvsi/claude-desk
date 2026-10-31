@@ -97,6 +97,7 @@ class ReleaseDocumentAdapter:
     Args = ReleaseDocumentArgs
     free_text_fields: frozenset[str] = frozenset()
     model_view_keys = frozenset({"fact_id", "title", "link_ready"})
+    releases_private_data = True          # a link to the verified person's document, read only as them
 
     async def normalize(self, nctx: NormalizeCtx, args: ReleaseDocumentArgs) -> Normalized:
         document = await find_document(nctx.ctx, nctx.desk_row.desk_id, args.document_id)

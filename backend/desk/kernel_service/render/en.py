@@ -28,6 +28,10 @@ STATUS: dict[str, str] = {
     "reply_handed_off": "Passed to {owner} to answer",
     "owner_said": "Written by {owner}",
     "owner_say_blocked": "Not sent: it included text from a private document",   # shown to the owner alone
+    # an approved release of private data whose session no longer stands for its person (shown to the owner)
+    "refused_contact_changed": "Not shared: their session ended when their contact changed",
+    "refused_person_removed": "Not shared: they were removed from your records",
+    "refused_session_closed": "Not shared: their session ended before your answer",
 }
 
 # What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a

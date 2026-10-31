@@ -333,27 +333,29 @@ def _sign(ctx: KernelCtx, row: DecisionRow) -> None:
                                   visitor_plain=row.visitor_plain, ledger_seq=row.ledger_seq)
 
 
-def status_line(state: str, *, tool: str, session: SessionRow, owner: str) -> str:
-    """A decision's status line in `state`, in the session's language: once a visitor's or an
-    agent's action has run, what was done (`render.executed_status`, which raises KeyError for a
-    tool without a line); in any other state, or for an owner session's own setup action, the
-    state's template."""
+def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: str | None = None) -> str:
+    """A decision's status line in `state`, in the session's language: the template `key` when
+    given (why a refusal happened, say); once a visitor's or an agent's action has run, what was
+    done (`render.executed_status`, which raises KeyError for a tool without a line); in any other
+    state, or for an owner session's own setup action, the state's template."""
     lang = render.language(session.last_language)
+    if key is not None:
+        return render.status(key, lang, owner=owner)
     if state == "executed" and session.kind != "owner":
         return render.executed_status(tool, lang, owner=owner)
     return render.status(state, lang, owner=owner)
 
 
 async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str = "decide",
-                    summary: dict[str, Any]) -> LedgerEntry:
+                    summary: dict[str, Any], status: str | None = None) -> LedgerEntry:
     """Moves a decision to `state` in the caller's transaction: the status line for the new state
-    (`status_line`), a ledger entry (`kind`, `summary`, kernel-built values only) and a signature
-    over both. Lock the row first."""
+    (`status_line`, the template `status` when given), a ledger entry (`kind`, `summary`,
+    kernel-built values only) and a signature over both. Lock the row first."""
     session = (await ctx.db.scalars(ctx.repo.scoped(
         select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
     row.state = state
     row.visitor_plain = status_line(state, tool=row.tool, session=session,
-                                    owner=(await _business(ctx, row.desk_id)).owner_display_name)
+                                    owner=(await _business(ctx, row.desk_id)).owner_display_name, key=status)
     row.updated_at = ctx.clock.now()
     entry = await _append(ctx, row, kind, summary)
     row.ledger_seq = entry.seq

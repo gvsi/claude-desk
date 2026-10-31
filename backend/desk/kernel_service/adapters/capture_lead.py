@@ -51,6 +51,7 @@ class CaptureLeadAdapter:
     Args = CaptureLeadArgs
     free_text_fields = frozenset({"name", "contact", "note"})
     model_view_keys = frozenset({"lead_id", "saved"})
+    releases_private_data = False         # saves what the visitor gave; returns only that it did
 
     async def normalize(self, nctx: NormalizeCtx, args: CaptureLeadArgs) -> Normalized:
         return Normalized(resource=ResourceRef(kind="desk", id=nctx.desk_row.desk_id, owner_person_id=None))

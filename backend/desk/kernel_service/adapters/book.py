@@ -107,6 +107,7 @@ class BookAdapter:
     Args = BookArgs
     free_text_fields: frozenset[str] = frozenset()
     model_view_keys = frozenset({"fact_id", "booking_id", "status"})
+    releases_private_data = False         # the booking the session made, labelled for the session too
 
     async def normalize(self, nctx: NormalizeCtx, args: BookArgs) -> Normalized:
         slot = await find_slot(nctx.ctx, nctx.desk_row.desk_id, args.slot_id)

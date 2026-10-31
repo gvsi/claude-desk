@@ -16,7 +16,9 @@ An execution takes up to three transactions, so that a crash leaves a record of 
   first stops it (the fence); `FOR UPDATE` for an adapter that writes the session's own rows
   (`locks_session`). Then it locks the decision and the intent row and, before any side effect,
   reads the session and the Desk afresh: a Desk deleted since T1, or an allow's session closed,
-  ends `refused_at_execution` (`_refused_in_t2`); an allow's session that no longer stands
+  ends `refused_at_execution` (`_refused_in_t2`), and so does an approved hold that releases private
+  data whose session no longer stands for its person (`session_ended`), with the plain reason the
+  owner reads; an allow's session that no longer stands
   otherwise (`auth.session_stands`: its person off the record, say) ends the same way and answers
   409 `closed`, ledgered as at authentication (`_closed_in_t2`); and an allow's take-over or pause
   is fenced. Otherwise it runs the adapter's `execute`, and commits `succeeded` with the result
@@ -58,7 +60,7 @@ from sqlalchemy import and_, or_, select
 
 from desk.contracts import ExecResult, LedgerEvent, NormalizedAction, Principal
 from desk.db.models import Action as ActionRow
-from desk.db.models import Approval, Business, Desk, Execution, Tool
+from desk.db.models import Approval, Business, Desk, Execution, Person, Tool
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_api import ExecuteRequest
 from desk.kernel_service import activation, adapters, auth, decide, labels, ledger, repo
@@ -486,6 +488,11 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
         raise RuntimeError(f"{path}_without_session")
     if (gone := _gone(target, session, path)) is not None:
         return await _refused_in_t2(ctx, target, execution, gone, path)
+    if path == "approved" and releases_private_data(target.action.tool):
+        # step 6 runs an approved hold for a closed session, but never one that releases private data
+        if (ended := await session_ended(ctx, target.decision)) is not None:
+            return await _refused_in_t2(ctx, target, execution, ended, path, reason="session_ended",
+                                        status=f"refused_{ended}")
     if path == "allow":
         # the request's own session check, before the adapter acts: the commit below records what
         # it did whatever happens to the session after, so it runs no recheck of its own
@@ -509,7 +516,8 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
 def _gone(target: _Target, session: SessionRow, path: ExecPath) -> str | None:
     """What T2 finds gone since T1, read afresh under the session row it holds: `desk` when the
     Desk was deleted (on either path, as step 6 needs), `closed` when an allow's session was closed
-    (an approved hold still runs for a closed session, as step 6 lets it); None when neither. A
+    (an approved hold still runs for a closed session, as step 6 lets it, unless it releases private
+    data: `session_ended`); None when neither. A
     Desk's deletion closes its open visitor and agent sessions under their rows' locks, so for such
     a session it either committed before T2 took the row, and T2 sees it here, or waits until T2
     commits. An owner's session, or one closed already, isn't among those: for them the Desk's row
@@ -522,16 +530,19 @@ def _gone(target: _Target, session: SessionRow, path: ExecPath) -> str | None:
 
 
 async def _refused_in_t2(ctx: KernelCtx, target: _Target, execution: Execution, check: str,
-                         path: ExecPath) -> ExecResult | KernelFailure:
-    """A Desk deleted, or an allow's session closed, after T1 and before the side effect: nothing
-    runs. Its intent is `failed` (after `on_failed`), the decision `refused_at_execution` ("rules
-    changed"), its `execute` entry naming the `check` that failed, committed. An allow answers 409
-    `conflict`, as a refusal in T1 does; an approved hold answers with its failed result, so the
-    owner's answer reads the decision as refused."""
+                         path: ExecPath, *, reason: str = "rules_changed",
+                         status: str | None = None) -> ExecResult | KernelFailure:
+    """A Desk deleted, an allow's session closed, or an approved release of private data whose
+    session no longer stands (`session_ended`), after T1 and before the side effect: nothing runs.
+    Its intent is `failed` (after `on_failed`), the decision `refused_at_execution` (`reason`, "rules
+    changed" unless given, its status line the template `status` when given), its `execute` entry
+    naming the `check` that failed, committed. An allow answers 409 `conflict`, as a refusal in T1
+    does; an approved hold answers with its failed result, so the owner's answer reads the decision
+    as refused."""
     await _undo(ctx, target)
     result = _no_result(target.action.action_id, "failed")
     await _finish(ctx, target, execution, result, "refused_at_execution",
-                  _summary(target, "refused_at_execution", reason="rules_changed", check=check))
+                  _summary(target, "refused_at_execution", reason=reason, check=check), status=status)
     await ctx.db.commit()
     if path == "allow":
         return KernelFailure(409, "conflict", f"refused_at_execution:{check}")
@@ -575,14 +586,15 @@ async def _undo(ctx: KernelCtx, target: _Target) -> None:
 
 
 async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result: ExecResult, decision_state: str,
-                  summary: dict[str, Any]) -> None:
-    """The execution's final row and the decision's state, ledgered and signed, in the caller's
-    transaction, which holds the decision row (`target.decision`) and the execution row."""
+                  summary: dict[str, Any], *, status: str | None = None) -> None:
+    """The execution's final row and the decision's state (its status line the template `status`
+    when given), ledgered and signed, in the caller's transaction, which holds the decision row
+    (`target.decision`) and the execution row."""
     execution.state = {"executed": "succeeded", "failed": "failed", "expired": "failed",
                        "refused_at_execution": "failed"}[decision_state]
     execution.result = result
     execution.finished_at = ctx.clock.now()
-    await decide.set_state(ctx, target.decision, decision_state, kind="execute", summary=summary)
+    await decide.set_state(ctx, target.decision, decision_state, kind="execute", summary=summary, status=status)
 
 
 async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failure: AdapterFailure,
@@ -650,7 +662,16 @@ async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tu
     spaces, in another case or width, accented or in lookalike letters (`labels.find_canaries_in`);
     a canary adds `{violation: "canary"}` to the entry. The execution's state is the same either
     way. Its `inbox` holds no notice addressed to the owner, whose alerts are read only from the
-    Demo inbox: one an adapter returns is dropped and logged by its kind alone."""
+    Demo inbox: one an adapter returns is dropped and logged by its kind alone.
+
+    An adapter declared not to release private data that returns some anyway
+    (`undeclared_private_data`) fails closed: logged by its tool and action alone, never the data,
+    and raised as `AdapterFailure`, so T2 rolls back everything the adapter wrote and settles the
+    action `failed` with nothing delivered, and a reconciliation leaves it unknown."""
+    if undeclared_private_data(target, result):
+        log.error("adapter_undeclared_private_data tool=%s action_id=%s", target.action.tool,
+                  target.action.action_id)
+        raise AdapterFailure("undeclared_private_data")
     readers = labels.session_readers(target.session_row)
     facts = [fact for fact in result.facts if labels.can_read(fact.label, readers)]
     keys = target.adapter.model_view_keys if target.adapter is not None else frozenset()
@@ -667,6 +688,53 @@ async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tu
     return ExecResult(action_id=target.action.action_id, state="succeeded", facts=facts, model_view=view,
                       inbox=inbox), flagged
 
+
+
+def releases_private_data(tool: str) -> bool:
+    """Whether the tool's adapter declares that its result gives the session data it reads only as
+    its verified person (`releases_private_data`); an unknown tool counts as one that does."""
+    adapter = adapters.ADAPTERS.get(tool)
+    return True if adapter is None else adapter.releases_private_data
+
+
+async def session_ended(ctx: KernelCtx, decision: DecisionRow) -> str | None:
+    """Why the decision's session no longer stands for the person an action that releases private
+    data would go to (`auth.session_stands`, read afresh): `person_removed` when its verified person
+    is off the record, `contact_changed` when it was closed with its person still on record (only a
+    new contact closes a session so), `session_closed` for any other close; None while it stands, or
+    when its Desk is deleted, which the Desk's own checks refuse first."""
+    named = Named(copy_id=decision.copy_id, desk_id=decision.desk_id, session_id=decision.session_id)
+    if await auth.session_stands(ctx, named, None):
+        return None
+    deleted = (await ctx.db.execute(ctx.repo.scoped(select(Desk.deleted_at).where(
+        Desk.desk_id == decision.desk_id)))).scalar_one()
+    if deleted is not None:
+        return None
+    session = (await ctx.db.execute(ctx.repo.scoped(select(SessionRow.closed_at, SessionRow.person_id).where(
+        SessionRow.session_id == decision.session_id)))).one()
+    if session.person_id is not None:
+        person = (await ctx.db.execute(ctx.repo.scoped(select(Person.removed_at).where(
+            Person.person_id == session.person_id)))).one_or_none()
+        if person is None or person.removed_at is not None:
+            return "person_removed"
+        if session.closed_at is not None:
+            return "contact_changed"
+    return "session_closed"
+
+
+def undeclared_private_data(target: _Target, result: AdapterResult) -> bool:
+    """Whether an adapter declared not to release private data returned some: a document fact (a
+    document's title or link), or a fact a visitor's or agent's session reads only as its verified
+    person, not as itself or as the public. A fact labelled for the session as well as its person
+    (`labels.new_fact_label`: a quote, a booking) is the session's own; one it can't read at all
+    is dropped by `_visible`. An owner session's own setup results aren't a person's data."""
+    adapter, session = target.adapter, target.session_row
+    if adapter is None or adapter.releases_private_data or session.kind == "owner":
+        return False
+    as_person, as_itself = labels.session_readers(session), {"public", f"session:{session.session_id}"}
+    return any(fact.kind == "document"
+               or (labels.can_read(fact.label, as_person) and not labels.can_read(fact.label, as_itself))
+               for fact in result.facts)
 
 # ---- Reconciliation ---------------------------------------------------------------------------------
 
