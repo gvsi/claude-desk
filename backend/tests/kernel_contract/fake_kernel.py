@@ -232,6 +232,14 @@ class Refusal(Exception):
         self.status, self.code = status, code
 
 
+class AdapterCheckRefused(Exception):
+    """A normalization refusal whose fixed adapter check is ledgered by decide."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
 def sha256_hex(value: str | bytes) -> str:
     return hashlib.sha256(value.encode() if isinstance(value, str) else value).hexdigest()
 
@@ -2114,11 +2122,13 @@ class FakeKernelState:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="not_given")
         if not matches(desk.tools[call.tool].input_schema, call.args):
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="invalid_args")
-        action = self._normalize(session, desk, call)
+        try:
+            action = self._normalize(session, desk, call)
+        except AdapterCheckRefused as refusal:
+            return self._new_decision(session, desk, call, digest, None, "refuse", [],
+                                      why="adapter_refused", check=refusal.code)
         if action is None:
-            # The booking adapter's step-1 refusal carries its fixed check code in the decide entry.
-            check = "no_such_slot" if call.tool == "native.book" else None
-            return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused", check=check)
+            return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused")
         outcome, card_ids, baseline = self._rule(session, desk, action)
         script = self._scripts.get(call.tool)
         scripted = script is not None and script.outcome is not None
@@ -2129,27 +2139,27 @@ class FakeKernelState:
 
     def _normalize(self, session: Session, desk: Desk, call: ToolCall) -> NormalizedAction | None:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
-        args; None refuses."""
+        args; a known adapter refusal carries its check code, otherwise None refuses."""
         tool, args = call.tool, call.args
         resource = ResourceRef(kind="desk", id=desk.desk_id, owner_person_id=None)
         list_cents = discount_bp = amount_cents = recipient = starts_at = None
         if tool == "native.quote":
             if any(item["item_id"] not in desk.prices for item in args["items"]):
-                return None
+                raise AdapterCheckRefused("unknown_item")
             list_cents = sum(desk.prices[item["item_id"]].unit_cents * item["qty"] for item in args["items"])
             if list_cents > 1_000_000:
-                return None
+                raise AdapterCheckRefused("over_limit")
             discount_bp = args.get("requested_discount_bp", 0)
             amount_cents = list_cents - list_cents * discount_bp // 10_000
         elif tool == "native.book":
             slot = desk.slots.get(args["slot_id"])
             if slot is None or slot.starts_at <= self.now:
-                return None
+                raise AdapterCheckRefused("no_such_slot")
             resource, starts_at = ResourceRef(kind="slot", id=slot.slot_id, owner_person_id=None), slot.starts_at
         elif tool == "native.release_document":
             document = desk.documents.get(args["document_id"])
             if document is None:
-                return None
+                raise AdapterCheckRefused("no_such_document")
             resource = ResourceRef(kind="document", id=document.document_id,
                                    owner_person_id=document.record_owner_person_id)
             recipient = "verified_contact"
@@ -2168,7 +2178,8 @@ class FakeKernelState:
             resource = ResourceRef(kind="quote", id=quote["quote_id"], owner_person_id=None)
             amount_cents = quote["amount_cents"]
         elif tool == "payments.create_refund":
-            return None                         # charges to refund arrive with Plan 01c
+            # The fake has no provider charge records to resolve during refund normalization.
+            raise AdapterCheckRefused("no_such_charge")
         profile = desk.tools[tool]
         return NormalizedAction(
             action_id=new_id("act"), copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,

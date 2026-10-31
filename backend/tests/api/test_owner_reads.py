@@ -878,16 +878,30 @@ async def test_safety_lists_refusals_with_origin(scene, clock):
     assert (newest["ref_id"], newest["at"], newest["line"]) == (str(replayed_seq), stamp(local(2026, 10, 29, 20)), None)
 
 
-async def test_safety_cause_from_adapter_check(scene):
+@pytest.mark.parametrize(("tool", "args", "cause"), [
+    ("native.book", {"slot_id": "S-20990101-0000"}, "no_such_slot"),
+    ("native.quote", {"items": [{"item_id": "missing", "qty": 1}]}, "unknown_item"),
+    ("native.quote", None, "over_quote_ceiling"),
+    ("native.release_document", {"document_id": "missing"}, "no_such_document"),
+    ("payments.create_refund", {"charge_id": "missing"}, "no_such_charge"),
+])
+async def test_safety_cause_from_adapter_check(scene, tool, args, cause):
     who = await scene.visitor(local(2026, 10, 29, 19))
-    refusal = await who.decide("native.book", {"slot_id": "S-20990101-0000"})
+    if tool in ("native.release_document", "payments.create_refund"):
+        scene.fake.verify(who.session_id, "dana")
+    if args is None:
+        desk = scene.fake.desks[scene.owner.desk_id]
+        item_id = item_ids(scene.fake, scene.owner)
+        desk.prices[item_id] = desk.prices[item_id].model_copy(update={"unit_cents": 600_000})
+        args = {"items": [{"item_id": item_id, "qty": 2}]}
+    refusal = await who.decide(tool, args)
     assert refusal.outcome == "refuse"
 
     listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
 
     assert listed.status_code == 200
     (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
-    assert item["cause"] == "no_such_slot"
+    assert item["cause"] == cause
 
 
 async def test_verification_commits_between_owner_reads(scene, monkeypatch):
