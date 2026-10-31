@@ -23,8 +23,11 @@ const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 /** What happened to the "Try to break it" idea the owner picked, by its key. */
 interface Pick {
   key: BreakItIdea['key'];
-  /** The token of the hand-off this pick made, which the blocked tab's link carries too. */
-  token: string;
+  /**
+   * The token of the hand-off this pick made, which the blocked tab's link carries too; null when
+   * this browser's storage wouldn't keep it, and the page opens with nothing typed in.
+   */
+  token: string | null;
   /** Counts the picks, so each one draws its line afresh and a screen reader hears it again. */
   n: number;
   /** `opened`: the public page opened in a new tab, the idea in its chat box. `blocked`: the browser kept the tab from opening. */
@@ -176,8 +179,18 @@ function Thing({ icon, title, held = false, detail, below, children }: ThingProp
  * the owner's clipboard. The tab opens in the click itself, so the browser counts it as the owner's
  * own. It is opened without `noopener` (with it the browser hides whether the tab opened), and this
  * page cuts the new tab's link back to it. A browser that blocks the tab gets a link to open it by
- * hand, with the same token.
+ * hand, with the same token. When this browser's storage won't keep the hand-off, there is no token
+ * to promise the idea by: the page opens with nothing typed in, and the line says to type it there.
  */
+/** The fallback when the browser blocked the new tab: the public page by hand, in a new tab. */
+function openByHand(href: string): ReactNode {
+  return (
+    <Button variant="secondary" href={href} external>
+      Open your public page
+    </Button>
+  );
+}
+
 function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ownerName: string }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
@@ -187,7 +200,8 @@ function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ow
     if (idea === undefined) return;
     const n = (pick?.n ?? 0) + 1;
     const token = handOffBreakItIdea(slug, idea.key);
-    const tab = window.open(customerLink(slug, deskId, token), '_blank');
+    const link = customerLink(slug, deskId, token ?? undefined);
+    const tab = window.open(link, '_blank');
     if (tab === null) {
       setPick({ key: idea.key, token, n, outcome: 'blocked' });
       return;
@@ -199,21 +213,18 @@ function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ow
   const below = showing ? (
     <div className="cd-things__ideas">
       <SuggestionChips label="Ideas to try" suggestions={IDEA_TEXTS} onPick={onPick} />
-      {pick?.outcome === 'opened' ? (
+      {pick !== null && pick.token === null ? (
+        <Notice key={pick.n} tone="info" action={pick.outcome === 'blocked' ? openByHand(customerLink(slug, deskId)) : undefined}>
+          Your browser didn't let Today pass the idea on. Type it in the new tab.
+        </Notice>
+      ) : null}
+      {pick?.outcome === 'opened' && pick.token !== null ? (
         <Notice key={pick.n} tone="info">
           The new tab opens with the idea in its chat box. Send it from there.
         </Notice>
       ) : null}
-      {pick?.outcome === 'blocked' ? (
-        <Notice
-          key={pick.n}
-          tone="info"
-          action={
-            <Button variant="secondary" href={customerLink(slug, deskId, pick.token)} external>
-              Open your public page
-            </Button>
-          }
-        >
+      {pick?.outcome === 'blocked' && pick.token !== null ? (
+        <Notice key={pick.n} tone="info" action={openByHand(customerLink(slug, deskId, pick.token))}>
           Your browser blocked the new tab. This link opens it with the idea typed in.
         </Notice>
       ) : null}

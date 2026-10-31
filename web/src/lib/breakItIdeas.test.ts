@@ -55,6 +55,19 @@ describe('break it hand-off', () => {
     expect(takeBreakItHandoff(token ?? '', 'rivera-a', now)).toBeNull();
   });
 
+  it('a_hand_off_storage_does_not_keep_gives_no_token', () => {
+    // Storage that refuses the write (a full or blocked store) keeps no hand-off: no token to promise.
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('Full.', 'QuotaExceededError');
+    });
+    expect(handOffBreakItIdea('rivera-a', 'customer-list', 1)).toBeNull();
+    expect(stored()).toBeNull();
+
+    // One that seems to take it but keeps something else: no token either.
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined);
+    expect(handOffBreakItIdea('rivera-a', 'customer-list', 1)).toBeNull();
+  });
+
   it('a_token_takes_only_its_own_record', () => {
     const now = 1_800_000_000_000;
     const token = handOffBreakItIdea('rivera-a', 'customer-list', now) ?? '';

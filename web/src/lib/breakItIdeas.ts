@@ -43,14 +43,16 @@ function newToken(): string {
 
 /**
  * Today's side: keeps the idea `key` for `slug`'s public page in this browser, in place of any
- * earlier hand-off, and returns the one-time token the page's link carries. Storage that can't be
- * written keeps nothing, and the page then types nothing.
+ * earlier hand-off, and returns the one-time token the page's link carries. It reads the record
+ * back, and returns null when storage didn't keep it (blocked, full, or a private window that keeps
+ * nothing): there is then no hand-off for the page to take, and Today says so.
  */
-export function handOffBreakItIdea(slug: string, key: BreakItIdea['key'], now: number = Date.now()): string {
+export function handOffBreakItIdea(slug: string, key: BreakItIdea['key'], now: number = Date.now()): string | null {
   const token = newToken();
   const record: Handoff = { token, slug, key, at: now };
-  writeLocal('breakItHandoff', JSON.stringify(record));
-  return token;
+  const raw = JSON.stringify(record);
+  writeLocal('breakItHandoff', raw);
+  return readLocal('breakItHandoff') === raw ? token : null;
 }
 
 /** The hand-off as `raw` holds it, or null when there is none or it isn't one. */
