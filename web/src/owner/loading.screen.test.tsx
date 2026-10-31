@@ -198,17 +198,59 @@ function landedRect(selector: string): DOMRect {
   return element.getBoundingClientRect();
 }
 
-/** Records Today's shapes and the footer as the reads are released, then checks the one move. */
+function boundsFromRect({ top, left, width, height }: DOMRect) {
+  return { top, left, width, height };
+}
+
+/** Sample the landed geometry from its first commit, even while the shapes fade over it. */
 function watchTheTickedRow(phone: boolean) {
   const under = TODAY_CONTENT_ANCHORS.filter(({ name }) => (phone ? UNDER_THINGS_ON_A_PHONE : UNDER_THINGS).includes(name));
   const shape = (name: string) => document.querySelector(`.cd-today-opening [data-skeleton-anchor="${name}"]`)!.getBoundingClientRect();
   let before: { card: DOMRect; under: DOMRect[]; footer: DOMRect } | undefined;
+  const snapshot = () => {
+    const card = landedElement('.cd-things > .cd-card');
+    return {
+      card: boundsFromRect(card?.getBoundingClientRect() ?? shape('things-card')),
+      under: under.map(({ name, page }) => boundsFromRect(landedElement(page)?.getBoundingClientRect() ?? shape(name))),
+      footer: boundsFromRect(landedRect('.cd-owner-layout__footer')),
+    };
+  };
+  const changes: ReturnType<typeof snapshot>[] = [];
+  let firstLanded: ReturnType<typeof snapshot> | undefined;
+  let landedState: string | null | undefined;
+  const sample = () => {
+    if (!landedElement('.cd-things > .cd-card') && !document.querySelector('.cd-today-opening [data-skeleton-anchor="things-card"]')) return;
+    const next = snapshot();
+    const card = landedElement('.cd-things > .cd-card');
+    if (card && !firstLanded) {
+      firstLanded = next;
+      landedState = document.querySelector('.cd-today-opening .cd-skeleton-screen__layer')?.getAttribute('data-state');
+    }
+    if (JSON.stringify(changes.at(-1)) !== JSON.stringify(next)) changes.push(next);
+  };
+  const observer = new MutationObserver(sample);
+  let frame = 0;
+  const sampleFrame = () => { sample(); frame = requestAnimationFrame(sampleFrame); };
+  const stop = () => { observer.disconnect(); cancelAnimationFrame(frame); };
+  onTestFinished(stop);
   return {
     record: () => {
       before = { card: shape('things-card'), under: under.map(({ name }) => shape(name)), footer: landedRect('.cd-owner-layout__footer') };
+      sample();
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state'] });
+      frame = requestAnimationFrame(sampleFrame);
     },
-    expectOneMove: () => {
+    expectOneMove: async () => {
       expect(before, 'the shapes were measured before the reads came in').toBeDefined();
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+      stop();
+      const final = snapshot();
+      expect(landedState).toBe(matchMedia('(prefers-reduced-motion: reduce)').matches ? undefined : 'leaving');
+      expect(firstLanded).toEqual(final);
+      expect(changes).toEqual([
+        { card: boundsFromRect(before!.card), under: before!.under.map(boundsFromRect), footer: boundsFromRect(before!.footer) },
+        final,
+      ]);
       const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
       expect(last?.textContent).toContain('Done. Your new Desk is live.');
       const change = landedRect('.cd-things > .cd-card').height - before!.card.height;
@@ -257,7 +299,7 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
       reads.forEach((read) => read.release());
     },
   });
-  ticked.expectOneMove();
+  await ticked.expectOneMove();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
@@ -281,7 +323,7 @@ it('switching_desks_opens_on_todays_shape at 390', async () => {
       reads.forEach((read) => read.release());
     },
   });
-  ticked.expectOneMove();
+  await ticked.expectOneMove();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
@@ -422,7 +464,7 @@ it('todays_hold_still_under_reduced_motion', async () => {
       needsYou.release();
     },
   });
-  ticked.expectOneMove();
+  await ticked.expectOneMove();
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -520,17 +562,31 @@ it('reload_changes_only_the_link_pills_width_once', async () => {
   const { screen } = await renderRoute(TODAY, { pollScale: 100 });
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
   const shape = document.querySelector('[data-skeleton-anchor="link-pill"]')!.getBoundingClientRect();
-  const widths: number[] = [];
+  const bounds = (element: Element) => {
+    const { top, left, width, height } = element.getBoundingClientRect();
+    return { top, left, width, height };
+  };
+  const changes: ReturnType<typeof bounds>[] = [];
+  let firstLanded: ReturnType<typeof bounds> | undefined;
+  let landedState: string | null | undefined;
   const read = () => {
     const layer = document.querySelector('.cd-skeleton-screen__layer');
-    const pill = layer?.querySelector('[data-skeleton-anchor="link-pill"]') ?? document.querySelector('.cd-greeting__link');
+    const real = landedElement('.cd-greeting__link');
+    const pill = real ?? layer?.querySelector('[data-skeleton-anchor="link-pill"]');
     if (!pill) return;
-    const width = pill.getBoundingClientRect().width;
-    if (widths.at(-1) !== width) widths.push(width);
+    const next = bounds(pill);
+    if (real && !firstLanded) {
+      firstLanded = next;
+      landedState = layer?.getAttribute('data-state');
+    }
+    if (JSON.stringify(changes.at(-1)) !== JSON.stringify(next)) changes.push(next);
   };
   read();
   const observer = new MutationObserver(read);
   observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] });
+  let frame = 0;
+  const sampleFrame = () => { read(); frame = requestAnimationFrame(sampleFrame); };
+  frame = requestAnimationFrame(sampleFrame);
   try {
     desks.release();
     await expect.element(screen.getByRole('heading', { name: /Good .*Maria/ })).toBeVisible();
@@ -538,9 +594,13 @@ it('reload_changes_only_the_link_pills_width_once', async () => {
     const real = document.querySelector('.cd-greeting__link')!.getBoundingClientRect();
     for (const edge of ['top', 'left', 'height'] as const) expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
     expect(shape.width).toBe(226);
-    expect(widths).toEqual([226, real.width]);
+    await new Promise<void>((resolve) => setTimeout(resolve, 200));
+    expect(landedState).toBe('leaving');
+    expect(firstLanded).toEqual(bounds(document.querySelector('.cd-greeting__link')!));
+    expect(changes).toEqual([boundsFromRect(shape), boundsFromRect(real)]);
   } finally {
     observer.disconnect();
+    cancelAnimationFrame(frame);
   }
 });
 
