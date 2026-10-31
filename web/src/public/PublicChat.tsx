@@ -316,11 +316,23 @@ function useNewestInView(
     return atTheEnd.current ? now.top < seen.top : now.top !== seen.top;
   }, [end]);
 
+  // A scroll event, which can come before the page sees the shell change size: when the window
+  // narrows and shortens in one step, the browser's scroll anchoring moves the conversation down as
+  // the rows rewrap, and its event arrives with the end still hidden under the composer. So while
+  // the visitor is at the end, a move down (or none) keeps them there, as `scrolledSinceSeen` holds,
+  // and only a move up, or the scroller changing, is weighed by where the end now is.
+  const noteScroll = useCallback(() => {
+    const seen = seenAt.current;
+    const now = end.current ? scrollerAt(end.current) : null;
+    if (atTheEnd.current && seen !== null && now !== null && now.scroller === seen.scroller && now.top >= seen.top) noteSeen();
+    else notePlace();
+  }, [end, noteSeen, notePlace]);
+
   useEffect(() => {
     // Captured on the document, so the page's scrolling and an embedding panel's both count.
-    document.addEventListener('scroll', notePlace, { capture: true, passive: true });
-    return () => document.removeEventListener('scroll', notePlace, { capture: true });
-  }, [notePlace]);
+    document.addEventListener('scroll', noteScroll, { capture: true, passive: true });
+    return () => document.removeEventListener('scroll', noteScroll, { capture: true });
+  }, [noteScroll]);
 
   // The page changing size moves the end without a render: the shell rewraps when the window or
   // the panel around it resizes, and the composer area grows with what is typed. Watched while the

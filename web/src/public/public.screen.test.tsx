@@ -721,6 +721,32 @@ describe('public chat page', () => {
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
   });
 
+  it('newest_row_follows_a_phone_turned_smaller', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
+    await ready(screen);
+    for (const text of LONG_CHAT) await say(screen, text);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+
+    // At the end of the chat the window gets narrower and shorter in one step (a small phone, a
+    // split view), and the browser lays the page out at the new size before the page hears of it
+    // (here the test reads the conversation's scroll in the resize event). The rows rewrap taller,
+    // the browser's scroll anchoring moves the conversation down, and that scroll's event comes
+    // before the page sees the shell change size, with the end hidden under the composer. The move
+    // was the browser's, not the visitor's, so the end comes back above the composer.
+    const region = chatScroller();
+    const atTheEnd = region.scrollTop;
+    let anchoredTo = atTheEnd;
+    const resized = () => {
+      anchoredTo = region.scrollTop;
+    };
+    window.addEventListener('resize', resized, { once: true });
+    onTestFinished(() => window.removeEventListener('resize', resized));
+    await page.viewport(320, 568);
+    await vi.waitFor(() => expect(anchoredTo, 'scroll anchoring moved the conversation down as the rows rewrapped').toBeGreaterThan(atTheEnd));
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    expectNoWindowScroll();
+  }, 30_000);
+
   it('a_new_chat_on_a_phone_opens_at_its_start', async () => {
     // A new chat on a phone, before anything is said: the about column opens the conversation's
     // scroll region, taller than the region, and the page shows it from its start, its heading right
