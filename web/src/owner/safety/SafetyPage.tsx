@@ -18,12 +18,13 @@ import {
   CATEGORY_LABELS,
   NOT_SORTED,
   anythingStoppedIn,
+  anythingTurnedDownIn,
   attemptTime,
   categoryLabel,
   originCopy,
   stoppedBy,
-  stoppedHeadline,
   triageOf,
+  turnedDownHeadline,
 } from './copy.ts';
 import { attemptsQuery, ledgerQuery } from './queries.ts';
 import { RecordList } from './RecordList.tsx';
@@ -90,12 +91,13 @@ function anyFailed(...failures: (ReadFailure | null)[]): ReadFailure | null {
 
 /**
  * This week's count of the requests the kernel refused, in Claude's voice: the figure Today's
- * "Last 7 days" shows. With none, what will show up here and how to see one, but only once the
- * attempts say nothing else was stopped this week either, and only while neither read has failed
- * since it last worked, so an earlier read never passes for current; with Claude's own stopped
- * drafts alone nobody tried to talk Claude around, so nothing shows here and the list below has the
- * drafts. A failed read of the count or of the attempts says so first, in either view, since
- * "Every entry" has no list of the attempts to say it over.
+ * "Last 7 days" shows. With none, it says so only once the attempts say no request was refused
+ * this week either, and only while neither read has failed since it last worked, so an earlier
+ * read never passes for current. Claude's own stopped drafts are no request anyone made, so with
+ * them alone none were turned down, and the list below has the drafts. With nothing stopped at
+ * all, under the same conditions, what will show up here and how to see one follow. A failed read
+ * of the count or of the attempts says so first, in either view, since "Every entry" has no list
+ * of the attempts to say it over.
  */
 function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   const today = useToday(deskId);
@@ -105,11 +107,17 @@ function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   const failure = anyFailed(todayFailure, attemptsFailure);
   const week = today.data?.this_week;
   const attempts = safety.data;
+  // Both reads in, and neither failed since it last worked: a count of none can be said.
+  const current = week !== undefined && attempts !== undefined && failure === null;
   let shown: ReactNode = null;
   if (week !== undefined && week.stopped > 0) {
-    shown = <p className="cd-safety__headline cd-type-summary">{stoppedHeadline(week.stopped)}</p>;
-  } else if (week !== undefined && attempts !== undefined && failure === null && !anythingStoppedIn(attempts, week)) {
-    shown = (
+    shown = <p className="cd-safety__headline cd-type-summary">{turnedDownHeadline(week.stopped)}</p>;
+  } else if (current && !anythingTurnedDownIn(attempts, week)) {
+    shown = <p className="cd-safety__headline cd-type-summary">{turnedDownHeadline(0)}</p>;
+  }
+  let empty: ReactNode = null;
+  if (current && week.stopped === 0 && !anythingStoppedIn(attempts, week)) {
+    empty = (
       <EmptyState
         title="Nothing stopped this week"
         body="When someone tries to get around your rules, you'll see here what they tried and what stopped it. Try it yourself from your public page."
@@ -125,6 +133,7 @@ function Headline({ deskId, slug }: { deskId: string; slug: string }) {
     <>
       <ReadFailed failure={failure} />
       {shown}
+      {empty}
     </>
   );
 }

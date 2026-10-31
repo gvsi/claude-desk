@@ -168,9 +168,10 @@ function attempt(fields: Partial<Attempt> = {}): Attempt {
 /** A blocked reply's line as the API writes it, when no violation says more. */
 const STOPPED_REPLY = 'A reply was stopped before it was shown.';
 
-/** Safety's empty state, and its headline for any count. */
+/** Safety's empty state, its headline for a count of one or more, and its headline for none. */
 const NOTHING = 'Nothing stopped this week';
-const HEADLINE = /^\d+ attempts? to talk me around (?:was|were) stopped this week\.$/;
+const HEADLINE = /^I turned down \d+ requests? this week\.$/;
+const NONE_TURNED_DOWN = "I didn't turn down any requests this week.";
 
 /**
  * One of Claude's drafts the reply check stopped at `at`: entry `seq` of the record, and its
@@ -248,15 +249,16 @@ describe('Safety', () => {
     const entries = (await mockLedger()).entries.length;
     const { screen } = await renderRoute(SAFETY);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety' })).toBeVisible();
-    await expect.element(screen.getByText('2 attempts to talk me around were stopped this week.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('I turned down 2 requests this week.', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Every entry checks out', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('img', { name: `${entries} entries`, exact: true })).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/talk me around|attempts? (?:was|were) stopped/);
 
-    // One attempt reads in the singular.
+    // One request reads in the singular.
     mockStore.reset('rivera');
     await stoppedThisWeek(1);
     const one = await renderRoute(SAFETY);
-    await expect.element(one.screen.getByText('1 attempt to talk me around was stopped this week.', { exact: true })).toBeVisible();
+    await expect.element(one.screen.getByText('I turned down 1 request this week.', { exact: true })).toBeVisible();
   });
 
   it('empty_state_only_when_nothing_was_stopped_this_week', async () => {
@@ -268,8 +270,13 @@ describe('Safety', () => {
     const quiet = await renderRoute(SAFETY);
     await readsMore('today', 2);
     expect(quiet.screen.getByText(NOTHING).elements()).toHaveLength(0);
+    expect(quiet.screen.getByText(NONE_TURNED_DOWN).elements()).toHaveLength(0);
     list.release();
     await expect.element(quiet.screen.getByText(NOTHING, { exact: true })).toBeVisible();
+    // The week turned nothing down, said in Claude's voice above the empty state.
+    const none = quiet.screen.getByText(NONE_TURNED_DOWN, { exact: true });
+    await expect.element(none).toBeVisible();
+    expect(none.element().compareDocumentPosition(quiet.screen.getByText(NOTHING).element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(quiet.screen.getByText(HEADLINE).elements()).toHaveLength(0);
     expect(quiet.screen.getByRole('list', { name: 'Attempts, newest first' }).elements()).toHaveLength(0);
 
@@ -286,10 +293,10 @@ describe('Safety', () => {
     await expect.element(screen.getByRole('link', { name: /^Oct 23, 8:00 pm A reply was stopped before it was shown\./ })).toBeVisible();
   });
 
-  it('stopped_drafts_alone_show_no_headline', async () => {
+  it('stopped_drafts_alone_turn_nothing_down', async () => {
     // Only Claude's own drafts were stopped this week, at 12:30 am on its first day and at 9:52 am
-    // today, and no request was refused: nobody tried to talk Claude around, so there is no count,
-    // and nothing says nothing was stopped. The list shows both drafts.
+    // today, and no request was refused: the headline says no request was turned down, and nothing
+    // says nothing was stopped. The list shows both drafts.
     const first = stoppedDraft(1, '2026-10-24T07:30:00.000000Z');
     const second = stoppedDraft(2, isoTime(NOW.getTime() - 38 * 60_000));
     injectLedger(ledgerPage([first.entry, second.entry]));
@@ -301,8 +308,11 @@ describe('Safety', () => {
     expect(rows.elements().map((row) => row.querySelector('.cd-attempt-row__title')?.textContent)).toEqual([STOPPED_REPLY, STOPPED_REPLY]);
     await expect.element(detail(screen).getByText('This reply was never shown.', { exact: true })).toBeVisible();
 
-    // Today's count has been read again with the list on screen: still no count and no empty state.
+    // Today's count has been read again with the list on screen: still none turned down, no count
+    // and no empty state.
     await readsMore('today', 2);
+    await expect.element(screen.getByText(NONE_TURNED_DOWN, { exact: true })).toBeVisible();
+    expect(screen.getByText(HEADLINE).elements()).toHaveLength(0);
     expect(screen.getByText(NOTHING).elements()).toHaveLength(0);
     expect(screen.getByRole('link', { name: 'Open your public page' }).elements()).toHaveLength(0);
     expect(document.body.textContent).not.toMatch(/talk me around/);
@@ -324,11 +334,12 @@ describe('Safety', () => {
     injectAttempts([draft.attempt, attempt({ created_at: refusedAt })]);
     await stoppedThisWeek(1);
     const { screen } = await renderRoute(SAFETY);
-    await expect.element(screen.getByText('1 attempt to talk me around was stopped this week.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('I turned down 1 request this week.', { exact: true })).toBeVisible();
     const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('link');
     await expect.element(rows.first()).toBeVisible();
     expect(rows.elements().map((row) => row.querySelector('.cd-attempt-row__title')?.textContent)).toEqual([STOPPED_REPLY, REFUND_REASON]);
     expect(screen.getByText(NOTHING).elements()).toHaveLength(0);
+    expect(screen.getByText(NONE_TURNED_DOWN).elements()).toHaveLength(0);
   });
 
   it('headline_counts_the_listed_refusals', async () => {
@@ -352,7 +363,7 @@ describe('Safety', () => {
     const list = screen.getByRole('list', { name: 'Attempts, newest first' });
     await expect.element(list.getByRole('link').first()).toBeVisible();
     const refused = list.getByRole('link', { name: /Stopped by: Action checkpoint$/ }).elements();
-    expect(refused).toHaveLength(Number.parseInt(headline.element().textContent ?? '', 10));
+    expect(refused).toHaveLength(Number.parseInt(/\d+/.exec(headline.element().textContent ?? '')?.[0] ?? '', 10));
     expect(list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ }).elements()).toHaveLength(1);
     expect(list.getByRole('link').elements()).toHaveLength(refused.length + 1);
 
@@ -761,16 +772,19 @@ describe('Safety', () => {
     await readsMore('safety', 2);
     await readsMore('today', 1);
     expect(nothing.elements()).toHaveLength(0);
+    expect(screen.getByText(NONE_TURNED_DOWN).elements()).toHaveLength(0);
     expect(line.elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
 
-    // Once a read works, the line is gone, and the stopped draft shows no empty state either.
+    // Once a read works, the line is gone, and the stopped draft shows no empty state either: no
+    // request was turned down, and the headline says so.
     mockStore.reset('rivera');
     await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
     await readsMore('safety', 1);
     await readsMore('today', 1);
     expect(nothing.elements()).toHaveLength(0);
     expect(screen.getByText(HEADLINE).elements()).toHaveLength(0);
+    await expect.element(screen.getByText(NONE_TURNED_DOWN, { exact: true })).toBeVisible();
     if (view === 'attempts') {
       const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('link', { name: /Stopped by: Reply checkpoint$/ });
       await expect.element(rows.first()).toBeVisible();
@@ -822,7 +836,7 @@ describe('Safety', () => {
     // stays, until a read works.
     await refuseTheAgentsCharge();
     const { screen } = await renderRoute(SAFETY);
-    const headline = screen.getByText(/stopped this week\.$/);
+    const headline = screen.getByText(HEADLINE);
     await expect.element(headline).toBeVisible();
     mockStore.inject({ route: 'today', status: 503, times: 10_000 });
     const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });

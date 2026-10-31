@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
 import type { Attempt } from '../../api/views.ts';
-import { CATEGORY_COPY, LEDGER_KIND_COPY, ORIGIN_COPY, anythingStoppedIn, entryFor } from './copy.ts';
+import { CATEGORY_COPY, LEDGER_KIND_COPY, ORIGIN_COPY, anythingStoppedIn, anythingTurnedDownIn, entryFor, turnedDownHeadline } from './copy.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SCHEMA_PATH = path.join(here, '..', '..', '..', '..', 'backend', 'desk', 'contracts.schema.json');
@@ -108,5 +108,29 @@ describe('Safety copy', () => {
     expect(anythingStoppedIn(one('rate_limited' as Attempt['kind'], '2026-10-29T17:00:00.000000Z'), week)).toBe(true);
     // A time that can't be read may be this week's, so the week isn't said to have nothing.
     expect(anythingStoppedIn(one('reply_blocked', 'not a time'), week)).toBe(true);
+  });
+
+  it('anything_turned_down_in_the_week_takes_refusals_only', () => {
+    // The same week and the same clock as `anythingStoppedIn`, but a draft of Claude's the reply
+    // check stopped is no request anyone made, so it was never turned down.
+    const week = { timezone: 'America/Los_Angeles', start: '2026-10-24', end: '2026-10-30' };
+    const one = (kind: Attempt['kind'], createdAt: string) => [{ kind, created_at: createdAt }];
+    expect(anythingTurnedDownIn([], week)).toBe(false);
+    expect(anythingTurnedDownIn(one('refused', '2026-10-24T07:00:00.000000Z'), week)).toBe(true);
+    expect(anythingTurnedDownIn(one('reply_blocked', '2026-10-29T17:00:00.000000Z'), week)).toBe(false);
+    expect(anythingTurnedDownIn(one('held', '2026-10-29T17:00:00.000000Z'), week)).toBe(false);
+    // Before the week began on the business's clock: not this week.
+    expect(anythingTurnedDownIn(one('refused', '2026-10-24T06:59:00.000000Z'), week)).toBe(false);
+    // Newer than the week Today last read, a kind this build doesn't know yet, or a time that can't
+    // be read: each may be a request turned down this week, so the week isn't said to have none.
+    expect(anythingTurnedDownIn(one('refused', '2026-10-31T07:00:00.000000Z'), week)).toBe(true);
+    expect(anythingTurnedDownIn(one('rate_limited' as Attempt['kind'], '2026-10-29T17:00:00.000000Z'), week)).toBe(true);
+    expect(anythingTurnedDownIn(one('refused', 'not a time'), week)).toBe(true);
+  });
+
+  it('headline_says_how_many_requests_were_turned_down', () => {
+    expect(turnedDownHeadline(3)).toBe('I turned down 3 requests this week.');
+    expect(turnedDownHeadline(1)).toBe('I turned down 1 request this week.');
+    expect(turnedDownHeadline(0)).toBe("I didn't turn down any requests this week.");
   });
 });

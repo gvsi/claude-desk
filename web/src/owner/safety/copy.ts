@@ -123,9 +123,10 @@ export function categoryLabel(a: Pick<Attempt, 'triage'>): string {
   return Object.hasOwn(CATEGORY_COPY, triage.category) ? CATEGORY_COPY[triage.category] : CATEGORY_COPY.other;
 }
 
-/** Safety's headline, in Claude's voice, for `n` attempts stopped in the last seven days. */
-export function stoppedHeadline(n: number): string {
-  return n === 1 ? '1 attempt to talk me around was stopped this week.' : `${n} attempts to talk me around were stopped this week.`;
+/** Safety's headline, in Claude's voice, for the `n` requests the kernel refused in the last seven days. */
+export function turnedDownHeadline(n: number): string {
+  if (n === 0) return "I didn't turn down any requests this week.";
+  return n === 1 ? 'I turned down 1 request this week.' : `I turned down ${n} requests this week.`;
 }
 
 /**
@@ -137,9 +138,22 @@ export function stoppedHeadline(n: number): string {
  * have. A hold is the one kind that isn't stopped, so a kind this build doesn't know yet counts.
  */
 export function anythingStoppedIn(attempts: readonly Pick<Attempt, 'kind' | 'created_at'>[], week: Pick<ThisWeek, 'timezone' | 'start'>): boolean {
-  return attempts.some((a) => {
-    if (a.kind === 'held') return false;
-    const date = localDate(a.created_at, week.timezone);
-    return date === null || date >= week.start;
-  });
+  return attempts.some((a) => a.kind !== 'held' && maybeThisWeek(a, week));
+}
+
+/**
+ * Whether a request may have been turned down in the last seven days, by the same clock as
+ * `anythingStoppedIn`: a refused request this week (or newer than the week Today last read, or at
+ * a time that can't be read), or a kind this build doesn't know yet. A draft of Claude's the reply
+ * check stopped is no request anyone made, and a hold isn't turned down, so neither counts; the
+ * week is never said to have turned nothing down when it may have.
+ */
+export function anythingTurnedDownIn(attempts: readonly Pick<Attempt, 'kind' | 'created_at'>[], week: Pick<ThisWeek, 'timezone' | 'start'>): boolean {
+  return attempts.some((a) => a.kind !== 'held' && a.kind !== 'reply_blocked' && maybeThisWeek(a, week));
+}
+
+/** An attempt from `week.start` on, by its `created_at`'s local date in the week's time zone, or at a time that can't be read. */
+function maybeThisWeek(a: Pick<Attempt, 'created_at'>, week: Pick<ThisWeek, 'timezone' | 'start'>): boolean {
+  const date = localDate(a.created_at, week.timezone);
+  return date === null || date >= week.start;
 }
