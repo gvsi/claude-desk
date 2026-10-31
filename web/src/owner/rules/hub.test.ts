@@ -278,8 +278,9 @@ describe('the Rules hub', () => {
 
     // A shared ask rule ranks below a tool's own rule: Share a document's automatic rule for the
     // record's owner still decides it.
-    const messagesAsk = card({ card_id: 'card-messages-ask', applies_to: 'effect:send_message', mode: 'ask', reason: 'Messages ask you first.' });
-    expect(hubTool(view([messagesAsk]), 'native.release_document')).toMatchObject({ summary: '2 rules · 1 shared', mode: 'auto' });
+    // (Not one on sending messages: that would hold Confirm it's them, which the kernel refuses.)
+    const privateAsk = card({ card_id: 'card-private-ask', applies_to: 'effect:private_data', mode: 'ask', reason: 'Private data asks you first.' });
+    expect(hubTool(view([privateAsk]), 'native.release_document')).toMatchObject({ summary: '2 rules · 1 shared', mode: 'auto' });
   });
 
   it('summary_shows_never_when_a_never_rule_governs', () => {
