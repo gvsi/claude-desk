@@ -505,7 +505,7 @@ class Today(BaseModel):
 
 
 RefusalCause = Literal[
-    "owner_rule", "not_verified", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
+    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
     "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
     "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
     "agent_limit", "other_copy", "no_rule",

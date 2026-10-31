@@ -119,6 +119,7 @@ export interface Attempt {
     | (
         | "owner_rule"
         | "not_verified"
+        | "not_their_record"
         | "recipient"
         | "no_such_slot"
         | "unknown_item"

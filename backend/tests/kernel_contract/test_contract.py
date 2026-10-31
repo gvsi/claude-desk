@@ -1532,7 +1532,7 @@ async def test_a_baseline_refusal_names_its_forbid(kernel, ro_read, arrange, api
     expected = ["B.private_data_record_owner"]
     assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
     assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
-    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) is None
+    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) == "not_their_record"
 
 
 # Single-use links: payment links (Plan 01c) -------------------------------------------------------------------------

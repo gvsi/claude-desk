@@ -920,7 +920,7 @@ async def test_safety_keeps_other_entries_when_a_code_is_withheld(scene, monkeyp
 
 
 @pytest.mark.parametrize(("source", "cause"), [
-    ("early_reason", "incomplete_request"), ("baseline_verified", None),
+    ("early_reason", "incomplete_request"), ("baseline_verified", "not_their_record"),
     ("baseline_unverified", "not_verified"), ("plain_deny", "no_rule"),
 ])
 async def test_safety_cause_from_decision_source(scene, monkeypatch, source, cause):

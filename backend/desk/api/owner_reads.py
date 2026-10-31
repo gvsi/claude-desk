@@ -255,7 +255,7 @@ REFUSAL_CHECKS: dict[str, RefusalCause] = {
     "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
     "no_such_document": "no_such_document", "not_verified": "not_verified",
 }
-# In precedence order, after any owner never card. The private-data cause also requires an unverified session.
+# In precedence order, after any owner never card. The private-data cause depends on session verification.
 BASELINE_CAUSES: dict[str, RefusalCause] = {
     "B.same_copy": "other_copy", "B.private_data_record_owner": "not_verified",
     "B.recipient_owner_or_verified_contact": "recipient", "B.no_agent_pay_out": "agent_pay_out",
@@ -274,7 +274,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
     Source                                           Cause                 Signed label
     reason: paused                                   paused                The chat was paused
     reason: unknown_tool, not_given                  tool_not_available    Not a tool this chat can use
-    reason: invalid_args                             incomplete_request    The request was incomplete
+    reason: invalid_args                             incomplete_request    The request wasn't in a form I can use
     reason: no_active_version                        no_rules              No rules turned on yet
     reason: version_unloadable, version_outdated,
             evaluation_error                         rules_unchecked       Your rules couldn't be checked, so I said no
@@ -283,18 +283,19 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       unknown_item                                   unknown_item          Not on the price list
       over_limit                                     over_quote_ceiling    Over the $10,000 quote ceiling
       no_such_quote, quote_paid, quote_paying         quote_unpayable       That quote can't be paid now
-      no_such_charge                                 no_such_charge        No such payment on record
+      no_such_charge                                 no_such_charge        Couldn't find that payment
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
       not_verified                                   not_verified          Not verified yet
     policy precedence:
       F.never.*                                      owner_rule            Your rule says no
       B.same_copy                                    other_copy            Not a record on this Desk
-      B.private_data_record_owner, unverified only   not_verified          Not verified yet
+      B.private_data_record_owner, unverified        not_verified          Not verified yet
+      B.private_data_record_owner, verified          not_their_record      Only for the person it belongs to
       B.recipient_owner_or_verified_contact          recipient             Only to you or a contact on record
       B.no_agent_pay_out                             agent_pay_out         Agents can't send money out
-      B.agent_charge_within_mandate                  agent_limit           Over the agent's spending limit
-      B.money_has_amount                             no_amount             No amount given
+      B.agent_charge_within_mandate                  agent_limit           Outside the agent's spending limit
+      B.money_has_amount                             no_amount             Not a valid amount
     no reason, empty policy_ids and card_ids         no_rule               No rule covers this yet
     anything else                                    null                  (no label)
     """
@@ -319,10 +320,9 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
         return "owner_rule"
     for policy, cause in BASELINE_CAUSES.items():
         if policy in policies:
-            # Verification never reverts; unverified now proves unverified at decision time.
-            # A verified person's refusal may instead mean the record belongs to someone else.
+            # A verified person's private-data refusal means the record belongs to someone else.
             if policy == "B.private_data_record_owner" and verified:
-                return None
+                return "not_their_record"
             return cause
     return None if policies or row["card_ids"] else "no_rule"
 
