@@ -794,7 +794,8 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
             if spent():
                 left.append((copy_id, desk_id))
                 continue
-            done = await _bring_up(runtime, copy_id, desk_id, prove=False)
+            done = await _bring_up(runtime, copy_id, desk_id, prove=False,
+                                   lock_s=STARTUP_REBUILD_S - (monotonic() - started))
             if done == FAILED or (done is not None and done[1] == NEEDS_PROOF):
                 left.append((copy_id, desk_id))
             elif done is not None:
@@ -829,8 +830,8 @@ async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild)
     back, its prover is killed, and the next start takes it up again."""
     results: Rebuilt = {}
     work: list[tuple[str, str]] = list(startup.left)
-    for copy_id, desk_id in work:             # the Desks startup found: their owners are told first
-        await _alert_waiting(runtime, copy_id, desk_id)
+    told: set[tuple[str, str]] = set()
+    busy = await _alert_all(runtime, work, told)  # the Desks startup found: their owners are told first
     pending: list[str] | None = startup.unscanned
     attempt = 0
     while True:
@@ -844,12 +845,14 @@ async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild)
                 failed.append(copy_id)
             else:
                 found += [(copy_id, desk_id) for desk_id in desk_ids]
-        for copy_id, desk_id in found:
-            await _alert_waiting(runtime, copy_id, desk_id)
+        busy |= await _alert_all(runtime, found, told)
         work += found
         again: list[tuple[str, str]] = []
         for copy_id, desk_id in work:
-            done = await _bring_up(runtime, copy_id, desk_id, prove=True)
+            if (copy_id, desk_id) in busy:      # its row is held: told and brought up on a later pass
+                again.append((copy_id, desk_id))
+                continue
+            done = await _bring_up(runtime, copy_id, desk_id, prove=True, lock_s=BACKGROUND_LOOKUP_S)
             if done == FAILED:
                 again.append((copy_id, desk_id))
             elif done is not None:
@@ -861,6 +864,7 @@ async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild)
                  "unlisted" if failed is None else len(failed), len(again))
         await wait_to_retry(RETRY_WAITS_S[min(attempt, len(RETRY_WAITS_S)) - 1])
         pending, work = failed, again
+        busy = await _alert_all(runtime, work, told)
     log.info("background_rebuild_done desks=%s", len(results))
     return results
 
@@ -885,6 +889,32 @@ async def _bounded(lookup: Awaitable[T], cut_off: str) -> T | None:
         return None
 
 
+async def _alert_all(runtime: KernelRuntime, desks: list[tuple[str, str]],
+                     told: set[tuple[str, str]]) -> set[tuple[str, str]]:
+    """Tells the owner of each of `desks` not yet told (`_alert_waiting`), adding it to `told`;
+    returns the Desks whose row was held, to tell on a later pass."""
+    busy: set[tuple[str, str]] = set()
+    for copy_id, desk_id in desks:
+        if (copy_id, desk_id) in told:
+            continue
+        if await _alert_waiting(runtime, copy_id, desk_id, lock_s=BACKGROUND_LOOKUP_S):
+            told.add((copy_id, desk_id))
+        else:
+            busy.add((copy_id, desk_id))
+    return busy
+
+
+async def _limit_lock_waits(ctx: KernelCtx, seconds: float) -> None:
+    """Holds the transaction's waits for a lock to `seconds` (Postgres `lock_timeout`), so a row an
+    owner's write holds makes the rebuild try that Desk again later rather than stall the others."""
+    await ctx.db.execute(select(func.set_config("lock_timeout", f"{max(1, int(seconds * 1000))}ms", True)))
+
+
+def _lock_busy(exc: BaseException) -> bool:
+    """Whether `exc` is Postgres giving up on a lock wait (`lock_not_available`, 55P03)."""
+    return getattr(getattr(exc, "orig", None), "sqlstate", None) == "55P03"
+
+
 async def _desks_of(runtime: KernelRuntime, copy_id: str) -> list[str] | None:
     """The copy's Desks to bring up (`repo.desks_to_bring_up`), or None when the lookup failed,
     which is logged; a Desk it would have found keeps refusing until a later pass finds it."""
@@ -896,49 +926,60 @@ async def _desks_of(runtime: KernelRuntime, copy_id: str) -> list[str] | None:
         return None
 
 
-async def _alert_waiting(runtime: KernelRuntime, copy_id: str, desk_id: str) -> None:
+async def _alert_waiting(runtime: KernelRuntime, copy_id: str, desk_id: str, *, lock_s: float) -> bool:
     """Tells the owner, in the Demo inbox whatever their notification defaults, that the Desk's
     active version, stored by an earlier kernel and left to the background rebuild, refuses every
     call until it is checked (`WAITING_ALERT`), unless it did within `WAITING_ALERT_EVERY`. Nothing
     is written for a Desk whose version is current, which refuses nothing meanwhile. In a
     transaction of its own, which first takes the Desk's `waiting-alert` advisory lock, so two
-    kernels starting at once check and write one after the other and the owner is told once; a
-    failure is logged, and the version refuses all the same."""
+    kernels starting at once check and write one after the other and the owner is told once. Its
+    lock waits are held to `lock_s`: a row an owner's write holds returns False, so the caller tells
+    that owner on a later pass. Any other failure is logged and returns True, and the version
+    refuses all the same."""
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
+            await _limit_lock_waits(ctx, lock_s)
             await _lock(ctx, "waiting-alert", desk_id)
             # the Desk row held to the commit, so a deletion comes before the check or waits for the alert
             deleted = await ctx.db.scalar(ctx.repo.scoped(select(Desk.deleted_at).where(Desk.desk_id == desk_id)
                                                           .with_for_update(read=True)))
             row = await active_version(ctx, desk_id)
             if deleted is not None or row is None or not outdated(row):
-                return
+                return True
             preview, now = render.owner_preview("rules"), ctx.clock.now()
             recent = await ctx.db.scalars(ctx.repo.scoped(select(DemoInboxRow.entry_id).where(
                 DemoInboxRow.desk_id == desk_id, DemoInboxRow.to == "owner", DemoInboxRow.kind == "alert",
                 DemoInboxRow.preview == preview, DemoInboxRow.body == WAITING_ALERT,
                 DemoInboxRow.created_at > now - WAITING_ALERT_EVERY).limit(1)))
             if recent.first() is not None:
-                return
+                return True
             await demo_inbox.deliver(ctx, copy_id=copy_id, desk_id=desk_id, to="owner", person_id=None,
                                      kind="alert", body=WAITING_ALERT, preview=preview)
+        return True
     except Exception as exc:
+        if _lock_busy(exc):
+            log.info("rebuild_alert_busy copy_id=%s desk_id=%s", copy_id, desk_id)
+            return False
         log_error(log, exc, "rebuild_alert_failed copy_id=%s desk_id=%s", copy_id, desk_id)
+        return True
 
 
-async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *,
-                    prove: bool) -> tuple[int, str | None] | str | None:
+async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *, prove: bool,
+                    lock_s: float) -> tuple[int, str | None] | str | None:
     """Gives the Desk the native tools it has no row for (`desks.add_native_tools`), then rebuilds
     its active version if it is outdated (`rebuild_version`, proving live only when `prove`), each
     in a transaction of its own. Returns the outdated version and what became of it, None when the
     Desk's version is current, or `FAILED` when either step raised: that is logged, the Desk is left
     as it was (without a tool, it can't be called on it; with a version left as stored, it decides
     nothing), and its callers try it again. A Desk that couldn't be given its tools isn't rebuilt
-    over the old ones."""
+    over the old ones. Each transaction's lock waits are held to `lock_s`, so a Desk row an owner's
+    write holds is `FAILED`, tried again later, rather than a stall; and a Desk deleted since it
+    was found isn't rebuilt."""
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
+            await _limit_lock_waits(ctx, lock_s)
             await desks.add_native_tools(ctx, desk_id)
     except Exception as exc:
         log_error(log, exc, "native_tools_failed copy_id=%s desk_id=%s", copy_id, desk_id)
@@ -947,8 +988,10 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *,
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
+            await _limit_lock_waits(ctx, lock_s)
+            deleted = await ctx.db.scalar(ctx.repo.scoped(select(Desk.deleted_at).where(Desk.desk_id == desk_id)))
             row = await active_version(ctx, desk_id)
-            if row is None or not outdated(row):
+            if deleted is not None or row is None or not outdated(row):
                 return None
             version = row.version
             done = version, await rebuild_version(ctx, desk_id, version, prove=prove)

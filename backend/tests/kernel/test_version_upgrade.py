@@ -32,7 +32,7 @@ from sqlalchemy import delete, select
 
 from desk.contracts import ProofReport, RuleCard, ToolProfile
 from desk.db.models import DemoInboxEntry as InboxRow
-from desk.db.models import PolicyVersion, Tool
+from desk.db.models import Desk, PolicyVersion, Tool
 from desk.db.session import database_url, libpq_url
 from desk.kernel_service import activation, adapters, compiler, desks
 from desk.kernel_service import app as app_module
@@ -503,7 +503,7 @@ async def test_two_kernels_starting_at_once_alert_a_waiting_owner_once(app, clie
         return await deliver(*args, **kwargs)
 
     monkeypatch.setattr(activation.demo_inbox, "deliver", together)
-    await asyncio.gather(*(activation._alert_waiting(app.state.kernel, copy.copy_id, copy.desk_id) for _ in range(2)))
+    await asyncio.gather(*(activation._alert_waiting(app.state.kernel, copy.copy_id, copy.desk_id, lock_s=10.0) for _ in range(2)))
     assert await rules_alerts(app, copy) == [WAITING_ALERT]
 
 
@@ -524,6 +524,7 @@ async def test_a_blocked_lookup_holds_up_no_desk_the_background_already_knows(ap
     async def waiting(seconds):
         waits.append(seconds)
         assert await rules_alerts(app, known) == [WAITING_ALERT]  # the known Desk's owner was told first
+        monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 10.0)  # only the hanging lookup gets the short bound
 
     monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 0.05)
     monkeypatch.setattr(activation, "desks_to_bring_up", hanging_once)
@@ -547,6 +548,7 @@ async def test_a_kernel_starts_and_rebuilds_while_the_copies_table_is_locked(app
 
     async def waiting(seconds):
         await released.wait()
+        monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 10.0)  # once the lock goes, a slow runner still finishes
 
     monkeypatch.setattr(activation, "wait_to_retry", waiting)
     async with await psycopg.AsyncConnection.connect(libpq_url(database_url("ADMIN"))) as admin:
@@ -705,7 +707,7 @@ async def test_a_desk_deleted_while_its_waiting_alert_is_written_waits_for_it(ap
         return await deliver(*args, **kwargs)
 
     monkeypatch.setattr(activation.demo_inbox, "deliver", held)
-    alerting = asyncio.create_task(activation._alert_waiting(app.state.kernel, copy.copy_id, copy.desk_id))
+    alerting = asyncio.create_task(activation._alert_waiting(app.state.kernel, copy.copy_id, copy.desk_id, lock_s=10.0))
     await asyncio.wait_for(paused.wait(), timeout=5)
     with connections_of(app) as pids:
         deleting = asyncio.create_task(client.delete(f"/desks/{copy.desk_id}", headers=copy.owner))
@@ -715,6 +717,98 @@ async def test_a_desk_deleted_while_its_waiting_alert_is_written_waits_for_it(ap
     await asyncio.wait_for(alerting, timeout=5)
     assert (await asyncio.wait_for(deleting, timeout=5)).status_code == 204
     assert await rules_alerts(app, copy) == [WAITING_ALERT]       # written while the Desk still stood
+
+
+async def test_a_desk_row_held_by_an_owner_write_holds_up_no_other_desk(app, client, monkeypatch):
+    # an owner's write holding one Desk's row (FOR UPDATE) doesn't stop the background: that Desk's alert and
+    # rebuild wait for the next pass, and the other Desk is told and rebuilt meanwhile
+    from .helpers import kernel_ctx
+    held_copy, other = await rivera(app, client), await rivera(app, client)
+    for each in (held_copy, other):
+        await seed_from_an_earlier_kernel(app, each)
+    holding, release = asyncio.Event(), asyncio.Event()
+
+    async def owner_write():
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(held_copy.copy_id)
+            await ctx.db.execute(select(Desk.desk_id).where(Desk.desk_id == held_copy.desk_id).with_for_update())
+            holding.set()
+            await release.wait()
+
+    waits = []
+
+    async def waiting(seconds):
+        waits.append(seconds)
+        assert await rules_alerts(app, other) == [WAITING_ALERT]      # the other Desk went on meanwhile
+        assert await rules_alerts(app, held_copy) == []
+        release.set()
+
+    writer = asyncio.create_task(owner_write())
+    await asyncio.wait_for(holding.wait(), timeout=5)
+    monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 0.2)
+    monkeypatch.setattr(activation, "wait_to_retry", waiting)
+    startup = activation.StartupRebuild(results={}, unscanned=[],
+                                        left=sorted([(held_copy.copy_id, held_copy.desk_id), (other.copy_id, other.desk_id)]))
+    rebuilt = await asyncio.wait_for(activation.rebuild_in_background(app.state.kernel, startup), timeout=10)
+    await writer
+    assert rebuilt == {(held_copy.desk_id, 1): None, (other.desk_id, 1): None}
+    assert waits == [5.0] and await rules_alerts(app, held_copy) == [WAITING_ALERT]
+
+
+async def test_a_kernel_starts_within_its_budget_while_a_desk_row_is_held(app, client, frozen_clock, reviewer,
+                                                                           monkeypatch):
+    # an owner's write holding a Desk's row at startup doesn't hold the kernel past its budget: the Desk is left
+    # to the background, which brings it up once the row is free
+    from .helpers import kernel_ctx
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    await without_new_native_tools(app, copy)
+    holding, release = asyncio.Event(), asyncio.Event()
+
+    async def owner_write():
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            await ctx.db.execute(select(Desk.desk_id).where(Desk.desk_id == copy.desk_id).with_for_update())
+            holding.set()
+            await release.wait()
+
+    async def waiting(seconds):
+        release.set()
+
+    writer = asyncio.create_task(owner_write())
+    await asyncio.wait_for(holding.wait(), timeout=5)
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.3)
+    monkeypatch.setattr(activation, "BACKGROUND_LOOKUP_S", 0.3)
+    monkeypatch.setattr(activation, "wait_to_retry", waiting)
+    async with asyncio.timeout(5):
+        async with started_kernel(frozen_clock, reviewer) as (kernel, _):
+            rebuilding = kernel.state.rebuilding
+            assert rebuilding is not None and not rebuilding.done()
+            assert await rebuilding == {(copy.desk_id, 1): None}
+    await writer
+
+
+async def test_a_desk_deleted_after_it_was_found_is_neither_rebuilt_nor_given_tools(app, client):
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    await without_new_native_tools(app, copy)
+    response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
+    assert response.status_code == 204, response.text
+    before = await entries_of(client, copy, "policy")
+    assert await activation._bring_up(app.state.kernel, copy.copy_id, copy.desk_id, prove=True, lock_s=10.0) is None
+    tools = {row.tool for row in await rows_of(app, copy.copy_id, select(Tool).where(Tool.desk_id == copy.desk_id))}
+    assert not set(NEW_NATIVE_TOOLS) & tools
+    assert await entries_of(client, copy, "policy") == before
+    assert [alert.body for alert in await owner_alerts(app, copy)][-1:] != [activation.REBUILD_ALERT]
+
+
+async def test_a_waiting_alert_for_a_desk_deleted_after_it_was_found_writes_nothing(app, client):
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
+    assert response.status_code == 204, response.text
+    assert await activation._alert_waiting(app.state.kernel, copy.copy_id, copy.desk_id, lock_s=10.0) is True
+    assert await rules_alerts(app, copy) == []
 
 
 async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
