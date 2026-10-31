@@ -3,7 +3,8 @@
  * and a Desk's Today and its held requests, polled. Query keys start with the route key, so a
  * screen invalidates every Desk's read of a route by that key alone.
  */
-import { queryOptions, useQuery, type QueryClient } from '@tanstack/react-query';
+import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 
 import { request } from '../api/http.ts';
 import type { BusinessOut, DeskSummary, NeedsYouItem } from '../api/views.ts';
@@ -71,6 +72,28 @@ export async function readTodayAhead(queryClient: QueryClient, deskId: string, c
   ]);
   await Promise.race([reads, cap]);
   clearTimeout(timer);
+}
+
+/**
+ * Whether a page opening onto `deskId`'s Today from the owner's loading page (a reload, or a Desk
+ * the copy's Desks don't list yet) is still reading Today ahead. `wanted`, as the page first
+ * renders, says whether to; then it reads what Today first shows, as a first visit does, for up to
+ * `READ_AHEAD_MS`, so Today opens drawn rather than section by section, each pushing the next down.
+ */
+export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
+  const queryClient = useQueryClient();
+  const [reading, setReading] = useState(wanted);
+  useEffect(() => {
+    if (!reading) return undefined;
+    let live = true;
+    void readTodayAhead(queryClient, deskId, READ_AHEAD_MS).then(() => {
+      if (live) setReading(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, [reading, queryClient, deskId]);
+  return reading;
 }
 
 /** The copy changed (a new copy, a Desk added or deleted): read the businesses and the copy again. */

@@ -4,9 +4,9 @@
  * and the last 7 days, every figure as the API reads it.
  */
 import { http, HttpResponse } from 'msw';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
-import type { RenderResult } from 'vitest-browser-react';
+import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { ROUTES } from '../../api/routes.ts';
@@ -89,6 +89,56 @@ async function expectWaiting(button: Locator, words: string): Promise<void> {
   expect(el.getAttribute('aria-busy')).toBeNull();
   expect(el.querySelector('.cd-button__spinner')).toBeNull();
 }
+
+/**
+ * Holds every read of `path` until the test lets them through to the mock: `held()` counts the
+ * reads waiting, and `release()` sends them on.
+ */
+function holdReads(path: string): { held: () => number; release: () => void } {
+  let waiting = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  worker.use(
+    http.get(path, async () => {
+      waiting += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => waiting, release };
+}
+
+/**
+ * Whether Today was drawn, even for a moment, without the held request asked for `reason`, from
+ * now until the test ends: a Today still reading what needs the owner.
+ */
+function watchTodayDrawnWithout(reason: string): () => boolean {
+  let seen = false;
+  const look = () => {
+    if (document.querySelector('.cd-today') !== null && document.querySelector(`article[aria-label="Held for you: ${reason}"]`) === null) seen = true;
+  };
+  look();
+  const observer = new MutationObserver(look);
+  observer.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => observer.disconnect());
+  return () => seen;
+}
+
+/** Whether `text` showed anywhere on the page, even for a moment, from now until the test ends. */
+function watchFor(text: string): () => boolean {
+  let seen = false;
+  const observer = new MutationObserver(() => {
+    if (document.body.textContent.includes(text)) seen = true;
+  });
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => observer.disconnect());
+  return () => seen;
+}
+
+/** The main Desk's Needs you, as the app reads it. */
+const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
 
 /** Waits for `key` to be read `n` more times than now. */
 async function readsMore(key: string, n: number): Promise<void> {
@@ -207,6 +257,57 @@ describe('Today', () => {
     (document.activeElement as HTMLElement | null)?.blur();
     await things.getByRole('button', { name: 'Open the request' }).click();
     expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+  });
+
+  it('reload_opens_today_drawn', async () => {
+    // Opened at Today's address, as a reload does, the owner's loading page stays until what Today
+    // first shows is read, so its sections never arrive one by one, each pushing the next down.
+    // The Desks and Today answer at once; Needs you is held back.
+    await cleanup();
+    const drawnWithout = watchTodayDrawnWithout(SEEDED_REASON);
+    const needsYou = holdReads(needsYouPath);
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(needsYou.held()).toBe(1));
+    await expect.poll(() => requests('today').length).toBeGreaterThan(0);
+    await expect.poll(() => requests('desks').length).toBeGreaterThan(0);
+    // Time for Today to be drawn, had it opened without Needs you.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Since last night' }).elements()).toHaveLength(0);
+
+    // Once Needs you is in, Today opens with every section drawn.
+    needsYou.release();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Live now').getByRole('link')).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
+    expect(drawnWithout()).toBe(false);
+  });
+
+  it('reload_waits_on_today_no_longer_than_a_first_visit', async () => {
+    // A read that runs past the read ahead's 3 s cap doesn't keep the owner on the loading page:
+    // Today opens, still reading what needs the owner, and the request shows when its read is in.
+    const needsYou = holdReads(needsYouPath);
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(needsYou.held()).toBe(1));
+    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
+    await expect.element(region(screen, 'Since last night').getByRole('listitem').first(), { timeout: 5_000 }).toBeVisible();
+    expect(heldCard(screen, SEEDED_REASON).elements()).toHaveLength(0);
+
+    needsYou.release();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+  });
+
+  it('switching_desks_opens_today_at_once', async () => {
+    // A Desk the copy's Desks already list opens straight onto its Today, never the loading page.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const sawLoading = watchFor('Opening your Desk');
+    await screen.getByRole('button', { name: 'Switch Desk, current: Main line' }).click();
+    await screen.getByRole('button', { name: 'Emergencies' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' })).toBeVisible();
+    await expect.element(region(screen, 'Since last night')).toBeVisible();
+    expect(sawLoading()).toBe(false);
   });
 
   it('needs_you_read_failure_says_so', async () => {
@@ -889,31 +990,8 @@ describe("Today's Demo inbox", () => {
   /** The owner's read of one decision, as the app sends it. */
   const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
 
-  /**
-   * Holds every read of `path` until the test lets them through to the mock: `held()` counts the
-   * reads waiting, and `release()` sends them on.
-   */
-  function holdReads(path: string): { held: () => number; release: () => void } {
-    let waiting = 0;
-    let release!: () => void;
-    const released = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    worker.use(
-      http.get(path, async () => {
-        waiting += 1;
-        await released;
-        return undefined;
-      }),
-    );
-    return { held: () => waiting, release };
-  }
-
   /** Two animation frames: long enough for a navigation's transition to be drawn. */
   const nextFrames = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-
-  /** The main Desk's Needs you, as the app reads it. */
-  const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
 
   /** Answers every read of `path` 503 until `stop()`: `count()` is how many it answered. */
   function failReads(path: string): { count: () => number; stop: () => void } {
