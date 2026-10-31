@@ -14,6 +14,12 @@ import type { ROUTES, RouteKey } from './routes.ts';
  * The schema each route's 2xx answer carries, by its name in the API's OpenAPI document (Plan 02's
  * read model names; `Name[]` for a list; null for a 204 or the event stream). A route the document
  * doesn't serve yet names the model the web expects, checked once it is served.
+ *
+ * This list, like `ROUTES`, is the web's. It names the same answers that `RouteShapes` in
+ * routes.ts types for `request()`, and nothing checks the two against each other yet. A served
+ * route whose path, method or answer model differs from them is reconciled with the web app plan
+ * (plan 04) together with `RouteShapes`, never by editing this list alone, which would make both
+ * checks pass while screens keep the old type.
  */
 export const ROUTE_MODELS = {
   // Copy and Desks
