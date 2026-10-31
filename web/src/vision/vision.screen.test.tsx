@@ -1,8 +1,8 @@
 /**
  * The vision pages in a real browser against the mock API: a resident on a city permits office's
  * public Desk, a team Desk, a returning visitor signed in with a Claude account, and the app on a
- * phone. Each says it is vision under the vision bar, with the way back to the owner's Desk; each is
- * static, so it asks the API for nothing; and each is drawn as its signed board draws it.
+ * phone. Each says it is vision under the vision bar, with the way back to the Vision article; each
+ * is static, so it asks the API for nothing; and each is drawn as its signed board draws it.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { page as browserPage, userEvent } from 'vitest/browser';
@@ -85,8 +85,8 @@ function slotStart(slotId: string): string | null {
 /** A fee, a permit's number or its recorded status: on the city office, only ever in a card. */
 const CITY_FACT_ANYWHERE = /[$€£]\s?\d|\bB-\d{4}-\d{4}\b|\b(?:passed|approved|issued|denied)\b/i;
 
-/** Where "Back to your Desk" goes: the app's entry, which opens a returning owner's Today. */
-const BACK_HREF = '/';
+/** Where "Back to Vision" goes: the Vision article, under About this prototype. */
+const BACK_HREF = '/about/vision';
 
 /** The public page's AI disclosure, as every public page shows it. */
 const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";
@@ -214,11 +214,12 @@ describe('Vision pages', () => {
     for (const path of VISION_ROUTES) {
       performance.clearResourceTimings();
       const { screen } = await renderRoute(path);
-      // The vision bar, word for word, with the way back to the owner's Desk.
+      // The vision bar, word for word, with the way back to the Vision article.
       const bar = screen.getByRole('note', { name: 'Vision' });
       await expect.element(bar).toBeVisible();
-      await expect.element(bar).toHaveTextContent(`Vision${VISION_LINE}Back to your Desk`);
-      await expect.element(bar.getByRole('link', { name: 'Back to your Desk' })).toHaveAttribute('href', BACK_HREF);
+      await expect.element(bar).toHaveTextContent(`Vision${VISION_LINE}Back to Vision`);
+      await expect.element(bar.getByRole('link', { name: 'Back to Vision', exact: true })).toHaveAttribute('href', BACK_HREF);
+      expect(bar.getByRole('link').elements(), path).toHaveLength(1);
       // Static: in a while on the page, nothing was asked of the API, by fetch or any other way the
       // browser loads a resource (a request, an event stream, an image, a beacon), and nothing was
       // sent to a path the mock API doesn't serve.
@@ -438,23 +439,22 @@ describe('Vision pages', () => {
     }
   });
 
-  it('back_to_your_desk_opens_today', async () => {
-    // The owner was last on their Emergencies Desk, then opened a vision page.
-    const desk = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
-    await expect.element(desk.screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+  it('back_to_vision_opens_the_article', async () => {
+    // From each vision page, the bar's way back opens the Vision article in the same tab, through the router.
     for (const path of VISION_ROUTES) {
       const { screen, router } = await renderRoute(path);
-      await screen.getByRole('note', { name: 'Vision' }).getByRole('link', { name: 'Back to your Desk' }).click();
-      // Back on the Desk they came from, through the app's entry, which reads the copy's Desks.
-      await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-      await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
+      const back = screen.getByRole('note', { name: 'Vision' }).getByRole('link', { name: 'Back to Vision', exact: true });
+      expect(back.element().getAttribute('target'), path).toBeNull();
+      await back.click();
+      await expect.poll(() => router.state.location.pathname, { message: path }).toBe('/about/vision');
+      await expect.element(screen.getByRole('heading', { level: 1, name: 'A front desk that never closes', exact: true })).toBeVisible();
     }
 
-    // Someone with the link and no copy of the demo lands on the intro dialog, not on an error.
+    // Someone with the link and no copy of the demo reads the article too: it reads nothing of theirs.
     const stranger = await renderRoute(TEAM_DESK, { seed: { name: 'rivera', signedIn: false } });
-    await stranger.screen.getByRole('link', { name: 'Back to your Desk' }).click();
-    await expect.poll(() => stranger.router.state.location.pathname).toBe('/');
-    await expect.element(stranger.screen.getByRole('dialog', { name: 'A Claude front desk for your business' })).toBeVisible();
+    await stranger.screen.getByRole('link', { name: 'Back to Vision', exact: true }).click();
+    await expect.poll(() => stranger.router.state.location.pathname).toBe('/about/vision');
+    await expect.element(stranger.screen.getByRole('heading', { level: 1, name: 'A front desk that never closes', exact: true })).toBeVisible();
   });
 });
 

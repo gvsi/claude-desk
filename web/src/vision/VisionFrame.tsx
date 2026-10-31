@@ -20,7 +20,7 @@ export interface VisionFrameProps {
 
 /**
  * Every vision page's frame: the vision bar ("Vision, not in the prototype. Nothing here is live.",
- * with "Back to your Desk") handed to the page to put first, and the tab named while it is open.
+ * with "Back to Vision") handed to the page to put first, and the tab named while it is open.
  * A link to a page of the app goes through the router, as the owner's pages do. Nothing here is
  * live, so the pages name no API path: the design system draws their controls going nowhere.
  */

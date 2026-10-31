@@ -413,15 +413,15 @@ export const VISION_BAR_LINE = 'Vision, not in the prototype. Nothing here is li
 
 /**
  * vision_page_is_labelled: the vision bar first on the page, across the window's width at its top,
- * 40 px tall on the panel, with the "Vision" pill, its line, and "Back to your Desk" to `backHref`.
+ * 40 px tall on the panel, with the "Vision" pill, its line, and "Back to Vision" to `backHref`.
  */
 export async function expectVisionBar(root: HTMLElement, backHref: string): Promise<HTMLElement> {
   const bar = within(root).getByRole('note', { name: 'Vision' });
   const box = bar.getBoundingClientRect();
   await expect([box.top, box.left, box.width]).toEqual([0, 0, document.documentElement.clientWidth]);
   expectComputed(bar, { height: '40px', backgroundColor: 'rgb(34, 34, 32)', borderBottomColor: 'rgba(250, 249, 245, 0.12)' });
-  await expect(bar).toHaveTextContent(`Vision${VISION_BAR_LINE}Back to your Desk`);
-  await expect(within(bar).getByRole('link', { name: 'Back to your Desk' })).toHaveAttribute('href', backHref);
+  await expect(bar).toHaveTextContent(`Vision${VISION_BAR_LINE}Back to Vision`);
+  await expect(within(bar).getByRole('link', { name: 'Back to Vision' })).toHaveAttribute('href', backHref);
   // Nothing on the page comes before it: it is the first thing a screen reader and the keyboard reach.
   const first = root.querySelector('[role="note"], a[href], button, h1, h2, main, nav, aside, header');
   await expect(bar.contains(first)).toBe(true);

@@ -13,11 +13,12 @@
  * Fees, dates, statuses, documents and bookings sit only in cards, never in Claude's words, as on
  * every Desk.
  */
+import { VISION_ARTICLE } from '../about/links.ts';
 import type { DecisionState, PublicDesk } from '../api/contracts.ts';
 import { cardBlock, meridian, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import type { FactCardProps, NavCount, NavKey, PhoneTab, ReceiptSource, SidebarHrefs, StatusTone } from '../ds/index.ts';
 
-/** Where each vision page lives. Today's "Things to try" leads to the city office. */
+/** Where each vision page lives. The Vision article's picture cards lead to each. */
 export const VISION_PATHS = {
   cityOffice: '/vision/city-office',
   teamDesk: '/vision/team-desk',
@@ -26,11 +27,10 @@ export const VISION_PATHS = {
 } as const;
 
 /**
- * Where every vision page's "Back to your Desk" goes: the app's entry, which opens a returning
- * owner's Today on the Desk they last had open (and the intro dialog for anyone without a copy).
- * A vision page reads nothing, so it can't name the owner's Desk itself.
+ * Where every vision page's "Back to Vision" goes: the Vision article under About this prototype,
+ * which tells the story the four pages draw and links each of them.
  */
-export const VISION_BACK_HREF = '/';
+export const VISION_BACK_HREF = VISION_ARTICLE.route;
 
 /** The receipts' sources, by what each reports: a checked reply, or an action in its state. */
 const CHECKED: ReceiptSource = { kind: 'reply', handoff: false };
