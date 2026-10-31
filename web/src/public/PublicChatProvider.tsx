@@ -26,7 +26,7 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
-import { chatReducer, initialChatState, ownerTypingDelayMs, type ChatAction, type ChatState, type SendFailure } from './chatReducer.ts';
+import { chatReducer, initialChatState, ownerInChatNow, ownerTypingDelayMs, type ChatAction, type ChatState, type SendFailure } from './chatReducer.ts';
 
 export type ChatStatus = 'loading' | 'ready' | 'not_found' | 'unavailable';
 
@@ -77,6 +77,13 @@ export interface VisitorChatSnapshot {
   cancelFailed: string | null;
   /** Where the last demo code the visitor sent stands. */
   verifyStatus: VerifyStatus;
+  /**
+   * The owner is in the chat (a take-over), which the chat's head says in the AI disclosure's place:
+   * only from the kernel's session mode (`session.mode === 'owner'`, `ownerInChatNow`), read with
+   * the stored conversation and kept current by the stream's join and leave, and only while the
+   * chat is ready and following the stream. The page passes it to PublicShell as it is.
+   */
+  ownerInChat: boolean;
 }
 
 export interface VisitorChatActions {
@@ -117,7 +124,11 @@ export async function ensureSession(slug: string, previewDeskId?: string): Promi
 
 const sessionGone = (err: unknown) => err instanceof ApiError && err.kind === 'unauthorized';
 
-/** A chat as it opened: its session, and its stored conversation, or null when the session was gone before it could be read. */
+/**
+ * A chat as it opened: its session, as the read of its stored conversation answered it when there was
+ * one (the latest the kernel said, its mode included), and that conversation, or null when the
+ * session was gone before it could be read.
+ */
 export interface OpenedChat {
   session: SessionState;
   transcript: VisitorTranscript | null;
@@ -141,7 +152,8 @@ export async function openChat(slug: string, previewDeskId?: string): Promise<Op
   }
   const opened = await ensureSession(slug, previewDeskId);
   try {
-    return { session: opened.state, transcript: await request('visitorSession', { params: { slug } }) };
+    const transcript = await request('visitorSession', { params: { slug } });
+    return { session: transcript.state, transcript };
   } catch (err) {
     if (!sessionGone(err)) throw err;
     return { session: opened.state, transcript: null };
@@ -168,6 +180,7 @@ class VisitorChat {
     cancelling: null,
     cancelFailed: null,
     verifyStatus: 'idle',
+    ownerInChat: false,
   };
   private readonly listeners = new Set<() => void>();
   /** Pages showing this chat; the stream is open only while there is one. */
@@ -215,8 +228,10 @@ class VisitorChat {
 
   readonly getSnapshot = (): VisitorChatSnapshot => this.snapshot;
 
-  private set(patch: Partial<VisitorChatSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...patch };
+  /** Applies `patch`, and with it whether the owner is in the chat, which only `ownerInChatNow` says. */
+  private set(patch: Partial<Omit<VisitorChatSnapshot, 'ownerInChat'>>): void {
+    const next = { ...this.snapshot, ...patch };
+    this.snapshot = { ...next, ownerInChat: next.status === 'ready' && ownerInChatNow(next.session, next.state) };
     for (const listener of [...this.listeners]) listener();
   }
 
@@ -337,7 +352,10 @@ class VisitorChat {
     // Still catching up: the stream isn't quiet yet.
     if (this.caughtUpTimer !== null) this.awaitCaughtUp();
     if (ev.type !== 'owner_typing') {
+      // An event the chat has already seen (a replay from an earlier seq) changes nothing.
+      const fresh = seq > this.snapshot.state.lastSeq;
       this.dispatch({ type: 'event', seq, ev });
+      if (fresh) this.followMode(ev);
       return;
     }
     if (seq <= this.snapshot.state.lastSeq) return;
@@ -352,6 +370,18 @@ class VisitorChat {
       this.ownerTypingTimer = null;
       this.dispatch({ type: 'owner_typing_over' });
     }, delay);
+  }
+
+  /**
+   * The session's mode as the stream changes it: the owner's take-over (`owner_joined`) puts the chat
+   * in her hands, and her hand-back (`owner_left`) in Claude's. So does Claude starting to write,
+   * which it does only in its own hands, so a hand-back whose leave never came still ends hers.
+   */
+  private followMode(ev: SseEvent): void {
+    const mode: SessionState['mode'] | null = ev.type === 'owner_joined' ? 'owner' : ev.type === 'owner_left' || ev.type === 'writing' ? 'ai' : null;
+    const { session } = this.snapshot;
+    if (mode === null || session === null || session.mode === mode) return;
+    this.set({ session: { ...session, mode } });
   }
 
   private clearOwnerTypingTimer(): void {

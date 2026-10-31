@@ -1396,6 +1396,31 @@ describe('public chat page', () => {
     }
   });
 
+  it('reload_reads_the_owner_from_the_sessions_mode', async () => {
+    const first = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(first.screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+
+    // The kernel puts the chat in Maria's hands, but its join was never kept (the API's answer was
+    // lost). A new page load: the session's mode says she is in the chat, with no line for her join.
+    chat.state = { ...chat.state, mode: 'owner', generation: chat.state.generation + 1 };
+    const second = await renderRoute(PAGE);
+    await ready(second.screen);
+    expect(systemLines()).toEqual([]);
+    expect(chatHead()).toEqual(withOwner(HEAD.en));
+
+    // She takes it over and the kernel hands it back, but the leave was never kept: her join is the
+    // chat's last line, and the session's mode, Claude's, decides after a reload.
+    mockStore.world.takeOver(chat);
+    await expect.element(second.screen.getByRole('status').filter({ hasText: 'Maria Rivera joined the chat' })).toBeVisible();
+    chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
+    const third = await renderRoute(PAGE);
+    await ready(third.screen);
+    expect(systemLines()).toEqual(['Maria Rivera joined the chat']);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+  });
+
   it('the_head_goes_back_to_claude_when_the_chat_ends', async () => {
     const takenOver = async () => {
       const chat = mockStore.visitorSession(RIVERA.slug);

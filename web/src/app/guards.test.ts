@@ -180,6 +180,17 @@ const FROM_AN_ANSWER = /^(?:null|[\w.]+\.open_status \?\? null)$/;
 const OPEN_AND_TEXT = /\{[^{}]*\}/g;
 const STATUS_TIME = /\.(?:until|opens_at|as_of|refresh_at)\b|\[\s*['"`](?:until|opens_at|as_of|refresh_at)['"`]\s*\]|\{[^{}]*\b(?:until|opens_at|as_of|refresh_at)\b[^{}]*\}\s*=/g;
 
+// Whether the owner is in the chat, which changes the AI disclosure's line: the visitor chat's own
+// value, whose one source is the kernel's session mode. A prop (or a bare one, which is `true`)
+// anywhere under `public/` may only pass `chat.ownerInChat`, with `chat` from `useVisitorChat`.
+const OWNER_IN_CHAT_PROP = /(?<![\w.$'"`])ownerInChat(?![\w$'"`]|\s*\??:)(?:\s*=\s*(\{(?:[^{}]|\{[^{}]*\})*\}|"[^"]*"|'[^']*'))?/g;
+const CHAT_FROM_THE_HOOK = /\bconst\s+chat\s*=\s*useVisitorChat\(/;
+const CHAT_ASSIGNED = /(?<![\w.$])chat\s*=(?![=>])/g;
+const OTHER_CHAT_DECLARATION = /\b(?:let|var)\s+chat\b|\bfunction\s+\w*\s*\([^)]*(?<![\w.$])chat\b/;
+const OWNER_IN_CHAT_FIELD = /(?<![\w.$])ownerInChat\s*:\s*([^;\n]+)/g;
+const VISITOR_CHAT_FILE = 'public/PublicChatProvider.tsx';
+const CHAT_REDUCER_FILE = 'public/chatReducer.ts';
+
 // The first visit's dialog: the design system's, once its index exports it, with no stand-in left.
 const DS_INDEX_FILE = 'ds/index.ts';
 const ARRIVAL_FILE = 'owner/Arrival.tsx';
@@ -371,6 +382,45 @@ function bindingsNotFromTheHook(scanned: Source[]): string[] {
     if (OTHER_DECLARATION.test(text)) bad.push(`${file}: openStatus is declared or assigned elsewhere`);
     return bad;
   });
+}
+
+/** `text` without its comments, so a comment that names something isn't taken for code. */
+function codeOf(text: string): string {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+}
+
+/**
+ * `ownerInChat` props whose value isn't the visitor chat's own (`{chat.ownerInChat}`), bare ones,
+ * and files that pass it where `chat` doesn't come from `useVisitorChat` alone.
+ */
+function ownerInChatNotFromTheChat(scanned: Source[]): string[] {
+  return scanned.flatMap(({ file, text }) => {
+    const code = codeOf(text);
+    const props = [...code.matchAll(OWNER_IN_CHAT_PROP)].map((m) => m[1] ?? '');
+    if (props.length === 0) return [];
+    const bad = props.filter((value) => value !== '{chat.ownerInChat}').map((value) => `${file}: ownerInChat${value === '' ? '' : `=${value}`}`);
+    if (!CHAT_FROM_THE_HOOK.test(code)) bad.push(`${file}: chat doesn't come from useVisitorChat`);
+    if ((code.match(CHAT_ASSIGNED) ?? []).length !== 1 || OTHER_CHAT_DECLARATION.test(code)) bad.push(`${file}: chat is declared or assigned elsewhere`);
+    return bad;
+  });
+}
+
+/**
+ * Where the visitor chat's `ownerInChat` could come from anything but the session's mode: a value
+ * in the chat other than its type, `false` or `ownerInChatNow(…)`, and an `ownerInChatNow` that
+ * doesn't read `session?.mode === 'owner'` or has another way to say yes.
+ */
+function ownerInChatSources(chat: string, reducer: string): string[] {
+  const bad = [...codeOf(chat).matchAll(OWNER_IN_CHAT_FIELD)]
+    .map((m) => (m[1] ?? '').replace(/[\s,}]+$/, '').trim())
+    .filter((value) => value !== 'boolean' && value !== 'false' && !(/\bownerInChatNow\(/.test(value) && !/\btrue\b|\|\||\?\?/.test(value)))
+    .map((value) => `${VISITOR_CHAT_FILE}: ownerInChat: ${value}`);
+  const code = codeOf(reducer);
+  const body = functionBody(code, 'ownerInChatNow');
+  const said = body === null ? '' : code.slice(...body);
+  if (!/\bsession\?\.mode === 'owner'/.test(said)) bad.push(`${CHAT_REDUCER_FILE}: ownerInChatNow doesn't read the session's mode`);
+  if (/\btrue\b|\|\||\?\?/.test(said)) bad.push(`${CHAT_REDUCER_FILE}: ownerInChatNow has another way to say yes`);
+  return bad;
 }
 
 /** Assignments to `openStatus` in the hook whose value isn't an answer's `.open_status` or null. */
@@ -688,6 +738,39 @@ describe('app source guards', () => {
     expect(functionBody(hook?.text ?? '', 'openStatusDelayMs'), 'openStatusDelayMs is in useOpenStatus.ts').not.toBeNull();
     const reducer = visitor.find((s) => s.file === 'public/chatReducer.ts');
     expect(functionBody(reducer?.text ?? '', 'ownerTypingDelayMs'), 'ownerTypingDelayMs is in chatReducer.ts').not.toBeNull();
+  });
+
+  it('owner_in_chat_comes_only_from_the_sessions_mode', () => {
+    const visitor = sources.filter((s) => s.file.startsWith('public/') && /\.tsx?$/.test(s.file));
+    const hook = "const chat = useVisitorChat(slug, previewDeskId);\n";
+
+    // Props: only the visitor chat's own value, by its own name, from the hook.
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell ownerInChat={true} />`))).toEqual(['sample.tsx: ownerInChat={true}']);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell ownerInChat />`))).toEqual(['sample.tsx: ownerInChat']);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}<PublicShell ownerInChat={ready && joined(state)} />`))).toHaveLength(1);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}const { ownerInChat } = chat;\n<PublicShell ownerInChat={ownerInChat} />`))).toHaveLength(2);
+    expect(ownerInChatNotFromTheChat(sample('const chat = { ownerInChat: true };\n<PublicShell ownerInChat={chat.ownerInChat} />'))).toHaveLength(1);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}chat = other;\n<PublicShell ownerInChat={chat.ownerInChat} />`))).toHaveLength(1);
+    expect(ownerInChatNotFromTheChat(sample(`${hook}// ownerInChat={true} in a comment\n<PublicShell ownerInChat={chat.ownerInChat} />`))).toEqual([]);
+    expect(ownerInChatNotFromTheChat(sample("type Set = Omit<Snapshot, 'ownerInChat'>;"))).toEqual([]);
+    expect(ownerInChatNotFromTheChat(visitor)).toEqual([]);
+    // It is passed where it is meant to be, so the check can't pass by finding nothing.
+    expect(visitor.filter(({ text }) => /\bownerInChat=\{chat\.ownerInChat\}/.test(codeOf(text))).map(({ file }) => file)).toEqual(['public/PublicChat.tsx']);
+
+    // In the visitor chat, the value is `ownerInChatNow`'s, which reads the session's mode and only
+    // ANDs on what keeps it false.
+    const now = "export function ownerInChatNow(session: SessionState | null, state: ChatState): boolean {\n  return session?.mode === 'owner' && !state.catchingUp;\n}\n";
+    expect(ownerInChatSources("ownerInChat: boolean;\nownerInChat: false,\nownerInChat: ready && ownerInChatNow(session, state),", now)).toEqual([]);
+    expect(ownerInChatSources('ownerInChat: state.rows.some(joined),', now)).toHaveLength(1);
+    expect(ownerInChatSources('ownerInChat: ownerInChatNow(session, state) || joined,', now)).toHaveLength(1);
+    expect(ownerInChatSources('', now.replace("session?.mode === 'owner'", 'joined(state)'))).toHaveLength(1);
+    expect(ownerInChatSources('', now.replace('&& !state.catchingUp', '|| joined(state)'))).toHaveLength(1);
+    const chat = visitor.find((s) => s.file === VISITOR_CHAT_FILE);
+    const reducer = visitor.find((s) => s.file === CHAT_REDUCER_FILE);
+    expect(chat, VISITOR_CHAT_FILE).toBeDefined();
+    expect(reducer, CHAT_REDUCER_FILE).toBeDefined();
+    expect(ownerInChatSources(chat?.text ?? '', reducer?.text ?? '')).toEqual([]);
+    expect([...codeOf(chat?.text ?? '').matchAll(OWNER_IN_CHAT_FIELD)].some((m) => /\bownerInChatNow\(/.test(m[1] ?? '')), 'the chat sets it from ownerInChatNow').toBe(true);
   });
 
   it('mark_tile_only_in_the_app_icon', () => {

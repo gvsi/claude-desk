@@ -13,12 +13,6 @@
  * identity, so only the cursor keeps one from showing twice: the API reads `last_seq` in the same
  * snapshot as the items, so the stream resumes after the last join or leave the transcript holds.
  *
- * Whether the owner is in the chat, which the chat's head says in the disclosure's place
- * (`ownerInChat`), fails safe to no: only her join says she is, read live or as the latest join or
- * leave stored in a session in her hands, and only while the chat is following the stream. Her
- * leave, Claude writing, any error, the chat ending or a new chat says she isn't; a stream that
- * dropped, or a page that comes back, doesn't know until it has caught up.
- *
  * A held request's later lines ("Cancelled", "Maria Rivera approved this") stay under the message
  * that holds it, as every receipt stays under its own message, however far the chat has gone on.
  * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
@@ -39,6 +33,7 @@ import type {
   EvOwnerJoined,
   EvOwnerLeft,
   EvOwnerTyping,
+  SessionState,
   SseEvent,
   StatusEvent,
 } from '../api/contracts.ts';
@@ -76,15 +71,6 @@ export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
    * runs out (`owner_typing_over`).
    */
   ownerTyping: OwnerTyping | null;
-  /**
-   * The owner has taken the chat over, as the chat last heard: set by her `owner_joined`, and read
-   * from the stored conversation as its latest join or leave being a join while the session is in
-   * her hands (`mode: 'owner'`), so a hand-back whose leave the API never kept doesn't count. Her
-   * `owner_left`, Claude starting to write (it isn't paused), any `error`, the chat ending and a new
-   * chat clear it. The page reads it through `ownerInChat`, which also asks that the chat be
-   * following the stream.
-   */
-  ownerJoined: boolean;
   /** The highest seq the chat has seen; the stream resumes after it. */
   lastSeq: number;
   /**
@@ -138,7 +124,6 @@ export function initialChatState(): ChatState {
     ...emptyGroups<ChatItem, ReceiptView>(),
     writing: false,
     ownerTyping: null,
-    ownerJoined: false,
     lastSeq: 0,
     catchingUp: false,
     connection: 'open',
@@ -165,13 +150,15 @@ export function ownerTypingDelayMs(ev: EvOwnerTyping, nowMs: number): number {
 }
 
 /**
- * Whether the page says the owner is in the chat (PublicShell's `ownerInChat`): she joined, as the
- * chat last heard (`ownerJoined`), and the chat is following the stream now, so it would have heard
- * her leave. While the stream is down or catching up on what it missed, or once the chat has ended,
- * it says no, and the head shows the AI disclosure.
+ * Whether the page says the owner is in the chat (PublicShell's `ownerInChat`, which changes the AI
+ * disclosure's line). Its one source is the kernel's session mode, `session.mode === 'owner'`: the
+ * visitor chat reads it with the stored conversation and follows the stream's join and leave. The
+ * chat's lines never decide it. It fails safe to no: no session, any other mode, an error (the chat
+ * ending included), and a stream that is down or catching up on what it missed (a drop, or the page
+ * coming back), since the chat can't know then whether she has left.
  */
-export function ownerInChat(state: ChatState): boolean {
-  return state.ownerJoined && state.connection === 'open' && !state.catchingUp && state.error !== 'session';
+export function ownerInChatNow(session: SessionState | null, state: ChatState): boolean {
+  return session?.mode === 'owner' && state.error === null && state.connection === 'open' && !state.catchingUp;
 }
 
 const messageKey = (ev: EvMessage) => `m:${ev.message_id}`;
@@ -241,20 +228,15 @@ function fromHistory(transcript: VisitorTranscript): ChatState {
   // A stored conversation has no writing events: a turn Claude started on its own is found by what
   // follows a decision's status, as the owner's view finds it.
   const groups = groupRows(items, partOf, { writingBefore: opensAReply });
-  // The owner is in the chat when her latest join or leave kept is a join and the session is in her
-  // hands: a hand-back whose leave was never kept leaves a join last, and the session says otherwise.
-  const presence = items.findLast((item) => isPresence(item.event) && item.event.type === item.kind);
-  const ownerJoined = presence?.kind === 'owner_joined' && transcript.state.mode === 'owner';
-  return { ...initialChatState(), ...groups, ownerJoined, lastSeq: transcript.last_seq, openHolds, holds, seen };
+  return { ...initialChatState(), ...groups, lastSeq: transcript.last_seq, openHolds, holds, seen };
 }
 
 function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
   switch (ev.type) {
     case 'writing':
       // Claude has started a turn: what it does now explains the reply it is writing, so the turn's
-      // receipts wait for that reply, even in a turn the API started with no visitor message. Claude
-      // writing isn't paused, so the owner isn't in the chat, whatever the chat last heard.
-      return { ...state, ...addPart(state, { kind: 'writing' }), writing: true, ownerJoined: false, error: null };
+      // receipts wait for that reply, even in a turn the API started with no visitor message.
+      return { ...state, ...addPart(state, { kind: 'writing' }), writing: true, error: null };
     case 'turn_end':
       return { ...state, ...settle(state), writing: false, ownerTyping: null };
     case 'message': {
@@ -285,15 +267,9 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
       };
     }
     case 'owner_joined':
-      return { ...state, ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))), writing: false, ownerJoined: true };
+      return { ...state, ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))), writing: false };
     case 'owner_left':
-      return {
-        ...state,
-        ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))),
-        writing: false,
-        ownerTyping: null,
-        ownerJoined: false,
-      };
+      return { ...state, ...arrived(state, addPart(state, presenceLine(`s${seq}`, ev))), writing: false, ownerTyping: null };
     case 'owner_typing': {
       // Kept whole, without its type: a later typing event replaces it.
       const { type: _type, ...ownerTyping } = ev;
@@ -302,7 +278,7 @@ function onEvent(state: ChatState, seq: number, ev: SseEvent): ChatState {
     case 'demo_inbox':
       return { ...state, inbox: [...state.inbox, ev] };
     case 'error':
-      return { ...state, ...settle(state), writing: false, ownerTyping: null, ownerJoined: false, error: ev.code };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: ev.code };
   }
 }
 
@@ -363,7 +339,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // The stream resumes after the last seq the chat holds, and sends what it missed first.
       return { ...state, connection: action.connection, catchingUp: state.catchingUp || action.connection !== 'open' };
     case 'ended':
-      return { ...state, ...settle(state), writing: false, ownerTyping: null, ownerJoined: false, error: 'session' };
+      return { ...state, ...settle(state), writing: false, ownerTyping: null, error: 'session' };
     case 'reset':
       return initialChatState();
   }

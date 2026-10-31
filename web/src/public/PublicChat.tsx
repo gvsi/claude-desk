@@ -37,7 +37,7 @@ import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { brandFrom } from './brand.ts';
-import { ownerInChat, type ChatRow, type ChatState, type SendFailure } from './chatReducer.ts';
+import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
 import { useVisitorChat, type ChatStatus } from './PublicChatProvider.tsx';
@@ -638,9 +638,9 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         openStatus={openStatus}
         onAskForOwner={askForOwner}
         // While the owner has taken the chat over, the head says so in the disclosure's place, still
-        // naming Claude as an AI, and Ask goes. Only while the chat can be written in and follows
-        // the stream: anything less, and the head shows the AI disclosure.
-        ownerInChat={ready && ownerInChat(state)}
+        // naming Claude as an AI, and Ask goes. The visitor chat's own value, from the kernel's
+        // session mode, as it is: nothing on the page decides it.
+        ownerInChat={chat.ownerInChat}
         about={desk.charter}
         aboutLinks={aboutLinks}
         footer={!embedded}
