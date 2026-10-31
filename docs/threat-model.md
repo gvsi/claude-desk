@@ -30,6 +30,7 @@ Talking Claude around can't make it act past the owner's rules, because the kern
 - Promises without numbers or words like "guarantee" rely on a model check, which can miss.
 - Beside a booking card, the code check lets any booking claim through, since prose doesn't name which booking it means; a claim about another booking, or one that says more than the card, rests on the model check, which can miss.
 - That Claude never writes a look-alike link: links and email addresses in Claude's own replies rest on its prompt.
+- Which attempt of a reply is its last: the kernel trusts the API's `final` on each reply check, which decides whether a blocked draft opens an owner handoff and whether a visiting agent's turn ends there, and the ledger records it on each check.
 - Isolation from a compromised host or container: the kernel is a separate process in the same task, not a separate machine.
 - Denial of service beyond per-visitor rate limits and the hosted demo's daily model budget.
 

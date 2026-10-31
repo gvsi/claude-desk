@@ -11,8 +11,11 @@ their kind from the row itself (below).
 The table holds no rule of one open handoff per session: during a deploy the previous release's
 kernel serves beside this schema and inserts a call-back's handoff whatever else is open, and a
 unique index would fail it. This release keeps one per session in its own code, under the session
-row, and rows from before may hold several. Consolidating those, by when each was requested and
-with each closure ledgered, is left to a follow-up.
+row (a call-back request closes the session's open ones before it opens its own, and a card opens
+only with none open), so rows from before may hold several until the next call-back closes them.
+`created_at` (the kernel's time; null on rows from before, and on the previous release's) orders a
+session's open handoffs, and a plain partial index, `handoffs_open_by_session`, serves the look
+for them that each reply check makes.
 
 A card's handoff has no action. `action_id` stays NOT NULL and unique: a card's names the
 handoff's own id, which no action's id can equal (an action's id starts `act-`, a handoff's
@@ -80,6 +83,16 @@ DROP_KIND = """
     ALTER TABLE kernel.handoffs DROP COLUMN IF EXISTS kind;
 """
 
+# When each handoff opened, and the index a session's open handoffs are looked up by.
+ADD_OPENED = """
+    ALTER TABLE kernel.handoffs ADD COLUMN IF NOT EXISTS created_at timestamptz;
+    CREATE INDEX IF NOT EXISTS handoffs_open_by_session ON kernel.handoffs (session_id) WHERE status = 'open';
+"""
+DROP_OPENED = """
+    DROP INDEX IF EXISTS kernel.handoffs_open_by_session;
+    ALTER TABLE kernel.handoffs DROP COLUMN IF EXISTS created_at;
+"""
+
 def _script(sql: str) -> None:
     """Run a multi-statement SQL script as-is (no parameters), inside the migration's transaction."""
     op.get_bind().connection.driver_connection.execute(sql)
@@ -115,10 +128,12 @@ def upgrade() -> None:
     _script("DROP VIEW kernel_ro.handoffs;")
     _script(ADD_KIND)
     _script("GRANT SELECT (kind) ON kernel.handoffs TO desk_ro_owner;")
+    _script(ADD_OPENED)
     _create_view(AFTER)
 
 
 def downgrade() -> None:
     _script("DROP VIEW kernel_ro.handoffs;")
+    _script(DROP_OPENED)
     _script(DROP_KIND)                    # dropping the column drops its CHECK and its column grant too
     _create_view(BEFORE)

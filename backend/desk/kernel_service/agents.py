@@ -56,6 +56,7 @@ import re
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import get_args
 from functools import partial
 
 import desk_kernel
@@ -66,7 +67,8 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, AgentAuth, DemoAgentIssued, LedgerEvent, Mandate, ReplyVerdict
+from desk.contracts import (AUTO_MONEY_HARD_CAP_CENTS, AgentAuth, DemoAgentIssued, LedgerEvent, Mandate, ReplyVerdict,
+                            Violation)
 from desk.db.models import AgentKey, AgentNonce, DemoWalletKey, Desk
 from desk.db.models import Mandate as MandateRow
 from desk.kernel_api import DemoAgentRequest
@@ -84,6 +86,8 @@ DEMO_ON_BEHALF_OF = "Demo visitor"
 DEMO_PER_CHARGE_CENTS = 2_000            # the "Agent demo" row: $20 a charge, $100 in all, for an hour
 DEMO_TOTAL_CENTS = 10_000
 DEMO_MANDATE_TTL = timedelta(hours=1)
+# the violations that hand off at once: every kind but those a rewrite can fix (desk.rewrites)
+IMMEDIATE_HANDOFFS = frozenset(get_args(Violation.model_fields["kind"].annotation)) - REWRITABLE
 TURN_CHECKS = 2                          # a turn's second reply check ends it
 
 KEY_ID = re.compile(r"[0-9a-f]{16}")
@@ -264,7 +268,7 @@ async def end_turn(ctx: KernelCtx, request: Request, verdict: ReplyVerdict, *, f
         return
     nonce = await _nonce_row(ctx, turn.agent_key_id, turn.nonce)
     nonce.check_replies += 1
-    immediate = any(violation.kind not in REWRITABLE for violation in verdict.violations)
+    immediate = any(violation.kind in IMMEDIATE_HANDOFFS for violation in verdict.violations)
     if (verdict.ok or immediate or final or nonce.check_replies >= TURN_CHECKS) and nonce.spent_at is None:
         nonce.spent_at = ctx.clock.now()
     await ctx.db.flush()

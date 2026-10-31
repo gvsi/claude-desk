@@ -36,7 +36,8 @@ from .test_execute import executed
 from .test_lead_tools import CALLBACK, TZ, alert_now, callback, handoff_done, owner_alerts
 from .test_owner_messages import sent
 from .test_release_document import DANA, confirmed
-from .test_reply_check import assert_handed_off, checked, clause, keep_alive_until, post_check, reply_entries
+from .test_reply_check import (assert_handed_off, checked, clause, keep_alive_until, post_check, public_key,
+                               reply_entries, verify_verdict)
 from .test_verification import api_rows
 
 CARD_REASON = "The Desk handed this to you."
@@ -340,13 +341,16 @@ async def checked_as(client, visitor, prose: str, clauses=(), *, final: bool | N
 async def test_a_draft_the_api_will_rewrite_opens_no_handoff(app, client, reviewer, prose, soft_answer, kind):
     """A first attempt (`final: false`) blocked only for what a rewrite can fix (`desk.rewrites`) is
     never shown: the API sends Claude the violations and checks the rewrite. So the kernel opens no
-    handoff for it, alerts no one, and leaves nothing to back a later reply."""
+    handoff for it, alerts no one, and leaves nothing to back a later reply; and its verdict, still
+    signed and ledgered, carries no blocks, so it never holds a showable handoff card that no
+    handoff backs."""
     copy, visitor = await visitor_of(app, client)
     if soft_answer is not None:
         reviewer.soft_answer = soft_answer
     verdict = await checked_as(client, visitor, prose, final=False)
-    assert_handed_off(verdict)                                    # the kernel's verdict is as ever
+    assert (verdict.ok, verdict.blocks, verdict.visitor_plain) == (False, [], "Passed to Maria Rivera to answer")
     assert {violation.kind for violation in verdict.violations} == {kind}
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
     assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
     assert handoff_entries(await ledger_rows(app, copy)) == []
     [entry] = await reply_entries(app, copy)
@@ -361,7 +365,8 @@ async def test_a_rewritten_draft_leaves_no_phantom_handoff(app, client, reviewer
     Claude's clean rewrite, which passes. No handoff is opened, no alert sent, and the rewrite's
     check is shown no handoff card."""
     copy, visitor = await visitor_of(app, client)
-    assert not (await checked_as(client, visitor, BLOCKED, final=False)).ok
+    first = await checked_as(client, visitor, BLOCKED, final=False)
+    assert (first.ok, first.blocks) == (False, [])
     rewrite = await checked_as(client, visitor, CLEAN, final=True)
     assert rewrite.ok and [(block.kind, block.text) for block in rewrite.blocks] == [("prose", CLEAN)]
     assert reviewer.soft_inputs[-1].cards == []
@@ -383,7 +388,7 @@ async def test_a_draft_no_rewrite_can_fix_opens_one_even_on_a_first_attempt(app,
 @pytest.mark.parametrize("final", [True, None], ids=["final", "absent"])
 async def test_a_final_draft_or_one_that_says_nothing_opens_one(app, client, final):
     copy, visitor = await visitor_of(app, client)
-    assert not (await checked_as(client, visitor, BLOCKED, final=final)).ok
+    assert_handed_off(await checked_as(client, visitor, BLOCKED, final=final))     # the handoff card, shown
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
     assert len(await handoff_alerts(app, copy)) == 1
     [entry] = await reply_entries(app, copy)
@@ -425,11 +430,19 @@ async def test_the_owners_own_preview_opens_no_handoff(app, client):
 SAM = "Sam Lee · (510) 555-0100 · The water heater is leaking"     # the call-back's reason, as CALLBACK writes it
 
 
-async def test_a_call_back_request_takes_over_the_open_card_handoff(app, client):
-    """A call-back request in a conversation the card already handed to the owner makes that
-    handoff the call-back's, in the call-back's own transaction: kind `callback`, its reason, its
-    window and fact, and its action, so the session keeps one open handoff and the owner one item.
-    The card's alert isn't repeated; the call-back alerts as call-backs do."""
+def closed_entries(entries: list[LedgerEntry]) -> list[list[str]]:
+    """The handoffs each `desk_data` closing entry names, in order: the owner's mark, or a call-back's."""
+    return [entry.event.summary["refs"] for entry in entries if entry.event.kind == "desk_data"
+            and entry.event.summary.get("part") == "handoffs" and "kind" not in entry.event.summary]
+
+
+async def test_a_call_back_request_closes_the_open_card_handoff_and_opens_its_own(app, client, frozen_clock):
+    """A call-back request in a conversation the card already handed to the owner closes the card's
+    handoff, as the owner's mark of done closes one and ledgered as it is, and opens its own, of kind
+    `callback`, with its window, fact and action. A row's kind never changes, so the session keeps
+    one open handoff, the owner one item, and an owner's stale mark of done on the card's item
+    answers 409 without touching the call-back. The card's alert isn't repeated; the call-back
+    alerts as call-backs do."""
     copy, visitor = await visitor_of(app, client)                 # Friday 10:04 in Oakland: 11:00 to 12:00
     await alert_now(app, copy, "callback")
     assert_handed_off(await checked(client, visitor, BLOCKED))
@@ -437,65 +450,74 @@ async def test_a_call_back_request_takes_over_the_open_card_handoff(app, client)
     decision = await decided(client, visitor, "native.request_callback", CALLBACK)
     result = await executed(client, visitor, decision)
 
-    [handoff] = await handoffs_of(app, copy)
-    assert handoff.handoff_id == card.handoff_id == result.model_view["handoff_id"]
-    assert (handoff.kind, handoff.status, handoff.action_id, handoff.reason) == (
+    rows = {row.handoff_id: row for row in await handoffs_of(app, copy)}
+    called = rows[result.model_view["handoff_id"]]
+    assert (rows[card.handoff_id].kind, rows[card.handoff_id].status) == ("card", "done")
+    assert (called.kind, called.status, called.action_id, called.reason) == (
         "callback", "open", decision.action.action_id, SAM)
-    assert (handoff.window_start, handoff.window_end) == (datetime(2026, 10, 30, 11, tzinfo=TZ),
-                                                          datetime(2026, 10, 30, 12, tzinfo=TZ))
-    assert api_rows(copy.copy_id, "SELECT handoff_id, kind, callback_window, status FROM kernel_ro.handoffs") == [
-        (card.handoff_id, "callback", "2026-10-30T11:00:00-07:00/2026-10-30T12:00:00-07:00", "open")]
+    assert (called.window_start, called.window_end) == (datetime(2026, 10, 30, 11, tzinfo=TZ),
+                                                        datetime(2026, 10, 30, 12, tzinfo=TZ))
+    assert (rows[card.handoff_id].created_at, called.created_at) == (frozen_clock.now(), frozen_clock.now())
+    assert closed_entries(await ledger_rows(app, copy)) == [[card.handoff_id]]   # as the owner's mark is ledgered
     [fact] = result.facts
-    assert (fact.fact_id, fact.kind, fact.status) == (f"handoff:{card.handoff_id}", "handoff", "committed")
+    assert (fact.fact_id, fact.kind, fact.status) == (f"handoff:{called.handoff_id}", "handoff", "committed")
     assert len(await handoff_alerts(app, copy)) == 1                         # the card's, not repeated
     assert len([alert for alert in await owner_alerts(client, copy) if "Sam Lee" in alert.body]) == 1
     reconciled = await run(app, copy.copy_id, decision, "reconcile")       # found by its action, as any call-back
     assert (reconciled.facts, reconciled.model_view) == (result.facts, result.model_view)
+
+    response = await handoff_done(client, card.handoff_id, copy.owner)    # the owner's view from before
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy) if row.status == "open"] == [
+        ("callback", "open")]
     verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact.fact_id)])
     assert verdict.ok, verdict.violations
 
 
-async def test_a_second_call_back_request_takes_over_the_first(app, client, frozen_clock):
-    """A second call-back request while the first is open makes that handoff the second's: its
-    reason, window, action and fact, the fact keeping its ID, so the visitor's card shows the time
-    now promised. Each call-back alerts as call-backs do."""
+async def test_a_second_call_back_request_closes_the_first(app, client, frozen_clock):
+    """A second call-back request while the first is open closes the first, its fact expired, and
+    opens its own with the time now promised. Each keeps its own row, so the first call-back's
+    reconciliation still finds its own. Each alerts as call-backs do."""
     copy, visitor = await visitor_of(app, client)
     await alert_now(app, copy, "callback")
-    first = await callback(client, visitor)                       # 10:04: 11:00 to 12:00
+    first_decision = await decided(client, visitor, "native.request_callback", CALLBACK)
+    first = await executed(client, visitor, first_decision)       # 10:04: 11:00 to 12:00
     frozen_clock.advance(3600)                                    # 11:04: 12:00 to 13:00
     decision = await decided(client, visitor, "native.request_callback", {**CALLBACK, "contact": "(510) 555-0199"},
                              call_id="call-2")
     second = await executed(client, visitor, decision)
 
-    [handoff] = await handoffs_of(app, copy)
-    assert handoff.handoff_id == first.model_view["handoff_id"] == second.model_view["handoff_id"]
-    assert (handoff.kind, handoff.action_id, handoff.reason) == (
-        "callback", decision.action.action_id, "Sam Lee · (510) 555-0199 · The water heater is leaking")
-    noon, one = datetime(2026, 10, 30, 12, tzinfo=TZ), datetime(2026, 10, 30, 13, tzinfo=TZ)
-    assert (handoff.window_start, handoff.window_end) == (noon, one)
-    [fact] = await rows_of(app, copy.copy_id, select(Fact).where(Fact.kind == "handoff"))
-    assert (fact.fact_id, fact.status, fact.action_id, fact.expires_at) == (
-        first.facts[0].fact_id, "committed", decision.action.action_id, one)
-    assert [f.fact_id for f in second.facts] == [fact.fact_id]
+    rows = {row.handoff_id: row for row in await handoffs_of(app, copy)}
+    earlier, later = rows[first.model_view["handoff_id"]], rows[second.model_view["handoff_id"]]
+    assert (earlier.status, earlier.action_id) == ("done", first_decision.action.action_id)
+    assert (later.status, later.kind, later.action_id, later.reason) == (
+        "open", "callback", decision.action.action_id, "Sam Lee · (510) 555-0199 · The water heater is leaking")
+    assert (later.window_start, later.window_end) == (datetime(2026, 10, 30, 12, tzinfo=TZ),
+                                                      datetime(2026, 10, 30, 13, tzinfo=TZ))
+    facts = {row.fact_id: row.status for row in await rows_of(app, copy.copy_id, select(Fact).where(
+        Fact.kind == "handoff"))}
+    assert facts == {first.facts[0].fact_id: "expired", second.facts[0].fact_id: "committed"}
+    assert closed_entries(await ledger_rows(app, copy)) == [[earlier.handoff_id]]
     assert len([alert for alert in await owner_alerts(client, copy) if "Sam Lee" in alert.body]) == 2
+    reconciled = await run(app, copy.copy_id, first_decision, "reconcile")
+    assert reconciled.model_view == first.model_view                       # its own row, closed
 
 
 async def test_two_call_back_requests_at_once_leave_one_open_handoff(app, client):
     """A call-back's execution holds the session row FOR UPDATE, so two call-back requests run at once
-    in one session take turns: the second finds the first's handoff and takes it over."""
+    in one session take turns: the second closes the first's handoff and opens its own."""
     copy, visitor = await visitor_of(app, client)
     decisions = [await decided(client, visitor, "native.request_callback", CALLBACK, call_id=call_id)
                  for call_id in ("call-1", "call-2")]
     results = await asyncio.gather(*(executed(client, visitor, decision) for decision in decisions))
     assert [result.state for result in results] == ["succeeded", "succeeded"]
-    [handoff] = await handoffs_of(app, copy)
-    assert (handoff.kind, handoff.status) == ("callback", "open")
-    assert handoff.action_id in {decision.action.action_id for decision in decisions}
-    assert {result.model_view["handoff_id"] for result in results} == {handoff.handoff_id}
+    rows = await handoffs_of(app, copy)
+    assert sorted((row.kind, row.status) for row in rows) == [("callback", "done"), ("callback", "open")]
+    assert {row.handoff_id for row in rows} == {result.model_view["handoff_id"] for result in results}
 
 
 async def legacy_call_back(app: FastAPI, copy: Rivera, visitor: Visitor, handoff_id: str, action_id: str) -> None:
-    """An open call-back's handoff written as an earlier kernel wrote it, beside any other open one."""
+    """An open call-back's handoff as an earlier kernel wrote it (no `created_at`), beside any other."""
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=copy.copy_id, desk_id=copy.desk_id,
@@ -503,28 +525,23 @@ async def legacy_call_back(app: FastAPI, copy: Rivera, visitor: Visitor, handoff
                            action_id=action_id))
 
 
-async def test_a_session_left_with_several_open_call_backs_has_its_newest_taken_over(app, client, frozen_clock):
+async def test_a_session_holding_several_open_handoffs_has_them_closed_by_the_next_call_back(app, client):
     """A session may hold several open call-backs from before one open handoff per session was
-    kept, or from the previous release during a deploy. The next call-back request takes over the
-    most recent, by when its request was made (its action's), never by its random ID, and leaves the
-    older ones as they are. A card shown there opens none."""
+    kept, or from the previous release during a deploy. A card shown there opens none; the next
+    call-back request closes them all, each ledgered as the owner's mark is, and opens its own."""
     copy, visitor = await visitor_of(app, client)
-    older = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-1")
-    frozen_clock.advance(600)
-    newer = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-2")
-    await legacy_call_back(app, copy, visitor, "handoff-zzzz", older.action.action_id)
-    await legacy_call_back(app, copy, visitor, "handoff-aaaa", newer.action.action_id)   # the newest, first by ID
+    for handoff_id, call_id in (("handoff-zzzz", "call-1"), ("handoff-aaaa", "call-2")):
+        earlier = await decided(client, visitor, "native.request_callback", CALLBACK, call_id=call_id)
+        await legacy_call_back(app, copy, visitor, handoff_id, earlier.action.action_id)
     assert_handed_off(await checked(client, visitor, BLOCKED))
     assert await handoff_alerts(app, copy) == []                                      # no card's handoff beside them
 
-    frozen_clock.advance(600)
-    latest = await decided(client, visitor, "native.request_callback", {**CALLBACK, "contact": "(510) 555-0199"},
-                           call_id="call-3")
+    latest = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-3")
     result = await executed(client, visitor, latest)
-    assert (result.state, result.model_view["handoff_id"]) == ("succeeded", "handoff-aaaa")
-    rows = {row.handoff_id: (row.status, row.action_id) for row in await handoffs_of(app, copy)}
-    assert rows == {"handoff-aaaa": ("open", latest.action.action_id),
-                    "handoff-zzzz": ("open", older.action.action_id)}             # the older, as it was
+    rows = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
+    assert rows == {"handoff-zzzz": ("callback", "done"), "handoff-aaaa": ("callback", "done"),
+                    result.model_view["handoff_id"]: ("callback", "open")}
+    assert sorted(closed_entries(await ledger_rows(app, copy))) == [["handoff-aaaa"], ["handoff-zzzz"]]
 
 
 # ---- A held request awaiting the owner (the owner's decision of 2026-10-31) ---------------------------

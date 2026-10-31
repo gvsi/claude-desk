@@ -531,8 +531,8 @@ async def test_a_call_back_taking_over_a_card_handoff_runs_in_the_lock_order(app
         assert (await executed(client, visitor, allowed)).state == "succeeded"
     assert log.transactions == [
         ["sessions", "decisions", "executions"],                    # T1: the intent
-        # T2, holding the session row FOR UPDATE (one open handoff per session): the open handoff, made the
-        # call-back's, then its fact, then the outcome
+        # T2, holding the session row FOR UPDATE (one open handoff per session): the open handoff, closed, and the
+        # call-back's own, then their facts, then the closing's entry and the outcome
         ["sessions", "decisions", "executions", "handoffs", "facts", "ledger_heads"],
     ]
 
@@ -547,8 +547,8 @@ async def test_a_call_back_beside_several_open_ones_runs_in_the_lock_order(app, 
     allowed = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-3")
     with lock_log(app) as log:
         assert (await executed(client, visitor, allowed)).state == "succeeded"
-    # T2 holds the session row FOR UPDATE, then the open handoffs FOR UPDATE (their actions read without a
-    # lock, to find the most recent), then the fact, then the outcome
+    # T2 holds the session row FOR UPDATE, then the open handoffs FOR UPDATE, closed newest first, and the
+    # call-back's own, then their facts, then the closings' entries and the outcome
     assert log.transactions[-1] == ["sessions", "decisions", "executions", "handoffs", "facts", "ledger_heads"]
     assert all(map(in_lock_order, log.transactions))
 

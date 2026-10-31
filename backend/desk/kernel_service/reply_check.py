@@ -44,7 +44,8 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    without a lock, so the model never holds one; a reply that passes with its card is checked
    again in step 7.
 6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
-   handoff clause, in the reply's language.
+   handoff clause, in the reply's language, or no block at all for a first attempt the API
+   rewrites (`final` false, every violation one a rewrite can fix), which is never shown.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
    lines, until the next turn starts (its row written only now, so no lock on it is held while the model reads the draft); a
    reply that passed step 5 with an open handoff's card passes only if a handoff is still open,
@@ -667,7 +668,9 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     blocked draft when it is `final`, or when one of its violations is outside the kinds a rewrite
     can fix (`desk.rewrites.REWRITABLE`), since the API then hands off at once. A first attempt
     (`final` false) blocked only for rewritable kinds is never shown, since the API asks Claude
-    for a rewrite, so it opens none. An owner's message never opens one, and neither does the
+    for a rewrite, so it opens none, and its verdict, still signed and ledgered, carries no blocks:
+    the kernel never signs a showable handoff card that no handoff backs, and the API's rewrite
+    reads only the violations. An owner's message never opens one, and neither does the
     owner's own preview of the Desk (`preview`; the owner's decision of 2026-10-31)."""
     if seen:
         session_row.last_seen_at = ctx.clock.now()
@@ -679,6 +682,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
         blocks = [handoff(language, await _desk_info(ctx, session_row.desk_id))]
     shown = not violations or final or any(violation.kind not in REWRITABLE for violation in violations)
+    if author == "claude" and not shown:
+        blocks = []                    # the API rewrites it: no handoff card is signed that no handoff backs
     if author == "claude" and shown and not session_row.preview and any(block.template == "handoff"
                                                                         for block in blocks):
         await open_card_handoff(ctx, session_row)
@@ -789,7 +794,7 @@ async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | No
     In the lock order: the session row first (`FOR NO KEY UPDATE`, the mode `finalize`'s write
     takes, read as columns, so the row the request read keeps the generation the verdict is signed
     at), then the session's open handoffs `FOR SHARE`, then the ledger head. Two checks of one
-    session, a call-back's execution (which holds the session row `FOR SHARE`) and the owner's
+    session, a call-back's execution (which holds the session row `FOR UPDATE`) and the owner's
     mark of done (which holds the handoff `FOR UPDATE`) each come wholly before or after it.
 
     It opens none when a take-over or hand-back has moved the session to another generation since
@@ -817,7 +822,7 @@ async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | No
     handoff_id = new_id("handoff")
     ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=copy_id, desk_id=desk_id, session_id=session_id,
                        reason=CARD_REASON, callback_window=None, status="open", kind="card", action_id=handoff_id,
-                       window_start=None, window_end=None))
+                       window_start=None, window_end=None, created_at=ctx.clock.now()))
     await ctx.db.flush()
     who = await _waiting(ctx, current.kind, current.assurance, current.person_id)
     await demo_inbox.alert_owner(ctx, desk_id, "handoff", render.owner_preview("handoff"), card_alert(who))

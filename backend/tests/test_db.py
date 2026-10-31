@@ -1142,6 +1142,11 @@ def test_a_handoff_from_before_the_kind_revision_is_a_callback(scratch):
                                    " AND table_name = 'handoffs' AND column_name = 'kind'").fetchone()
         assert default == "'callback'::text"         # the previous release, during a deploy, names no kind
         assert columns(admin, "kernel_ro", "handoffs")[-1] == "kind"
+        assert nullable_columns(admin, "kernel", "handoffs")["created_at"] is True    # null on rows from before
+        assert admin.execute("SELECT indexdef FROM pg_indexes WHERE schemaname = 'kernel'"
+                             " AND indexname = 'handoffs_open_by_session'").fetchone() == (
+            "CREATE INDEX handoffs_open_by_session ON kernel.handoffs USING btree (session_id)"
+            " WHERE (status = 'open'::text)",)
         insert("handoff-card", "handoff-card", "card")
         insert("handoff-callback", "act-callback", "callback")
         for refused in (("handoff-x", "act-x", "card"), ("handoff-y", "handoff-y", "callback"),
@@ -1160,6 +1165,9 @@ def test_a_handoff_from_before_the_kind_revision_is_a_callback(scratch):
         assert kinds() == kept
         scratch.migrate(command.downgrade, before)
         assert admin.execute("SELECT count(*) FROM kernel.handoffs WHERE copy_id = 'copy-kind'").fetchone() == (3,)
+        assert "created_at" not in columns(admin, "kernel", "handoffs")
+        assert admin.execute("SELECT count(*) FROM pg_indexes WHERE schemaname = 'kernel'"
+                             " AND indexname = 'handoffs_open_by_session'").fetchone() == (0,)
         scratch.migrate(command.upgrade, "head")
         assert kinds() == kept
         scratch.migrate(command.stamp, before)                       # the revision runs again over what it added
@@ -1213,9 +1221,9 @@ def test_the_previous_release_writes_call_backs_as_it_did(scratch):
             admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, reason, status,"
                           " action_id) VALUES (%s, 'copy-old', 'desk-old', 'session-old', 'Sam Lee', 'open', %s)",
                           (handoff_id, f"act-{handoff_id}"))
-        rows = admin.execute("SELECT handoff_id, kind, status FROM kernel.handoffs WHERE copy_id = 'copy-old'"
-                             " ORDER BY handoff_id").fetchall()
-        assert rows == [("handoff-old-a", "callback", "open"), ("handoff-old-b", "callback", "open")]
+        rows = admin.execute("SELECT handoff_id, kind, status, created_at FROM kernel.handoffs"
+                             " WHERE copy_id = 'copy-old' ORDER BY handoff_id").fetchall()
+        assert rows == [("handoff-old-a", "callback", "open", None), ("handoff-old-b", "callback", "open", None)]
     finally:
         admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-old'")
 

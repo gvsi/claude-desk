@@ -2,39 +2,38 @@
 
 The call names who to call, how to reach them and why, all text Claude writes into the call from
 what the visitor said (untrusted, and the owner reads it under "Claude's note"); it can't name a
-time. `execute` makes the session's handoff a call-back's: kind `callback`, a reason carrying that
-text for the owner, a window that is the Desk's next open hour (`desks.next_open_window`), or none,
-and the action's id, with a `handoff:<id>` fact labelled for the session (the callback confirmed
-card) whose only claims are the window, so no visitor text reaches a card. The kernel keeps one open
-handoff per session: when the session already has one, the handoff card's or an earlier
-call-back's, that one becomes this call-back's, in this execution's transaction, its fact written
-or rewritten under the same id, so the owner keeps one item for the conversation and the visitor's
-card shows the time now promised; otherwise a new one opens. A session may hold several open from
-before (or from the previous release, during a deploy): then the most recent becomes this one's,
-by when its request was made (`latest_open`), and the older ones are left as they are. The
-execution holds the session row `FOR UPDATE` (`locks_session`), so two such executions, or one and
-a reply check opening a card's handoff, take turns; the table itself holds no such rule. The fact
-expires when its window ends, and when the owner closes the handoff (`POST /handoffs/{id}/done`),
-so a callback that happened is never promised again.
+time. `execute` opens a new handoff of kind `callback`: a reason carrying that text for the owner,
+a window that is the Desk's next open hour (`desks.next_open_window`), or none, the action's id and
+the kernel's time, with a `handoff:<id>` fact labelled for the session (the callback confirmed card)
+whose only claims are the window, so no visitor text reaches a card. The kernel keeps one open
+handoff per session, so first it closes the session's open ones, the handoff card's or an earlier
+call-back's (`close_open`), each exactly as the owner's mark of done closes one: `done`, its fact
+expired, ledgered `desk_data` `{part: "handoffs", refs: [its id]}`. A row's kind never changes,
+so an owner's stale mark of done on the card answers 409, never closing the call-back, and each
+call-back's reconciliation finds its own row by its action. A session may hold several open from
+before, or from the previous release during a deploy, and all of them close. The execution holds
+the session row `FOR UPDATE` (`locks_session`), so two such executions, or one and a reply check
+opening a card's handoff, take turns; the table itself holds no such rule. The fact expires when
+its window ends, and when the owner closes the handoff (`POST /handoffs/{id}/done`), so a callback
+that happened is never promised again.
 The owner is alerted per the Desk's notification defaults; the alert is read only from the Demo
 inbox, so the result's `inbox` stays empty.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
-from desk.contracts import Claim, Fact, NormalizedAction, ResourceRef, ToolProfile
-from desk.db.models import Action as ActionRow
+from desk.contracts import Claim, Fact, LedgerEvent, NormalizedAction, ResourceRef, ToolProfile
 from desk.db.models import Fact as FactRow
 from desk.db.models import Handoff
-from desk.kernel_service import demo_inbox, desks, labels, render
+from desk.kernel_service import demo_inbox, desks, labels, ledger, render
 from desk.kernel_service.adapters import register
 from desk.kernel_service.adapters.base import (AdapterResult, ExecCtx, Normalized, NormalizeCtx, business_timezone,
                                                claudes_note)
-from desk.kernel_service.repo import new_id
+from desk.kernel_service.repo import KernelCtx, new_id
 
 
 class RequestCallbackArgs(BaseModel):
@@ -79,24 +78,17 @@ def model_view(fact_id: str, handoff_id: str) -> dict[str, Any]:
     return {"fact_id": fact_id, "handoff_id": handoff_id}
 
 
-async def latest_open(ctx, desk_id: str, session_id: str) -> Handoff | None:
-    """The session's most recent open handoff, its open ones held `FOR UPDATE` (step 10 of the lock
-    order, after the session row the execution holds): by when its request was made, a call-back's
-    being its action's `created_at`, read without a lock. A card's handoff counts as the oldest,
-    since one opens only while the session has none open, so any call-back open beside it came
-    later; a call-back whose action can't be found counts as the oldest too, and a tie goes to the
-    larger ID. None when the session has none open."""
+async def close_open(ctx: KernelCtx, desk_id: str, session_id: str) -> list[Handoff]:
+    """Closes the session's open handoffs, of either kind, each as the owner's mark of done closes one
+    (`app.close_handoff`): `done`, under its row's lock, its `handoff:<id>` fact expired. Newest first
+    (`created_at`, rows from before it last, then ID), so their locks come in one order. The caller
+    ledgers each closing once its own rows are written, at the ledger head."""
     rows = list(await ctx.db.scalars(ctx.repo.scoped(select(Handoff).where(
         Handoff.desk_id == desk_id, Handoff.session_id == session_id, Handoff.status == "open")
-        .order_by(Handoff.handoff_id).with_for_update())))
-    if len(rows) <= 1:
-        return rows[0] if rows else None
-    action_ids = [row.action_id for row in rows if row.kind == "callback"]
-    requested = dict((await ctx.db.execute(ctx.repo.scoped(select(ActionRow.action_id, ActionRow.created_at).where(
-        ActionRow.action_id.in_(action_ids))))).all())
-    never = datetime.min.replace(tzinfo=UTC)
-    return max(rows, key=lambda row: (requested.get(row.action_id, never) if row.kind == "callback" else never,
-                                      row.handoff_id))
+        .order_by(Handoff.created_at.desc().nulls_last(), Handoff.handoff_id).with_for_update())))
+    for row in rows:
+        row.status = "done"
+    return rows
 
 
 class RequestCallbackAdapter:
@@ -116,35 +108,32 @@ class RequestCallbackAdapter:
         window = desks.next_open_window(xctx.desk_row.hours, await business_timezone(ctx, xctx.desk_row), now)
         session_id = xctx.session_row.session_id
         start, end = window or (None, None)
-        written = {"reason": f"{args.name} · {args.contact} · {args.reason}", "kind": "callback",
-                   "callback_window": f"{start.isoformat()}/{end.isoformat()}" if start and end else None,
-                   "action_id": action.action_id, "window_start": start, "window_end": end}
-        handoff = await latest_open(ctx, action.desk_id, session_id)
-        if handoff is None:
-            handoff = Handoff(handoff_id=new_id("handoff"), copy_id=action.copy_id, desk_id=action.desk_id,
-                              session_id=session_id, status="open", **written)
-            ctx.db.add(handoff)
-        else:                             # the session's open handoff, a card's or an earlier call-back's
-            for column, value in written.items():
-                setattr(handoff, column, value)
-        await ctx.db.flush()              # the handoff, then its fact, as the lock order goes
+        closed = await close_open(ctx, action.desk_id, session_id)
+        handoff_id = new_id("handoff")
+        ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=action.copy_id, desk_id=action.desk_id, session_id=session_id,
+                           reason=f"{args.name} · {args.contact} · {args.reason}",
+                           callback_window=f"{start.isoformat()}/{end.isoformat()}" if start and end else None,
+                           status="open", kind="callback", action_id=action.action_id, window_start=start,
+                           window_end=end, created_at=now))
+        await ctx.db.flush()              # the handoffs, then their facts, as the lock order goes
+        if closed:
+            expired = await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+                FactRow.desk_id == action.desk_id,
+                FactRow.fact_id.in_([f"handoff:{row.handoff_id}" for row in closed])).with_for_update()))
+            for fact_row in expired:
+                fact_row.status = "expired"
         # a callback whose window has passed can't be promised again
-        fact = Fact(fact_id=f"handoff:{handoff.handoff_id}", kind="handoff", status="committed", source="kernel",
+        fact = Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
                     claims=window_claims(window), label=labels.new_fact_label(xctx.session_row), expires_at=end)
-        row = labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=session_id,
-                              action_id=action.action_id)
-        kept = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
-            FactRow.desk_id == action.desk_id, FactRow.fact_id == fact.fact_id).with_for_update()))).one_or_none()
-        if kept is None:
-            ctx.db.add(row)
-        else:                             # an earlier call-back's: this one's window, label and action
-            for column in ("status", "claims", "readers", "record_owner", "expires_at", "session_id", "action_id",
-                           "created_at"):
-                setattr(kept, column, getattr(row, column))
+        ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=session_id,
+                                   action_id=action.action_id))
         await ctx.db.flush()
+        for row in closed:
+            await ledger.append(ctx, copy_id=action.copy_id, desk_id=action.desk_id, event=LedgerEvent(
+                kind="desk_data", origin="kernel", summary={"part": "handoffs", "refs": [row.handoff_id]}))
         await demo_inbox.alert_owner(ctx, action.desk_id, "callback", render.owner_preview("callback"),
                                      alert_body(window, args))
-        return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, handoff.handoff_id))
+        return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, handoff_id))
 
     async def reconcile(self, xctx: ExecCtx, action: NormalizedAction) -> AdapterResult | None:
         """The handoff the action wrote, if it wrote one."""
