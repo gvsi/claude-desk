@@ -129,13 +129,10 @@ const AGENT_DECISIONS = {
   },
 } as const satisfies Record<string, DecisionSpec>;
 
-/**
- * One exchange: the agent's signed request (its words, for the owner's view only), what the kernel
- * decides for it (null when Claude calls no tool) and the Desk's checked answer.
- */
+/** One exchange: the agent's signed request (its words, for the owner's view only) and the Desk's checked answer. */
 interface Exchange {
   request: string;
-  decision: DecisionSpec | null;
+  decision: DecisionSpec;
   reply: readonly RenderedBlock[];
 }
 
@@ -179,46 +176,39 @@ function exchangesFor(task: DemoAgentTask): Exchange[] {
   }
 }
 
-/**
- * A task's exchanges as the agent's session may run them. While the Desk's Answering switch is off
- * it keeps only callbacks and leads (master plan, "Model-visible tools"), so the first request that
- * needs another tool gets the handoff, which decides nothing, and the run ends there.
- */
-function exchangesWhile(answering: boolean, task: DemoAgentTask): Exchange[] {
-  const exchanges = exchangesFor(task);
-  if (answering) return exchanges;
-  const at = exchanges.findIndex((exchange) => exchange.decision !== null && !TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool));
-  const stopped = exchanges[at];
-  if (stopped === undefined) return exchanges;
-  return [...exchanges.slice(0, at), { request: stopped.request, decision: null, reply: [rivera.blocks.handoff.en] }];
-}
-
 /** A block as the wire carries it: its own lists, shared with nothing. */
 function copyBlock(block: RenderedBlock): RenderedBlock {
   return { ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] };
 }
 
-/** Makes one turn of the run, numbered `n`, and applies it to the copy. */
-type TurnStep = (n: number) => AgentTurn;
+/** Makes one turn of the run, numbered `n`, and applies it to the copy; `last` ends the run there. */
+type TurnStep = (n: number) => { turn: AgentTurn; last?: true };
 
 /**
  * A task's turns for `agent`, in order, each applied when its time comes: the agent's request joins
  * the owner's view of the chat, and the Desk's answer is decided, checked and recorded as a
  * visitor's turn is. The agent's turn carries no words and no blocks.
+ *
+ * Each answer goes by the Desk as it is at that request, as the API gives each request its tools.
+ * While the Desk's Answering switch is off, the agent's session keeps only callbacks and leads
+ * (master plan, "Model-visible tools"): a request that needs another tool gets the handoff, which
+ * decides nothing, and the run ends there.
  */
 function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task: DemoAgentTask): TurnStep[] {
-  return exchangesWhile(desk.summary.answering, task).flatMap((exchange): TurnStep[] => [
+  return exchangesFor(task).flatMap((exchange): TurnStep[] => [
     (n) => {
       world.agentText(agent, exchange.request);
-      return { author: 'agent', n, blocks: [], receipts: [] };
+      return { turn: { author: 'agent', n, blocks: [], receipts: [] } };
     },
     (n) => {
       const ctx = world.context(agent, 'en', exchange.request);
-      const receipts = exchange.decision === null ? [] : [ctx.status('receipt', ctx.decide(exchange.decision))];
+      const allowed = desk.summary.answering || TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool);
+      const receipts = allowed ? [ctx.status('receipt', ctx.decide(exchange.decision))] : [];
       for (const receipt of receipts) world.emit(agent, receipt);
-      const reply = ctx.reply(exchange.reply.map(copyBlock));
+      const reply = ctx.reply((allowed ? exchange.reply : [rivera.blocks.handoff.en]).map(copyBlock));
       world.emit(agent, reply);
-      return { author: 'desk', n, blocks: reply.blocks, receipts };
+      const turn: AgentTurn = { author: 'desk', n, blocks: reply.blocks, receipts };
+      return allowed ? { turn } : { turn, last: true };
     },
   ]);
 }
@@ -248,7 +238,11 @@ export class AgentRuns {
       record.timer = setTimeout(() => {
         record.timer = null;
         const step = steps.shift();
-        if (step) run.turns.push(step(run.turns.length + 1));
+        if (step) {
+          const { turn, last } = step(run.turns.length + 1);
+          run.turns.push(turn);
+          if (last) steps.length = 0;
+        }
         if (steps.length === 0) run.state = 'done';
         else tick();
       }, AGENT_TURN_GAP_MS);

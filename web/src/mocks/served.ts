@@ -219,8 +219,15 @@ function toolBatch(body: unknown): { entries: ToolConfirmEntry[]; enable: boolea
   return { entries, enable: body.enable };
 }
 
-/** A turn's step as queued, with the session's generation then: a take-over since fences it off (`Server.tick`). */
-type Scheduled = { step: Step; language: Language; text: string; generation: number };
+/**
+ * A turn's step as queued, with the session's generation then: a take-over since fences it off
+ * (`Server.tick`). A turn whose steps depend on the session's tools is queued as one `pick`, which
+ * chooses them when the turn starts.
+ */
+type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language: Language; text: string; generation: number };
+
+/** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
+const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
 /**
  * How a store numbers its copies and names their payment links: the screen tests' one copy from
@@ -302,11 +309,13 @@ export class Server {
   }
 
   /**
-   * Queues `steps` after whatever the session's turn is doing, one event every `EVENT_GAP_MS`, then
+   * Queues a turn after whatever the session's turn is doing, one event every `EVENT_GAP_MS`, then
    * `turn_end`, at the session's generation now. One queue per session is the API's turn lock: a
-   * turn queued behind another starts only after that one's `turn_end`.
+   * turn queued behind another starts only after that one's `turn_end`. `steps` is the turn's
+   * steps, or what picks them when the turn starts, as the API gives a turn its tools then: a turn
+   * waiting behind another goes by the Desk as it is when its own turn begins.
    */
-  runTurn(session: SessionRecord, steps: readonly Step[], language: Language, text: string): void {
+  runTurn(session: SessionRecord, steps: readonly Step[] | (() => readonly Step[]), language: Language, text: string): void {
     const sessionId = session.state.session_id;
     let turn = this.turns.get(sessionId);
     if (!turn) {
@@ -314,7 +323,9 @@ export class Server {
       this.turns.set(sessionId, turn);
     }
     const { generation } = session.state;
-    for (const step of [...steps, turnEnd]) turn.queue.push({ step, language, text, generation });
+    const queued: Scheduled[] =
+      typeof steps === 'function' ? [{ pick: steps, language, text, generation }] : steps.map((step) => ({ step, language, text, generation }));
+    turn.queue.push(...queued, { step: turnEnd, language, text, generation });
     if (turn.timer === null) this.tick(sessionId);
   }
 
@@ -329,7 +340,13 @@ export class Server {
       if (world !== this.world || !session) return;
       // The owner took over after these steps were queued: like the API at a stale generation, they
       // never decide, run or say anything. The turn still ends, so "Claude is writing" clears.
-      while (next !== undefined && next.generation !== session.state.generation && next.step.unfenced !== true) next = turn.queue.shift();
+      while (next !== undefined && next.generation !== session.state.generation && !isUnfenced(next)) next = turn.queue.shift();
+      // The turn starts: its steps are picked now, from the Desk as it is, and its first one runs.
+      while (next !== undefined && 'pick' in next) {
+        const { language, text, generation } = next;
+        turn.queue.unshift(...next.pick().map((step): Scheduled => ({ step, language, text, generation })));
+        next = turn.queue.shift();
+      }
       if (next === undefined) return;
       world.emit(session, next.step(world.context(session, next.language, next.text)));
       if (turn.queue.length > 0) this.tick(sessionId);
@@ -658,7 +675,8 @@ const SERVED: ServedRoutes = {
     if (req.malformed || typeof text !== 'string' || text.length < 1 || text.length > MESSAGE_MAX) return INVALID;
     const { session } = visitor;
     sv.world.visitorText(session, text);
-    if (session.state.mode === 'ai') sv.runTurn(session, scriptedTurn(text, hasAllTools(sv.world, session)), session.language, text);
+    // The turn's tools are read when it starts, which may be after a turn in progress ends.
+    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session)), session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
   },
   visitorTyping(sv, req) {
@@ -687,7 +705,7 @@ const SERVED: ServedRoutes = {
     // One answer for a wrong, expired or used-up code, so a refusal never says which.
     if (!sv.world.checkCode(session, code)) return failWith(422, 'kernel', { code: 'invalid' });
     // The API wakes Claude, which goes on with what the visitor asked for.
-    sv.runTurn(session, afterVerify(hasAllTools(sv.world, session)), session.language, '');
+    sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
     return ok({ state: session.state } satisfies VerifyChecked);
   },
   visitorInbox(sv, req) {

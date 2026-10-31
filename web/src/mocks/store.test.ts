@@ -718,6 +718,59 @@ describe('the scripted Desk', () => {
     expect(toolsDecided(preview.session_id)).toEqual(['native.quote']);
   });
 
+  it('answering_is_read_when_a_turn_starts', async () => {
+    // As the API gives a turn its tools when the turn starts: a question waiting behind a turn in
+    // progress goes by Answering as it stands when its own turn begins, not when it was sent.
+    const setAnswering = async (on: boolean) => {
+      expect((await call('setAnswering', { params: { desk_id: deskId }, body: { on } })).status).toBe(200);
+    };
+    const { events } = await openChat();
+    const templatesFrom = (from: number) =>
+      events.slice(from).flatMap(([, ev]) => (ev.type === 'message' ? [ev.blocks.map((block) => block.template)] : []));
+
+    // Sent while the Desk answers, behind a turn that has started; Answering goes off before its turn starts.
+    await send('How much is drain clearing?');
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS);
+    await send('How much to clear a drain?');
+    await setAnswering(false);
+    await drain();
+    expect(templatesFrom(0)).toEqual([[null, 'quote'], ['handoff']]);
+
+    // The other way round: sent while it doesn't, and Answering is back on before its turn starts.
+    const before = events.length;
+    await send('Can you call me back?');
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS);
+    await send('How much to clear a drain?');
+    await setAnswering(true);
+    await drain();
+    expect(templatesFrom(before)).toEqual([['callback_confirmed'], [null, 'quote']]);
+  });
+
+  it('agent_run_reads_answering_at_each_request', async () => {
+    // The built-in agent's run goes by Answering as it stands at each of its requests: switched off
+    // after the agent's quote and before its payment, the payment gets the handoff and nothing is charged.
+    await openChat();
+    const sent = await call('sendAgent', { params: { slug }, body: { task: 'quote_and_deposit' } });
+    expect(sent.status).toBe(202);
+    const runId = (sent.body as { run_id: string }).run_id;
+    const read = async () => (await call('agentRun', { params: { slug, run_id: runId } })).body as DemoAgentRun;
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 2);
+    expect((await read()).turns.map((t) => t.author)).toEqual(['agent', 'desk']);
+    expect((await call('setAnswering', { params: { desk_id: deskId }, body: { on: false } })).status).toBe(200);
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 4);
+
+    const run = await read();
+    expect(run.state).toBe('done');
+    const desk = run.turns.filter((t) => t.author === 'desk');
+    expect(desk.map((t) => [t.blocks.map((b) => b.template), t.receipts.map((ev) => ev.state)])).toEqual([
+      [[null, 'quote'], ['executed']],
+      [['handoff'], []],
+    ]);
+    const agentChat = [...mockStore.world.sessions.values()].filter((s) => s.state.kind === 'agent').at(-1);
+    const decided = [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === agentChat?.state.session_id);
+    expect(decided.map((d) => d.decision.action?.tool)).toEqual(['native.quote']);
+  });
+
   it('callback_comes_from_dana_on_record', async () => {
     // The callback the script files is from Dana Whitfield, the one Dana the copy has on record,
     // with the contact the kernel's seed keeps for her (the fixtures show it masked).
