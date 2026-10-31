@@ -24,7 +24,7 @@ import { VISION_LINE } from '../ds/index.ts';
 import { expectComputed } from '../ds/test/expectComputed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
-import { expectNoWindowScroll } from '../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll } from '../test/screen.ts';
 
 const CITY_OFFICE = '/vision/city-office';
 const TEAM_DESK = '/vision/team-desk';
@@ -405,6 +405,66 @@ describe('Vision pages against their boards', () => {
     await expect.element(log).toBeVisible();
     expect(mockStore.requests).toEqual([]);
     expect(mockStore.unhandled).toEqual([]);
+  });
+
+  it('phone_matches_its_board', async () => {
+    // As Boards/Vision, phone draws it: the owner's Today and a visitor's chat, as phone apps.
+    const { screen } = await renderRoute(PHONE);
+    const title = main(screen).getByRole('heading', { level: 1, name: 'Claude Desk on a phone' });
+    await expect.element(title).toBeVisible();
+    const root = screen.container;
+    const bar = await expectVisionBar(root, BACK_HREF);
+    expect(top(main(screen).element())).toBe(bottom(bar));
+
+    // The title centered over the phones, its line under it.
+    expectComputed(title.element(), SPEC.pageTitle);
+    const titleBox = title.element().getBoundingClientRect();
+    expect(round(titleBox.left + titleBox.width / 2)).toBe(round(window.innerWidth / 2));
+    await expect.element(main(screen).getByText('The owner’s Today and a visitor’s chat, as phone apps.', { exact: true })).toBeVisible();
+
+    // Two phones, 64 px apart, centered under the title, each captioned.
+    const owner = main(screen).getByRole('figure', { name: 'Today, for the owner' });
+    const visitor = main(screen).getByRole('figure', { name: 'The public chat, for a visitor' });
+    const ownerScreen = one(owner.element(), '.cd-phone-frame__screen');
+    const visitorScreen = one(visitor.element(), '.cd-phone-frame__screen');
+    expect(round(visitorScreen.getBoundingClientRect().left - ownerScreen.getBoundingClientRect().right)).toBe(64);
+    expect(round(ownerScreen.getBoundingClientRect().left)).toBe(round((window.innerWidth - (390 + 64 + 390)) / 2));
+    expect(round(top(ownerScreen) - bottom(bar))).toBe(106);
+
+    // The owner's phone: the greeting, the held quote and Live now, over the five tabs, Today current.
+    await expect.element(owner.getByRole('heading', { level: 2, name: 'Good morning, Maria' })).toBeVisible();
+    await expect.element(owner.getByText('Rivera Plumbing', { exact: true })).toBeVisible();
+    const held = owner.getByRole('article', { name: /^Held for you:/ });
+    await expect.element(held.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    await expect.element(held.getByRole('button', { name: 'Deny this time' })).toBeVisible();
+    await expect.element(held.getByText('Web chat, 2 min ago', { exact: true })).toBeVisible();
+    const live = owner.getByRole('region', { name: 'Live now' });
+    expect(live.getByRole('listitem').elements().map((row) => row.textContent)).toEqual(['Lucía HerreraVisitor', 'Alex Kim’s assistantAgent']);
+    const tabs = owner.getByRole('navigation', { name: 'Main' }).getByRole('link').elements();
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Today', 'Chats', 'Rules', 'Safety', 'More']);
+    expect(tabs.map((tab) => tab.getAttribute('aria-current'))).toEqual(['page', null, null, null, null]);
+    // The tab bar at the foot of the owner's screen.
+    const tabBar = one(owner.element(), '.cd-phone-tab-bar');
+    expect(round(ownerScreen.getBoundingClientRect().bottom - tabBar.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
+
+    // The visitor's phone: the business's header with the disclosure, the booking next to its card, the composer.
+    await expect.element(visitor.getByText('Claude, an AI, answers for Maria Rivera', { exact: true })).toBeVisible();
+    const log = visitor.getByRole('log', { name: 'Conversation with Rivera Plumbing' }).element() as HTMLElement;
+    expectConversationType(log);
+    expect(await expectReceiptsUnderMessages(log)).toBe(1);
+    expect(one(log, '.cd-margin-line').textContent).toBe('Booked on Maria Rivera’s calendar');
+    const booked = visitor.getByRole('article', { name: 'Booked' });
+    expect(booked.element().textContent).toBe('BookedTuesday, November 3Arriving 2:00 pm to 4:00 pmWith Maria Rivera');
+    const reply = one(log, '.cd-claude-message__prose');
+    expect(reply.textContent).toBe('Maria will text you when she’s on her way.');
+    expect(reply.textContent ?? '').not.toMatch(/\d|Tuesday|November/);
+    await expect.element(visitor.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toBeVisible();
+    await expect.element(visitor.getByText('This chat is with Claude, an AI.', { exact: true })).toBeVisible();
+
+    // Nothing scrolls sideways, and the footer follows the phones.
+    expectNoHorizontalScroll();
+    await expectFooter(root);
+    expect(top(one(root, '[data-ds="concept-footer"]'))).toBeGreaterThan(bottom(visitor.element()));
   });
 });
 
