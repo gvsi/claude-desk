@@ -1,12 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../api/http.ts';
 import type { StartSetupBody } from '../api/views.ts';
 import { retryAfterMs, sleep } from '../app/poll.ts';
-import { Button, Notice, PageHeader, TextField } from '../ds/index.ts';
-import { SETUP_COPY, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
+import { Button, Notice, PageHeader, SuggestionChips, TextField } from '../ds/index.ts';
+import { SETUP_COPY, SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 
 /** Plan 02's limit on the business's description. */
 const DESCRIPTION_MAX = 1500;
@@ -42,7 +42,9 @@ interface Unresolved {
 
 /**
  * "Tell me about your business": a few sentences in the owner's own words, from which the API
- * takes the business's name and the owner's, and makes the new Desk with Answering off.
+ * takes the business's name and the owner's, and makes the new Desk with Answering off. Under the
+ * box, three examples to start from: a chip puts its description in the box, focused, for the owner
+ * to change, and sends nothing; while a start is being settled they are off, as the box is.
  *
  * Each press of "Start" sends a new idempotency key, and its retries send it again, so the API
  * answers the interview that press made rather than making a second Desk. A start the API says is
@@ -62,12 +64,49 @@ export function StartStep() {
   const leaving = useRef<AbortController | null>(null);
   // Where focus goes when "Try again" goes with its line.
   const titleRef = useRef<HTMLHeadingElement>(null);
+  // The box, which takes focus once an example is put in it.
+  const boxRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  // Each example put in the box, counted, so the box takes focus after each, the same one again too.
+  const [picks, setPicks] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     leaving.current = controller;
     return () => controller.abort();
   }, []);
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    if (picks === 0 || box === null) return;
+    box.focus();
+    // The caret at the start, where the business's name is to change, and the box scrolled to it.
+    box.setSelectionRange(0, 0);
+    box.scrollTop = 0;
+    // The words fade in with each press: the fill's animation (SetupPage.css) starts over.
+    box.style.animation = 'none';
+    void box.offsetWidth;
+    box.style.removeProperty('animation');
+  }, [picks]);
   const copy = SETUP_COPY.start;
+  const examples = START_EXAMPLES[SETUP_LANGUAGE];
+  // A start in flight or unresolved is sent again with the words as they were: nothing changes them.
+  const locked = pending || unresolved !== null;
+
+  /** An example's chip: its description goes in the box for the owner to change. Nothing is sent. */
+  const pick = (chip: string) => {
+    const example = examples.examples.find((each) => each.chip === chip);
+    if (locked || example === undefined) return;
+    setEmpty(false);
+    setPicks((n) => n + 1);
+    const box = boxRef.current;
+    const ownWords = description.trim() !== '' && !examples.examples.some((each) => each.description === description);
+    // Words the owner typed are replaced as an edit, through the box's own input (its change reaches
+    // `onChange`), so undo brings them back. Where the browser can't, they are replaced as below.
+    if (ownWords && box !== null) {
+      box.focus();
+      box.select();
+      if (document.execCommand('insertText', false, example.description)) return;
+    }
+    setDescription(example.description);
+  };
 
   const send = async (attempt: Attempt) => {
     const signal = leaving.current?.signal;
@@ -128,20 +167,26 @@ export function StartStep() {
   return (
     <form className="cd-setup-step" noValidate onSubmit={(event) => void start(event)}>
       <PageHeader title={copy.title} subtitle={copy.subtitle} titleRef={titleRef} />
-      <TextField
-        label={copy.field}
-        multiline
-        value={description}
-        onChange={(next) => {
-          setDescription(next);
-          if (next.trim() !== '') setEmpty(false);
-        }}
-        hint={copy.hint}
-        maxLength={DESCRIPTION_MAX}
-        // A start in flight or unresolved is sent again with these words as they were.
-        readOnly={pending || unresolved !== null}
-        {...(empty ? { error: copy.empty } : {})}
-      />
+      <div className={`cd-setup-start__field${picks > 0 ? ' cd-setup-start__field--filled' : ''}`}>
+        <TextField
+          label={copy.field}
+          multiline
+          value={description}
+          onChange={(next) => {
+            setDescription(next);
+            if (next.trim() !== '') setEmpty(false);
+          }}
+          hint={copy.hint}
+          maxLength={DESCRIPTION_MAX}
+          readOnly={locked}
+          fieldRef={boxRef}
+          {...(empty ? { error: copy.empty } : {})}
+        />
+        <div className="cd-setup-start__examples">
+          <p className="cd-setup-start__line cd-type-meta">{examples.line}</p>
+          <SuggestionChips label={examples.label} suggestions={examples.examples.map((example) => example.chip)} onPick={pick} disabled={locked} />
+        </div>
+      </div>
       {error === null ? null : <Notice tone="error">{error}</Notice>}
       {unresolved === null ? null : (
         <Notice tone="error" action={tryAgain}>

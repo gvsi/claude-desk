@@ -21,10 +21,15 @@ export interface SuggestionChipsProps {
    * under them. Never on a real page.
    */
   inertSuggestions?: boolean;
+  /**
+   * Every chip off, while what a pick would change can't change: setup's examples while a start is
+   * being settled. They stay in place, dimmed, and `onPick` is never called.
+   */
+  disabled?: boolean;
 }
 
 /** A row of at most three suggestion chips, each a thing to ask, handed to the screen when picked. */
-export function SuggestionChips({ label, suggestions, onPick, inertSuggestions = false }: SuggestionChipsProps) {
+export function SuggestionChips({ label, suggestions, onPick, inertSuggestions = false, disabled = false }: SuggestionChipsProps) {
   const [inertPressed, setInertPressed] = useState(false);
   const lineRef = useRef<HTMLParagraphElement>(null);
   // The chips can end a scroll region, as they end the conversation on a public page, so the line
@@ -44,7 +49,7 @@ export function SuggestionChips({ label, suggestions, onPick, inertSuggestions =
   const group = (
     <div role="group" aria-label={label} className="cd-suggestion-chips">
       {suggestions.slice(0, MAX_SUGGESTIONS).map((suggestion) => (
-        <Chip key={suggestion} onClick={() => pick(suggestion)}>
+        <Chip key={suggestion} disabled={disabled} onClick={() => pick(suggestion)}>
           {suggestion}
         </Chip>
       ))}

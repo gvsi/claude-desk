@@ -107,6 +107,42 @@
   min-width: 0;
 }
 
+/* The start step's box with its hint, then the examples 10 px under the hint (the field's 6 px gap
+   and 4 more): a line in secondary meta type, and the chips 8 px under it (UXC-P602-After). */
+.cd-setup-start__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  min-width: 0;
+}
+
+.cd-setup-start__examples {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-setup-start__line {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* A chosen example's words fill the box with a fade of their color from transparent, over
+   motion-base (UXC-P602-After); StartStep starts it over with each press. At once under reduced
+   motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .cd-setup-start__field--filled .cd-text-field__input {
+    animation: cd-setup-start-fill var(--motion-base) var(--motion-ease);
+  }
+}
+
+@keyframes cd-setup-start-fill {
+  from {
+    color: transparent;
+  }
+}
+
 .cd-setup-step__actions {
   display: flex;
   flex-wrap: wrap;
