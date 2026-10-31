@@ -11,7 +11,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Set off a name someone chose (a visitor's, an agent's) as user text: its own `.cd-user-name` element marked `data-copy="user"`, first in its line, and never joined to a status or a trust word in one run of text. A status sits beside it in its own `Pill`, as "Signed" or "Not signed" does on an agent's request.
 - Write English and Spanish wherever a visitor reads.
 - Call the product Claude Desk: one is "your Desk", several are "Desks". Every surface carries the footer "Concept prototype by Giovanni Alcantara, not an Anthropic product" in `caption`.
-- Say on every visitor surface that Claude is an AI answering for the business: "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime." It can't be turned off.
+- Say on every visitor surface that Claude is an AI answering for the business: "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime." While the owner is in the chat, the public page's chat head says instead: "{owner} is in this chat. Claude, an AI, is paused until {owner} hands it back." Both forms name Claude as an AI, and neither can be turned off.
 
 ## Visual foundations
 

@@ -58,10 +58,14 @@ export interface PublicShellProps {
   /** Asks for the owner in the chat. */
   onAskForOwner: () => void;
   /**
-   * The owner is in the chat (a take-over): the page sets it on the stream's `owner_joined` and
-   * clears it on `owner_left`. While it is set, the chat's head says so on the disclosure's line,
-   * "{owner} is in this chat. Claude, an AI, is paused until {owner} hands it back.", which still
-   * names Claude as an AI, and "Ask for {owner}" isn't shown. `false` by default.
+   * The owner is in the chat (a take-over). While it is set, the chat's head says so on the
+   * disclosure's line, "{owner} is in this chat. Claude, an AI, is paused until {owner} hands it
+   * back.", which still names Claude as an AI, and "Ask for {owner}" isn't shown. `false` by default.
+   *
+   * Its one source is the kernel's session mode: `SessionState.mode === 'owner'` when the chat opens
+   * or reloads, kept current by the stream's `owner_joined` and `owner_left`. The line tells the
+   * visitor a person is in the chat, so it is never set from anything else. The web app is to set
+   * it this way; it doesn't yet.
    */
   ownerInChat?: boolean;
   /**
