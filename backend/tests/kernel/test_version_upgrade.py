@@ -37,13 +37,16 @@ from desk.db.session import database_url, libpq_url
 from desk.kernel_service import activation, adapters, compiler, desks
 from desk.kernel_service import app as app_module
 from desk.kernel_service.app import create_app
+from desk.kernel_service.decide import BASELINE_PLAIN
 
 from .fakes import FakeDecisions, FrozenClock
 from .helpers import kernel_ctx, rows_of
 from .test_adapters import Rivera, rivera
+from .test_approvals import answered
 from .test_decide import decided, open_visitor, payment_link
 from .test_execute import post_execute, read
 from .test_money_cap import entries_of
+from .test_probe import setup_desk
 
 KERNEL_CORE = json.loads((Path(__file__).parent / "fixtures" / "kernel_core_version.json").read_text())
 KERNEL_CORE_CAP = 50_000          # the cap the money cap revision gives a version stored before it
@@ -273,6 +276,189 @@ async def test_a_desk_from_before_new_native_tools_gets_them_at_startup(app, cli
         Tool.desk_id == copy.desk_id))), await entries_of(client, copy, "desk_data"),
         await entries_of(client, copy, "policy")) for copy in (current, upgraded)}
     assert after == before
+
+
+async def compiled_without(app: FastAPI, copy: Rivera, *tools: str) -> None:
+    """The copy's active version compiled again over the Desk's enabled tools but `tools`, at its
+    own money cap, its proof kept: a version compiled before `tools` were registered, on a Desk
+    whose rows for them a start then added with no rebuild. With no `tools`, compiled over the
+    enabled tools as they are."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = await activation.active_version(ctx, copy.desk_id)
+        profiles = [profile for profile in await desks.enabled_profiles(ctx, copy.desk_id) if profile.tool not in tools]
+        owned, cap = [card for card in row.cards if not card.is_default], row.auto_money_cap_cents
+        schema = compiler.desk_schema(profiles)
+        compiled = compiler.compile_cards(owned, profiles, auto_money_cap_cents=cap)
+        earlier = activation.version_row(
+            copy_id=copy.copy_id, desk_id=copy.desk_id, version=row.version, parent_version=row.parent_version,
+            compiled=compiled, a0=compiler.compile_cards(owned, profiles, auto_money_cap_cents=cap, review=False).A,
+            schema=schema, hashes=activation.version_hashes(compiled, schema, profiles, cards=owned,
+                                                            auto_money_cap_cents=cap),
+            auto_money_cap_cents=cap, status=row.status, proof=row.proof, created_at=row.created_at)
+        for column in ("cards", "cedar", "schema_json", *activation.VersionHashes._fields):
+            setattr(row, column, getattr(earlier, column))
+
+
+async def uncovered(app: FastAPI, copy: Rivera) -> list[str]:
+    """The Desk's enabled tools its active version has no rule for: no owner card, default ask or
+    `never` card of it names the tool in its Cedar, so the kernel refuses every call to it while the
+    owner's rules read as covering it."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = await activation.active_version(ctx, copy.desk_id)
+        cedar = "\n".join(row.cedar[name] for name in ("F", "A", "H"))
+        return [profile.tool for profile in await desks.enabled_profiles(ctx, copy.desk_id)
+                if f'Action::"{profile.tool}"' not in cedar]
+
+
+async def test_every_enabled_tool_has_a_rule_after_startup(app, client, frozen_clock, reviewer):
+    # bounded mode: a copy from before the payments plan, whose version was compiled before the payment link and
+    # the mandate charge were registered and whose start then gave it their rows with no rebuild, is rebuilt from
+    # its shipped report over every tool it has, so the rules the owner reads are the ones the kernel decides by
+    earlier, current = await rivera(app, client), await rivera(app, client)
+    await compiled_without(app, earlier, "native.charge_mandate", "native.payment_link")
+    assert await uncovered(app, earlier) == ["native.charge_mandate", "native.payment_link"]
+    untouched = stored_columns(await stored_version(app, current, 1))
+
+    async with upgraded_kernel(frozen_clock, reviewer):
+        pass
+
+    for copy in (earlier, current):
+        assert await uncovered(app, copy) == []
+    shipped = activation.ShippedReport.model_validate_json((activation.PROOFS_DIR / "rivera.json").read_bytes())
+    rebuilt = await stored_version(app, earlier, 1)
+    assert activation.VersionHashes(*(getattr(rebuilt, field) for field in activation.VersionHashes._fields)) \
+        == shipped.hashes
+    assert (rebuilt.status, rebuilt.auto_money_cap_cents, rebuilt.proof) == ("active", KERNEL_CORE_CAP, shipped.proof)
+    assert (await entries_of(client, earlier, "policy"))[-1]["rebuilt"] is True
+    # a version compiled over the Desk's tools as they are is left as it was
+    assert stored_columns(await stored_version(app, current, 1)) == untouched
+    assert all("rebuilt" not in entry for entry in await entries_of(client, current, "policy"))
+
+
+@pytest.mark.solver
+async def test_a_payment_link_holds_on_a_desk_whose_version_predates_it(app, client, registry, desk_prove,
+                                                                        frozen_clock, reviewer):
+    # a Desk set up before the payments plan, on the starter rules at a $0 money cap with no card for money: its
+    # version had no rule for the payment link, so a visitor's link was refused by the always-on rules rather than
+    # held for the owner. Startup leaves the rebuild to a live proof in the background.
+    desk = await setup_desk(app, client)
+    link = payment_link(5_000)
+    adapters.register(link, replace=True)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(desk.copy_id)
+        await ctx.db.execute(delete(Tool).where(Tool.desk_id == desk.desk_id, Tool.tool == link.profile.tool))
+        ctx.db.add(desks.tool_row(desk.copy_id, desk.desk_id, link.profile))
+        row = (await ctx.db.scalars(select(Desk).where(Desk.desk_id == desk.desk_id))).one()
+        row.answering = True
+    await compiled_without(app, desk, "native.payment_link")
+    visitor = await open_visitor(client, desk)
+    refused = await decided(client, visitor, "native.payment_link", call_id="before")
+    assert refused.outcome == "refuse" and BASELINE_PLAIN in refused.reason_plain
+
+    async with upgraded_kernel(frozen_clock, reviewer) as http:
+        visitor = await open_visitor(http, desk)
+        held = await decided(http, visitor, "native.payment_link", call_id="after")
+        assert (held.outcome, held.state, held.policy_version) == ("hold", "held", 1)
+        approved = await answered(http, desk.owner, held.decision_id, "allow_once")
+        assert approved.execution is not None and approved.execution.state == "succeeded"
+
+    assert link.calls.count("execute") == 1
+    assert await uncovered(app, desk) == []
+    assert (await entries_of(client, desk, "policy"))[-1]["rebuilt"] is True
+
+
+async def test_a_version_proved_under_other_invariants_refuses_until_startup_rebuilds_it(app, client, frozen_clock,
+                                                                                         reviewer):
+    # bounded mode: the version was proved under this kernel's baseline but against the invariants and prover an
+    # earlier kernel had, so its proof doesn't cover what this kernel checks; it is rebuilt from its shipped report
+    copy = await rivera(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        seed = await activation.active_version(ctx, copy.desk_id)
+        seed.invariants_sha256 = KERNEL_CORE["version"]["invariants_sha256"]
+    visitor = await open_visitor(client, copy)
+    refused = await decided(client, visitor, "native.find_slots", call_id="before")
+    assert (refused.outcome, refused.policy_version) == ("refuse", 1)
+    assert REFUSED in refused.reason_plain
+
+    async with upgraded_kernel(frozen_clock, reviewer) as http:
+        slots = await decided(http, await open_visitor(http, copy), "native.find_slots", call_id="after")
+        assert (slots.outcome, slots.policy_version) == ("allow", 1)
+
+    shipped = activation.ShippedReport.model_validate_json((activation.PROOFS_DIR / "rivera.json").read_bytes())
+    rebuilt = await stored_version(app, copy, 1)
+    assert activation.VersionHashes(*(getattr(rebuilt, field) for field in activation.VersionHashes._fields)) \
+        == shipped.hashes
+    assert (await entries_of(client, copy, "policy"))[-1]["rebuilt"] is True
+
+
+async def with_earlier_profile(app: FastAPI, copy: Rivera, tool: str, *, status: str = "enabled") -> None:
+    """The Desk's `tool` row as an earlier kernel wrote it, with the profile it registered then, at
+    `status`."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(select(Tool).where(Tool.desk_id == copy.desk_id, Tool.tool == tool))).one()
+        earlier = row.profile.model_copy(update={"description_confirmed": "An earlier kernel's words for the tool."})
+        row.profile, row.description_confirmed, row.status = earlier, earlier.description_confirmed, status
+        row.profile_sha256 = row.definition_sha256 = adapters.profile_sha256(earlier)
+
+
+async def test_native_tool_rows_an_earlier_kernel_wrote_are_brought_up_to_date(app, client, frozen_clock, reviewer):
+    # bounded mode: an earlier kernel wrote a native tool's row with the profile it registered then. Startup points
+    # the row at today's profile, keeping its status, as the owner's confirm of the tool would, and rebuilds the
+    # version compiled over the old one from its shipped report; a tool the owner turned off stays off
+    on, off = await rivera(app, client), await rivera(app, client)
+    made_now = tool_columns(await rows_of(app, on.copy_id, select(Tool).where(Tool.desk_id == on.desk_id)))
+    await with_earlier_profile(app, on, "native.book")
+    await with_earlier_profile(app, off, "native.capture_lead", status="disabled")
+    for copy in (on, off):
+        await compiled_without(app, copy)
+    off_version = stored_columns(await stored_version(app, off, 1))
+
+    async with upgraded_kernel(frozen_clock, reviewer):
+        pass
+
+    def anywhere(columns: dict[str, dict]) -> dict[str, dict]:
+        return {tool: {**row, "desk_id": None, "copy_id": None} for tool, row in columns.items()}
+
+    for copy, status in ((on, {}), (off, {"native.capture_lead": "disabled"})):
+        rows = tool_columns(await rows_of(app, copy.copy_id, select(Tool).where(Tool.desk_id == copy.desk_id)))
+        assert anywhere(rows) == {tool: {**row, "status": status.get(tool, row["status"])}
+                                  for tool, row in anywhere(made_now).items()}
+    assert [entry for entry in await entries_of(client, on, "desk_data") if entry["part"] == "tools"] == [
+        {"part": "tools", "refs": ["native.book"]}]
+    assert [entry for entry in await entries_of(client, off, "desk_data") if entry["part"] == "tools"] == [
+        {"part": "tools", "refs": ["native.capture_lead"]}]
+    shipped = activation.ShippedReport.model_validate_json((activation.PROOFS_DIR / "rivera.json").read_bytes())
+    rebuilt = await stored_version(app, on, 1)
+    assert activation.VersionHashes(*(getattr(rebuilt, field) for field in activation.VersionHashes._fields)) \
+        == shipped.hashes
+    # the tools the owner's Desk enables are the ones its version was compiled over: nothing to rebuild
+    assert stored_columns(await stored_version(app, off, 1)) == off_version
+
+
+async def test_a_version_that_only_needs_the_desks_tools_keeps_deciding_when_it_cant_be_rebuilt(
+        app, client, frozen_clock, reviewer):
+    # bounded mode: the owner turned a tool off, so the version was compiled over one more tool than the Desk
+    # enables, and no shipped report covers the Desk's tools now. The attempt is ledgered; the version is proved
+    # for what it decides, so it keeps deciding, and the owner isn't told Claude won't act
+    copy = await rivera(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(select(Tool).where(Tool.desk_id == copy.desk_id,
+                                                       Tool.tool == "native.capture_lead"))).one()
+        row.status = "disabled"
+    stored = stored_columns(await stored_version(app, copy, 1))
+
+    async with upgraded_kernel(frozen_clock, reviewer) as http:
+        slots = await decided(http, await open_visitor(http, copy), "native.find_slots", call_id="slots")
+        assert (slots.outcome, slots.policy_version) == ("allow", 1)
+
+    assert stored_columns(await stored_version(app, copy, 1)) == stored
+    assert (await entries_of(client, copy, "policy"))[-1] == {"version": 1, "rebuilt": False, "refused": "not_proved"}
+    assert await rules_alerts(app, copy) == []
 
 
 async def test_startup_starts_no_desk_past_its_budget(app, client, monkeypatch):
@@ -615,7 +801,7 @@ async def test_no_rebuild_runs_over_the_old_tools_when_adding_the_new_ones_fails
     # the tools and then rebuilds it
     copy = await rivera(app, client)
     await seed_from_an_earlier_kernel(app, copy)
-    add, rebuild, steps = desks.add_native_tools, activation.rebuild_version, []
+    add, rebuild, steps = desks.update_native_tools, activation.rebuild_version, []
 
     async def adding_fails_once(*args, **kwargs):
         steps.append("tools")
@@ -630,7 +816,7 @@ async def test_no_rebuild_runs_over_the_old_tools_when_adding_the_new_ones_fails
     async def waiting(seconds):
         steps.append("wait")
 
-    monkeypatch.setattr(desks, "add_native_tools", adding_fails_once)
+    monkeypatch.setattr(desks, "update_native_tools", adding_fails_once)
     monkeypatch.setattr(activation, "rebuild_version", rebuilding)
     monkeypatch.setattr(activation, "wait_to_retry", waiting)
     startup = activation.StartupRebuild(results={}, left=[(copy.copy_id, copy.desk_id)], unscanned=[])
