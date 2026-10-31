@@ -14,6 +14,7 @@ import { connectorByKey } from '../connectors/catalog.ts';
 import { DEFAULT_SIDE, cancelsLinksFor, changeRows } from './changeRows.ts';
 import { checkStatus } from './checkStatus.ts';
 import { capOf, draftFromAnswer, draftFromDiff, draftFromVersion, moneyCapChange } from './drafts.ts';
+import { hubSections } from './hub.ts';
 import { PAYMENT_MAX_CENTS, moneyCapWords, moneyLimitHint, moneyLimitLine, ruleWords, type AgentNames } from './ruleWords.ts';
 
 const { ruleCards } = rivera;
@@ -793,12 +794,96 @@ describe('rule drafts', () => {
     // A more specific automatic rule still decides over a shared one that asks.
     const askPayOut: RuleCard = { ...neverPayOut, card_id: 'card-ask-pay-out', mode: 'ask', reason: 'Sending money out asks you first.' };
     expect(turnOn([...noRefund, askPayOut, refundAuto])).toMatchObject({ mode: 'auto', reason: refundAuto.reason, limit: '$50' });
-    // Shared automatic rules decide for anyone only when every effect has one for anyone: with
-    // private data for verified customers only, a stranger's refund still asks.
+    // Shared automatic rules cover a tool with several effects only together: with sending money
+    // out alone, Refund asks; with private data for verified customers too, a verified customer's
+    // refund runs on its own, so Refund turns on at Automatic, as Rules would read it.
     const autoPayOut: RuleCard = { ...neverPayOut, card_id: 'card-auto-pay-out', mode: 'auto', reason: 'Money goes out on its own.' };
+    expect(turnOn([...noRefund, autoPayOut])).toEqual(DEFAULT_SIDE);
     const verifiedData: RuleCard = { ...autoPayOut, card_id: 'card-verified-data', applies_to: 'effect:private_data', who: 'verified', reason: 'Verified customers see their own records.' };
-    expect(turnOn([...noRefund, autoPayOut, verifiedData])).toEqual(DEFAULT_SIDE);
+    expect(turnOn([...noRefund, autoPayOut, verifiedData])).toMatchObject({ mode: 'auto', reason: autoPayOut.reason });
     const anyoneData: RuleCard = { ...verifiedData, card_id: 'card-anyone-data', who: 'anyone' };
     expect(turnOn([...noRefund, autoPayOut, anyoneData])).toMatchObject({ mode: 'auto', reason: autoPayOut.reason });
+  });
+
+  it('turned_on_rows_read_as_rules_does', () => {
+    // A tool a change turns on starts at the outcome Rules shows for the same rules: the most that
+    // runs on its own for some visitor, at its largest limit.
+    const rule = (fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode'> & Partial<RuleCard>): RuleCard => ({ who: 'anyone', reason: `${fields.card_id}.`, ...fields });
+    const without = (...cardIds: string[]) => RIVERA_CARDS.filter((card) => !cardIds.includes(card.card_id));
+    const weekdays: RuleCard['hours'] = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '17:00:00' };
+    const cases: { name: string; tool: ToolRow['tool']; cards: RuleCard[]; mode: RuleCard['mode']; limit?: string }[] = [
+      {
+        name: 'a never rule on charges for verified customers leaves strangers automatic',
+        tool: 'native.payment_link',
+        cards: [...RIVERA_CARDS, rule({ card_id: 'card-charges-verified-never', applies_to: 'effect:charge', mode: 'never', who: 'verified' })],
+        mode: 'auto',
+        limit: '$300',
+      },
+      {
+        name: 'an ask rule for verified customers leaves strangers automatic',
+        tool: 'native.quote',
+        cards: [...RIVERA_CARDS, rule({ card_id: 'card-quote-verified-ask', applies_to: 'native.quote', mode: 'ask', who: 'verified' })],
+        mode: 'auto',
+      },
+      {
+        name: "a quote is no one's record, so a never rule for record owners refuses no one",
+        tool: 'native.quote',
+        cards: [...RIVERA_CARDS, rule({ card_id: 'card-change-owner-never', applies_to: 'effect:change', mode: 'never', who: 'record_owner' })],
+        mode: 'auto',
+      },
+      {
+        name: 'a larger limit for verified customers is the largest that runs',
+        tool: 'native.payment_link',
+        cards: [...RIVERA_CARDS, rule({ card_id: 'card-link-verified', applies_to: 'native.payment_link', mode: 'auto', who: 'verified', max_amount_cents: 50_000 })],
+        mode: 'auto',
+        limit: '$500',
+      },
+      {
+        name: 'a shared never rule for anyone refuses everyone',
+        tool: 'native.payment_link',
+        cards: [...RIVERA_CARDS, rule({ card_id: 'card-charges-never', applies_to: 'effect:charge', mode: 'never' })],
+        mode: 'never',
+      },
+      {
+        name: 'shared rules on two effects hold together, at the tighter limit',
+        tool: 'payments.create_refund',
+        cards: [
+          ...without('rv-refund'),
+          rule({ card_id: 'card-pay-out-100', applies_to: 'effect:pay_out', mode: 'auto', max_amount_cents: 10_000 }),
+          rule({ card_id: 'card-private-50', applies_to: 'effect:private_data', mode: 'auto', max_amount_cents: 5_000 }),
+        ],
+        mode: 'auto',
+        limit: '$50',
+      },
+      {
+        name: 'limits over the week: the largest at any time',
+        tool: 'native.payment_link',
+        cards: [
+          ...without('rv-link'),
+          rule({ card_id: 'card-link-weekdays', applies_to: 'native.payment_link', mode: 'auto', max_amount_cents: 10_000, hours: weekdays }),
+          rule({ card_id: 'card-link-saturdays', applies_to: 'native.payment_link', mode: 'auto', max_amount_cents: 30_000, hours: { days: ['sat'], start: '09:00:00', end: '13:00:00' } }),
+        ],
+        mode: 'auto',
+        limit: '$300',
+      },
+      {
+        name: 'shared rules whose hours never meet never run together',
+        tool: 'native.release_document',
+        cards: [
+          ...without('rv-docs'),
+          rule({ card_id: 'card-private-mon', applies_to: 'effect:private_data', mode: 'auto', hours: { days: ['mon'], start: '09:00:00', end: '17:00:00' } }),
+          rule({ card_id: 'card-messages-tue', applies_to: 'effect:send_message', mode: 'auto', hours: { days: ['tue'], start: '09:00:00', end: '17:00:00' } }),
+        ],
+        mode: 'ask',
+      },
+    ];
+    for (const { name, tool, cards, mode, limit } of cases) {
+      const onRules = hubSections({ active: version(8, cards), tools: TOOLS, preset: null }, PEOPLE)
+        .flatMap((section) => section.tools)
+        .find((row) => row.key === tool);
+      const turnedOn = changeRows(draftFromVersion(version(7, cards), version(8, cards), [toolRow(tool, { status: 'needs_review' })]), PEOPLE, TOOLS)[0]?.after;
+      expect({ mode: onRules?.mode, limit: onRules?.limit }, `${name}, on Rules`).toEqual({ mode, limit });
+      expect({ mode: turnedOn?.mode, limit: turnedOn?.limit }, `${name}, turned on`).toEqual({ mode, limit });
+    }
   });
 });
