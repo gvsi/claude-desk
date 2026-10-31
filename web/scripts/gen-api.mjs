@@ -98,9 +98,14 @@ function responseName(response, where, schemas) {
   fail(`${where}'s JSON body names no schema`);
 }
 
+/** A single status code, the only response key besides `default` this generator reads. */
+const STATUS_CODE = /^[1-5]\d\d$/;
+
 /**
  * Every operation in `paths`, keyed "METHOD /path" in the document's order, with the schema name
- * of each of its 2xx answers by status code. An operation with no 2xx answer fails.
+ * of each of its 2xx answers by status code. An operation with no 2xx answer fails, as does a
+ * response key that is neither a status code nor `default`, such as the range `2XX`, which would
+ * otherwise drop out unread.
  */
 export function apiOperations(openapi) {
   const paths = openapi?.paths;
@@ -113,7 +118,9 @@ export function apiOperations(openapi) {
       const key = `${method.toUpperCase()} ${route}`;
       const answers = {};
       for (const [status, response] of Object.entries(operation?.responses ?? {})) {
-        if (/^2\d\d$/.test(status)) answers[status] = responseName(response, `${key} ${status}`, schemas);
+        if (status === 'default') continue;
+        if (!STATUS_CODE.test(status)) fail(`${key} answers ${JSON.stringify(status)}, which is neither a status code nor default`);
+        if (status.startsWith('2')) answers[status] = responseName(response, `${key} ${status}`, schemas);
       }
       if (Object.keys(answers).length === 0) fail(`${key} has no 2xx answer`);
       operations[key] = answers;

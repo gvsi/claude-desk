@@ -85,7 +85,7 @@ describe('gen-api', () => {
     const paths = {
       '/things/{id}': {
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
-        get: { responses: { 200: json(ref('Thing')), 404: json(ref('ApiError')) } },
+        get: { responses: { 200: json(ref('Thing')), 404: json(ref('ApiError')), default: json(ref('ApiError')) } },
         delete: { responses: { 204: { description: 'Gone' } } },
       },
       '/things': {
@@ -135,6 +135,14 @@ describe('gen-api', () => {
     // A response only pointed at, which would otherwise read as one with no body.
     await expect(generate(answering({ 200: { $ref: '#/components/responses/Thing' } }))).rejects.toThrow(
       /GET \/x 200 is not an inline response/,
+    );
+    // A status range beside a single code, which would otherwise drop out of the answers unread,
+    await expect(generate(answering({ 200: json(ref('Thing')), '2XX': json(ref('Item')) }))).rejects.toThrow(
+      /GET \/x answers "2XX", which is neither a status code nor default/,
+    );
+    // and any other key that isn't a status code or `default`, a failure range included.
+    await expect(generate(answering({ 200: json(ref('Thing')), '4XX': json(ref('Item')) }))).rejects.toThrow(
+      /GET \/x answers "4XX", which is neither a status code nor default/,
     );
     // An operation with no success answer, and a document with no operations or no schemas.
     await expect(generate(answering({ 404: json(ref('Item')) }))).rejects.toThrow(/GET \/x has no 2xx answer/);
