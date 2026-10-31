@@ -26,16 +26,24 @@ export interface ProposalDecision {
   proposal: ProposalCard;
   title?: string;
   amount_cents?: number;
+  autonomy?: 'auto' | 'ask';
 }
 
 export type DecisionResult =
   | { ok: true; body: SetupProposalBody }
-  | { ok: false; field: 'title' | 'amount_cents'; message: string };
+  | { ok: false; field: 'title' | 'amount_cents' | 'autonomy'; message: string; code?: never }
+  | { ok: false; field: 'amount_cents'; code: 'amount_required'; message: string };
 
 /** Build only a valid request body, or a field error the screen can show without sending. */
 export function decisionBody(decision: ProposalDecision): DecisionResult {
   if (decision.action === 'decline') return { ok: true, body: { accept: false } };
   const body: SetupProposalBody = { accept: true };
+  if (decision.autonomy !== undefined) {
+    if (decision.proposal.kind !== 'job' || decision.proposal.job === null || !['auto', 'ask'].includes(decision.autonomy)) {
+      return { ok: false, field: 'autonomy', message: 'Choose whether this job acts on its own or asks you first.' };
+    }
+    body.autonomy = decision.autonomy;
+  }
   if (decision.title !== undefined) {
     const title = decision.title.trim();
     if (decision.proposal.kind !== 'job' || decision.proposal.job === null || [...title].length < 1 || [...title].length > 60) {
@@ -52,6 +60,10 @@ export function decisionBody(decision: ProposalDecision): DecisionResult {
       return { ok: false, field: 'amount_cents', message: 'Enter a whole number of cents between 0 and 1,000,000.' };
     }
     body.amount_cents = amount;
+  }
+  if (decision.proposal.kind === 'job' && decision.proposal.job?.config?.block === 'purpose_payment'
+    && decision.proposal.job.config.amount_cents === null && body.amount_cents === undefined) {
+    return { ok: false, field: 'amount_cents', code: 'amount_required', message: 'Enter an amount before accepting this payment job.' };
   }
   return { ok: true, body };
 }

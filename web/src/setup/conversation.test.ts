@@ -5,7 +5,7 @@ import { decisionBody, isCard, liveChoices } from './conversation.ts';
 const payment: ProposalCard = {
   proposal_id: 'p-000000000001', kind: 'job', state: 'proposed', connector: null,
   job: {
-    job: 'payment', title: 'Collect a retainer', why: 'Start the engagement.', how: 'Send a payment link.', can_do_today: true,
+    job: 'payment', title: 'Collect a retainer', why: 'Start the engagement.', how: 'Send a payment link.', can_do_today: true, autonomy: 'ask',
     config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: 50_000 },
   },
 };
@@ -15,6 +15,28 @@ const state = (messages: SetupMessage[]): SetupState => ({
 });
 
 describe('setup conversation', () => {
+  it('requires_an_owner_amount_before_accepting_an_unpriced_payment_job', () => {
+    const unpriced: ProposalCard = { ...payment, job: { ...payment.job!, config: { block: 'purpose_payment', purpose: 'Retainer', amount_cents: null } } };
+    for (const action of ['accept', 'change'] as const) {
+      const result = decisionBody({ action, proposal: unpriced, title: 'Retainer', autonomy: 'ask' });
+      expect(result).toMatchObject({ ok: false, field: 'amount_cents', code: 'amount_required', message: expect.any(String) });
+      expect(result).not.toHaveProperty('body');
+    }
+    expect(decisionBody({ action: 'decline', proposal: unpriced })).toEqual({ ok: true, body: { accept: false } });
+    for (const amount_cents of [0, 1_000_000]) {
+      expect(decisionBody({ action: 'accept', proposal: unpriced, amount_cents })).toEqual({ ok: true, body: { accept: true, amount_cents } });
+    }
+  });
+
+  it('includes_job_autonomy_only_on_acceptance_and_rejects_connector_autonomy', () => {
+    for (const autonomy of ['auto', 'ask'] as const) {
+      expect(decisionBody({ action: 'change', proposal: payment, autonomy })).toEqual({ ok: true, body: { accept: true, autonomy } });
+      expect(decisionBody({ action: 'decline', proposal: payment, autonomy })).toEqual({ ok: true, body: { accept: false } });
+    }
+    const connector: ProposalCard = { ...payment, kind: 'connector', job: null, connector: { app: 'stripe', label: 'Stripe', why: 'Payments', connectable: true } };
+    expect(decisionBody({ action: 'change', proposal: connector, autonomy: 'auto' })).toMatchObject({ ok: false, field: 'autonomy' });
+  });
+
   it('returns_field_errors_instead_of_bodies_for_invalid_changes', () => {
     for (const title of ['', '   ', 'x'.repeat(61)]) {
       expect(decisionBody({ action: 'change', proposal: payment, title })).toMatchObject({ ok: false, field: 'title' });

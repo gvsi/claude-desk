@@ -522,26 +522,26 @@ function say(interview: Interview, role: SetupMessage['role'], text: string, cho
 function consultantProposals(): ProposalCard[] {
   const jobs: JobProposal[] = [
     {
-      job: 'schedule', title: 'Book a free intro consult',
+      job: 'schedule', title: 'Book a free intro consult', autonomy: 'auto',
       why: 'New clients can find a time without a string of emails.',
       how: 'Offer a free intro consult in your available times and book the time the client chooses.',
       can_do_today: true, config: { block: 'typed_booking', appointment_type: 'Free intro consult', minutes: 20 },
     },
     {
-      job: 'intake', title: 'New client intake',
+      job: 'intake', title: 'New client intake', autonomy: 'auto',
       why: 'You have the basics before the first conversation.',
       how: 'Ask about the return and any tax notices, then save the answers for your team.',
       can_do_today: true,
       config: { block: 'intake', questions: ['Is this a personal or business return?', 'Which tax years do you need help with?', 'Have you heard from the IRS or the state?'] },
     },
     {
-      job: 'payment', title: 'Collect a retainer',
+      job: 'payment', title: 'Collect a retainer', autonomy: 'ask',
       why: 'Clients can pay the agreed retainer without waiting for an email.',
       how: 'Send a payment link for the engagement retainer under the money rules you approve.',
-      can_do_today: true, config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: 50_000 },
+      can_do_today: true, config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: null },
     },
     {
-      job: 'status', title: "Where's my return?",
+      job: 'status', title: "Where's my return?", autonomy: 'ask',
       why: 'Clients know how to ask for an update.',
       how: 'Take the client’s details and question so a person on your team can reply. Live return status is coming later.',
       can_do_today: false, config: null,
@@ -603,6 +603,7 @@ function askConsultant(interview: Interview, question: QuestionKey): void {
 }
 
 function finishQuestions(world: MockWorld, interview: Interview, suggestions = false): void {
+  for (const { card } of interview.state.messages) if (card?.state === 'proposed') card.state = 'accepted';
   interview.state.question = null;
   if (interview.consultant) {
     say(interview, 'claude', 'Your plan: help clients arrange an intro consult, gather new client intake, and handle retainer requests under the rules you approve. Return-status questions take their details for your team to reply. For example: “I need help with a business return” starts intake; “Can we talk about my taxes?” starts a consult request; “Where is my return?” leaves a question for your team.');
@@ -957,10 +958,12 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (interview.state.step !== 'questions' || interview.running !== null) return CONFLICT;
     const body = isRecord(req.body) ? req.body : {};
     if (req.malformed || typeof body.accept !== 'boolean') return INVALID;
-    if (Object.keys(body).some((key) => !['accept', 'title', 'amount_cents'].includes(key))) return INVALID;
+    if (Object.keys(body).some((key) => !['accept', 'title', 'amount_cents', 'autonomy'].includes(key))) return INVALID;
     const hasTitle = Object.hasOwn(body, 'title');
     const hasAmount = Object.hasOwn(body, 'amount_cents');
-    if (!body.accept && (hasTitle || hasAmount)) return INVALID;
+    const hasAutonomy = Object.hasOwn(body, 'autonomy');
+    if (!body.accept && (hasTitle || hasAmount || hasAutonomy)) return INVALID;
+    if (hasAutonomy && (proposal.kind !== 'job' || proposal.job === null || (body.autonomy !== 'auto' && body.autonomy !== 'ask'))) return INVALID;
     if (hasTitle && (
       proposal.kind !== 'job' || proposal.job === null || typeof body.title !== 'string'
       || [...body.title.trim()].length < 1 || [...body.title].length > 60
@@ -970,7 +973,10 @@ export const SETUP_ROUTES: ServedRoutes = {
       || typeof body.amount_cents !== 'number' || !Number.isInteger(body.amount_cents)
       || body.amount_cents < 0 || body.amount_cents > MONEY_CAP_MAX_CENTS
     )) return INVALID;
+    if (body.accept && proposal.job?.config?.block === 'purpose_payment'
+      && proposal.job.config.amount_cents === null && !hasAmount) return fail(422, 'amount_required');
     proposal.state = body.accept ? 'accepted' : 'declined';
+    if (proposal.job && (body.autonomy === 'auto' || body.autonomy === 'ask')) proposal.job.autonomy = body.autonomy;
     if (proposal.job && typeof body.title === 'string') proposal.job.title = body.title;
     if (proposal.job?.config?.block === 'purpose_payment' && typeof body.amount_cents === 'number') proposal.job.config.amount_cents = body.amount_cents;
     return ok(stateOf(interview, req.query));

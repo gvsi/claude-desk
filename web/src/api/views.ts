@@ -507,24 +507,26 @@ export type ProposalCard = {
 /** The closed catalog of jobs setup can propose. */
 export type JobKind = 'answer' | 'intake' | 'schedule' | 'price' | 'documents' | 'status' | 'payment' | 'urgent';
 
-/** Title ≤ 60, why ≤ 200, how ≤ 300; unavailable jobs take details for a person to reply. */
+/** Title ≤ 60, why ≤ 200, how ≤ 300; autonomy proposes doing it on its own or asking first. */
 export type JobProposal = {
   job: JobKind;
   title: string;
   why: string;
   how: string;
   can_do_today: boolean;
+  autonomy: 'auto' | 'ask';
   config: BlockConfig | null;
 };
 
 /**
- * Intake: 1..5 questions, each ≤ 120. Booking: appointment type ≤ 60, minutes 15..240.
- * Payment: purpose ≤ 60, integer amount_cents 0..1_000_000. Urgent: urgent_when ≤ 300.
+ * Intake: 1..5 questions, each ≤ 120. Booking: appointment type ≤ 60, minutes 15..60 (one slot).
+ * Payment: purpose ≤ 60, amount_cents null until the owner enters integer cents 0..1_000_000.
+ * Urgent: urgent_when ≤ 300.
  */
 export type BlockConfig =
   | { block: 'intake'; questions: string[] }
   | { block: 'typed_booking'; appointment_type: string; minutes: number }
-  | { block: 'purpose_payment'; purpose: string; amount_cents: number }
+  | { block: 'purpose_payment'; purpose: string; amount_cents: number | null }
   | { block: 'urgent'; urgent_when: string };
 
 /** Setup's closed connector catalog. */
@@ -783,8 +785,8 @@ export interface SetupAnswerBody {
   text: string;
 }
 
-/** Changes always accept: trimmed title 1..60; payment-only integer cents 0..1_000_000. */
-export type SetupProposalBody = { accept: boolean; title?: string; amount_cents?: number };
+/** Changes always accept: title 1..60, job autonomy, payment-only integer cents 0..1_000_000. */
+export type SetupProposalBody = { accept: boolean; title?: string; amount_cents?: number; autonomy?: 'auto' | 'ask' };
 
 /** Sent as an empty JSON object. */
 export type SetupSuggestionsBody = Record<string, never>;
