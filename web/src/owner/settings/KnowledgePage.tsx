@@ -67,7 +67,7 @@ function rowsOf(items: readonly KnowledgeRow[], timeZone: string): KnowledgeRowV
   return items.map((item) => ({
     id: item.item_id,
     title: item.title === null || item.text === null ? null : item.title,
-    detail: item.created_at === null ? 'Added date unknown' : `Added ${formatDate(item.created_at, timeZone)}`,
+    detail: item.created_at === null ? null : `Added ${formatDate(item.created_at, timeZone)}`,
     readers: item.readers,
   }));
 }

@@ -47,5 +47,5 @@ Two kinds of item are owner-only, and only one loses its title:
 | --- | --- | --- |
 | `id` | `string` | Required. `KnowledgeItem.item_id`. |
 | `title` | `string \| null` | Required. The item's title, or `null` only when the kernel forced it owner-only and withheld it. |
-| `detail` | `string` | Required. The line under the title, in the screen's words. |
+| `detail` | `string \| null` | Required. The line under the title, in the screen's words; null leaves the line out. |
 | `readers` | `readonly string[]` | Required. `label.readers` as returned; "public" reads "Customers can see this". |

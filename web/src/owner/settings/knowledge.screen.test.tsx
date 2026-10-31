@@ -445,10 +445,16 @@ describe('knowledge', () => {
       const list = main(screen).getByRole('list', { name: 'What I know now' });
       await expect.element(list).toBeVisible();
       expect(list.getByRole('listitem').elements().map((row) => row.textContent)).toEqual([
-        'An older noteAdded date unknownOnly you',
+        'An older noteOnly you',
         'A recent noteAdded Oct 30Customers can see this',
-        'A note only you can seeAdded date unknownOnly you',
+        'A note only you can seeOnly you',
         'An earlier noteAdded Oct 26Customers can see this',
+      ]);
+      expect(list.getByRole('listitem').elements().map((row) => row.querySelector('.cd-knowledge-list__detail')?.textContent ?? null)).toEqual([
+        null,
+        'Added Oct 30',
+        null,
+        'Added Oct 26',
       ]);
       expectNoHorizontalScroll();
       await expectScreenBasics(screen.container, { owner: true });
