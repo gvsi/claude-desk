@@ -81,12 +81,12 @@ contract test, before the task that first uses them.
   and enabled tools but for a timed-out rejection, which proves again; `POST /policy/confirm` activates only a proved
   draft whose parent is still active (else 409); `POST /policy/{version}/probe` decides each `Probe` through the
   fake's card rules below, changing nothing. `POST /tools/connect` pins the mock payments tools `needs_review`, and
-  `POST /tools/simulate_change` (the owner's demo action) drifts a connected one back to `needs_review` with its
-  changed definition pending. `POST /documents` adds a document through the seed path's writer and `POST /knowledge`
-  upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a route's calls until a test lets
-  them through, as a slow proof does. The fake's rules are cards read plainly (a `never` refuses, an `auto` card whose
-  limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no specificity order between overlapping
-  cards, and an effect card covers a tool by any one of its effects.
+  `POST /tools/simulate_change` (the owner's demo action) drifts a connected one back to `needs_review` (a disabled
+  one stays disabled) with its changed definition pending. `POST /documents` adds a document through the seed path's
+  writer and `POST /knowledge` upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a
+  route's calls until a test lets them through, as a slow proof does. The fake's rules are cards read plainly (a
+  `never` refuses, an `auto` card whose limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no
+  specificity order between overlapping cards, and an effect card covers a tool by any one of its effects.
 - Refused calls (the baseline's "every attempt logged"): a call refused because its session is closed or its Desk
   deleted is ledgered `auth {route, reason: "closed"}` on that Desk, naming the session it acted for (none for an
   owner route or a new session), as the kernel's `auth.AuthError` does; a refused agent signature is ledgered as
@@ -3459,9 +3459,10 @@ class FakeKernelState:
 
     def tools_simulate_change(self, request: Request, body: ToolsSimulateChangeRequest) -> ToolProfile:
         """The owner's demo action: the mock payments server changes the tool's definition for this copy, and the
-        re-listing finds it at once (ledgered `tool_pin`, simulated then drift, with the owner alerted): the tool is
-        `needs_review` ("changed"), the changed definition waiting as quoted text under its own hash, its pin
-        unchanged. A tool the Desk doesn't have is 404; a native tool, which no server defines, is 422 `invalid`."""
+        re-listing finds it at once (ledgered `tool_pin`, simulated then drift): the changed definition waits as quoted
+        text under its own hash, its pin unchanged. An enabled or waiting tool is `needs_review` ("changed") and the
+        owner is alerted; a disabled tool stays disabled, with no alert (`mcp_pins.check_pin`). A tool the Desk doesn't
+        have is 404; a native tool, which no server defines, is 422 `invalid`."""
         desk = self._owners_desk(request, body.desk_id)
         profile = desk.tools.get(body.tool)
         if profile is None:
@@ -3470,13 +3471,16 @@ class FakeKernelState:
             raise Refusal(422, "invalid")
         listed = canonical({"name": profile.tool.removeprefix("payments."), "inputSchema": profile.input_schema,
                             "description": f"{TOOL_FACTS[profile.tool][3]} {SIMULATED_CHANGE}"})
-        changed = profile.model_copy(update={"status": "needs_review", "review_reason": "changed",
-                                             "pending_definition_text": listed, "pending_sha256": sha256_hex(listed)})
+        disabled = profile.status == "disabled"
+        review = {} if disabled else {"status": "needs_review", "review_reason": "changed"}
+        changed = profile.model_copy(update={**review, "pending_definition_text": listed,
+                                             "pending_sha256": sha256_hex(listed)})
         self._put_tool(desk, changed)
         self.append(desk, "tool_pin", {"tool": profile.tool, "event": "simulated"})
         self.append(desk, "tool_pin", {"tool": profile.tool, "event": "drift",
                                        "pending_sha256": changed.pending_sha256})
-        self._alert_owner(desk, f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")
+        if not disabled:
+            self._alert_owner(desk, f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")
         return changed
 
     # Verification --------------------------------------------------------------------------------

@@ -2803,8 +2803,9 @@ async def test_tool_review_refusals_and_disable_are_atomic(kernel, ro_read):
         desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
     rows = ro_read(ro_schema, copy.copy_id,
                    "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
+    # a drift on a disabled tool leaves it disabled, its changed definition pending (`mcp_pins.check_pin`)
     assert {row["tool"]: row["status"] for row in rows} == {
-        pins[0].tool: "disabled", pins[-1].tool: "needs_review"}
+        pins[0].tool: "disabled", pins[-1].tool: "disabled"}
 
 
 @pytest.mark.kernel_plan("01c")
