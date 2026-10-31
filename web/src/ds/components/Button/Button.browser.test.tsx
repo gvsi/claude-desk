@@ -2,10 +2,11 @@
  * A busy button under prefers-reduced-motion: reduce, which this project's browser context
  * emulates. The BusyReducedMotion story runs with its play, so its reduced-motion branch is the one
  * checked: the spinner is a still arc, and the button is still named by its label. And the button's
- * ref, which lets go while the button is still on the page.
+ * ref, which lets go while the button is still on the page, and, on a touch screen, the unseen hit
+ * area that takes a tap just beside it without ever overlapping a neighbour's.
  */
 import { composeStory } from '@storybook/react-vite';
-import { act } from 'react';
+import { act, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
 
@@ -60,7 +61,7 @@ it('button_ref_lets_go_while_the_button_is_on_the_page', () => {
 });
 
 /** Renders `ui` into a fresh host on the page; the returned function takes it off again. */
-function mount(ui: React.ReactElement): { host: HTMLDivElement; unmount: () => void } {
+function mount(ui: ReactElement): { host: HTMLDivElement; unmount: () => void } {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement('div');
   document.body.append(host);

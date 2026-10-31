@@ -3,21 +3,18 @@
  * it, through an unseen hit area, and its box, look and place stay as they are. Where the composer
  * puts its controls closer together than that, each hit area stops halfway across the gap.
  */
-import { composeStories } from '@storybook/react-vite';
 import { act, type ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
 
 import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea } from '../../test/touch.ts';
-import * as composerStories from '../Composer/Composer.stories.tsx';
+import { Composer } from '../Composer/Composer.tsx';
 import { IconButton } from './IconButton.tsx';
 
 declare global {
   // Tells React this test drives its updates inside act().
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
 }
-
-const { Owner, Visitor } = composeStories(composerStories);
 
 /** Renders `ui` into a fresh host on the page; the returned function takes it off again. */
 function mount(ui: ReactElement): { host: HTMLDivElement; unmount: () => void } {
@@ -70,11 +67,18 @@ it('touch_hit_areas_in_the_composer_stay_apart', async () => {
   // The owner composer's speak and send buttons sit 4 px apart, and the visitor composer's controls
   // 8 px apart on one row with its text box: each hit area reaches halfway across its gap, and the
   // full 6 px up and down, so a tap between two of them lands on the nearer one.
+  const tools = { onSend: () => {}, onAttach: () => {}, onSpeak: () => {} };
   const { host, unmount } = mount(
-    <>
-      <Owner />
-      <Visitor onAttach={() => {}} onSpeak={() => {}} />
-    </>,
+    <div style={{ display: 'grid', gap: 40, width: 640, padding: 40 }}>
+      <Composer
+        variant="owner"
+        label="Ask Claude about your Desk, or change a rule"
+        placeholder="Ask Claude about your Desk, or change a rule"
+        helper="Rule changes are shown to you before they apply."
+        {...tools}
+      />
+      <Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" {...tools} />
+    </div>,
   );
   try {
     await coarsePointer();
