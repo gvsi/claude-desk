@@ -267,6 +267,9 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
         ))}
         {sending !== null ? <VisitorMessage text={sending} /> : null}
         {sending !== null || busy ? <WritingIndicator language="en" /> : null}
+        {busy && !asking && state.question === null && state.step === 'questions' && sending === null ? (
+          <p className="cd-setup-step__line cd-type-meta">{copy.putting}</p>
+        ) : null}
       </Transcript>
       {work.gaveUp ? (
         <Notice

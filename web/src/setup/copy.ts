@@ -170,6 +170,7 @@ export const SETUP_COPY = {
     failed: "I couldn't answer just now. Your answer is still here; try again.",
     tryAgain: 'Try again',
     conversation: 'Setup questions',
+    putting: 'Putting together what I’d have your Desk do. This can take a minute or so.',
     loading: 'Opening your setup',
   },
 

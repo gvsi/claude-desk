@@ -1173,6 +1173,42 @@ describe('setup', () => {
     expect(requests('setupAnswer', sent)).toHaveLength(1);
   });
 
+  it('async_consent_shows_the_signed_wait_line_until_the_first_question_lands', async () => {
+    const words = 'Putting together what I’d have your Desk do. This can take a minute or so.';
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const state = await startInterview(null);
+      const finish = holdNextConsent(mockStore.world, state.interview_id);
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      await screen.getByRole('button', { name: 'Yes, use it' }).click();
+      const writing = screen.getByText('Claude is writing', { exact: true });
+      const wait = screen.getByText(words, { exact: true });
+      await expect.element(writing).toBeVisible();
+      await expect.element(wait).toBeVisible();
+      expect(writing.element().nextElementSibling).toBe(wait.element());
+      const log = screen.getByRole('log', { name: 'Setup questions' }).element();
+      expect(wait.element().getBoundingClientRect().left).toBe(log.getBoundingClientRect().left);
+      expect(wait.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(writing.element().getBoundingClientRect().bottom);
+      expect(wait.element()).toHaveClass('cd-type-meta');
+      expect(getComputedStyle(wait.element()).color).toBe(tokenColor('--text-secondary'));
+      expectNoHorizontalScroll();
+      finish('landed');
+      await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
+      await expect.element(wait).not.toBeInTheDocument();
+
+      // An ordinary answer still uses the writing indicator, without the consent wait line.
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      onTestFinished(() => release());
+      mockStore.inject({ route: 'setupAnswer', status: 503, until: held });
+      await screen.getByRole('textbox', { name: 'Your answer' }).fill('We repair leaks.');
+      await screen.getByRole('button', { name: 'Send' }).click();
+      await expect.element(writing).toBeVisible();
+      await expect.element(wait).not.toBeInTheDocument();
+      release();
+      await expect.element(writing).not.toBeInTheDocument();
+    }
+  });
+
   it('async_consent_waits_with_a_disabled_composer_then_focuses_the_first_question', async () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
