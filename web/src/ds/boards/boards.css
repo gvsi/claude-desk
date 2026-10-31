@@ -1106,10 +1106,11 @@
   border-bottom: 1px solid var(--line-hairline);
 }
 
+/* The lockup as the setup boards draw it: the 20 px bell, then the wordmark 10 px on. */
 .board-setup__brand {
   display: flex;
   align-items: center;
-  gap: var(--space-12);
+  gap: var(--space-10);
 }
 
 .board-setup__business {

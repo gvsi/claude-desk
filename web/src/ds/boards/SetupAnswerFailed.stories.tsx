@@ -63,6 +63,11 @@ type Story = StoryObj<typeof meta>;
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
+    // The bar's lockup as the setup boards draw it: the 20 px bell, then the wordmark 10 px on.
+    const brand = one(canvasElement, '.board-setup__brand');
+    const bell = one(brand, '.cd-mark').getBoundingClientRect();
+    await expect([Math.round(bell.width), Math.round(bell.height)]).toEqual([20, 20]);
+    await expect(Math.round(one(brand, '.cd-wordmark').getBoundingClientRect().left - bell.right)).toBe(10);
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'A few questions' }), SPEC.pageTitle);
     await expect(canvas.getByText('Question 3 of 7')).toBeVisible();
     expectConversationType(canvasElement);

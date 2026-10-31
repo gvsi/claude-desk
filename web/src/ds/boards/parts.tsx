@@ -1041,7 +1041,7 @@ function isCompactBar(): boolean {
 }
 
 /**
- * The setup interview's page (plan 04, Task 12): a bar with the mark, the wordmark and the business,
+ * The setup interview's page (plan 04, Task 12): a bar with the 20 px mark, the wordmark and the business,
  * "Save and exit" at its right, then one 720 px column and the footer at the window's foot. Below the
  * About pages' compact breakpoint the wordmark drops its Preview badge, as every phone top bar does.
  * The step list in the bar is `Steps`, which comes with the Connectors and rules change, so it is
@@ -1053,7 +1053,7 @@ export function SetupFrame({ business, children }: { business: string; children:
     <div className="board-setup">
       <header className="board-setup__bar">
         <span className="board-setup__brand">
-          <Mark size={16} />
+          <Mark size={20} />
           <Wordmark preview={!compact} />
         </span>
         <span className="board-setup__business cd-type-control" data-copy="user">
