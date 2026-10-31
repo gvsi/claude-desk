@@ -695,5 +695,5 @@ export interface AgentTaskBody {
    * One per task click (1 to 128 characters, no control characters): a repeat with the same key,
    * task, session and Desk answers the run the first started and starts nothing (plan 02b).
    */
-  idempotency_key?: string;
+  idempotency_key: string;
 }

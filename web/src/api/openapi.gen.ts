@@ -599,7 +599,7 @@ export interface SafetyRow {
 }
 export interface SendAgentIn {
   task: "book_visit" | "quote_and_deposit" | "push_the_limit";
-  idempotency_key?: string | null;
+  idempotency_key: string;
 }
 /**
  * `POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
