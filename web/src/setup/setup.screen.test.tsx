@@ -16,6 +16,7 @@ import type { RuleCard } from '../api/contracts.ts';
 import type { BusinessOut, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
+import { pairContrast } from '../ds/contrast.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { hubSections } from '../owner/rules/hub.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
@@ -187,6 +188,15 @@ const LONG_BUSINESS_NAME = 'Bayview Heating, Plumbing & Drain Services of Greate
 
 /** The composer's failed box, which keeps an answer that didn't go through beside "Try again". */
 const keptAnswer = (screen: RenderResult) => screen.getByRole('group', { name: 'Your answer' });
+
+/** The opaque background an element is drawn on: the first one up its ancestors that paints one. */
+function groundOf(el: Element): string {
+  for (let at = el.parentElement; at !== null; at = at.parentElement) {
+    const color = getComputedStyle(at).backgroundColor;
+    if (color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)') return color;
+  }
+  throw new Error('Nothing under the element paints a background');
+}
 
 /** Setup's loading line, while what a step needs is read. */
 const OPENING = 'Opening your setup';
@@ -1855,6 +1865,13 @@ describe('setup', () => {
     if (!dot) throw new Error('No handled dot beside "Answering now"');
     expect(getComputedStyle(dot)).toMatchObject({ animationDuration: '5s', animationIterationCount: 'infinite', animationDirection: 'alternate' });
     expect(getComputedStyle(dot).animationName).not.toBe('none');
+    // breathing_dot_keeps_3_to_1: at its faintest the dot still stands out from its ground by 3:1,
+    // the least a status dot may have, measured from the breath it runs and the colors it is drawn in.
+    const [breath] = dot.getAnimations();
+    if (!breath?.effect) throw new Error('The dot beside "Answering now" doesn\'t breathe');
+    const faintest = Math.min(...(breath.effect as KeyframeEffect).getKeyframes().map((frame) => Number(frame.opacity ?? 1)));
+    expect(faintest).toBeLessThan(1);
+    expect(pairContrast({ fg: getComputedStyle(dot).backgroundColor, ground: 'transparent', over: groundOf(dot), opacity: faintest })).toBeGreaterThanOrEqual(3);
     const subtitle = screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true }).element();
     const link = screen.getByRole('button', { name: 'Copy link' }).element();
     const line = answering.element().getBoundingClientRect();
