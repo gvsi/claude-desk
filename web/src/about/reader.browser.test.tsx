@@ -443,9 +443,9 @@ describe('ReaderPage', () => {
         // The reader's own strings, each found where the boards put it.
         const topBar = root.querySelector('header');
         const documents = root.querySelector('nav[aria-label="Documents"]');
-        expect(readText(documents ?? document.body), where).toBe('Capability prediction Product proposal');
+        expect(readText(documents ?? document.body), where).toBe('Capability prediction Product proposal Vision');
         expect(readText(topBar ?? document.body), where).toBe(
-          phone ? 'Try Desk prototype Claude Desk' : 'Claude Desk Preview Capability prediction Product proposal Try Desk prototype',
+          phone ? 'Try Desk prototype Claude Desk' : 'Claude Desk Preview Capability prediction Product proposal Vision Try Desk prototype',
         );
         // "On this page", without the entries, which are the document's section names.
         const contents = without(root.querySelector('nav[aria-label="On this page"]'), 'ol');
@@ -613,26 +613,31 @@ describe('ReaderPage', () => {
     await expect.poll(title).toBe('Capability prediction');
     expect(at.path).toBe('/about/prediction');
 
-    // From the end of each page, "Read next" opens the other one at its top.
-    for (const [next, expected] of [
-      ['Product proposal', '/about/proposal'],
-      ['Capability prediction', '/about/prediction'],
-    ] as const) {
-      window.scrollTo(0, document.documentElement.scrollHeight);
-      await expect.poll(() => window.scrollY).toBeGreaterThan(0);
-      const card = screen.container.querySelector('[data-next-label]')?.closest('.cd-about-next');
-      const link = card?.querySelector('a');
-      expect(flat(link?.textContent)).toBe(next);
-      expect(link?.getAttribute('href')).toBe(expected);
-      await userEvent.click(link as HTMLElement);
-      await expect.poll(title).toBe(next);
-      expect(at.path).toBe(expected);
-      await expect.poll(() => window.scrollY).toBe(0);
-    }
+    // From the end of each page, "Read next" opens the next one in the About set: the prediction the proposal,
+    // at its top, and the proposal the Vision article, which this router doesn't draw.
+    const readNext = () => screen.container.querySelector('[data-next-label]')?.closest('.cd-about-next')?.querySelector('a');
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    await expect.poll(() => window.scrollY).toBeGreaterThan(0);
+    expect([flat(readNext()?.textContent), readNext()?.getAttribute('href')]).toEqual(['Product proposal', '/about/proposal']);
+    await userEvent.click(readNext() as HTMLElement);
+    await expect.poll(title).toBe('Product proposal');
+    expect(at.path).toBe('/about/proposal');
+    await expect.poll(() => window.scrollY).toBe(0);
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    await expect.poll(() => window.scrollY).toBeGreaterThan(0);
+    expect([flat(readNext()?.textContent), readNext()?.getAttribute('href')]).toEqual(['Vision', '/about/vision']);
+    await userEvent.click(readNext() as HTMLElement);
+    await expect.poll(() => at.path).toBe('/about/vision');
 
-    // The top bar's switch too, the page on show marked as current.
-    const current = screen.container.querySelector('nav[aria-label="Documents"] [aria-current="page"]');
-    expect(flat(current?.textContent)).toBe('Capability prediction');
+    // The top bar's switch too: the set's three pages, the page on show marked as current.
+    at.navigate?.('/about/prediction');
+    await expect.poll(title).toBe('Capability prediction');
+    const links = [...screen.container.querySelectorAll('nav[aria-label="Documents"] a')];
+    expect(links.map((link) => [flat(link.textContent), link.getAttribute('href'), link.getAttribute('aria-current')])).toEqual([
+      ['Capability prediction', '/about/prediction', 'page'],
+      ['Product proposal', '/about/proposal', null],
+      ['Vision', '/about/vision', null],
+    ]);
     await userEvent.click(screen.container.querySelector('nav[aria-label="Documents"] a[href="/about/proposal"]') as HTMLElement);
     await expect.poll(title).toBe('Product proposal');
     await screen.unmount();

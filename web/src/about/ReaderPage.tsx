@@ -2,8 +2,8 @@
  * An About this prototype reading page: the product proposal or the capability prediction, laid out as the
  * reader boards draw them. A centered title, its summary and the lead figure; then the numbered contents
  * list, the document in a serif column and the author, date and reading time beside it; then "Read next", the
- * other document. On a phone the contents list folds into one row and the details into a line under the
- * summary.
+ * next page in the About set. On a phone the contents list folds into one row and the details into a line
+ * under the summary.
  *
  * The page is static: it reads its document from `documents.ts`, which only it loads, and makes no request.
  */
@@ -28,7 +28,8 @@ import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { Inlines } from './Inlines.tsx';
-import { DOCUMENT_LINKS, type AboutId } from './links.ts';
+import { AboutSwitch } from './AboutSwitch.tsx';
+import { readNext, type AboutId, type AboutPage } from './links.ts';
 import { MONTHS } from './months.ts';
 import { prefersReducedMotion } from './motion.ts';
 import { PrototypeLink } from './PrototypeLink.tsx';
@@ -438,8 +439,8 @@ function BylineLine({ document }: { document: AboutDocument }) {
   );
 }
 
-/** "Read next": the other document, its title and summary, the whole card one link. */
-function ReadNext({ other, compact }: { other: AboutDocument; compact: boolean }) {
+/** "Read next": the next page in the About set, its title and summary, the whole card one link. */
+function ReadNext({ next, compact }: { next: AboutPage; compact: boolean }) {
   return (
     <div className="cd-about-next">
       <Card>
@@ -448,31 +449,24 @@ function ReadNext({ other, compact }: { other: AboutDocument; compact: boolean }
         </p>
         <Link
           className={`cd-about-next__link ${compact ? 'cd-type-page-title' : 'cd-type-intro-title'}`}
-          to={other.route}
+          to={next.route}
         >
-          {other.title}
+          {next.title}
         </Link>
-        <p className="cd-about-next__summary cd-type-body">{other.summary}</p>
+        <p className="cd-about-next__summary cd-type-body">{next.summary}</p>
       </Card>
     </div>
   );
 }
 
-/** The two documents as links, the one on show marked as the current page. */
+/** The About set's three pages as links, the one on show marked as the current page. */
 function DocumentSwitch({ current, compact }: { current: AboutId; compact: boolean }) {
   return (
-    <nav className={`cd-about-switch${compact ? ' cd-about-switch--compact' : ''}`} aria-label="Documents">
-      {DOCUMENT_LINKS.map((link) => (
-        <Link
-          key={link.id}
-          className="cd-about-switch__link cd-type-control"
-          to={link.href}
-          aria-current={link.id === current ? 'page' : undefined}
-        >
-          {link.label}
-        </Link>
-      ))}
-    </nav>
+    <AboutSwitch
+      current={current}
+      className={`cd-about-switch${compact ? ' cd-about-switch--compact' : ''}`}
+      linkClassName="cd-about-switch__link cd-type-control"
+    />
   );
 }
 
@@ -490,7 +484,7 @@ function Brand({ compact }: { compact: boolean }) {
   );
 }
 
-/** The bar across the top, which stays while the page scrolls: the product's name, the two documents and the link into the prototype. */
+/** The bar across the top, which stays while the page scrolls: the product's name, the About set's switch and the link into the prototype. */
 function TopBar({ current, compact }: { current: AboutId; compact: boolean }) {
   if (compact) {
     return (
@@ -555,7 +549,7 @@ export function ReaderPage({ id }: ReaderPageProps) {
           <Contents sections={sections} compact={compact} />
           <div className="cd-about-column">
             <Article document={about} compact={compact} />
-            <ReadNext other={other} compact={compact} />
+            <ReadNext next={readNext(id)} compact={compact} />
           </div>
           {compact ? null : <Details document={about} other={other} />}
         </div>
