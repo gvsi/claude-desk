@@ -353,7 +353,7 @@ async def test_accepting_stripe_connects_after_the_decision_commit(proposals, en
     calls = []
 
     async def connect(ctx, desk_id):
-        assert interview_id not in setup._RUNNING
+        assert interview_id in setup._RUNNING
         saved = await stored(engine, interview_id)
         card = next(entry["card"] for entry in reversed(saved["transcript"])
                     if (entry.get("card") or {}).get("proposal_id") == ids[2])
@@ -379,7 +379,7 @@ async def test_typing_accept_connects_stripe_after_the_commit(proposals, model, 
         card = next(entry["card"] for entry in reversed(saved["transcript"])
                     if (entry.get("card") or {}).get("proposal_id") == ids[2])
         assert card["state"] == "accepted"
-        assert interview_id not in setup._RUNNING
+        assert interview_id in setup._RUNNING
         calls.append(desk_id)
         return []
 
@@ -400,7 +400,7 @@ async def test_a_failed_connector_accept_still_saves_and_answers(proposals, engi
     calls = []
 
     async def connect(ctx, desk_id):
-        assert state["interview_id"] not in setup._RUNNING
+        assert state["interview_id"] in setup._RUNNING
         calls.append(("connect", desk_id))
         raise KernelFailed(503, "unavailable")
 
@@ -431,7 +431,7 @@ async def test_use_your_suggestions_connects_leftover_apps_after_commit(proposal
     connects, writes = [], []
 
     async def connect(ctx, desk_id):
-        assert interview_id not in setup._RUNNING
+        assert interview_id in setup._RUNNING
         async with engine.connect() as conn:
             saved = await setup._load(conn, owner.copy_id, interview_id)
         assert saved.step == "tools"
@@ -490,7 +490,7 @@ async def test_ordinary_completion_connects_leftover_stripe_after_commit(
     connects = []
 
     async def connect(ctx, desk_id):
-        assert interview_id not in setup._RUNNING
+        assert interview_id in setup._RUNNING
         assert (await stored(engine, interview_id))["step"] == "tools"
         connects.append(desk_id)
 
@@ -603,7 +603,7 @@ async def test_a_connector_without_an_accept_does_not_connect(proposals, model, 
 
 
 @pytest.mark.parametrize("action", ["decision", "typed", "suggestions"])
-async def test_a_decision_while_busy_is_409(proposals, engine, action):
+async def test_a_decision_while_busy_is_202(proposals, engine, action):
     owner, state, ids = proposals
     path = f"/api/owner/setup/{state['interview_id']}"
     suffix, body = {
@@ -622,10 +622,10 @@ async def test_a_decision_while_busy_is_409(proposals, engine, action):
     visible = await owner.browser.get(path + "?cards=1")
     assert visible.json()["busy"] is True
     reply = await owner.browser.post(path + suffix, json=body)
-    assert reply.status_code == 409, reply.text
+    assert reply.status_code == 202, reply.text
     with setup._turn(state["interview_id"]):
         reply = await owner.browser.post(path + suffix, json=body)
-        assert reply.status_code == 409, reply.text
+        assert reply.status_code == 202, reply.text
     assert await stored(engine, state["interview_id"]) == before
 
 
@@ -732,9 +732,9 @@ async def test_a_card_click_does_not_invalidate_the_running_answer(proposals, mo
     try:
         await asyncio.wait_for(slow.entered.wait(), 5)
         reply = await asyncio.wait_for(owner.browser.post(path + f"/proposals/{ids[0]}", json={"accept": True}), 2)
-        assert reply.status_code == 409
+        assert reply.status_code == 202
         reply = await asyncio.wait_for(owner.browser.post(path + "/suggestions", json={}), 2)
-        assert reply.status_code == 409
+        assert reply.status_code == 202
     finally:
         release.set()
     reply = await pending
@@ -757,7 +757,7 @@ async def test_the_last_answer_uses_the_same_finish_and_post_commit_work(proposa
     calls = []
 
     async def put(ctx, desk_id, jobs):
-        assert interview_id not in setup._RUNNING
+        assert interview_id in setup._RUNNING
         record = await stored(engine, interview_id)
         assert record["step"] == "tools"
         assert record["answers"]["how_we_help"]
@@ -998,7 +998,7 @@ async def test_a_failed_business_tool_write_keeps_saved_setup(proposals, engine,
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions", json={})
     assert reply.status_code == 200, reply.text
     assert reply.json()["step"] == "tools"
-    assert observed == [("tools", False)]
+    assert observed == [("tools", True)]
     assert (await stored(engine, interview_id))["step"] == "tools"
     assert "a setup business tools write failed (RuntimeError)" in caplog.text
 
@@ -1168,7 +1168,7 @@ async def test_a_decision_that_closes_setup_runs_after_finish_after_the_commit(p
         saved = await stored(engine, interview_id)
         assert saved["step"] == interview.step == "tools"
         assert saved["transcript"][-1]["text"] == setup.QUESTIONS_DONE
-        assert interview_id not in setup._RUNNING
+        assert interview_id in setup._RUNNING
         calls.append(interview_id)
     monkeypatch.setattr(setup, "after_finish", after)
     first = (card_answer("accept", next={"kind": "done"}, skip=list(setup.QUESTION_KEYS)) if typed else
@@ -1334,3 +1334,45 @@ async def test_suggestions_keep_a_typed_revision_and_summarize_its_replacement(p
     row = await stored(engine, interview_id)
     assert row["answers"]["how_we_help"] == "Revised intro: Ask before booking a call"
     assert (await owner.browser.get(path + "?cards=1")).json() == reply.json()
+
+
+@pytest.mark.parametrize("action", ["decision", "suggestions"])
+async def test_proposal_routes_store_busy_then_land_with_only_the_signed_owner_entry(
+        proposals, app, engine, monkeypatch, action):
+    import asyncio
+
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    path = f"/api/owner/setup/{interview_id}"
+    endpoint, body = ((f"/proposals/{ids[0]}", {"accept": True}) if action == "decision" else
+                      ("/suggestions", {}))
+    original = setup.card_turn if action == "decision" else setup.close_setup
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow(ctx, engine, model, interview, *args, **kwargs):
+        assert interview.busy
+        entered.set()
+        await release.wait()
+        await original(ctx, engine, model, interview, *args, **kwargs)
+
+    monkeypatch.setattr(setup, "card_turn" if action == "decision" else "close_setup", slow)
+    monkeypatch.setattr(setup, "TURN_WAIT_S", 0.01)
+    before = await stored(engine, interview_id)
+    try:
+        reply = await owner.browser.post(path + endpoint + "?cards=1", json=body)
+        assert entered.is_set() and reply.status_code == 202, reply.text
+        busy = reply.json()
+        assert busy["busy"] is True
+        assert (await owner.browser.get(path + "?cards=1")).json() == busy
+        assert (await owner.browser.post(path + endpoint + "?cards=1", json=body)).status_code == 202
+        saved = await stored(engine, interview_id)
+        assert saved["answers"] == before["answers"]
+        assert saved["transcript"][-1]["pending"]
+    finally:
+        release.set()
+    await app.state.runtime.turn_runs.wait(interview_id)
+    landed = await stored(engine, interview_id)
+    assert all(not entry.get("pending") for entry in landed["transcript"])
+    owner_entries = [entry["text"] for entry in landed["transcript"] if entry["role"] == "owner"]
+    before_entries = [entry["text"] for entry in before["transcript"] if entry["role"] == "owner"]
+    assert owner_entries == before_entries + (["Use your suggestions"] if action == "suggestions" else [])

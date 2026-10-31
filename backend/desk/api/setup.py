@@ -680,9 +680,8 @@ def setup_state(interview: Interview, slug: str, *, cards: bool = False,
     description (`start` puts it there), which the owner isn't shown back; the stored transcript, which later turns
     read, keeps it. Card messages appear only when requested by a client that can render them."""
     def visible(entry: Entry) -> ProposalCard | None:
-        card = entry.card
+        card = entry.card.model_copy(deep=True) if entry.card is not None else None
         if card is not None and card.job is not None and not business_tools_enabled:
-            card = card.model_copy(deep=True)
             card.job.config = None
         return card
 
@@ -1160,8 +1159,11 @@ async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs:
                        business_tools_enabled=interview.business_tools_enabled)
 
 
-def apply_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn) -> None:
-    """Validate an answer and change only the waiting card, without I/O or transcript additions."""
+def _check_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn, *,
+                    configs: bool = True) -> tuple[ProposalCard, SetupProposalIn]:
+    """Validate a waiting-card decision without changing the card or transcript."""
+    if interview.step != "questions":
+        raise ApiProblem(409, "conflict")
     card = next((entry.card for entry in reversed(interview.transcript)
                  if entry.card is not None and entry.card.proposal_id == proposal_id), None)
     if card is None and not any(item.proposal_id == proposal_id for item in interview.planned):
@@ -1175,12 +1177,19 @@ def apply_decision(interview: Interview, proposal_id: str, decision: SetupPropos
         raise ApiProblem(422, "invalid") from None
     if card.job is None and (decision.title is not None or decision.autonomy is not None):
         raise ApiProblem(422, "invalid")
-    config = card.job.config if card.job is not None else None
+    config = card.job.config if card.job is not None and configs else None
     if decision.amount_cents is not None and not isinstance(config, PurposePaymentConfig):
         raise ApiProblem(422, "invalid")
     if (decision.accept and isinstance(config, PurposePaymentConfig)
             and decision.amount_cents is None and config.amount_cents is None):
         raise ApiProblem(422, "amount_required")
+    return card, decision
+
+
+def apply_decision(interview: Interview, proposal_id: str, decision: SetupProposalIn) -> None:
+    """Validate an answer and change only the waiting card, without I/O or transcript additions."""
+    card, decision = _check_decision(interview, proposal_id, decision)
+    config = card.job.config if card.job is not None else None
     card.state = "accepted" if decision.accept else "declined"
     if decision.amount_cents is not None:
         config.amount_cents = decision.amount_cents
@@ -1192,31 +1201,37 @@ def apply_decision(interview: Interview, proposal_id: str, decision: SetupPropos
 
 
 async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
-                          interview_id: str, proposal_id: str, decision: SetupProposalIn, *, cards: bool = False,
-                          business_tools_enabled: bool = False) -> SetupState:
-    """Answer the pending card, then save Claude's reply and its next ask as one guarded turn."""
-    with _turn(interview_id):
-        interview = await _read(engine, owner, interview_id)
+                          interview_id: str, proposal_id: str, decision: SetupProposalIn, *,
+                          runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
+                          cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
+    """Answer the pending card through the shared runner, without retaining its temporary owner marker."""
+    connect = False
+
+    def check(interview: Interview) -> None:
         interview.business_tools_enabled = business_tools_enabled
-        owner.desk(interview.desk_id)
-        if interview.step != "questions" or interview.busy:
-            raise ApiProblem(409, "conflict")
-        seen = _stored(interview)
-        if not interview.business_tools_enabled:
+        _check_decision(interview, proposal_id, decision, configs=business_tools_enabled)
+
+    async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        nonlocal connect
+        if not business_tools_enabled:
             _clear_configs(interview)
         apply_decision(interview, proposal_id, decision)
         entry = next(entry for entry in reversed(interview.transcript)
                      if entry.card is not None and entry.card.proposal_id == proposal_id)
         entry.owner_decided = True
-        await card_turn(owner, engine, model, interview, proposal_id)
+        await card_turn(ctx, engine, model, interview, proposal_id)
         connect = _claim_connector_connect(interview, None if interview.step == "tools" else proposal_id)
-        await _commit(engine, owner, interview, seen)
-    if connect:
-        await _connect_accepted_connector(owner, interview)
-    if interview.step == "tools":
-        await after_finish(owner, interview)
-    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
-                       business_tools_enabled=interview.business_tools_enabled)
+
+    async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if connect:
+            await _connect_accepted_connector(ctx, interview)
+        if interview.step == "tools":
+            await after_finish(ctx, interview)
+
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=lambda interview: [Entry(role="owner", text="")], turn=turn,
+                          keep_staged=False, after=after,
+                          render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
 
@@ -1463,6 +1478,7 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
                   cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
     """Run consent and its reads through the shared turn runner; no reads run after no."""
     def check(interview: Interview) -> None:
+        interview.business_tools_enabled = business_tools_enabled
         if interview.consent is not None or interview.step != "questions":
             raise ApiProblem(409, "conflict")
 
@@ -1482,7 +1498,8 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
         await _after_consent(ctx, engine, model, interview, entries)
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
-                          check=check, stage=stage, turn=turn, render=partial(setup_state, cards=cards))
+                          check=check, stage=stage, turn=turn,
+                          render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
 def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: str | None = None) -> dict:
@@ -1905,6 +1922,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
     connect = False
 
     def check(interview: Interview) -> None:
+        interview.business_tools_enabled = business_tools_enabled
         if card is not None:
             if card != interview.pending_card:
                 raise ApiProblem(409, "conflict")
@@ -1980,7 +1998,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
 
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=stage, turn=run, after=after,
-                          render=partial(setup_state, cards=cards))
+                          render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
 # Finish ------------------------------------------------------------------------------------------------------
@@ -2111,24 +2129,32 @@ async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
 
 
 async def use_suggestions(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, *,
+                           runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
                            cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
-    """Finish questions with the current facts and safe defaults for every unanswered limit."""
-    with _turn(interview_id):
-        interview = await _read(engine, owner, interview_id)
+    """Finish questions through the shared runner, retaining the signed owner button label."""
+    connect = False
+
+    def check(interview: Interview) -> None:
         interview.business_tools_enabled = business_tools_enabled
-        owner.desk(interview.desk_id)
-        if interview.step != "questions" or interview.consent is None or interview.busy:
+        if interview.step != "questions" or interview.consent is None:
             raise ApiProblem(409, "conflict")
-        seen = _stored(interview)
-        interview.transcript.append(Entry(role="owner", text="Use your suggestions"))
-        await close_setup(owner, engine, model, interview)
+
+    async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        nonlocal connect
+        if not business_tools_enabled:
+            _clear_configs(interview)
+        await close_setup(ctx, engine, model, interview)
         connect = _claim_connector_connect(interview)
-        await _commit(engine, owner, interview, seen)
-    if connect:
-        await _connect_accepted_connector(owner, interview)
-    await after_finish(owner, interview)
-    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
-                       business_tools_enabled=interview.business_tools_enabled)
+
+    async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if connect:
+            await _connect_accepted_connector(ctx, interview)
+        await after_finish(ctx, interview)
+
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=lambda interview: [Entry(role="owner", text="Use your suggestions")],
+                          turn=turn, after=after,
+                          render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
 
 
 # Setup, part 2 (Task 7): the Desk's parts, rule cards, situations, the safety check and going live -----------------

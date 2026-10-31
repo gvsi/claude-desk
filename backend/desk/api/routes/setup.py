@@ -157,24 +157,38 @@ async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: 
 
 
 @router.post("/{id}/proposals/{proposal_id}", response_model=SetupState,
-             responses=error_responses(401, 404, 409, 422, 429, 503))
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
 async def setup_proposal(interview_id: InterviewId, proposal_id: Annotated[str, Path(max_length=64)],
                           body: SetupProposalIn, request: Request,
-                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
     """Answer the waiting proposal and receive Claude's reply and next ask."""
-    state = await _moving_on(request, ctx)
-    return await setup.decide_proposal(ctx, state.database(), state.model, interview_id, proposal_id, body, cards=cards,
-                                       business_tools_enabled=state.settings.business_tools_enabled)
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+    answer = await setup.decide_proposal(ctx, state.database(), state.model, interview_id, proposal_id, body, cards=cards,
+                                       business_tools_enabled=state.settings.business_tools_enabled,
+                                       runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
 
 
 @router.post("/{id}/suggestions", response_model=SetupState,
-             responses=error_responses(401, 404, 409, 422, 429, 503))
+             responses={202: {"model": SetupState}, **error_responses(401, 404, 409, 422, 429, 503)})
 async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn, request: Request,
-                             ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
+                             ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> Any:
     """Use the current proposals and finish questions with safe defaults for unanswered limits."""
-    state = await _moving_on(request, ctx)
-    return await setup.use_suggestions(ctx, state.database(), state.model, interview_id, cards=cards,
-                                      business_tools_enabled=state.settings.business_tools_enabled)
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+    answer = await setup.use_suggestions(ctx, state.database(), state.model, interview_id, cards=cards,
+                                      business_tools_enabled=state.settings.business_tools_enabled,
+                                       runs=state.turn_runs, ro_schema=state.settings.kernel_ro_schema, admit=admit)
+    if answer.busy:
+        return JSONResponse(answer.model_dump(mode="json"), status_code=202)
+    return answer
 
 
 @router.get("/{id}/tools", response_model=SetupTools, responses=error_responses(401, 404, 422, 503))
