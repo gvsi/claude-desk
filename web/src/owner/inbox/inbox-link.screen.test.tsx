@@ -4,16 +4,18 @@
  * it is answered, here or anywhere, the alert stays and the link goes: Today would have no card to
  * open.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { observeRequests } from '../../api/http.ts';
+import { ROUTES, type RouteKey } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { focusIsOn, nextFrames } from '../../test/screen.ts';
+import { FRESH_MS } from '../useDesks.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const SEEDED_REASON = rivera.decisions.held.reason_plain;
@@ -42,18 +44,35 @@ const inboxButton = (screen: RenderResult) => screen.getByRole('button', { name:
 /** Where a held request's alert links to: its card on Today. */
 const requestLink = (decisionId: string) => `${TODAY}#request-${encodeURIComponent(decisionId)}`;
 
-/** Settles once the app has the answers to `n` more reads of a decision and has drawn them. */
-function decisionReads(n: number): Promise<void> {
-  let left = n;
+/**
+ * Settles once the app has the answers to as many more reads of each route as `counts` says, read
+ * or failed, from now on, and has drawn them.
+ */
+function readsAnswered(counts: Partial<Record<RouteKey, number>>): Promise<void> {
+  const left = new Map(Object.entries(counts) as [RouteKey, number][]);
   return new Promise<void>((resolve) => {
     const stop = observeRequests((outcome) => {
-      if (outcome.key !== 'decision') return;
-      left -= 1;
-      if (left > 0) return;
+      const n = left.get(outcome.key);
+      if (n === undefined) return;
+      left.set(outcome.key, n - 1);
+      if ([...left.values()].some((more) => more > 0)) return;
       stop();
       resolve();
     });
+    onTestFinished(stop);
   }).then(nextFrames);
+}
+
+/** Main line's Needs you, as the app reads it from another Desk's Today. */
+const MAIN_LINE_NEEDS_YOU = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
+
+/** How many times the mock has been asked for Main line's Needs you. */
+const mainLineReads = () => mockStore.requests.filter((r) => r.key === 'needsYou' && r.path === MAIN_LINE_NEEDS_YOU).length;
+
+/** The owner answers `decisionId` somewhere else, such as another tab: Deny this time. */
+async function answerElsewhere(decisionId: string): Promise<void> {
+  const reply = await mockStore.dispatch('answer', { params: { decision_id: decisionId }, body: { answer: 'deny_once' } });
+  if ('network' in reply || reply.status !== 200) throw new Error('the mock takes the answer');
 }
 
 /** Opens the Demo inbox's sheet, once its alert for `decisionId` shows. */
@@ -85,10 +104,10 @@ describe('Demo inbox request link', () => {
     await screen.getByRole('region', { name: 'Needs you', exact: true }).getByRole('button', { name: 'Dismiss' }).click();
     await expect.element(card).not.toBeInTheDocument();
 
-    const read = decisionReads(1);
+    // Its request read, and Today's Needs you read again (Today polls it).
+    const read = readsAnswered({ decision: 1, needsYou: 1 });
     const sheet = await openInbox(screen, held.decision_id);
     await read;
-    await new Promise((resolve) => setTimeout(resolve, 300));
     expect(sheet.getByRole('link', { name: 'Open the request' }).elements()).toHaveLength(0);
   });
 
@@ -104,12 +123,13 @@ describe('Demo inbox request link', () => {
     await screen.getByRole('region', { name: 'Needs you', exact: true }).getByRole('button', { name: 'Dismiss' }).click();
     await expect.element(seeded).not.toBeInTheDocument();
 
+    // Both requests read, and Today's Needs you read again (Today polls it).
+    const read = readsAnswered({ decision: 2, needsYou: 1 });
     const sheet = await openInbox(screen, refund.decision_id);
     await expect.element(sheet.getByText(alertFor(answered.decision_id).body)).toBeVisible();
+    await read;
+    // Under the held request's alert only.
     const links = sheet.getByRole('link', { name: 'Open the request' });
-    await expect.element(links.first()).toBeVisible();
-    // Under the held request's alert only, once every request is read.
-    await new Promise((resolve) => setTimeout(resolve, 300));
     expect(links.elements()).toHaveLength(1);
     const link = links.first();
     expect(link.element().closest('li')?.textContent).toContain(alertFor(refund.decision_id).body);
@@ -130,15 +150,79 @@ describe('Demo inbox request link', () => {
     await expect.element(inboxButton(screen)).toBeVisible();
     const answered = seededHold();
     const refund = mockStore.world.addHeldRefund(RIVERA.deskId);
-    const reply = await mockStore.dispatch('answer', { params: { decision_id: answered.decision_id }, body: { answer: 'deny_once' } });
-    if ('network' in reply || reply.status !== 200) throw new Error('the mock takes the answer');
+    await answerElsewhere(answered.decision_id);
 
+    // Both requests read; the held one's link shows once Main line's Needs you, which holds both, is
+    // read too, so the answered one's is decided by then.
+    const decided = readsAnswered({ decision: 2 });
     const sheet = await openInbox(screen, refund.decision_id);
     await expect.element(sheet.getByText(alertFor(answered.decision_id).body)).toBeVisible();
     const links = sheet.getByRole('link', { name: 'Open the request' });
     await expect.element(links.first()).toHaveAttribute('href', requestLink(refund.decision_id));
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await decided;
     expect(links.elements()).toHaveLength(1);
     expect(links.first().element().closest('li')?.textContent).toContain(alertFor(refund.decision_id).body);
+  });
+
+  it('another_desks_answer_while_open_drops_its_link', async () => {
+    // On Emergencies, with the sheet open on Main line's held request, the request is answered
+    // elsewhere. Main line's Needs you is read again on the sheet's poll once it is no longer fresh,
+    // and the link goes while the sheet stays open.
+    const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
+    await expect.element(inboxButton(screen)).toBeVisible();
+    const held = seededHold();
+    const sheet = await openInbox(screen, held.decision_id);
+    const link = sheet.getByRole('link', { name: 'Open the request' });
+    await expect.element(link).toHaveAttribute('href', requestLink(held.decision_id));
+    const before = mainLineReads();
+
+    await answerElsewhere(held.decision_id);
+    await expect.element(link, { timeout: FRESH_MS + 3_000 }).not.toBeInTheDocument();
+    await expect.element(sheet).toBeVisible();
+    expect(mainLineReads()).toBeGreaterThan(before);
+  });
+
+  it('another_desks_list_read_before_and_now_failing_draws_no_link', async () => {
+    // The sheet linked Main line's held request, then closed. The request is answered elsewhere,
+    // and every read of Needs you fails from then on. Opened again once the list read before is no
+    // longer fresh, the sheet draws no link from it, before or after its own read fails.
+    const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks', retryScale: 0 });
+    await expect.element(inboxButton(screen)).toBeVisible();
+    const held = seededHold();
+    let sheet = await openInbox(screen, held.decision_id);
+    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toBeVisible();
+    await sheet.getByRole('button', { name: 'Close' }).click();
+    await expect.element(sheet).not.toBeInTheDocument();
+
+    await answerElsewhere(held.decision_id);
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    // Past the freshness of the last read that worked: a rule about time, waited out.
+    await new Promise((resolve) => setTimeout(resolve, FRESH_MS + 500));
+    const before = mainLineReads();
+    sheet = await openInbox(screen, held.decision_id);
+    expect(sheet.getByRole('link', { name: 'Open the request' }).elements()).toHaveLength(0);
+    // Its read as it opens, and that read's one retry, both fail.
+    await expect.poll(() => mainLineReads()).toBeGreaterThanOrEqual(before + 2);
+    await nextFrames();
+    expect(sheet.getByRole('link', { name: 'Open the request' }).elements()).toHaveLength(0);
+  });
+
+  it('another_desks_list_whose_read_again_fails_drops_its_link', async () => {
+    // With the sheet open on Main line's held request, the request is answered elsewhere and every
+    // read of Needs you fails from then on. The list read as the sheet opened is the last that
+    // worked, and it still holds the request; once the sheet's poll reads it again and that read
+    // fails, the link goes: a list whose latest read failed may be out of date.
+    const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks', retryScale: 0 });
+    await expect.element(inboxButton(screen)).toBeVisible();
+    const held = seededHold();
+    const sheet = await openInbox(screen, held.decision_id);
+    const link = sheet.getByRole('link', { name: 'Open the request' });
+    await expect.element(link).toBeVisible();
+    const before = mainLineReads();
+
+    await answerElsewhere(held.decision_id);
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await expect.element(link, { timeout: FRESH_MS + 3_000 }).not.toBeInTheDocument();
+    expect(mainLineReads()).toBeGreaterThanOrEqual(before + 2);
   });
 });
