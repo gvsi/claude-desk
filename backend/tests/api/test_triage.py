@@ -27,7 +27,7 @@ from desk.api.main import create_app
 from desk.api.model import ModelRequest, ModelResponse
 from desk.api.ratelimit import LIMITS, Limit
 from desk.api.prompts import TRANSLATION_SYSTEM, TRIAGE_SYSTEM, Translation, Triage, wrap
-from desk.api.store import Ids, append_message
+from desk.api.store import Ids, _read_triage, append_message
 from desk.api.triage import ANNOTATION_MODEL, ANNOTATION_TIMEOUT_S, translate_message, triage_attempt
 from tests.api.fakes import ScriptedModel, gated, response, tool_use, unavailable
 from tests.api.fakes import text as text_block
@@ -159,7 +159,7 @@ async def test_refusal_gets_an_ai_written_triage(app, browser, fake, kernel_http
         "kind": "refused", "tool": "native.find_slots", "effects": list(refused.action.effects),
         "reason": refused.reason_plain}
     assert json.loads(unwrapped(blocked, "stopped_event")) == {"kind": "reply_blocked",
-                                                                  "violations": ["number_in_prose"]}
+        "violations": [{"kind": "number_in_prose", "rule": "digit"}]}
     # an owner-only triage row for each, the model's never; the refusal's receipt and the reply's stopped draft (Claude
     # rewrote it, so nothing else shows that attempt) are annotated for a polling owner. The two jobs finish in either
     # order, so the rows are compared by the attempt each is about.
@@ -212,6 +212,19 @@ async def test_stored_triage_categories_read_in_safety_and_transcript(
     assert transcript.status_code == 200, transcript.text
     assert transcript.json()["items"][0]["triage"] == {"summary": summary, "category": category}
     assert (await rows(engine, visitor.session_id, "triage"))[0]["text"] == stored
+
+
+@pytest.mark.parametrize(("stored", "expected"), [
+    pytest.param('{"summary":"x"}', Triage(summary="x", category="other"), id="missing-category"),
+    pytest.param('{"summary":"x","category":null}', Triage(summary="x", category="other"), id="null-category"),
+    pytest.param('[]', None, id="array"),
+    pytest.param('"x"', None, id="string"),
+    pytest.param('[' * 100_000 + '0' + ']' * 100_000, None, id="deep-nesting"),
+    pytest.param('', None, id="empty"),
+    pytest.param(None, None, id="null-row"),
+])
+def test_stored_triage_parsing_handles_old_or_invalid_rows(stored, expected):
+    assert _read_triage(stored) == expected
 
 
 async def test_triage_failure_stores_nothing(app, browser, fake, kernel_http, model, engine, jobs_connector,

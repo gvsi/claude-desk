@@ -63,6 +63,7 @@ from datetime import datetime
 from typing import Any, get_args
 
 from pydantic import ConfigDict, ValidationError
+from pydantic_core import from_json
 from sqlalchemy import and_, case, cast, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -321,13 +322,13 @@ def _read_triage(text: str | None) -> Triage | None:
     None for a row whose JSON or remaining fields don't read back as a triage.
     """
     try:
-        stored = json.loads(text or "")
+        stored = from_json(text or "")
         if isinstance(stored, dict):
             category = stored.get("category")
             category = _LEGACY_TRIAGE_CATEGORIES.get(category, category) if isinstance(category, str) else "other"
             stored["category"] = category if category in get_args(TriageCategory) else "other"
         return Triage.model_validate(stored)
-    except (json.JSONDecodeError, ValidationError):
+    except ValueError:
         return None
 
 

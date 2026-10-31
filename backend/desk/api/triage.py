@@ -122,6 +122,8 @@ async def _attempt(conn: AsyncConnection, ids: Ids, ref_id: str, ref_kind: RefKi
     decided, or a reply check of Claude's in this session blocked for anything but a pause; None for anything else,
     for an attempt the kernel replayed (its ledger entry marked `summary.replayed`: recorded history), and for one
     whose ledger entry can't be read, so an attempt of unknown origin never reaches the model."""
+    from desk.api.owner_reads import reply_violations  # owner reads also depends on the turn runner
+
     ro = KernelRO(conn, ids.copy_id, ro_schema)
     if ref_kind == "decision":
         row = await ro.one("decisions", decision_id=ref_id)
@@ -139,10 +141,11 @@ async def _attempt(conn: AsyncConnection, ids: Ids, ref_id: str, ref_kind: RefKi
     entry = await ro.one("ledger_entries", desk_id=ids.desk_id, seq=int(ref_id))
     event = (entry or {}).get("event") or {}
     summary = event.get("summary") or {}
-    violations = [kind for kind in summary.get("violations") or [] if isinstance(kind, str)]
+    violations = [{"kind": kind, "rule": rule} for kind, rule in reply_violations(summary)
+                  if kind != "session_paused"]
     if (event.get("kind"), event.get("session_id"), summary.get("author")) != ("reply", ids.session_id, "claude"):
         return None
-    if not [kind for kind in violations if kind != "session_paused"] or replayed(entry):
+    if not violations or replayed(entry):
         return None
     return {"kind": "reply_blocked", "violations": violations}
 
@@ -187,6 +190,11 @@ async def triage_attempt(engine: AsyncEngine, model: ModelClient, ids: Ids, ref_
     triage = await _ask(engine, model, ids, request, Triage)
     if triage is None:
         return False
+    if ref_kind == "reply":
+        rules = {violation["rule"] for violation in attempt["violations"]}
+        triage = triage.model_copy(update={"category": "other" if rules == {"soft.unavailable"} else "wording"})
+    elif triage.category == "wording":
+        triage = triage.model_copy(update={"category": "other"})
     async with engine.connect() as conn:
         try:
             await lock_events(conn, ids.session_id)            # one triage per attempt, decided under the lock
