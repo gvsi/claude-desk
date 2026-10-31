@@ -20,7 +20,7 @@
 
 ## What it shows
 
-- `inline`: the value on its line in the `code` type, inset 12 px with no box, and a secondary `main` button at the right of the line, centered on it. Below 480 px of field width the value takes the whole line and the button goes under it.
+- `inline`: the value in the `code` type in an outlined box, as every signed board with an inline value draws it (N-R2-Agents-01-Page and -06-Phone, and the setup's live link on N-R2-Setup-14-Live and -15-Copy-Failed): a 1 px `line-field` outline at `radius-control`, no fill, a control's 32 px tall (growing if a long value wraps), the words 12 px in. A secondary `main` button sits 8 px after it, at the right of the line, centered on it. Below 480 px of field width the box takes the whole line and the button goes 8 px under it, at its own width. The outline reads 3.2 to 1 on a card.
 - `block`: the label in `meta`, `text-secondary`; 6 px under it the value in a `fill-secondary` box at `radius-control`, padded 12 px by 14 px, 44 px tall for one line; 10 px under the box the button, with the note 12 px after it, in `meta`, `text-secondary`, on the button's middle.
 - Long values wrap inside their line or box; nothing scrolls sideways.
 

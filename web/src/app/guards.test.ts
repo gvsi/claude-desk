@@ -87,6 +87,11 @@ function visitorFormatSources(scanned: Source[]): Source[] {
     .map((s) => (s.file.startsWith('public/checkout/') ? { ...s, text: s.text.replace(CHECKOUT_MONEY_IMPORT, '') } : s));
 }
 
+// A card that holds cards: the design system's one exception to "never a card in a card", for the
+// agents page's "Send an agent" card, which holds the agent's run and the Desk's reply cards.
+const HOLDS_CARDS = /\bholdsCards\b/;
+const HOLDS_CARDS_FILE = 'public/agents/SendAgentPanel.tsx';
+
 // An owner's reason on a receipt: the decision's `reason_plain` and the receipt props that show it
 // to the owner. The visitor's page shows each receipt's `visitor_plain` and nothing else.
 const OWNER_REASON = /\breason_plain\b|\breason=|\bcardBelow\b/;
@@ -308,6 +313,14 @@ describe('app source guards', () => {
     const visitor = visitorFormatSources(sources);
     expect(visitor.map((s) => s.file)).toContain('public/checkout/CheckoutPage.tsx');
     expect(hits(FORMATS, visitor)).toEqual([]);
+  });
+
+  it('only_the_send_agent_panel_holds_cards', () => {
+    expect(hits(HOLDS_CARDS, sample('<Card as="section" label="Send an agent" holdsCards>{run}</Card>'))).toHaveLength(1);
+    expect(hits(HOLDS_CARDS, sample('<Card as="section" label="Send an agent">{run}</Card>; const holdsCardsLike = 1;'))).toEqual([]);
+    // Allowed in the design system, which these sources leave out, and in the panel the exception is for.
+    expect(sources.some(({ file }) => file.startsWith('ds/'))).toBe(false);
+    expect(hits(HOLDS_CARDS, sources.filter(({ file }) => file !== HOLDS_CARDS_FILE))).toEqual([]);
   });
 
   it('visitor_code_never_shows_owner_reasons', () => {

@@ -32,3 +32,4 @@
 | `meta` | `string` | Required. |
 | `time` | `string` | Optional. |
 | `text` | `string` | Optional. A blank text is left out. |
+| `language` | `'en' \| 'es'` | The page's language, English by default: the pill reads "Signed" or "Not signed", "Firmado" or "Sin firma" in Spanish, and the message carries `lang`. |

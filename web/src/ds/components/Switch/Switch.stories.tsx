@@ -66,3 +66,27 @@ export const Off: Story = {
     await expect(toggle).toHaveAttribute('aria-checked', 'true');
   },
 };
+
+/** A change in flight: the switch shows what the screen last passed and ignores presses until it answers. */
+export const Waiting: Story = {
+  args: { label: 'Customers can see this', description: 'Claude can quote it to visitors when it answers.', checked: false, waiting: true },
+  render: (args) => (
+    <div style={{ maxWidth: 680 }}>
+      <Switch {...args} />
+    </div>
+  ),
+  parameters: { canvas: 'none', canvasNote: 'N-Run2-Settings-Knowledge’s “Customers can see this” while its change is being saved: no board draws it, so the switch keeps its look and waits.' },
+  play: async ({ args, canvas, userEvent }) => {
+    // switch_waits_while_saving: it says so, keeps focus, and a press or a key does nothing.
+    const toggle = canvas.getByRole('switch', { name: 'Customers can see this' });
+    await expect(toggle).toHaveAttribute('aria-disabled', 'true');
+    await expect(toggle).toHaveAttribute('aria-busy', 'true');
+    await expect(toggle).not.toBeDisabled();
+    await userEvent.click(toggle);
+    await expect(toggle).toHaveFocus();
+    await userEvent.keyboard(' ');
+    await userEvent.keyboard('{Enter}');
+    await expect(args.onChange).not.toHaveBeenCalled();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  },
+};

@@ -1,0 +1,54 @@
+/* KnowledgeList: the section's heading, then 8 px under it a card of rows. Each row is padded
+   12 px 16 px under a hairline (none above the first): the title in body type at 520 over one meta
+   line in the secondary ink, 2 px apart, and who can see it in a pill at the right, centered on
+   the row. The words wrap beside the pill; the pill keeps its line. */
+
+.cd-knowledge-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-knowledge-list__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-knowledge-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  min-width: 0;
+  padding: var(--space-12) var(--space-16);
+}
+
+.cd-knowledge-list__row + .cd-knowledge-list__row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+/* The title and its line 2 px apart by a gap, not a margin, so a page that resets its paragraphs'
+   margins (as Settings' column does) keeps the row's 64 px. */
+.cd-knowledge-list__words {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.cd-knowledge-list__title,
+.cd-knowledge-list__detail {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-knowledge-list__title {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-knowledge-list__detail {
+  color: var(--text-secondary);
+}

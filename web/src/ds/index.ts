@@ -22,10 +22,13 @@ export {
 
 export { Notice, type NoticeProps, type NoticeTone } from './components/Notice/Notice.tsx';
 export {
+  AGENT_START_LOST_COPY,
   CHANGED_REFRESHED,
   CHAT_ENDED_COPY,
+  DEMO_BUDGET_COPY,
   NEW_CHAT_LABEL,
   RATE_LIMITED_COPY,
+  RELOAD_PAGE_LABEL,
   UNREACHABLE_COPY,
   errorCopy,
   evErrorCopy,
@@ -128,6 +131,12 @@ export { SafetyCheckRow, type SafetyCheckRowProps } from './components/SafetyChe
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
 export { CopyField, type CopyFieldProps } from './components/CopyField/CopyField.tsx';
 export { COPY_RESULT_COPY, copyResultLine, useCopyText, type CopyState, type CopyWhat } from './components/CopyField/useCopyText.ts';
+export { SignedLimitPanel, type SignedLimitPanelProps } from './components/SignedLimitPanel/SignedLimitPanel.tsx';
+export { SIGNED_LIMIT_COPY } from './components/SignedLimitPanel/signedLimitCopy.ts';
+
+// Knowledge
+export { KnowledgeList, type KnowledgeListProps, type KnowledgeRowView } from './components/KnowledgeList/KnowledgeList.tsx';
+export { KnowledgeAdd, type KnowledgeAddProps, type KnowledgeAddedView } from './components/KnowledgeAdd/KnowledgeAdd.tsx';
 
 // Share
 export { ShareCard, type ShareCardProps } from './components/ShareCard/ShareCard.tsx';

@@ -24,6 +24,7 @@ import { AgentMessage } from '../components/AgentMessage/AgentMessage.tsx';
 import { ApprovalCard } from '../components/ApprovalCard/ApprovalCard.tsx';
 import { ClaudeMessage } from '../components/ClaudeMessage/ClaudeMessage.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
+import { DisclosureLine } from '../components/DisclosureLine/DisclosureLine.tsx';
 import { Mark, Wordmark } from '../components/Mark/Mark.tsx';
 import { Greeting } from '../components/Greeting/Greeting.tsx';
 import { SectionHeader } from '../components/SectionHeader/SectionHeader.tsx';
@@ -1054,8 +1055,8 @@ export function SetupFrame({ business, children }: { business: string; children:
 
 /**
  * `/d/:slug/agents` (plan 04, Task 11): the public page's brand header on its own, then one 760 px
- * column with the way back to the chat, the page's title, its line about who answers, the page's
- * cards, and the footer at the window's foot.
+ * column with the way back to the chat, the page's title, the AI disclosure (`DisclosureLine`, as
+ * the agents boards draw it since 2026-10-30), the page's cards, and the footer at the window's foot.
  */
 export function AgentsFrame({ brand, children }: { brand: PublicBrand; children: ReactNode }) {
   return (
@@ -1068,9 +1069,9 @@ export function AgentsFrame({ brand, children }: { brand: PublicBrand; children:
         <h1 className="board-agents__title cd-type-page-title">
           <span data-copy="user">{brand.name}</span> for AI agents
         </h1>
-        <p className="board-agents__disclosure cd-type-caption">
-          Every answer here comes from Claude, an AI, working under <span data-copy="user">{brand.name}</span>’s rules.
-        </p>
+        <div className="board-agents__disclosure">
+          <DisclosureLine language="en" businessName={brand.name} />
+        </div>
         <div className="board-agents__cards">{children}</div>
         <ConceptFooter />
       </main>
@@ -1078,10 +1079,13 @@ export function AgentsFrame({ brand, children }: { brand: PublicBrand; children:
   );
 }
 
-/** A card on the agents page: its title, an optional line under it, then what it holds. */
-export function AgentsCard({ title, lead, children }: { title: string; lead?: string; children: ReactNode }) {
+/**
+ * A card on the agents page: its title, an optional line under it, then what it holds. "Send an
+ * agent" `holdsCards`, since the agent's run in it carries the Desk's reply cards.
+ */
+export function AgentsCard({ title, lead, holdsCards = false, children }: { title: string; lead?: string; holdsCards?: boolean; children: ReactNode }) {
   return (
-    <Card as="section" label={title} padding={16}>
+    <Card as="section" label={title} padding={16} holdsCards={holdsCards}>
       <h2 className="board-agents__card-title cd-type-section">{title}</h2>
       {lead === undefined ? null : <p className="board-agents__card-lead cd-type-meta">{lead}</p>}
       <div className="board-agents__card-body">{children}</div>

@@ -18,6 +18,27 @@ export const UNREACHABLE_COPY = {
   es: 'Algo falló de nuestro lado. Inténtalo de nuevo en un momento.',
 } as const satisfies CopyPair;
 
+/**
+ * The answer to starting an agent was lost, so the agent may be running: sending it again may run it
+ * twice. The agents page shows it with `RELOAD_PAGE_LABEL`, which reloads the page.
+ */
+export const AGENT_START_LOST_COPY = {
+  en: 'The agent may have started, but we lost the answer. If you reload and send it again, it may run twice.',
+  es: 'Puede que el agente haya empezado, pero perdimos la respuesta. Si recargas y lo envías de nuevo, puede ejecutarse dos veces.',
+} as const satisfies CopyPair;
+
+/** The button beside `AGENT_START_LOST_COPY`, which reloads the page. */
+export const RELOAD_PAGE_LABEL = {
+  en: 'Reload the page',
+  es: 'Recargar la página',
+} as const satisfies CopyPair;
+
+/** The demo has spent its model budget for now. */
+export const DEMO_BUDGET_COPY = {
+  en: 'The demo has used its budget for now. Try again later.',
+  es: 'La demo agotó su presupuesto por ahora. Inténtalo más tarde.',
+} as const satisfies CopyPair;
+
 /** The visitor's chat session is gone; shown with `NEW_CHAT_LABEL`, which opens a new one. */
 export const CHAT_ENDED_COPY = {
   en: 'This chat ended. Start a new one to keep going.',

@@ -27,6 +27,11 @@
   background: var(--fill-hover);
 }
 
+/* Saving a change: the switch keeps its look, the state the screen last passed, and waits. */
+.cd-switch[aria-busy='true'] {
+  cursor: progress;
+}
+
 .cd-switch__text {
   display: flex;
   flex: 1;

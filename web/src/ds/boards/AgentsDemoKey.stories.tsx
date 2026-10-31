@@ -5,7 +5,7 @@ import { CopyField } from '../components/CopyField/CopyField.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { AgentsCard, AgentsFrame, brandOf } from './parts.tsx';
-import { expectFooter, expectFooterAtFoot, expectTabOrder } from './spec.ts';
+import { expectAgentsDisclosure, expectFooter, expectFooterAtFoot, expectTabOrder } from './spec.ts';
 
 /** A demo key as the board writes it: a placeholder, never a real key. */
 const KEY = '0000000000000000000000000000000000000000000000000000000000000000';
@@ -40,6 +40,7 @@ const meta = {
     canvasNote: [
       'Built against the board in review; sign-off pending.',
       'The demo key, shown once: the key id and the private key, each a CopyField in its mono box, with “Copy key” and the warning beside it. The key is a placeholder.',
+      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -51,6 +52,7 @@ type Story = StoryObj<typeof meta>;
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
+    await expectAgentsDisclosure(canvasElement);
     const card = canvas.getByRole('region', { name: 'Try it with a demo key' });
     const keyId = within(card).getByRole('group', { name: 'Key id' });
     const key = within(card).getByRole('group', { name: 'Private key' });

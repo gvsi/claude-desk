@@ -323,8 +323,12 @@ describe('design tokens', () => {
     add(['illustration-handled'], ['illustration-card'], 3);
     // The owner's words in a bubble in the Ask Claude panel, on the panel ground.
     add(['text-primary'], ['fill-bubble'], 4.5, 'bg-panel');
+    // An agent's signed limit in the "Send an agent" card: its words on its own fill over the card's.
+    add(['text-primary', 'text-secondary'], ['fill-card'], 4.5, 'fill-card', 'bg-app');
     // A text field's outline is its boundary, so it needs 3:1 on every ground a field sits on.
     add(['line-field'], ['bg-surface', 'bg-app'], 3);
+    // The outlined value of an inline CopyField, in a card on the agents page.
+    add(['line-field'], ['fill-card'], 3, 'bg-app');
     // The deny answers in a held request's card: danger at rest and on hover, then danger-ghost,
     // whose ground is the card itself, at rest and on hover.
     add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'fill-card', 'bg-app');
@@ -445,6 +449,11 @@ describe('design tokens', () => {
     // A connector's quoted definition is mono at 12 px, a size smaller than the full trace's values.
     const mono = tokens.type.groups.find((group) => group.family === 'mono');
     expect(mono?.styles.find((style) => style.name === 'quote')).toMatchObject({ fontSize: '12px', lineHeight: '18px', fontWeight: 400 });
+  });
+
+  test('agents_measures_are_tokens', () => {
+    // The agents page's one column, 760 px between its gutters, as the signed agents boards draw it.
+    expect(tokenValue('size-agents-column')).toBe('760px');
   });
 
   test('settings_measures_are_tokens', () => {

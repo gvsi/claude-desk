@@ -1,0 +1,40 @@
+# SignedLimitPanel
+
+`SignedLimitPanel` shows a visiting agent's signed spending limit: what one charge can be, what its charges can add up to, how long the limit lasts, and whose wallet signed it.
+
+## When to use
+
+- In the agents page's "Send an agent" card, between its line and the tasks to send the agent on, before and during a run (N-R2-Agents-03-Send, N-R2-Agents-05-Over-Limit).
+- Not for the Desk's own payment limit, which is `MoneyLimit`, and not for a change to it, which is `LimitChange`.
+
+## Where the values come from
+
+The panel sits on a visitor page, which never formats money (the web app's guard `visitor_code_never_formats_money_or_dates`). So every value is the page's own static copy, in English and Spanish, for the built-in agent's signed mandate (`Mandate` in the contract, which `POST /agents/demo` returns in `DemoAgentIssued.mandate`). It is never Claude's prose and never the agent's:
+
+- `perCharge` ("$20") and `total` ("$100") stand for the mandate's `per_charge_cents` and `total_cents`. The page's test (`limits_line_matches_the_seed`, the web app's plan, Task 11) checks them equal to the seed's mandate, as the panel's story does with the Rivera fixture's `DemoAgentIssued.mandate`.
+- `duration` ("One hour") is how long the mandate lasts, from when it was signed to its `expires_at`. The built-in agent's mandate always lasts one hour (the master plan's "Agent demo" row).
+- `source` says whose wallet signed it ("Signed limit from Alex Kim’s demo wallet"). On the agents page the built-in agent acts for Alex Kim, the demo's own fixed name. A name a third party chose, such as another wallet's `on_behalf_of`, never goes in this line: it would run into the word "Signed". That agent's name is set off on its own, as `AgentMessage` sets it.
+- A value that is blank or only spaces draws no panel at all, so the panel never shows part of a limit.
+
+The panel shows the mandate the built-in agent will carry before the run starts, and the same limit while it runs.
+
+## What it shows
+
+- An inset in the card look: `fill-card`, a 1 px `line-card` border at `radius-card`, padded 12 px 16 px, 63 px tall with one line each. In the "Send an agent" card it sits on the card's own fill, as the board draws it, so its words read on `fill-card` over `fill-card` (12.0 and 6.6, `CONTRAST_PAIRS`). It is not a `Card`, so it may sit in one.
+- The terms, 16 px apart, as a description list: "Per charge", "In total" and "For" ("Por cargo", "En total" and "Durante" in Spanish, `SIGNED_LIMIT_COPY`), each name in `caption` type, `text-secondary`, over its value in `body` type at weight 520, `text-primary`.
+- `source` at the right in `caption` type, `text-secondary`, centered on the panel.
+- Below 480 px of its own width, as in a phone's card, `source` takes its own line under the terms, from their start. The terms wrap before anything scrolls sideways.
+
+## Accessibility
+
+- The panel is a region named "Signed limit" ("Límite firmado"), with `lang` set to the page's language. Its terms are a `dl`, so a screen reader pairs each name with its amount ("Per charge, $20").
+
+## Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `perCharge` | `string` | Required. The page's words for `Mandate.per_charge_cents`: "$20". |
+| `total` | `string` | Required. The page's words for `Mandate.total_cents`: "$100". |
+| `duration` | `string` | Required. How long the mandate lasts, in the page's words: "One hour". |
+| `source` | `string` | Required. Whose wallet signed it, in the page's words. |
+| `language` | `'en' \| 'es'` | Required. The panel's own words and its `lang`. |
