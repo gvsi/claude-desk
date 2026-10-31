@@ -344,7 +344,8 @@ async def scripted_chat(k: KernelTarget, api: ApiTarget, fake: FakeAnthropic) ->
     """A new copy and a visitor's chat on its Desk, in two turns: the quote and its card, then the
     blocked amounts and the handoff. A conversation that didn't go as scripted fails the case."""
     fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))   # the reviewer passes, if the kernel asks it
-    fake.script(SOFT_PROMISE_MODEL, Json(SOFT_PROMISE_PASS, usage=SOFT_PROMISE_USAGE))
+    # Scripted for the soft-promise check alone: the API's owner translations and triage run on the same model.
+    fake.script(SOFT_PROMISE_MODEL, Json(SOFT_PROMISE_PASS, usage=SOFT_PROMISE_USAGE), schema=SOFT_PROMISE_SCHEMA)
     script = QuoteScript(fake, [Text(NUMBERS_PROSE, usage=CALL_USAGE[2]), Text(NUMBERS_PROSE, usage=CALL_USAGE[3])])
     script.start()
     k.travel(START)
@@ -531,7 +532,8 @@ async def test_usage_records_match_the_scripted_usage(k: KernelTarget, api: ApiT
         "output_tokens": SOFT_PROMISE_USAGE.output_tokens,
     }, checked
     assert isinstance(soft.get("latency_ms"), int)
-    assert len(fake.calls(SOFT_PROMISE_MODEL)) == sum(1 for summary in replies if summary.get("soft_promise")), (
+    checks = fake.calls(SOFT_PROMISE_MODEL, schema=SOFT_PROMISE_SCHEMA)
+    assert len(checks) == sum(1 for summary in replies if summary.get("soft_promise")), (
         "each soft-promise call is in one reply entry")
 
 
@@ -733,14 +735,14 @@ async def test_a2a_verify_code_never_leaks(
         wrong = wrong_codes(code_a, 5)
         refusals = []
         for n, sent in enumerate([*wrong, code_a], start=1):
-            calls = len(fake.calls())
+            calls = len(fake.calls(OPUS))
             response = await agent_turn(client, agent_a, session_id=session_a, message="Here is the code.",
                                         verify_code=sent)
             body = response.json()
             shown = redacted(response.text, [*wrong, code_a])   # a failure never prints a code
             assert (response.status_code, body.get("code"), body.get("disclosure")) == (422, "invalid", "ai"), (
                 f"attempt {n} of six on a challenge with five answered {response.status_code}: {shown}")
-            assert len(fake.calls()) == calls, f"refused attempt {n} made a model call"
+            assert len(fake.calls(OPUS)) == calls, f"refused attempt {n} made a model call"
             refusals.append(body)
         assert all(body == refusals[0] for body in refusals), "the six refusals aren't uniform"
         # Session B: a new challenge, and its code verifies the session.

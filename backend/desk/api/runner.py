@@ -28,12 +28,14 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 
+import procrastinate
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from desk.api.deliver import NOT_FINAL, Status, deliver
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
-from desk.api.loop import run_pending
+from desk.api.loop import PendingOutcome, run_pending
 from desk.api.model import ModelClient
+from desk.api.ratelimit import RateLimiter
 from desk.api.sse import ControlRow, being_cancelled, claim_control, unhandled_controls
 from desk.api.store import append_message
 from desk.api.tools import Caller
@@ -47,9 +49,12 @@ class TurnRunner:
     """The session work this process does, one task per session (module docstring)."""
 
     def __init__(self, model: ModelClient, *, engine: AsyncEngine, lock_engine: AsyncEngine, production: bool,
-                 clock: Callable[[], datetime]):
+                 clock: Callable[[], datetime], jobs: procrastinate.App | None = None,
+                 limiter: RateLimiter | None = None):
         self._model, self._engine, self._lock_engine = model, engine, lock_engine
         self._production, self._clock = production, clock
+        self._jobs = jobs                         # the job queue the turns leave triage and translations for
+        self._limiter = limiter                   # the process's limits, which bound a conversation's translations
         self._tasks: dict[str, asyncio.Task] = {}
         self._wanted: dict[str, Caller] = {}      # sessions whose task must look (again) for waiting work
 
@@ -63,6 +68,15 @@ class TurnRunner:
 
     def running(self, session_id: str) -> bool:
         return session_id in self._tasks
+
+    async def run_agent_turn(self, caller: Caller, *, resend_since: datetime | None = None) -> PendingOutcome:
+        """An agent's turn, run in its request (Plan 02b, Task 4): its session's waiting work, waiting up to 30 s for a
+        turn already running there, and ended at Claude's reply, which answers the request. One turn only: the reply
+        spends the request's nonce, so work that wakes meanwhile waits for the agent's next request. `resend_since`:
+        the request is one sent again, whose first try began then (`loop.run_pending`)."""
+        return await run_pending(caller, self._model, engine=self._engine, lock_engine=self._lock_engine,
+                                 production=self._production, clock=self._clock, blocking=True, end_on_reply=True,
+                                 jobs=self._jobs, limiter=self._limiter, resend_since=resend_since)
 
     async def _run(self, session_id: str) -> None:
         try:
@@ -85,7 +99,8 @@ class TurnRunner:
             return
         try:
             await run_pending(caller, self._model, engine=self._engine, lock_engine=self._lock_engine,
-                              production=self._production, clock=self._clock)
+                              production=self._production, clock=self._clock, jobs=self._jobs,
+                              limiter=self._limiter)
         except Exception as error:                          # run_pending shows its own failures; this is a guard
             logger.error("a session's turns failed with %s", type(error).__name__)
 

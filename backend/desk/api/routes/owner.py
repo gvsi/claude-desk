@@ -2,23 +2,32 @@
 
 Creating a copy is the one call that needs the passcode. Every other owner route takes the copy from the
 kernel's `GET /whoami` answer for the owner cookie (`deps.owner_ctx`), never from the browser.
+
+A new copy (`copies`, `start_over`) asks the kernel for the recorded night when the settings do (Plan 01d), and
+stores what the kernel replayed into it (`store_replayed_night`) before answering: recorded history for the owner's
+reads, never a turn.
 """
 
 import asyncio
 import logging
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
+from sqlalchemy.ext.asyncio import AsyncConnection
 
-from desk.api.cookies import set_owner_cookie
-from desk.api.deliver import status_shown
+from desk.api.cookies import set_owner_cookie, set_visitor_cookie
+from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
 from desk.api import owner_reads
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.passcode import check_passcode
+from desk.api.prompts import NOTES
+from desk.api.ratelimit import RateLimitLedger
+from desk.api.ro import KernelRO
 from desk.api.schemas import (
     AlreadyResolved,
     AnsweringIn,
@@ -31,15 +40,41 @@ from desk.api.schemas import (
     ConversationSummary,
     CopyOut,
     DeskSummary,
+    GenerationIn,
+    Lead,
     NeedsYouItem,
+    OwnerMessageIn,
     OwnerTranscript,
+    PeopleOut,
+    PersonOnRecord,
+    Reports,
     Today,
+    VisitorSession,
     error_responses,
     operation_ids,
 )
-from desk.api.store import Ids, transcript
-from desk.contracts import Decision, DemoInboxEntry, LedgerPage, SessionState
-from desk.kernel_api import AnswerRequest, CreateCopyRequest, DeskAnsweringRequest, DeskUpdated
+from desk.api.sse import append_control, emit
+from desk.api.store import Ids, Replayed, append_message, blocks_text, has_pending, transcript
+from desk.contracts import CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState
+from desk.events import EvOwnerJoined, EvOwnerLeft, EvOwnerTyping
+from desk.kernel_api import (
+    AnswerRequest,
+    CreateCopyRequest,
+    CreateDeskRequest,
+    CreateSessionRequest,
+    DeskAnsweringRequest,
+    DeskBusinessRequest,
+    DeskCalendarRequest,
+    DeskCharterRequest,
+    DeskCreated,
+    DeskHoursRequest,
+    DeskNotificationsRequest,
+    DeskPeopleRequest,
+    DeskPricesRequest,
+    DeskUpdated,
+    ModeRequest,
+    OwnerMessageRequest,
+)
 
 router = APIRouter(prefix="/api/owner", generate_unique_id_function=operation_ids("owner"))
 logger = logging.getLogger(__name__)
@@ -70,9 +105,89 @@ async def copy_out(ctx: OwnerCtx) -> CopyOut:
     return CopyOut(copy_id=ctx.copy_id, desks=[_summary(desk, businesses[desk["business_id"]]) for desk in desks])
 
 
+# A replayed visitor's words, by the kind of session they were said in; and the record each event kind carries
+# (text, verdict, decision).
+REPLAYED_TEXT = {"visitor": "visitor_text", "agent": "agent_text"}
+EVENT_RECORDS = {"visitor_message": (True, False, False), "reply": (False, True, False),
+                 "receipt": (False, False, True)}
+
+
+async def store_replayed_night(conn: AsyncConnection, created: CopyCreated, *, ro_schema: str) -> int:
+    """Store the night the kernel replayed into a new copy (Plan 01d) in the copy's transcripts, in the caller's
+    transaction, and return how many events it stored. Each event, in shown order, is written at the moment it was
+    shown with the copy's `replay_id`: a visitor's words as `visitor_text` (an agent's as `agent_text`), a reply
+    through `deliver()` as Claude's, and a receipt through `deliver()` as its final decision. A copy without a
+    `replay_id` stores nothing. An event that doesn't fit fails the whole night: a session that isn't one of the
+    copy's closed visitor or agent sessions, an event without the one record its kind carries, a decision that isn't
+    final or is another session's, or an event deliver() wouldn't show."""
+    if created.replay_id is None:
+        return 0
+    events = sorted(created.replayed_messages, key=lambda event: datetime.fromisoformat(event.shown_at))
+    ro, sessions = KernelRO(conn, created.copy_id, ro_schema), {}
+    for session_id in sorted({event.session_id for event in events}):
+        session = await ro.session(session_id)
+        if (session is None or session["desk_id"] not in created.desk_ids or session["kind"] not in REPLAYED_TEXT
+                or session["closed_at"] is None):
+            raise ValueError("a replayed event names a session that isn't one of the copy's closed conversations")
+        sessions[session_id] = session
+        await run_lock(conn, session_id)              # the run lock before any events lock, as deliver() takes them
+    for event in events:
+        session = sessions[event.session_id]
+        ids = Ids(copy_id=created.copy_id, desk_id=session["desk_id"], session_id=event.session_id)
+        replayed = Replayed(replay_id=created.replay_id, at=datetime.fromisoformat(event.shown_at))
+        if (event.text is not None, event.verdict is not None, event.decision is not None) != EVENT_RECORDS[event.kind]:
+            raise ValueError(f"a replayed {event.kind} doesn't carry its record")
+        if event.kind == "visitor_message":
+            await append_message(conn, ids, REPLAYED_TEXT[session["kind"]], text=event.text, replayed=replayed)
+            continue
+        if event.kind == "reply":
+            item: Reply | Status = Reply(event.verdict, author="claude", via="api")
+        else:
+            decision = event.decision
+            if decision.session_id != event.session_id or decision.state in NOT_FINAL:
+                raise ValueError("a replayed receipt shows a final decision of its own session")
+            item = Status(decision, "resolved" if decision.outcome == "hold" else "receipt")
+        if await deliver(conn, ids, item, ro_schema=ro_schema, replayed=replayed) is None:
+            raise ValueError(f"a replayed {event.kind} wouldn't be shown")
+    return len(events)
+
+
+async def _store_replayed(state: Runtime, created: CopyCreated) -> None:
+    """Store the copy's replayed night in a transaction of its own, once the copy exists. A replay never fails the
+    copy: when storing fails, nothing replayed is stored, the error's type alone is logged, and the copy is answered
+    with live data only."""
+    if created.replay_id is None or not created.replayed_messages:
+        return
+    try:
+        async with state.database().connect() as conn:
+            await store_replayed_night(conn, created, ro_schema=state.settings.kernel_ro_schema)
+            await conn.commit()
+    except Exception as error:
+        logger.error("the replayed night couldn't be stored (%s); the copy has live data only", type(error).__name__)
+
+
+async def _create_copy(state: Runtime) -> CopyCreated:
+    """`POST /copies`, asking for the recorded night when the settings do (`replay_night`). A kernel without the
+    seeded night refuses a body that carries `replay_night` at all (422 `invalid`, which creates nothing), so a live
+    copy is asked for with a body that leaves the field out (`POST /copies` sends only the fields set): at once when
+    the settings ask for no replay, and once more after that refusal otherwise, and that answer stands."""
+    kernel = state.kernel.public()
+    if not state.settings.replay_night:
+        return await kernel.call("POST /copies", CreateCopyRequest())
+    try:
+        return await kernel.call("POST /copies", CreateCopyRequest(replay_night=True))
+    except KernelFailed as failure:
+        if (failure.status, failure.code) != (422, "invalid"):
+            raise
+    logger.warning("the kernel refused to replay the recorded night; the copy has live data only")
+    return await kernel.call("POST /copies", CreateCopyRequest())
+
+
 async def _new_copy(state: Runtime, response: Response) -> CopyOut:
-    """A new copy of the Rivera seed, read back through its own owner token, which goes only into the cookie."""
-    created = await state.kernel.public().call("POST /copies", CreateCopyRequest())
+    """A new copy of the Rivera seed, read back through its own owner token, which goes only into the cookie. It asks
+    for the recorded night when the settings do (`replay_night`) and stores what was replayed before answering."""
+    created = await _create_copy(state)
+    await _store_replayed(state, created)
     async with owner_context(state, created.owner_token) as ctx:
         copy = await copy_out(ctx)
     set_owner_cookie(response, created.owner_token)
@@ -124,7 +239,30 @@ async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOu
     return list(listed.values())
 
 
+@router.post("/desks", status_code=201, response_model=DeskCreated,
+             responses=error_responses(401, 404, 422, 429, 503))
+async def create_desk(body: CreateDeskRequest, request: Request,
+                      ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DeskCreated:
+    """A new Desk in the owner's copy, made by the kernel with the owner's credential: for a new business, or for one
+    of the copy's businesses (`existing_business_id`, whose name, owner name and time zone it keeps). The kernel
+    activates the starter rules (every request asks, but for the utility tools) and refuses what a new Desk can't
+    have: a money cap, connected tools, an owner name outside its pattern, an unknown time zone or another copy's
+    business (404). Counts on the copy's `new_desk` limit (10 an hour)."""
+    await runtime(request).started().limiter.enforce("new_desk", ctx.copy_id, ledger=ctx.ledger())
+    return await ctx.kernel.call("POST /desks", body)
+
+
 DeskId = Annotated[str, Path(max_length=128)]
+
+
+@router.delete("/desks/{desk_id}", status_code=204, response_class=Response,
+               responses=error_responses(401, 404, 409, 422, 503))
+async def delete_desk(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Response:
+    """Delete one of the copy's Desks, through the kernel with the owner's credential: its chats close, its public
+    page and links stop working, and it leaves the copy's Desks; its ledger is kept. A Desk of another copy, or one
+    already deleted, is 404 before anything is sent."""
+    await ctx.kernel.call("DELETE /desks/{id}", path={"id": ctx.desk(desk_id)})
+    return Response(status_code=204)
 
 
 @router.put("/desks/{desk_id}/answering", response_model=DeskUpdated, responses=error_responses(401, 404, 422, 503))
@@ -134,6 +272,103 @@ async def answering(desk_id: DeskId, body: AnsweringIn,
     details or ask for a callback; the owner's own previews keep every tool."""
     return await ctx.kernel.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=body.on),
                                  path={"id": ctx.desk(desk_id)})
+
+
+# A Desk's parts, one route each: the kernel replaces that part (people are upserted and removed by `ref`), checks it
+# and ledgers the change. A Desk of another copy is 404 before anything is sent; a deleted one is the kernel's 409.
+PART_ERRORS = error_responses(401, 404, 409, 422, 503)
+
+
+async def _put_part(ctx: OwnerCtx, desk_id: str, part: str, body: BaseModel) -> DeskUpdated:
+    return await ctx.kernel.call(f"PUT /desks/{{id}}/{part}", body, path={"id": ctx.desk(desk_id)})
+
+
+@router.put("/desks/{desk_id}/business", response_model=DeskUpdated, responses=PART_ERRORS)
+async def update_business(desk_id: DeskId, body: DeskBusinessRequest,
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DeskUpdated:
+    """The business the Desk belongs to: its name, the owner's name customers see, its time zone and brand, for every
+    Desk of that business."""
+    return await _put_part(ctx, desk_id, "business", body)
+
+
+@router.put("/desks/{desk_id}/charter", response_model=DeskUpdated, responses=PART_ERRORS)
+async def update_charter(desk_id: DeskId, body: DeskCharterRequest,
+                         ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DeskUpdated:
+    """What the Desk tells the public about the business (contact, service area, policies), in place of before."""
+    return await _put_part(ctx, desk_id, "charter", body)
+
+
+@router.put("/desks/{desk_id}/hours", response_model=DeskUpdated, responses=PART_ERRORS)
+async def update_hours(desk_id: DeskId, body: DeskHoursRequest,
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DeskUpdated:
+    """The opening hours, in the business's time zone."""
+    return await _put_part(ctx, desk_id, "hours", body)
+
+
+@router.put("/desks/{desk_id}/prices", response_model=DeskUpdated, responses=PART_ERRORS)
+async def update_prices(desk_id: DeskId, body: DeskPricesRequest,
+                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DeskUpdated:
+    """The price list, in place of before; quotes already given keep their amounts."""
+    return await _put_part(ctx, desk_id, "prices", body)
+
+
+@router.put("/desks/{desk_id}/calendar", response_model=DeskUpdated, responses=PART_ERRORS)
+async def update_calendar(desk_id: DeskId, body: DeskCalendarRequest,
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DeskUpdated:
+    """The bookable slots, in place of before; the kernel keeps a slot that is booked or waiting on a request."""
+    return await _put_part(ctx, desk_id, "calendar", body)
+
+
+@router.put("/desks/{desk_id}/people", response_model=DeskUpdated, responses=PART_ERRORS)
+async def update_people(desk_id: DeskId, body: DeskPeopleRequest,
+                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DeskUpdated:
+    """People on record, upserted and removed by `ref`. Verification codes go only to a person's contact, so the
+    kernel refuses a contact that looks masked (as the owner is shown it) and keeps the one on record when `contact`
+    is null; its refusal is passed on as it is."""
+    return await _put_part(ctx, desk_id, "people", body)
+
+
+@router.put("/desks/{desk_id}/notifications", response_model=DeskUpdated, responses=PART_ERRORS)
+async def update_notifications(desk_id: DeskId, body: DeskNotificationsRequest,
+                               ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DeskUpdated:
+    """What alerts the owner at once and what waits for the briefing."""
+    return await _put_part(ctx, desk_id, "notifications", body)
+
+
+@router.post("/desks/{desk_id}/preview_session", response_model=VisitorSession,
+             responses=error_responses(401, 404, 409, 422, 429, 503))
+async def preview_session(desk_id: DeskId, request: Request, response: Response,
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> VisitorSession:
+    """A new chat on the Desk as a customer, for its owner: the kernel opens it with the owner's credential as a
+    visitor session marked `preview`, which keeps the visitor tools while Answering is off (setup's try-out before
+    going live). Its token goes only into the visitor cookie for the Desk's public routes, so the public chat then
+    runs as that session. Like any new chat it counts toward the address's `new_chat` limit."""
+    state = runtime(request).started()
+    desk = await ctx.ro.one("desks", desk_id=ctx.desk(desk_id))
+    if desk is None:
+        raise ApiProblem(404, "not_found")
+    ledger = RateLimitLedger(ctx.kernel, desk_id=desk_id, session_id=ctx.owner_session_id)   # the Desk previewed
+    await state.limiter.enforce("new_chat", client_ip(request), ledger=ledger)
+    created = await ctx.kernel.call("POST /sessions",
+                                    CreateSessionRequest(desk_slug=desk["slug"], kind="visitor", preview=True))
+    set_visitor_cookie(response, desk["slug"], created.session_token)
+    return VisitorSession(state=created.state, resumed=False)
+
+
+@router.get("/desks/{desk_id}/people", response_model=PeopleOut, responses=error_responses(401, 404, 422, 503))
+async def people(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> PeopleOut:
+    """The people on record, in the order they were added, each with the masked contact the kernel keeps for owners'
+    screens, and the leads visitors left, newest first, their names and notes as typed (untrusted text)."""
+    desk_id = ctx.desk(desk_id)
+    on_record = sorted(await ctx.ro.rows("people", desk_id=desk_id),
+                       key=lambda row: (owner_reads.utc(row["created_at"]), row["person_id"]))
+    leads = sorted(await ctx.ro.rows("leads", desk_id=desk_id),
+                   key=lambda row: (owner_reads.utc(row["created_at"]), row["lead_id"]), reverse=True)
+    return PeopleOut(
+        people=[PersonOnRecord(person_id=row["person_id"], display_name=row["display_name"],
+                               masked_contact=row["masked_contact"]) for row in on_record],
+        leads=[Lead(lead_id=row["lead_id"], display_name=row["display_name"], note=row["note"],
+                    created_at=row["created_at"]) for row in leads])
 
 
 @router.get("/desks/{desk_id}/today", response_model=Today, responses=error_responses(401, 404, 422, 503))
@@ -152,6 +387,14 @@ async def briefing(desk_id: DeskId, request: Request, ctx: Annotated[OwnerCtx, D
     return await owner_reads.briefing_list(ctx, ctx.desk(desk_id), runtime(request).clock())
 
 
+@router.get("/desks/{desk_id}/reports", response_model=Reports, responses=error_responses(401, 404, 422, 503))
+async def reports(desk_id: DeskId, request: Request, ctx: Annotated[OwnerCtx, Depends(owner_ctx)],
+                  days: Annotated[int, Query(ge=1, le=365)] = 30) -> Reports:
+    """The last `days` local dates on the Desk, today included, in the business's time zone: bookings, the money
+    paid, and the conversations Claude handled alone versus the ones that needed the owner."""
+    return await owner_reads.reports(ctx, ctx.desk(desk_id), runtime(request).clock(), days)
+
+
 @router.get("/desks/{desk_id}/conversations", response_model=list[ConversationSummary],
             responses=error_responses(401, 404, 422, 503))
 async def conversations(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[ConversationSummary]:
@@ -161,17 +404,21 @@ async def conversations(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_
 
 @router.get("/conversations/{session_id}", response_model=OwnerTranscript,
             responses=error_responses(401, 404, 422, 503))
-async def conversation(session_id: Annotated[str, Path(max_length=128)], ctx: Annotated[OwnerCtx, Depends(owner_ctx)],
+async def conversation(session_id: Annotated[str, Path(max_length=128)], request: Request,
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)],
                        after: Annotated[int, Query(ge=0)] = 0) -> OwnerTranscript:
     """A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).
-    The cursor never skips a row: a session's rows commit in the order of their `n`."""
+    The cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the
+    visitor's typing dots stop, while they are typing (presence in this process's memory, never stored)."""
     session = await ctx.ro.session(session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         raise ApiProblem(404, "not_found")
     ids = Ids(copy_id=ctx.copy_id, desk_id=session["desk_id"], session_id=session_id)
     state = SessionState(session_id=session_id, kind=session["kind"], verified=session["verified"],
                          assurance=session["assurance"], mode=session["mode"], generation=session["generation"])
-    return OwnerTranscript(state=state, items=await transcript(ctx.ro.conn, ids, "owner", after))
+    process = runtime(request)
+    return OwnerTranscript(state=state, items=await transcript(ctx.ro.conn, ids, "owner", after),
+                           typing_until=process.presence.visitor_typing_until(session_id, process.clock()))
 
 
 @router.get("/desks/{desk_id}/safety", response_model=list[Attempt], responses=error_responses(401, 404, 422, 503))
@@ -301,3 +548,195 @@ async def _resume(state: Runtime, ctx: OwnerCtx, decision: Decision) -> None:
             await resume_after_answer(conn, ids, decision)
     except Exception as error:
         logger.error("the answer couldn't be resumed here either (%s)", type(error).__name__)
+
+
+# The owner in a conversation (Plan 02b) ----------------------------------------------------------------------
+#
+# Take-over, hand-back and resume change the session's mode through the kernel with the owner's credential, under
+# the session's run lock, with the event, its transcript row and the note they bring in the same transaction: a
+# delivery waits for them, then reads the new generation and drops anything of the old one. Claude's follow-up after
+# a hand-back or a resume runs with the visitor's own credential, once it is present: the `run_resumable` control row
+# is for the visitor's open stream or next request.
+
+SessionId = Annotated[str, Path(max_length=128)]
+
+
+async def _conversation(ctx: OwnerCtx, session_id: str) -> Ids:
+    """A visitor's or an agent's conversation on one of the copy's Desks, from its kernel_ro row; any other session,
+    the owner's own included, is 404 and never sent to the kernel."""
+    session = await ctx.ro.session(session_id)
+    if session is None or session["desk_id"] not in ctx.desk_ids or session["kind"] == "owner":
+        raise ApiProblem(404, "not_found")
+    return Ids(copy_id=ctx.copy_id, desk_id=session["desk_id"], session_id=session_id)
+
+
+async def _owner_name(ctx: OwnerCtx, desk_id: str) -> str:
+    """The owner's name as the kernel has it for the Desk's business, the only name the visitor's events carry."""
+    desk = await ctx.ro.one("desks", desk_id=desk_id)
+    business = None if desk is None else await ctx.ro.one("businesses", business_id=desk["business_id"])
+    if business is None:
+        raise LookupError("the Desk's business isn't in its copy")
+    return business["owner_display_name"]
+
+
+async def _change_mode(ctx: OwnerCtx, session_id: str, mode: Literal["ai", "owner"], generation: int) -> SessionState:
+    """Move the conversation to `mode` at the generation the owner read, as the kernel answers it (route docstrings).
+    What the visitor and Claude are told follows the change the kernel made from the mode read under the run lock;
+    the current mode again changes nothing and says nothing. The owner's name is read before the kernel is asked,
+    so a failure to read it changes nothing rather than leave a change the visitor is never told of."""
+    ids = await _conversation(ctx, session_id)
+    name = await _owner_name(ctx, ids.desk_id)
+    conn = ctx.ro.conn
+    await conn.commit()
+    try:
+        await run_lock(conn, session_id)
+        before = await ctx.ro.session(session_id)
+        changed = await ctx.kernel.call("POST /sessions/{id}/mode", ModeRequest(mode=mode, generation=generation),
+                                        path={"id": session_id})
+        if changed.generation != generation and before is not None:
+            await _announce(conn, ids, before["mode"], changed, name)
+        await conn.commit()
+    except BaseException:
+        await conn.rollback()
+        raise
+    return changed
+
+
+async def _announce(conn: AsyncConnection, ids: Ids, before: str, now: SessionState, name: str) -> None:
+    """The visitor's event (`name` is the owner's, as the kernel has it) and Claude's note for a mode change; after
+    one back to Claude, a `run_resumable` row when work is waiting for it. A take-over or a hand-back also stays in
+    the transcript (`_transcribed`); a resume after a breaker pause has no event and leaves no item."""
+    if now.mode == "owner":
+        await _transcribed(conn, ids, EvOwnerJoined(type="owner_joined", name=name))
+        await append_message(conn, ids, "note", text=NOTES["taken_over"], wake=False)
+        return
+    if before == "owner":
+        await _transcribed(conn, ids, EvOwnerLeft(type="owner_left"))
+    await append_message(conn, ids, "note", text=NOTES["handed_back" if before == "owner" else "resumed"],
+                         wake=False)
+    if await has_pending(conn, ids.session_id):
+        await append_control(conn, ids, "run_resumable", {"generation": now.generation})
+
+
+async def _transcribed(conn: AsyncConnection, ids: Ids, event: EvOwnerJoined | EvOwnerLeft) -> None:
+    """Emit the owner's joining or leaving to the visitor's stream and keep it in the transcript: a row of the event's
+    kind holding that event (`event_seq`), which the owner's and the visitor's transcripts read back as it was sent.
+    It has no text and no model block, so no model context, reply check or job ever carries it."""
+    await append_message(conn, ids, event.type, event_seq=await emit(conn, ids, event))
+
+
+@router.post("/conversations/{session_id}/takeover", response_model=SessionState,
+             responses=error_responses(401, 404, 409, 422, 503))
+async def takeover(session_id: SessionId, body: GenerationIn,
+                   ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SessionState:
+    """Take the conversation over from Claude, or from a breaker pause, at the generation the owner last read: the
+    kernel moves it to mode `owner` (a new generation, so nothing Claude had in flight is shown), the visitor sees the
+    owner join by the kernel's name for them, and Claude reads that the owner took over at its next call. A stale
+    generation is the kernel's 409 `stale_generation`."""
+    return await _change_mode(ctx, session_id, "owner", body.generation)
+
+
+@router.post("/conversations/{session_id}/handback", response_model=SessionState,
+             responses=error_responses(401, 404, 409, 422, 503))
+async def handback(session_id: SessionId, body: GenerationIn,
+                   ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SessionState:
+    """Hand a conversation the owner took over back to Claude, at the generation the owner last read: the kernel
+    moves it to mode `ai` (a new generation), the visitor sees the owner leave, and Claude reads that the owner handed
+    it back. Work that waited for the owner (an answered request's outcome, a whisper) wakes Claude, whose turn runs
+    with the visitor's credential once it is present: the open stream or the next request."""
+    return await _change_mode(ctx, session_id, "ai", body.generation)
+
+
+@router.post("/conversations/{session_id}/resume", response_model=SessionState,
+             responses=error_responses(401, 404, 409, 422, 503))
+async def resume(session_id: SessionId, body: GenerationIn,
+                 ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SessionState:
+    """Resume a conversation the breaker paused, at the generation the owner last read: the kernel moves it back to
+    mode `ai` (a new generation, its strikes reset), and Claude reads that the owner resumed it. Work still waiting
+    wakes Claude as after a hand-back; work the pause's handoff already answered doesn't."""
+    return await _change_mode(ctx, session_id, "ai", body.generation)
+
+
+@router.post("/conversations/{session_id}/messages", response_model=OwnerMessageResult,
+             responses=error_responses(401, 404, 409, 422, 503))
+async def message(session_id: SessionId, body: OwnerMessageIn,
+                  ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> OwnerMessageResult:
+    """The owner's words in a conversation, through the kernel with the owner's credential (it ledgers both kinds).
+
+    A `say` goes to the visitor once the owner has taken the conversation over (else 409 `take_over_first`): the
+    kernel checks it and signs it at the session's generation, and only a passing verdict is shown, through
+    `deliver()`, as the owner's, with an `owner_say` row so Claude reads it at its next call. A say the kernel blocks
+    comes back to the owner unchanged and reaches no one; one the session moved past before it could be shown is 409
+    `stale_generation`. A `whisper` is a note for Claude alone, in any mode, held as untrusted text: in mode `ai` it
+    wakes Claude's next turn, which runs with the visitor's credential once it is present; during a take-over it
+    waits for the hand-back; during a breaker pause Claude reads it at its first call after the resume."""
+    ids = await _conversation(ctx, session_id)
+    conn = ctx.ro.conn
+    await conn.commit()
+    try:
+        await run_lock(conn, session_id)                     # the mode read below holds until this commits
+        session = await ctx.ro.session(session_id)
+        mode = session["mode"] if session is not None else None
+        if body.kind == "say" and mode != "owner":
+            raise ApiProblem(409, "take_over_first")
+        result = await ctx.kernel.call("POST /owner/messages", OwnerMessageRequest(
+            session_id=session_id, text=body.text, kind=body.kind))
+        if body.kind == "say":
+            await _said(conn, ids, result, ctx.ro.schema)
+        else:
+            await append_message(conn, ids, "whisper", text=body.text, ref_id=result.message_id,
+                                 wake=mode != "paused")
+            if mode == "ai":
+                await append_control(conn, ids, "run_resumable", {"message_id": result.message_id})
+        await conn.commit()
+    except BaseException:
+        await conn.rollback()
+        raise
+    return result
+
+
+async def _said(conn: AsyncConnection, ids: Ids, result: OwnerMessageResult, ro_schema: str) -> None:
+    """Show the owner's checked say to the visitor and note it for Claude, as the visitor was shown it (`message`)."""
+    verdict = result.verdict
+    if verdict is None:
+        raise ValueError("the kernel answered a say without its verdict")
+    if not verdict.ok:                                      # blocked: it stays with the owner
+        return
+    if await deliver(conn, ids, Reply(verdict, "owner", via="owner"), ro_schema=ro_schema) is None:
+        raise ApiProblem(409, "stale_generation")
+    await append_message(conn, ids, "owner_say", text=blocks_text(verdict.blocks), ref_id=result.message_id)
+
+
+@router.post("/conversations/{session_id}/typing", status_code=204, response_class=Response,
+             responses=error_responses(401, 404, 409, 422, 503))
+async def typing(session_id: SessionId, body: GenerationIn, request: Request,
+                 ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> None:
+    """The owner is typing in a conversation they took over, at the generation they read: the visitor sees their
+    initials, name and three dots for five seconds, or until their say replaces them (an `owner_typing` event that
+    carries the kernel's name for the owner and when the dots stop, never text). Presence, not a message: no kernel
+    call but the one naming the owner, no ledger entry. In any other mode it is 409 `take_over_first`, and at a
+    generation the session has left 409 `stale_generation`. The app sends about one signal every two seconds while
+    the owner types, never one per keystroke: each one still costs a kernel call, database reads and a moment of the
+    conversation's lock. At most one event goes out every two seconds; a signal sooner changes nothing."""
+    ids = await _conversation(ctx, session_id)
+    process = runtime(request)
+    conn = ctx.ro.conn
+    await conn.commit()
+    try:
+        await run_lock(conn, session_id)                     # after a hand-back, no dots: it holds the same lock
+        session = await ctx.ro.session(session_id)
+        if session is None or session["mode"] != "owner":
+            raise ApiProblem(409, "take_over_first")
+        if session["generation"] != body.generation:
+            raise ApiProblem(409, "stale_generation")
+        name = await _owner_name(ctx, ids.desk_id)
+        now = process.clock()
+        until = process.presence.owner_typing(session_id, now)
+        if until is not None:
+            await emit(conn, ids, EvOwnerTyping(type="owner_typing", name=name, until=until))
+        await conn.commit()
+        if until is not None:                                # counted once sent: a failure holds nothing back
+            process.presence.owner_typing_sent(session_id, now)
+    except BaseException:
+        await conn.rollback()
+        raise

@@ -207,9 +207,55 @@ async def test_kernel_unavailable_mid_turn(api_conn, engine, locks, caller, fake
     assert fake.called("/check_reply") == [] and len(model.requests) == 1
     assert [(event.type, getattr(event, "code", None)) for event in await events(api_conn, caller.session_id)] == [
         ("writing", None), ("error", "kernel_unavailable"), ("turn_end", None)]
-    ((results,),) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
-    assert [(result["tool_use_id"], result["content"]) for result in results] == [
-        ("toolu_book", '{"outcome":"unavailable"}'), ("toolu_say", '{"outcome":"unavailable"}')]
+    # the booking may still run, so it isn't answered `unavailable`: the response is left without its results row
+    assert await rows(api_conn, caller.session_id, "model_tool_results", "model_content") == []
+
+    # The next request finds the call by its ID, never deciding it again: the allow runs once, and Claude reads that
+    # it ran before it replies.
+    fake.fail("/execute", None)
+    model.add(response(reply("You're booked.", id="toolu_booked")))
+    await said(api_conn, caller, "Did it go through?")
+    assert await pending(caller, model, engine, locks) == "done"
+    assert len(fake.called("/decide")) == 1 and len(fake.called("/decisions/by_call")) == 1
+    assert [entry.event.summary.get("repeat", False) for entry in fake.desks[caller.desk_id].ledger
+            if entry.event.kind == "execute"] == [False]                # it ran once
+    assert [(result["tool_use_id"], result["content"]["outcome"]) for result in tool_results(model.requests[-1])] == [
+        ("toolu_book", "done"), ("toolu_say", "not_run")]
+    assert fake.decisions[decision_id].decision.state == "executed"
+
+
+async def test_a_money_call_left_open_is_never_run_by_a_later_visitor_message(api_conn, engine, locks, caller, fake,
+                                                                             monkeypatch):
+    # A payment link the kernel allowed, whose `/execute` couldn't reach it: the visitor's next message is another
+    # request, so the call is answered from its decision, `unknown`, and `/execute` is never sent again for it; the
+    # decision is left to its pending row and the kernel's reconciliation.
+    monkeypatch.setattr(tools, "EXECUTE_POLL_S", 0)
+    await said(api_conn, caller, "Can I pay the deposit now?")
+
+    def link_with_the_kernel_down(request):
+        (quoted,) = [result for result in tool_results(request) if result["content"]["outcome"] == "done"]
+        fake.fail("/execute", "connect")
+        return response(tool_use("native__payment_link", {"quote_id": quoted["content"]["result"]["quote_id"]},
+                                 id="toolu_link"), reply("Here's the link.", id="toolu_say"))
+
+    model = ScriptedModel([response(tool_use("native__quote", {"items": [{"item_id": "deposit", "qty": 1}]},
+                                             id="toolu_quote")), link_with_the_kernel_down])
+    assert await pending(caller, model, engine, locks) == "kernel_unavailable"
+    (link,) = [record.decision for record in fake.decisions.values()
+               if record.decision.session_id == caller.session_id and record.decision.action is not None
+               and record.decision.action.tool == "native.payment_link"]
+    assert link.state == "allowed"
+    tries = [call for call in fake.called("/execute") if call.body["decision_id"] == link.decision_id]
+
+    fake.fail("/execute", None)
+    model.add(response(reply("I couldn't confirm the link yet.", id="toolu_later")))
+    await said(api_conn, caller, "Did it work?")
+    assert await pending(caller, model, engine, locks) == "done"
+    assert [call for call in fake.called("/execute") if call.body["decision_id"] == link.decision_id] == tries
+    assert [(result["tool_use_id"], result["content"]["outcome"]) for result in tool_results(model.requests[-1])] == [
+        ("toolu_link", "unknown"), ("toolu_say", "not_run")]
+    assert fake.decisions[link.decision_id].decision.state == "allowed"
+    assert ("decision_pending", {"decision_id": link.decision_id}) in await control_rows(api_conn, caller.session_id)
 
 
 async def test_session_error_mid_turn(api_conn, engine, locks, caller, visitor, fake):
@@ -389,7 +435,8 @@ async def test_a_call_nothing_could_settle_stays_open_for_the_next_request(api_c
     assert len(fake.called("/decide")) == 1                    # never decided again
     (held,) = tool_results(model.requests[0])
     assert (held["tool_use_id"], held["content"]) == ("toolu_half", {
-        "outcome": "held_for_owner", "decision_id": decision_id, "message": "I've asked Maria Rivera to look at this."})
+        "outcome": "held_for_owner", "decision_id": decision_id,
+        "message": fake.decisions[decision_id].decision.visitor_plain})
     assert [(event.type, getattr(event, "decision_id", None)) for event in await events(
         api_conn, caller.session_id)][3:] == [("held", decision_id), ("writing", None), ("message", None),
                                               ("turn_end", None)]
@@ -754,6 +801,31 @@ async def test_a_blocking_request_waits_for_the_turn_then_gives_up(api_conn, eng
     assert len(model.requests) == 1 and await has_pending(api_conn, caller.session_id)
     model.add(response(reply("Saturday mornings work.")))
     assert await pending(caller, model, engine, locks, blocking=True) == "done"
+    assert await turn_locks_held(engine, caller.session_id) == 0
+
+
+async def test_a_run_ended_on_its_reply_leaves_work_woken_meanwhile(api_conn, engine, locks, caller, visitor, fake):
+    # an agent's request runs one turn: its reply spends the request's nonce, so work that wakes the session during
+    # the turn (an owner's answer, a whisper, the agent's next message) waits for the next request
+    woken = []
+
+    async def meanwhile(request: httpx.Request) -> None:      # a message lands as the reply is checked
+        if not woken:
+            await said(api_conn, caller, "Is Saturday possible?")
+            woken.append(True)
+
+    await said(api_conn, caller, "When could you come?")
+    model = ScriptedModel([response(reply("Here are the open times."))])
+    async with KernelHttp("http://fake-kernel", transport=Kernel(fake, before={"/check_reply": meanwhile})) as http:
+        assert await pending(replace(caller, kernel=http.session(visitor.token)), model, engine, locks,
+                             blocking=True, end_on_reply=True) == "done"
+    assert woken and len(model.requests) == 1 and await has_pending(api_conn, caller.session_id)
+
+    # the next request's turn reads it
+    model.add(response(reply("Saturday mornings work.")))
+    assert await pending(caller, model, engine, locks, blocking=True, end_on_reply=True) == "done"
+    assert len(model.requests) == 2 and not await has_pending(api_conn, caller.session_id)
+    assert visitor_texts(model.requests[1])[-1] == "<visitor_message>Is Saturday possible?</visitor_message>"
     assert await turn_locks_held(engine, caller.session_id) == 0
 
 

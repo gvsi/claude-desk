@@ -2,10 +2,12 @@
 
 Plan 06b's runtime seam sets them: `DESK_ENV`, `API_DATABASE_URL`, `ANTHROPIC_API_KEY`,
 `PASSCODE_HASH`, `KERNEL_URL`, `PUBLIC_ORIGIN` and `TRUSTED_PROXY_HOPS`. `ANTHROPIC_BASE_URL` is a
-test hook that points the model client at a fake server. `a2a_loopback` and `kernel_ro_schema`
-are not read from the environment; tests override them with `dataclasses.replace`, which checks
-the result again, and the evals' `make_api_target` builds `Settings` directly, never through
-`Settings.from_env`.
+test hook that points the model client at a fake server. `a2a_loopback`, `kernel_ro_schema` and
+`replay_night` are not read from the environment; tests override them with `dataclasses.replace`,
+which checks the result again, and the evals' `make_api_target` builds `Settings` directly, never
+through `Settings.from_env`. `replay_night` asks the kernel to replay the recorded night into each
+new demo copy (Plan 01d); it is on for the hosted app and off for the evals target, and the kernel's
+`REPLAY_NIGHT_OFF=1` is the switch that turns replay off.
 
 The model provider (`MODEL_PROVIDER`) is the Claude API (`anthropic`, the default) or, for local
 evals, Amazon Bedrock (`bedrock`) in `AWS_REGION` with the one Bedrock credential the API ever
@@ -66,6 +68,7 @@ class Settings:
     bedrock_bearer_token: str | None = field(default=None, repr=False)   # local Bedrock evals only
     a2a_loopback: str = "http://127.0.0.1:8700"
     kernel_ro_schema: str = "kernel_ro"
+    replay_night: bool = True               # each new copy asks for the recorded night; never from the environment
 
     @property
     def production(self) -> bool:

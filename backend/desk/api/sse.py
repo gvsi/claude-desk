@@ -10,7 +10,9 @@ the four signed events (message, receipt, held, resolved); `emit` writes the oth
 (`run_resumable`, `decision_due`, `decision_pending`) are work for the next request that holds the
 session's credential, claimed once each; metric rows record reveal and turn timings.
 
-Functions that write run in the caller's transaction and never commit.
+Functions that write run in the caller's transaction and never commit. `emit_inbox` publishes the kernel's Demo inbox
+notices meant for the visitor (a code sent to the contact on record), code-free and once per entry; owner alerts never
+reach a session.
 
 The stream: one `Listener` per process holds the only `LISTEN desk_run_events` connection and wakes the
 streams of the session each notification names. `event_stream` replays the session's events after the
@@ -26,7 +28,7 @@ waits should it still run `CLOSE_GRACE_S` later. `on_end` runs once the stream h
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -40,12 +42,14 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 from starlette.types import Message, Receive, Scope, Send
 
 from desk.api.metrics import metric_row
-from desk.api.store import Ids, lock_events
+from desk.api.store import Ids, Replayed, lock_events
+from desk.contracts import InboxNotice
 from desk.db.models import RunEvent
 from desk.db.session import libpq_url
-from desk.events import SseEvent
+from desk.events import EvDemoInbox, SseEvent
 
 RUN_EVENTS = RunEvent.__table__
+OWNER = "owner"                                  # an InboxNotice's `to` for an owner alert
 CHANNEL = "desk_run_events"
 SIGNED_TYPES = frozenset({"message", "receipt", "held", "resolved"})   # built only by deliver()
 CONTROL_TYPES = frozenset({"run_resumable", "decision_due", "decision_pending"})
@@ -63,17 +67,21 @@ async def _notify(conn: AsyncConnection, session_id: str) -> None:
     await conn.execute(select(func.pg_notify(CHANNEL, session_id)))
 
 
-async def append_event(conn: AsyncConnection, ids: Ids, event: BaseModel) -> int:
-    """Publish an SSE event to the session; returns its `seq`. Only deliver() and emit() call this."""
+async def append_event(conn: AsyncConnection, ids: Ids, event: BaseModel, *, replayed: Replayed | None = None) -> int:
+    """Publish an SSE event to the session; returns its `seq`. Only deliver() and emit() call this. A `replayed`
+    event (recorded history) is written at its moment with its `replay_id` and wakes no stream: no one holds a
+    replayed session's credential."""
     event = _EVENT.validate_python(event.model_dump())
     await lock_events(conn, ids.session_id)
     last = (await conn.execute(select(func.max(RUN_EVENTS.c.seq)).where(
         RUN_EVENTS.c.session_id == ids.session_id, RUN_EVENTS.c.kind == "sse"))).scalar_one()
     seq = 1 if last is None else last + 1
+    recorded = {} if replayed is None else {"created_at": replayed.at, "replay_id": replayed.replay_id}
     await conn.execute(insert(RUN_EVENTS).values(
         copy_id=ids.copy_id, desk_id=ids.desk_id, session_id=ids.session_id, kind="sse", seq=seq,
-        type=event.type, payload=event.model_dump(mode="json")))
-    await _notify(conn, ids.session_id)
+        type=event.type, payload=event.model_dump(mode="json"), **recorded))
+    if replayed is None:
+        await _notify(conn, ids.session_id)
     return seq
 
 
@@ -83,6 +91,25 @@ async def emit(conn: AsyncConnection, ids: Ids, event: Any) -> int:
     if not isinstance(event, BaseModel) or getattr(event, "type", None) in SIGNED_TYPES:
         raise TypeError("emit() publishes unsigned events only; signed ones go through deliver()")
     return await append_event(conn, ids, event)
+
+
+async def emit_inbox(conn: AsyncConnection, ids: Ids, notices: Iterable[InboxNotice]) -> list[int]:
+    """Publish the kernel's Demo inbox notices meant for the session's visitor as code-free `demo_inbox` events; returns
+    their `seq`s. An owner alert (`to == "owner"`) never reaches the session, and an entry already published to it isn't
+    published again (a repeated `/execute` answers with the stored result, notices included)."""
+    seqs = []
+    for notice in notices:
+        if notice.to == OWNER:
+            continue
+        await lock_events(conn, ids.session_id)              # the check and the write, one transaction at a time
+        published = (await conn.execute(select(RUN_EVENTS.c.id).where(
+            RUN_EVENTS.c.copy_id == ids.copy_id, RUN_EVENTS.c.session_id == ids.session_id,
+            RUN_EVENTS.c.kind == "sse", RUN_EVENTS.c.type == "demo_inbox",
+            RUN_EVENTS.c.payload["entry_id"].astext == notice.entry_id).limit(1))).first()
+        if published is None:
+            seqs.append(await emit(conn, ids, EvDemoInbox(type="demo_inbox", entry_id=notice.entry_id, to=notice.to,
+                                                          preview=notice.preview)))
+    return seqs
 
 
 async def append_control(conn: AsyncConnection, ids: Ids, type: str, payload: dict) -> int | None:

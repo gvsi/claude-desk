@@ -22,8 +22,10 @@ from sqlalchemy import text as sql
 
 from desk.api.kernel_client import CredentialView, KernelFailed
 from desk.api.main import create_app
+from desk.api.owner_reads import BOOKING_CLAIM, REPLY_WHY_BY_RULE
 from desk.api.ro import KernelRO
 from desk.api.deliver import Reply, Status, deliver
+from desk.api.prompts import Triage
 from desk.api.store import (
     Ids,
     append_assistant,
@@ -42,6 +44,7 @@ from desk.kernel_api import (
     DecideRequest,
     ExecuteRequest,
 )
+from desk.kernel_service import reply_check
 from tests.api.fakes import ScriptedModel
 from tests.kernel_contract.fake_kernel import fake_kernel_app, signed_time
 
@@ -236,6 +239,19 @@ class Scene:
         entry = self.fake.append(self.fake.desks[self.owner.desk_id], "reply", {
             "message_id": "msg-owner-say", "author": "owner", "ok": False, "language": "en", "violations": ["canary"],
             "rule_ids": ["canary"], "fact_ids": []}, session_id=who.session_id)
+        self.fake.flush()
+        return entry.seq
+
+    def blocked_reply_with(self, who: Guest, when: datetime, violations: list[str], rule_ids: list[str] | None) -> int:
+        """A reply of Claude's the checkpoint blocked, ledgered as the kernel ledgers one: its violation kinds and their
+        rule IDs, side by side (`rule_ids=None` leaves them out of the entry). The fake's own scan makes no booking
+        claim, so the entry is written straight; returns its seq."""
+        self.fake.now = when
+        summary = {"message_id": f"msg-{next(_CALL_IDS)}", "author": "claude", "ok": False, "language": "en",
+                   "violations": violations, "fact_ids": []}
+        if rule_ids is not None:
+            summary["rule_ids"] = rule_ids
+        entry = self.fake.append(self.fake.desks[self.owner.desk_id], "reply", summary, session_id=who.session_id)
         self.fake.flush()
         return entry.seq
 
@@ -788,6 +804,62 @@ async def test_safety_lists_refusals_with_origin(scene, clock):
     assert (newest["ref_id"], newest["at"], newest["line"]) == (str(replayed_seq), stamp(local(2026, 10, 29, 20)), None)
 
 
+STOPPED = "A reply was stopped before it was shown, because "
+BOOKING_WHY = "it said a booking was made instead of showing the card"
+PROMISE_WHY = "it made a promise the rules don't back"
+NUMBER_WHY = "it wrote a number outside a checked card"
+
+
+async def stopped_reason(scene: Scene, violations: list[str], rule_ids: list[str] | None) -> str:
+    """The reason Safety gives the owner for one blocked reply of Claude's, ledgered with these kinds and rule IDs."""
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    seq = scene.blocked_reply_with(who, local(2026, 10, 29, 19), violations, rule_ids)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200, listed.text
+    (attempt,) = listed.json()
+    assert (attempt["kind"], attempt["ref_id"]) == ("reply_blocked", str(seq))
+    return attempt["reason_plain"]
+
+
+def test_the_booking_line_goes_by_the_kernels_booking_rules():
+    # the owner's booking line is keyed by the rule IDs the kernel's reply check gives a booking claim, one per language
+    # it checks: a language added to the check, or a rule renamed there, can't leave a booking claim read as a promise
+    assert {rule_id for rule_id, _ in reply_check.BOOKING_LINES} == {
+        rule_id for rule_id, line in REPLY_WHY_BY_RULE.items() if line == BOOKING_CLAIM}
+
+
+@pytest.mark.parametrize("rule_id", ["lex.en.booking", "lex.es.booking"])
+async def test_a_stopped_booking_claim_says_so(scene, clock, rule_id):
+    clock.now = local(2026, 10, 30, 9)
+
+    assert await stopped_reason(scene, ["promise_word"], [rule_id]) == f"{STOPPED}{BOOKING_WHY}."
+
+
+@pytest.mark.parametrize(("violations", "rule_ids", "why"), [
+    (["promise_word"], ["lex.en.promise"], PROMISE_WHY),
+    (["promise_word"], ["link"], PROMISE_WHY),
+    (["promise_word"], ["policy_echo"], PROMISE_WHY),
+    (["promise_word"], None, PROMISE_WHY),                          # an entry that names no rule IDs
+    # rule IDs that don't stand beside the kinds one for one name none of them
+    (["number_in_prose", "promise_word"], ["lex.en.booking"], f"{NUMBER_WHY} and {PROMISE_WHY}"),
+], ids=["other-rule", "link", "policy-echo", "no-rule-ids", "rule-ids-out-of-step"])
+async def test_a_rule_without_a_line_of_its_own_reads_as_its_kind(scene, clock, violations, rule_ids, why):
+    clock.now = local(2026, 10, 30, 9)
+
+    assert await stopped_reason(scene, violations, rule_ids) == f"{STOPPED}{why}."
+
+
+@pytest.mark.parametrize(("violations", "rule_ids", "why"), [
+    (["number_in_prose", "promise_word"], ["digit", "lex.en.booking"], f"{NUMBER_WHY} and {BOOKING_WHY}"),
+    (["promise_word", "promise_word"], ["lex.en.booking", "lex.en.promise"], f"{BOOKING_WHY} and {PROMISE_WHY}"),
+    (["promise_word", "promise_word"], ["lex.en.booking", "lex.es.booking"], BOOKING_WHY),     # one line, once
+], ids=["number-and-booking", "booking-and-promise", "two-booking-claims"])
+async def test_a_booking_claims_reason_joins_the_others(scene, clock, violations, rule_ids, why):
+    clock.now = local(2026, 10, 30, 9)
+
+    assert await stopped_reason(scene, violations, rule_ids) == f"{STOPPED}{why}."
+
+
 async def test_owner_transcript_adds_whispers_and_translations(app, browser, fake, kernel_http, engine, ro_schema):
     owner = await new_owner(app, browser, fake, kernel_http)
     other = await new_owner(app, browser, fake, kernel_http)
@@ -807,7 +879,8 @@ async def test_owner_transcript_adds_whispers_and_translations(app, browser, fak
         await conn.commit()
         await deliver(conn, ids, Reply(verdict, "claude", "api"), ro_schema=ro_schema)
         await deliver(conn, ids, Status(held, "held"), ro_schema=ro_schema)
-        await append_message(conn, ids, "triage", ref_id=held.decision_id, text="Pushed for a discount.")
+        pushed = Triage(summary="Pushed for a discount.", category="discount_push")
+        await append_message(conn, ids, "triage", ref_id=held.decision_id, text=pushed.model_dump_json())
         await append_message(conn, ids, "whisper", text="Offer a callback instead.")
         await append_message(conn, ids, "note", text="The visitor verified.")
         await append_message(conn, ids, "desk_context", text="{}")
@@ -822,7 +895,7 @@ async def test_owner_transcript_adds_whispers_and_translations(app, browser, fak
     assert body["state"] == fake.sessions[ids.session_id].state().model_dump(mode="json")
     assert [(item["kind"], item["text"], item["owner_translation"], item["triage"]) for item in body["items"]] == [
         ("visitor_text", "Hola, ¿cuánto cuesta?", "Hi, how much is it?", None), ("delivered", None, None, None),
-        ("status", None, None, "Pushed for a discount."), ("whisper", "Offer a callback instead.", None, None),
+        ("status", None, None, pushed.model_dump(mode="json")), ("whisper", "Offer a callback instead.", None, None),
         ("delivered", None, None, None)]
     assert [item["event"]["type"] if item["event"] else None for item in body["items"]] == [
         None, "message", "held", None, "message"]

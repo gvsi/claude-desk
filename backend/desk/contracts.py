@@ -36,12 +36,6 @@ class SessionCreated(BaseModel):          # POST /sessions; the token is shown o
     state: SessionState
     session_token: str | None             # 256-bit CSPRNG, stored only as its hash (secret_hash); None for agent sessions
 
-class CopyCreated(BaseModel):             # POST /copies; the owner token is the copy credential
-    copy_id: str
-    desk_ids: list[str]
-    owner_session: SessionState
-    owner_token: str                      # 256-bit CSPRNG, stored hashed, sent as X-Owner-Session
-
 # A signed timestamp: RFC 3339 UTC with microseconds and "Z"; signatures cover the literal string
 SignedTime = Annotated[str, StringConstraints(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$")]
 
@@ -429,6 +423,22 @@ class ReplyVerdict(BaseModel):
     ledger_seq: int
     signature: str                        # Ed25519 over b"desk-verdict-v1\0" + sha256(canonical_json {session_id, generation, message_id, blocks_sha256, visitor_plain, ledger_seq})
                                           # blocks_sha256 = sha256(canonical_json(blocks))
+
+class ReplayedEvent(BaseModel):           # one moment of the recorded night as POST /copies replayed it into the copy
+    session_id: str                       # the copy's own session, closed at generation 0
+    shown_at: SignedTime                  # not signed: the ledger entry's summary.replayed.at is the signed record of the time
+    kind: Literal["visitor_message", "reply", "receipt"]
+    text: str | None                      # visitor_message only: the persona's words (untrusted text)
+    verdict: ReplyVerdict | None          # reply: a full signed ReplyVerdict
+    decision: Decision | None             # receipt: a full signed Decision, in its final state
+
+class CopyCreated(BaseModel):             # POST /copies; the owner token is the copy credential
+    copy_id: str
+    desk_ids: list[str]
+    owner_session: SessionState
+    owner_token: str                      # 256-bit CSPRNG, stored hashed, sent as X-Owner-Session
+    replayed_messages: list[ReplayedEvent] = []   # in shown order; empty without a replay
+    replay_id: str | None = None          # the recording id the replayed kernel rows carry; None without a replay
 
 class OwnerMessageResult(BaseModel):
     message_id: str

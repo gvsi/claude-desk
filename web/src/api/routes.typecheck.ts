@@ -112,64 +112,39 @@ export const ROUTE_MODELS = {
  * list and its answers match `ROUTE_MODELS`.
  */
 export const NOT_YET_SERVED = [
-  // Copy and Desks
-  'deleteDesk',
-  'openPreview',
-  // Today
-  'reports',
-  // Conversations
-  'takeover',
-  'handback',
-  'resume',
-  'ownerMessage',
-  'ownerTyping',
-  // Rules, tools, knowledge, people
-  'rules',
-  'ruleDraft',
-  'suggestions',
-  'simulateToolChange',
-  'addKnowledge',
-  'people',
   // Proving
-  'ruleChat',
-  'draftRules',
-  'draftPreset',
-  'draftSuggestion',
-  'confirmRules',
   'confirmTool',
-  'setupRules',
-  'setupSituations',
-  'setupSafetyCheck',
-  'setupConfirm',
-  'goLive',
-  // Setup
-  'startSetup',
-  'setup',
-  'setupConsent',
-  'setupAnswer',
-  'setupTools',
-  'setupConnect',
-  // Public
-  'visitorTyping',
-  'verifyCheck',
-  'visitorInbox',
-  'agentKey',
-  'sendAgent',
-  'agentRun',
-  // Tokens
-  'paymentLink',
-  'completePayment',
-  'cancelPayment',
 ] as const satisfies readonly RouteKey[];
 
 /**
  * Operations the API serves that the web deliberately never calls, as "METHOD /path": one served
- * for another caller (the load balancer, a visiting agent) that no screen needs. None today.
- * Every other operation in the document must be some route's, so a route the API serves under
- * another path or method fails both checks rather than waiting on `NOT_YET_SERVED` forever. Each
- * entry must be served and called by no route.
+ * for another caller (the load balancer, a visiting agent) that no screen needs, or one no plan 04
+ * screen uses. Every other operation in the document must be some route's, so a route the API
+ * serves under another path or method fails both checks rather than waiting on `NOT_YET_SERVED`
+ * forever. Each entry must be served and called by no route.
  */
-export const NEVER_CALLED = [] as const satisfies readonly string[];
+export const NEVER_CALLED = [
+  // Served for other callers: the document link a visitor opens, and a visiting agent's turn.
+  'GET /api/d/{token}',
+  'POST /api/a2a/{slug}',
+  // A new Desk goes through setup (`startSetup`).
+  'POST /api/owner/desks',
+  // Settings is read-only by the owner's ruling, and no plan 04 task edits these parts.
+  'PUT /api/owner/desks/{desk_id}/people',
+  'PUT /api/owner/desks/{desk_id}/business',
+  'PUT /api/owner/desks/{desk_id}/charter',
+  'PUT /api/owner/desks/{desk_id}/hours',
+  'PUT /api/owner/desks/{desk_id}/prices',
+  'PUT /api/owner/desks/{desk_id}/calendar',
+  'PUT /api/owner/desks/{desk_id}/notifications',
+  // Verification starts through Claude's tool in the chat; the page only checks the code (`verifyCheck`).
+  'POST /api/public/desks/{slug}/verify/start',
+  // No plan 04 task uploads a document.
+  'POST /api/owner/desks/{desk_id}/documents',
+  // Task 14 (Connectors) adds `connectTools` and `toolDecisions`.
+  'POST /api/owner/desks/{desk_id}/tools/connect',
+  'GET /api/owner/desks/{desk_id}/tools/{tool}/decisions',
+] as const satisfies readonly string[];
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 

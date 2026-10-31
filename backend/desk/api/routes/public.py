@@ -1,10 +1,18 @@
 """The public routes: the kernel's public Desk at `/api/public/{slug}` and, under `/api/public/desks/{slug}/`, the
-Agent Card and the visitor's chat.
+Agent Card, the visitor's chat, demo-code verification, the visitor's Demo inbox and the demo agents.
 
 The public Desk and the Agent Card read no cookie and set none. The chat routes act only for the session the
 `desk_visitor` cookie names, as the kernel's `GET /whoami` answers for it (`deps.visitor_ctx`): an ID the browser
 sends is never read. Claude's turns run in the process's `TurnRunner`, which holds the visitor's credential in
 memory only; what they show reaches the visitor on the event stream.
+
+Verification codes go only to the contact on record, as Demo inbox entries the visitor reads through the kernel; the
+stream carries only their code-free notices, and a code the visitor types goes to the kernel alone: it is never stored,
+logged, streamed or shown to Claude (master plan, "Demo limit: the Demo inbox").
+
+A visitor can also send the built-in visiting agent to the Desk, or get a demo key to connect an agent of their own
+(Plan 02b, Task 5): the kernel mints each agent for the visitor's session, and the key is handed over once or kept in
+the run's memory alone, never stored (`agents.py`).
 """
 
 import json
@@ -18,21 +26,44 @@ from sse_starlette import EventSourceResponse
 
 from desk.api.cookies import VISITOR_COOKIE, set_visitor_cookie
 from desk.api.deliver import Status, deliver
-from desk.api.deps import ApiProblem, VisitorCtx, client_ip, public_origin, runtime, visitor_context, visitor_ctx
+from desk.api.deps import (
+    ApiProblem,
+    VisitorCtx,
+    client_ip,
+    public_origin,
+    require_model_budget,
+    runtime,
+    visitor_context,
+    visitor_ctx,
+)
+from desk.api.jobs import defer_translation
+from desk.api.prompts import NOTES, DemoTask
 from desk.api.schemas import (
     AgentCardOut,
     AgentCardSigning,
+    AgentRunStarted,
     CancelAccepted,
+    DemoAgentRun,
     MessageAccepted,
+    VerifyChecked,
     VisitorSession,
     VisitorTranscript,
     error_responses,
     operation_ids,
 )
-from desk.api.sse import RUN_EVENTS, ControlRow, Wakeup, event_stream
-from desk.api.store import MESSAGES, append_message, transcript
-from desk.contracts import LedgerEvent
-from desk.kernel_api import CancelRequest, CreateSessionRequest, LedgerAppendRequest, PublicDesk
+from desk.api.sse import OWNER, RUN_EVENTS, ControlRow, Wakeup, emit_inbox, event_stream
+from desk.api.store import MESSAGES, append_message, append_note_once, transcript
+from desk.contracts import DemoAgentIssued, DemoInboxEntry, LedgerEvent
+from desk.kernel_api import (
+    CancelRequest,
+    CreateSessionRequest,
+    DemoAgentRequest,
+    LedgerAppendRequest,
+    PublicDesk,
+    VerifyCheckRequest,
+    VerifyStarted,
+    VerifyStartRequest,
+)
 
 router = APIRouter(prefix="/api/public", generate_unique_id_function=operation_ids("public"))
 NO_STORE = "no-store"
@@ -111,9 +142,9 @@ async def open_session(slug: str, request: Request, response: Response) -> Visit
 
 @router.get("/desks/{slug}/session", response_model=VisitorTranscript, responses=error_responses(401, 422, 503))
 async def visitor_session(ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> VisitorTranscript:
-    """The session's state and its transcript as the visitor sees it: their own words and what was delivered to
-    them, never model, note, owner-only or other sessions' rows. `last_seq` is read in the same snapshot, so the
-    event stream opened after it neither misses nor repeats an item."""
+    """The session's state and its transcript as the visitor sees it: their own words, what was delivered to them
+    and where the owner joined and left, never model, note, owner-only or other sessions' rows. `last_seq` is read in
+    the same snapshot, so the event stream opened after it neither misses nor repeats an item."""
     conn = ctx.conn
     await conn.commit()
     await conn.execution_options(isolation_level="REPEATABLE READ")   # reset when the connection is pooled again
@@ -146,7 +177,9 @@ async def send_message(body: MessageIn, request: Request,
     meanwhile precedes the message and the same turn answers both. The message wakes a turn unless the owner has taken
     the chat over (mode `owner`: the owner answers it). In a paused session that turn is the kernel's handoff, with no
     model call: it runs under the session's turn lock and stops the waiting work from starting more turns, so one
-    handoff answers the message and whatever else was waiting. Neither counts toward the turn limits."""
+    handoff answers the message and whatever else was waiting. Neither counts toward the turn limits. Once the message
+    is stored, its translation for the owner is queued (Plan 02b, Task 10), unless the chat is paused or the
+    conversation's `translate` limit is spent; a queue that can't take it changes nothing here."""
     state = runtime(request).started()
     limits = [("visitor_post", ctx.ids.session_id)]
     if ctx.state.mode == "ai":                    # the turn limits first: when one refuses, it names the wait
@@ -158,8 +191,22 @@ async def send_message(body: MessageIn, request: Request,
     n = await append_message(conn, ctx.ids, "visitor_text", text=body.text, wake=ctx.state.mode != "owner")
     message_id = (await conn.execute(select(MESSAGES.c.message_id).where(MESSAGES.c.n == n))).scalar_one()
     await conn.commit()
+    if ctx.state.mode != "paused":                # the owner's English copy, if it needs one (none in a paused chat)
+        await defer_translation(state.jobs, ctx.ids, message_id, limiter=state.limiter, ledger=ctx.ledger())
     state.runner.start(caller)
     return MessageAccepted(message_id=message_id)
+
+
+@router.post("/desks/{slug}/typing", status_code=204, response_class=Response,
+             responses=error_responses(401, 422, 503))
+async def typing(request: Request, ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> None:
+    """The visitor is typing: the owner's view of the conversation shows their dots for five seconds (Plan 02b).
+    Presence, not a message: it carries no text, stores nothing and calls the kernel only to name the session. The
+    page sends about one signal every two seconds while the visitor types, never one per keystroke: each one still
+    costs a kernel call and database reads. A signal within two seconds of the last one that counted changes nothing,
+    and nothing here is ever shown to the visitor or to Claude."""
+    state = runtime(request)
+    state.presence.visitor_typing(ctx.ids.session_id, state.clock())
 
 
 def _cursor(last_event_id: str | None, after: int | None) -> int | None:
@@ -232,3 +279,134 @@ async def cancel_request(decision_id: Annotated[str, Path(max_length=128)],
         await conn.rollback()
         raise
     return CancelAccepted(decision_id=decision.decision_id)
+
+
+# Verification and the Demo inbox -----------------------------------------------------------------------------
+
+
+class VerifyStartIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contact: Annotated[str, StringConstraints(min_length=3, max_length=120)]    # the kernel's contact bound
+
+
+@router.post("/desks/{slug}/verify/start", response_model=VerifyStarted,
+             responses=error_responses(401, 409, 422, 429, 503))
+async def verify_start(body: VerifyStartIn, request: Request,
+                       ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> VerifyStarted:
+    """Ask for a code for the contact the visitor typed. The kernel sends it only to the contact on record, as a Demo
+    inbox entry, and answers with one message whether or not the contact is on record; the visitor's stream gets the
+    entry's code-free notice. Owner alerts never reach the visitor, here or on the stream."""
+    state = runtime(request).started()
+    await state.limiter.enforce("verify", ctx.ids.session_id, ledger=ctx.ledger())
+    started = await ctx.caller.kernel.call("POST /verify/start", VerifyStartRequest(
+        session_id=ctx.ids.session_id, contact=body.contact))
+    started = started.model_copy(update={"inbox": [notice for notice in started.inbox if notice.to != OWNER]})
+    conn = ctx.conn
+    await conn.commit()
+    try:
+        await emit_inbox(conn, ctx.ids, started.inbox)
+        await conn.commit()
+    except BaseException:
+        await conn.rollback()
+        raise
+    return started
+
+
+class VerifyCheckIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: Annotated[str, StringConstraints(pattern=r"^[0-9]{6}$")]          # six ASCII digits
+
+
+@router.post("/desks/{slug}/verify/check", response_model=VerifyChecked,
+             responses=error_responses(401, 409, 422, 429, 503))
+async def verify_check(body: VerifyCheckIn, request: Request,
+                       ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> VerifyChecked:
+    """The code the visitor typed into the verify card, checked by the kernel; it is never stored, logged, streamed or
+    shown to Claude. A wrong, expired or used-up code is the kernel's 422 `{"error": "kernel", "code": "invalid"}`,
+    and a code that isn't six digits 422 `{"error": "invalid"}`: the card shows one message for both. Once the session
+    is verified, a note tells Claude (it wakes a turn, which gets the verified tools)."""
+    state = runtime(request).started()
+    await state.limiter.enforce("verify", ctx.ids.session_id, ledger=ctx.ledger())
+    checked = await ctx.caller.kernel.call("POST /verify/check", VerifyCheckRequest(
+        session_id=ctx.ids.session_id, code=body.code))
+    if checked.verified:                            # noted once a session, whichever check found it verified
+        conn = ctx.conn
+        await conn.commit()
+        try:
+            noted = await append_note_once(conn, ctx.ids, NOTES["verified"], wake=True)
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+        if noted is not None:
+            state.runner.start(ctx.caller)
+    return VerifyChecked(state=checked)
+
+
+@router.get("/desks/{slug}/demo_inbox", response_model=list[DemoInboxEntry],
+            responses=error_responses(401, 422, 503))
+async def demo_inbox(response: Response, ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> list[DemoInboxEntry]:
+    """The session's Demo inbox, read from the kernel with the visitor's credential: the codes sent for the
+    verifications this session started, never an owner alert. Its bodies hold codes, so the answer is never stored,
+    here or in a cache."""
+    response.headers["Cache-Control"] = NO_STORE
+    return await ctx.caller.kernel.call("GET /demo_inbox?session_id=", query={"session_id": ctx.ids.session_id})
+
+
+# Demo agents -------------------------------------------------------------------------------------------------
+
+
+async def _mint_agent(ctx: VisitorCtx) -> DemoAgentIssued:
+    """A demo agent the kernel mints for the visitor's session on its Desk; a kernel 429 passes through."""
+    return await ctx.caller.kernel.call("POST /agents/demo", DemoAgentRequest(desk_id=ctx.ids.desk_id))
+
+
+@router.post("/desks/{slug}/agents/key", response_model=DemoAgentIssued,
+             responses=error_responses(401, 404, 422, 429, 503))
+async def agent_key(request: Request, response: Response,
+                    ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> DemoAgentIssued:
+    """A demo key for connecting an agent of the visitor's own: its key ID, its Ed25519 private key and a spending
+    limit the demo wallet signed, which the agent sends when it opens its session at the A2A endpoint. The key is
+    handed over in this answer once and kept nowhere, here or in a cache. Five demo agents a copy an hour, this and
+    sending the built-in one together."""
+    state = runtime(request).started()
+    await state.limiter.enforce("demo_agent", ctx.ids.copy_id, ledger=ctx.ledger())
+    issued = await _mint_agent(ctx)
+    response.headers["Cache-Control"] = NO_STORE
+    return issued
+
+
+class SendAgentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task: DemoTask
+
+
+@router.post("/desks/{slug}/send_agent", status_code=202, response_model=AgentRunStarted,
+             responses=error_responses(401, 404, 422, 429, 503))
+async def send_agent(slug: str, body: SendAgentIn, request: Request,
+                     ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> AgentRunStarted:
+    """Send the built-in visiting agent, Alex Kim's assistant, to the Desk on one of the demo tasks; it runs in this
+    process and talks to the Desk through the public A2A endpoint. Poll its run each second with the ID answered
+    here. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent."""
+    state = runtime(request).started()
+    await state.limiter.enforce("demo_agent", ctx.ids.copy_id, ledger=ctx.ledger())
+    await require_model_budget(request)
+    issued = await _mint_agent(ctx)
+    return AgentRunStarted(run_id=state.agents.launch(issued, body.task, slug, ctx.ids))
+
+
+@router.get("/desks/{slug}/send_agent/{run_id}", response_model=DemoAgentRun,
+            responses=error_responses(401, 404, 422, 503))
+async def agent_run(run_id: Annotated[str, Path(max_length=64)], request: Request, response: Response,
+                    ctx: Annotated[VisitorCtx, Depends(visitor_ctx)]) -> DemoAgentRun:
+    """The built-in agent's run as it stands, for the session that sent it (any other is 404): what the Desk
+    answered, as the kernel checked it, and never the agent's own words. Kept for an hour. Never cached: a Desk turn
+    can carry a payment link."""
+    run = runtime(request).started().agents.run(run_id, ctx.ids.session_id)
+    if run is None:
+        raise ApiProblem(404, "not_found")
+    response.headers["Cache-Control"] = NO_STORE
+    return run

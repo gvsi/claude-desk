@@ -8,7 +8,12 @@ response by its stop reason. Claude only proposes: every tool call goes through 
 and every reply through `/check_reply` and `deliver()` (`tools.send_reply`).
 
 `run_pending(caller, model, ...)` is how a request starts turns (Task 6): one session's turns run one at a time,
-under the turn lock (`turn_lock`), until no work is waiting.
+under the turn lock (`turn_lock`), until no work is waiting (an agent's request runs one turn at most).
+
+Given the job queue (`jobs`), a turn leaves for the owner, as it finishes (Plan 02b, Task 10): a triage of each attempt
+the checkpoint stopped in it, and a translation of each reply of Claude's it delivered in another language than English
+(`jobs.defer_turn_annotations`), each counted on the conversation's `translate` limit with the process's `limiter`
+(none without it). Queueing them never changes how the turn ends.
 """
 
 import asyncio
@@ -23,20 +28,24 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+import procrastinate
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from desk.api.jobs import defer_turn_annotations
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.metrics import RevealMetric, TurnMetric, over_daily_budget, record_model_call
 from desk.api.model import ModelClient, ModelRequest, ModelResponse, ModelUnavailable
 from desk.api.prompts import NOTES, DeskIdentity, conversation_system
+from desk.api.ratelimit import RateLimiter, RateLimitLedger
 from desk.api.ro import KernelRO
 from desk.api.sse import append_metric, emit
 from desk.api.store import (
     OpenToolUse,
     append_assistant,
     append_message,
+    append_stopped_draft,
     append_tool_change,
     append_tool_results,
     clear_wake,
@@ -67,6 +76,7 @@ from desk.api.tools import (
     tool_call,
     tool_delta,
 )
+from desk.api.triage import Stopped
 from desk.contracts import SessionState
 from desk.events import EvError, EvTurnEnd, EvWriting
 from desk.kernel_api import SessionContext
@@ -173,6 +183,10 @@ class _Turn:
     delivered: Literal["reply", "handoff"] | None = None   # what the turn last put on screen
     returned_at: float = 0.0                           # when the last model call returned (monotonic)
     reveals: list[RevealMetric] = field(default_factory=list)
+    jobs: procrastinate.App | None = None              # the job queue, for the turn's triage and translations
+    limiter: RateLimiter | None = None                 # the process's limits, for the conversation's translations
+    stopped: list[Stopped] = field(default_factory=list)   # attempts the checkpoint stopped this turn
+    replied: list[str] = field(default_factory=list)   # the kernel's message IDs of Claude's messages delivered
 
     @property
     def visitor(self) -> bool:
@@ -281,9 +295,18 @@ class _Turn:
                                       [not_run().block(block["id"]) for block in tool_uses])
         await self.conn.commit()
 
+    def _note(self, outcome: ToolOutcome) -> None:
+        """Keep what the owner's annotations need from an outcome: an attempt the checkpoint stopped, a message of
+        Claude's delivered."""
+        if outcome.stopped is not None:
+            self.stopped.append(outcome.stopped)
+        if outcome.delivered is not None and outcome.message_id is not None:
+            self.replied.append(outcome.message_id)
+
     async def _hand_off(self) -> TurnOutcome:
         """Hand the conversation to the owner: the handoff clause, checked by the kernel, then shown."""
         outcome = await hand_off(self.conn, self.caller, self.generation)
+        self._note(outcome)
         stop = _stop([outcome])
         if stop is not None:
             return stop
@@ -310,28 +333,34 @@ class _Turn:
         if outcome.result["outcome"] == "blocked":         # once, with kinds a rewrite can fix: say why, call again
             violations = json.dumps({"violations": outcome.result["violations"]}, ensure_ascii=False)
             await append_message(self.conn, self.caller.ids, "note", text=NOTES["prose_blocked"] + "\n" + violations)
-            await self.conn.commit()
+            await self.conn.commit()                       # with the stopped draft `_reply` kept for the owner
             return None
         return self._ended()
 
     async def _tool_use(self, content: list[dict], tool_uses: list[dict]) -> TurnOutcome | None:
         """Claude called tools. Its response is stored before any call runs. The other calls run together, each
         status shown as it is known; only then the replies, one at a time, so a reply never goes out (or spends an
-        agent's request) while a sibling call still runs. One results row answers every call, in block order.
+        agent's request) while a sibling call still runs. One results row answers every call, in block order. A draft
+        the check blocked (kept for the owner: `_reply`) commits with it, unless another reply's check follows: it then
+        commits before that check, so no lock of the session is held across a kernel call, and it stays before
+        whatever that reply shows.
 
         A call that raised before the kernel had it didn't run, and ends the turn with the static error. One that
         raised once the kernel may have had it is found by its call ID and settled (`_recover_raised`); if nothing
         can settle it (settling raised too, or its decision couldn't be looked up: `unread`), the response is left
         without its results row and the turn stops, so the session's next request answers it by call ID (`_recover`)
-        before Claude is asked anything. A call whose decision was found is answered however settling it ended, an
-        `unknown` after a 409 whose decision couldn't be read included, so /execute is never sent again for it."""
+        before Claude is asked anything. So is an allow whose `/execute` couldn't reach the kernel and whose reads
+        after found it not yet final (`unread` too): the next request runs it once, or gets its stored result, and
+        Claude reads that, never `unavailable` for a call that ran. Any other call whose decision was found is
+        answered however settling it ended, an `unknown` after a 409 whose decision couldn't be read included, so
+        /execute is never sent again for it."""
         conn, ids = self.conn, self.caller.ids
         assistant_n = await append_assistant(conn, ids, content, generation=self.generation)
         await conn.commit()
         calls = [block for block in tool_uses if block["name"] != SEND_REPLY]
         routed = await asyncio.gather(*(self._route(block) for block in calls), return_exceptions=True)
         outcomes: dict[str, ToolOutcome] = {}
-        unread: list[ToolOutcome] = []                     # calls left open as their decisions couldn't be looked up
+        unread: list[ToolOutcome] = []                     # calls left open as their outcomes couldn't be learned
         raised = False
         for block, outcome in zip(calls, routed, strict=True):
             if isinstance(outcome, NotSent):               # the kernel never had it: not run
@@ -344,17 +373,18 @@ class _Turn:
                 if outcome is None:                        # recovering it raised too: left open
                     raised = True
                     continue
-                if outcome.unread:                         # its decision couldn't be looked up: left open
-                    unread.append(outcome)
-                    continue
+            if outcome.unread:                             # its outcome couldn't be learned: left open
+                unread.append(outcome)
+                continue
             outcomes[block["id"]] = outcome
+            self._note(outcome)
             self.decide_ms += outcome.decide_ms
             self.execute_ms += outcome.execute_ms
         self.tool_calls += len(calls)
         stop = _stop([*outcomes.values(), *unread]) or ("internal" if raised else None)
         if len(outcomes) < len(calls):                     # a call left open: no results row until it is settled
             return stop
-        shown = False
+        shown = kept = False
         for block in (block for block in tool_uses if block["name"] == SEND_REPLY):
             # A fenced turn's replies still go to the kernel, which fences them too (409 at a generation the session
             # has left; a paused session's check answers with its handoff). Any other stop, or one message of this
@@ -363,8 +393,10 @@ class _Turn:
                 outcomes[block["id"]] = (ToolOutcome(dict(UNAVAILABLE), True) if stop == "kernel_unavailable"
                                          else not_run())
                 continue
+            if kept:                                       # the draft a sibling's check stopped, before this check
+                await conn.commit()
             outcomes[block["id"]] = outcome = await self._reply(block["input"], block["id"])
-            stop, shown = stop or _stop([outcome]), outcome.delivered is not None
+            stop, shown, kept = stop or _stop([outcome]), outcome.delivered is not None, outcome.kept is not None
         await append_tool_results(conn, ids, assistant_n, [outcomes[block["id"]].block(block["id"])
                                                            for block in tool_uses])
         await conn.commit()
@@ -394,15 +426,22 @@ class _Turn:
         again), so Claude and the visitor learn what the kernel did. A take-over that lands first still leaves a call
         that ran answered from its decision (`_settle`), and stops the turn. None when that raises too."""
         try:
-            return await recover_call(self.conn, self.caller, self.generation, block, made_at=self.generation)
+            return await recover_call(self.conn, self.caller, self.generation, block, made_at=self.generation,
+                                      resumes_money=True)                  # the same turn, so the same request
         except Exception as error:
             logger.warning("recovering tool call %s raised %s", block["id"], _raised(error))
             await self.conn.rollback()
             return None
 
     async def _reply(self, tool_input: object, call_id: str | None) -> ToolOutcome:
+        """One reply of Claude's at the turn's attempt (`tools.send_reply`). A draft the check stopped that Claude may
+        rewrite is kept for the owner here, in the turn's transaction, which the caller commits with the result Claude
+        reads and before any other kernel call (`_tool_use`, `_end_turn`)."""
         attempt = self.attempt
         outcome = await send_reply(self.conn, self.caller, self.generation, tool_input, attempt, call_id=call_id)
+        if outcome.kept is not None:
+            await append_stopped_draft(self.conn, self.caller.ids, outcome.kept)
+        self._note(outcome)
         if outcome.result["outcome"] == "blocked":
             self.attempt = 2
         if outcome.delivered is not None:
@@ -413,7 +452,7 @@ class _Turn:
 
     async def finish(self, outcome: TurnOutcome) -> None:
         """Show why the turn failed, if it did, record the turn's metrics and, for a visitor, end the turn on its
-        stream (silent ends included)."""
+        stream (silent ends included); then leave the turn's triage and translations for the job queue."""
         conn, ids = self.conn, self.caller.ids
         if outcome in ERROR_CODES:
             await emit(conn, ids, EvError(type="error", code=ERROR_CODES[outcome]))
@@ -425,12 +464,16 @@ class _Turn:
         if self.visitor:
             await emit(conn, ids, EvTurnEnd(type="turn_end"))
         await conn.commit()
+        await defer_turn_annotations(self.jobs, conn, ids, self.stopped, self.replied, limiter=self.limiter,
+                                     ledger=RateLimitLedger(self.caller.kernel, desk_id=ids.desk_id,
+                                                            session_id=ids.session_id))
 
 
 async def run_turn(conn: AsyncConnection, caller: Caller, model: ModelClient, *, end_on_reply: bool = False,
-                   production: bool = False, clock: Callable[[], datetime] = _utc_now) -> TurnOutcome:
+                   production: bool = False, clock: Callable[[], datetime] = _utc_now,
+                   jobs: procrastinate.App | None = None, limiter: RateLimiter | None = None) -> TurnOutcome:
     """Answer what is waiting in the caller's session, as the module docstring says; returns how the turn ended."""
-    turn = _Turn(conn, caller, model, end_on_reply, production, clock)
+    turn = _Turn(conn, caller, model, end_on_reply, production, clock, jobs=jobs, limiter=limiter)
     try:
         outcome = await turn.run()
     except Exception as error:                             # anything unexpected: the static error, never a silent end
@@ -505,7 +548,8 @@ async def _take_lock(conn: AsyncConnection, key: int, blocking: bool) -> bool:
 
 async def run_pending(caller: Caller, model: ModelClient, *, engine: AsyncEngine, lock_engine: AsyncEngine,
                       production: bool, clock: Callable[[], datetime] = _utc_now, blocking: bool = False,
-                      end_on_reply: bool = False) -> PendingOutcome:
+                      end_on_reply: bool = False, jobs: procrastinate.App | None = None,
+                      limiter: RateLimiter | None = None, resend_since: datetime | None = None) -> PendingOutcome:
     """Run the caller's session's waiting work, one turn at a time, as a request does once it has stored its own.
 
     Takes the session's turn lock on `lock_engine` (the turn-lock pool), or returns "busy": the turn holding it runs
@@ -513,6 +557,11 @@ async def run_pending(caller: Caller, model: ModelClient, *, engine: AsyncEngine
     Under the lock, an interrupted turn's open tool calls are answered first (`_recover`), then turns run while work
     waits and the session is Claude's (`run_turn`, on a connection of `engine`, the API's pool); in mode `owner` the
     work waits for the hand-back. Returns "idle" when nothing was waiting, else how the last turn ended.
+
+    With `end_on_reply` (an agent's request, whose signed nonce is spent by the turn's reply) one turn runs at most
+    and nothing is looked for after it: work that woke the session meanwhile waits for the agent's next request,
+    since another turn on the spent nonce could only fail. `resend_since` marks an agent's request sent again, whose
+    first try began then: a call its tries left open may be resumed even when it moves money (`_drain`).
 
     It never raises but to be cancelled: an error outside a turn (no pooled connection, a recovery that broke) shows
     the static error when it can and returns "internal", leaving the work for the next request.
@@ -525,8 +574,9 @@ async def run_pending(caller: Caller, model: ModelClient, *, engine: AsyncEngine
                 if not taken:
                     return outcome if retry else "busy"
                 async with engine.connect() as conn:
-                    outcome, left = await _drain(conn, caller, model, end_on_reply, production, clock)
-            if outcome not in GO_ON:
+                    outcome, left = await _drain(conn, caller, model, end_on_reply, production, clock, jobs,
+                                                 limiter, resend_since)
+            if outcome not in GO_ON or end_on_reply:
                 return outcome
             async with engine.connect() as conn:
                 waiting = await _waiting(conn, caller.session_id)
@@ -544,13 +594,20 @@ async def run_pending(caller: Caller, model: ModelClient, *, engine: AsyncEngine
 
 
 async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_on_reply: bool, production: bool,
-                 clock: Callable[[], datetime]) -> tuple[PendingOutcome, int | None]:
+                 clock: Callable[[], datetime],
+                 jobs: procrastinate.App | None = None,
+                 limiter: RateLimiter | None = None,
+                 resend_since: datetime | None = None) -> tuple[PendingOutcome, int | None]:
     """Under the turn lock: answer what an interrupted turn left open, then run turns while work waits.
 
     A turn that hands off with no model call (past the daily budget, or paused) stops the work it answers from waking
     turns (`clear_wake`), so neither this run nor the next request's hands off again for it; work that arrives after
     it still gets a turn. Should work still wait after such a turn, no other turn is run for it here: its latest
-    waiting row is returned with the outcome."""
+    waiting row is returned with the outcome. With `end_on_reply` the first turn is the last (`run_pending`).
+
+    A call left open moves money again only for the request that made it: an agent's request sent again
+    (`resend_since`), whose tries wrote the open row since its first one began. Any other request answers such a call
+    from its decision, never sending `/execute` (`tools.recover_call`)."""
     open_tool_use = await unanswered_tool_use(conn, caller.session_id)
     waiting = await _waiting(conn, caller.session_id)
     if open_tool_use is None and waiting is None:
@@ -560,7 +617,8 @@ async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_
         return await _end(conn, caller, model, session), None
     must_call = False
     if open_tool_use is not None:
-        recovered = await _recover(conn, caller, session.generation, open_tool_use)
+        same_request = resend_since is not None and open_tool_use.created_at >= resend_since
+        recovered = await _recover(conn, caller, session.generation, open_tool_use, resumes_money=same_request)
         if (stop := _stop(recovered)) is not None:
             return await _end(conn, caller, model, stop), None
         shown = {outcome.delivered for outcome in recovered} - {None}
@@ -570,8 +628,9 @@ async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_
     outcome: PendingOutcome = "idle"
     while must_call or waiting is not None:
         must_call = False
-        outcome = await run_turn(conn, caller, model, end_on_reply=end_on_reply, production=production, clock=clock)
-        if outcome not in GO_ON:
+        outcome = await run_turn(conn, caller, model, end_on_reply=end_on_reply, production=production, clock=clock,
+                                 jobs=jobs, limiter=limiter)
+        if outcome not in GO_ON or end_on_reply:
             return outcome, None
         before, waiting = waiting, await _waiting(conn, caller.session_id)
         if waiting is not None and waiting == before:
@@ -585,8 +644,8 @@ async def _end(conn: AsyncConnection, caller: Caller, model: ModelClient, outcom
     return outcome
 
 
-async def _recover(conn: AsyncConnection, caller: Caller, generation: int,
-                   open_tool_use: OpenToolUse) -> list[ToolOutcome]:
+async def _recover(conn: AsyncConnection, caller: Caller, generation: int, open_tool_use: OpenToolUse, *,
+                   resumes_money: bool = False) -> list[ToolOutcome]:
     """Answer the tool calls a turn left without results (it stopped after they went out), before any model call
     and never by deciding again: a reply is `delivered` when a `delivered` row carries its call ID, else `not_run`;
     any other call is found by its ID at the generation its turn ran at (`recover_call`), even after a take-over
@@ -601,7 +660,8 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int,
             outcomes.append(_recovered_reply(await delivered_reply(conn, caller.session_id, block["id"])))
             await conn.commit()
         else:
-            outcomes.append(await recover_call(conn, caller, generation, block, made_at=open_tool_use.generation))
+            outcomes.append(await recover_call(conn, caller, generation, block, made_at=open_tool_use.generation,
+                                               resumes_money=resumes_money))
     if any(outcome.unread for outcome in outcomes):        # left open: the next request looks it up again
         return outcomes
     await append_tool_results(conn, caller.ids, open_tool_use.assistant_n, [

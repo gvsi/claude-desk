@@ -76,6 +76,15 @@ def test_production_reads_plan_06bs_variables(environ):
     assert Settings.from_env().public_origin == "https://localhost.invalid"
 
 
+@pytest.mark.parametrize("values", [{"API_DATABASE_URL": DATABASE_URL}, PRODUCTION])
+def test_replay_night_is_on_and_never_read_from_the_environment(environ, values):
+    """Each demo copy asks the kernel for the recorded night (Plan 01d); the setting is code, so no variable turns it
+    off (the kernel's own `REPLAY_NIGHT_OFF=1` is the off switch) and only the evals target sets it false."""
+    environ(values | {"REPLAY_NIGHT": "0", "REPLAY_NIGHT_OFF": "1", "DESK_REPLAY_NIGHT": "false"})
+    assert Settings.from_env().replay_night is True
+    assert dataclasses.replace(Settings.from_env(), replay_night=False).replay_night is False
+
+
 @pytest.mark.parametrize("missing", ["API_DATABASE_URL", "ANTHROPIC_API_KEY", "PASSCODE_HASH", "PUBLIC_ORIGIN"])
 def test_production_requires_its_variables(environ, monkeypatch, missing):
     environ(PRODUCTION)

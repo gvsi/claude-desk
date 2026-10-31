@@ -6,22 +6,49 @@ kernel-contract` sets both for the plans in `evals/tier1/landed.toml`). Argument
 read-only views, never from the fake's internals, so both variants take the same path.
 """
 
+import hashlib
+import json
+import re
+import secrets
+from datetime import UTC, datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
 import httpx
 import pytest
 
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
 from desk.contracts import (
+    AgentAuth,
     ApprovalResult,
+    BusinessSeed,
+    CalendarSlot,
+    Claim,
+    Clause,
     CopyCreated,
     Decision,
+    DemoAgentIssued,
     DemoInboxEntry,
+    DeskSeed,
     ExecResult,
+    HoursWindow,
+    KnowledgeItem,
+    Label,
     LedgerEvent,
     LedgerPage,
+    NotificationDefaults,
+    OwnerMessageResult,
+    PolicyVersion,
+    PriceItem,
+    Probe,
+    ProbeResult,
     ReplyDraft,
     ReplyVerdict,
+    RuleCard,
+    SeedDocument,
     SessionCreated,
+    SessionState,
     ToolCall,
+    ToolProfile,
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
@@ -29,20 +56,52 @@ from desk.kernel_api import (
     CancelRequest,
     CheckReplyRequest,
     CreateCopyRequest,
+    CreateDeskRequest,
     CreateSessionRequest,
     DecideRequest,
+    DemoAgentRequest,
     DeskAnsweringRequest,
+    DeskBusinessRequest,
+    DeskCalendarRequest,
+    DeskCharterRequest,
+    DeskCreated,
+    DeskHoursRequest,
+    DeskNotificationsRequest,
+    DeskPeopleRequest,
+    DeskPricesRequest,
     DeskUpdated,
+    DocumentCreated,
+    DocumentUploadRequest,
     ExecuteRequest,
     Health,
     KernelError,
+    KnowledgeRequest,
     LedgerAppendRequest,
+    ModeRequest,
+    OwnerMessageRequest,
+    PaymentLinkActionRequest,
+    PersonUpsert,
+    PolicyConfirmRequest,
+    PolicyDraftRequest,
+    PolicyProbeRequest,
     PublicDesk,
     SessionContext,
+    ToolsConnectRequest,
+    ToolsSimulateChangeRequest,
+    VerifyCheckRequest,
+    VerifyStarted,
+    VerifyStartRequest,
     WhoAmI,
 )
 from tests.kernel_contract import ro_tables
-from tests.kernel_contract.fake_kernel import FAKE_ROUTES, fake_kernel_app
+from tests.kernel_contract.fake_kernel import (
+    FAKE_ROUTES,
+    RecordedSession,
+    RecordedStep,
+    agent_signature,
+    fake_kernel_app,
+    signed_time,
+)
 
 
 async def new_copy(http: KernelHttp) -> CopyCreated:
@@ -121,6 +180,58 @@ async def test_copy_owner_token_authenticates(kernel):
     assert me.session == copy.owner_session
 
     assert await refused(http.owner("not-" + copy.owner_token).whoami()) == (401, "auth")
+
+
+NOT_FINAL = {"allowed", "held", "approved", "unknown"}
+EVENT_FIELDS = {"visitor_message": (True, False, False), "reply": (False, True, False), "receipt": (False, False, True)}
+
+
+@pytest.mark.kernel_plan("01d")
+async def test_a_copy_replays_the_recorded_night_only_when_asked(kernel, ro_read):
+    """A copy replays nothing unless it asks (`replay_night`), and its ledger carries no replayed entry. A copy that
+    asks gets the recorded night when the kernel has one (FakeKernel: the night a test recorded; the real kernel: its
+    shipped recording, else a live copy): each event names a closed session of the copy at generation 0 and carries
+    the one record its kind does, a receipt's decision final and its own session's; events come in shown order, and
+    the replayed ledger entries are marked `summary.replayed`, while a live copy has neither (Plan 01d)."""
+    http, ro_schema, state = kernel
+    if state is not None:
+        night = state.now - timedelta(hours=15)
+        state.record_night(RecordedSession(steps=(
+            RecordedStep("said", night, "Hi, can someone look at my water heater?"),
+            RecordedStep("replied", night + timedelta(seconds=20), "Yes, Maria can. Here's an open time."),
+            RecordedStep("booked", night + timedelta(seconds=90)))))
+
+    def marked(copy: CopyCreated) -> list[dict]:
+        entries = ro_read(ro_schema, copy.copy_id, "SELECT event FROM {ro}.ledger_entries WHERE desk_id = %s",
+                          (copy.desk_ids[0],))
+        return [entry["event"]["summary"]["replayed"] for entry in entries if "replayed" in entry["event"]["summary"]]
+
+    live = await new_copy(http)
+    assert (live.replay_id, live.replayed_messages, marked(live)) == (None, [], [])
+
+    asked = await http.public().call("POST /copies", CreateCopyRequest(replay_night=True))
+    if state is not None:
+        assert asked.replay_id is not None and [event.kind for event in asked.replayed_messages] == [
+            "visitor_message", "reply", "receipt"]
+    if asked.replay_id is None:
+        assert (asked.replayed_messages, marked(asked)) == ([], [])
+        return
+    sessions = {row["session_id"]: row for row in ro_read(
+        ro_schema, asked.copy_id, "SELECT session_id, desk_id, kind, generation, closed_at FROM {ro}.sessions")}
+    for event in asked.replayed_messages:
+        session = sessions[event.session_id]
+        assert session["desk_id"] in asked.desk_ids and session["kind"] in ("visitor", "agent")
+        assert session["generation"] == 0 and session["closed_at"] is not None
+        has = (event.text is not None, event.verdict is not None, event.decision is not None)
+        assert has == EVENT_FIELDS[event.kind]
+        if event.verdict is not None:
+            assert event.verdict.generation == 0
+        if event.decision is not None:
+            assert event.decision.session_id == event.session_id and event.decision.state not in NOT_FINAL
+    shown = [event.shown_at for event in asked.replayed_messages]
+    assert shown == sorted(shown)
+    marks = marked(asked)
+    assert marks and all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z", mark["at"]) for mark in marks)
 
 
 @pytest.mark.kernel_plan("01a")
@@ -465,6 +576,75 @@ async def test_check_reply_hands_off_other_languages(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01a")
+async def test_status_lines_are_the_kernels(kernel, ro_read):
+    """A decision's and a reply's status line is the kernel's template for its state, naming the owner, in the
+    session's last language: what the API shows a visitor as it is."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    drain = item_id(ro_read, ro_schema, copy, "Drain clearing")
+    owner = http.owner(copy.owner_token)
+    visitor = await new_visitor(http, slug)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+
+    allowed = await decide(view, session_id, 0, "call-allow", "native.quote", quote_args(drain))
+    held = await decide(view, session_id, 0, "call-hold", "native.quote", quote_args(drain, 1500))
+    to_deny = await decide(view, session_id, 0, "call-deny", "native.quote", quote_args(drain, 1500))
+    unknown = await decide(view, session_id, 0, "call-unknown", "native.teleport", {})
+    cancelled = await view.call("POST /decisions/{decision_id}/cancel", CancelRequest(session_id=session_id),
+                                path={"decision_id": held.decision_id})
+    denied = (await answer(owner, to_deny.decision_id, "deny_once")).decision
+    assert [(decision.state, decision.visitor_plain) for decision in (allowed, held, unknown, cancelled, denied)] == [
+        ("allowed", "Checked against Maria Rivera's rules"), ("held", "Waiting for Maria Rivera to approve"),
+        ("refused", "Not something I can do here"), ("cancelled", "Cancelled"),
+        ("denied", "Maria Rivera decided not to go ahead")]
+    assert (await check_reply(view, session_id, 0, "Happy to help.")).visitor_plain == (
+        "Reply checked against Maria Rivera's rules")
+    assert (await check_reply(view, session_id, 0, "It costs 80 dollars.")).visitor_plain == (
+        "Passed to Maria Rivera to answer")
+
+    spanish = await new_visitor(http, slug)
+    view, session_id = http.session(spanish.session_token), spanish.state.session_id
+    assert (await check_reply(view, session_id, 0, "Hola, puedo ayudarle con eso.")).visitor_plain == (
+        "Respuesta revisada con las reglas de Maria Rivera")
+    assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args(drain))).visitor_plain == (
+        "Revisado con las reglas de Maria Rivera")
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_executed_lines_say_what_was_done(kernel, ro_read):
+    """Once a visitor's action has run, its status line says what was done, by tool, naming the owner and no amount
+    or time, in the session's last language."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    visitor = await new_visitor(http, slug)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    calls = {"native.quote": quote_args(item_id(ro_read, ro_schema, copy, "Service call deposit")),
+             "native.find_slots": {},
+             "native.request_callback": {"name": "Dana Wells", "contact": "(503) 555-0142", "reason": "Water heater"},
+             "native.start_verification": {"contact": "nobody@example.com"}}
+    lines = {}
+    for n, (tool, args) in enumerate(calls.items()):
+        allowed = await decide(view, session_id, 0, f"call-{n}", tool, args)
+        assert (await execute(view, allowed, 0)).state == "succeeded", tool
+        executed = await read_decision(view, allowed.decision_id)
+        lines[tool] = (executed.state, executed.visitor_plain)
+    assert lines == {"native.quote": ("executed", "Quoted from Maria Rivera's price list"),
+                     "native.find_slots": ("executed", "Times read from Maria Rivera's calendar"),
+                     "native.request_callback": ("executed", "Callback request saved for Maria Rivera"),
+                     "native.start_verification": ("executed", "Verification started")}
+
+    spanish = await new_visitor(http, slug)
+    view, session_id = http.session(spanish.session_token), spanish.state.session_id
+    assert (await check_reply(view, session_id, 0, "Hola, puedo ayudarle con eso.")).ok
+    allowed = await decide(view, session_id, 0, "call-1", "native.find_slots", {})
+    await execute(view, allowed, 0)
+    assert (await read_decision(view, allowed.decision_id)).visitor_plain == (
+        "Horarios tomados del calendario de Maria Rivera")
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_session_state_responses(kernel, ro_read, arrange):
     """Every row of "Session state responses", in its order, for the four session routes."""
     http, ro_schema, _ = kernel
@@ -560,6 +740,113 @@ async def test_session_state_responses(kernel, ro_read, arrange):
 
 
 @pytest.mark.kernel_plan("01a")
+async def test_calls_on_a_closed_session_are_ledgered(kernel, ro_read, arrange):
+    """Every attempt is logged: each call refused because its session is closed is an `auth` entry on the session's
+    Desk, naming the session, the route and the reason, and never the token."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id, desk_id = http.session(visitor.session_token), visitor.state.session_id, copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    arrange.close_idle_sessions(session_id)
+    start = (await ledger_page(owner, desk_id)).entries[-1].seq
+
+    assert await refused(view.whoami()) == (409, "closed")
+    assert await refused(context(view, session_id)) == (409, "closed")
+    assert await refused(check_reply(view, session_id, 0, "Happy to help.")) == (409, "closed")
+    entries = [entry.event for entry in (await ledger_page(owner, desk_id)).entries if entry.seq > start]
+    assert [(event.kind, event.origin, event.session_id, event.summary) for event in entries] == [
+        ("auth", "kernel", session_id, {"route": "GET /whoami", "reason": "closed"}),
+        ("auth", "kernel", session_id, {"route": "GET /context/{session_id}", "reason": "closed"}),
+        ("auth", "kernel", session_id, {"route": "POST /check_reply", "reason": "closed"})]
+    assert visitor.session_token not in json.dumps([event.summary for event in entries])
+
+
+@pytest.mark.kernel_plan("01a")
+async def test_mode_change_bumps_generation(kernel, ro_read, arrange):
+    """The owner's take-over, hand-back and resume (Plan 01a's mode table): each change bumps the generation and is
+    ledgered, and a take-over or resume of a paused session resets its strikes. The current mode again changes
+    nothing; a stale generation is 409, only the breaker pauses (422), a visitor's token is 401 and another copy's
+    owner 404, none of them changing anything."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id, desk_id = http.session(visitor.session_token), visitor.state.session_id, copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    start = (await ledger_page(owner, desk_id)).entries[-1].seq
+
+    async def mode(to: str, generation: int, caller: CredentialView = owner) -> SessionState:
+        return await caller.call("POST /sessions/{id}/mode", ModeRequest(mode=to, generation=generation),
+                                 path={"id": session_id})
+
+    def row() -> tuple:
+        (found,) = ro_read(ro_schema, copy.copy_id, "SELECT mode, generation, strikes FROM {ro}.sessions"
+                                                    " WHERE session_id = %s", (session_id,))
+        return found["mode"], found["generation"], found["strikes"]
+
+    taken = await mode("owner", 0)
+    assert (taken.session_id, taken.mode, taken.generation) == (session_id, "owner", 1)
+    assert (await view.whoami()).session == taken and row() == ("owner", 1, 0)
+    assert await mode("owner", 1) == taken                                  # the current mode: nothing changes
+    for refusal, expected in ((lambda: mode("ai", 0), (409, "stale_generation")),
+                              (lambda: mode("paused", 1), (422, "invalid")),
+                              (lambda: mode("ai", 1, view), (401, "auth")),
+                              (lambda: mode("ai", 1, http.owner(other.owner_token)), (404, "not_found"))):
+        assert await refused(refusal()) == expected
+    assert row() == ("owner", 1, 0)
+
+    back = await mode("ai", 1)
+    assert (back.mode, back.generation) == ("ai", 2) and row() == ("ai", 2, 0)
+    arrange.pause(session_id)                                               # the breaker's third strike
+    assert row() == ("paused", 2, 3)
+    resumed = await mode("ai", 2)
+    assert (resumed.mode, resumed.generation) == ("ai", 3) and row() == ("ai", 3, 0)
+    arrange.pause(session_id)
+    from_paused = await mode("owner", 3)
+    assert (from_paused.mode, from_paused.generation) == ("owner", 4) and row() == ("owner", 4, 0)
+
+    moves = [(entry.event.kind, {key: entry.event.summary.get(key) for key in ("from", "to", "generation", "resumed")})
+             for entry in (await ledger_page(owner, desk_id)).entries
+             if entry.seq > start and entry.event.session_id == session_id and (
+                 entry.event.kind == "takeover" or entry.event.summary.get("resumed"))]
+    assert moves == [
+        ("takeover", {"from": "ai", "to": "owner", "generation": 1, "resumed": None}),
+        ("takeover", {"from": "owner", "to": "ai", "generation": 2, "resumed": None}),
+        ("breaker", {"from": None, "to": None, "generation": None, "resumed": True}),
+        ("takeover", {"from": "paused", "to": "owner", "generation": 4, "resumed": None})]
+
+
+@pytest.mark.kernel_plan("01a")
+async def test_mode_change_names_a_session_of_the_owners_copy(kernel, ro_read):
+    """`POST /sessions/{id}/mode` answers an owner session's two "Session state responses" rows: a token that isn't
+    the owner's is 401, and a session the owner's copy doesn't have, another copy's or an ID that names none, is 404.
+    The owner's own session is of the copy, so it passes them and the open and generation checks (a stale generation
+    is 409 `stale_generation`), and then has no mode to set: 422 `invalid`. None of them changes anything."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    elsewhere = await new_visitor(http, desk_slug(ro_read, ro_schema, other))
+    owner, guess = http.owner(copy.owner_token), http.owner("a-guess")
+    own = copy.owner_session
+
+    async def mode(caller: CredentialView, session_id: str, generation: int = 0) -> SessionState:
+        return await caller.call("POST /sessions/{id}/mode", ModeRequest(mode="owner", generation=generation),
+                                 path={"id": session_id})
+
+    assert await refused(mode(owner, "no-such-session")) == (404, "not_found")
+    assert await refused(mode(owner, elsewhere.state.session_id)) == (404, "not_found")
+    assert await refused(mode(guess, "no-such-session")) == (401, "auth")
+    assert await refused(mode(guess, elsewhere.state.session_id)) == (401, "auth")
+    assert await refused(mode(owner, own.session_id, own.generation + 1)) == (409, "stale_generation")
+    assert await refused(mode(owner, own.session_id, own.generation)) == (422, "invalid")
+    (row,) = ro_read(ro_schema, other.copy_id, "SELECT mode, generation FROM {ro}.sessions WHERE session_id = %s",
+                     (elsewhere.state.session_id,))
+    assert row == {"mode": "ai", "generation": 0}
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT mode, generation FROM {ro}.sessions WHERE session_id = %s",
+                     (own.session_id,))
+    assert row == {"mode": own.mode, "generation": own.generation}
+
+
+@pytest.mark.kernel_plan("01a")
 async def test_ledger_append_allows_three_kinds(kernel, ro_read):
     http, ro_schema, _ = kernel
     copy, other = await new_copy(http), await new_copy(http)
@@ -597,7 +884,11 @@ async def test_public_desk_shows_only_public_fields(kernel, ro_read):
     public = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug})
     assert (public.business_name, public.desk_name, public.owner_display_name) == (
         "Rivera Plumbing", "Main line", "Maria Rivera")
-    assert public.brand and {"hours", "contact", "policy"} <= {block.template for block in public.charter}
+    # the charter in the page's order: the hours, the contact, then the policies by their fact IDs
+    assert public.brand and [block.template for block in public.charter] == [
+        "hours", "contact", "policy", "policy", "policy"]
+    policies = [block.fact_id for block in public.charter if block.template == "policy"]
+    assert policies == sorted(policies) and all(fact_id.startswith("charter:policy:") for fact_id in policies)
     shown = public.model_dump_json()
     private = [
         *(row["display_name"] for row in ro_read(ro_schema, copy.copy_id, "SELECT display_name FROM {ro}.people")),
@@ -608,6 +899,82 @@ async def test_public_desk_shows_only_public_fields(kernel, ro_read):
     assert len(private) == 10 and not [value for value in private if value in shown]
     assert await refused(http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug + "-gone"})) == (
         404, "not_found")
+
+
+RIVERA_TIME = ZoneInfo("America/Los_Angeles")
+# The Rivera seed's hours, by weekday (Monday 0): weekdays 8:00 am to 6:00 pm, Saturday 9:00 am to 1:00 pm.
+RIVERA_OPEN = {**{day: (time(8), time(18)) for day in range(5)}, 5: (time(9), time(13))}
+
+
+def rivera_open_at(moment: datetime) -> bool:
+    local = moment.astimezone(RIVERA_TIME)
+    window = RIVERA_OPEN.get(local.weekday())
+    return window is not None and window[0] <= local.time() < window[1]
+
+
+async def public_page(http: KernelHttp, slug: str, lang: str) -> PublicDesk:
+    return await http.public().call("GET /public/{desk_slug}", path={"desk_slug": slug}, query={"lang": lang})
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_public_desk_says_whether_it_is_open_now(kernel, ro_read):
+    """The public page's open-now line, from the Desk's hours in its time zone on the kernel's clock: open until the
+    window ends, or closed until the next one opens, in the language asked for, and asked for again by the boundary,
+    the next local midnight or 25 hours on. A Desk without hours claims neither, and shows no hours card."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    english = (await public_page(http, slug, "en")).open_status
+    spanish = (await public_page(http, slug, "es")).open_status
+
+    assert english is not None and english.open == rivera_open_at(english.as_of)
+    boundary = english.until if english.open else english.opens_at
+    assert boundary is not None and (english.opens_at if english.open else english.until) is None
+    assert rivera_open_at(boundary) != english.open and rivera_open_at(boundary - timedelta(minutes=1)) == english.open
+    assert english.as_of < boundary <= english.as_of + timedelta(days=7)
+    assert english.as_of < english.refresh_at <= min(boundary, english.as_of + timedelta(hours=25))
+    local = boundary.astimezone(RIVERA_TIME)
+    assert english.text.startswith("Open now, until " if english.open else "Closed now. Opens ")
+    assert f"{local.hour % 12 or 12}:{local.minute:02d} {'am' if local.hour < 12 else 'pm'}" in english.text
+    assert spanish is not None and spanish.open == english.open
+    assert spanish.text.startswith("Abierto ahora, hasta " if english.open else "Cerrado ahora. Abre ")
+    assert f" {local.hour}:{local.minute:02d}" in spanish.text
+
+    created = await http.owner(copy.owner_token).call("POST /desks", a_new_desk())   # no hours, no charter
+    unset = await public_page(http, created.slug, "en")
+    assert unset.open_status is None and unset.charter == []
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_public_desk_carries_the_agent_card(kernel, ro_read):
+    """The public page's Agent Card: prose the kernel writes in the language asked for, saying that Claude, an AI,
+    answers within the owner's rules, what an agent can do there (leaving details and asking for a callback alone while
+    Answering is off), where to send each request and how to sign it."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+
+    async def card(lang: str) -> list[str]:
+        blocks = (await public_page(http, slug, lang)).agent_card
+        assert all((block.kind, block.template, block.title) == ("prose", None, None) for block in blocks)
+        return [block.text for block in blocks]
+
+    english, spanish = await card("en"), await card("es")
+    assert len(english) == len(spanish) == 6
+    assert english[0] == ("Visiting agents can talk to Rivera Plumbing here too. Answers come from Claude, an AI, "
+                          "working within Maria Rivera's rules, unless a message is marked as Maria Rivera's own.")
+    assert english[1].startswith("What an agent can do here: get a quote from the price list, find open times, ")
+    assert english[2] == f"Send each request to POST /api/a2a/{slug} on this site; {slug} is this Desk's slug."
+    assert all(header in english[3] for header in ("X-Agent-Key-Id", "X-Agent-Ts", "X-Agent-Nonce", "X-Agent-Sig"))
+    assert spanish[0].startswith("Los agentes también pueden hablar aquí con Rivera Plumbing. ")
+    assert spanish[2] == (f"Envía cada solicitud a POST /api/a2a/{slug} en este sitio; {slug} es el identificador de "
+                          "este Desk.")
+
+    await http.owner(copy.owner_token).call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False),
+                                            path={"id": copy.desk_ids[0]})
+    assert (await card("en"))[1] == "What an agent can do here: leave contact details and ask for a callback."
+    assert (await card("es"))[1] == ("Lo que un agente puede hacer aquí: dejar datos de contacto y pedir que te "
+                                     "devuelvan la llamada.")
 
 
 @pytest.mark.kernel_plan("01a")
@@ -797,3 +1164,1438 @@ async def test_owner_demo_inbox_is_the_copys(kernel, ro_read):
         assert entries[notice.entry_id].decision_id == held.decision_id
     assert not {entry.entry_id for entry in theirs} & set(entries)
     assert await refused(view.call("GET /demo_inbox")) == (401, "auth")
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_owner_say_returns_a_signed_owner_said_verdict(kernel, ro_read, arrange):
+    """The owner's say into a session of their copy, in any mode: a passing verdict signed at the session's
+    generation, one `owner_said` card holding the text verbatim (the number rule doesn't apply to the owner's own
+    words), an `owner_statement` fact only that session and the owner read, and a `reply` entry by the owner. A
+    document's canary blocks a say: no card, no fact and no echo of it. A whisper has no verdict, makes no fact and is
+    ledgered `whisper` without its text. Another copy's owner is 404."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    session_id, desk_id, owner = visitor.state.session_id, copy.desk_ids[0], http.owner(copy.owner_token)
+    text = "A tank replacement usually runs $1,400 to $1,900."
+
+    async def message(words: str, kind: str = "say", caller: CredentialView = owner) -> OwnerMessageResult:
+        return await caller.call("POST /owner/messages", OwnerMessageRequest(session_id=session_id, text=words,
+                                                                             kind=kind))
+
+    def owner_facts() -> list[set[str]]:
+        return [set(row["readers"]) for row in ro_read(
+            ro_schema, copy.copy_id, "SELECT readers FROM {ro}.facts WHERE desk_id = %s AND kind = 'owner_statement'",
+            (desk_id,))]
+
+    async def entry_at(seq: int) -> LedgerEvent:
+        (found,) = [entry.event for entry in (await ledger_page(owner, desk_id)).entries if entry.seq == seq]
+        return found
+
+    said = await message(text)
+    verdict = said.verdict
+    assert isinstance(said, OwnerMessageResult) and verdict is not None
+    assert (verdict.ok, verdict.violations, verdict.generation) == (True, [], 0)
+    assert [(block.kind, block.template, block.title, block.lines, block.text) for block in verdict.blocks] == [
+        ("card", "owner_said", text, [], text)]                            # the title is the owner's text
+    assert owner_facts() == [{"owner", f"session:{session_id}"}]
+    said_entry = await entry_at(verdict.ledger_seq)
+    assert (said_entry.kind, said_entry.session_id, said_entry.summary.get("author")) == ("reply", session_id, "owner")
+
+    await arrange.take_over(owner, session_id, 0)                          # a say during a take-over, as the API's
+    during = await message("I'm here now, give me a minute.")
+    assert during.verdict is not None and (during.verdict.ok, during.verdict.generation) == (True, 1)
+
+    canary = arrange.canary(copy.copy_id)
+    blocked = await message(f"Your invoice reference is {canary}.")
+    assert blocked.verdict is not None and not blocked.verdict.ok and blocked.verdict.blocks == []
+    assert [violation.kind for violation in blocked.verdict.violations] == ["canary"]
+    assert canary not in blocked.model_dump_json() and len(owner_facts()) == 2
+
+    whisper = "She sounds worried about cost, so go gently."
+    whispered = await message(whisper, "whisper")
+    assert whispered.verdict is None and len(owner_facts()) == 2
+    whisper_entry = await entry_at(whispered.ledger_seq)
+    assert whisper_entry.kind == "whisper" and whisper_entry.session_id in (None, session_id)
+    assert "worried" not in json.dumps(whisper_entry.summary)
+    assert await refused(message("Hello", caller=http.owner(other.owner_token))) == (404, "not_found")
+
+
+def holds_canary_text(text: str, canary: str, run: int = 6) -> bool:
+    """Whether `text`, read on its ASCII letters and digits alone, holds `run` characters of `canary` in a row."""
+    key, wanted = ("".join(char for char in value.lower() if char.isascii() and char.isalnum())
+                   for value in (text, canary))
+    return any(wanted[start:start + run] in key for start in range(len(wanted) - run + 1))
+
+
+def disguises(canary: str) -> list[str]:
+    """A canary as written, in upper case and spaced out letter by letter."""
+    return [canary, canary.upper(), " ".join(canary)]
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_check_reply_finds_a_disguised_canary(kernel, ro_read, arrange):
+    """A document canary in Claude's prose is found however it is written: as it is, in upper case or spaced out letter
+    by letter (the kernel matches canaries on their letters and digits alone), on any Desk of the copy. The check fails
+    with one `canary` violation listed first and shows only the handoff, and no span or block repeats the canary."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    canary = arrange.canary(copy.copy_id)
+    created = await http.owner(copy.owner_token).call("POST /desks", a_new_desk())   # a Desk with no documents
+    for slug in (desk_slug(ro_read, ro_schema, copy), created.slug):
+        visitor = await new_visitor(http, slug)
+        view, session_id = http.session(visitor.session_token), visitor.state.session_id
+        for written in disguises(canary):
+            verdict = await check_reply(view, session_id, 0, f"Your reference is {written} for the invoice.")
+            kinds = [violation.kind for violation in verdict.violations]
+            assert not verdict.ok and kinds[0] == "canary" and kinds.count("canary") == 1, (slug, written)
+            assert [block.template for block in verdict.blocks] == ["handoff"], (slug, written)
+            shown = [violation.span for violation in verdict.violations] + [block.text for block in verdict.blocks]
+            assert not holds_canary_text(" ".join(shown), canary), (slug, written)
+
+
+# Verification and the session's Demo inbox (Plan 01b) ----------------------------------------------------------
+
+DANA = "dana@example.com"               # a contact on record in the Rivera seed (master plan, "Rivera seed")
+SIX_DIGITS = re.compile(r"[0-9]{6}")
+
+
+async def verify_start(view: CredentialView, session_id: str, contact: str) -> VerifyStarted:
+    return await view.call("POST /verify/start", VerifyStartRequest(session_id=session_id, contact=contact))
+
+
+async def session_inbox(view: CredentialView, session_id: str) -> list[DemoInboxEntry]:
+    return await view.call("GET /demo_inbox?session_id=", query={"session_id": session_id})
+
+
+def code_in(entries: list[DemoInboxEntry], entry_id: str) -> str:
+    """The code in the Demo inbox entry `entry_id`."""
+    (body,) = [entry.body for entry in entries if entry.entry_id == entry_id]
+    (code,) = SIX_DIGITS.findall(body)
+    return code
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_verify_start_is_uniform(kernel, ro_read):
+    """A contact on record, one that isn't and "owner" get the same message. Only the contact on record gets a notice:
+    code-free, to the masked contact, never the owner. Its code reaches the session's Demo inbox and nothing else: not
+    the answer, its notice or a ledger summary."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    sessions = [await new_visitor(http, slug) for _ in range(3)]
+    views = [http.session(created.session_token) for created in sessions]
+    answers = [await verify_start(view, created.state.session_id, contact)
+               for view, created, contact in zip(views, sessions, (DANA, "nobody@example.com", "owner"), strict=True)]
+
+    on_record, stranger, owner_typed = answers
+    assert on_record.message == stranger.message == owner_typed.message
+    assert stranger.inbox == [] and owner_typed.inbox == []
+    (notice,) = on_record.inbox
+    assert notice.to != "owner" and DANA not in notice.to
+    assert not SIX_DIGITS.search(on_record.message) and not SIX_DIGITS.search(notice.preview)
+    (entry,) = await session_inbox(views[0], sessions[0].state.session_id)
+    assert (entry.entry_id, entry.to, entry.kind) == (notice.entry_id, notice.to, "verification_code")
+    (code,) = SIX_DIGITS.findall(entry.body)
+
+    # Claude's tool works the same way: its execution carries the code notice for a contact on record and none for
+    # another, and Claude's view of it says nothing either way.
+    executed = []
+    for contact in (DANA, "nobody@example.com"):
+        created = await new_visitor(http, slug)
+        view = http.session(created.session_token)
+        allowed = await decide(view, created.state.session_id, 0, "call-1", "native.start_verification",
+                               {"contact": contact})
+        assert allowed.state == "allowed"
+        executed.append(await execute(view, allowed, 0))
+    (tool_notice,) = executed[0].inbox
+    assert executed[1].inbox == [] and tool_notice.to == notice.to and tool_notice.preview == notice.preview
+    assert executed[0].model_view.keys() == executed[1].model_view.keys()
+    tool_code = code_in(await http.owner(copy.owner_token).call("GET /demo_inbox"), tool_notice.entry_id)
+
+    page = await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])
+    summaries = json.dumps([entry.event.summary for entry in page.entries])
+    answers = (on_record.model_dump_json(), executed[0].model_dump_json(), summaries)
+    assert [text for text in answers for sent in (code, tool_code) if sent in text] == []
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_demo_inbox_is_scoped_to_the_session(kernel, ro_read):
+    """A session reads only the code entries of people whose challenges it started: never another session's, never
+    an owner alert, and nothing for typing "owner" or the business's own number. It names only its own session; the
+    owner reads every entry of the copy."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    first, second = await new_visitor(http, slug), await new_visitor(http, slug)
+    a, b = http.session(first.session_token), http.session(second.session_token)
+    a_id, b_id = first.state.session_id, second.state.session_id
+    held = await decide(a, a_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held" and held.inbox                                   # an owner alert in the copy
+
+    started = await verify_start(a, a_id, DANA)
+    mine = await session_inbox(a, a_id)
+    assert [entry.entry_id for entry in mine] == [notice.entry_id for notice in started.inbox]
+    assert {entry.kind for entry in mine} == {"verification_code"}
+    assert await session_inbox(b, b_id) == []
+    assert await refused(b.call("GET /demo_inbox?session_id=", query={"session_id": a_id})) == (401, "auth")
+    for typed in ("owner", "(510) 555-0142"):
+        assert (await verify_start(b, b_id, typed)).inbox == []
+    assert await session_inbox(b, b_id) == []
+
+    again = await verify_start(b, b_id, DANA)
+    theirs = await session_inbox(b, b_id)
+    assert {notice.entry_id for notice in again.inbox} <= {entry.entry_id for entry in theirs}
+    assert {entry.kind for entry in theirs} == {"verification_code"}
+    every = await http.owner(copy.owner_token).call("GET /demo_inbox")
+    assert {entry.entry_id for entry in mine + theirs} | {notice.entry_id for notice in held.inbox} <= {
+        entry.entry_id for entry in every}
+
+
+async def verify_check(view: CredentialView, session_id: str, code: str) -> SessionState:
+    return await view.call("POST /verify/check", VerifyCheckRequest(session_id=session_id, code=code))
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_verify_check_takes_only_the_sessions_live_code(kernel, ro_read):
+    """Only the code of the session's own live challenge verifies it, as the person on record (assurance `demo_code`,
+    the generation unchanged), and the verified tools follow. A wrong code, or a code in a session with no challenge,
+    is 422 `invalid` alike; a verified session checking again stays as it is. No ledger summary holds the code."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    first, second = await new_visitor(http, slug), await new_visitor(http, slug)
+    a, b = http.session(first.session_token), http.session(second.session_token)
+    a_id, b_id = first.state.session_id, second.state.session_id
+    await verify_start(a, a_id, DANA)
+    (entry,) = await session_inbox(a, a_id)
+    (code,) = SIX_DIGITS.findall(entry.body)
+    wrong = f"{(int(code) + 1) % 1_000_000:06d}"
+
+    assert await refused(verify_check(a, a_id, wrong)) == (422, "invalid")
+    assert await refused(verify_check(b, b_id, code)) == (422, "invalid")         # B started no challenge
+    assert "native.release_document" not in tools(await context(a, a_id))[0]
+    verified = await verify_check(a, a_id, code)
+    assert (verified.session_id, verified.verified, verified.assurance) == (a_id, True, "demo_code")
+    assert verified.generation == first.state.generation and verified.mode == "ai"
+    assert "native.release_document" in tools(await context(a, a_id))[0]
+    assert await verify_check(a, a_id, code) == verified
+    assert (await b.whoami()).session.verified is False
+    page = await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])
+    assert code not in json.dumps([entry.event.summary for entry in page.entries])
+
+
+# Single-use links: documents (Plan 01b) ---------------------------------------------------------------------------
+
+
+async def cite(view: CredentialView, session_id: str, generation: int, prose: str, template: str,
+               fact_id: str) -> ReplyVerdict:
+    """A reply citing one fact with `template`, checked by the kernel."""
+    draft = ReplyDraft(session_id=session_id, generation=generation, prose=prose,
+                       clauses=[Clause(template=template, fact_id=fact_id)])
+    return await view.call("POST /check_reply", CheckReplyRequest(draft=draft))
+
+
+def link_token(verdict: ReplyVerdict, prefix: str) -> str:
+    """The token in the verdict's one link card, whose `href` is `prefix` + token."""
+    (href,) = [block.href for block in verdict.blocks if block.href is not None]
+    assert href.startswith(prefix) and len(href) > len(prefix)
+    return href.removeprefix(prefix)
+
+
+async def open_document(http: KernelHttp, token: str) -> tuple[str, bytes]:
+    """The document a link token opens, as the API's proxy reads it: its content type and bytes."""
+    async with http.public().stream("GET /document_links/{token}", {"token": token}) as response:
+        return response.headers["content-type"], await response.aread()
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_document_link_is_single_use(kernel, ro_read):
+    """A session verified as a document's record owner gets a single-use link to it. The token is only in the signed
+    card's `href`: never in the execution, its facts or a ledger summary. The link serves the document's bytes once,
+    with its content type; then it, and a token that names no link, are 404 `not_found` alike, and the link's fact is
+    stale."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    created = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(created.session_token), created.state.session_id
+    started = await verify_start(view, session_id, DANA)
+    await verify_check(view, session_id, code_in(await session_inbox(view, session_id), started.inbox[0].entry_id))
+    ((person_id,),) = [tuple(row.values()) for row in ro_read(
+        ro_schema, copy.copy_id, "SELECT person_id FROM {ro}.sessions WHERE session_id = %s", (session_id,))]
+    (document,) = ro_read(ro_schema, copy.copy_id, "SELECT document_id, title FROM {ro}.documents"
+                                                   " WHERE desk_id = %s AND record_owner_person_id = %s",
+                          (copy.desk_ids[0], person_id))
+
+    allowed = await decide(view, session_id, 0, "call-1", "native.release_document",
+                           {"document_id": document["document_id"]})
+    assert allowed.state == "allowed"
+    executed = await execute(view, allowed, 0)
+    (fact,) = executed.facts
+    assert fact.kind == "document" and executed.model_view.get("link_ready") is True
+    verdict = await cite(view, session_id, 0, "Here is your invoice.", "document_link", fact.fact_id)
+    assert verdict.ok
+    (card,) = [block for block in verdict.blocks if block.template == "document_link"]
+    assert card.title == document["title"]
+    token = link_token(verdict, "/api/d/")
+
+    content_type, body = await open_document(http, token)
+    assert content_type.startswith("text/plain") and body
+    assert await refused(open_document(http, token)) == (404, "not_found")
+    assert await refused(open_document(http, "no-such-link-" + token[:8])) == (404, "not_found")
+    stale = await cite(view, session_id, 0, "Here it is again.", "document_link", fact.fact_id)
+    assert not stale.ok and [violation.kind for violation in stale.violations] == ["stale_fact"]
+
+    page = await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])
+    seen = (executed.model_dump_json(), card.text, json.dumps([entry.event.summary for entry in page.entries]))
+    assert [text for text in seen if token in text] == []
+
+
+# Single-use links: payment links (Plan 01c) -------------------------------------------------------------------------
+
+LINK_ROUTES = ("GET /payment_links/{token}", "POST /payment_links/{token}/complete",
+               "POST /payment_links/{token}/cancel")
+
+
+async def issue_payment_link(view: CredentialView, session_id: str, item: str, n: int) -> tuple[str, ExecResult]:
+    """A payment link for the session's own quote of one `item`, under the Rivera seed's `rv-link` card: the token in
+    its card's `href`, and the link's execution."""
+    quoted = await execute(view, await decide(view, session_id, 0, f"call-quote-{n}", "native.quote",
+                                              quote_args(item)), 0)
+    linked = await decide(view, session_id, 0, f"call-link-{n}", "native.payment_link",
+                          {"quote_id": quoted.model_view["quote_id"]})
+    assert linked.state == "allowed" and linked.action.amount_cents == 2000
+    issued = await execute(view, linked, 0)
+    (fact,) = issued.facts
+    assert fact.kind == "payment_link" and set(issued.model_view) == {"fact_id", "title", "amount_cents"}
+    verdict = await cite(view, session_id, 0, "Here is your payment link.", "payment_link", fact.fact_id)
+    assert verdict.ok
+    return link_token(verdict, "/pay/"), issued
+
+
+async def checkout(http: KernelHttp, route: str, token: str):
+    """One of the mock checkout's calls on the link `token` names, which needs no other credential."""
+    body = None if route.startswith("GET ") else PaymentLinkActionRequest()
+    return await http.public().call(route, body, path={"token": token})
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_payment_link_completes_once(kernel, ro_read):
+    """The checkout reads a link by its token alone, which only the card's `href` carries. Completing it pays it once
+    and answers with the `payment_confirmed` verdict for the link's session, signed at its current generation; once
+    paid, completing or cancelling it again is 409 `conflict` and it reads `paid`. A link cancelled at checkout pays
+    nothing and has no verdict. A token that names no link is 404 `not_found` on every route."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    created = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(created.session_token), created.state.session_id
+    deposit = item_id(ro_read, ro_schema, copy, "Service call deposit")
+    (paying, issued), (cancelling, _) = [await issue_payment_link(view, session_id, deposit, n) for n in (1, 2)]
+    get, complete, cancel = LINK_ROUTES
+
+    shown = await checkout(http, get, paying)
+    assert (shown.state, shown.amount_cents, shown.language) == ("issued", 2000, "en")
+    assert shown.title == issued.model_view["title"]
+    paid = await checkout(http, complete, paying)
+    assert (paid.state, paid.session_id) == ("paid", session_id)
+    assert paid.verdict is not None and paid.verdict.ok and paid.verdict.generation == created.state.generation
+    assert [block.template for block in paid.verdict.blocks] == ["payment_confirmed"]
+    for again in (complete, cancel):
+        assert await refused(checkout(http, again, paying)) == (409, "conflict")
+    assert (await checkout(http, get, paying)).state == "paid"
+
+    cancelled = await checkout(http, cancel, cancelling)
+    assert (cancelled.state, cancelled.session_id, cancelled.verdict) == ("cancelled", session_id, None)
+    assert await refused(checkout(http, complete, cancelling)) == (409, "conflict")
+    assert (await checkout(http, get, cancelling)).state == "cancelled"
+    links = ro_read(ro_schema, copy.copy_id, "SELECT state, amount_cents FROM {ro}.payment_links WHERE session_id = %s"
+                                             " ORDER BY state DESC", (session_id,))
+    assert links == [{"state": "paid", "amount_cents": 2000}, {"state": "cancelled", "amount_cents": 2000}]
+
+    for route in LINK_ROUTES:
+        assert await refused(checkout(http, route, "no-such-link-" + paying[:8])) == (404, "not_found")
+    page = await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])
+    summaries = json.dumps([entry.event.summary for entry in page.entries])
+    assert [token for token in (paying, cancelling) if token in summaries or token in issued.model_dump_json()] == []
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_paid_link_is_ledgered_paid_once(kernel, ro_read):
+    """The owner's reports time a link's payment by its ledger entries: completing a link writes one `payment` entry
+    `{link_id, state: "paid"}` for it, and each refused retry after that (completing or cancelling the paid link again)
+    is ledgered `payment` for the link marked `refused: true`, so no retry reads as another move to `paid`."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    created = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(created.session_token), created.state.session_id
+    token, _ = await issue_payment_link(view, session_id, item_id(ro_read, ro_schema, copy, "Service call deposit"), 1)
+    _, complete, cancel = LINK_ROUTES
+    assert (await checkout(http, complete, token)).state == "paid"
+    for again in (complete, cancel):
+        assert await refused(checkout(http, again, token)) == (409, "conflict")
+
+    (link,) = ro_read(ro_schema, copy.copy_id, "SELECT link_id FROM {ro}.payment_links WHERE session_id = %s",
+                      (session_id,))
+    page = await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])
+    entries = [entry.event.summary for entry in page.entries
+               if entry.event.kind == "payment" and entry.event.summary.get("link_id") == link["link_id"]]
+    (paid,) = [n for n, summary in enumerate(entries) if summary.get("state") == "paid" and not summary.get("refused")]
+    assert [summary.get("refused") for summary in entries[paid + 1:]] == [True, True]
+
+
+# Signed visiting agents and mandates (Plan 01c) ---------------------------------------------------------------------
+
+
+async def demo_agent(http: KernelHttp, copy: CopyCreated) -> DemoAgentIssued:
+    """A demo agent minted by the copy's owner for its first Desk: its key and a demo-wallet mandate."""
+    return await http.owner(copy.owner_token).call("POST /agents/demo", DemoAgentRequest(desk_id=copy.desk_ids[0]))
+
+
+def a2a_body(slug: str, message: str = "Hello, can you help?", session_id: str | None = None) -> bytes:
+    """The raw bytes of an A2A request, whose sha256 the agent signs and the API forwards."""
+    return json.dumps({"desk_slug": slug, "session_id": session_id, "message": message}).encode()
+
+
+def agent_auth(issued: DemoAgentIssued, slug: str, body: bytes, *, nonce: str | None = None,
+               ts: datetime | None = None, signed_slug: str | None = None,
+               signer: DemoAgentIssued | None = None) -> tuple[AgentAuth, str]:
+    """The `AgentAuth` headers of one A2A request in `issued`'s name, signed with the agent's key (or `signer`'s)
+    over `{desk_slug, ts, nonce, body_sha256}`, and the body's sha256."""
+    digest = hashlib.sha256(body).hexdigest()
+    when = signed_time(ts or datetime.now(UTC))
+    nonce = nonce or secrets.token_hex(16)
+    sig = agent_signature((signer or issued).agent_private_key_hex, signed_slug or slug, when, nonce, digest)
+    return AgentAuth(agent_key_id=issued.agent_key_id, ts=when, nonce=nonce, sig=sig), digest
+
+
+def signed_view(http: KernelHttp, issued: DemoAgentIssued, slug: str, body: bytes, **options) -> CredentialView:
+    """The agent's view for one A2A request (`agent_auth`)."""
+    return http.agent(*agent_auth(issued, slug, body, **options))
+
+
+async def open_agent_session(http: KernelHttp, issued: DemoAgentIssued, slug: str, *, mandate: bool = True,
+                             nonce: str | None = None) -> tuple[SessionCreated, CredentialView]:
+    """A signed agent `POST /sessions`, with the agent's mandate unless `mandate` is False, and the view it used."""
+    view = signed_view(http, issued, slug, a2a_body(slug), nonce=nonce)
+    created = await view.call("POST /sessions", CreateSessionRequest(
+        desk_slug=slug, kind="agent", mandate=issued.mandate if mandate else None))
+    return created, view
+
+
+def turn_view(http: KernelHttp, issued: DemoAgentIssued, slug: str, session_id: str, message: str) -> CredentialView:
+    """The view of a later A2A request in the agent's session: a new body and a new nonce."""
+    return signed_view(http, issued, slug, a2a_body(slug, message, session_id))
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_agent_session_needs_a_valid_signature(kernel, ro_read):
+    """An agent session opens and is read by signature alone: no session token, the key bound to the session at
+    creation, its mandate recorded. A signature by another key, over another slug or with a stale timestamp is 401,
+    as is any agent call carrying no signature."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    assert issued.mandate.agent_key_id == issued.agent_key_id and issued.mandate.desk_id == copy.desk_ids[0]
+
+    created, view = await open_agent_session(http, issued, slug)
+    session_id = created.state.session_id
+    assert created.session_token is None
+    assert (created.state.kind, created.state.mode, created.state.verified) == ("agent", "ai", False)
+    who = await view.whoami(session_id)
+    assert (who.kind, who.copy_id, who.desk_id, who.desk_ids) == ("agent", copy.copy_id, copy.desk_ids[0],
+                                                                  copy.desk_ids)
+    assert who.session == created.state
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT kind, agent_key_id, mandate_id FROM {ro}.sessions"
+                                              " WHERE session_id = %s", (session_id,))
+    assert row == {"kind": "agent", "agent_key_id": issued.agent_key_id, "mandate_id": issued.mandate.mandate_id}
+
+    other = await demo_agent(http, copy)
+    body = a2a_body(slug, "Hi again", session_id)
+    forged = signed_view(http, issued, slug, body, signer=other)     # another key's signature under this key's name
+    assert await refused(forged.whoami(session_id)) == (401, "auth")
+    stale = signed_view(http, issued, slug, body, ts=datetime.now(UTC) - timedelta(minutes=10))
+    assert await refused(stale.whoami(session_id)) == (401, "auth")
+    elsewhere = signed_view(http, issued, slug, body, signed_slug=slug + "-elsewhere")
+    assert await refused(elsewhere.whoami(session_id)) == (401, "auth")
+    assert await refused(http.public().call("POST /sessions", CreateSessionRequest(desk_slug=slug, kind="agent"))) == (
+        401, "auth")
+    assert await refused(context(http.public(), session_id)) == (401, "auth")
+    assert await refused(decide(http.public(), session_id, 0, "call-unsigned", "native.find_slots", {})) == (
+        401, "auth")
+    assert (await turn_view(http, issued, slug, session_id, "Still there?").whoami(session_id)).session == created.state
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_agent_nonce_is_bound_to_one_body(kernel, ro_read):
+    """A nonce's first use binds it to its session and body hash: the same request may repeat it within its turn,
+    while another body or another session under it is 401."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, issued, slug)
+    second, _ = await open_agent_session(http, issued, slug, mandate=False)    # a mandate opens one session
+    session_id = created.state.session_id
+
+    nonce = secrets.token_hex(16)
+    body = a2a_body(slug, "What are your hours?", session_id)
+    first = signed_view(http, issued, slug, body, nonce=nonce)
+    assert (await first.whoami(session_id)).session.session_id == session_id
+    assert (await signed_view(http, issued, slug, body, nonce=nonce).whoami(session_id)).session.session_id == (
+        session_id)                                                    # the same request, again within its turn
+    assert isinstance(await context(first, session_id), SessionContext)
+    other_body = signed_view(http, issued, slug, a2a_body(slug, "Something else", session_id), nonce=nonce)
+    assert await refused(other_body.whoami(session_id)) == (401, "auth")
+    other_session = signed_view(http, issued, slug, body, nonce=nonce)
+    assert await refused(other_session.whoami(second.state.session_id)) == (401, "auth")
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_signed_request_for_another_agents_session_is_refused(kernel, ro_read):
+    """Agent B's valid signature naming agent A's session reads and decides nothing there: 401, ledgered
+    `agent_auth`."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    agent_a, agent_b = await demo_agent(http, copy), await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, agent_a, slug)
+    session_id = created.state.session_id
+    owner = http.owner(copy.owner_token)
+    before = len((await ledger_page(owner, copy.desk_ids[0])).entries)
+
+    b_view = turn_view(http, agent_b, slug, session_id, "Let me see A's chat")
+    assert await refused(b_view.whoami(session_id)) == (401, "auth")
+    assert await refused(context(b_view, session_id)) == (401, "auth")
+    assert await refused(decide(b_view, session_id, 0, "call-b", "native.find_slots", {})) == (401, "auth")
+    assert await refused(check_reply(b_view, session_id, 0, "Happy to help.")) == (401, "auth")
+    entries = (await ledger_page(owner, copy.desk_ids[0])).entries[before:]
+    assert entries and {entry.event.kind for entry in entries} == {"agent_auth"}
+    assert agent_b.agent_private_key_hex not in json.dumps([entry.event.summary for entry in entries])
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_refused_agent_signatures_are_ledgered(kernel, ro_read):
+    """Each refused agent call is an `agent_auth` entry on the Desk of the session it names: the route, why it was
+    refused and the key it named, never a signature, nonce or key."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    agent_a, agent_b = await demo_agent(http, copy), await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, agent_a, slug)
+    session_id = created.state.session_id
+    owner = http.owner(copy.owner_token)
+    start = (await ledger_page(owner, copy.desk_ids[0])).entries[-1].seq
+
+    body = a2a_body(slug, "Hello again", session_id)
+    short_nonce = signed_view(http, agent_a, slug, body, nonce="too-short")   # a nonce takes 16 to 128 characters
+    forged = signed_view(http, agent_a, slug, body, signer=agent_b)    # B's signature under A's key
+    stale = signed_view(http, agent_a, slug, body, ts=datetime.now(UTC) - timedelta(minutes=10))
+    for view in (short_nonce, forged, stale, turn_view(http, agent_b, slug, session_id, "Let me see A's chat")):
+        assert await refused(view.whoami(session_id)) == (401, "auth")
+    assert await refused(context(turn_view(http, agent_b, slug, session_id, "And its facts"), session_id)) == (
+        401, "auth")
+    entries = [entry.event for entry in (await ledger_page(owner, copy.desk_ids[0])).entries if entry.seq > start]
+    assert [(event.kind, event.session_id, event.summary) for event in entries] == [
+        ("agent_auth", session_id, {"route": "GET /whoami", "reason": "malformed",
+                                    "agent_key_id": agent_a.agent_key_id}),
+        ("agent_auth", session_id, {"route": "GET /whoami", "reason": "bad_signature",
+                                    "agent_key_id": agent_a.agent_key_id}),
+        ("agent_auth", session_id, {"route": "GET /whoami", "reason": "stale_timestamp",
+                                    "agent_key_id": agent_a.agent_key_id}),
+        ("agent_auth", session_id, {"route": "GET /whoami", "reason": "wrong_key",
+                                    "agent_key_id": agent_b.agent_key_id}),
+        ("agent_auth", session_id, {"route": "GET /context/{session_id}", "reason": "wrong_key",
+                                    "agent_key_id": agent_b.agent_key_id})]
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
+    """A nonce's turn ends at a passing verdict, an immediate handoff or the second reply check; after that the same
+    request is 409 `replayed`, and any other reuse 401."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, issued, slug)
+    session_id = created.state.session_id
+
+    async def turn(message: str, *drafts: str) -> CredentialView:
+        view = turn_view(http, issued, slug, session_id, message)
+        assert (await view.whoami(session_id)).session.session_id == session_id
+        for draft in drafts:
+            await check_reply(view, session_id, 0, draft)
+        return view
+
+    passed = await turn("When are you open?", "We're open on weekdays.")
+    assert await refused(passed.whoami(session_id)) == (409, "replayed")
+    assert await refused(context(passed, session_id)) == (409, "replayed")
+    handed_off = await turn("Parlez-vous français ?", "Bonjour, je peux vous aider.")   # unsupported_language
+    assert await refused(handed_off.whoami(session_id)) == (409, "replayed")
+    twice = await turn("How much is it?", "It costs 50 dollars.")
+    assert (await twice.whoami(session_id)).session.session_id == session_id      # one blocked check: still its turn
+    await check_reply(twice, session_id, 0, "It costs 60 dollars.")
+    assert await refused(twice.whoami(session_id)) == (409, "replayed")
+    assert await refused(passed.whoami(created.state.session_id + "x")) == (401, "auth")
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_demo_inbox_shows_the_codes_a_sessions_own_agent_asked_for(kernel, ro_read):
+    """A visitor session's Demo inbox shows the codes a demo agent it minted asked for, as if it had asked itself (the
+    built-in agent acts for the visitor who sent it), and never the codes of an agent another session or the owner
+    minted."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    minter, bystander = await new_visitor(http, slug), await new_visitor(http, slug)
+    minter_view, minter_id = http.session(minter.session_token), minter.state.session_id
+    issued = await minter_view.call("POST /agents/demo", DemoAgentRequest(desk_id=copy.desk_ids[0]))
+    created, _ = await open_agent_session(http, issued, slug)
+    agent_id = created.state.session_id
+    started = await verify_start(turn_view(http, issued, slug, agent_id, "Please verify Dana"), agent_id, DANA)
+    (notice,) = started.inbox
+
+    owners_agent = await demo_agent(http, copy)
+    owners_session, _ = await open_agent_session(http, owners_agent, slug)
+    owners_id = owners_session.state.session_id
+    bob = await verify_start(turn_view(http, owners_agent, slug, owners_id, "Please verify Bob"), owners_id,
+                             "bob@example.com")
+    assert len(bob.inbox) == 1
+
+    mine = await session_inbox(minter_view, minter_id)
+    assert [(entry.entry_id, entry.kind) for entry in mine] == [(notice.entry_id, "verification_code")]
+    assert await session_inbox(http.session(bystander.session_token), bystander.state.session_id) == []
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_a_disguised_canary_ends_an_agents_turn(kernel, ro_read, arrange):
+    """A document canary in an agent session's reply is an immediate handoff however it is written, so its first reply
+    check ends the turn: the same request is 409 `replayed` after it."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, issued, slug)
+    session_id = created.state.session_id
+    canary = arrange.canary(copy.copy_id)
+    for n, written in enumerate(disguises(canary)):
+        view = turn_view(http, issued, slug, session_id, f"What is my reference? ({n})")
+        assert (await view.whoami(session_id)).session.session_id == session_id
+        verdict = await check_reply(view, session_id, 0, f"Your reference is {written} for the invoice.")
+        assert not verdict.ok and verdict.violations[0].kind == "canary", written
+        assert await refused(view.whoami(session_id)) == (409, "replayed"), written
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_resent_opening_request_returns_the_bound_session(kernel, ro_read):
+    """An opening request sent again with the same key, nonce and body gets the session its first try opened, during
+    its turn and after it, and opens no other; under another body the nonce is 401."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    nonce = secrets.token_hex(16)
+    created, view = await open_agent_session(http, issued, slug, nonce=nonce)
+    session_id = created.state.session_id
+
+    during, _ = await open_agent_session(http, issued, slug, nonce=nonce)
+    assert during == created
+    verdict = await check_reply(view, session_id, 0, "Happy to help.")
+    assert verdict.ok
+    after, _ = await open_agent_session(http, issued, slug, nonce=nonce)
+    assert after.state.session_id == session_id and after.session_token is None
+    assert await refused(view.whoami(session_id)) == (409, "replayed")
+    rows = ro_read(ro_schema, copy.copy_id, "SELECT session_id FROM {ro}.sessions WHERE desk_id = %s AND kind = 'agent'",
+                   (copy.desk_ids[0],))
+    assert rows == [{"session_id": session_id}]
+    other_body = signed_view(http, issued, slug, a2a_body(slug, "Another opening"), nonce=nonce)
+    assert await refused(other_body.call("POST /sessions", CreateSessionRequest(desk_slug=slug, kind="agent"))) == (
+        401, "auth")
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_agent_tools_follow_the_mandate(kernel, ro_read):
+    """An agent is never given refunds; it is given the mandate charge and payment links only with a verified
+    mandate, and without one the kernel refuses both before anything is normalized."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    deposit = item_id(ro_read, ro_schema, copy, "Service call deposit")
+
+    bare, _ = await open_agent_session(http, issued, slug, mandate=False)
+    bare_id = bare.state.session_id
+    view = turn_view(http, issued, slug, bare_id, "I'd like to pay the deposit")
+    given, declared = tools(await context(view, bare_id))
+    assert not given & {"native.payment_link", "native.charge_mandate", "payments.create_refund"}
+    assert {"native.quote", "native.find_slots", "native.book"} <= given
+    assert {"native.payment_link", "native.charge_mandate"} <= declared and "payments.create_refund" not in declared
+    quoted = await execute(view, await decide(view, bare_id, 0, "call-quote", "native.quote", quote_args(deposit)), 0)
+    for n, tool in enumerate(("native.charge_mandate", "native.payment_link")):
+        refusal = await decide(view, bare_id, 0, f"call-money-{n}", tool, {"quote_id": quoted.model_view["quote_id"]})
+        assert (refusal.outcome, refusal.state, refusal.action) == ("refuse", "refused", None)
+
+    with_mandate, _ = await open_agent_session(http, issued, slug)
+    session_id = with_mandate.state.session_id
+    given, declared = tools(await context(turn_view(http, issued, slug, session_id, "Hello"), session_id))
+    assert {"native.payment_link", "native.charge_mandate"} <= given and "payments.create_refund" not in given
+    assert "payments.create_refund" not in declared
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_charge_mandate_bounds_and_commits(kernel, ro_read):
+    """A mandate charge is allowed only within the mandate's remaining amount, reserved and committed at execution,
+    with a `charge` fact rendered as `charge_confirmed`. The demo mandate ($20 a charge, $100 in all) takes five
+    deposits; a charge above $20, and a sixth, are refused at `/decide`."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    issued = await demo_agent(http, copy)
+    created, _ = await open_agent_session(http, issued, slug)
+    session_id = created.state.session_id
+    deposit = item_id(ro_read, ro_schema, copy, "Service call deposit")
+    leak = item_id(ro_read, ro_schema, copy, "Leak repair")
+
+    async def charge(n: int, item: str) -> tuple[CredentialView, Decision]:
+        view = turn_view(http, issued, slug, session_id, f"Charge number {n}")
+        quoted = await execute(view, await decide(view, session_id, 0, f"call-quote-{n}", "native.quote",
+                                                  quote_args(item)), 0)
+        return view, await decide(view, session_id, 0, f"call-charge-{n}", "native.charge_mandate",
+                                  {"quote_id": quoted.model_view["quote_id"]})
+
+    view, first = await charge(1, deposit)
+    assert (first.outcome, first.action.amount_cents) == ("allow", 2000)
+    charged = await execute(view, first, 0)
+    (fact,) = charged.facts
+    assert charged.state == "succeeded" and fact.kind == "charge"
+    verdict = await cite(view, session_id, 0, "The deposit is paid.", "charge_confirmed", fact.fact_id)
+    assert verdict.ok and [block.template for block in verdict.blocks] == [None, "charge_confirmed"]
+
+    _, too_much = await charge(2, leak)
+    assert (too_much.outcome, too_much.state) == ("refuse", "refused")
+    for n in range(3, 7):
+        view, allowed = await charge(n, deposit)
+        assert (await execute(view, allowed, 0)).state == "succeeded"
+    _, sixth = await charge(7, deposit)
+    assert (sixth.outcome, sixth.state) == ("refuse", "refused")
+    (mandate,) = ro_read(ro_schema, copy.copy_id, "SELECT committed_cents, reserved_cents FROM {ro}.mandates"
+                                                  " WHERE mandate_id = %s", (issued.mandate.mandate_id,))
+    assert mandate == {"committed_cents": 10_000, "reserved_cents": 0}
+
+
+# Setup: a new Desk and the owner's setup tools (Plans 01b and 01c) ---------------------------------------------------
+
+SETUP_TOOLS = {"native.fetch_website", "native.read_memory"}
+# `PRESETS["ask_first"]`: auto for anyone on these, everything else asks (Plan 01a).
+ASK_FIRST_AUTO = {"native.find_slots", "native.capture_lead", "native.request_callback", "native.start_verification",
+                  *SETUP_TOOLS}
+
+
+def a_new_desk(**business) -> CreateDeskRequest:
+    """A Desk as setup first makes it: the business, and every other part of the seed empty."""
+    seed = DeskSeed(name="Main line", charter=[], hours=[], price_items=[], calendar_slots=[], people=[], documents=[],
+                    notifications=NotificationDefaults(now=["approval", "breaker", "lockout"],
+                                                       briefing=["lead", "callback", "booking"]))
+    fields = {"name": "Okafor Electric", "owner_display_name": "Bob Okafor", "timezone": "America/New_York",
+              **business}
+    return CreateDeskRequest(business=BusinessSeed(**fields), desk=seed)
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_owner_creates_a_desk_with_the_starter_preset(kernel, ro_read):
+    """`POST /desks` adds a Desk to the owner's own copy, with its business, native tools only and the `ask_first`
+    preset active (auto for the utility and setup tools); a `connections` list, an owner name outside the pattern
+    or an unknown time zone is 422 `invalid`, and another copy's business 404."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    assert isinstance(created, DeskCreated) and created.desk_id not in copy.desk_ids
+    assert created.desk_id in (await owner.whoami()).desk_ids
+    assert created.desk_id not in (await http.owner(other.owner_token).whoami()).desk_ids
+
+    def rows(query: str) -> list[dict]:
+        return ro_read(ro_schema, copy.copy_id, query, (created.desk_id,))
+
+    (desk,) = rows("SELECT slug, business_id, name FROM {ro}.desks WHERE desk_id = %s")
+    assert desk["slug"] == created.slug and created.slug.startswith("okafor-electric-") and desk["name"] == "Main line"
+    (business,) = ro_read(ro_schema, copy.copy_id, "SELECT name, owner_display_name, timezone FROM {ro}.businesses"
+                                                   " WHERE business_id = %s", (desk["business_id"],))
+    assert business == {"name": "Okafor Electric", "owner_display_name": "Bob Okafor", "timezone": "America/New_York"}
+    tools_rows = rows("SELECT tool, source, status FROM {ro}.tools WHERE desk_id = %s")
+    assert {row["source"] for row in tools_rows} == {"native"} and SETUP_TOOLS <= {row["tool"] for row in tools_rows}
+    (active,) = rows("SELECT version, cards FROM {ro}.policy_versions WHERE desk_id = %s AND status = 'active'")
+    owner_cards = [card for card in active["cards"] if not card["is_default"]]
+    assert {card["applies_to"] for card in owner_cards} == ASK_FIRST_AUTO
+    assert all(card["mode"] == "auto" and card["who"] == "anyone" and card["card_id"].startswith("preset-")
+               for card in owner_cards)
+
+    connected = a_new_desk()
+    connected.desk.connections = ["mock_payments"]
+    for request in (connected, a_new_desk(owner_display_name="Bob Okafor 2nd"), a_new_desk(timezone="Mars/Olympus")):
+        assert await refused(owner.call("POST /desks", request)) == (422, "invalid")
+    elsewhere = a_new_desk(existing_business_id=desk["business_id"])
+    assert await refused(http.owner(other.owner_token).call("POST /desks", elsewhere)) == (404, "not_found")
+    assert len((await owner.whoami()).desk_ids) == 2
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_owner_renames_the_business(kernel, ro_read):
+    """`PUT /desks/{id}/business` replaces the business's name, owner name and time zone (the public page names
+    the new owner), ledgered `desk_data`; a bad owner name is 422, another copy's Desk 404."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk(owner_display_name="Okafor Electric"))
+    renamed = DeskBusinessRequest(name="Okafor Electric", owner_display_name="Bob Okafor", timezone="America/Chicago")
+    updated = await owner.call("PUT /desks/{id}/business", renamed, path={"id": created.desk_id})
+    assert isinstance(updated, DeskUpdated) and updated.desk_id == created.desk_id
+    (business,) = ro_read(ro_schema, copy.copy_id, "SELECT b.owner_display_name, b.timezone FROM {ro}.businesses b"
+                                                   " JOIN {ro}.desks d USING (business_id) WHERE d.desk_id = %s",
+                          (created.desk_id,))
+    assert business == {"owner_display_name": "Bob Okafor", "timezone": "America/Chicago"}
+    public = await http.public().call("GET /public/{desk_slug}", path={"desk_slug": created.slug})
+    assert public.owner_display_name == "Bob Okafor"
+    parts = [entry.event.summary.get("part") for entry in (await ledger_page(owner, created.desk_id)).entries
+             if entry.event.kind == "desk_data"]
+    assert "business" in parts
+
+    bad = renamed.model_copy(update={"owner_display_name": "Bob <Okafor>"})
+    assert await refused(owner.call("PUT /desks/{id}/business", bad, path={"id": created.desk_id})) == (422, "invalid")
+    elsewhere = http.owner(other.owner_token).call("PUT /desks/{id}/business", renamed, path={"id": created.desk_id})
+    assert await refused(elsewhere) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_deleted_desk_closes_sessions(kernel, ro_read):
+    """`DELETE /desks/{id}`, by the owner of its copy (another copy's owner gets 404), answers 204: the Desk's sessions
+    close (409 `closed`), its public page is gone (404, as for a slug that names no Desk), a new session on it is 409
+    `closed`, the owner's routes naming it answer 409 `closed`, and its ledger stays, with the deletion's `desk_data`
+    entry once, followed by an `auth` entry for each call refused after it."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    visitor = await new_visitor(http, created.slug)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    path = {"id": created.desk_id}
+
+    assert await refused(http.owner(other.owner_token).call("DELETE /desks/{id}", path=path)) == (404, "not_found")
+    assert created.desk_id in (await owner.whoami()).desk_ids
+    assert await owner.call("DELETE /desks/{id}", path=path) is None
+    assert (await owner.whoami()).desk_ids == copy.desk_ids          # the copy's live Desks only (Plan 01a)
+    assert await refused(decide(view, session_id, 0, "call-after", "native.find_slots", {})) == (409, "closed")
+    (closed,) = ro_read(ro_schema, copy.copy_id, "SELECT closed_at FROM {ro}.sessions WHERE session_id = %s",
+                        (session_id,))
+    assert closed["closed_at"] is not None
+    gone = http.public().call("GET /public/{desk_slug}", path={"desk_slug": created.slug})
+    assert await refused(gone) == (404, "not_found")
+    assert await refused(new_visitor(http, created.slug)) == (409, "closed")
+    assert await refused(new_visitor(http, created.slug + "-unknown")) == (404, "not_found")
+    answering = owner.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False), path=path)
+    assert await refused(answering) == (409, "closed")
+    assert await refused(owner.call("DELETE /desks/{id}", path=path)) == (409, "closed")
+    page = await ledger_page(owner, created.desk_id)
+    (deletion,) = [n for n, entry in enumerate(page.entries)
+                   if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "desk"
+                   and entry.event.summary.get("deleted")]
+    assert page.chain_ok and page.entries[deletion].event.summary == {"part": "desk", "deleted": True}
+    # every call refused after it is ledgered on the Desk, as `auth` with the route and the reason, and the session
+    # it named; the slug that names no Desk has no ledger to go on
+    assert [(entry.event.kind, entry.event.origin, entry.event.session_id, entry.event.summary)
+            for entry in page.entries[deletion + 1:]] == [
+        ("auth", "kernel", session_id, {"route": "POST /decide", "reason": "closed"}),
+        ("auth", "kernel", None, {"route": "POST /sessions", "reason": "closed"}),
+        ("auth", "kernel", None, {"route": "PUT /desks/{id}/answering", "reason": "closed"}),
+        ("auth", "kernel", None, {"route": "DELETE /desks/{id}", "reason": "closed"})]
+    # the copy's other Desk is untouched
+    rivera = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    assert (await context(http.session(rivera.session_token), rivera.state.session_id)).tools
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_deleted_desk_refuses_agent_sessions(kernel):
+    """An agent's signed `POST /sessions` on a deleted Desk is 409 `closed`, whether it opens a session or resends
+    an opening whose nonce is bound to one; an unsigned one is still 401 `auth`."""
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    issued = await owner.call("POST /agents/demo", DemoAgentRequest(desk_id=created.desk_id))
+    nonce = secrets.token_hex(16)
+    await open_agent_session(http, issued, created.slug, mandate=False, nonce=nonce)
+
+    assert await owner.call("DELETE /desks/{id}", path={"id": created.desk_id}) is None
+    assert await refused(open_agent_session(http, issued, created.slug, mandate=False)) == (409, "closed")
+    resent = open_agent_session(http, issued, created.slug, mandate=False, nonce=nonce)
+    assert await refused(resent) == (409, "closed")
+    unsigned = http.public().call("POST /sessions", CreateSessionRequest(desk_slug=created.slug, kind="agent"))
+    assert await refused(unsigned) == (401, "auth")
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_no_demo_agent_for_a_deleted_desk(kernel):
+    """No demo agent is minted for a deleted Desk: its owner gets 409 `closed`, and so does a visitor session that
+    was open on it when it was deleted, each ledgered `auth` on the Desk."""
+    http, _, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    visitor = await new_visitor(http, created.slug)
+    assert await owner.call("DELETE /desks/{id}", path={"id": created.desk_id}) is None
+    start = (await ledger_page(owner, created.desk_id)).entries[-1].seq
+
+    request = DemoAgentRequest(desk_id=created.desk_id)
+    assert await refused(owner.call("POST /agents/demo", request)) == (409, "closed")
+    assert await refused(http.session(visitor.session_token).call("POST /agents/demo", request)) == (409, "closed")
+    assert [(entry.event.kind, entry.event.session_id, entry.event.summary)
+            for entry in (await ledger_page(owner, created.desk_id)).entries if entry.seq > start] == [
+        ("auth", None, {"route": "POST /agents/demo", "reason": "closed"}),
+        ("auth", visitor.state.session_id, {"route": "POST /agents/demo", "reason": "closed"})]
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
+    """The owner session has the setup tools, and only them, on its own Desks: a memory read is decided and
+    executed as the owner on the Desk it names, storing owner-only knowledge. A visitor tool asked by the owner, a
+    setup tool asked by a visitor, or the owner of another copy naming this Desk is refused."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    session = (await owner.whoami()).session
+    assert tools(await context(owner, session.session_id, created.desk_id)) == (SETUP_TOOLS, SETUP_TOOLS)
+
+    call = ToolCall(call_id="setup-memory", tool="native.read_memory", args={"query": "business hours"})
+    decision = await owner.call("POST /decide", DecideRequest(session_id=session.session_id,
+                                                              generation=session.generation, call=call,
+                                                              desk_id=created.desk_id))
+    assert decision.outcome == "allow" and decision.session_id == session.session_id
+    assert decision.action.desk_id == created.desk_id and decision.action.resource.kind == "desk"
+    result = await execute(owner, decision, session.generation)
+    assert result.state == "succeeded" and result.model_view["simulated"] is True and result.model_view["items"]
+    knowledge = ro_read(ro_schema, copy.copy_id, "SELECT source, readers FROM {ro}.knowledge_items"
+                                                 " WHERE desk_id = %s", (created.desk_id,))
+    assert knowledge and all(row == {"source": "memory_import", "readers": ["owner"]} for row in knowledge)
+    assert (await read_decision(owner, decision.decision_id)).state == "executed"
+
+    slots = await owner.call("POST /decide", DecideRequest(
+        session_id=session.session_id, generation=session.generation, desk_id=created.desk_id,
+        call=ToolCall(call_id="setup-slots", tool="native.find_slots", args={})))
+    assert slots.outcome == "refuse" and slots.action is None
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    fetch = await decide(http.session(visitor.session_token), visitor.state.session_id, 0, "visitor-fetch",
+                         "native.fetch_website", {"url": "https://rivera-plumbing.example"})
+    assert fetch.outcome == "refuse" and fetch.action is None
+    stranger = http.owner(other.owner_token)
+    theirs = (await stranger.whoami()).session
+    elsewhere = stranger.call("POST /decide", DecideRequest(session_id=theirs.session_id, generation=theirs.generation,
+                                                            call=call, desk_id=created.desk_id))
+    assert await refused(elsewhere) == (404, "not_found")
+
+
+# Setup: a new Desk's parts, rules drafts, probes and connected tools (Plans 01a, 01b and 01c) -------------------------
+
+HOURS = [HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(8), end=time(17))]
+
+
+def active_version(ro_read, ro_schema: str, copy_id: str, desk_id: str) -> dict:
+    (active,) = ro_read(ro_schema, copy_id, "SELECT version, cards FROM {ro}.policy_versions"
+                                            " WHERE desk_id = %s AND status = 'active'", (desk_id,))
+    return active
+
+
+def owner_cards(version: dict) -> list[RuleCard]:
+    return [RuleCard.model_validate(card) for card in version["cards"] if not card["is_default"]]
+
+
+def quote_card(**limits) -> RuleCard:
+    return RuleCard(card_id="card-quote", applies_to="native.quote", mode="auto", who="anyone",
+                    reason="Quotes from the price list, at list price.", **limits)
+
+
+async def draft(owner: CredentialView, desk_id: str, cards: list[RuleCard], parent: int):
+    return await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
+                                                                     expected_parent=parent))
+
+
+def proved_or_skip(version: PolicyVersion) -> None:
+    """A draft the kernel proved; the real kernel in bounded mode proves none, so the test can't go on there."""
+    if version.proof is not None and version.proof.method == "bounded":
+        pytest.skip("the kernel is in bounded mode: no owner draft is proved")
+    assert version.status == "proved", version.status
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_owner_puts_a_new_desks_parts(kernel, ro_read):
+    """Setup fills a new Desk part by part: `PUT /desks/{id}/charter`, `hours`, `prices`, `calendar` and
+    `notifications` each replace that part (a price item or slot left out is gone), each answer `DeskUpdated` and is
+    ledgered `desk_data` naming its part; the charter's claims are public charter facts and the hours rewrite
+    `charter:hours`. Another copy's owner gets 404."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    path = {"id": created.desk_id}
+    tz = ZoneInfo("America/New_York")
+    slots = [CalendarSlot(slot_id=f"S-2026110{day}-0900", starts_at=datetime(2026, 11, day, 9, tzinfo=tz), minutes=60)
+             for day in (2, 3)]
+    parts = (("PUT /desks/{id}/charter", DeskCharterRequest(charter=[
+                 Claim(key="contact", kind="text", value="(212) 555-0199"),
+                 Claim(key="policy:service_area", kind="text", value="We work across Brooklyn.")])),
+             ("PUT /desks/{id}/hours", DeskHoursRequest(hours=HOURS)),
+             ("PUT /desks/{id}/prices", DeskPricesRequest(price_items=[
+                 PriceItem(item_id="outlet", title="Outlet repair", unit_cents=9_000),
+                 PriceItem(item_id="panel", title="Panel check", unit_cents=25_000)])),
+             ("PUT /desks/{id}/calendar", DeskCalendarRequest(calendar_slots=slots)),
+             ("PUT /desks/{id}/notifications", DeskNotificationsRequest(notifications=NotificationDefaults(
+                 now=["approval", "breaker"], briefing=["lead"]))))
+    for route, body in parts:
+        updated = await owner.call(route, body, path=path)
+        assert isinstance(updated, DeskUpdated) and updated.desk_id == created.desk_id, route
+
+    def rows(query: str) -> list[dict]:
+        return ro_read(ro_schema, copy.copy_id, query, (created.desk_id,))
+
+    facts = {row["fact_id"]: row for row in rows("SELECT fact_id, kind, status, claims, readers FROM {ro}.facts"
+                                                 " WHERE desk_id = %s AND kind = 'charter'")}
+    assert {"charter:contact", "charter:policy:service_area", "charter:hours"} <= set(facts)
+    assert all(row["readers"] == ["public"] and row["status"] == "available" for row in facts.values())
+    assert facts["charter:contact"]["claims"][0]["value"] == "(212) 555-0199"
+    assert {row["item_id"]: row["unit_cents"] for row in rows("SELECT item_id, unit_cents FROM {ro}.price_items"
+                                                              " WHERE desk_id = %s")} == {"outlet": 9_000,
+                                                                                          "panel": 25_000}
+    assert sorted(row["slot_id"] for row in rows("SELECT slot_id FROM {ro}.calendar_slots WHERE desk_id = %s")) == [
+        "S-20261102-0900", "S-20261103-0900"]
+    (prefs,) = rows("SELECT now, briefing FROM {ro}.notification_prefs WHERE desk_id = %s")
+    assert prefs == {"now": ["approval", "breaker"], "briefing": ["lead"]}
+
+    fewer = DeskPricesRequest(price_items=[PriceItem(item_id="panel", title="Panel check", unit_cents=26_000)])
+    await owner.call("PUT /desks/{id}/prices", fewer, path=path)
+    assert {row["item_id"]: row["unit_cents"] for row in rows("SELECT item_id, unit_cents FROM {ro}.price_items"
+                                                              " WHERE desk_id = %s")} == {"panel": 26_000}
+    logged = [entry.event.summary.get("part") for entry in (await ledger_page(owner, created.desk_id)).entries
+              if entry.event.kind == "desk_data"]
+    assert {"charter", "hours", "prices", "calendar", "notifications"} <= set(logged)
+    stranger = http.owner(other.owner_token).call("PUT /desks/{id}/hours", DeskHoursRequest(hours=HOURS), path=path)
+    assert await refused(stranger) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_masked_contact_is_rejected(kernel, ro_read):
+    """`PUT /desks/{id}/people` upserts people by `ref`. A contact that looks masked (with `•` or `*`, as the masked
+    contacts the owner is shown do) is 422 `invalid` with nothing written, a batch with one included, so a masked
+    contact never replaces the one codes go to; a new person without a contact, or a ref with `@` (refs are ledgered,
+    contacts never), is 422 too. `contact: None` keeps the contact on record (codes still go there); `remove` takes a
+    person off the record, so their contact gets no code. A write answers `DeskUpdated`, ledgered `desk_data` naming
+    `people`; another copy's owner gets 404."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    path = {"id": desk_id}
+
+    def people() -> dict[str, dict]:
+        rows = ro_read(ro_schema, copy.copy_id, "SELECT display_name, masked_contact, notes FROM {ro}.people"
+                                                " WHERE desk_id = %s", (desk_id,))
+        return {row["display_name"]: row for row in rows}
+
+    def put(*upsert: PersonUpsert, remove: tuple[str, ...] = ()):
+        return owner.call("PUT /desks/{id}/people", DeskPeopleRequest(upsert=list(upsert), remove=list(remove)),
+                          path=path)
+
+    before = people()
+    dana_masked = before["Dana Whitfield"]["masked_contact"]
+    lee = PersonUpsert(ref="lee", display_name="Lee Park", contact="lee@example.com")
+    for masked in (dana_masked, "d***@example.com"):
+        assert await refused(put(PersonUpsert(ref="dana", display_name="Dana Whitfield", contact=masked))) == (
+            422, "invalid")
+    batch = put(lee, PersonUpsert(ref="bob", display_name="Bob Okafor", contact="b•••@example.com"))
+    assert await refused(batch) == (422, "invalid")
+    assert await refused(put(lee.model_copy(update={"contact": None}))) == (422, "invalid")
+    assert await refused(put(lee.model_copy(update={"ref": "lee@example.com"}))) == (422, "invalid")  # ledgered
+    assert people() == before
+
+    updated = await put(PersonUpsert(ref="dana", display_name="Dana W.", contact=None, notes="Prefers mornings."), lee,
+                        remove=("bob",))
+    assert isinstance(updated, DeskUpdated) and updated.desk_id == desk_id
+    after = people()
+    assert set(after) == {"Dana W.", "Lee Park"}
+    assert (after["Dana W."]["masked_contact"], after["Dana W."]["notes"]) == (dana_masked, "Prefers mornings.")
+    assert after["Lee Park"]["masked_contact"] not in ("", "lee@example.com")
+
+    slug = desk_slug(ro_read, ro_schema, copy)
+    started = []
+    for contact in (DANA, "bob@example.com", "lee@example.com"):
+        visitor = await new_visitor(http, slug)
+        started.append(await verify_start(http.session(visitor.session_token), visitor.state.session_id, contact))
+    assert [notice.to for notice in started[0].inbox] == [dana_masked]
+    assert started[1].inbox == []
+    assert [notice.to for notice in started[2].inbox] == [after["Lee Park"]["masked_contact"]]
+    logged = [entry.event.summary.get("part") for entry in (await ledger_page(owner, desk_id)).entries
+              if entry.event.kind == "desk_data"]
+    assert logged[-1] == "people" and logged.count("people") == 1
+    stranger = http.owner(other.owner_token).call("PUT /desks/{id}/people", DeskPeopleRequest(remove=["dana"]),
+                                                  path=path)
+    assert await refused(stranger) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_preview_session_needs_the_owner(kernel, ro_read):
+    """`POST /sessions` with `preview: true` opens a visitor session only with `X-Owner-Session` for the slug's copy:
+    with no credential, a visitor's token or another copy's owner it is 401 `auth` and opens nothing, and a preview
+    `kind: "agent"` is 422 `invalid`. The preview is marked in `kernel_ro.sessions.preview` and ledgered `session` with
+    `preview: true`; with Answering off it keeps the visitor tools, while an ordinary visitor gets only lead capture
+    and a callback."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    slug = desk_slug(ro_read, ro_schema, copy)
+    visitor = await new_visitor(http, slug)
+    preview = CreateSessionRequest(desk_slug=slug, kind="visitor", preview=True)
+
+    def previews() -> dict[str, bool]:
+        rows = ro_read(ro_schema, copy.copy_id, "SELECT session_id, preview FROM {ro}.sessions"
+                                                " WHERE desk_id = %s AND kind = 'visitor'", (desk_id,))
+        return {row["session_id"]: row["preview"] for row in rows}
+
+    before = previews()
+    for view in (http.public(), http.session(visitor.session_token), http.owner(other.owner_token)):
+        assert await refused(view.call("POST /sessions", preview)) == (401, "auth")
+    agent = CreateSessionRequest.model_construct(desk_slug=slug, kind="agent", mandate=None, preview=True)
+    assert await refused(owner.call("POST /sessions", agent)) == (422, "invalid")
+    assert previews() == before and before[visitor.state.session_id] is False
+
+    await owner.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False), path={"id": desk_id})
+    created = await owner.call("POST /sessions", preview)
+    assert isinstance(created, SessionCreated) and created.session_token
+    assert (created.state.kind, created.state.mode, created.state.generation) == ("visitor", "ai", 0)
+    assert previews() == {**before, created.state.session_id: True}
+    preview_view = http.session(created.session_token)
+    assert (await preview_view.whoami()).session == created.state
+    given, _ = tools(await context(preview_view, created.state.session_id))
+    assert {"native.quote", "native.find_slots", "native.book"} <= given
+    assert tools(await context(http.session(visitor.session_token), visitor.state.session_id))[0] == {
+        "native.capture_lead", "native.request_callback"}
+    opened = [entry.event for entry in (await ledger_page(owner, desk_id)).entries
+              if entry.event.kind == "session" and entry.event.session_id == created.state.session_id]
+    assert [event.summary.get("preview") for event in opened] == [True]
+
+
+@pytest.mark.kernel_plan("01b")   # its Desk comes from `POST /desks`, Plan 01b's
+async def test_policy_draft_returns_a_version(kernel, ro_read):
+    """`POST /policy/draft` compiles and proves the owner's cards against the active version: a new version, its
+    parent the active one, carrying the owner's cards and the compiler's default asks for the tools no card for
+    anyone covers. The same cards and parent again return that version; a parent that isn't active is 409, another
+    copy's owner 404. Nothing activates."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    cards = [*owner_cards(active), quote_card()]
+
+    version = await draft(owner, created.desk_id, cards, active["version"])
+    assert isinstance(version, PolicyVersion) and version.desk_id == created.desk_id
+    proved_or_skip(version)
+    assert version.version > active["version"] and version.parent_version == active["version"]
+    assert version.proof.ok and version.proof.method == "symcc"
+    drafted = {card.card_id: card for card in version.cards}
+    assert all(drafted[card.card_id] == card for card in cards)
+    defaults = {card.applies_to for card in version.cards if card.is_default}
+    assert "native.book" in defaults and "native.quote" not in defaults
+    assert all(card.mode == "ask" and card.who == "anyone" for card in version.cards if card.is_default)
+    assert (await draft(owner, created.desk_id, cards, active["version"])).version == version.version
+    assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
+
+    stale = draft(owner, created.desk_id, cards, active["version"] + 100)
+    assert await refused(stale) == (409, "conflict")
+    elsewhere = draft(http.owner(other.owner_token), created.desk_id, cards, active["version"])
+    assert await refused(elsewhere) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01b")   # its Desk comes from `POST /desks`, Plan 01b's
+async def test_confirm_needs_a_proved_version(kernel, ro_read):
+    """`POST /policy/confirm` activates a proved draft whose parent is still active, superseding it; a sibling
+    drafted from the same parent is then 409 (its parent is no longer active), and a version that doesn't exist is
+    404."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    first = await draft(owner, created.desk_id, [*owner_cards(active), quote_card()], active["version"])
+    sibling = await draft(owner, created.desk_id, [*owner_cards(active), quote_card(max_discount_bp=500)],
+                          active["version"])
+    proved_or_skip(first)
+    assert sibling.version != first.version
+
+    confirmed = await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=created.desk_id,
+                                                                              version=first.version))
+    assert isinstance(confirmed, PolicyVersion) and (confirmed.version, confirmed.status) == (first.version, "active")
+    now_active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    assert now_active["version"] == first.version
+    (old,) = ro_read(ro_schema, copy.copy_id, "SELECT status FROM {ro}.policy_versions WHERE desk_id = %s"
+                                              " AND version = %s", (created.desk_id, active["version"]))
+    assert old["status"] == "superseded"
+    late = owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=created.desk_id, version=sibling.version))
+    assert await refused(late) == (409, "conflict")
+    missing = owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=created.desk_id, version=10_000))
+    assert await refused(missing) == (404, "not_found")
+
+
+def verification_card(ro_read, ro_schema: str, copy: CopyCreated) -> tuple[dict, list[RuleCard], RuleCard]:
+    """The Rivera Desk's active version, its owner cards, and the presets' own card for starting a verification
+    among them (auto, for anyone, on the tool), which every preset and the Rivera seed carry."""
+    active = active_version(ro_read, ro_schema, copy.copy_id, copy.desk_ids[0])
+    kept = owner_cards(active)
+    (shipped,) = [card for card in kept if card.applies_to == "native.start_verification"]
+    assert shipped == RuleCard(card_id="preset-start-verification", applies_to="native.start_verification",
+                               mode="auto", who="anyone", reason=shipped.reason)
+    return active, kept, shipped
+
+
+def send_card(mode: str, **scope) -> RuleCard:
+    """A card on `effect:send_message`, the one effect of `native.start_verification`, so it covers that tool too."""
+    return RuleCard(card_id="card-send", applies_to="effect:send_message", mode=mode, who=scope.pop("who", "anyone"),
+                    reason="Messages to customers.", **scope)
+
+
+def draft_versions(ro_read, ro_schema: str, copy: CopyCreated) -> list[dict]:
+    return ro_read(ro_schema, copy.copy_id, "SELECT version, status FROM {ro}.policy_versions WHERE desk_id = %s"
+                                            " ORDER BY version", (copy.desk_ids[0],))
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_draft_that_would_change_starting_a_verification_is_422(kernel, ro_read):
+    """Verification is always on: `POST /policy/draft` refuses whole, 422 `invalid` with nothing drafted, a set holding
+    a card on `native.start_verification` other than the presets' own (every field but its reason the same), an
+    `ask` or `never` card on its effect `effect:send_message`, or an `auto` one for a person, which outranks the
+    presets' card (`(who is a person or an agent, applies_to is a tool)`, compared in that order). The presets' own
+    card drafts, reworded or not, and so does an `auto` effect card for anyone, which ranks below it."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    active, kept, shipped = verification_card(ro_read, ro_schema, copy)
+    others = [card for card in kept if card != shipped]
+    (dana,) = ro_read(ro_schema, copy.copy_id, "SELECT person_id FROM {ro}.people WHERE desk_id = %s"
+                                               " AND display_name = 'Dana Whitfield'", (desk_id,))
+    for_dana = {"who": "person", "person_id": dana["person_id"]}
+
+    def verify(**changes) -> RuleCard:          # the presets' card, changed, in its place
+        return RuleCard.model_validate({**shipped.model_dump(), **changes})
+
+    refusals = {"asks": [*others, verify(mode="ask")],
+                "never for dana": [*others, verify(mode="never", **for_dana)],
+                "auto for verified people": [*others, verify(who="verified")],
+                "behind the reviewer": [*others, verify(review=True)],
+                "under another id": [*others, verify(card_id="card-verify")],
+                "effect asks": [*kept, send_card("ask")],
+                "effect never for dana": [*kept, send_card("never", **for_dana)],
+                "effect auto for dana": [*kept, send_card("auto", **for_dana)]}
+    before = draft_versions(ro_read, ro_schema, copy)
+    for shape, cards in refusals.items():
+        assert await refused(draft(owner, desk_id, cards, active["version"])) == (422, "invalid"), shape
+    assert draft_versions(ro_read, ro_schema, copy) == before
+
+    reworded = shipped.model_copy(update={"reason": "Anyone can ask for a code, sent to the contact on record."})
+    for cards in ([*others, reworded], [*kept, send_card("auto")]):
+        version = await draft(owner, desk_id, cards, active["version"])
+        assert isinstance(version, PolicyVersion) and version.parent_version == active["version"]
+        # by card_id: the kernel returns a draft's cards sorted by it, not in the order they were sent
+        assert {card.card_id: card for card in version.cards if not card.is_default} == {
+            card.card_id: card for card in cards}
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_an_auto_effect_card_for_one_agent_over_verification_is_422(kernel, ro_read):
+    """An `auto` card on `effect:send_message` for one agent outranks the presets' card for starting a verification,
+    as one for a person does, so `POST /policy/draft` refuses it (422 `invalid`) with nothing drafted."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    active, kept, _ = verification_card(ro_read, ro_schema, copy)
+    agent = await demo_agent(http, copy)
+    before = draft_versions(ro_read, ro_schema, copy)
+    cards = [*kept, send_card("auto", who="agent", agent_key_id=agent.agent_key_id)]
+    assert await refused(draft(owner, copy.desk_ids[0], cards, active["version"])) == (422, "invalid")
+    assert draft_versions(ro_read, ro_schema, copy) == before
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_probes_decide_a_draft_without_activating_it(kernel, ro_read):
+    """`POST /policy/{version}/probe` decides hypothetical callers against a draft, one result per probe, and
+    changes nothing: a stranger asking for someone else's document is refused, an 80% discount past an auto quote
+    card at list price asks the owner, and a tool the Desk doesn't have is refused with no card."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    active = active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)
+    version = await draft(owner, created.desk_id, [*owner_cards(active), quote_card()], active["version"])
+    probes = [
+        Probe(actor="visitor", who="anyone", resource_kind="document", resource_owner="other",
+              call=ToolCall(call_id="probe-1", tool="native.release_document", args={"document_id": "probe"})),
+        Probe(actor="visitor", who="anyone", resource_kind="desk", amount_cents=25_000,
+              call=ToolCall(call_id="probe-2", tool="native.quote", args=quote_args("panel", 8_000))),
+        Probe(actor="visitor", who="anyone", resource_kind="desk",
+              call=ToolCall(call_id="probe-3", tool="admin.export_customers", args={})),
+    ]
+    results = await owner.call("POST /policy/{version}/probe", PolicyProbeRequest(desk_id=created.desk_id,
+                                                                                    probes=probes),
+                               path={"version": version.version})
+    assert [result.probe for result in results] == probes
+    assert [result.outcome for result in results] == ["refuse", "hold", "refuse"]
+    assert all(isinstance(result, ProbeResult) and result.reason_plain for result in results)
+    assert "card-quote" in results[1].card_ids and not results[1].depends_on_review
+    assert results[2].card_ids == []
+    assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_connecting_payments_pins_its_tools_for_review(kernel, ro_read):
+    """`POST /tools/connect {server: "mock_payments"}` lists the payments tools and pins each by its definition's
+    hash, `needs_review` until the owner confirms them, so no visitor is given them yet."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner = http.owner(copy.owner_token)
+    created = await owner.call("POST /desks", a_new_desk())
+    profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(desk_id=created.desk_id,
+                                                                           server="mock_payments"))
+    assert {profile.tool for profile in profiles} == {"payments.list_charges", "payments.create_refund"}
+    assert all(isinstance(profile, ToolProfile) and profile.source == "mcp" and profile.status == "needs_review"
+               and re.fullmatch(r"[0-9a-f]{64}", profile.definition_sha256 or "") for profile in profiles)
+    rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s"
+                                            " AND source = 'mcp'", (created.desk_id,))
+    assert {row["tool"]: row["status"] for row in rows} == {"payments.list_charges": "needs_review",
+                                                            "payments.create_refund": "needs_review"}
+    visitor = await new_visitor(http, created.slug)
+    given, declared = tools(await context(http.session(visitor.session_token), visitor.state.session_id))
+    assert not {"payments.list_charges", "payments.create_refund"} & given
+
+
+# The owner's knowledge, documents and tool changes (Plans 01b and 01c) ---------------------------------------
+
+
+def knowledge_item(readers: list[str], text: str = "Street parking is free after 6 pm.") -> KnowledgeItem:
+    return KnowledgeItem(item_id="upload-parking", source="upload", title="Parking", text=text,
+                         label=Label(readers=readers))
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_knowledge_round_trips(kernel, ro_read):
+    """`POST /knowledge` stores the owner's item as given, owner-only until the owner marks it public: re-posting the
+    same `item_id` with `["public"]` updates it in place, and visitors' `/context` then carries it. Readers other than
+    `["owner"]` or `["public"]`, or text over 100 KiB, are 422 `invalid`; another copy's owner gets 404. Each write is
+    ledgered `desk_data` naming the item."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view = http.session(visitor.session_token)
+
+    def stored() -> list[dict]:
+        return ro_read(ro_schema, copy.copy_id, "SELECT item_id, source, title, text, readers FROM {ro}.knowledge_items"
+                                                " WHERE desk_id = %s AND item_id = %s", (desk_id, "upload-parking"))
+
+    private = knowledge_item(["owner"])
+    assert await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=private)) == private
+    assert stored() == [{"item_id": "upload-parking", "source": "upload", "title": "Parking", "text": private.text,
+                         "readers": ["owner"]}]
+    assert "upload-parking" not in {item.item_id for item in (await context(view, visitor.state.session_id)).knowledge}
+
+    public = knowledge_item(["public"])
+    assert await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=public)) == public
+    assert [row["readers"] for row in stored()] == [["public"]]
+    seen = {item.item_id: item for item in (await context(view, visitor.state.session_id)).knowledge}
+    assert seen["upload-parking"] == public
+
+    for item in (knowledge_item(["person:someone"]), knowledge_item(["owner", "public"]),
+                 knowledge_item(["owner"], text="x" * (100 * 1024 + 1))):
+        assert await refused(owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=item))) == (
+            422, "invalid")
+    assert [row["readers"] for row in stored()] == [["public"]]
+    elsewhere = http.owner(other.owner_token).call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=private))
+    assert await refused(elsewhere) == (404, "not_found")
+    written = [entry.event.summary for entry in (await ledger_page(owner, desk_id)).entries
+               if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "knowledge"]
+    assert [summary["item_id"] for summary in written] == ["upload-parking", "upload-parking"]
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_uploaded_document_gets_a_title_only_fact(kernel, ro_read):
+    """`POST /documents` adds the owner's document through the seed path's writer: a `documents` row and a
+    `document:<id>` fact naming only its title, readable by the owner and the person on record it belongs to (the
+    owner alone without one); the body stays in the kernel. Ledgered `desk_data {part: "documents", refs: [id]}`. A
+    `record_owner_ref` naming no one on record, or a body over 200 KiB, is 422 `invalid`; another copy's owner 404."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    body = "Rivera Plumbing\nEstimate, leak repair\nFor Dana Whitfield\n"
+    estimate = SeedDocument(ref="dana-estimate", title="Estimate, leak repair", body=body, record_owner_ref="dana")
+
+    created = await owner.call("POST /documents", DocumentUploadRequest(desk_id=desk_id, document=estimate))
+    assert isinstance(created, DocumentCreated)
+    (dana,) = ro_read(ro_schema, copy.copy_id, "SELECT person_id FROM {ro}.people WHERE desk_id = %s"
+                                               " AND display_name = 'Dana Whitfield'", (desk_id,))
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT title, record_owner_person_id FROM {ro}.documents"
+                                              " WHERE document_id = %s", (created.document_id,))
+    assert row == {"title": "Estimate, leak repair", "record_owner_person_id": dana["person_id"]}
+    (fact,) = ro_read(ro_schema, copy.copy_id, "SELECT kind, claims, readers FROM {ro}.facts WHERE desk_id = %s"
+                                               " AND fact_id = %s", (desk_id, f"document:{created.document_id}"))
+    assert fact["kind"] == "document" and fact["claims"] == [{"key": "title", "kind": "text",
+                                                              "value": "Estimate, leak repair"}]
+    assert sorted(fact["readers"]) == sorted(["owner", f"person:{dana['person_id']}"])
+
+    private = await owner.call("POST /documents", DocumentUploadRequest(desk_id=desk_id, document=SeedDocument(
+        ref="supplier-terms", title="Supplier terms", body="Net 30.")))
+    (fact,) = ro_read(ro_schema, copy.copy_id, "SELECT readers FROM {ro}.facts WHERE desk_id = %s AND fact_id = %s",
+                      (desk_id, f"document:{private.document_id}"))
+    assert fact["readers"] == ["owner"]
+    written = [entry.event.summary for entry in (await ledger_page(owner, desk_id)).entries
+               if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "documents"]
+    assert [summary["refs"] for summary in written] == [[created.document_id], [private.document_id]]
+    assert not any(body in json.dumps(summary) for summary in written)
+
+    for bad in (estimate.model_copy(update={"ref": "nobodys", "record_owner_ref": "nobody"}),
+                estimate.model_copy(update={"ref": "too-long", "body": "x" * (200 * 1024 + 1)})):
+        assert await refused(owner.call("POST /documents", DocumentUploadRequest(desk_id=desk_id, document=bad))) == (
+            422, "invalid")
+    elsewhere = http.owner(other.owner_token).call("POST /documents", DocumentUploadRequest(desk_id=desk_id,
+                                                                                             document=estimate))
+    assert await refused(elsewhere) == (404, "not_found")
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_simulated_change_needs_review(kernel, ro_read):
+    """`POST /tools/simulate_change` (the owner's demo action) changes a connected tool's definition on the server and
+    re-lists it at once: the tool is `needs_review` straight away, the changed definition waiting as
+    `pending_definition_text` under its own `pending_sha256`, and the pinned hash unchanged until the owner reviews
+    it; other tools are untouched. Ledgered `tool_pin`; another copy's owner gets 404."""
+    http, ro_schema, _ = kernel
+    copy, other = await new_copy(http), await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+
+    def pins() -> dict[str, dict]:
+        rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status, definition_sha256, pending_sha256 FROM"
+                                                " {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (desk_id,))
+        return {row["tool"]: row for row in rows}
+
+    before = pins()
+    assert {tool: row["status"] for tool, row in before.items()} == {"payments.list_charges": "enabled",
+                                                                     "payments.create_refund": "enabled"}
+    changed = await owner.call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
+        desk_id=desk_id, tool="payments.create_refund"))
+    assert isinstance(changed, ToolProfile) and changed.tool == "payments.create_refund"
+    assert changed.status == "needs_review" and changed.pending_definition_text
+    assert re.fullmatch(r"[0-9a-f]{64}", changed.pending_sha256 or "")
+    assert changed.pending_sha256 != changed.definition_sha256
+    assert changed.definition_sha256 == before["payments.create_refund"]["definition_sha256"]
+    after = pins()
+    assert after["payments.create_refund"] == {**before["payments.create_refund"], "status": "needs_review",
+                                               "pending_sha256": changed.pending_sha256}
+    assert after["payments.list_charges"] == before["payments.list_charges"]
+    assert "tool_pin" in [entry.event.kind for entry in (await ledger_page(owner, desk_id)).entries]
+    elsewhere = http.owner(other.owner_token).call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
+        desk_id=desk_id, tool="payments.create_refund"))
+    assert await refused(elsewhere) == (404, "not_found")

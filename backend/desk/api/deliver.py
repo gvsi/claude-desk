@@ -7,8 +7,9 @@ reach the session as one of the four signed events, which only this module build
   failed: its blocks are then the handoff clause alone) and a `delivered` row carrying the event's `seq`
   and, for Claude's `send_reply`, the call's ID. A verdict checked at a generation the session has since
   left (a take-over, a hand-back) is dropped: nothing is shown and None is returned. `via` says who
-  produced it and fixes the author: `model` (Claude's `send_reply`) and `api` (a handoff the loop asked for)
-  are Claude's, `owner` (a say) the owner's and `kernel` (a payment confirmation) the Desk's.
+  produced it and fixes the author: `model` (Claude's `send_reply`) and `api` (a handoff the loop asked for, or a
+  reply of Claude's replayed into a copy) are Claude's, `owner` (a say) the owner's and `kernel` (a payment
+  confirmation) the Desk's.
 - `Status(decision, phase)`: a signed decision becomes `EvReceipt`, `EvHeld` or `EvResolved` with its
   signed fields unchanged, and a `status` row. Statuses aren't generation-fenced (an approved hold
   resumes across a take-over); a decision's state at a ledger entry is shown once, and a state older than
@@ -16,6 +17,9 @@ reach the session as one of the four signed events, which only this module build
   kernel reconciled an `unknown` outcome) never is: either way it is None, so the visitor never sees a
   decision go back. `status_shown` answers whether it is shown (or, with `or_later`, whether that state or
   a later one is).
+
+Recorded history (Plan 01d): `replayed` delivers a verdict or decision the kernel re-signed for a replayed night,
+written at the moment it was shown and with the copy's `replay_id` (`store.Replayed`), its signed fields unchanged.
 
 Each call runs in the caller's transaction under the session's run lock (`run_lock`, a transaction-level
 advisory lock held until the caller commits), the lock take-over and hand-back hold around a mode change.
@@ -35,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.ro import KERNEL_RO, KernelRO
 from desk.api.sse import RUN_EVENTS, append_event
-from desk.api.store import MESSAGES, Ids, append_message, lock_key
+from desk.api.store import MESSAGES, Ids, Replayed, append_message, lock_key
 from desk.contracts import Decision, ReplyVerdict
 from desk.events import EvHeld, EvMessage, EvReceipt, EvResolved
 
@@ -84,9 +88,11 @@ async def run_lock(conn: AsyncConnection, session_id: str) -> None:
     await conn.execute(select(func.pg_advisory_xact_lock(lock_key("run:" + session_id))))
 
 
-async def deliver(conn: AsyncConnection, ids: Ids, item: Reply | Status, *, ro_schema: str = KERNEL_RO) -> int | None:
+async def deliver(conn: AsyncConnection, ids: Ids, item: Reply | Status, *, ro_schema: str = KERNEL_RO,
+                  replayed: Replayed | None = None) -> int | None:
     """Publish a checked reply or a signed status to the session; returns the event's `seq`, or None when it is
-    stale or already shown. `ro_schema` is `kernel_ro` (the fake's mirror in tests)."""
+    stale or already shown. `ro_schema` is `kernel_ro` (the fake's mirror in tests); `replayed` writes recorded
+    history at its moment, with its `replay_id` (module docstring)."""
     if not isinstance(item, (Reply, Status)):
         raise TypeError("deliver() takes a Reply or a Status")
     isolation = (await conn.execute(text("SHOW transaction_isolation"))).scalar_one()
@@ -94,11 +100,12 @@ async def deliver(conn: AsyncConnection, ids: Ids, item: Reply | Status, *, ro_s
         raise RuntimeError("deliver() reads the current generation, which needs a READ COMMITTED transaction")
     await run_lock(conn, ids.session_id)
     if isinstance(item, Reply):
-        return await _deliver_reply(conn, ids, item, ro_schema)
-    return await _deliver_status(conn, ids, item)
+        return await _deliver_reply(conn, ids, item, ro_schema, replayed)
+    return await _deliver_status(conn, ids, item, replayed)
 
 
-async def _deliver_reply(conn: AsyncConnection, ids: Ids, reply: Reply, ro_schema: str) -> int | None:
+async def _deliver_reply(conn: AsyncConnection, ids: Ids, reply: Reply, ro_schema: str,
+                         replayed: Replayed | None) -> int | None:
     session = await KernelRO(conn, ids.copy_id, ro_schema).session(ids.session_id)
     if session is None or session["desk_id"] != ids.desk_id:
         raise SessionNotFound(ids.session_id)
@@ -113,8 +120,8 @@ async def _deliver_reply(conn: AsyncConnection, ids: Ids, reply: Reply, ro_schem
     event = EvMessage(type="message", message_id=verdict.message_id, generation=verdict.generation,
                       author=reply.author, language=verdict.language, handoff=not verdict.ok, blocks=verdict.blocks,
                       visitor_plain=verdict.visitor_plain, ledger_seq=verdict.ledger_seq, signature=verdict.signature)
-    seq = await append_event(conn, ids, event)
-    await append_message(conn, ids, "delivered", author=reply.author, blocks=verdict.blocks,
+    seq = await append_event(conn, ids, event, replayed=replayed)
+    await append_message(conn, ids, "delivered", replayed=replayed, author=reply.author, blocks=verdict.blocks,
                          language=verdict.language, ref_id=verdict.message_id, call_id=reply.call_id, event_seq=seq)
     return seq
 
@@ -129,7 +136,7 @@ async def status_shown(conn: AsyncConnection, decision: Decision, *, or_later: b
         RUN_EVENTS.c.payload["decision_id"].astext == decision.decision_id, at)))).scalar_one()
 
 
-async def _deliver_status(conn: AsyncConnection, ids: Ids, status: Status) -> int | None:
+async def _deliver_status(conn: AsyncConnection, ids: Ids, status: Status, replayed: Replayed | None) -> int | None:
     decision = status.decision
     if decision.session_id != ids.session_id:
         raise ValueError("a decision is shown only in its own session")
@@ -143,6 +150,6 @@ async def _deliver_status(conn: AsyncConnection, ids: Ids, status: Status) -> in
         event = EvHeld(type="held", **signed)
     else:
         event = EvResolved(type="resolved", **signed)
-    seq = await append_event(conn, ids, event)
-    await append_message(conn, ids, "status", ref_id=decision.decision_id, event_seq=seq)
+    seq = await append_event(conn, ids, event, replayed=replayed)
+    await append_message(conn, ids, "status", replayed=replayed, ref_id=decision.decision_id, event_seq=seq)
     return seq

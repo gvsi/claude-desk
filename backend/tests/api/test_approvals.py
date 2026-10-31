@@ -18,7 +18,7 @@ from procrastinate.exceptions import ConnectorException
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text
 
-from desk.api.jobs import surface_due_decisions
+from desk.api.jobs import RESUME_AFTER_ANSWER, surface_due_decisions
 from desk.api.main import create_app
 from desk.kernel_api import CreateCopyRequest
 from tests.api.fakes import ScriptedModel, response, tool_use
@@ -148,6 +148,12 @@ async def jobs_done(connector: InMemoryConnector, timeout: float = 5.0) -> list[
     return list(connector.jobs.values())
 
 
+async def resume_jobs(connector: InMemoryConnector) -> list[dict]:
+    """The queue's resume jobs, once the worker has finished every job (a visitor's message queues its translation
+    too, Plan 02b's Task 10)."""
+    return [job for job in await jobs_done(connector) if job["task_name"] == RESUME_AFTER_ANSWER]
+
+
 async def test_answer_twice_resolves_once(app, browser, fake, kernel_http, model, engine, jobs_connector):
     held = await held_request(app, browser, fake, kernel_http, model)
     first = await answer(held, "allow_once")
@@ -160,7 +166,7 @@ async def test_answer_twice_resolves_once(app, browser, fake, kernel_http, model
         assert again.status_code == 409
         assert again.json() == {"error": "already_resolved", "decision": first.json()["decision"]}
 
-    jobs = await jobs_done(jobs_connector)
+    jobs = await resume_jobs(jobs_connector)
     assert [(job["task_name"], job["status"]) for job in jobs] == [("desk.resume_after_answer", "succeeded")]
     # The job holds IDs and the decision as the kernel signed it, and nothing else: no token, key or code.
     session = fake.sessions[held.session_id]
@@ -183,7 +189,7 @@ async def test_answer_after_expiry_or_cancel(app, browser, fake, kernel_http, mo
     assert (late.json()["error"], late.json()["decision"]["state"]) == ("already_resolved", "cancelled")
     (shown,) = await resolved(engine, cancelled.session_id)
     assert shown == signed(late.json()["decision"])
-    assert await jobs_done(jobs_connector) == []
+    assert await resume_jobs(jobs_connector) == []
 
     # A request the owner answers a day late: the kernel expires it, and the visitor's next request shows it once.
     expired = await held_request(app, browser, fake, kernel_http, model)
@@ -293,7 +299,7 @@ async def test_a_failed_answer_to_a_held_request_keeps_the_kernels_error(app, br
     assert (fault.status_code, fault.json()) == (503, {"error": "kernel", "code": "internal"})
 
     assert fake.decisions[held.decision_id].decision.state == "held"
-    assert await jobs_done(jobs_connector) == []
+    assert await resume_jobs(jobs_connector) == []
     assert [type for type, _ in await sse_events(engine, held.session_id)] == ["writing", "held", "message",
                                                                               "turn_end"]
     assert (await answer(held, "allow_once")).status_code == 200          # answering again is safe
@@ -319,7 +325,7 @@ async def test_answer_resumes_in_the_request_when_the_queue_cant_take_the_job(ap
     assert answered.status_code == 200, answered.text
     shown = [payload for type, payload in await sse_events(engine, held.session_id) if type == "resolved"]
     assert shown == [signed(answered.json()["decision"])]                 # shown before the answer returned
-    assert jobs_connector.jobs == {}
+    assert [job for job in jobs_connector.jobs.values() if job["task_name"] == RESUME_AFTER_ANSWER] == []
     made = fake.calls[calls:]                                           # the owner's, and nothing with the visitor's
     assert [call.route for call in made] == ["GET /whoami", "POST /approvals/{decision_id}/answer"]
     assert all(call.headers[OWNER] == held.owner_token and VISITOR not in call.headers for call in made)
@@ -360,7 +366,7 @@ async def test_answer_stands_when_neither_the_queue_nor_the_request_can_resume(a
         "the answer couldn't be resumed here either (RuntimeError)"]
     assert [type for type, _ in await sse_events(engine, held.session_id)] == ["writing", "held", "message",
                                                                               "turn_end"]
-    assert jobs_connector.jobs == {}
+    assert [job for job in jobs_connector.jobs.values() if job["task_name"] == RESUME_AFTER_ANSWER] == []
 
     assert await surface_due_decisions(engine, now=fake.now, ro_schema=ro_schema) == 1
     async with engine.connect() as conn:

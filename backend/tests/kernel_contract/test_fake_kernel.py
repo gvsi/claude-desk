@@ -1,5 +1,6 @@
 """FakeKernel's own knobs, which the real kernel doesn't have: failures, dropped answers, scripted outcomes,
-forced violations, mode changes, verification, the call log, its clock and its read-only mirror."""
+forced violations, mode changes, verification, a lowered payment-link limit, the call log, its clock and its read-only
+mirror."""
 
 from collections.abc import AsyncIterator
 from datetime import timedelta
@@ -11,15 +12,18 @@ from pydantic import ValidationError
 
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable
 from desk.contracts import CopyCreated, SessionCreated
-from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, Health
+from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health
 from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO
 from tests.kernel_contract.test_contract import (
+    LINK_ROUTES,
     answer,
     check_reply,
+    checkout,
     context,
     decide,
     execute,
+    issue_payment_link,
     quote_args,
     read_decision,
     refused,
@@ -197,6 +201,31 @@ async def test_verify_gives_the_verified_tools_and_labels(fake):
     assert invoice.label.record_owner == dana
 
 
+async def test_a_lowered_link_limit_cancels_the_open_links_above_it(fake):
+    http, state = fake
+    copy, visitor = await copy_and_visitor(http, state)
+    view, session_id, desk_id = http.session(visitor.session_token), visitor.state.session_id, copy.desk_ids[0]
+    token, _ = await issue_payment_link(view, session_id, "deposit", 1)
+    (link_id,) = state.payment_links
+    get, complete, _ = LINK_ROUTES
+
+    assert state.lower_link_limit(desk_id, 1000) == [link_id]
+    assert (await checkout(http, get, token)).state == "cancelled"
+    assert state.payment_links[link_id].cancel_reason == "rules_changed"
+    assert await refused(checkout(http, complete, token)) == (409, "conflict")
+    *_, policy, cancelled, refusal = [entry.event for entry in state.desks[desk_id].ledger]
+    assert (policy.kind, policy.summary) == ("policy", {"version": 2, "activated": True})
+    assert (cancelled.kind, cancelled.summary) == (
+        "payment", {"link_id": link_id, "state": "cancelled", "reason": "rules_changed", "version": 2})
+    assert refusal.summary["refused"] is True
+    # The new limit decides new links: the deposit now asks the owner.
+    quoted = await execute(view, await decide(view, session_id, 0, "call-quote-2", "native.quote",
+                                              quote_args("deposit")), 0)
+    held = await decide(view, session_id, 0, "call-link-2", "native.payment_link",
+                        {"quote_id": quoted.model_view["quote_id"]})
+    assert (held.state, held.card_ids) == ("held", ["rv-link"])
+
+
 async def test_calls_are_logged_with_their_credentials(fake):
     http, state = fake
     copy, visitor = await copy_and_visitor(http, state)
@@ -267,3 +296,24 @@ async def test_an_answer_that_breaks_its_response_model_never_leaves(fake_ro: Fa
     async with KernelHttp("http://fake-kernel", transport=httpx.ASGITransport(app=fake_kernel_app(state))) as http:
         with pytest.raises(ValidationError, match="proof_mode"):     # raised by the fake, before the client
             await http.public().call("GET /health")
+
+
+async def test_demo_agents_are_minted_for_the_desk_and_limited_per_copy(fake):
+    """The owner or a visitor session on the Desk mints a demo agent (a session for another Desk can't), ten per copy
+    an hour; the eleventh is 429 `rate_limited`, ledgered `rate_limit`, and an hour later minting works again."""
+    http, state = fake
+    copy, visitor = await copy_and_visitor(http, state)
+    _, elsewhere = await copy_and_visitor(http, state)
+    desk_id = copy.desk_ids[0]
+    owner, session = http.owner(copy.owner_token), http.session(visitor.session_token)
+    issued = await session.call("POST /agents/demo", DemoAgentRequest(desk_id=desk_id))
+    assert state.agent_keys[issued.agent_key_id].minted_by == visitor.state.session_id
+    assert issued.agent_private_key_hex not in repr(state.agent_keys)
+    assert await refused(http.session(elsewhere.session_token).call(
+        "POST /agents/demo", DemoAgentRequest(desk_id=desk_id))) == (404, "not_found")
+    for _ in range(9):
+        await owner.call("POST /agents/demo", DemoAgentRequest(desk_id=desk_id))
+    assert await refused(owner.call("POST /agents/demo", DemoAgentRequest(desk_id=desk_id))) == (429, "rate_limited")
+    assert state.desks[desk_id].ledger[-1].event.kind == "rate_limit"
+    state.now += timedelta(hours=1)
+    assert (await owner.call("POST /agents/demo", DemoAgentRequest(desk_id=desk_id))).mandate.desk_id == desk_id

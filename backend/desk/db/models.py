@@ -13,9 +13,9 @@ price items, knowledge items, tools) or the copy (agent keys, mock payments rows
 """
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import TypeAdapter
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 from sqlalchemy import BigInteger, Boolean, DateTime, Integer, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -548,6 +548,7 @@ class Message(Base):
     event_seq: Mapped[int | None] = mapped_column(BigInteger)      # the run_events.seq a delivered or status row published
     generation: Mapped[int | None] = mapped_column(Integer)        # an assistant row's calls' session generation
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    replay_id: Mapped[str | None] = mapped_column(Text)            # recorded history: the copy's replayed night
 
 
 class RunEvent(Base):
@@ -563,6 +564,7 @@ class RunEvent(Base):
     payload: Mapped[Any] = mapped_column(JSONB)
     handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # control only
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
+    replay_id: Mapped[str | None] = mapped_column(Text)            # recorded history: the copy's replayed night
 
 
 class SetupInterview(Base):
@@ -582,8 +584,18 @@ class SetupInterview(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 
+class A2AError(BaseModel):
+    """An A2A error answer's body (Plan 02b, "Errors"): what went wrong, and that the answer comes from an AI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    disclosure: Literal["ai"]
+
+
 class A2ATurn(Base):
-    """One agent turn's answer. Nonces are agent-chosen, so the key includes the key and session."""
+    """One agent turn's answer: its `A2AResponse`, or its `A2AError` with the error's status. Nonces are agent-chosen,
+    so the key includes the key and session."""
 
     __tablename__ = "a2a_turns"
     __table_args__ = {"schema": "app"}
@@ -595,7 +607,7 @@ class A2ATurn(Base):
     status: Mapped[str] = mapped_column(Text, server_default=text("'running'"))
     http_status: Mapped[int | None] = mapped_column(Integer)
     # the stored answer, replayed to a resent request; it always carries the AI disclosure
-    response: Mapped[A2AResponse | None] = mapped_column(ContractJSON(A2AResponse))
+    response: Mapped[A2AResponse | A2AError | None] = mapped_column(ContractJSON(A2AResponse | A2AError))
     through_seq: Mapped[int | None] = mapped_column(BigInteger)    # the last run_events.seq the answer covers
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
