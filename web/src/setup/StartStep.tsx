@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router';
 
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../api/http.ts';
 import type { StartSetupBody } from '../api/views.ts';
-import { retryAfterMs } from '../app/poll.ts';
+import { retryAfterMs, sleep } from '../app/poll.ts';
 import { Button, Notice, PageHeader, TextField } from '../ds/index.ts';
 import { SETUP_COPY, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 
@@ -23,19 +23,6 @@ function browserTimeZone(): string {
   } catch {
     return 'UTC';
   }
-}
-
-/** Resolves after `ms`, or at once when `signal` aborts. */
-function wait(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', done);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    signal.addEventListener('abort', done);
-  });
 }
 
 /** One press of "Start": its body and its idempotency key, sent again as they are by each retry. */
@@ -100,7 +87,7 @@ export function StartStep() {
         if (err instanceof ApiError && err.kind === 'unauthorized') return;
         const underWay = err instanceof ApiError && err.code === 'in_progress';
         if (underWay && retries < UNDER_WAY_RETRIES) {
-          await wait(retryAfterMs(err.retryAfter ?? UNDER_WAY_WAIT_S), signal);
+          await sleep(retryAfterMs(err.retryAfter ?? UNDER_WAY_WAIT_S), signal);
           if (signal.aborted) return;
           continue;
         }

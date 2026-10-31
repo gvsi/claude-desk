@@ -24,7 +24,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { ApiError, isUncertain, newIdempotencyKey, request } from '../../api/http.ts';
 import type { AgentTurn, DemoAgentRun } from '../../api/views.ts';
-import { agentRunPollMs } from '../../app/poll.ts';
+import { agentRunPollMs, sleep } from '../../app/poll.ts';
 import {
   AGENT_START_LOST_COPY,
   AgentMessage,
@@ -159,19 +159,6 @@ function readFailure(err: unknown): 'ended' | 'stopped' | null {
   if (err.kind === 'unauthorized') return 'ended';
   if (err.kind === 'not_found' || err.kind === 'conflict' || err.kind === 'unprocessable') return 'stopped';
   return null;
-}
-
-/** Resolves after `ms`, or at once when `signal` aborts. */
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    const done = () => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', done);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    signal.addEventListener('abort', done);
-  });
 }
 
 /** Resolves once the tab is in view, or at once when `signal` aborts: reads pause while it is hidden. */
