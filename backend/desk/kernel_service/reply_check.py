@@ -35,11 +35,14 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
    (`soft.denies_ai`). No verdict (a timeout, an error, a refusal, an unparsable answer) blocks
-   too (`soft.unavailable`). While the session has an open handoff of either kind
-   (`open_handoff_ids`), the handoff card's text is one of those cards, though the reply doesn't
-   show it again: the owner has the conversation, so a later "Maria Rivera will reply here" is
-   backed, as the card that opened it said. That handoff is read without a lock, so the model
-   never holds one; a reply that passes with its card is checked again in step 7.
+   too (`soft.unavailable`). While the session has an open handoff the handoff card opened
+   (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
+   doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
+   here" is backed, as the card that opened it said. A call-back request backs nothing (the
+   owner's decision of 2026-10-31): its own card names a time and never says the owner will
+   reply here, and once its window has passed nothing promises a call. That handoff is read
+   without a lock, so the model never holds one; a reply that passes with its card is checked
+   again in step 7.
 6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
    handoff clause, in the reply's language.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
@@ -576,7 +579,8 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     handoff_backed = False                  # the soft-promise check was shown an open handoff's card
     if not violations and prose.strip():
         backing = list(cards)
-        if not any(card.template == "handoff" for card in cards) and await open_handoff_ids(ctx, session_row):
+        if not any(card.template == "handoff" for card in cards) and await open_handoff_ids(ctx, session_row,
+                                                                                             cards_only=True):
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
         found, usage = await soft_promises(ctx, language, prose, backing)
@@ -645,9 +649,10 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
 
     With `handoff_backed` (the soft-promise check passed the prose shown an open handoff's card,
     which it read without a lock while the model ran), a passing verdict stands only if the
-    session still has an open handoff, which `handoff_still_open` then holds `FOR SHARE` until the
-    verdict commits, so the owner can't mark it done before the reply is on record. If the owner
-    marked it done meanwhile, nothing backs the card's words any longer: the verdict fails as the
+    session still has an open handoff of kind `card`, which `handoff_still_open` then holds `FOR
+    SHARE` until the verdict commits, so the owner can't mark it done before the reply is on
+    record. If the owner marked it done meanwhile, or a call-back request made it a call-back's,
+    nothing backs the card's words any longer: the verdict fails as the
     check would have failed it without the card, with a `soft_promise` violation
     (`soft.handoff_closed`) and the handoff card in the prose's place, which then opens a new
     handoff.
@@ -706,12 +711,15 @@ def card_alert(who: str) -> str:
     return f"{who} is waiting in a conversation the Desk handed to you."
 
 
-async def open_handoff_ids(ctx: KernelCtx, session_row: SessionRow, *, lock: bool = False) -> list[str]:
-    """The IDs of the session's open handoffs, of either kind: read without a lock, or with `lock`
-    held `FOR SHARE` (step 10 of the lock order), so the owner can't mark one done until the
-    caller's transaction ends."""
+async def open_handoff_ids(ctx: KernelCtx, session_row: SessionRow, *, lock: bool = False,
+                           cards_only: bool = False) -> list[str]:
+    """The IDs of the session's open handoffs, of either kind, or with `cards_only` only those the
+    handoff card opened: read without a lock, or with `lock` held `FOR SHARE` (step 10 of the lock
+    order), so the owner can't mark one done until the caller's transaction ends."""
     stmt = select(Handoff.handoff_id).where(Handoff.desk_id == session_row.desk_id,
                                            Handoff.session_id == session_row.session_id, Handoff.status == "open")
+    if cards_only:
+        stmt = stmt.where(Handoff.kind == "card")
     if lock:
         stmt = stmt.order_by(Handoff.handoff_id).with_for_update(read=True)
     return list(await ctx.db.scalars(ctx.repo.scoped(stmt)))
@@ -727,11 +735,12 @@ async def _lock_session(ctx: KernelCtx, session_row: SessionRow):
 
 
 async def handoff_still_open(ctx: KernelCtx, session_row: SessionRow) -> bool:
-    """Whether the session still has an open handoff, in the lock order: the session row, then its
-    open handoffs `FOR SHARE`, held until the caller's transaction ends, so none of them is marked
-    done before what leans on it is on record."""
+    """Whether the session still has an open handoff the handoff card opened, in the lock order:
+    the session row, then those open handoffs `FOR SHARE`, held until the caller's transaction
+    ends, so none of them is marked done, or made a call-back's, before what leans on it is on
+    record."""
     await _lock_session(ctx, session_row)
-    return bool(await open_handoff_ids(ctx, session_row, lock=True))
+    return bool(await open_handoff_ids(ctx, session_row, lock=True, cards_only=True))
 
 
 async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:

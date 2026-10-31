@@ -286,16 +286,24 @@ async def test_the_soft_promise_check_reads_an_open_handoffs_card(app, client, r
     assert reviewer.soft_inputs[-1].cards == []                                  # done: no longer shown
 
 
-async def test_an_open_call_back_request_backs_the_card_too(app, client, reviewer):
-    """A call-back request is the session's open handoff as well: the owner has the conversation in
-    Needs you, so the check reads the handoff card beside the reply's own cards."""
-    copy, visitor = await visitor_of(app, client)
+async def test_an_open_call_back_request_backs_nothing(app, client, reviewer, frozen_clock):
+    """Only an open handoff the handoff card opened backs a later reply (the owner's decision of
+    2026-10-31). A call-back request shows the visitor its own card, with a time, and never says
+    the owner will reply here; once its window has passed, nothing promises a call any longer. So
+    while a call-back is open, before or after its window, the check is shown no handoff card, and
+    "Maria Rivera will reply here" is the model's to flag."""
+    copy, visitor = await visitor_of(app, client)                 # Friday 10:04 in Oakland: 11:00 to 12:00
     [fact] = (await callback(client, visitor)).facts
     verdict = await checked(client, visitor, "I passed your request on.", [clause("callback_confirmed", fact.fact_id)])
     assert verdict.ok, verdict.violations
-    card = verdict.blocks[-1].text
-    assert reviewer.soft_inputs[-1].cards == [card, HANDOFF_CARD["en"]]
-    assert [block.template or block.kind for block in verdict.blocks] == ["prose", "callback_confirmed"]
+    assert reviewer.soft_inputs[-1].cards == [verdict.blocks[-1].text]          # its own card, alone
+    for moment in (None, fact.expires_at):                                      # before and after its window
+        if moment is not None:
+            frozen_clock.travel(moment)
+        assert (await checked(client, visitor, REPLY_HERE)).ok                  # the fake model passes anything
+        assert reviewer.soft_inputs[-1].cards == []                             # but nothing backed it
+    [handoff] = await handoffs_of(app, copy)
+    assert (handoff.kind, handoff.status) == ("callback", "open")              # still the session's open handoff
 
 
 async def test_a_session_with_no_handoff_of_its_own_is_shown_no_card(app, client, reviewer):
