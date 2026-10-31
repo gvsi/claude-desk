@@ -913,6 +913,18 @@ describe("Ask Claude's question about a hold", () => {
     expect(chipWords(group)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
   });
 
+  it('hold_question_reads_needs_you_as_rules_opens', async () => {
+    // From Today, which has just read Needs you, with polls far apart (a minute): Rules reads it
+    // again as it opens, so the chip comes with that one read, not the first poll.
+    const { screen, router } = await renderRoute(`${DESK}/today`, { pollScale: 20 });
+    await expect.element(screen.getByRole('button', { name: 'Deny this time' })).toBeVisible();
+    const before = requests('needsYou').length;
+    await router.navigate(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    expect(requests('needsYou')).toHaveLength(before + 1);
+  });
+
   it('hold_question_reaches_ask_claude_as_typed', async () => {
     mockStore.world.addHeldRefund();
     const { screen } = await renderRoute(`${DESK}/rules`);

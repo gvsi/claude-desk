@@ -88,8 +88,9 @@ export function RulesPage() {
   const suggestions = useQuery({ ...suggestionsQuery(deskId), refetchInterval: pollMs('rules') });
   // The Desk's held requests, as Needs you lists them: the latest is one more thing to ask about,
   // but only from a read made since the page opened, with no failed read since the last that
-  // worked and none waiting for the network, so a hold answered or expired since never shows.
-  const needsYou = useNeedsYou(deskId);
+  // worked and none waiting for the network, so a hold answered or expired since never shows. The
+  // page reads it as it opens, so the question doesn't wait for the first poll.
+  const needsYou = useNeedsYou(deskId, { readOnOpen: true });
   const current = needsYou.isFetchedAfterMount && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && needsYou.fetchStatus !== 'paused';
   const question = current ? holdQuestion(needsYou.data ?? []) : null;
   const chips = question === null ? RULES_CHIPS : [...RULES_CHIPS, question];
