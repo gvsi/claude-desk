@@ -2719,6 +2719,44 @@ def knowledge_item(readers: list[str], text: str = "Street parking is free after
 
 
 @pytest.mark.kernel_plan("01b")
+async def test_knowledge_created_at_reads_in_kernel_order_and_survives_replacement(kernel, arrange, api_ro_conn):
+    """The API's reader exposes each stored first-added time, ordered by time then ID, even after replacement."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+    reader = KernelRO(api_ro_conn, copy.copy_id, ro_schema, own_transactions=True)
+    for item_id in ("upload-z", "upload-a"):
+        item = knowledge_item(["owner"]).model_copy(update={"item_id": item_id})
+        await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=item))
+
+    async def read() -> list[dict]:
+        rows = await reader.rows("knowledge_items", desk_id=desk_id, order_by=("created_at", "item_id"))
+        recorded = arrange.recorded_knowledge_created_at(desk_id)
+        assert {row["item_id"]: row["created_at"] for row in rows} == recorded
+        assert all(isinstance(row["created_at"], datetime) and row["created_at"].tzinfo for row in rows)
+        assert [(row["created_at"], row["item_id"]) for row in rows] == sorted(
+            (at, item_id) for item_id, at in recorded.items())
+        return rows
+
+    first = await read()
+    first_times = {row["item_id"]: row["created_at"] for row in first}
+    # Fake time is fixed; move it so resetting created_at on replacement would fail on both kernels.
+    if state is not None:
+        state.now += timedelta(seconds=1)
+    later = knowledge_item(["owner"]).model_copy(update={"item_id": "upload-later"})
+    await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=later))
+    replacement = knowledge_item(["public"], text="Updated parking directions.").model_copy(
+        update={"item_id": "upload-z"})
+    await owner.call("POST /knowledge", KnowledgeRequest(desk_id=desk_id, item=replacement))
+    after = await read()
+    assert {row["item_id"]: row["created_at"] for row in after if row["item_id"] in first_times} == first_times
+    updated = next(row for row in after if row["item_id"] == "upload-z")
+    assert (updated["text"], updated["readers"]) == (replacement.text, ["public"])
+    assert after[-1]["item_id"] == "upload-later"
+    assert after[-1]["created_at"] > max(first_times.values())
+
+
+@pytest.mark.kernel_plan("01b")
 async def test_knowledge_round_trips(kernel, ro_read):
     """`POST /knowledge` stores the owner's item as given, owner-only until the owner marks it public: re-posting the
     same `item_id` with `["public"]` updates it in place, and visitors' `/context` then carries it. Readers other than

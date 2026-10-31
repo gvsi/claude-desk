@@ -50,7 +50,7 @@ KERNEL_RO_COLUMNS: dict[str, tuple[str, ...]] = {
                         "cedar_sha256", "schema_sha256", "baseline_sha256", "profiles_sha256", "invariants_sha256",
                         "review_thresholds_version", "auto_money_cap_cents", "created_at"),
     "facts": ("fact_id", "copy_id", "desk_id", "kind", "status", "claims", "readers", "expires_at"),
-    "knowledge_items": ("item_id", "copy_id", "desk_id", "source", "title", "text", "readers"),
+    "knowledge_items": ("item_id", "copy_id", "desk_id", "source", "title", "text", "readers", "created_at"),
     "quotes": ("quote_id", "copy_id", "desk_id", "session_id", "items", "list_cents", "discount_bp",
                "amount_cents", "status", "expires_at", "created_at"),
     "bookings": ("booking_id", "copy_id", "desk_id", "slot_id", "starts_at", "person_id", "lead_id", "status"),
