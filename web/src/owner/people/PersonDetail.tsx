@@ -80,9 +80,19 @@ export function PersonDetail() {
     return <div className="cd-person">{failure === null ? <LoadingLine>Loading this customer</LoadingLine> : <ReadFailed failure={failure} />}</div>;
   }
 
-  // Someone the copy's list doesn't hold: the not-found screen, never anyone else's page.
+  // Someone the copy's list doesn't hold: the not-found screen, never anyone else's page. Only a
+  // read made since the page opened decides that, since a list read earlier may not have them yet;
+  // until it lands, the page is loading, and if it fails, it says so with Try again.
   const person = people.data.people.find((p) => p.person_id === personId);
-  if (person === undefined) throw new OutsideTheCopy();
+  if (person === undefined) {
+    const fresh = people.isFetchedAfterMount && !people.isFetching && failure === null;
+    if (fresh) throw new OutsideTheCopy();
+    return (
+      <div className="cd-person">
+        {failure !== null && !people.isFetching ? <ReadFailed failure={failure} /> : <LoadingLine>Loading this customer</LoadingLine>}
+      </div>
+    );
+  }
 
   const name = person.display_name;
   return (

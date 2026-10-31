@@ -420,6 +420,28 @@ describe('customers', () => {
   });
 });
 
+describe('a person outside the list', () => {
+  it('person_page_reads_the_list_again_before_not_found', async () => {
+    // Customers read the list before Dana was on it.
+    mockStore.inject({ route: 'people', status: 200, body: { people: [{ person_id: bob.personId, display_name: bob.name, masked_contact: bob.maskedContact }], leads: [] } });
+    const { screen, router } = await renderRoute(PEOPLE, { pollScale: 100 });
+    await expect.element(screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+    expect(screen.getByText(dana.name).query()).toBeNull();
+
+    // Her page, opened from that older list: it reads the list again and waits for that read
+    // before it decides she isn't in the copy, and the fresh read has her.
+    const now = held();
+    const answer = await mockStore.dispatch('people', { params: { desk_id: RIVERA.deskId } });
+    mockStore.inject({ route: 'people', status: 200, until: now.until, body: (answer as { body: unknown }).body });
+    await router.navigate(`${PEOPLE}/${dana.personId}`);
+    await expect.element(screen.getByRole('status').filter({ hasText: /^Loading this customer$/ })).toBeVisible();
+    expect(screen.getByText("This page doesn't exist").query()).toBeNull();
+    now.release();
+    await expect.element(screen.getByRole('heading', { level: 1, name: dana.name })).toBeVisible();
+    expect(screen.getByText("This page doesn't exist").query()).toBeNull();
+  });
+});
+
 describe('share', () => {
   it('share_page_uses_the_desk_slug', async () => {
     const { screen } = await renderRoute(`${DESK}/share`);
