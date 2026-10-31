@@ -51,8 +51,8 @@ ES_MARKERS = frozenset("""
     está estás tu te ti lo ya del al claro listo perfecto enseguida quedó
 """.split())
 
-# French, Portuguese, Italian and German markers, with Spanish homographs handled below:
-# the homographs ("pour", "et", "est", "eu", "sim"; "das", "sur", "pela", "pode",
+# French, Portuguese, Italian and German words that English and Spanish don't write on their own:
+# the homographs ("pour", "et", "est", "eu", "sim"; "das", "des", "une", "sur", "pela", "pode",
 # "che") are left out, and a few loanwords, abbreviations and prefixes stay ("non", "ciao",
 # "merci", "à", "au", "pas", "tout", "ce", "com", "nous", "mit", "ci", "il")
 OTHER_MARKERS = frozenset("""
@@ -61,9 +61,6 @@ OTHER_MARKERS = frozenset("""
     anche molto ciao ich und nicht ist mit ein bitte danke kann für sie wir ihnen gerne
     à au toi moi tout quand demain já vou estou tudo depois assim bem certo perfeito
     ci gli più bene tutto perfetto subito dopo
-    tous toutes sans des aux leur leurs notre nos vos une chez cette ces être sera seront
-    gratuit gratuite gratuits gratuites frais offert offerte offerts offertes garanti garantie
-    remboursé remboursés remise
 """.split())
 
 # English markers that French ("on", "an", "but"), German ("in", "an", "am", "was", "will",
@@ -73,16 +70,10 @@ OTHER_MARKERS = frozenset("""
 # writes "to" far more often
 EN_SHARED = frozenset("on in an am was will i also her all for but".split())
 
-# French markers also written in Spanish (dar, unir, and the pronoun): they remain
-# positive French evidence on their own, but cannot outweigh a recognized Spanish marker.
-OTHER_SHARED_ES = frozenset("des nos une".split())
-
 if EN_MARKERS & ES_MARKERS or (EN_MARKERS | ES_MARKERS) & OTHER_MARKERS:
     raise RuntimeError("the language marker sets are disjoint")
 if not EN_SHARED <= EN_MARKERS:
     raise RuntimeError("the English markers other languages write are English markers")
-if not OTHER_SHARED_ES <= OTHER_MARKERS:
-    raise RuntimeError("the shared Spanish words are other-language markers")
 
 WORD = re.compile(r"[^\W\d_]+")
 
@@ -115,8 +106,7 @@ def _detect(text: str, *, unmarked_is_other: bool) -> Detected:
         es += SPANISH_MARK_BONUS
     other = sum(word in OTHER_MARKERS for word in words)
     shared = sum(word in EN_SHARED for word in words)
-    shared_es = sum(word in OTHER_SHARED_ES for word in words)
-    if other > en - shared and other - shared_es >= es:
+    if other > en - shared and other >= es:
         return "other"
     if en == es == 0:
         return "other" if unmarked_is_other and len(words) >= MIN_UNMARKED_WORDS else "none"

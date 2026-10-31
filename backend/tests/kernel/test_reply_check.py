@@ -43,6 +43,23 @@ from .test_execute import executed
 ROUTE = "POST /check_reply"
 
 
+@pytest.mark.parametrize(("prose", "detected"), [
+    ("In Des Moines.", "en"),
+    ("Nos vemos.", "none"),
+    ("No des vueltas.", "none"),
+    ("Une ambos tubos.", "none"),
+    ("Vos estás cerca.", "es"),
+])
+async def test_honest_english_spanish_language_and_real_reply(app, client, prose, detected):
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked(client, visitor, prose)
+    verify_verdict(app.state.kernel.signer.public_key_hex(), visitor.session_id, verdict)
+    assert verdict.ok and verdict.violations == []
+    assert verdict.blocks == [RenderedBlock(kind="prose", text=prose)]
+    assert lang.detect(prose) == detected
+    assert not lang.positive_other_language(prose)
+
+
 def clause(template: str, fact_id: str | None = None) -> dict:
     return {"template": template, "fact_id": fact_id}
 
