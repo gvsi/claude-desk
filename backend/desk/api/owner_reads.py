@@ -248,7 +248,8 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
 
     Exact codes only; never inspect or echo owner/visitor prose. Early `reason` wins, including an unknown one.
     For evaluated refusals, take the first match in the policy precedence below, regardless of the IDs' row order.
-    Unknown codes/IDs and a missing entry have no label. The web holds the signed labels shown here for reference.
+    Unknown codes/IDs and a missing, malformed or mismatched entry have no label. A valid entry has a `decide`
+    event, a dict summary with outcome `refuse`, and a matching decision ID when present. The web holds the labels.
 
     Source                                           Cause                 Signed label
     reason: paused                                   paused                The chat was paused
@@ -276,12 +277,21 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       B.no_agent_pay_out                             agent_pay_out         Agents can't send money out
       B.agent_charge_within_mandate                  agent_limit           Over the agent's spending limit
       B.money_has_amount                             no_amount             No amount given
-    no reason, empty policy_ids                      no_rule               No rule covers this yet
+    no reason, empty policy_ids and card_ids         no_rule               No rule covers this yet
     anything else                                    null                  (no label)
     """
     if entry is None:
         return None
-    summary = (entry["event"] or {}).get("summary") or {}
+    event = entry.get("event")
+    if not isinstance(event, dict) or event.get("kind") != "decide":
+        return None
+    summary = event.get("summary")
+    if not isinstance(summary, dict) or summary.get("outcome") != "refuse":
+        return None
+    if "decision_id" in summary and summary["decision_id"] != row["decision_id"]:
+        return None
+    if any(key in summary and not isinstance(summary[key], str) for key in ("reason", "check")):
+        return None
     if "reason" in summary:
         if summary["reason"] == "adapter_refused":
             checks: dict[str, RefusalCause] = {
@@ -315,7 +325,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
             if policy == "B.private_data_record_owner" and verified:
                 return None
             return cause
-    return None if policies else "no_rule"
+    return None if policies or row["card_ids"] else "no_rule"
 
 
 def reply_violations(summary: dict) -> list[tuple[str, str | None]]:

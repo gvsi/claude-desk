@@ -33,6 +33,12 @@ from desk.api.schemas import Attempt, RefusalCause
     ({}, [], "no_rule"),
     ({"reason": "new_reason"}, ["F.never.card"], None),
     ({"reason": "adapter_refused", "check": "new_check"}, ["F.never.card"], None),
+    ({"reason": {"withheld": True}}, [], None),
+    ({"reason": "adapter_refused", "check": {"withheld": True}}, [], None),
+    ({"reason": "paused", "check": {"withheld": True}}, [], None),
+    ({"check": {"withheld": True}}, ["F.never.card"], None),
+    ({"reason": None}, [], None),
+    ({"reason": "adapter_refused", "check": None}, [], None),
     ({"reason": "adapter_refused"}, [], None),
     ({}, ["B.new_policy"], None),
     ({}, ["B.auto_money_cap"], None),
@@ -45,8 +51,8 @@ from desk.api.schemas import Attempt, RefusalCause
     ({}, ["X.F.never.card"], None),
 ])
 def test_refusal_cause_uses_exact_kernel_codes(summary, policies, expected):
-    row = {"policy_ids": policies, "reason_plain": "Your rule says never", "card_ids": ["never-decoy"]}
-    entry = {"event": {"kind": "decide", "summary": summary}}
+    row = {"decision_id": "decision", "policy_ids": policies, "reason_plain": "Your rule says never", "card_ids": []}
+    entry = {"event": {"kind": "decide", "summary": {"outcome": "refuse", **summary}}}
 
     assert refusal_cause(row, entry, verified=False) == expected
 
@@ -68,3 +74,31 @@ def test_refusal_cause_is_closed_and_held_requests_have_no_cause():
 
 def test_refusal_without_its_ledger_entry_has_no_cause():
     assert refusal_cause({"policy_ids": []}, None, verified=False) is None
+
+
+@pytest.mark.parametrize("entry", [
+    {}, {"event": None}, {"event": []}, {"event": "decide"},
+    {"event": {"kind": "reply", "summary": {"outcome": "refuse", "reason": "paused"}}},
+    {"event": {"kind": "decide"}},
+    *[{"event": {"kind": "decide", "summary": value}} for value in (None, [], "refuse", 1)],
+    {"event": {"kind": "decide", "summary": {}}},
+    *[{"event": {"kind": "decide", "summary": {"outcome": value, "reason": "paused"}}}
+      for value in (None, "allow", "hold")],
+    {"event": {"kind": "decide", "summary": {
+        "outcome": "refuse", "decision_id": "someone-else", "reason": "paused"}}},
+    {"event": {"kind": "decide", "summary": {"outcome": "refuse", "decision_id": None}}},
+])
+def test_refusal_requires_matching_refused_decide_entry(entry):
+    row = {"decision_id": "decision", "policy_ids": [], "card_ids": []}
+    assert refusal_cause(row, entry, verified=False) is None
+
+
+@pytest.mark.parametrize("decision_id", [None, "decision"])
+def test_plain_deny_requires_no_cards(decision_id):
+    summary = {"outcome": "refuse"}
+    if decision_id is not None:
+        summary["decision_id"] = decision_id
+    entry = {"event": {"kind": "decide", "summary": summary}}
+    row = {"decision_id": "decision", "policy_ids": [], "card_ids": ["unmapped-card"]}
+    assert refusal_cause(row, entry, verified=False) is None
+    assert refusal_cause({**row, "card_ids": []}, entry, verified=False) == "no_rule"

@@ -889,6 +889,36 @@ async def test_safety_cause_from_adapter_check(scene):
     assert item["cause"] == "no_such_slot"
 
 
+@pytest.mark.parametrize("summary", [
+    {"reason": {"withheld": True}},
+    {"reason": "adapter_refused", "check": {"withheld": True}},
+])
+async def test_safety_keeps_other_entries_when_a_code_is_withheld(scene, monkeypatch, summary):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    withheld = await who.decide("native.book", {"slot_id": "S-20990101-0000"})
+    scene.fake.never(scene.owner.desk_id, "native.find_slots")
+    other = await who.decide("native.find_slots", {})
+    blocked_seq = await scene.blocked_reply(who, local(2026, 10, 29, 20))
+    rows = KernelRO.rows
+
+    async def with_withheld_code(ro, view, **filters):
+        found = await rows(ro, view, **filters)
+        if view == "ledger_entries":
+            for row in found:
+                if row["seq"] == withheld.ledger_seq:
+                    row["event"]["summary"].update(summary)
+        return found
+
+    monkeypatch.setattr(KernelRO, "rows", with_withheld_code)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200, listed.text
+    causes = {item["ref_id"]: item["cause"] for item in listed.json()}
+    assert causes[withheld.decision_id] is None
+    assert causes[other.decision_id] == "owner_rule"
+    assert causes[str(blocked_seq)] is None
+
+
 @pytest.mark.parametrize(("source", "cause"), [
     ("early_reason", "incomplete_request"), ("baseline_verified", None),
     ("baseline_unverified", "not_verified"), ("plain_deny", "no_rule"),
