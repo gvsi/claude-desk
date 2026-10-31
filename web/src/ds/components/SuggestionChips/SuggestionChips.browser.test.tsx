@@ -16,7 +16,7 @@ declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
 }
 
-/** Setup's three examples, which wrap onto their own lines in a phone's 358 px column. */
+/** Three example labels, which wrap onto their own lines in a phone's 358 px column. */
 const EXAMPLES = ['A plumber in Oakland', 'A bakery that takes custom orders', 'A tax preparer'];
 
 /** Renders `ui` into a fresh host on the page; the returned function takes it off again. */
@@ -34,6 +34,23 @@ function mount(ui: ReactElement): { host: HTMLDivElement; unmount: () => void } 
     },
   };
 }
+
+it('shows_three_suggestions_by_default_and_four_when_requested', () => {
+  const suggestions = ['A hair salon in Oakland', 'A plumber in Oakland', 'Apartments in Sacramento', 'A CPA firm in San Jose'];
+  const { host, unmount } = mount(
+    <>
+      <SuggestionChips label="Default" suggestions={suggestions} onPick={() => {}} />
+      <SuggestionChips label="Starters" suggestions={suggestions} max={4} onPick={() => {}} />
+    </>,
+  );
+  try {
+    const words = (label: string) => [...host.querySelectorAll(`[aria-label="${label}"] button`)].map((chip) => chip.textContent);
+    expect(words('Default')).toEqual(suggestions.slice(0, 3));
+    expect(words('Starters')).toEqual(suggestions);
+  } finally {
+    unmount();
+  }
+});
 
 it('touch_hit_areas_reach_halfway_to_each_neighbour', async () => {
   const { host, unmount } = mount(

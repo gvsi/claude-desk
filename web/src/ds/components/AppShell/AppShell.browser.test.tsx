@@ -66,6 +66,68 @@ it('fill_never_changes_the_sidebar', () => {
   expect(look()).toEqual(PANEL);
 });
 
+it('skip_link_is_the_first_stop_and_moves_focus_to_the_page', async () => {
+  // "Skip to content" is the first Tab stop, before the banner's Start over and the navigation.
+  // Hidden until keyboard focus, it shows at the top left over the sidebar with the standard focus
+  // ring; Enter moves focus to the page, and the next Tab continues inside it. A mouse never shows it.
+  for (const layout of ['auto', 'compact'] as const) {
+    act(() =>
+      root.render(
+        <AppShell
+          layout={layout}
+          banner={<button type="button">Start over</button>}
+          sidebar={
+            <nav aria-label="Main">
+              <a href="#today">Today</a>
+            </nav>
+          }
+          business="Rivera Plumbing"
+        >
+          <button type="button">First on the page</button>
+        </AppShell>,
+      ),
+    );
+    const skip = page.getByRole('link', { name: 'Skip to content' }).element() as HTMLAnchorElement;
+    const hidden = () => {
+      const box = skip.getBoundingClientRect();
+      return box.width <= 1 && box.height <= 1;
+    };
+    expect([layout, hidden()]).toEqual([layout, true]);
+
+    // Tab from the start of the document, as on a page just opened: from a control just before
+    // the shell, gone before the Tab.
+    const start = document.createElement('button');
+    container.before(start);
+    start.focus();
+    start.remove();
+    await userEvent.tab();
+    expect([layout, document.activeElement]).toEqual([layout, skip]);
+    expect([layout, hidden()]).toEqual([layout, false]);
+    // At the top left, over the banner and the sidebar: nothing covers it.
+    const box = skip.getBoundingClientRect();
+    expect([layout, box.left < 24, box.top < 24]).toEqual([layout, true, true]);
+    expect(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('a')).toBe(skip);
+    const ring = getComputedStyle(skip);
+    expect([ring.outlineStyle, ring.outlineWidth, ring.outlineColor]).toEqual(['solid', '2px', 'rgb(126, 174, 218)']);
+
+    // Enter moves focus to the page, leaving the address as it is, and the next Tab is inside it.
+    const address = window.location.href;
+    await userEvent.keyboard('{Enter}');
+    const main = container.querySelector('main') as HTMLElement;
+    expect([layout, document.activeElement]).toEqual([layout, main]);
+    expect(skip.getAttribute('href')).toBe(`#${main.id}`);
+    expect(window.location.href).toBe(address);
+    expect(hidden()).toBe(true);
+    await userEvent.tab();
+    expect(document.activeElement).toBe(page.getByRole('button', { name: 'First on the page' }).element());
+
+    // After a click, focus a script puts on it doesn't show it: only the keyboard does.
+    await userEvent.click(page.getByRole('button', { name: 'Start over' }));
+    skip.focus();
+    expect([layout, document.activeElement, hidden()]).toEqual([layout, skip, true]);
+  }
+});
+
 it('page_state_survives_the_breakpoint', async () => {
   act(() =>
     root.render(

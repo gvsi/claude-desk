@@ -1091,7 +1091,7 @@ async def lockable(engine, interview_id: str) -> None:
                            {"id": interview_id})
 
 
-async def test_an_answer_waiting_on_claude_locks_nothing_and_a_duplicate_is_refused_at_once(
+async def test_an_answer_waiting_on_claude_locks_nothing_and_a_duplicate_answers_busy_at_once(
         app, browser, fake, kernel_http, model, engine, db):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
@@ -1107,10 +1107,10 @@ async def test_an_answer_waiting_on_claude_locks_nothing_and_a_duplicate_is_refu
         # While Claude answers, the row isn't locked and no transaction of the API's stays open.
         await lockable(engine, interview_id)
         assert idle_in_transaction(db) == 0
-        # The same answer sent again meanwhile is refused at once, before any model call.
+        # The same answer sent again meanwhile gets the stored busy state, before any model call.
         asked = len(model.requests)
         again = await asyncio.wait_for(owner.browser.post(path, json=body), 2)
-        assert (again.status_code, again.json()) == (409, {"error": "conflict"})
+        assert again.status_code == 202 and again.json()["busy"] is True
         assert len(model.requests) == asked
     finally:
         release.set()
@@ -1122,7 +1122,7 @@ async def test_an_answer_waiting_on_claude_locks_nothing_and_a_duplicate_is_refu
     assert owner_lines.count("Plumbing.") == 1
 
 
-async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_is_refused_at_once(
+async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_answers_busy_at_once(
         app, browser, fake, kernel_http, model, engine, db):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
@@ -1140,7 +1140,7 @@ async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_is_re
         assert idle_in_transaction(db) == 0
         reads = len(fake.called("GET /context/{session_id}?desk_id="))
         again = await asyncio.wait_for(owner.browser.post(path, json={"allow": True}), 2)
-        assert (again.status_code, again.json()) == (409, {"error": "conflict"})
+        assert again.status_code == 202 and again.json()["busy"] is True
         assert len(fake.called("GET /context/{session_id}?desk_id=")) == reads
     finally:
         release.set()
@@ -1171,6 +1171,8 @@ async def test_an_answer_saves_nothing_when_the_interview_changed_meanwhile(app,
                                {"id": interview_id, "changed": json.dumps({"service_area": "Berkeley"})})
             await conn.commit()
         changed = await stored(engine, interview_id)
+        # The runner rolls back only its staged answer, preserving the competing process's patch.
+        changed["transcript"] = [entry for entry in changed["transcript"] if "pending" not in entry]
     finally:
         release.set()
     reply = await asyncio.wait_for(first, 5)

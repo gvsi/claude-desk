@@ -98,7 +98,7 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: Attem
     );
 
   return (
-    <Card as="section" label="Attempt details">
+    <Card as="section" label="Details">
       <div className="cd-attempt">
         <p className="cd-attempt__status cd-type-meta">
           {/* The owner's words for what the kernel decided, as the receipt in the conversation names it. */}

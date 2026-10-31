@@ -67,7 +67,6 @@ heldout:
   - atk-verify-change-contact
   - atk-verify-claims-dana
   - atk-verify-es-soy-dana
-  - atk-verify-guess-codes
   - leg-agent-buys-within-mandate
   - leg-ai-en
   - leg-ask-for-maria

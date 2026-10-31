@@ -5,10 +5,11 @@ import { StatusLabel, type StatusTone } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { conversationPath } from '../conversations/status.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { causeLabel } from '../safety/copy.ts';
 
-/** Each kind's word and dot. */
+/** Each kind's word and dot. A turned-down request is no alarm: its dot is the hollow, neutral one. */
 const KINDS = {
-  blocked: { word: 'Blocked', tone: 'refused' },
+  turned_down: { word: 'Turned down', tone: 'info' },
   booking: { word: 'Booked', tone: 'handled' },
   lead: { word: 'New lead', tone: 'info' },
   answer: { word: 'Answered', tone: 'handled' },
@@ -28,13 +29,16 @@ function Name({ children }: { children: string }) {
   );
 }
 
-/** The row's words: what happened, in the kernel's words or the visitor's own. */
+/** The row's words: what happened, in the signed cause labels, the kernel's words or the visitor's own. */
 function words(item: BriefingItem): ReactNode {
   const name = item.display_name?.trim() ? item.display_name : null;
   switch (item.kind) {
-    case 'blocked':
-      // The kernel's reason for a refusal; a blocked reply of Claude's has none of its own.
-      return <span className="cd-briefing-row__line">{item.line ?? 'A reply was stopped before it was shown.'}</span>;
+    case 'turned_down': {
+      // Why it was turned down, in the owner's signed words for its cause. With no cause this build
+      // has words for, the kernel's reason when there is one, else nothing beside the kind's word.
+      const why = causeLabel({ kind: 'refused', cause: item.cause }) ?? item.line;
+      return why ? <span className="cd-briefing-row__line">{why}</span> : null;
+    }
     case 'booking':
       return (
         <>
@@ -58,9 +62,9 @@ function words(item: BriefingItem): ReactNode {
   }
 }
 
-/** Where a row leads: a blocked attempt to its page on Safety, anything else to its conversation, if it has one. */
+/** Where a row leads: a turned-down request to its page on Safety, anything else to its conversation, if it has one. */
 function hrefFor(deskId: string, item: BriefingItem): string | null {
-  if (item.kind === 'blocked') return `/app/${encodeURIComponent(deskId)}/safety/${encodeURIComponent(item.ref_id)}`;
+  if (item.kind === 'turned_down') return `/app/${encodeURIComponent(deskId)}/safety/${encodeURIComponent(item.ref_id)}`;
   return item.session_id === null ? null : conversationPath(deskId, item.session_id);
 }
 

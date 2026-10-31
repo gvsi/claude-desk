@@ -31,6 +31,7 @@ A row with `live` lands once, in about half a second, at most 650 ms (the last l
 - A booking's or a payment's check (`drawCheck`) draws as its line lands.
 - `live` is read once, when the row is first drawn: changing it later neither starts nor stops the motion, and a re-render never replays it.
 - It lands once. When the last line has landed, the row is like any other: a line attached later (a held request's outcome, an approval) shows at once, and nothing in it can land again.
+- The browser regression for a later line waits until `cd-transcript-row--live` is gone before attaching it. An empty animation list alone can precede the landing re-check and the render that spends it. `LiveReply` shows the live arrival; this test changes no component behavior.
 - The motion is visual only. The log announces the row as it does without it, and the words, order and colors are the same.
 - Under reduced motion nothing moves: the row and everything attached show at once, and the landing is spent, so turning motion back on never plays it.
 
