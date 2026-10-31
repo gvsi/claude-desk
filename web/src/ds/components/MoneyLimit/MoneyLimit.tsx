@@ -5,12 +5,18 @@ import { TextField } from '../TextField/TextField.tsx';
 
 import './MoneyLimit.css';
 
-export interface MoneyLimitProps {
+interface MoneyLimitLine {
   /**
    * The payment limit in the screen's words: "No payment over $500 goes through without asking
    * you, whatever the rules below say.", or "Every payment asks you first." when none is set.
    */
   line: string;
+  /** The limit leads the rules under it, as above the setup interview's rules: its line in weight 520. */
+  prominent?: boolean;
+}
+
+/** The limit with "Change", which opens a field to draft a new one, as on the Rules page. */
+interface MoneyLimitEditable extends MoneyLimitLine {
   /** The field is open. */
   editing: boolean;
   /** The field's label; "Most a payment can be without asking you, in dollars" by default. */
@@ -31,30 +37,37 @@ export interface MoneyLimitProps {
   onCancel: () => void;
   /** A draft is in flight: the buttons wait. */
   disabled?: boolean;
-  /** The limit leads the rules under it, as above the setup interview's rules: its line in weight 520. */
-  prominent?: boolean;
 }
+
+/**
+ * The limit in words only, with nothing to change: the setup interview's rules step, which has no
+ * "Change" (owner ruling, 2026-10-30). Without `onEdit`, none of the field's props apply.
+ */
+interface MoneyLimitReadOnly extends MoneyLimitLine {
+  editing?: undefined;
+  label?: undefined;
+  value?: undefined;
+  hint?: undefined;
+  error?: undefined;
+  onEdit?: undefined;
+  onChange?: undefined;
+  onReview?: undefined;
+  onCancel?: undefined;
+  disabled?: undefined;
+}
+
+export type MoneyLimitProps = MoneyLimitEditable | MoneyLimitReadOnly;
 
 /**
  * The Desk's payment limit, the line at the top of a group of payment tools on the Rules page (its
  * `ConnectorSection`'s `aboveTools`): the limit in words with "Change", or, while editing, a field
- * with "Review change" and "Cancel". It never reads the value: the screen checks it, shows
- * `error`, and drafts the change, which applies only after its review.
+ * with "Review change" and "Cancel". Without `onEdit` it is the line alone, as above the setup
+ * interview's rules. It never reads the value: the screen checks it, shows `error`, and drafts the
+ * change, which applies only after its review.
  */
-export function MoneyLimit({
-  line,
-  editing,
-  label = 'Most a payment can be without asking you, in dollars',
-  value,
-  hint,
-  error,
-  onEdit,
-  onChange,
-  onReview,
-  onCancel,
-  disabled = false,
-  prominent = false,
-}: MoneyLimitProps) {
+export function MoneyLimit(props: MoneyLimitProps) {
+  const { line, prominent = false } = props;
+  const editing = props.onEdit !== undefined && props.editing;
   const root = useRef<HTMLDivElement>(null);
   // "Change" is described by its own line, so the Rules page's two (Payments and Stripe) differ.
   const lineId = useId();
@@ -68,6 +81,18 @@ export function MoneyLimit({
     target?.focus();
   }, [editing]);
 
+  const className = `cd-money-limit${editing ? ' cd-money-limit--editing' : ''}${prominent ? ' cd-money-limit--prominent' : ''}`;
+  if (props.onEdit === undefined) {
+    return (
+      <div ref={root} className={className}>
+        <div className="cd-money-limit__reading">
+          <p className="cd-money-limit__line cd-type-body">{line}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const { label = 'Most a payment can be without asking you, in dollars', value, hint, error, onEdit, onChange, onReview, onCancel, disabled = false } = props;
   const review = (event?: FormEvent) => {
     event?.preventDefault();
     if (disabled) return;
@@ -75,7 +100,7 @@ export function MoneyLimit({
   };
 
   return (
-    <div ref={root} className={`cd-money-limit${editing ? ' cd-money-limit--editing' : ''}${prominent ? ' cd-money-limit--prominent' : ''}`}>
+    <div ref={root} className={className}>
       {editing ? (
         <form className="cd-money-limit__form" noValidate onSubmit={review}>
           <div className="cd-money-limit__field">

@@ -29,6 +29,7 @@ export {
   NEW_CHAT_LABEL,
   RATE_LIMITED_COPY,
   RELOAD_PAGE_LABEL,
+  SETUP_START_LOST_COPY,
   UNREACHABLE_COPY,
   errorCopy,
   evErrorCopy,
@@ -46,7 +47,7 @@ export {
   type SegmentedControlProps,
   type SegmentedOption,
 } from './components/SegmentedControl/SegmentedControl.tsx';
-export { Composer, type ComposerProps, type ComposerVariant } from './components/Composer/Composer.tsx';
+export { Composer, type ComposerFailed, type ComposerProps, type ComposerVariant } from './components/Composer/Composer.tsx';
 export { SuggestionChips, type SuggestionChipsProps } from './components/SuggestionChips/SuggestionChips.tsx';
 export { TextField, type TextFieldProps } from './components/TextField/TextField.tsx';
 
@@ -141,6 +142,7 @@ export { DemoInboxSheet, type DemoInboxSheetProps } from './components/DemoInbox
 // Setup
 export { SituationRow, type SituationRowProps } from './components/SituationRow/SituationRow.tsx';
 export { SafetyCheckRow, type SafetyCheckRowProps } from './components/SafetyCheckRow/SafetyCheckRow.tsx';
+export { SetupToolsList, type SetupToolsListProps, type SetupToolsRow } from './components/SetupToolsList/SetupToolsList.tsx';
 
 // Agents
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
@@ -226,6 +228,7 @@ export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './c
 export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
 export { ConnectorIcon, type ConnectorIconName, type ConnectorIconProps } from './components/ConnectorIcon/ConnectorIcon.tsx';
 export { ConnectorName, type ConnectorNameProps, type ConnectorView } from './components/ConnectorName/ConnectorName.tsx';
+export { ConnectorSummary, type ConnectorSummaryProps } from './components/ConnectorName/ConnectorSummary.tsx';
 export {
   ConnectorSection,
   type ConnectorSectionProps,

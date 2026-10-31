@@ -178,7 +178,7 @@ describe('public chat page', () => {
 
     // Prices and dates reach a visitor only in cards; Claude's own words carry none.
     for (const bad of ['It is $180', 'Good until Tuesday', 'el sábado', 'en noviembre', 'at 2 pm']) expect(bad).toMatch(PRICE_OR_DATE);
-    expect("Maria will text you when she's on her way.").not.toMatch(PRICE_OR_DATE);
+    expect("You're all set. Here's your visit.").not.toMatch(PRICE_OR_DATE);
     const prose = [...screen.container.querySelectorAll('.cd-claude-message__prose')].map((p) => p.textContent ?? '');
     expect(prose.length).toBeGreaterThanOrEqual(6);
     for (const text of prose) expect(text, text).not.toMatch(PRICE_OR_DATE);
@@ -313,6 +313,30 @@ describe('public chat page', () => {
     // The visitor can keep going: the next reply clears the line.
     await say(screen, 'How much is drain clearing?');
     await expect.element(screen.getByText(UNREACHABLE_COPY.en, { exact: true })).not.toBeInTheDocument();
+  });
+
+  it('deleted_desk_ends_the_chat', async () => {
+    // The owner deletes the Desk the moment Claude starts writing a reply.
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const deleted: Promise<unknown>[] = [];
+    const stop = mockStore.listen(RIVERA.slug, chatEvents().length, (_seq, ev) => {
+      if (ev.type === 'writing' && deleted.length === 0) deleted.push(mockStore.dispatch('deleteDesk', { params: { desk_id: RIVERA.deskId } }));
+    });
+    onTestFinished(stop);
+    await type(screen, 'How much is drain clearing?');
+    await vi.waitFor(() => expect(deleted).toHaveLength(1));
+    expect(await deleted[0]).toMatchObject({ status: 204 });
+
+    // The chat ends, and stops showing Claude writing: no reply is coming.
+    await expect.element(screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Claude is writing')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element()).toBeDisabled();
+    expect(messagesOf(chatEvents())).toEqual([]);
+
+    // A new chat finds the Desk gone.
+    await screen.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
   });
 
   it('session_error_offers_a_new_chat', async () => {

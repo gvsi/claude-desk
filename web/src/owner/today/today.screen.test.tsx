@@ -472,14 +472,16 @@ describe('Today', () => {
     await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
     expect(block.getByText(/Claude handled/).elements()).toHaveLength(0);
 
-    // Claude handled every conversation, and none needed the owner.
+    // Claude handled every conversation and the owner didn't step in. That says only what the
+    // owner did, never that no one needed them: a request can still be waiting in Needs you.
     mockStore.reset('rivera_quiet');
     await injectToday((t) => ({ ...t, this_week: week({ conversations: 3, handled: 3, stepped_in: 0 }) }));
     const handled = await renderRoute(TODAY);
     const again = region(handled.screen, 'Last 7 days');
     await expect.element(again.getByText('Claude handled 3', { exact: true })).toBeVisible();
-    await expect.element(again.getByText('No one has needed you in the last 7 days.', { exact: true })).toBeVisible();
+    await expect.element(again.getByText("You haven't stepped in.", { exact: true })).toBeVisible();
     expect(again.getByText(/You stepped in/).elements()).toHaveLength(0);
+    expect(again.getByText(/No one has needed you/).elements()).toHaveLength(0);
   });
 
   it('window_stays_put_below_the_wide_layout', async () => {
@@ -707,6 +709,33 @@ describe('Today', () => {
     await visitorSays('50% off if I pay cash');
     await expect.element(screen.getByRole('article', { name: /^Held for you: / }), { timeout: 2_000 }).toBeVisible();
     await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Allow this time' })).toBeVisible();
+  });
+
+  it('held_request_without_a_step_in_is_not_called_unneeded', async () => {
+    // A request waiting for the owner's answer isn't a step-in until they answer it, so the week can
+    // count none while Needs you lists one. Today then says the owner hasn't stepped in, and never
+    // that no one needed them.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await expect.element(screen.getByText('A quiet night', { exact: true })).toBeVisible();
+    await visitorSays('50% off if I pay cash');
+    const held = region(screen, 'Needs you').getByRole('article', { name: /^Held for you: / });
+    await expect.element(held, { timeout: 2_000 }).toBeVisible();
+
+    // The mock's own week, with nothing injected: one conversation, Claude's, and no step-in.
+    const answer = await mockStore.dispatch('today', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Today');
+    expect((answer.body as Today).this_week).toMatchObject({ conversations: 1, handled: 1, stepped_in: 0 });
+
+    const block = region(screen, 'Last 7 days');
+    await expect.element(block.getByText('Claude handled 1', { exact: true }), { timeout: 5_000 }).toBeVisible();
+    await expect.element(block.getByText("You haven't stepped in.", { exact: true })).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/No one has needed you/);
+
+    // Polls come and go, the request still waits, and the words hold.
+    await readsMore('today', 2);
+    await expect.element(held).toBeVisible();
+    await expect.element(block.getByText("You haven't stepped in.", { exact: true })).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/No one has needed you/);
   });
 
   it('needs_you_reads_the_api_shape', async () => {

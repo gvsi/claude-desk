@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useState } from 'react';
 import { expect, fireEvent, fn } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { Button } from '../Button/Button.tsx';
 import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { Composer } from './Composer.tsx';
 
@@ -248,6 +250,192 @@ export const Disabled: Story = {
     await userEvent.type(input, 'Hello');
     await expect(input).toHaveValue('');
     await expect(args.onSend).not.toHaveBeenCalled();
+  },
+};
+
+/** The owner's answer the setup interview couldn't take, and the page's line about it, as N-R2-Setup-04-Answer-Failed writes them. */
+const KEPT_ANSWER = '$500 is fine. Anything bigger, ask me.';
+const FAILED_LINE = 'I couldn’t answer just now. Your answer is still here; try again.';
+
+/** What the screen sends again when "Try again" is chosen. */
+const retried = fn();
+
+export const Failed: Story = {
+  args: {
+    variant: 'owner',
+    label: 'Answer in your own words',
+    placeholder: 'Answer in your own words',
+    maxLength: 2000,
+    failed: { text: KEPT_ANSWER, line: FAILED_LINE, onRetry: fn() },
+  },
+  parameters: { canvas: 'N-R2-Setup-04-Answer-Failed' },
+  play: async ({ args, canvas, userEvent }) => {
+    // failed_keeps_the_answer: the page's line as an alert, then the answer as it was written in
+    // the composer's box, with "Try again" in it and nothing to type into.
+    const alert = canvas.getByRole('alert');
+    await expect(alert).toHaveTextContent(FAILED_LINE);
+    await expect(alert.querySelector('.cd-status-dot--refused')).not.toBeNull();
+    await expect(canvas.queryByRole('textbox')).toBeNull();
+    const kept = canvas.getByText(KEPT_ANSWER);
+    await expect(kept).toHaveAttribute('data-copy', 'user');
+    expectComputed(kept, { fontFamily: /Hanken Grotesk/, fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.92)' });
+    const tryAgain = canvas.getByRole('button', { name: 'Try again' });
+    await expect(canvas.getAllByRole('button')).toEqual([tryAgain]);
+    expectComputed(tryAgain, { height: '32px', backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' });
+
+    // The box is the composer's surface as the board draws it: no hairline, padded 12 px 14 px, 56 px
+    // high around one line, the answer and the button 12 px apart, both on the box's bottom line.
+    const box = boxOf(kept);
+    await expect(box).toHaveAccessibleName('Answer in your own words');
+    expectComputed(box, {
+      backgroundColor: 'rgb(42, 41, 39)',
+      borderTopLeftRadius: '16px',
+      boxShadow: 'rgba(0, 0, 0, 0.25) 0px 4px 20px 0px',
+      paddingTop: '12px',
+      paddingRight: '14px',
+      paddingBottom: '12px',
+      paddingLeft: '14px',
+      height: '56px',
+    });
+    const keptBox = kept.getBoundingClientRect();
+    const buttonBox = tryAgain.getBoundingClientRect();
+    await expect(buttonBox.left - keptBox.right).toBe(12);
+    await expect(keptBox.bottom).toBe(buttonBox.bottom);
+    // The line sits 20 px over the box.
+    await expect(box.getBoundingClientRect().top - alert.getBoundingClientRect().bottom).toBe(20);
+
+    await userEvent.click(tryAgain);
+    await expect(args.failed?.onRetry).toHaveBeenCalledTimes(1);
+    await expect(args.onSend).not.toHaveBeenCalled();
+  },
+};
+
+export const FailedWhileSending: Story = {
+  args: { ...Failed.args, disabled: true, failed: { text: KEPT_ANSWER, line: FAILED_LINE, onRetry: fn() } },
+  parameters: { canvas: 'N-R2-Setup-04-Answer-Failed', canvasNote: 'The board draws "Try again" ready; here the answer is being sent again, so it waits.' },
+  play: async ({ args, canvas, userEvent }) => {
+    // failed_retry_waits_while_sending: while the screen sends again, "Try again" waits, keeps its
+    // focus and calls nothing, however often it is pressed.
+    const tryAgain = canvas.getByRole('button', { name: 'Try again' });
+    await expect(tryAgain).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(tryAgain);
+    await userEvent.click(tryAgain);
+    await expect(tryAgain).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.failed?.onRetry).not.toHaveBeenCalled();
+    await expect(canvas.getByText(KEPT_ANSWER)).toBeVisible();
+  },
+};
+
+export const FailedInSpanish: Story = {
+  args: {
+    label: 'Escribe a Rivera Plumbing',
+    placeholder: 'Escribe a Rivera Plumbing',
+    sendLabel: 'Enviar',
+    failed: {
+      text: '¿Cuánto cuesta destapar un desagüe?',
+      line: 'No se pudo enviar. Tu mensaje sigue aquí; inténtalo de nuevo.',
+      retryLabel: 'Intentar de nuevo',
+      onRetry: fn(),
+    },
+  },
+  parameters: { canvas: 'N-R2-Setup-04-Answer-Failed', canvasNote: 'The board draws the owner’s English; here a Spanish screen names the button in its own words.' },
+  play: async ({ args, canvas, userEvent }) => {
+    // failed_retry_label_is_the_screens: a screen in another language names the button itself.
+    const retry = canvas.getByRole('button', { name: 'Intentar de nuevo' });
+    await expect(canvas.queryByRole('button', { name: 'Try again' })).toBeNull();
+    await userEvent.click(retry);
+    await expect(args.failed?.onRetry).toHaveBeenCalledTimes(1);
+  },
+};
+
+/**
+ * A screen whose answers fail until it tries again: "Fail the send" stands in for the request
+ * coming back failed, clicked without moving focus, as a response arrives.
+ */
+function AnswerThatFails({ onSend, onRetry }: { onSend: (text: string) => void; onRetry: (text: string) => void }) {
+  const [sent, setSent] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-20)' }}>
+      <Composer
+        variant="owner"
+        label="Answer in your own words"
+        placeholder="Answer in your own words"
+        onSend={(text) => {
+          onSend(text);
+          setSent(text);
+        }}
+        failed={
+          failed && sent !== null
+            ? {
+                text: sent,
+                line: FAILED_LINE,
+                onRetry: () => {
+                  onRetry(sent);
+                  setFailed(false);
+                },
+              }
+            : undefined
+        }
+      />
+      <div style={{ display: 'flex', gap: 'var(--space-8)' }}>
+        <Button variant="secondary" onClick={() => setFailed(true)}>
+          Fail the send
+        </Button>
+        <Button variant="secondary">Something else</Button>
+      </div>
+    </div>
+  );
+}
+
+export const FailedThenTryAgain: Story = {
+  args: { variant: 'owner', label: 'Answer in your own words', placeholder: 'Answer in your own words' },
+  render: ({ onSend }) => <AnswerThatFails onSend={onSend} onRetry={retried} />,
+  parameters: {
+    canvas: 'N-R2-Setup-04-Answer-Failed',
+    canvasNote: 'The board draws the failed state alone; here the answer is sent, fails, and is tried again, with two buttons standing in for the screen.',
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    retried.mockClear();
+    const failSend = canvas.getByRole('button', { name: 'Fail the send' });
+
+    // failed_send_moves_focus_to_try_again: the text box that had focus goes, so "Try again" takes it.
+    await userEvent.click(canvas.getByRole('textbox', { name: 'Answer in your own words' }));
+    await userEvent.keyboard(`${KEPT_ANSWER}{Enter}`);
+    await expect(args.onSend).toHaveBeenCalledWith(KEPT_ANSWER);
+    fireEvent.click(failSend);
+    const tryAgain = await canvas.findByRole('button', { name: 'Try again' });
+    await expect(canvas.getByText(KEPT_ANSWER)).toBeVisible();
+    await expect(tryAgain).toHaveFocus();
+
+    // try_again_returns_focus_to_the_text_box: the kept words go back to the screen, and the text
+    // box comes back empty, with the focus.
+    await userEvent.keyboard('{Enter}');
+    await expect(retried).toHaveBeenCalledTimes(1);
+    await expect(retried).toHaveBeenCalledWith(KEPT_ANSWER);
+    const input = canvas.getByRole('textbox', { name: 'Answer in your own words' });
+    await expect(input).toHaveValue('');
+    await expect(input).toHaveFocus();
+
+    // failed_send_leaves_focus_elsewhere_alone: focus the owner moved away stays where it is.
+    await userEvent.keyboard('Anything over $500, ask me.{Enter}');
+    const elsewhere = canvas.getByRole('button', { name: 'Something else' });
+    await userEvent.click(elsewhere);
+    fireEvent.click(failSend);
+    await canvas.findByRole('button', { name: 'Try again' });
+    await expect(elsewhere).toHaveFocus();
+
+    // failed_send_leaves_the_page_focused_alone: focus the owner left on the page itself, by
+    // clicking away from the composer, stays there too; only the composer's own control hands on.
+    await userEvent.click(canvas.getByRole('button', { name: 'Try again' }));
+    await expect(canvas.getByRole('textbox', { name: 'Answer in your own words' })).toHaveFocus();
+    await userEvent.keyboard('Ask me about anything over $500.{Enter}');
+    await userEvent.click(canvasElement);
+    await expect(document.activeElement).toBe(document.body);
+    fireEvent.click(failSend);
+    await canvas.findByRole('button', { name: 'Try again' });
+    await expect(document.activeElement).toBe(document.body);
   },
 };
 

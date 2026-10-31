@@ -63,7 +63,19 @@ export interface ScreenBasicsOptions {
   owner: boolean;
 }
 
+/**
+ * Waits for every animation on the page that ends (rows fading in one by one), so contrast is
+ * checked on what settles, not mid-fade. Animations that loop (a spinner, the writing dots) are left.
+ */
+async function animationsSettled(root: HTMLElement): Promise<void> {
+  const ending = root.ownerDocument
+    .getAnimations()
+    .filter((animation) => animation.playState === 'running' && Number.isFinite(animation.effect?.getComputedTiming().endTime ?? Infinity));
+  await Promise.all(ending.map((animation) => animation.finished.catch(() => undefined)));
+}
+
 export async function expectScreenBasics(root: HTMLElement, { owner }: ScreenBasicsOptions): Promise<void> {
+  await animationsSettled(root);
   const footers = root.querySelectorAll('[data-ds="concept-footer"]');
   expect(footers, 'one concept footer').toHaveLength(1);
   expect(footers[0]?.textContent?.replace(/\s+/g, ' ').trim()).toBe(CONCEPT_FOOTER_TEXT);
