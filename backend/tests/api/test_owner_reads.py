@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text as sql
 
+from desk.api import owner_reads
 from desk.api.kernel_client import CredentialView, KernelFailed
 from desk.api.main import create_app
 from desk.api.owner_reads import (
@@ -446,7 +447,7 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
         "decision": None, "held_by": None, "held_at": None,
         "handoff": {"handoff_id": handoff["handoff_id"], "session_id": caller.session_id,
                     "reason": "Sam Ortiz · (510) 555-0199 · Leaking water heater", "callback_window": None,
-                    "status": "open"},
+                    "status": "open", "kind": "callback"},
         "session": {"session_id": caller.session_id, "kind": "visitor", "display_name": "Sam Ortiz",
                     "verified": False, "assurance": "none"},
         "from_the_visitor": "It's the heater in the garage"}
@@ -456,6 +457,46 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                                                          for decision_id in (seeded, dana_hold.decision_id))
     assert all(call.headers[OWNER] == owner.token for call in reads)
 
+
+
+async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
+                                                                                   engine, db):
+    """A conversation the kernel's handoff card handed to the owner (#96) is in Needs you as a handoff of kind `card`:
+    no call-back window, since none was promised, and the kernel's reason, never the draft's words. A call-back
+    request is kind `callback`, so the owner's screens can tell the two apart though neither has a window here, and a
+    session whose call-back request is open gets no second handoff from a blocked reply."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    caller = await guest(kernel_http, fake, owner)
+    await caller.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                                 "reason": "Leaking water heater"})
+    fake.now += timedelta(minutes=5)
+    handed = await guest(kernel_http, fake, owner)
+    await write(engine, db, handed.ids, "visitor_text", text="How much is a new water heater?")
+    for who in (handed, caller):
+        draft = ReplyDraft(session_id=who.session_id, generation=who.generation, prose="That's 1,400 dollars.")
+        verdict = await who.kernel.call("POST /check_reply", CheckReplyRequest(draft=draft))
+        assert not verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
+    # one handoff each: the caller's is its call back
+    assert sorted(row["session_id"] for row in fake.handoffs.values()) == sorted([caller.session_id, handed.session_id])
+    opened = {row["session_id"]: handoff_id for handoff_id, row in fake.handoffs.items()}
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    handoffs = {item["session"]["session_id"]: item for item in listed.json() if item["handoff"] is not None}
+    assert handoffs[handed.session_id] == {
+        "decision": None, "held_by": None, "held_at": None,
+        "handoff": {"handoff_id": opened[handed.session_id], "session_id": handed.session_id,
+                    "reason": "The Desk handed this to you.", "callback_window": None, "status": "open",
+                    "kind": "card"},
+        "session": {"session_id": handed.session_id, "kind": "visitor", "display_name": None, "verified": False,
+                    "assurance": "none"},
+        "from_the_visitor": "How much is a new water heater?"}
+    assert handoffs[caller.session_id]["handoff"] == {
+        "handoff_id": opened[caller.session_id], "session_id": caller.session_id,
+        "reason": "Sam Ortiz · (510) 555-0199 · Leaking water heater", "callback_window": None, "status": "open",
+        "kind": "callback"}
+    assert len(handoffs) == 2
 
 
 async def test_handoff_done_leaves_needs_you(app, browser, fake, kernel_http):
@@ -507,6 +548,70 @@ async def test_expired_hold_refreshes_on_read(app, browser, fake, kernel_http, r
     assert today.status_code == 200 and today.json()["needs_you_count"] == 0
 
 
+async def test_briefing_answers_after_a_stopped_draft(scene, clock):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    await scene.text(who, local(2026, 10, 29, 19))
+    seq = await scene.blocked_reply(who, local(2026, 10, 29, 19, 1))
+    await scene.reply(who, local(2026, 10, 29, 19, 2))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
+    safety = (await owner.get(f"desks/{owner.desk_id}/safety")).json()
+
+    assert [(item["kind"], item["ref_id"]) for item in listed] == [("answer", who.session_id)]
+    assert [(item["kind"], item["ref_id"]) for item in safety] == [("reply_blocked", str(seq))]
+
+
+async def test_briefing_does_not_count_an_earlier_answer_when_the_chat_ends_in_handoff(scene, clock):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    await scene.text(who, local(2026, 10, 29, 19))
+    await scene.reply(who, local(2026, 10, 29, 19, 1))
+    await scene.text(who, local(2026, 10, 29, 19, 2))
+    seq = await scene.blocked_reply(who, local(2026, 10, 29, 19, 3))
+    await scene.reply(who, local(2026, 10, 29, 19, 4), handoff=True)
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    brief = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]
+    assert brief["newest"]["lead_or_answer"] is None and brief["total"] == 0
+    assert (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"] == []
+    assert [(item["kind"], item["ref_id"]) for item in
+            (await owner.get(f"desks/{owner.desk_id}/safety")).json()] == [("reply_blocked", str(seq))]
+
+
+async def test_briefing_omits_stopped_drafts_when_the_only_delivered_reply_is_a_handoff(scene, clock):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    await scene.text(who, local(2026, 10, 29, 19))
+    first = await scene.blocked_reply(who, local(2026, 10, 29, 19, 0, 30))
+    seq = await scene.blocked_reply(who, local(2026, 10, 29, 19, 1))
+    await scene.reply(who, local(2026, 10, 29, 19, 2), handoff=True)
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    assert (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"] == []
+    assert [(item["kind"], item["ref_id"]) for item in
+            (await owner.get(f"desks/{owner.desk_id}/safety")).json()] == [
+                ("reply_blocked", str(seq)), ("reply_blocked", str(first))]
+
+
+async def test_briefing_turns_down_refused_requests_with_their_cause(scene, clock):
+    scene.fake.never(scene.owner.desk_id, "native.find_slots")
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    refused = await who.decide("native.find_slots", {})
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    brief = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]
+    listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
+
+    assert brief["turned_down"] == brief["total"] == 1
+    assert "blocked" not in brief and "blocked" not in brief["newest"]
+    assert brief["newest"]["turned_down"] == listed[0]
+    assert (listed[0]["kind"], listed[0]["ref_id"], listed[0]["cause"]) == (
+        "turned_down", refused.decision_id, "owner_rule")
+
+
 async def test_briefing_counts_and_newest_rows(scene, clock):
     # Before 18:00 yesterday (2026-10-29): one of each, none of which the briefing counts.
     for when, act in ((local(2026, 10, 29, 17), "refusal"), (local(2026, 10, 29, 17, 10), "blocked_reply"),
@@ -530,7 +635,7 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     await scene.reply(refused_chat, local(2026, 10, 29, 20, 1))
     blocked_chat = await scene.visitor(local(2026, 10, 29, 21))
     await scene.text(blocked_chat, local(2026, 10, 29, 21), "How much is a drain?")
-    blocked_seq = await scene.blocked_reply(blocked_chat, local(2026, 10, 29, 21))
+    await scene.blocked_reply(blocked_chat, local(2026, 10, 29, 21))
     await scene.reply(blocked_chat, local(2026, 10, 29, 21, 2))
     booked_chat = await scene.visitor(local(2026, 10, 29, 22))
     await scene.text(booked_chat, local(2026, 10, 29, 22), "Book me in")
@@ -554,24 +659,25 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert [summary["session_id"] for summary in today["live"]] == [handed_off.session_id]
     brief = today["briefing"]
     assert brief["since"] == stamp(local(2026, 10, 29, 18)) == "2026-10-30T01:00:00Z"
-    assert {key: brief[key] for key in ("conversations", "bookings", "leads", "blocked", "total")} == {
-        "conversations": 6, "bookings": 1, "leads": 1, "blocked": 2, "total": 5}
+    assert {key: brief[key] for key in ("conversations", "bookings", "leads", "turned_down", "total")} == {
+        "conversations": 6, "bookings": 1, "leads": 1, "turned_down": 1, "total": 5}
     assert brief["newest"] == {
-        "blocked": {"kind": "blocked", "at": stamp(local(2026, 10, 29, 21)), "session_id": blocked_chat.session_id,
-                    "display_name": None, "ref_id": str(blocked_seq), "line": None},
+        "turned_down": {"kind": "turned_down", "at": stamp(local(2026, 10, 29, 20)),
+                        "session_id": refused_chat.session_id, "display_name": None,
+                        "ref_id": refused.decision_id, "line": refused.reason_plain, "cause": "tool_not_available"},
         "booking": {"kind": "booking", "at": stamp(local(2026, 10, 29, 22)), "session_id": booked_chat.session_id,
-                    "display_name": None, "ref_id": booked.decision_id, "line": booked.reason_plain},
+                    "display_name": None, "ref_id": booked.decision_id, "line": booked.reason_plain, "cause": None},
         "lead_or_answer": {"kind": "answer", "at": stamp(local(2026, 10, 30, 7, 1)), "session_id": answered.session_id,
-                           "display_name": None, "ref_id": answered.session_id, "line": None}}
+                           "display_name": None, "ref_id": answered.session_id, "line": None, "cause": None}}
     listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()
     assert listed["since"] == brief["since"]
     assert [(item["kind"], item["ref_id"]) for item in listed["items"]] == [
-        ("answer", answered.session_id), ("booking", booked.decision_id), ("blocked", str(blocked_seq)),
-        ("blocked", refused.decision_id), ("lead", lead_id)]
+        ("answer", answered.session_id), ("booking", booked.decision_id), ("answer", blocked_chat.session_id),
+        ("turned_down", refused.decision_id), ("lead", lead_id)]
     assert listed["items"][3]["line"] == refused.reason_plain
     assert listed["items"][4] == {"kind": "lead", "at": stamp(local(2026, 10, 29, 18)),
                                   "session_id": lead_chat.session_id, "display_name": "Sam Ortiz", "ref_id": lead_id,
-                                  "line": "Call after 5, the side gate"}
+                                  "line": "Call after 5, the side gate", "cause": None}
     # computed from the rows on each read: polling gives the same briefing
     assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"] == brief
 
@@ -602,12 +708,12 @@ async def test_briefing_list_is_the_window_newest_first(scene, clock):
     assert [(item["kind"], item["ref_id"], item["at"]) for item in listed.json()["items"]] == [
         ("lead", lead_id, stamp(local(2026, 10, 30, 6))),
         ("answer", answered.session_id, stamp(local(2026, 10, 30, 6))),
-        ("blocked", refused.decision_id, stamp(local(2026, 10, 29, 19))),
+        ("turned_down", refused.decision_id, stamp(local(2026, 10, 29, 19))),
         ("booking", booked.decision_id, stamp(local(2026, 10, 29, 19))),
-        ("blocked", same_time[0], stamp(pushy_at)), ("blocked", same_time[1], stamp(pushy_at))]
+        ("turned_down", same_time[0], stamp(pushy_at)), ("turned_down", same_time[1], stamp(pushy_at))]
     brief = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]
     assert brief["total"] == 6 and brief["newest"]["lead_or_answer"]["kind"] == "lead"
-    assert (brief["newest"]["blocked"]["ref_id"], brief["newest"]["booking"]["ref_id"]) == (
+    assert (brief["newest"]["turned_down"]["ref_id"], brief["newest"]["booking"]["ref_id"]) == (
         refused.decision_id, booked.decision_id)
 
 
@@ -798,8 +904,8 @@ async def test_stopped_counts_only_attempts(scene, clock):
     today = (await owner.get(f"desks/{owner.desk_id}/today")).json()
     safety = await owner.get(f"desks/{owner.desk_id}/safety")
 
-    # Safety and the briefing list the refusal and the blocked reply; the last 7 days count the refusal alone
-    assert (today["this_week"]["stopped"], today["briefing"]["blocked"]) == (1, 2)
+    # Safety lists the refusal and the stopped draft; Today lists and counts the refusal alone
+    assert (today["this_week"]["stopped"], today["briefing"]["turned_down"]) == (1, 1)
     assert safety.status_code == 200, safety.text
     assert [(attempt["kind"], attempt["ref_id"]) for attempt in safety.json()] == [
         ("reply_blocked", str(blocked_seq)), ("refused", refused.decision_id)]
@@ -807,8 +913,7 @@ async def test_stopped_counts_only_attempts(scene, clock):
 
 async def test_stopped_counts_refused_requests_not_claudes_drafts(scene, clock):
     """The last 7 days count as stopped only the requests the kernel refused: a draft of Claude's the reply check
-    stopped is no attempt anyone made. Safety still lists both kinds, and the briefing still shows each draft among
-    its blocked items, whose words claim no attempt."""
+    stopped is no attempt anyone made. Safety still lists both kinds; the briefing lists only refused requests."""
     pushy = await scene.visitor(local(2026, 10, 29, 19))
     refused = await scene.refusal(pushy, local(2026, 10, 29, 19))
     first = await scene.blocked_reply(pushy, local(2026, 10, 29, 19, 10))
@@ -828,25 +933,25 @@ async def test_stopped_counts_refused_requests_not_claudes_drafts(scene, clock):
     assert safety.status_code == 200, safety.text
     assert [(attempt["kind"], attempt["ref_id"]) for attempt in safety.json()] == [
         ("reply_blocked", str(second)), ("reply_blocked", str(first)), ("refused", refused.decision_id)]
-    assert today["briefing"]["blocked"] == 3
+    assert today["briefing"]["turned_down"] == 1
     assert [(item["kind"], item["ref_id"]) for item in listed] == [
-        ("blocked", str(second)), ("blocked", str(first)), ("blocked", refused.decision_id)]
+        ("turned_down", refused.decision_id)]
 
 
 def test_the_week_and_the_reports_count_only_refused_requests():
     """`week_counts`, the one count Today's last 7 days and the reports share, takes only refused requests as stopped:
-    a replayed draft of Claude's the reply check stopped neither counts nor flags the week as recorded history, while
-    "since last night", which lists it among its blocked items, is flagged."""
+    a replayed draft of Claude's the reply check stopped neither counts nor flags the week or briefing as recorded
+    history."""
     frame = windows(local(2026, 10, 30, 9), "America/Los_Angeles")
     at = local(2026, 10, 29, 19)
     done = Activity(people=People([], [], []), bookings=[], booked={}, leads=[], holds=[], callbacks=[], stepped=[],
-                    texts=[], replies=[], stopped=[
+                    texts=[], replies=[], handoffs=[], stopped=[
                         Stopped(at=at, session_id="sess-a", ref_id="dec-refused", kind="refused"),
                         Stopped(at=at, session_id="sess-a", ref_id="7", kind="reply_blocked", replayed=True),
                         Stopped(at=at, session_id="sess-b", ref_id="9", kind="reply_blocked")])
 
     assert [attempt.ref_id for attempt in week_counts(done, frame.start, frame.now).stopped] == ["dec-refused"]
-    assert recorded_history(done, frame) == RecordedHistory(needs_you=False, briefing=True, this_week=False)
+    assert recorded_history(done, frame) == RecordedHistory(needs_you=False, briefing=False, this_week=False)
 
 
 
@@ -868,13 +973,168 @@ async def test_safety_lists_refusals_with_origin(scene, clock):
         {"ref_id": str(replayed_seq), "kind": "reply_blocked",
          "reason_plain": "A reply was stopped before it was shown, because it wrote a number outside a checked card.",
          "card_ids": [], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 20)), "triage": None,
-         "ledger_seq": replayed_seq},
+         "ledger_seq": replayed_seq, "cause": None},
         {"ref_id": refused.decision_id, "kind": "refused", "reason_plain": refused.reason_plain,
          "card_ids": ["never-native.find_slots"], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 19)),
-         "triage": None, "ledger_seq": refused.ledger_seq}]
-    # the replayed entry is listed at the time it was recorded, in the briefing too, not when it was written
-    newest = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]["newest"]["blocked"]
-    assert (newest["ref_id"], newest["at"], newest["line"]) == (str(replayed_seq), stamp(local(2026, 10, 29, 20)), None)
+         "triage": None, "ledger_seq": refused.ledger_seq, "cause": "owner_rule"}]
+    # Safety keeps the replayed draft at its recorded time; the briefing contains only the refused request.
+    newest = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]["newest"]["turned_down"]
+    assert (newest["ref_id"], newest["at"], newest["line"]) == (
+        refused.decision_id, stamp(local(2026, 10, 29, 19)), refused.reason_plain)
+
+
+@pytest.mark.parametrize(("tool", "args", "cause"), [
+    ("native.book", {"slot_id": "S-20990101-0000"}, "no_such_slot"),
+    ("native.quote", {"items": [{"item_id": "missing", "qty": 1}]}, "unknown_item"),
+    ("native.quote", None, "over_quote_ceiling"),
+    ("native.release_document", {"document_id": "missing"}, "no_such_document"),
+    ("payments.create_refund", {"charge_id": "missing"}, "no_such_charge"),
+])
+async def test_safety_cause_from_adapter_check(scene, tool, args, cause):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    if tool in ("native.release_document", "payments.create_refund"):
+        scene.fake.verify(who.session_id, "dana")
+    if args is None:
+        desk = scene.fake.desks[scene.owner.desk_id]
+        item_id = item_ids(scene.fake, scene.owner)
+        desk.prices[item_id] = desk.prices[item_id].model_copy(update={"unit_cents": 600_000})
+        args = {"items": [{"item_id": item_id, "qty": 2}]}
+    refusal = await who.decide(tool, args)
+    assert refusal.outcome == "refuse"
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] == cause
+
+
+async def test_verification_commits_between_owner_reads(scene, monkeypatch):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    rows = KernelRO.rows
+    refusal = None
+
+    async def interleaved(ro, view, **filters):
+        nonlocal refusal
+        found = await rows(ro, view, **filters)
+        if view == "sessions" and refusal is None:
+            scene.fake.verify(who.session_id, "dana")
+            desk = scene.fake.desks[scene.owner.desk_id]
+            person = scene.fake.sessions[who.session_id].person_id
+            document = next(doc for doc in desk.documents.values() if doc.record_owner_person_id != person)
+            refusal = await who.decide("native.release_document", {"document_id": document.document_id})
+            assert refusal.outcome == "refuse"
+            assert refusal.policy_ids == ["B.private_data_record_owner"]
+        return found
+
+    monkeypatch.setattr(KernelRO, "rows", interleaved)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200
+    # Both the verification and decision committed after the snapshot started: neither belongs in this read.
+    assert all(item["ref_id"] != refusal.decision_id for item in listed.json())
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] == "not_their_record"
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("summary", 1), ("summary", "malformed"), ("summary", None), ("summary", []),
+    ("event", 1), ("event", "malformed"), ("event", None), ("event", []),
+])
+async def test_malformed_summary_keeps_safety_available(scene, monkeypatch, field, value):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    refusal = await who.decide("native.book", {"slot_id": "S-20990101-0000"})
+    rows = KernelRO.rows
+    stopped = []
+    original_stopped = owner_reads._stopped_attempts
+
+    def capture_stopped(*args):
+        found = original_stopped(*args)
+        stopped.extend(found)
+        return found
+
+    async def malformed(ro, view, **filters):
+        found = await rows(ro, view, **filters)
+        if view == "ledger_entries":
+            for row in found:
+                if row["seq"] == refusal.ledger_seq:
+                    if field == "event":
+                        row["event"] = value
+                    else:
+                        row["event"]["summary"] = value
+        return found
+
+    monkeypatch.setattr(KernelRO, "rows", malformed)
+    monkeypatch.setattr(owner_reads, "_stopped_attempts", capture_stopped)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] is None
+    (attempt,) = [attempt for attempt in stopped if attempt.ref_id == refusal.decision_id]
+    assert attempt.replayed is True
+
+
+@pytest.mark.parametrize("summary", [
+    {"reason": {"withheld": True}},
+    {"reason": "adapter_refused", "check": {"withheld": True}},
+])
+async def test_safety_keeps_other_entries_when_a_code_is_withheld(scene, monkeypatch, summary):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    withheld = await who.decide("native.book", {"slot_id": "S-20990101-0000"})
+    scene.fake.never(scene.owner.desk_id, "native.find_slots")
+    other = await who.decide("native.find_slots", {})
+    blocked_seq = await scene.blocked_reply(who, local(2026, 10, 29, 20))
+    rows = KernelRO.rows
+
+    async def with_withheld_code(ro, view, **filters):
+        found = await rows(ro, view, **filters)
+        if view == "ledger_entries":
+            for row in found:
+                if row["seq"] == withheld.ledger_seq:
+                    row["event"]["summary"].update(summary)
+        return found
+
+    monkeypatch.setattr(KernelRO, "rows", with_withheld_code)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200, listed.text
+    causes = {item["ref_id"]: item["cause"] for item in listed.json()}
+    assert causes[withheld.decision_id] is None
+    assert causes[other.decision_id] == "owner_rule"
+    assert causes[str(blocked_seq)] is None
+
+
+@pytest.mark.parametrize(("source", "cause"), [
+    ("early_reason", "incomplete_request"), ("baseline_verified", "not_their_record"),
+    ("baseline_unverified", "not_verified"), ("plain_deny", "no_rule"),
+])
+async def test_safety_cause_from_decision_source(scene, monkeypatch, source, cause):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    tool, args = "native.book", {}
+    if source.startswith("baseline_"):
+        if source == "baseline_verified":
+            scene.fake.verify(who.session_id, "dana")
+        else:
+            # Exercise the baseline independently of the tool-discovery gate.
+            monkeypatch.setattr(scene.fake, "tools_given", lambda session, desk: ("native.release_document",))
+        desk = scene.fake.desks[scene.owner.desk_id]
+        person = scene.fake.sessions[who.session_id].person_id
+        document = next(doc for doc in desk.documents.values() if doc.record_owner_person_id != person)
+        tool, args = "native.release_document", {"document_id": document.document_id}
+    elif source == "plain_deny":
+        # An evaluated Cedar deny with no deciding policies (no permit covers this request).
+        monkeypatch.setattr(scene.fake, "_rule", lambda session, desk, action: ("refuse", [], None))
+        tool, args = "native.find_slots", {}
+    refusal = await who.decide(tool, args)
+    assert refusal.outcome == "refuse"
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] == cause
 
 
 STOPPED = "A reply was stopped before it was shown, because "
@@ -899,6 +1159,16 @@ def test_the_booking_line_goes_by_the_kernels_booking_rules():
     # it checks: a language added to the check, or a rule renamed there, can't leave a booking claim read as a promise
     assert {rule_id for rule_id, _ in reply_check.BOOKING_LINES} == {
         rule_id for rule_id, line in REPLY_WHY_BY_RULE.items() if line == BOOKING_CLAIM}
+
+
+@pytest.mark.parametrize(("rule_id", "why"), [
+    ("soft.unavailable", "the checkpoint wasn't available"),
+    ("soft.denies_ai", "it said it wasn't an AI"),
+])
+async def test_a_stopped_soft_check_gives_its_actual_cause(scene, clock, rule_id, why):
+    clock.now = local(2026, 10, 30, 9)
+
+    assert await stopped_reason(scene, ["soft_promise"], [rule_id]) == f"{STOPPED}{why}."
 
 
 @pytest.mark.parametrize("rule_id", ["lex.en.booking", "lex.es.booking"])
@@ -1046,8 +1316,8 @@ async def test_owner_reads_are_copy_scoped(app, browser, fake, kernel_http, engi
 
     today = (await owner.get(f"desks/{owner.desk_id}/today")).json()
 
-    assert {key: today["briefing"][key] for key in ("conversations", "bookings", "leads", "blocked", "total")} == {
-        "conversations": 1, "bookings": 0, "leads": 0, "blocked": 0, "total": 1}
+    assert {key: today["briefing"][key] for key in ("conversations", "bookings", "leads", "turned_down", "total")} == {
+        "conversations": 1, "bookings": 0, "leads": 0, "turned_down": 0, "total": 1}
     assert (today["this_week"]["conversations"], today["this_week"]["stopped"]) == (1, 0)
     listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
     assert [(item["kind"], item["session_id"]) for item in listed] == [("answer", chat.session_id)]

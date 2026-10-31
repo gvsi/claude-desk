@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable
 from desk.contracts import CopyCreated, NormalizedAction, ResourceRef, SessionCreated
-from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health
+from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health, TurnRequest
 from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO
 from tests.kernel_contract.test_contract import (
@@ -257,6 +257,21 @@ async def test_expiry_follows_the_fakes_clock(fake):
     assert await refused(read_decision(view, held.decision_id)) == (409, "closed")
     assert await refused(answer(http.owner(copy.owner_token), held.decision_id, "allow_once")) == (409, "conflict")
     assert state.decisions[held.decision_id].decision.state == "expired"
+
+
+async def test_a_turn_leaves_the_sessions_activity_alone(fake):
+    """The kernel's turn route reads the session without marking it seen, so starting a turn keeps no idle
+    conversation open: the fake's `/turn` leaves `last_seen` as it was, while any other session call moves it."""
+    http, state = fake
+    _, visitor = await copy_and_visitor(http, state)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    seen = state.sessions[session_id].last_seen
+    state.now += timedelta(minutes=5)
+    started = await view.call("POST /sessions/{session_id}/turn",
+                              TurnRequest(generation=0, text="Hola, ¿tienen citas?"), path={"session_id": session_id})
+    assert started.language == "es" and state.sessions[session_id].last_seen == seen
+    await context(view, session_id)
+    assert state.sessions[session_id].last_seen == state.now
 
 
 async def test_the_mirror_is_copy_scoped_and_read_only(fake, api_conn):

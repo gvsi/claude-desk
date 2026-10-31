@@ -1,7 +1,7 @@
 /**
- * Safety's words for the record: every kind of entry, where it came from and what an attempt was
- * about, each table covering exactly the values the contracts name; and the one entry an attempt
- * is shown with.
+ * Safety's words for the record: every kind of entry, where it came from, what an attempt was
+ * about and why a request was turned down, each table covering exactly the values the contracts
+ * name; and the one entry an attempt is shown with.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -10,8 +10,18 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
-import type { Attempt } from '../../api/views.ts';
-import { CATEGORY_COPY, LEDGER_KIND_COPY, ORIGIN_COPY, anythingStoppedIn, entryFor } from './copy.ts';
+import type { Attempt, RefusalCause } from '../../api/views.ts';
+import {
+  CATEGORY_COPY,
+  CAUSE_COPY,
+  LEDGER_KIND_COPY,
+  ORIGIN_COPY,
+  anythingStoppedIn,
+  anythingTurnedDownIn,
+  causeLabel,
+  entryFor,
+  turnedDownHeadline,
+} from './copy.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SCHEMA_PATH = path.join(here, '..', '..', '..', '..', 'backend', 'desk', 'contracts.schema.json');
@@ -25,6 +35,45 @@ function schemaEnum(model: string, field: string): string[] {
   if (!values) throw new Error(`contracts.schema.json has no enum at ${model}.${field}`);
   return values;
 }
+
+type SchemaNode = { $ref?: string; anyOf?: SchemaNode[]; enum?: string[]; properties?: Record<string, SchemaNode> };
+const OPENAPI_PATH = path.join(here, '..', '..', '..', '..', 'backend', 'desk', 'api', 'openapi.json');
+const openapi = JSON.parse(readFileSync(OPENAPI_PATH, 'utf8')) as { components: { schemas: Record<string, SchemaNode> } };
+
+/** The causes a refused Safety entry can carry, as the API's own document lists them. */
+function causeEnum(): string[] {
+  const resolve = (node: SchemaNode | undefined): SchemaNode | undefined =>
+    node?.$ref === undefined ? node : resolve(openapi.components.schemas[node.$ref.split('/').at(-1) ?? '']);
+  const cause = resolve(openapi.components.schemas.Attempt?.properties?.cause);
+  const values = (cause?.anyOf ?? (cause ? [cause] : [])).flatMap((option) => resolve(option)?.enum ?? []);
+  if (values.length === 0) throw new Error('openapi.json has no enum at Attempt.cause');
+  return values;
+}
+
+/** Why a request was turned down, each cause in the owner's signed words. */
+const SIGNED_CAUSES = {
+  owner_rule: 'Your rule says no',
+  not_verified: 'Not verified yet',
+  not_their_record: 'Only for the person it belongs to',
+  recipient: 'Only to you or a contact on record',
+  no_such_slot: "That time isn't open",
+  unknown_item: 'Not on the price list',
+  over_quote_ceiling: 'Over the $10,000 quote ceiling',
+  quote_unpayable: "That quote can't be paid now",
+  no_such_charge: "Couldn't find that payment",
+  not_refundable: "That payment can't be refunded",
+  no_such_document: 'No such document',
+  no_amount: 'Not a valid amount',
+  tool_not_available: 'Not a tool this chat can use',
+  incomplete_request: "The request wasn't in a form I can use",
+  paused: 'The chat was paused',
+  no_rules: 'No rules turned on yet',
+  rules_unchecked: "Your rules couldn't be checked, so I said no",
+  agent_pay_out: "Agents can't send money out",
+  agent_limit: "Outside the agent's spending limit",
+  other_copy: 'Not a record on this Desk',
+  no_rule: 'No rule covers this yet',
+} as const;
 
 /** The triage categories, as the API owner plan's triage task names them (plan 02b, Task 10). */
 const TRIAGE_CATEGORIES = ['impersonation', 'discount_push', 'private_data', 'code_redirect', 'injection', 'over_limit', 'other'];
@@ -55,6 +104,7 @@ function attempt(ledgerSeq: number): Attempt {
     created_at: '2026-10-30T16:52:00.000000Z',
     triage: null,
     ledger_seq: ledgerSeq,
+    cause: null,
   };
 }
 
@@ -108,5 +158,49 @@ describe('Safety copy', () => {
     expect(anythingStoppedIn(one('rate_limited' as Attempt['kind'], '2026-10-29T17:00:00.000000Z'), week)).toBe(true);
     // A time that can't be read may be this week's, so the week isn't said to have nothing.
     expect(anythingStoppedIn(one('reply_blocked', 'not a time'), week)).toBe(true);
+  });
+
+  it('anything_turned_down_in_the_week_takes_refusals_only', () => {
+    // The same week and the same clock as `anythingStoppedIn`, but a draft of Claude's the reply
+    // check stopped is no request anyone made, so it was never turned down.
+    const week = { timezone: 'America/Los_Angeles', start: '2026-10-24', end: '2026-10-30' };
+    const one = (kind: Attempt['kind'], createdAt: string) => [{ kind, created_at: createdAt }];
+    expect(anythingTurnedDownIn([], week)).toBe(false);
+    expect(anythingTurnedDownIn(one('refused', '2026-10-24T07:00:00.000000Z'), week)).toBe(true);
+    expect(anythingTurnedDownIn(one('reply_blocked', '2026-10-29T17:00:00.000000Z'), week)).toBe(false);
+    expect(anythingTurnedDownIn(one('held', '2026-10-29T17:00:00.000000Z'), week)).toBe(false);
+    // Before the week began on the business's clock: not this week.
+    expect(anythingTurnedDownIn(one('refused', '2026-10-24T06:59:00.000000Z'), week)).toBe(false);
+    // Newer than the week Today last read, a kind this build doesn't know yet, or a time that can't
+    // be read: each may be a request turned down this week, so the week isn't said to have none.
+    expect(anythingTurnedDownIn(one('refused', '2026-10-31T07:00:00.000000Z'), week)).toBe(true);
+    expect(anythingTurnedDownIn(one('rate_limited' as Attempt['kind'], '2026-10-29T17:00:00.000000Z'), week)).toBe(true);
+    expect(anythingTurnedDownIn(one('refused', 'not a time'), week)).toBe(true);
+  });
+
+  it('cause_copy_has_every_cause_in_the_signed_words', () => {
+    expect(sorted(Object.keys(CAUSE_COPY))).toEqual(sorted(causeEnum()));
+    expect(CAUSE_COPY).toEqual(SIGNED_CAUSES);
+  });
+
+  it('cause_label_is_only_for_a_refused_entry_with_a_cause', () => {
+    for (const [cause, words] of Object.entries(SIGNED_CAUSES)) {
+      expect(causeLabel({ kind: 'refused', cause: cause as RefusalCause }), cause).toBe(words);
+    }
+    // No cause, or none sent: no label, and the entry's detail says why on its own.
+    expect(causeLabel({ kind: 'refused', cause: null })).toBeNull();
+    expect(causeLabel({ kind: 'refused' } as Pick<Attempt, 'kind' | 'cause'>)).toBeNull();
+    // A cause this build has no words for yet: no label, never a guess.
+    expect(causeLabel({ kind: 'refused', cause: 'a_newer_cause' as RefusalCause })).toBeNull();
+    // A stopped draft or a held request is never labelled, whatever it carries.
+    expect(causeLabel({ kind: 'reply_blocked', cause: null })).toBeNull();
+    expect(causeLabel({ kind: 'reply_blocked', cause: 'owner_rule' })).toBeNull();
+    expect(causeLabel({ kind: 'held', cause: 'owner_rule' })).toBeNull();
+  });
+
+  it('headline_says_how_many_requests_were_turned_down', () => {
+    expect(turnedDownHeadline(3)).toBe('I turned down 3 requests this week.');
+    expect(turnedDownHeadline(1)).toBe('I turned down 1 request this week.');
+    expect(turnedDownHeadline(0)).toBe("I didn't turn down any requests this week.");
   });
 });

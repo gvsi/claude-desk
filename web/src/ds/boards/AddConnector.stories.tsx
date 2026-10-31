@@ -244,11 +244,12 @@ export const ConnectGoogleCalendar: Story = {
   },
 };
 
-/** The review's header and tools as the boards draw them: a 44 px tile, and every tool under a hairline, 14 px above and below. */
+/** The review's header and tools: a 44 px tile, hairlines between tools, 14 px above and below. */
 function expectReviewLook(main: HTMLElement): void {
   expectComputed(one(main, '.cd-connector-review__header > .cd-connector-icon'), { width: '44px', height: '44px' });
-  for (const tool of some(main, '.cd-connector-review__tool')) {
-    expectComputed(tool, { paddingTop: '14px', paddingBottom: '14px', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
+  for (const [index, tool] of some(main, '.cd-connector-review__tool').entries()) {
+    expectComputed(tool, { paddingTop: '14px', paddingBottom: '14px', borderTopWidth: index === 0 ? '0px' : '1px' });
+    if (index > 0) expectComputed(tool, { borderTopColor: 'rgba(250, 249, 245, 0.12)' });
   }
 }
 

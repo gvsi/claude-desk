@@ -897,8 +897,10 @@ describe("Ask Claude's question about a hold", () => {
   });
 
   it('hold_question_never_shows_a_hold_from_an_earlier_read', async () => {
-    // The seed's quote, held and read, so the app keeps it.
-    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    // The seed's quote, held and read, so the app keeps it. Polls are far apart (a minute), so the
+    // only read after the count below is the one Rules sends as it opens: an earlier poll held open
+    // would be reused by it and never counted again.
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { pollScale: 20 });
     const group = screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
 
@@ -910,12 +912,14 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.world.answer(held, 'deny_once');
     await router.navigate(`${DESK}/rules/all`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    // Counted before Rules opens again: the page's own read may reach the server before or after
+    // the page draws, and once it's out no other read is sent until it comes back.
+    const before = reads.held();
     await router.navigate(`${DESK}/rules`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     const again = screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(again.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
-    const waiting = reads.held();
-    await expect.poll(() => reads.held()).toBeGreaterThan(waiting);
+    await expect.poll(() => reads.held()).toBeGreaterThan(before);
     expect(chipWords(again)).toEqual([...FIXED_CHIPS]);
 
     // Dana's refund is held meanwhile: once the reads come back, the chip asks about it.

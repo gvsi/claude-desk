@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
+from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
 from desk.contracts import (
     AgentAuth,
@@ -89,6 +90,8 @@ from desk.kernel_api import (
     SessionContext,
     ToolsConnectRequest,
     ToolsSimulateChangeRequest,
+    TurnRequest,
+    TurnStarted,
     VerifyCheckRequest,
     VerifyStarted,
     VerifyStartRequest,
@@ -102,6 +105,7 @@ from tests.kernel_contract.fake_kernel import (
     RecordedStep,
     agent_signature,
     fake_kernel_app,
+    fake_signature,
     signed_time,
 )
 
@@ -145,9 +149,10 @@ async def answer(owner: CredentialView, decision_id: str, choice: str) -> Approv
                             path={"decision_id": decision_id})
 
 
-async def check_reply(view: CredentialView, session_id: str, generation: int, prose: str) -> ReplyVerdict:
+async def check_reply(view: CredentialView, session_id: str, generation: int, prose: str, *,
+                      final: bool = True) -> ReplyVerdict:
     draft = ReplyDraft(session_id=session_id, generation=generation, prose=prose)
-    return await view.call("POST /check_reply", CheckReplyRequest(draft=draft))
+    return await view.call("POST /check_reply", CheckReplyRequest(draft=draft, final=final))
 
 
 async def context(view: CredentialView, session_id: str, desk_id: str | None = None) -> SessionContext:
@@ -182,6 +187,36 @@ async def test_copy_owner_token_authenticates(kernel):
     assert me.session == copy.owner_session
 
     assert await refused(http.owner("not-" + copy.owner_token).whoami()) == (401, "auth")
+
+
+@pytest.mark.kernel_plan("01a")
+async def test_copy_returns_seeded_chat(kernel, ro_read):
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    chat = copy.seeded_chat
+    assert chat is not None
+    decision = chat.decision
+    assert chat.session_id == decision.session_id
+    assert chat.visitor_line == "Could you do the drain clearing at 15% off?"
+    assert (decision.outcome, decision.state, decision.visitor_plain) == (
+        "hold", "held", "Waiting for Maria Rivera to approve")
+    assert decision.action is not None
+    assert (decision.action.tool, decision.action.discount_bp, decision.action.amount_cents) == (
+        "native.quote", 1500, 15300)
+    if state is not None:
+        assert decision.signature == fake_signature(decision.model_dump(include={
+            "decision_id", "session_id", "state", "visitor_plain", "ledger_seq"}))
+    else:
+        from tests.kernel.test_decide import verify_signature
+
+        health = await http.public().call("GET /health")
+        verify_signature(health.public_key_hex, decision)
+
+    held = ro_read(ro_schema, copy.copy_id,
+                   "SELECT decision_id, session_id FROM {ro}.decisions WHERE state = 'held'")
+    assert held == [{"decision_id": decision.decision_id, "session_id": chat.session_id}]
+    read = await read_decision(http.owner(copy.owner_token), decision.decision_id)
+    assert read == decision.model_copy(update={"inbox": []})
 
 
 NOT_FINAL = {"allowed", "held", "approved", "unknown"}
@@ -520,6 +555,15 @@ async def read_policy_ids(api_ro_conn, ro_schema: str, copy: CopyCreated, decisi
     return row["policy_ids"]
 
 
+async def read_refusal_cause(api_ro_conn, ro_schema: str, copy: CopyCreated, decision_id: str) -> str | None:
+    """The Safety cause from the same decision and ledger views the API reads, on either kernel."""
+    ro = KernelRO(api_ro_conn, copy.copy_id, ro_schema)
+    row = await ro.one("decisions", decision_id=decision_id)
+    entry = await ro.one("ledger_entries", desk_id=copy.desk_ids[0], seq=row["ledger_seq"])
+    session = await ro.one("sessions", session_id=row["session_id"])
+    return refusal_cause(row, entry, verified=session["verified"])
+
+
 @pytest.mark.kernel_plan("01a")
 async def test_a_never_cards_refusal_names_its_forbid(kernel, ro_read, arrange, api_ro_conn):
     """The owner's Safety entries say why a refusal happened from the decision's deciding policies, which the API reads
@@ -536,6 +580,7 @@ async def test_a_never_cards_refusal_names_its_forbid(kernel, ro_read, arrange, 
     expected = ["F.never.never-native.quote"]
     assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
     assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
+    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) == "owner_rule"
 
 
 @pytest.mark.kernel_plan("01a")
@@ -1186,6 +1231,175 @@ async def test_handoff_done_closes_it_once(kernel, ro_read):
     assert closed == [{"part": "handoffs", "refs": [handoff_id]}]
 
 
+CARD_HANDOFF_REASON = "The Desk handed this to you."
+HANDED_TO_YOU = "A visitor is waiting in a conversation the Desk handed to you."
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_the_handoff_card_opens_one_owner_handoff_per_session(kernel, ro_read):
+    """The handoff card opens a handoff the owner sees (#96). A reply the check blocks shows the visitor the handoff
+    card and opens one handoff on the session, which the owner's Needs you lists from `kernel_ro.handoffs`: kind
+    `card`, no call-back window and the kernel's reason, never the draft's words. The owner gets one alert naming no
+    decision and nothing of the draft. A second blocked reply in the same session shows the card again but opens none
+    and alerts nothing. Claude's own draft citing the card opens one too. The alert follows the Desk's notification
+    preferences, as every alert does: with `handoff` taken out of "now", a card still opens a handoff but alerts
+    nothing."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    seeded = {entry.entry_id for entry in await owner.call("GET /demo_inbox")}
+
+    def open_handoffs() -> list[tuple]:
+        """The Desk's open handoffs as Needs you reads them: (session, kind, call-back window, reason)."""
+        rows = ro_read(ro_schema, copy.copy_id, "SELECT session_id, kind, callback_window, reason FROM {ro}.handoffs"
+                                                " WHERE desk_id = %s AND status = 'open'", (desk_id,))
+        return sorted(tuple(row.values()) for row in rows)
+
+    async def alerts() -> list[DemoInboxEntry]:
+        return [entry for entry in await owner.call("GET /demo_inbox") if entry.entry_id not in seeded]
+
+    blocked = await new_visitor(http, slug)
+    for _ in range(2):
+        verdict = await check_reply(http.session(blocked.session_token), blocked.state.session_id, 0,
+                                    "It comes to $89 for the visit.")
+        assert not verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
+        assert open_handoffs() == [(blocked.state.session_id, "card", None, CARD_HANDOFF_REASON)]
+        (alert,) = await alerts()
+        assert (alert.to, alert.kind, alert.decision_id, alert.body) == ("owner", "alert", None, HANDED_TO_YOU)
+
+    cited = await new_visitor(http, slug)
+    draft = ReplyDraft(session_id=cited.state.session_id, generation=0, prose="",
+                       clauses=[Clause(template="handoff")])
+    verdict = await http.session(cited.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+    assert verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
+    assert open_handoffs() == sorted([(blocked.state.session_id, "card", None, CARD_HANDOFF_REASON),
+                                      (cited.state.session_id, "card", None, CARD_HANDOFF_REASON)])
+    assert [entry.body for entry in await alerts()] == [HANDED_TO_YOU] * 2
+
+    quiet = NotificationDefaults(now=["approval", "emergency", "breaker", "lockout"],
+                                 briefing=["lead", "callback", "booking"])
+    await owner.call("PUT /desks/{id}/notifications", DeskNotificationsRequest(notifications=quiet),
+                     path={"id": desk_id})
+    unalerted = await new_visitor(http, slug)
+    verdict = await check_reply(http.session(unalerted.session_token), unalerted.state.session_id, 0,
+                                "It comes to $89 for the visit.")
+    assert not verdict.ok and len(open_handoffs()) == 3
+    assert (unalerted.state.session_id, "card", None, CARD_HANDOFF_REASON) in open_handoffs()
+    assert len(await alerts()) == 2
+
+
+BLOCKED_PROSE = "It comes to $89 for the visit."           # a number in prose: a kind a rewrite fixes
+OTHER_LANGUAGE = "Bonjour, je peux vous aider."             # unsupported_language: no rewrite fixes it
+
+
+async def checked(http: KernelHttp, created: SessionCreated, prose: str, *, final: bool) -> ReplyVerdict:
+    draft = ReplyDraft(session_id=created.state.session_id, generation=0, prose=prose)
+    return await http.session(created.session_token).call("POST /check_reply",
+                                                          CheckReplyRequest(draft=draft, final=final))
+
+
+def session_handoffs(ro_read, ro_schema: str, copy: CopyCreated, session_id: str) -> list[tuple]:
+    """The session's handoffs as the owner's reads see them: (handoff ID, kind, status)."""
+    return [tuple(row.values()) for row in ro_read(
+        ro_schema, copy.copy_id, "SELECT handoff_id, kind, status FROM {ro}.handoffs WHERE session_id = %s"
+                                 " ORDER BY handoff_id", (session_id,))]
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_only_a_handoff_card_the_session_sees_opens_an_owner_handoff(kernel, ro_read):
+    """The API checks a first draft it could still rewrite with `final` false (`CheckReplyRequest.final`). Blocked only
+    for kinds a rewrite fixes (`desk.rewrites`), it is never shown, so the kernel opens no owner handoff and alerts
+    nothing; the same draft checked as final opens one, and so does a non-final draft blocked for a kind no rewrite
+    fixes. Each reply entry records `final`. While the session has a held request awaiting the owner, whose own alert
+    and item the owner has, a final block opens none; once the owner has answered it, the next one does."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    seeded = {entry.entry_id for entry in await owner.call("GET /demo_inbox")}
+
+    async def handed_to_you() -> int:
+        return sum(entry.body == HANDED_TO_YOU for entry in await owner.call("GET /demo_inbox")
+                   if entry.entry_id not in seeded)
+
+    async def recorded_final(verdict: ReplyVerdict) -> bool:
+        (entry,) = [entry for entry in (await ledger_page(owner, desk_id)).entries if entry.seq == verdict.ledger_seq]
+        assert entry.event.kind == "reply"
+        return entry.event.summary["final"]
+
+    visitor = await new_visitor(http, slug)
+    rewritable = await checked(http, visitor, BLOCKED_PROSE, final=False)
+    assert not rewritable.ok and {violation.kind for violation in rewritable.violations} == {"number_in_prose"}
+    assert rewritable.blocks == []                          # never shown, so no handoff card is signed for it
+    assert session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id) == []
+    assert await handed_to_you() == 0 and await recorded_final(rewritable) is False
+    shown = await checked(http, visitor, BLOCKED_PROSE, final=True)
+    assert not shown.ok and await recorded_final(shown) is True
+    assert [block.template for block in shown.blocks] == ["handoff"]
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)] == ["card"]
+    assert await handed_to_you() == 1
+
+    stranger = await new_visitor(http, slug)
+    french = await checked(http, stranger, OTHER_LANGUAGE, final=False)
+    assert "unsupported_language" in {violation.kind for violation in french.violations}
+    assert [block.template for block in french.blocks] == ["handoff"]
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, stranger.state.session_id)] == ["card"]
+    assert await handed_to_you() == 2
+
+    asking = await new_visitor(http, slug)
+    held = await decide(http.session(asking.session_token), asking.state.session_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    assert held.state == "held"
+    assert not (await checked(http, asking, BLOCKED_PROSE, final=True)).ok
+    assert session_handoffs(ro_read, ro_schema, copy, asking.state.session_id) == []
+    assert await handed_to_you() == 2                          # the owner has the held request's alert and item
+    await answer(owner, held.decision_id, "deny_once")
+    assert not (await checked(http, asking, BLOCKED_PROSE, final=True)).ok
+    assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, asking.state.session_id)] == ["card"]
+    assert await handed_to_you() == 3
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_call_back_request_closes_the_card_handoff_and_opens_its_own(kernel, ro_read):
+    """A session holds one open handoff: a call-back request after the handoff card closes the card's handoff, as
+    the owner's mark of done closes one, and opens its own of kind `callback` under a new ID, so the owner keeps one
+    open item for the conversation. The closing is ledgered `desk_data` naming the card's handoff and, as
+    `replaced_by`, the call-back's, so the owner's history reads it as replaced rather than marked done. A row's kind
+    never changes, so the owner's stale mark of done on the card answers 409 and leaves the call-back open. The
+    owner's own preview of the Desk opens none."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    visitor = await new_visitor(http, slug)
+    assert not (await checked(http, visitor, BLOCKED_PROSE, final=True)).ok
+    ((card_id, kind, status),) = session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)
+    assert (kind, status) == ("card", "open")
+
+    view = http.session(visitor.session_token)
+    callback = await decide(view, visitor.state.session_id, 0, "call-1", "native.request_callback",
+                            {"name": "Dana Wells", "contact": "(503) 555-0142", "reason": "Leaking water heater"})
+    assert callback.state == "allowed" and (await execute(view, callback, 0)).state == "succeeded"
+    handoffs = {handoff_id: (kind, status)
+                for handoff_id, kind, status in session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)}
+    (callback_id,) = set(handoffs) - {card_id}
+    assert handoffs == {card_id: ("card", "done"), callback_id: ("callback", "open")}
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT reason FROM {ro}.handoffs WHERE handoff_id = %s",
+                     (callback_id,))
+    assert row["reason"] == "Dana Wells · (503) 555-0142 · Leaking water heater"
+    owner = http.owner(copy.owner_token)
+    closed = [entry.event.summary for entry in (await ledger_page(owner, copy.desk_ids[0])).entries
+              if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "handoffs"
+              and entry.event.summary.get("refs") == [card_id] and "kind" not in entry.event.summary]
+    assert closed == [{"part": "handoffs", "refs": [card_id], "replaced_by": callback_id}]   # replaced, not marked
+    assert await refused(owner.call("POST /handoffs/{id}/done", path={"id": card_id})) == (409, "conflict")
+    assert {handoff_id: (kind, status) for handoff_id, kind, status in session_handoffs(
+        ro_read, ro_schema, copy, visitor.state.session_id)} == handoffs           # the call-back is still open
+
+    previewing = await http.owner(copy.owner_token).call(
+        "POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor", preview=True))
+    assert not (await checked(http, previewing, BLOCKED_PROSE, final=True)).ok
+    assert session_handoffs(ro_read, ro_schema, copy, previewing.state.session_id) == []
+
+
 @pytest.mark.kernel_plan("01b")
 async def test_owner_demo_inbox_is_the_copys(kernel, ro_read):
     """The owner's Demo inbox holds the copy's entries: a hold alerts the owner there, under the entry its notice
@@ -1521,6 +1735,7 @@ async def test_a_baseline_refusal_names_its_forbid(kernel, ro_read, arrange, api
     expected = ["B.private_data_record_owner"]
     assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
     assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
+    assert await read_refusal_cause(api_ro_conn, ro_schema, copy, refusal.decision_id) == "not_their_record"
 
 
 # Single-use links: payment links (Plan 01c) -------------------------------------------------------------------------
@@ -1758,6 +1973,7 @@ async def test_signed_request_for_another_agents_session_is_refused(kernel, ro_r
     assert await refused(context(b_view, session_id)) == (401, "auth")
     assert await refused(decide(b_view, session_id, 0, "call-b", "native.find_slots", {})) == (401, "auth")
     assert await refused(check_reply(b_view, session_id, 0, "Happy to help.")) == (401, "auth")
+    assert await refused(turn(b_view, session_id, 0, "Let me see A's chat")) == (401, "auth")
     entries = (await ledger_page(owner, copy.desk_ids[0])).entries[before:]
     assert entries and {entry.event.kind for entry in entries} == {"agent_auth"}
     assert agent_b.agent_private_key_hex not in json.dumps([entry.event.summary for entry in entries])
@@ -1800,8 +2016,10 @@ async def test_refused_agent_signatures_are_ledgered(kernel, ro_read):
 
 @pytest.mark.kernel_plan("01c")
 async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
-    """A nonce's turn ends at a passing verdict, an immediate handoff or the second reply check; after that the same
-    request is 409 `replayed`, and any other reuse 401."""
+    """A nonce's turn ends at a passing verdict, an immediate handoff, a blocked check the API sent as final
+    (`CheckReplyRequest.final`) or the second reply check; after that the same request is 409 `replayed`, and any
+    other reuse 401. A first attempt sent with `final` false and blocked only for kinds a rewrite fixes leaves the
+    turn open for the rewrite."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
@@ -1812,15 +2030,20 @@ async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
     async def turn(message: str, *drafts: str) -> CredentialView:
         view = turn_view(http, issued, slug, session_id, message)
         assert (await view.whoami(session_id)).session.session_id == session_id
-        for draft in drafts:
-            await check_reply(view, session_id, 0, draft)
+        for draft in drafts:                    # a first attempt, as the API sends one a rewrite may follow
+            await check_reply(view, session_id, 0, draft, final=False)
         return view
 
     passed = await turn("When are you open?", "We're open on weekdays.")
     assert await refused(passed.whoami(session_id)) == (409, "replayed")
     assert await refused(context(passed, session_id)) == (409, "replayed")
+    assert await refused(passed.call("POST /sessions/{session_id}/turn", TurnRequest(
+        generation=0, text="When are you open?"), path={"session_id": session_id})) == (409, "replayed")
     handed_off = await turn("Parlez-vous français ?", "Bonjour, je peux vous aider.")   # unsupported_language
     assert await refused(handed_off.whoami(session_id)) == (409, "replayed")
+    final_block = await turn("What does it cost?")
+    await check_reply(final_block, session_id, 0, "It costs 40 dollars.", final=True)    # blocked, sent as final
+    assert await refused(final_block.whoami(session_id)) == (409, "replayed")
     twice = await turn("How much is it?", "It costs 50 dollars.")
     assert (await twice.whoami(session_id)).session.session_id == session_id      # one blocked check: still its turn
     await check_reply(twice, session_id, 0, "It costs 60 dollars.")
@@ -2836,3 +3059,91 @@ async def test_simulated_change_needs_review(kernel, ro_read):
     elsewhere = http.owner(other.owner_token).call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
         desk_id=desk_id, tool="payments.create_refund"))
     assert await refused(elsewhere) == (404, "not_found")
+
+
+# The turn's language (GitHub issue #121) --------------------------------------------------------------------------
+
+
+async def turn(view: CredentialView, session_id: str, generation: int, said: str) -> TurnStarted:
+    return await view.call("POST /sessions/{session_id}/turn", TurnRequest(generation=generation, text=said),
+                           path={"session_id": session_id})
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_turn_speaks_the_language_of_the_message_that_started_it(kernel, ro_read):
+    """The API sends each turn's newest visitor or agent message as the turn starts, and the kernel keeps the
+    language it detects as the session's, so the turn's receipts speak it, not the last reply's. A message in neither
+    English nor Spanish keeps the language on record. The text is read for that alone: the session is otherwise as it
+    was, a repeat changes nothing, and no ledger entry holds the text."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug, desk_id = desk_slug(ro_read, ro_schema, copy), copy.desk_ids[0]
+    drain = item_id(ro_read, ro_schema, copy, "Drain clearing")
+    owner = http.owner(copy.owner_token)
+    visitor = await new_visitor(http, slug)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    start = (await ledger_page(owner, desk_id)).entries[-1].seq
+
+    assert (await check_reply(view, session_id, 0, "Happy to help with your drain.")).language == "en"
+    spanish = "Hola, ¿pueden venir mañana a revisar el desagüe?"
+    assert await turn(view, session_id, 0, spanish) == TurnStarted(language="es")
+    assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args(drain))).visitor_plain == (
+        "Revisado con las reglas de Maria Rivera")
+    neither = ("\U0001F44D", "Bonjour, je voudrais un rendez-vous.", "\U0001F44D")
+    for said in neither:
+        assert await turn(view, session_id, 0, said) == TurnStarted(language="es"), said
+    english = "Can someone look at my water heater tomorrow?"
+    assert await turn(view, session_id, 0, english) == TurnStarted(language="en")
+    assert (await decide(view, session_id, 0, "call-2", "native.quote", quote_args(drain))).visitor_plain == (
+        "Checked against Maria Rivera's rules")
+
+    assert (await view.whoami()).session == visitor.state           # mode, generation and verification untouched
+    ledgered = json.dumps([entry.model_dump(mode="json") for entry in (await ledger_page(owner, desk_id)).entries
+                           if entry.seq > start], ensure_ascii=False)
+    for said in (spanish, *neither, english):
+        assert said not in ledgered
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_turn_starts_in_a_paused_session_and_after_a_take_over(kernel, ro_read, arrange):
+    """"Session state responses": `/turn` answers in mode `paused`, so a paused turn's handoff speaks the visitor's
+    language, and in mode `owner` at the generation the take-over set; the generation from before it is stale."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    paused, taken = await new_visitor(http, slug), await new_visitor(http, slug)
+
+    view, session_id = http.session(paused.session_token), paused.state.session_id
+    arrange.pause(session_id)
+    generation = (await view.whoami()).session.generation
+    assert await turn(view, session_id, generation, "Hola, ¿siguen ahí?") == TurnStarted(language="es")
+
+    view, session_id = http.session(taken.session_token), taken.state.session_id
+    await arrange.take_over(http.owner(copy.owner_token), session_id, 0)
+    assert (await view.whoami()).session.generation == 1
+    assert await turn(view, session_id, 1, "Can someone call me back today?") == TurnStarted(language="en")
+    assert await refused(turn(view, session_id, 0, "Can someone call me back today?")) == (409, "stale_generation")
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_turn_is_refused_like_the_other_turn_routes(kernel, ro_read, arrange):
+    """Up to 2,000 characters, else 422 `invalid`; a token for another session 401; a stale generation 409
+    `stale_generation`; a closed session 409 `closed`, before a stale generation."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    visitor, stranger = await new_visitor(http, slug), await new_visitor(http, slug)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+
+    assert await turn(view, session_id, 0, ("Hello " * 400)[:2000]) == TurnStarted(language="en")
+    # read raw, since a request model that bounds the text couldn't even be built over the limit
+    transport = httpx.ASGITransport(app=fake_kernel_app(state)) if state is not None else None
+    async with httpx.AsyncClient(base_url=http.base_url, transport=transport) as raw:
+        too_long = await raw.post(f"/sessions/{session_id}/turn", json={"generation": 0, "text": "Hola " * 401},
+                                  headers={"X-Session-Token": visitor.session_token})
+    assert (too_long.status_code, KernelError.model_validate_json(too_long.content).code) == (422, "invalid")
+    assert await refused(turn(http.session(stranger.session_token), session_id, 0, "Hola")) == (401, "auth")
+    assert await refused(turn(view, session_id, 1, "Hola")) == (409, "stale_generation")
+    arrange.close_idle_sessions(session_id)
+    for generation in (0, 1):
+        assert await refused(turn(view, session_id, generation, "Hola")) == (409, "closed")

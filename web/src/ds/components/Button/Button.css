@@ -46,6 +46,13 @@
   min-width: 0;
 }
 
+/* A StatusLabel as the whole label ("1 held for you" with its dot) sits at the top of the label's
+   line rather than on the dot's made-up baseline, which would push the line, and the button, 2 px
+   past size-control. */
+.cd-button__label > .cd-status-label {
+  vertical-align: top;
+}
+
 /* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
 .cd-button.cd-button--primary {
   background: var(--button-primary);
