@@ -17,8 +17,8 @@ const state = (messages: SetupMessage[]): SetupState => ({
 describe('setup conversation', () => {
   it('requires_an_owner_amount_before_accepting_an_unpriced_payment_job', () => {
     const unpriced: ProposalCard = { ...payment, job: { ...payment.job!, config: { block: 'purpose_payment', purpose: 'Retainer', amount_cents: null } } };
-    for (const action of ['accept', 'change'] as const) {
-      const result = decisionBody({ action, proposal: unpriced, title: 'Retainer', autonomy: 'ask' });
+    {
+      const result = decisionBody({ action: 'accept', proposal: unpriced });
       expect(result).toMatchObject({ ok: false, field: 'amount_cents', code: 'amount_required', message: expect.any(String) });
       expect(result).not.toHaveProperty('body');
     }
@@ -28,38 +28,22 @@ describe('setup conversation', () => {
     }
   });
 
-  it('includes_job_autonomy_only_on_acceptance_and_rejects_connector_autonomy', () => {
-    for (const autonomy of ['auto', 'ask'] as const) {
-      expect(decisionBody({ action: 'change', proposal: payment, autonomy })).toEqual({ ok: true, body: { accept: true, autonomy } });
-      expect(decisionBody({ action: 'decline', proposal: payment, autonomy })).toEqual({ ok: true, body: { accept: false } });
-    }
-    const connector: ProposalCard = { ...payment, kind: 'connector', job: null, connector: { app: 'stripe', label: 'Stripe', why: 'Payments', connectable: true } };
-    expect(decisionBody({ action: 'change', proposal: connector, autonomy: 'auto' })).toMatchObject({ ok: false, field: 'autonomy' });
-  });
-
-  it('returns_field_errors_instead_of_bodies_for_invalid_changes', () => {
-    for (const title of ['', '   ', 'x'.repeat(61)]) {
-      expect(decisionBody({ action: 'change', proposal: payment, title })).toMatchObject({ ok: false, field: 'title' });
-    }
-    expect(decisionBody({ action: 'change', proposal: payment, title: '😀'.repeat(60) })).toMatchObject({ ok: true });
+  it('returns_field_errors_instead_of_bodies_for_invalid_payment_amounts', () => {
     for (const amount_cents of [-1, 1_000_001, 0.5, NaN, Infinity]) {
-      expect(decisionBody({ action: 'change', proposal: payment, amount_cents })).toMatchObject({ ok: false, field: 'amount_cents' });
+      expect(decisionBody({ action: 'accept', proposal: payment, amount_cents })).toMatchObject({ ok: false, field: 'amount_cents' });
     }
     const schedule: ProposalCard = { ...payment, job: { ...payment.job!, config: { block: 'typed_booking', appointment_type: 'Intro', minutes: 20 } } };
     const connector: ProposalCard = { ...payment, kind: 'connector', job: null, connector: { app: 'stripe', label: 'Stripe', why: 'Payments', connectable: true } };
     for (const proposal of [schedule, connector]) {
-      expect(decisionBody({ action: 'change', proposal, amount_cents: 100 })).toMatchObject({ ok: false, field: 'amount_cents' });
+      expect(decisionBody({ action: 'accept', proposal, amount_cents: 100 })).toMatchObject({ ok: false, field: 'amount_cents' });
     }
-    expect(decisionBody({ action: 'change', proposal: connector, title: 'Renamed' })).toMatchObject({ ok: false, field: 'title' });
-    expect(decisionBody({ action: 'change', proposal: schedule, title: 'Intro' })).toEqual({ ok: true, body: { accept: true, title: 'Intro' } });
   });
 
-  it('builds_declines_accepts_and_trimmed_payment_changes', () => {
-    expect(decisionBody({ action: 'decline', proposal: payment, title: 'Ignored', amount_cents: -1 })).toEqual({ ok: true, body: { accept: false } });
+  it('builds_declines_and_accepts_with_only_the_payment_amount', () => {
+    expect(decisionBody({ action: 'decline', proposal: payment, amount_cents: -1 })).toEqual({ ok: true, body: { accept: false } });
     expect(decisionBody({ action: 'accept', proposal: payment })).toEqual({ ok: true, body: { accept: true } });
     for (const amount_cents of [0, 1_000_000]) {
-      expect(decisionBody({ action: 'change', proposal: payment, title: '  New retainer  ', amount_cents }))
-        .toEqual({ ok: true, body: { accept: true, title: 'New retainer', amount_cents } });
+      expect(decisionBody({ action: 'accept', proposal: payment, amount_cents })).toEqual({ ok: true, body: { accept: true, amount_cents } });
     }
   });
 

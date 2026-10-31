@@ -529,22 +529,22 @@ const proposalId = () => `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)
 function consultantProposals(): ProposalCard[] {
   const jobs: JobProposal[] = [
     {
-      job: 'schedule', title: 'Book a free intro consult', autonomy: 'auto',
+      job: 'schedule', title: 'Book a free intro call', autonomy: 'auto', who: 'New clients',
       why: 'New clients pick a time for their free consult without emailing back and forth.',
-      how: 'The Desk offers open times, books the one the person picks and sends you the details.',
+      how: 'New clients pick a time within your opening hours and book a 20-minute call.',
       can_do_today: true, config: { block: 'typed_booking', appointment_type: 'Intro consult', minutes: 20 },
     },
     {
-      job: 'intake', title: 'Take new-client details', autonomy: 'auto',
+      job: 'intake', title: 'Ask new clients three questions', autonomy: 'auto', who: 'New clients, when they book',
       why: 'You know who’s coming and what they need before the consult starts.',
-      how: 'Before it books, the Desk asks three questions and puts the answers on the booking.',
+      how: 'Before their call, new clients answer three short questions.',
       can_do_today: true,
-      config: { block: 'intake', questions: ['Is this for you, your business, or both?', 'Which tax years or months need work?', 'Do you use bookkeeping software today?'] },
+      config: { block: 'intake', questions: ['Is it for you or your business?', 'Which tax years or months?', 'Any bookkeeping software?'] },
     },
     {
-      job: 'payment', title: 'Take a retainer for new work', autonomy: 'ask',
+      job: 'payment', title: 'Send a retainer link', autonomy: 'ask', who: 'Clients you’ve priced',
       why: 'Once you’ve priced the work, the client can pay the retainer right away, so it starts sooner.',
-      how: 'The Desk sends the client a payment link for the retainer you set.',
+      how: 'Clients you’ve priced get a secure link to pay a retainer before you start.',
       can_do_today: true, config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: null },
     },
     {
@@ -555,14 +555,15 @@ function consultantProposals(): ProposalCard[] {
     },
   ];
   const connectors: ConnectorProposal[] = [
-    { app: 'stripe', label: 'Stripe', why: 'Clients pay the retainer by card, and the money goes to your Stripe account.', connectable: true },
+    { app: 'stripe', label: 'Stripe', why: 'Take card payments for retainers. Test mode in this preview, so no money moves.', connectable: true },
     { app: 'google_calendar', label: 'Google Calendar', why: 'Bookings would land on the calendar you already use.', connectable: false },
   ];
   const fields = [
     ...jobs.map((job) => ({ kind: 'job' as const, job, connector: null })),
     ...connectors.map((connector) => ({ kind: 'connector' as const, job: null, connector })),
   ];
-  return fields.map((proposal) => ({ ...proposal, proposal_id: proposalId(), state: 'proposed', superseded_by: null }));
+  const proposals: ProposalCard[] = fields.map((proposal) => ({ ...proposal, proposal_id: proposalId(), state: 'proposed', superseded_by: null }));
+  return [proposals[5]!, proposals[0]!, proposals[1]!, proposals[4]!, proposals[2]!, proposals[3]!];
 }
 
 /** Signed board words, shared by all fixture paths. */
@@ -570,14 +571,16 @@ export const CPA_COPY = {
   opening: [
     'Thanks, Linda. Here’s how I understand Chen & Co.: you and one colleague do tax returns and bookkeeping for individuals and small businesses in San Jose. New clients start with a free 20-minute consult, and you price each engagement after it.',
     'Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now. We’ll take them one at a time, and you can change anything later.',
+    'One thing first, so I describe Chen & Co. the right way.',
   ],
-  first: 'First, who do you work with most? I’ll lead with that when people ask what you do.',
+  first: 'Who do you work with most?',
   clients: ['Both, about evenly', 'Mostly individuals', 'Mostly small businesses'],
-  consult: 'Got it. Want me to book free 20-minute intro consults? People pick an open time, and you get the details.',
-  intake: 'Great, I’ll set it up this way. Next, the questions new clients answer before their call.',
+  consult: 'Got it. First, intro calls. To book one I need to know when you’re free, so I’ll use your opening hours from your website, Monday to Friday, 9 to 6. Google Calendar can take over once it’s available.',
+  intake: 'Great, I’ll set it up this way. Next: the questions new clients answer before their call.',
   updated: 'Sure. Here’s the updated version.',
   retainer: 'Got it. Once you’ve priced the work, want the Desk to send the client a retainer link?',
-  stripe: 'Good. Stripe can take those retainers by card. Connect it?',
+  stripe: 'Got it. Once you’ve priced the work, I can send the client a link to pay a retainer. Payments go through Stripe. Connect it here, and I’ll set up the link.',
+  stripeConnected: 'Connected. Now the retainer: set the amount, and I’ll set it up.',
   optIn: 'Got it. One thing about money: with no amount set, I ask you before every payment. If you’d like, you can set an amount I take on my own, now or later in Rules.',
   optChoices: ['Ask me before every payment', 'Set an amount now'],
   money: "What's the most I should take or pay out without asking you?",
@@ -612,13 +615,19 @@ function nextConsultant(interview: Interview): void {
   interview.state.pending_card = next?.proposal_id ?? null;
   if (next) {
     interview.state.question = null;
+    if (next.connector && !next.connector.connectable) {
+      say(interview, 'claude', CPA_COPY.consult);
+      interview.state.messages.push({ role: 'claude', text: '', choices: [], card: next });
+      nextConsultant(interview);
+      return;
+    }
     const job = next.job;
-    const intro = job?.job === 'schedule' ? CPA_COPY.consult
-      : job?.job === 'intake' && interview.proposals[0]?.job?.autonomy === 'auto' && interview.proposals[0]?.state === 'accepted' ? CPA_COPY.intake
-      : job?.job === 'payment' ? CPA_COPY.retainer
+    const intro = job?.job === 'schedule' ? null
+      : job?.job === 'intake' ? CPA_COPY.intake
+      : job?.job === 'payment' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'stripe') ? CPA_COPY.stripeConnected : CPA_COPY.retainer
       : next.connector?.app === 'stripe' ? CPA_COPY.stripe
       : job?.how ?? next.connector!.why;
-    say(interview, 'claude', intro);
+    if (intro) say(interview, 'claude', intro);
     interview.state.messages.push({ role: 'claude', text: '', choices: [], card: next });
   } else {
     interview.state.question = 'money_limit';

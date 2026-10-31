@@ -150,7 +150,7 @@ describe('setup consultant run and decisions', () => {
       expect(tools().map(({ status }) => status)).toEqual(accept ? ['needs_review', 'needs_review'] : []);
       if (ending === 'suggestions') state = await setupState('setupSuggestions', id, {});
       else {
-        state = await setupState('setupAnswer', id, { question: null, card: state.pending_card, text: 'Not now' });
+        while (state.pending_card) state = await setupState('setupAnswer', id, { question: null, card: state.pending_card, text: 'Not now' });
         state = await setupState('setupAnswer', id, { question: state.question, text: 'Ask me before every payment' });
       }
       expect(state.step).toBe('tools');
@@ -171,7 +171,7 @@ describe('setup consultant run and decisions', () => {
       const answered = await mockStore.dispatch('setupAnswer', { params: { id }, query, body: { question: state.question, text: 'Both, about evenly' } });
       if ('network' in answered) throw new Error('answer failed');
       state = answered.body as SetupState;
-      expect(state.messages.filter(({ card }) => card)).toHaveLength(cards === '1' ? 1 : 0);
+      expect(state.messages.filter(({ card }) => card)).toHaveLength(cards === '1' ? 2 : 0);
       if (cards !== '1') expect(state.pending_card).toBeNull();
       for (const message of state.messages) { expect(message).toHaveProperty('choices'); expect(message).toHaveProperty('card'); }
       const finished = await mockStore.dispatch('setupSuggestions', { params: { id }, query, body: {} });
@@ -284,6 +284,7 @@ describe('setup consultant run and decisions', () => {
     state = await setupState('setupAnswer', id, { question: null, card: pending, text: 'Yes, please' });
     expect(state.messages.find(({ card }) => card?.proposal_id === pending)?.card?.state).toBe('accepted');
     state = await setupState('setupAnswer', id, { question: null, card: state.pending_card, text: 'Not now' });
+    state = await setupState('setupAnswer', id, { question: null, card: state.pending_card, text: 'Yes, please' });
     const payment = state.pending_card;
     state = await setupState('setupAnswer', id, { question: null, card: payment, text: 'Yes, please' });
     expect(state.messages.find(({ card }) => card?.proposal_id === payment)?.card?.state).toBe('declined');
@@ -298,7 +299,7 @@ describe('setup consultant run and decisions', () => {
     const extra = state.messages.slice(before.messages.length);
     expect(extra[0]).toMatchObject({ role: 'owner', text: 'Use your suggestions' });
     expect(extra[1]).toMatchObject({ role: 'claude', text: 'Here’s the rest, as I’d set it up.' });
-    expect(state.messages.flatMap(({ card }) => card ? [card.state] : [])).toEqual(['accepted', 'accepted', 'declined', 'accepted', 'accepted', 'accepted']);
+    expect(state.messages.flatMap(({ card }) => card ? [card.state] : [])).toEqual(['accepted', 'accepted', 'accepted', 'accepted', 'declined', 'accepted']);
     expect(state.messages.at(-1)?.text).toBe(QUESTIONS_DONE);
     expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 0 } });
   });
@@ -309,8 +310,10 @@ describe('setup consultant run and decisions', () => {
     expect(state.messages.some(({ card }) => card)).toBe(false);
     expect(state).toMatchObject({ pending_card: null, question: 'what_you_do' });
     state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Both, about evenly' });
-    const ids = [];
-    for (const kind of ['schedule', 'intake', 'payment', 'status', 'stripe', 'google_calendar']) {
+    const calendar = state.messages.find(({ card }) => card?.connector?.app === 'google_calendar')!.card!;
+    expect(calendar.connector?.connectable).toBe(false);
+    const ids = [calendar.proposal_id];
+    for (const kind of ['schedule', 'intake', 'stripe', 'payment', 'status']) {
       const pending = state.messages.at(-1)!.card!;
       expect(pending.job?.job ?? pending.connector?.app).toBe(kind);
       expect(pending.proposal_id).toMatch(/^p-[0-9a-f]{12}$/);

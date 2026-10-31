@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Choice } from '../api/views.ts';
 import { Card, IconButton } from '../ds/index.ts';
+import { Icon } from '../ds/icons/index.tsx';
 import { SETUP_COPY } from './copy.ts';
 
 const copy = SETUP_COPY.questions;
 
 /** Only the current question lives in the dock; its answer remains in the transcript. */
-export function SetupChoices({ question, choices, disabled, onChoose, onDismiss }: {
+export function SetupChoices({ question, choices, maxLength, disabled, onChoose, onDismiss }: {
   question: string;
   choices: Choice[];
+  maxLength: number;
   disabled: boolean;
   onChoose: (text: string) => void;
   onDismiss: () => void;
@@ -66,11 +68,12 @@ export function SetupChoices({ question, choices, disabled, onChoose, onDismiss 
           <li><label className={`cd-setup-q3__row cd-setup-q3__row--other cd-type-body${active === choices.length ? ' is-active' : ''}`}>
             <kbd className="cd-setup-kbd cd-type-meta" aria-hidden="true">{choices.length + 1}</kbd>
             <input className="cd-type-body" aria-label={copy.other} placeholder={copy.other} value={other}
-              disabled={disabled} onFocus={() => setActive(choices.length)} onChange={(event) => setOther(event.target.value)} />
+              maxLength={maxLength} disabled={disabled} onFocus={() => setActive(choices.length)} onChange={(event) => setOther(event.target.value)} />
           </label></li>
         </ol>
         <p className="cd-setup-q3__hint cd-type-meta">
-          <kbd className="cd-setup-kbd cd-type-meta">↑</kbd><kbd className="cd-setup-kbd cd-type-meta">↓</kbd> {copy.move}
+          <kbd className="cd-setup-kbd cd-setup-kbd--arrow cd-type-meta"><Icon name="chevron-down" size={14} className="cd-setup-kbd__up" /><span className="cd-sr-only">{copy.upArrow}</span></kbd>
+          <kbd className="cd-setup-kbd cd-setup-kbd--arrow cd-type-meta"><Icon name="chevron-down" size={14} /><span className="cd-sr-only">{copy.downArrow}</span></kbd> {copy.move}
           <kbd className="cd-setup-kbd cd-type-meta">1–{choices.length + 1}</kbd> {copy.pick}
           <kbd className="cd-setup-kbd cd-type-meta">Enter</kbd> {copy.send}
           <kbd className="cd-setup-kbd cd-type-meta">Esc</kbd> {copy.typeInstead}

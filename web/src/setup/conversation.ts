@@ -20,37 +20,22 @@ export function liveChoices(state: Omit<SetupState, 'messages'> & { messages: Co
   return null;
 }
 
-/** A change is an acceptance; declines deliberately send no edits. */
+/** The inline actions accept or decline; typed changes are conversation turns. */
 export interface ProposalDecision {
-  action: 'accept' | 'decline' | 'change';
+  action: 'accept' | 'decline';
   proposal: ProposalCard;
-  title?: string;
   amount_cents?: number;
-  autonomy?: 'auto' | 'ask';
 }
 
 export type DecisionResult =
   | { ok: true; body: SetupProposalBody }
-  | { ok: false; field: 'title' | 'amount_cents' | 'autonomy'; message: string; code?: never }
+  | { ok: false; field: 'amount_cents'; message: string; code?: never }
   | { ok: false; field: 'amount_cents'; code: 'amount_required'; message: string };
 
 /** Build only a valid request body, or a field error the screen can show without sending. */
 export function decisionBody(decision: ProposalDecision): DecisionResult {
   if (decision.action === 'decline') return { ok: true, body: { accept: false } };
   const body: SetupProposalBody = { accept: true };
-  if (decision.autonomy !== undefined) {
-    if (decision.proposal.kind !== 'job' || decision.proposal.job === null || !['auto', 'ask'].includes(decision.autonomy)) {
-      return { ok: false, field: 'autonomy', message: 'Choose whether this job acts on its own or asks you first.' };
-    }
-    body.autonomy = decision.autonomy;
-  }
-  if (decision.title !== undefined) {
-    const title = decision.title.trim();
-    if (decision.proposal.kind !== 'job' || decision.proposal.job === null || [...title].length < 1 || [...title].length > 60) {
-      return { ok: false, field: 'title', message: 'Enter a job title between 1 and 60 characters.' };
-    }
-    body.title = title;
-  }
   if (decision.amount_cents !== undefined) {
     const amount = decision.amount_cents;
     if (decision.proposal.kind !== 'job' || decision.proposal.job?.config?.block !== 'purpose_payment') {

@@ -311,7 +311,7 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
     returnFocus.current = false;
     // A failed answer replaces the field with "Try again" until it can be settled.
     const target = decisionFailed
-      ? step.current?.querySelector<HTMLElement>('.cd-setup-job__failed button:not(:disabled)')
+      ? step.current?.querySelector<HTMLElement>('.cd-setup-c3__failed button:not(:disabled)')
       : closing ? step.current?.querySelector<HTMLElement>('.cd-setup-dock button')
       : composer.current?.querySelector<HTMLElement>('textarea:not(:disabled), button:not(:disabled)');
     target?.focus({ preventScroll: true });
@@ -324,7 +324,9 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
 
   return (
     <div className="cd-setup-chat" ref={step}>
-      <div className="cd-setup-chat__scroll" ref={scroll}>
+      <div className="cd-setup-chat__scroll" ref={scroll} tabIndex={0}
+        // Keyboard users can scroll here; clicking transcript text keeps the existing body-focus behavior.
+        onPointerUp={(event) => { if (document.activeElement === event.currentTarget) event.currentTarget.blur(); }}>
       <div className="cd-setup-chat__column cd-setup-step">
       <PageHeader title={copy.title} />
       <Transcript label={copy.conversation}>
@@ -362,8 +364,8 @@ export function QuestionsStep({ state, onState, reread, onContinue }: QuestionsS
       </div></div>
       <div className="cd-setup-dock"><div className="cd-setup-dock__column">
       {panel ? <SetupChoices key={panel.index} question={state.messages[panel.index]!.text} choices={panel.choices}
-        disabled={blocked || failed !== null} onDismiss={dismissPanel}
-        onChoose={(text) => { closePanel(); returnFocus.current = true; send(text); }} /> : null}
+        maxLength={ANSWER_MAX} disabled={blocked || failed !== null} onDismiss={dismissPanel}
+        onChoose={(text) => { returnFocus.current = true; send(text); }} /> : null}
       {closing ? <div className="cd-setup-step__actions"><Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button></div> : asking && !busy ? (
         <>
           {consentError === null ? null : <Notice tone="error">{consentError}</Notice>}

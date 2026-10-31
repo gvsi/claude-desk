@@ -508,12 +508,13 @@ export type ProposalCard = {
 /** The closed catalog of jobs setup can propose. */
 export type JobKind = 'answer' | 'intake' | 'schedule' | 'price' | 'documents' | 'status' | 'payment' | 'urgent';
 
-/** Title ≤ 60, why ≤ 200, how ≤ 300; autonomy proposes doing it on its own or asking first. */
+/** Title and who ≤ 60, why ≤ 200, how ≤ 300; model text is untrusted. */
 export type JobProposal = {
   job: JobKind;
   title: string;
   why: string;
   how: string;
+  who?: string | null;
   can_do_today: boolean;
   autonomy: 'auto' | 'ask';
   config: BlockConfig | null;

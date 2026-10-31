@@ -161,6 +161,7 @@ export const SETUP_COPY = {
     suggestions: 'Use your suggestions',
     suggestionsLine: 'Skip the rest. I’ll fill it in from what I’ve proposed, and every limit asks you first.',
     dismiss: 'Dismiss', other: 'Something else…',
+    upArrow: 'Up arrow', downArrow: 'Down arrow',
     move: 'to move', pick: 'to pick', send: 'to send', typeInstead: 'to type instead',
     allow: 'Yes, use it',
     decline: "No, I'll type it",
@@ -175,16 +176,17 @@ export const SETUP_COPY = {
 
   proposal: {
     changed: 'Changed below',
-    connectLabel: 'Connect', connectedLabel: 'Connected',
+    connect: 'Connect', connected: 'Connected',
     setItUp: 'Set it up', setUp: 'Set up',
     amount: 'Amount', amountHint: 'In dollars. The payment link asks for this amount.', amountError: 'Enter an amount to accept this.',
     failed: 'I couldn’t save that just now. Try again.', tryAgain: 'Try again',
-    name: 'Name', nameHint: 'Up to 60 characters.', outcome: 'Outcome', save: 'Save', cancel: 'Cancel',
-    accept: 'Accept', change: 'Change', decline: 'Not now', accepted: 'Accepted', later: 'Coming later',
-    connect: (label: string) => `Connect ${label}`,
-    connected: 'It connects when you reach Tools, and you review its tools there.',
-    appointment: 'Appointment', questions: 'Questions', payment: 'Payment', urgent: 'Urgent', minutes: 'minutes',
-    unpriced: (purpose: string) => `${purpose}. You set the amount when you accept.`,
+    decline: 'Not now', later: 'Coming later',
+    who: 'Who', usesLabel: 'Uses', nextLabel: 'Next for you', asks: 'Asks',
+    uses: { schedule: 'Your opening hours', payment: 'Stripe', price: 'Your prices', intake: 'Your questions', urgent: 'Alerts you right away' },
+    next: {
+      schedule: { auto: 'The booking shows in Today, with their answers', ask: 'You approve each request in Needs you' },
+      intake: 'Their answers show on the booking', payment: 'Each payment shows in Today',
+    },
   },
 
   tools: {
