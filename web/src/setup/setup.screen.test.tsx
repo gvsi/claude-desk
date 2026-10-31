@@ -33,6 +33,18 @@ const DESCRIPTION =
 const EXAMPLES_LINE = 'Or start from an example. You can change every word.';
 const EXAMPLE_CHIPS = ['A plumber in Oakland', 'A bakery that takes custom orders', 'A tax preparer'];
 
+/**
+ * What only the business's facts may state, in English and Spanish: an amount, a price, quote or
+ * deposit, a date or hold, a promise or deal, and a day or month. Setup's examples are words for the
+ * owner to change, so they state none of it.
+ */
+const STATES_A_FACT: readonly RegExp[] = [
+  /[\d$%€]/,
+  /\b(?:prices?|cost|charges?|quotes?|deposits?|dates?|hold|rates?|precios?|cuesta|cobro|depósitos?|anticipo|fechas?|apartar)\b/i,
+  /\b(?:free|discounts?|deals?|guarantee[ds]?|promise[ds]?|same[- ]day|today|tomorrow|gratis|descuentos?|ofertas?|garantiz\w*|prometo|hoy|mañana)\b/i,
+  /\b(?:(?:mon|tues|wednes|thurs|fri|satur|sun)days?|january|february|march|april|may|june|july|august|september|october|november|december|lunes|martes|miércoles|jueves|viernes|sábados?|domingos?|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i,
+];
+
 /** The requests a route got, by key, from the `from`th request on. */
 const requests = (key: RouteKey, from = 0) => mockStore.requests.slice(from).filter((r) => r.key === key);
 
@@ -518,18 +530,14 @@ describe('setup', () => {
     expect(enOwners).toEqual(['Daniel', 'Rosa', 'Linh']);
     expect(owners(es.examples.map((example) => example.description), /\bSoy ([A-Z][a-z]+) y /)).toEqual(enOwners);
 
-    // Words for the owner to change, never facts: no amounts, days, dates, discounts or promises, in
-    // two or three sentences.
+    // Words for the owner to change, never facts: no amounts, prices, days, dates, deposits, discounts
+    // or promises, in two or three sentences. The board's draft bakery sentence is what they avoid.
+    const states = (text: string) => STATES_A_FACT.filter((pattern) => pattern.test(text)).map(String);
+    expect(states('People ask for prices, order cakes for a date and pay a deposit to hold it.')).not.toEqual([]);
     for (const { chip, description } of [...en.examples, ...es.examples]) {
       expect(description.split(/(?<=\.)\s+/).length, chip).toBeGreaterThanOrEqual(2);
       expect(description.split(/(?<=\.)\s+/).length, chip).toBeLessThanOrEqual(3);
-      expect(description, chip).not.toMatch(/[\d$%€]/);
-      expect(description, chip).not.toMatch(
-        /\b(?:free|discounts?|deals?|guarantee[ds]?|promise[ds]?|same[- ]day|today|tomorrow|gratis|descuentos?|ofertas?|garantiz\w*|prometo|hoy|mañana)\b/i,
-      );
-      expect(description, chip).not.toMatch(
-        /\b(?:(?:mon|tues|wednes|thurs|fri|satur|sun)days?|january|february|march|april|may|june|july|august|september|october|november|december|lunes|martes|miércoles|jueves|viernes|sábados?|domingos?|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\b/i,
-      );
+      expect(states(description), chip).toEqual([]);
     }
   });
 
