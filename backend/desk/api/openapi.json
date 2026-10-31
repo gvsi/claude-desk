@@ -10638,7 +10638,8 @@
                   "refund_issued",
                   "charge_confirmed",
                   "callback_confirmed",
-                  "payment_confirmed"
+                  "payment_confirmed",
+                  "link_cancelled"
                 ]
               },
               {

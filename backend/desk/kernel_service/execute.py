@@ -6,11 +6,12 @@ An execution takes up to three transactions, so that a crash leaves a record of 
 - T1 locks the decision (for an allow, once it holds the session row `FOR SHARE`), settles it as
   any read does (`refresh_decision`), re-checks it against the current rows (`recheck`, step 6
   of "Evaluation", against the active version at its money cap, which the `execute` entries that
-  follow name as `policy_version` and `auto_money_cap_cents`), makes sure the receipt it will end
-  on can be written (`_receipt_ready`),
-  runs the adapter's `prepare` and commits the `executions` row in state `intent`, with whatever
-  `prepare` reserved and the version and cap the re-check ran under. Nothing outside the kernel
-  has happened yet.
+  follow name as `policy_version` and `auto_money_cap_cents`, and with an agent's mandate spend as
+  it stands, `mandates.session_remaining`), makes sure the receipt it will end on can be written
+  (`_receipt_ready`), runs the adapter's `prepare` (an agent's money action reserves its amount on
+  its mandate there, under the mandate row's lock) and commits the `executions` row in state
+  `intent`, with whatever `prepare` reserved and the version and cap the re-check ran under.
+  Nothing outside the kernel has happened yet.
 - T2 first holds the session row (`_hold_session`), on either path: `FOR SHARE`, so a take-over,
   or a Desk's deletion closing the session, waits for a running execution, and one that came
   first stops it (the fence); `FOR UPDATE` for an adapter that writes the session's own rows
@@ -40,6 +41,17 @@ ones active when it runs. What it settles is a record of what already happened, 
 commit, so each action it settles commits at once, before a read goes on: no recheck of the read's
 session takes it back.
 
+A connected (MCP) tool is listed again in every re-check, before the server is asked anything
+else, and its pin is checked last, under its `tools` row's lock: a changed or delisted definition
+refuses the call ("rules changed") and is recorded, the owner alerted, in the refusal's own
+transaction; a server that can't list refuses it with the visitor line `tool_unavailable`. The
+re-check takes the `tools` row and then the ledger head, the order `activation.confirm` takes them
+in after the active version, and it never takes the active version itself. One exception: on the
+approved path, the owner's answer holds the decision row across the re-list, and may already hold
+the ledger head when reading the decision recomputed a held money decision's answers
+(`decide.refresh_answers`). Against a concurrent confirm that changes the same tool, Postgres may
+then end one of the two transactions; either way it fails closed, with nothing run.
+
 Claude sees an execution only through its `model_view`: kept to the adapter's `model_view_keys`,
 and emptied when a fact the session can't read was dropped or a value carries a document canary,
 which the `execute` entry records (`violation: "canary"`). This one check runs wherever a result
@@ -49,7 +61,7 @@ is stored: an allow, an approved hold and a reconciled orphan.
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Literal, NamedTuple
 
@@ -58,12 +70,13 @@ from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 
-from desk.contracts import ExecResult, Fact, LedgerEvent, NormalizedAction, Principal
+from desk.contracts import ExecResult, Fact, InboxNotice, LedgerEvent, NormalizedAction, Principal
 from desk.db.models import Action as ActionRow
 from desk.db.models import Approval, Business, Desk, Execution, Person, Tool
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_api import ExecuteRequest
-from desk.kernel_service import activation, adapters, auth, decide, labels, ledger, repo
+from desk.kernel_service import (activation, adapters, auth, decide, labels, ledger, mandates, mcp_client, mcp_pins,
+                                 repo)
 from desk.kernel_service.adapters.base import (Adapter, AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown,
                                                ExecCtx, Normalized, NormalizeCtx)
 from desk.kernel_service.auth import AuthError, Named, SessionRow
@@ -76,6 +89,14 @@ log = logging.getLogger(__name__)
 ORPHAN_AFTER = timedelta(seconds=30)      # an intent younger than this may still be running
 EXECUTE_ROUTE = "POST /execute"
 ExecPath = Literal["allow", "approved"]   # an allow through /execute, an approved hold inside the answer
+UNAVAILABLE = "unavailable"               # the re-check's code for a connected tool's server that couldn't list
+PIN = "pin"                               # its code for a connected tool not listed at its pin
+
+
+def visitor_template(check: str | None) -> str | None:
+    """The status line a `refused_at_execution` takes for the re-check part that failed, when it
+    isn't the state's own ("rules changed"): `tool_unavailable` for a server that couldn't list."""
+    return "tool_unavailable" if check == UNAVAILABLE else None
 
 
 def binding_sha256(*, copy_id: str, desk_id: str, session_id: str, action_id: str, args_sha256: str,
@@ -123,9 +144,13 @@ class _Target:
     adapter: Adapter | None
     principal: Principal
     checked: Checked | None = None       # the version and cap step 6 ran against, once it has
+    notices: list[InboxNotice] = field(default_factory=list)   # owner alerts the re-check wrote (a drift)
 
     def xctx(self, ctx: KernelCtx) -> ExecCtx:
-        return ExecCtx(ctx=ctx, desk_row=self.desk_row, session_row=self.session_row, principal=self.principal)
+        """The adapter's context, with the version step 6 passed under (None before it runs, and in
+        reconciliation, which runs no re-check)."""
+        return ExecCtx(ctx=ctx, desk_row=self.desk_row, session_row=self.session_row, principal=self.principal,
+                       recheck_version=self.checked.policy_version if self.checked is not None else None)
 
 
 async def _one(ctx: KernelCtx, stmt: Any) -> Any:
@@ -227,19 +252,41 @@ async def recheck(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) 
     and the approval's binding. Either way the Desk must stand, the tool must be registered and
     enabled, and the adapter must normalize the stored args to exactly the stored action. The rules
     are the active version's, evaluated at its money cap, so a re-check after a confirm uses the
-    new version's cap."""
+    new version's cap, and an agent's charge is bounded by what its mandate has left now."""
     return isinstance(await recheck_under(ctx, decision_row, path=path), Checked)
 
 
 async def recheck_under(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Checked | str:
     """`recheck`, answering with the version and money cap it passed under, or, when it fails, with
-    the part that failed (`desk`, `tool`, `session`, `args`, `profile`, `policy` or `binding`), the
-    `check` its refusal is ledgered with, as an allow's is. A pass that named no version fails as
-    `policy`, so the refusal never ledgers a null check."""
+    the part that failed (`desk`, `tool`, `session`, `args`, `profile`, `policy` or `binding`, and
+    `UNAVAILABLE` or `PIN` for a connected tool), the `check` its refusal is ledgered with, as an
+    allow's is. A pass that named no version fails as `policy`, so the refusal never ledgers a null
+    check."""
+    outcome = await recheck_outcome(ctx, decision_row, path=path)
+    return outcome.checked if outcome.checked is not None else outcome.failed
+
+
+@dataclass(frozen=True)
+class Rechecked:
+    """A re-check's outcome: exactly one of the version and money cap it passed under (`checked`)
+    and the part that failed (`failed`, a ledgered code as `recheck_under` names it), and the owner
+    alerts it wrote, which go in the transaction the caller commits."""
+
+    checked: Checked | None
+    failed: str | None
+    notices: tuple[InboxNotice, ...] = ()
+
+
+async def recheck_outcome(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Rechecked:
+    """`recheck`, with the part that failed and the alerts it wrote. A pass that named no version
+    fails as `policy`."""
     target = await _target(ctx, decision_row)
-    if (failed := await _recheck(ctx, target, path)) is not None:
-        return failed
-    return target.checked if target.checked is not None else "policy"
+    failed = await _recheck(ctx, target, path)
+    if failed is None and target.checked is None:
+        failed = "policy"
+    if failed is not None:
+        return Rechecked(checked=None, failed=failed, notices=tuple(target.notices))
+    return Rechecked(checked=target.checked, failed=None, notices=tuple(target.notices))
 
 
 async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | None:
@@ -259,6 +306,13 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
             return "session"
         if action.tool not in decide.tools_given(target.principal, session, desk_row, enabled):
             return "tool"
+    # (1b) a connected tool's definitions, listed again before the server is asked anything else
+    listed: dict[str, dict[str, Any]] | None = None
+    if mcp_pins.is_mcp(action.tool):
+        try:
+            listed = await mcp_client.client(ctx.settings).list_tools_raw(action.copy_id)
+        except mcp_client.McpUnavailable:
+            return UNAVAILABLE
     # (2) the same action from the stored args, at the current profile
     try:
         args = adapter.Args.model_validate(target.action_row.args_json)
@@ -279,8 +333,9 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
         return "policy"
     cap = activation.version_cap(version_row)
     target.checked = Checked(policy_version=version_row.version, auto_money_cap_cents=cap)
+    remaining = await mandates.session_remaining(ctx, target.session_row, desk_row.desk_id)   # the spend left now
     request = decide.cedar_request(target.principal, action, tz=target.business.timezone, now=ctx.clock.now(),
-                                   auto_money_cap_cents=cap)
+                                   auto_money_cap_cents=cap, mandate_remaining_cents=remaining)
     if path == "allow":
         stored_review = Reviewed(review=decision.review, usage=None)
 
@@ -289,17 +344,27 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
 
         if (await decide.evaluate(ctx, version_row, request, review_source=review_source)).outcome != "allow":
             return "policy"
-        return None
-    key = activation.version_key(version_row.desk_id, version_row.version) + ":approvable"
-    verdict = json.loads(ctx.policies.engine.decide(key, json.dumps(request), "final"))
-    if verdict["errors"] or verdict["outcome"] != "hold":
-        return "policy"
-    approval = (await ctx.db.scalars(ctx.repo.scoped(
-        select(Approval).where(Approval.decision_id == decision.decision_id)))).one_or_none()
-    if approval is None or not approval.nonce or approval.binding_sha256 != binding_sha256(
-            copy_id=action.copy_id, desk_id=action.desk_id, session_id=action.session_id, action_id=action.action_id,
-            args_sha256=args_sha256, profile_sha256=tool_row.profile_sha256, nonce=approval.nonce):
-        return "binding"
+    else:
+        key = activation.version_key(version_row.desk_id, version_row.version) + ":approvable"
+        verdict = json.loads(ctx.policies.engine.decide(key, json.dumps(request), "final"))
+        if verdict["errors"] or verdict["outcome"] != "hold":
+            return "policy"
+        approval = (await ctx.db.scalars(ctx.repo.scoped(
+            select(Approval).where(Approval.decision_id == decision.decision_id)))).one_or_none()
+        if approval is None or not approval.nonce or approval.binding_sha256 != binding_sha256(
+                copy_id=action.copy_id, desk_id=action.desk_id, session_id=action.session_id,
+                action_id=action.action_id, args_sha256=args_sha256, profile_sha256=tool_row.profile_sha256,
+                nonce=approval.nonce):
+            return "binding"
+    # (4) a connected tool listed at its pin: checked last, under its row's lock (`check_pin`), which
+    # records a drift and alerts the owner in this transaction, so they commit with the refusal
+    if listed is not None:
+        check = await mcp_pins.check_pin(ctx, desk_row.desk_id, action.tool, listed=listed)
+        if check.notice is not None:
+            target.notices.append(check.notice)
+        if (check.state != "ok" or tool_row.status != "enabled" or check.sha256 != tool_row.definition_sha256
+                or tool_row.profile_sha256 != action.profile_sha256):
+            return PIN
     return None
 
 
@@ -361,8 +426,11 @@ async def _prepare_intent(ctx: KernelCtx, target: _Target) -> bool:
 
 
 async def _refused_at_execution(ctx: KernelCtx, target: _Target, check: str) -> KernelFailure:
-    """The decision becomes `refused_at_execution` ("rules changed"), committed; the answer is 409."""
+    """The decision becomes `refused_at_execution` ("rules changed", or `tool_unavailable` for a
+    connected tool's server that couldn't list), committed with whatever the re-check recorded (a
+    drift and its alert); the answer is 409."""
     await decide.set_state(ctx, target.decision, "refused_at_execution", kind="execute",
+                           status=visitor_template(check),
                            summary=_summary(target, "refused_at_execution", reason="rules_changed", check=check))
     await ctx.db.commit()
     return KernelFailure(409, "conflict", f"refused_at_execution:{check}")

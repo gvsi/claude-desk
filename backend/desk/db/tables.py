@@ -36,7 +36,7 @@ KERNEL_RO_COLUMNS: dict[str, tuple[str, ...]] = {
     "documents": ("document_id", "copy_id", "desk_id", "title", "record_owner_person_id", "created_at"),
     "leads": ("lead_id", "copy_id", "desk_id", "session_id", "display_name", "note", "created_at"),
     "tools": ("copy_id", "desk_id", "tool", "source", "effects", "reversible", "status", "description_confirmed",
-              "definition_sha256", "pending_definition_text", "pending_sha256"),   # the pin is public, not a secret
+              "definition_sha256", "pending_definition_text", "pending_sha256", "review_reason"),   # the pin is public
     "price_items": ("item_id", "copy_id", "desk_id", "title", "unit_cents"),
     "calendar_slots": ("slot_id", "copy_id", "desk_id", "starts_at", "minutes"),
     "notification_prefs": ("copy_id", "desk_id", "now", "briefing"),
@@ -54,8 +54,8 @@ KERNEL_RO_COLUMNS: dict[str, tuple[str, ...]] = {
     "quotes": ("quote_id", "copy_id", "desk_id", "session_id", "items", "list_cents", "discount_bp",
                "amount_cents", "status", "expires_at", "created_at"),
     "bookings": ("booking_id", "copy_id", "desk_id", "slot_id", "starts_at", "person_id", "lead_id", "status"),
-    "payment_links": ("link_id", "copy_id", "desk_id", "session_id", "quote_id", "amount_cents", "state",
-                      "expires_at"),
+    "payment_links": ("link_id", "copy_id", "desk_id", "session_id", "quote_id", "action_id", "amount_cents",
+                      "state", "expires_at"),
     "handoffs": ("handoff_id", "copy_id", "desk_id", "session_id", "reason", "callback_window", "status"),
     "ledger_entries": ("copy_id", "desk_id", "seq", "prev_hash", "created_at", "event", "hash", "signature",
                        "key_id"),

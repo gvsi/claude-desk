@@ -1,6 +1,8 @@
 """Sessions: opening one, /whoami and the owner's take-over.
 
-A session's state and principal are built from the kernel's own rows, never from a request.
+A session's state and principal are built from the kernel's own rows, never from a request. A
+visitor's session opens with a token, shown once; an agent's opens by signature alone, bound to
+the signing key and the mandate it presents (`agents.open_session`), and has no token.
 """
 
 from typing import Annotated
@@ -11,7 +13,7 @@ from sqlalchemy import select
 from desk.contracts import LedgerEvent, Principal, SessionCreated, SessionState
 from desk.db.models import Desk
 from desk.kernel_api import CreateSessionRequest, ModeRequest, WhoAmI
-from desk.kernel_service import auth, ledger, repo
+from desk.kernel_service import agents, auth, ledger, repo
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, route_template
 
@@ -59,7 +61,10 @@ async def create_session(body: CreateSessionRequest, ctx: Ctx, request: Request)
     desk = (await ctx.db.scalars(copy.scoped(select(Desk).where(Desk.slug == body.desk_slug)))).one()
     named = Named(copy_id=copy_id, desk_id=desk.desk_id)
     if body.kind == "agent":
-        raise AuthError(401, "auth", "agent_auth_unavailable", route=route_template(request), named=named)
+        row = await agents.open_session(ctx, request, desk, body.mandate)
+        return SessionCreated(state=session_state(row), session_token=None)
+    if body.mandate is not None:          # only an agent presents a mandate
+        raise KernelFailure(422, "invalid", "visitor_mandate")
     if body.preview and owner is None:
         raise AuthError(401, "auth", "preview_unavailable", route=route_template(request), named=named)
     if desk.deleted_at is not None:
@@ -88,9 +93,19 @@ async def open_visitor(ctx: KernelCtx, copy_id: str, desk_id: str, *, preview: b
 
 
 @router.get("/whoami", response_model=WhoAmI)
-async def whoami(ctx: Ctx, request: Request) -> WhoAmI:
-    """The API's only source for the copy, session and generation: a visitor's `X-Session-Token`
-    or the owner's `X-Owner-Session`, never both."""
+async def whoami(ctx: Ctx, request: Request, session_id: str | None = None) -> WhoAmI:
+    """The API's only source for the copy, session and generation: a visitor's `X-Session-Token`,
+    the owner's `X-Owner-Session`, or an agent's signature for the session it names
+    (`?session_id=`), never two of them. An agent's first call of a turn is normally this one."""
+    signed = auth.agent_signed(request)
+    if signed and auth.SESSION_HEADER not in request.headers and auth.OWNER_HEADER not in request.headers:
+        if session_id is None:
+            raise AuthError(401, "auth", "bad_token", route=route_template(request))
+        row = await auth.require_session(ctx, request, session_id)
+        return WhoAmI(kind=row.kind, copy_id=row.copy_id, desk_id=row.desk_id, desk_ids=[row.desk_id],
+                      session=session_state(row))
+    if signed:
+        raise AuthError(401, "auth", "bad_token", route=route_template(request))
     if auth.OWNER_HEADER in request.headers and auth.SESSION_HEADER not in request.headers:
         owner = await auth.require_owner(ctx, request)
         row = (await ctx.db.scalars(ctx.repo.scoped(

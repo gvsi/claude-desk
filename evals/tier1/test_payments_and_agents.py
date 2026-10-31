@@ -158,9 +158,9 @@ def pin_hashes(k: KernelHarness, drifted: ToolProfile) -> tuple[str, str]:
 
 
 async def confirm_tool(k: KernelHarness, desk: GoldenDesk, tool: str, sha256: str, *, expect: Expect) -> Any:
-    """The owner turns an MCP tool on, naming the hash of the definition they reviewed."""
-    return await k.call("POST /tools/confirm", body={"desk_id": desk.desk_id, "tool": tool, "enable": True,
-                                                     "definition_sha256": sha256},
+    """The owner turns an MCP tool on, naming the hash of the definition they reviewed: a batch of one."""
+    return await k.call("POST /tools/confirm", body={"desk_id": desk.desk_id, "enable": True,
+                                                     "tools": [{"tool": tool, "definition_sha256": sha256}]},
                         auth=desk.owner, expect=expect)
 
 
@@ -183,7 +183,7 @@ async def test_confirm_with_a_stale_hash_409(k: KernelHarness, records):
         assert (row["status"], row["definition_sha256"], row["pending_sha256"]) == ("needs_review", old, new), (
             f"confirming the old pin changed the tool: {row['status']}")
     confirmed = await confirm_tool(k, desk, REFUND, new, expect=Expect(fields={
-        "profile.tool": REFUND, "profile.status": "needs_review", "draft.desk_id": desk.desk_id,
+        "profiles.0.tool": REFUND, "profiles.0.status": "needs_review", "draft.desk_id": desk.desk_id,
         "draft.status": "proved",
     }))
     waiting = await tools_given(k, dana)

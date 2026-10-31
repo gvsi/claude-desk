@@ -63,7 +63,7 @@ import signal
 import tempfile
 import threading
 from collections import OrderedDict
-from collections.abc import Awaitable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from datetime import datetime, time, timedelta
@@ -78,19 +78,27 @@ from sqlalchemy import func, select
 from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     LedgerEvent,
+    NormalizedAction,
     PolicyVersion,
+    Principal,
+    Probe,
+    ProbeResult,
     ProofCheck,
     ProofReport,
+    ResourceRef,
     RuleCard,
     ToolProfile,
     money_tool,
 )
-from desk.db.models import AgentKey, Desk, Person
+from desk.db.models import AgentKey, Business, Desk, Person
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
-from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain, ledger, reference, render,
-                                 review_thresholds, seed)
-from desk.kernel_service.auth import OwnerCtx
+from desk.kernel_api import ToolPin
+from desk.kernel_service import (adapters, compiler, demo_inbox, desks, explain, ledger, mcp_client, mcp_pins, payments,
+                                 reference, render, review_thresholds, seed)
+from desk.kernel_service.adapters.base import Normalized
+from desk.kernel_service.auth import OwnerCtx, SessionRow
+from desk.kernel_service.decisions import Reviewed
 from desk.kernel_service.reference import RefSets
 from desk.kernel_service.repo import (KernelCtx, KernelFailure, KernelRuntime, copy_ids, desks_to_bring_up,
                                      kernel_transaction, log_error)
@@ -375,7 +383,9 @@ def version_hashes(compiled: compiler.CompiledSets, schema: Mapping[str, Any], p
 # fixed and their scopes never name a person, so they compile to the same hashes in every copy.
 # Each is proved at one money cap (`SHIPPED_CAPS`): the seed at its $500, the presets at 0, which
 # is every new Desk's first cap. A preset drafted at another cap misses the shipped report and
-# proves live like any draft.
+# proves live like any draft. Each is compiled over the profiles a Desk made from it enables
+# (`shipped_profiles`): the native adapters', and the seed's also its connected MCP tools', pinned at
+# the hashes of the server's default definitions (`mcp_client.seed_pins()`), so proving needs no server.
 
 PROOFS_DIR = compiler.CEDAR_DIR / "proofs"
 SHIPPED_PRESETS: dict[str, list[RuleCard]] = {
@@ -388,11 +398,21 @@ SHIPPED_CAPS: dict[str, int] = {
     "ask_first": 0,
     "auto": 0,
 }
+SHIPPED_CONNECTIONS: dict[str, tuple[str, ...]] = {   # the MCP servers a Desk from each set connects
+    "rivera": ("mock_payments",),
+    "ask_first": (),
+    "auto": (),
+}
 
 
-def shipped_profiles() -> list[ToolProfile]:
-    """The profiles a new Desk enables (`desks.create_desk`): the registered native adapters'."""
-    return adapters.registered_profiles(source="native")
+def shipped_profiles(preset: str | None = None) -> list[ToolProfile]:
+    """The profiles a Desk made from `preset` enables, by tool name: the registered native adapters'
+    (all a new Desk from `desks.create_desk` has), and for the seed also its connected MCP tools',
+    each pinned at its seed hash."""
+    pins = mcp_client.seed_pins()
+    connected = [ToolPin(tool=tool, definition_sha256=pins[mcp_pins.MCP_OPERATIONS[tool]])
+                 for server in SHIPPED_CONNECTIONS.get(preset or "", ()) for tool in mcp_pins.SERVERS[server]]
+    return mcp_pins.enabled_with(adapters.registered_profiles(source="native"), connected)
 
 
 class ShippedReport(BaseModel):
@@ -612,16 +632,17 @@ class SeedUnproved(KernelFailure):
 def version_row(*, copy_id: str, desk_id: str, version: int, parent_version: int | None,
                 compiled: compiler.CompiledSets, a0: str, schema: Mapping[str, Any], hashes: VersionHashes,
                 auto_money_cap_cents: int, status: str, proof: ProofReport | None, created_at: datetime,
-                preset: str | None = None, draft_key_sha256: str | None = None) -> PolicyVersionRow:
+                preset: str | None = None, draft_key_sha256: str | None = None,
+                enables: Sequence[ToolPin] = ()) -> PolicyVersionRow:
     """A `policy_versions` row for a compiled version: its cards with defaults, its Cedar (`F`,
     `A`, `H` and `A0`), its schema as loaded, the money cap it was compiled at and the hashes its
     proof covers (`cards_sha256` among them, from `version_hashes` at that cap); an owner's draft
-    also carries its `draft_key_sha256`."""
+    also carries its `draft_key_sha256`, and a tools-confirm draft the tools it turns on."""
     return PolicyVersionRow(
         desk_id=desk_id, version=version, copy_id=copy_id, parent_version=parent_version, cards=compiled.cards,
         status=status, proof=proof, **hashes._asdict(), auto_money_cap_cents=auto_money_cap_cents,
         created_at=created_at, cedar={**compiled.sets(), "A0": a0}, schema_json=json.dumps(schema), preset=preset,
-        draft_key_sha256=draft_key_sha256)
+        draft_key_sha256=draft_key_sha256, enables=list(enables))
 
 
 def version_contract(row: PolicyVersionRow) -> PolicyVersion:
@@ -1111,19 +1132,31 @@ def _hashes(profiles: Sequence[ToolProfile], schema: Mapping[str, Any], auto_mon
                   review_thresholds_version=review_thresholds.REVIEW_THRESHOLDS_VERSION)
 
 
-async def current_hashes(ctx: KernelCtx, desk_id: str, auto_money_cap_cents: int) -> Hashes:
-    """The hashes a version of the Desk at the money cap `auto_money_cap_cents` would be proved
-    against now, from its enabled profiles and the invariants rendered at that cap."""
-    profiles = await desks.enabled_profiles(ctx, desk_id)
+async def draft_profiles(ctx: KernelCtx, desk_id: str, enables: Sequence[ToolPin] = ()) -> list[ToolProfile]:
+    """The profiles a version of the Desk enabling `enables` is proved over: its enabled tools'
+    plus each tool `enables` turns on, pinned at its hash."""
+    return mcp_pins.enabled_with(await desks.enabled_profiles(ctx, desk_id), enables)
+
+
+async def current_hashes(ctx: KernelCtx, desk_id: str, auto_money_cap_cents: int, *,
+                         enables: Sequence[ToolPin] = ()) -> Hashes:
+    """The hashes a version of the Desk at the money cap `auto_money_cap_cents` that enables
+    `enables` would be proved against now: the schema and profiles of its enabled tools plus those
+    (at their current pins, none waiting for review), and the invariants rendered at that cap."""
+    profiles = await draft_profiles(ctx, desk_id, enables)
     return _hashes(profiles, compiler.desk_schema(profiles), auto_money_cap_cents)
 
 
-def draft_key_sha256(parent_version: int | None, cards: Iterable[RuleCard], hashes: Hashes) -> str:
+def draft_key_sha256(parent_version: int | None, cards: Iterable[RuleCard], hashes: Hashes,
+                     enables: Sequence[ToolPin] = ()) -> str:
     """sha256 of `canonical_json({parent_version, cards_sha256, schema_sha256, baseline_sha256,
-    profiles_sha256, invariants_sha256, review_thresholds_version})`: the same cards on the same
-    parent, proved against the same things, are the same draft. `invariants_sha256` renders the
-    invariants at the draft's money cap, so the same cards at another cap are another draft."""
-    key = {"parent_version": parent_version, "cards_sha256": cards_sha256(cards), **hashes._asdict()}
+    profiles_sha256, invariants_sha256, review_thresholds_version})`, plus `enables` when a draft
+    turns tools on: the same cards on the same parent, proved against the same things, are the same
+    draft. `invariants_sha256` renders the invariants at the draft's money cap, so the same cards at
+    another cap are another draft."""
+    key: dict[str, Any] = {"parent_version": parent_version, "cards_sha256": cards_sha256(cards), **hashes._asdict()}
+    if enables:
+        key["enables"] = sorted(([pin.tool, pin.definition_sha256] for pin in enables))
     return hashlib.sha256(desk_kernel.canonical_json(json.dumps(key)).encode()).hexdigest()
 
 
@@ -1206,10 +1239,13 @@ def _proves_again(row: PolicyVersionRow) -> bool:
 
 
 async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[RuleCard],
-                expected_parent: int | None, auto_money_cap_cents: int | None = None) -> PolicyVersion:
+                expected_parent: int | None, auto_money_cap_cents: int | None = None, *,
+                enables: Sequence[ToolPin] = ()) -> PolicyVersion:
     """The owner's `cards` as a new version of the Desk at the money cap `auto_money_cap_cents`
     (None takes the parent's, the active version's), proved or checked, in the caller's
-    transaction (`POST /policy/draft`), ledgered `policy` `{version, status, method}`.
+    transaction (`POST /policy/draft`), ledgered `policy` `{version, status, method}`. A draft from
+    `/tools/confirm` also turns on `enables`: it is compiled and proved over the enabled profiles
+    plus those, each pinned at its hash, and stores them for `confirm`.
 
     In order: a parent that isn't the active version is 409 `conflict`; cards `validate_cards`
     refuses at the draft's cap (an auto money card above it among them) are 422 `invalid`, with
@@ -1236,9 +1272,9 @@ async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[R
         # the log's reason is read from the cards, never from the wording of the errors
         above = bool(compiler.above_money_cap(owned, cap))
         raise KernelFailure(422, "invalid", compiler.ABOVE_MONEY_CAP if above else "invalid_cards")
-    profiles = await desks.enabled_profiles(ctx, desk_id)
+    profiles = await draft_profiles(ctx, desk_id, enables)
     schema = compiler.desk_schema(profiles)
-    key = draft_key_sha256(expected_parent, owned, _hashes(profiles, schema, cap))
+    key = draft_key_sha256(expected_parent, owned, _hashes(profiles, schema, cap), enables)
     await _lock(ctx, "draft", desk_id, key)
     existing = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
         PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.draft_key_sha256 == key)))).one_or_none()
@@ -1261,7 +1297,7 @@ async def draft(ctx: KernelCtx, owner: OwnerCtx, desk_id: str, cards: Sequence[R
         version = existing.version
     row = version_row(copy_id=owner.copy_id, desk_id=desk_id, version=version, parent_version=expected_parent,
                       compiled=compiled, a0=a0, schema=schema, hashes=hashes, auto_money_cap_cents=cap, status=status,
-                      proof=report, created_at=ctx.clock.now(), draft_key_sha256=key)
+                      proof=report, created_at=ctx.clock.now(), draft_key_sha256=key, enables=enables)
     if existing is None:
         ctx.db.add(row)
     else:
@@ -1285,24 +1321,51 @@ async def _next_version(ctx: KernelCtx, desk_id: str) -> int:
 
 # ---- Confirm -------------------------------------------------------------------------------------
 
-ConfirmRefusal = Literal["not_proved", "parent_changed", "hash_changed", "above_money_cap"]
+ConfirmRefusal = Literal["not_proved", "parent_changed", "pin_changed", "hash_changed", "above_money_cap"]
+
+# What an activation does to the rows the version it activates now governs: `(ctx, desk_id, the
+# version being activated)`, run inside `confirm`'s transaction once its checks pass and before it
+# writes anything. A hook locks and moves rows, never appends to the ledger, and returns the
+# `payment` events of what it moved; `confirm` appends its own `policy` entry and then each event in
+# order, so an activation holds no ledger lock while it waits for a row a completion holds. An
+# exception rolls the confirm back (500 `internal`).
+ActivationHook = Callable[[KernelCtx, str, PolicyVersionRow], Awaitable[list[LedgerEvent]]]
+
+
+async def cancel_disallowed_links(ctx: KernelCtx, desk_id: str, version: PolicyVersionRow) -> list[LedgerEvent]:
+    """The Desk's open payment links the version no longer allows (`payments.cancel_disallowed_links`)."""
+    return await payments.cancel_disallowed_links(ctx, desk_id, version)
+
+
+ON_ACTIVATE: list[ActivationHook] = [cancel_disallowed_links]
 
 
 class ConfirmConflict(KernelFailure):
     """A version that can't be activated now: 409 `conflict`, ledgered `policy` `{version,
     refused: <reason>}` after the request's transaction has rolled back."""
 
-    def __init__(self, copy_id: str, desk_id: str, version: int, refused: ConfirmRefusal):
+    def __init__(self, copy_id: str, desk_id: str, version: int, refused: ConfirmRefusal,
+                 drifted: Sequence[str] = ()):
         super().__init__(409, "conflict", f"confirm_{refused}",
                          persist=partial(_ledger_refusal, copy_id=copy_id, desk_id=desk_id, version=version,
-                                         refused=refused))
+                                         refused=refused, drifted=tuple(drifted)))
         self.refused = refused
 
 
-async def _ledger_refusal(ctx: KernelCtx, *, copy_id: str, desk_id: str, version: int, refused: str) -> None:
+async def _ledger_refusal(ctx: KernelCtx, *, copy_id: str, desk_id: str, version: int, refused: str,
+                          drifted: Sequence[str] = ()) -> None:
+    """The refusal's `policy` entry, after the request rolled back; a drift the confirm found is
+    checked and recorded again first, so its row change, alert and `tool_pin` entry outlive it."""
     ctx.bind(copy_id)
+    await mcp_pins.record_drift(ctx, desk_id, drifted)
     await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
         kind="policy", origin="kernel", summary={"version": version, "refused": refused}))
+
+
+async def _ledger_unavailable(ctx: KernelCtx, *, copy_id: str, desk_id: str, version: int) -> None:
+    ctx.bind(copy_id)
+    await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="policy", origin="kernel", summary={"version": version, "refused": "pin_unavailable"}))
 
 
 def _proved_against(row: PolicyVersionRow) -> Hashes:
@@ -1322,10 +1385,19 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
     - `not_proved`: the version isn't `proved` by a SymCC proof of all seven obligations (a
       bounded check, a rejection, or a version already active or superseded);
     - `parent_changed`: the version it was drafted on is no longer the active one;
-    - `hash_changed`: the schema, baseline, enabled profiles, invariants (at the version's cap) or
-      review thresholds it was proved against aren't the current ones (`current_hashes`);
+    - `pin_changed`: a tool the version enables isn't at the hash it was proved with any more (an
+      MCP tool listed again, `mcp_pins.check_enables`, whose drift is recorded with the refusal; a
+      native tool's adapter profile changed); a server that can't list is 503 `internal` instead,
+      ledgered `{version, refused: "pin_unavailable"}`;
+    - `hash_changed`: the schema, baseline, enabled profiles (with those it enables), invariants
+      (at the version's cap) or review thresholds it was proved against aren't the current ones
+      (`current_hashes`);
     - `above_money_cap`: the version holds an auto money card above its own cap, which only a
-      draft that bypassed `validate_cards` could."""
+      draft that bypassed `validate_cards` could.
+
+    Then the `ON_ACTIVATE` hooks run (open payment links the version no longer allows are cancelled
+    in this transaction), the tools it enables are turned on (`mcp_pins.enable_tools`), and their
+    events are ledgered after the `policy` entry, the hooks' first."""
     copy_id = ctx.copy_id
     await _lock(ctx, "versions", desk_id)
     active = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
@@ -1340,10 +1412,25 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
         raise ConfirmConflict(copy_id, desk_id, version, "not_proved")
     if row.parent_version != (active.version if active is not None else None):
         raise ConfirmConflict(copy_id, desk_id, version, "parent_changed")
-    if _proved_against(row) != await current_hashes(ctx, desk_id, row.auto_money_cap_cents):
+    pins = await mcp_pins.check_enables(ctx, desk_id, row.enables)
+    if pins.state == "unavailable":
+        raise KernelFailure(503, "internal", "pin_unavailable",
+                            persist=partial(_ledger_unavailable, copy_id=copy_id, desk_id=desk_id, version=version))
+    if pins.state != "ok":
+        raise ConfirmConflict(copy_id, desk_id, version, "pin_changed", drifted=pins.drifted)
+    if _proved_against(row) != await current_hashes(ctx, desk_id, row.auto_money_cap_cents, enables=row.enables):
         raise ConfirmConflict(copy_id, desk_id, version, "hash_changed")
     if compiler.above_money_cap(row.cards, row.auto_money_cap_cents):
         raise ConfirmConflict(copy_id, desk_id, version, "above_money_cap")
+    events: list[LedgerEvent] = []
+    for hook in ON_ACTIVATE:
+        try:
+            events += await hook(ctx, desk_id, row)
+        except Exception:
+            log.exception("activation_hook_failed desk_id=%s version=%s hook=%s", desk_id, version,
+                          getattr(hook, "__qualname__", repr(hook)))
+            raise KernelFailure(500, "internal", "activation_hook_failed") from None
+    events += await mcp_pins.enable_tools(ctx, desk_id, version, row.enables)
     if active is not None:
         active.status = "superseded"
         await ctx.db.flush()              # one active version per Desk, even between the two updates
@@ -1353,6 +1440,8 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
         kind="policy", origin="kernel",
         summary={"version": version, "activated": True, "from": active.version if active is not None else None,
                  "auto_money_cap_cents": row.auto_money_cap_cents}))
+    for event in events:
+        await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=event)
     return version_contract(row)
 
 
@@ -1769,3 +1858,242 @@ def _request(tool: str, principal: _Principal, *, amount: int | None, discount: 
     return {"principal": principal_uid, "action": tool, "resource": resource_uid, "context": context,
             "entities": [{"uid": principal_uid, "attrs": attrs, "parents": []},
                          {"uid": resource_uid, "attrs": {"copy": _COPY}, "parents": []}]}
+
+
+# ---- Setup safety probes -------------------------------------------------------------------------
+#
+# `POST /policy/{version}/probe` tries a version of the Desk's rules, in any status (a draft before
+# the owner confirms it, the active version, an old one), on hypothetical callers, so setup can show
+# the owner what the rules would do before they go live. Each `Probe` becomes the request a call
+# would make, built from the probe alone: the caller's standing, the tool and its args, and
+# stand-ins for the record's owner, the price and the time. No quote, slot or document is read, no
+# adapter hook runs, the reviewer is never asked and nothing executes: the request is evaluated as
+# `/decide` evaluates one (`decide.evaluate`) with the review absent, so a call that only a review
+# could let through holds, marked `depends_on_review`. Probes ask what the rules decide once the
+# Desk answers, so the Answering switch, which is off while setup runs, doesn't apply.
+
+PROBE_SESSION = "probe:session"           # the hypothetical caller's session
+PROBE_ACTION = "probe:action"             # the action the call would be
+PROBE_CALLER = "probe:caller"             # a verified caller's person, unless the probe names one
+PROBE_OTHER = "probe:other"               # the owner of a record that isn't the caller's
+PROBE_AGENT = "probe:agent"               # an agent's key, unless the probe names one
+PROBE_MANDATE = "probe:mandate"           # an agent's hypothetical mandate
+PROBE_RESOURCE = "probe"                  # the stand-in record
+MAX_PROBES = 100                          # per request; a longer list is a malformed body
+MAX_VERSION = 2**31 - 1                   # versions are a Postgres integer
+
+PROBE_OUTCOME_PLAIN: dict[str, str] = {
+    "allow": "It would go ahead without asking you.",
+    "hold": "It would ask you first.",
+    "refuse": "It would be refused.",
+}
+# Why a probe is refused before its rules are evaluated, in the owner's words.
+PROBE_REFUSED_PLAIN: dict[str, str] = {
+    "unknown_tool": "This Desk has no tool for that.",
+    "not_given": "This caller can't use that tool.",
+    "invalid_args": "The request isn't in a form the tool takes.",
+    "wrong_resource": "That tool doesn't act on that kind of record.",
+    "no_amount": "A payment always names an amount.",
+    "version_unloadable": "These rules couldn't be loaded.",
+    "evaluation_error": "These rules couldn't be checked for it.",
+}
+# The always-on rule behind a refusal (`cedar/baseline.cedar`, by `@id`), in the owner's words.
+# `auto_money_cap` has none: it forbids only what the owner hasn't approved, so it keeps a payment
+# above the cap from going ahead on its own but never decides a refusal.
+BASELINE_REASONS: dict[str, str] = {
+    "same_copy": "A conversation acts only on this Desk's own records.",
+    "private_data_record_owner": "Private records go only to the verified person they belong to.",
+    "recipient_owner_or_verified_contact": "Messages go only to you or to the verified contact on record.",
+    "no_agent_pay_out": "A visiting agent is never paid money.",
+    "agent_charge_within_mandate": "A visiting agent pays only within the limit it signed.",
+    "money_has_amount": f"A payment is always more than $0 and at most {explain.money(AUTO_MONEY_HARD_CAP_CENTS)}.",
+}
+PROBE_REVIEW_PLAIN = "It would go ahead on its own if the reviewer finds it within your rules."
+
+
+async def probe_version(ctx: KernelCtx, desk_id: str, version: int, probes: Sequence[Probe]) -> list[ProbeResult]:
+    """One `ProbeResult` per probe for version `version` of the Desk, in order, in the caller's
+    transaction (bound to the owner's copy). A version the Desk doesn't have is 404 `not_found`;
+    otherwise every probe gets an outcome, a probe that can't be evaluated a `refuse` with a plain
+    reason, so a batch never fails. The version loads under its own engine key, as it will when it
+    decides. Nothing changes but one ledger entry, `policy` `{version, probes, outcomes}`: no
+    decision, approval, execution or version is written, and no reviewer is called."""
+    row = None
+    if 0 < version <= MAX_VERSION:           # a number the column can't hold names no version
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
+            PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.version == version)))).one_or_none()
+    if row is None:
+        raise KernelFailure(404, "not_found", "unknown_version")
+    desk_row = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == desk_id)))).one()
+    timezone = (await ctx.db.execute(ctx.repo.scoped(select(Business.timezone).where(
+        Business.business_id == desk_row.business_id)))).scalar_one()
+    unloadable = bool(ctx.policies.versions.use(row))
+    prober = _Prober(ctx=ctx, row=row, desk_row=desk_row, timezone=timezone, unloadable=unloadable,
+                     tools=await _probe_tools(ctx, row), people=await desk_people(ctx, desk_id))
+    results = [await prober.run(probe) for probe in probes]
+    await ledger.append(ctx, copy_id=ctx.copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="policy", origin="kernel",
+        summary={"version": version, "probes": len(results), "outcomes": [result.outcome for result in results]}))
+    return results
+
+
+class _ProbeTool(NamedTuple):
+    """A tool a probe may be given: its pinned profile and that profile's hash."""
+
+    profile: ToolProfile
+    profile_sha256: str
+
+
+async def _probe_tools(ctx: KernelCtx, row: PolicyVersionRow) -> dict[str, _ProbeTool]:
+    """The tools a probe of `row` may be given, the version's enabled profiles: the Desk's enabled
+    tools with a pinned profile, as `/decide` gives them, and, for a version not yet turned on (a
+    draft, proved or rejected), each tool it enables (a `/tools/confirm` draft's `enables`) at the
+    hash it was proved with, as it would be once confirmed (`draft_profiles`). A version that has
+    been active turned its tools on when it activated, so a tool the owner turned off since stays
+    off."""
+    from desk.kernel_service import decide       # decide builds on this module
+
+    tools = {tool: _ProbeTool(tool_row.profile, tool_row.profile_sha256)
+             for tool, tool_row in (await decide.enabled_tools(ctx, row.desk_id)).items()}
+    if row.status not in ("active", "superseded"):
+        for pin in row.enables or ():
+            if pin.tool in adapters.ADAPTERS:    # a tool no adapter runs is never given
+                profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256)
+                tools[pin.tool] = _ProbeTool(profile, adapters.profile_sha256(profile))
+    return tools
+
+
+def _probe_principal(copy_id: str, desk_id: str, probe: Probe) -> tuple[Principal, SessionRow]:
+    """The hypothetical caller, and the stand-in session `tools_given` reads. A visitor or agent is
+    verified when the probe's `who` is `verified`, `record_owner` or `person`, as the person it
+    names or `PROBE_CALLER`; an agent holds the key it names or `PROBE_AGENT`, and a mandate
+    (`PROBE_MANDATE`) only when the probe gives its remaining room. The owner's setup is the
+    owner's session. The stand-in session counts as a preview, so the Answering switch doesn't
+    apply."""
+    if probe.actor == "owner":
+        principal = Principal(kind="owner", session_id=PROBE_SESSION, copy_id=copy_id, desk_id=desk_id,
+                              assurance="owner_session")
+    else:
+        verified = probe.who in ("verified", "record_owner", "person")
+        person_id = (probe.subject_id if probe.who == "person" else PROBE_CALLER) if verified else None
+        agent = probe.actor == "agent"
+        principal = Principal(
+            kind=probe.actor, session_id=PROBE_SESSION, copy_id=copy_id, desk_id=desk_id, person_id=person_id,
+            agent_key_id=(probe.subject_id if probe.who == "agent" else PROBE_AGENT) if agent else None,
+            assurance="demo_code" if verified else "none",
+            mandate_id=PROBE_MANDATE if agent and probe.agent_mandate_remaining_cents is not None else None)
+    session_row = SessionRow(kind=principal.kind, verified=principal.assurance != "none",
+                             person_id=principal.person_id, mode="ai", preview=True)
+    return principal, session_row
+
+
+def _probe_subject(probe: Probe, people: Mapping[str, str]) -> str:
+    """Who the probe stands for, in the words decisions use: the Desk's name for a person it knows."""
+    if probe.actor == "owner":
+        return "Setup"
+    if probe.actor == "agent":
+        return "A visiting agent"
+    if probe.who == "person":
+        return people.get(probe.subject_id or "") or "A verified customer"
+    return "A verified customer" if probe.who in ("verified", "record_owner") else "A stranger"
+
+
+@dataclass(frozen=True)
+class _Prober:
+    """What every probe of one version shares."""
+
+    ctx: KernelCtx
+    row: PolicyVersionRow
+    desk_row: Desk
+    timezone: str
+    unloadable: bool
+    tools: Mapping[str, _ProbeTool]          # the version's enabled tools, by tool (`_probe_tools`)
+    people: Mapping[str, str]
+
+    async def run(self, probe: Probe) -> ProbeResult:
+        """The probe's outcome: step 1 of "Evaluation" on the stand-ins, then steps 2 to 5 with the
+        review absent."""
+        from desk.kernel_service import decide       # decide builds on this module
+
+        ctx, row = self.ctx, self.row
+        principal, session_row = _probe_principal(ctx.copy_id, row.desk_id, probe)
+        subject, tool = _probe_subject(probe, self.people), probe.call.tool
+        list_cents, discount = probe.amount_cents, None
+
+        def discounted() -> int | None:
+            """The stand-in price less the discount asked for ("Discounts")."""
+            return None if list_cents is None else adapters.quote.discounted(list_cents, discount or 0)
+
+        def asked() -> str:
+            """"<subject> asks to <what>.", with the stand-in amount and the discount asked for."""
+            return explain.asked(subject, "asks", tool, discounted(), discount)
+
+        def refused(code: str) -> ProbeResult:
+            return self._result(probe, "refuse", [], False,
+                                [asked(), PROBE_OUTCOME_PLAIN["refuse"], PROBE_REFUSED_PLAIN[code]])
+
+        adapter = adapters.ADAPTERS.get(tool) if tool in decide.TOOL_NAMES else None
+        if adapter is None:
+            return refused("unknown_tool")
+        if tool not in decide.tools_given(principal, session_row, self.desk_row, self.tools):
+            return refused("not_given")
+        try:
+            args = adapter.Args.model_validate(probe.call.args)
+            args_sha256 = decide.args_sha256(args.model_dump(mode="json", exclude_none=True))
+        except ValueError:                           # pydantic's ValidationError included
+            return refused("invalid_args")
+        discount = getattr(args, "requested_discount_bp", None)
+        tool_row = self.tools[tool]
+        profile = tool_row.profile
+        if probe.resource_kind != profile.resource_kind:
+            return refused("wrong_resource")
+        if probe.resource_owner == "caller":
+            owner_person_id = principal.person_id
+        else:
+            owner_person_id = PROBE_OTHER if probe.resource_owner == "other" else None
+        if list_cents is not None and not 0 <= list_cents <= AUTO_MONEY_HARD_CAP_CENTS:
+            return refused("invalid_args")
+        amount = discounted()
+        if amount is None and decide.is_money(tool, profile.effects):
+            return refused("no_amount")
+        try:
+            stand_in = Normalized(resource=ResourceRef(kind=probe.resource_kind, id=PROBE_RESOURCE,
+                                                       owner_person_id=owner_person_id),
+                                  list_cents=list_cents, discount_bp=discount, amount_cents=amount,
+                                  starts_at=probe.starts_at)
+        except ValidationError:
+            return refused("invalid_args")
+        if self.unloadable:
+            return refused("version_unloadable")
+        action = NormalizedAction(
+            action_id=PROBE_ACTION, copy_id=ctx.copy_id, desk_id=row.desk_id, session_id=PROBE_SESSION,
+            generation=0, tool=tool, effects=profile.effects, args_sha256=args_sha256,
+            profile_sha256=tool_row.profile_sha256, resource=stand_in.resource, list_cents=stand_in.list_cents,
+            discount_bp=stand_in.discount_bp, amount_cents=stand_in.amount_cents, recipient=None,
+            starts_at=stand_in.starts_at)
+        request = decide.cedar_request(principal, action, tz=self.timezone, now=ctx.clock.now(),
+                                       auto_money_cap_cents=version_cap(row),
+                                       mandate_remaining_cents=probe.agent_mandate_remaining_cents)
+        evaluation = await decide.evaluate(ctx, row, request, review_source=_no_review)
+        if evaluation.errored:
+            return refused("evaluation_error")
+        cards = {card.card_id: card for card in row.cards}
+        reasons = [cards[card_id].reason for card_id in evaluation.card_ids if card_id in cards]
+        if not reasons and evaluation.outcome == "refuse":
+            reasons = [BASELINE_REASONS.get(policy_id.removeprefix("B."), decide.BASELINE_PLAIN)
+                       for policy_id in evaluation.policy_ids if policy_id.startswith("B.")] or [decide.BASELINE_PLAIN]
+        lines = [asked(), PROBE_OUTCOME_PLAIN[evaluation.outcome], *reasons]
+        if evaluation.needed_review:
+            lines.append(PROBE_REVIEW_PLAIN)
+        return self._result(probe, evaluation.outcome, evaluation.card_ids, evaluation.needed_review, lines)
+
+    @staticmethod
+    def _result(probe: Probe, outcome: str, card_ids: list[str], depends_on_review: bool,
+                lines: list[str]) -> ProbeResult:
+        return ProbeResult(probe=probe, outcome=outcome, depends_on_review=depends_on_review, card_ids=card_ids,
+                           reason_plain=" ".join(_dedup(lines)))
+
+
+async def _no_review(pending: list[RuleCard]) -> Reviewed:
+    """A probe's review source: the reviewer is never asked, so the review is always absent."""
+    return Reviewed(review=None, usage=None)

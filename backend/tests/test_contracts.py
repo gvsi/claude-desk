@@ -42,6 +42,7 @@ from desk.contracts import (
     SessionCreated,
     SessionState,
     ToolName,
+    ToolProfile,
 )
 from desk.events import EvDemoInbox, EvError, EvHeld, EvOwnerJoined, EvOwnerTyping, SseEvent
 from desk.kernel_api import (
@@ -475,21 +476,37 @@ def test_execute_names_generation_or_approval():
             ExecuteRequest(decision_id="d1", session_id="s1", **extra)
 
 
-def test_enabling_an_mcp_tool_names_the_reviewed_definition():
-    # the pin review: the owner's confirm names the exact definition hash they saw, so the kernel
-    # compares it with the current listing and never enables a definition nobody reviewed
+def test_confirming_tools_names_the_reviewed_definitions():
+    # the pin review: the owner's confirm names the exact hash they saw for each tool (an MCP tool's
+    # listed definition, a native tool's adapter profile), so the kernel compares it with what is
+    # current and never turns on a definition nobody reviewed; a whole connector goes in one batch
     assert MCP_TOOLS == {tool for tool in get_args(ToolName) if not tool.startswith("native.")}
-    reviewed = "a" * 64
-    for tool in sorted(MCP_TOOLS):
-        assert ToolsConfirmRequest(desk_id="d", tool=tool, enable=True, definition_sha256=reviewed)
-        assert ToolsConfirmRequest(desk_id="d", tool=tool, enable=False).definition_sha256 is None
-        for missing in ({}, {"definition_sha256": None}, {"definition_sha256": ""}, {"definition_sha256": "A" * 64}):
-            with pytest.raises(ValidationError):
-                ToolsConfirmRequest(desk_id="d", tool=tool, enable=True, **missing)
-    # native tools have no definition to pin, so naming one is a caller bug
-    assert ToolsConfirmRequest(desk_id="d", tool="native.book", enable=True).definition_sha256 is None
+    reviewed, other = "a" * 64, "b" * 64
+    for enable in (True, False):
+        batch = ToolsConfirmRequest(desk_id="d", enable=enable, tools=[
+            {"tool": "payments.list_charges", "definition_sha256": reviewed},
+            {"tool": "native.book", "definition_sha256": other}])
+        assert [(pin.tool, pin.definition_sha256) for pin in batch.tools] == [
+            ("payments.list_charges", reviewed), ("native.book", other)]
+    one = {"tool": "payments.create_refund", "definition_sha256": reviewed}
+    for bad in ({"tools": []}, {"tools": [one, one]}, {"tools": [{**one, "definition_sha256": None}]},
+                {"tools": [{"tool": "payments.create_refund"}]}, {"tools": [{**one, "definition_sha256": "A" * 64}]},
+                {"tools": [{**one, "tool": "payments.delete_customer"}]}, {"tools": [{**one, "extra": 1}]},
+                {"tool": "native.book", "tools": [one]}):
+        with pytest.raises(ValidationError):
+            ToolsConfirmRequest(desk_id="d", enable=True, **bad)
+
+
+def test_a_tool_says_why_it_needs_review():
+    # the owner's tool row tells a new connect, a changed definition and a delisted tool apart; the
+    # reason is never part of a profile's hash
+    base = {"tool": "payments.list_charges", "source": "mcp", "effects": ["private_data"], "reversible": True,
+            "adapter": "a", "resource_kind": "charge", "description_confirmed": "d", "input_schema": {}}
+    assert ToolProfile(**base, status="enabled").review_reason is None
+    for reason in ("new", "changed", "delisted"):
+        assert ToolProfile(**base, status="needs_review", review_reason=reason).review_reason == reason
     with pytest.raises(ValidationError):
-        ToolsConfirmRequest(desk_id="d", tool="native.book", enable=True, definition_sha256=reviewed)
+        ToolProfile(**base, status="needs_review", review_reason="edited")
 
 
 PUBLIC_DESK = {"business_name": "Rivera Plumbing", "desk_name": "Main line", "owner_display_name": "Maria Rivera",

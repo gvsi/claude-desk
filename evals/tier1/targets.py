@@ -52,6 +52,7 @@ from evals.tier1.harness import (
     parse_route,
     response_type,
     undeclared_fields,
+    unlisted_landed,
     validation_summary,
 )
 
@@ -232,7 +233,7 @@ class KernelTarget:
                 self._fake_models()
             else:
                 self._real_models()
-            if self.landed("01c"):
+            if self._runs_mockpay():
                 await self._start_mockpay()
             await self._start_kernel()
             self.health = await self._read_health()
@@ -306,6 +307,12 @@ class KernelTarget:
         self._env.unset("ANTHROPIC_BASE_URL")
         self._env.set("DESK_ENV", "dev")
         self._env.set("DESK_DECISIONS", "anthropic")
+
+    def _runs_mockpay(self) -> bool:
+        """Whether the kernel calls a mock payments server: once Plan 01c's code is on the branch,
+        whether or not landed.toml lists 01c yet, since a copy of the Rivera seed connects its
+        payment tools and fails closed without one. 01c's own cases still wait for its id."""
+        return self.landed("01c") or "01c" in unlisted_landed(self._landed)
 
     async def _start_mockpay(self) -> None:
         """Plan 01c's mock payments server, in a thread with a fresh key. The kernel doesn't spawn

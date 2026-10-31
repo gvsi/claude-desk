@@ -1,7 +1,8 @@
 """Decisions: deciding a proposed tool call (`POST /decide`) and reading decisions back.
 
 `cedar_request` builds the master plan's `request_json` ("Cedar request shape") from kernel-built
-values only: the principal from the session's rows, the action as its adapter normalized it, and
+values only: the principal from the session's rows (an agent's `mandate_remaining_cents` from its
+mandate as it stands, `mandates.session_remaining`), the action as its adapter normalized it, and
 the money cap of the version it will be evaluated against (`context.auto_money_cap_cents`, which
 the baseline's `auto_money_cap` reads; `evaluate` refuses a request whose cap isn't its version's).
 Optional attributes appear only when set, since the schema reads them behind `has`.
@@ -75,7 +76,8 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import DecideRequest
-from desk.kernel_service import activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, render, repo
+from desk.kernel_service import (activation, adapters, auth, clock, compiler, demo_inbox, explain, ledger, mandates,
+                                 render, repo)
 from desk.kernel_service.adapters.base import Adapter, AdapterRefusal, NormalizeCtx, claudes_note, quoted
 from desk.kernel_service.auth import AuthError, Named, SessionRow
 from desk.kernel_service.decisions import CallUsage, ReviewAction, ReviewCard, ReviewFact, ReviewInput, Reviewed
@@ -335,11 +337,12 @@ def _sign(ctx: KernelCtx, row: DecisionRow) -> None:
 
 def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: str | None = None) -> str:
     """A decision's status line in `state`, in the session's language: the template `key` when
-    given; once a visitor's or an agent's action has run, what was done (`render.executed_status`,
-    which raises KeyError for a tool without a line); in any other state, or for an owner session's
-    own setup action, the state's template. The line is the decision's `visitor_plain`, which the
-    visitor reads, so a `key` that isn't a decision's status line (`render.DECISION_STATUS_KEYS`: no
-    receipt, so no owner-only line) raises ValueError."""
+    given (why a refusal happened, say, or `tool_unavailable` for a `refused_at_execution` whose
+    connected tool couldn't be reached); once a visitor's or an agent's action has run, what was
+    done (`render.executed_status`, which raises KeyError for a tool without a line); in any other
+    state, or for an owner session's own setup action, the state's template. The line is the
+    decision's `visitor_plain`, which the visitor reads, so a `key` that isn't a decision's status
+    line (`render.DECISION_STATUS_KEYS`: no receipt, so no owner-only line) raises ValueError."""
     if key is not None and key not in render.DECISION_STATUS_KEYS:
         raise ValueError(f"{key!r} is not a decision's status line")
     lang = render.language(session.last_language)
@@ -648,22 +651,12 @@ def free_text(adapter: Adapter, args: BaseModel) -> dict[str, str]:
             if isinstance(value := getattr(args, name, None), str) and value}
 
 
-def _percent(bp: int) -> str:
-    return f"{bp // 100}%" if bp % 100 == 0 else f"{bp / 100:g}%"
-
-
 def _asked(subject: str, tool: str, action: NormalizedAction | None) -> str:
-    """"<subject> asked to <what>.", with the amount and discount the kernel computed; a name that
-    is no tool is never repeated."""
-    phrases = explain.PHRASES.get(tool)
-    if phrases is None:
-        return f"{subject} asked for something this Desk can't do."
-    plain, with_amount = phrases
-    amount = action.amount_cents if action is not None else None
-    what = with_amount.format(amount=explain.money(amount)) if with_amount and amount is not None else plain
-    if action is not None and action.discount_bp:
-        what += f" with {_percent(action.discount_bp)} off"
-    return f"{subject} asked to {what}."
+    """"<subject> asked to <what>.", with the amount and discount the kernel computed
+    (`explain.asked`, which setup probes share)."""
+    if action is None:
+        return explain.asked(subject, "asked", tool, None, None)
+    return explain.asked(subject, "asked", tool, action.amount_cents, action.discount_bp)
 
 
 @dataclass
@@ -761,7 +754,9 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
     if ctx.policies.versions.use(call.version_row):
         return await _refuse(ctx, call, "version_unloadable", args_json=args_json)
     request = cedar_request(principal, call.action, tz=call.business.timezone, now=ctx.clock.now(),
-                            auto_money_cap_cents=call.auto_money_cap_cents)
+                            auto_money_cap_cents=call.auto_money_cap_cents,
+                            mandate_remaining_cents=await mandates.session_remaining(ctx, session_row,
+                                                                                     principal.desk_id))
     evaluation = await evaluate(ctx, call.version_row, request,
                                 review_source=lambda pending: _review(ctx, call, pending))
     if evaluation.errored:

@@ -56,7 +56,7 @@ from desk.db.models import Fact as FactRow
 from desk.kernel_api import (DeskAnsweringRequest, DeskBusinessRequest, DeskCalendarRequest, DeskCharterRequest,
                              DeskCreated, DeskHoursRequest, DeskNotificationsRequest, DeskPeopleRequest,
                              DeskPricesRequest, DeskUpdated, DocumentCreated, KernelRequest)
-from desk.kernel_service import adapters, auth, clock, labels, ledger
+from desk.kernel_service import adapters, auth, clock, labels, ledger, payments
 from desk.kernel_service.auth import AuthError, Named
 from desk.kernel_service.labels import fact_row
 from desk.kernel_service.repo import REF, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
@@ -205,12 +205,13 @@ def new_canary() -> str:
 
 
 def tool_row(copy_id: str, desk_id: str, profile: ToolProfile) -> Tool:
-    """An enabled `tools` row for a registered native profile."""
+    """An enabled `tools` row for a registered native profile. Its `definition_sha256` is the
+    profile's `profile_sha256`, the hash the owner names the tool by in `/tools/confirm`."""
     enabled = profile.model_copy(update={"status": "enabled"})
+    pinned = adapters.profile_sha256(enabled)
     return Tool(desk_id=desk_id, tool=enabled.tool, copy_id=copy_id, source=enabled.source, effects=enabled.effects,
                 reversible=enabled.reversible, status="enabled", description_confirmed=enabled.description_confirmed,
-                definition_sha256=enabled.definition_sha256, profile=enabled,
-                profile_sha256=adapters.profile_sha256(enabled))
+                definition_sha256=pinned, profile=enabled, profile_sha256=pinned)
 
 
 async def add_native_tools(ctx: KernelCtx, desk_id: str) -> list[str]:
@@ -762,16 +763,28 @@ async def upload_document(ctx: KernelCtx, desk_row: Desk, document: SeedDocument
 DeleteHook = Callable[[KernelCtx, str], Awaitable[None]]
 
 
+async def lock_payment_links(ctx: KernelCtx, desk_id: str) -> None:
+    """The payment links `cancel_payment_links` will cancel, locked first (`payments.lock_desk_links`)."""
+    await payments.lock_desk_links(ctx, desk_id)
+
+
 async def void_document_links(ctx: KernelCtx, desk_id: str) -> None:
     """The Desk's unopened document links, void, and their facts expired."""
     voided = await adapters.release_document.void_links(ctx, desk_id)
     await adapters.release_document.expire_link_facts(ctx, desk_id, voided)
 
 
+async def cancel_payment_links(ctx: KernelCtx, desk_id: str) -> None:
+    """The Desk's issued payment links no completion has started, cancelled (`payments.cancel_desk_links`)."""
+    await payments.cancel_desk_links(ctx, desk_id)
+
+
 # What else a Desk's deletion ends (`(ctx, desk_id)`, in order, inside its transaction): its
-# document links here, and payment links (Plan 01c) register beside them. An exception from any of
-# them rolls the whole deletion back (500 `internal`).
-ON_DELETE: list[DeleteHook] = [void_document_links]
+# document links and its payment links. The payment links are locked before the document links
+# and cancelled after them, so the deletion takes payment links, document links, facts and the
+# ledger head in repo.py's order. An exception from any of them rolls the whole deletion back
+# (500 `internal`).
+ON_DELETE: list[DeleteHook] = [lock_payment_links, void_document_links, cancel_payment_links]
 
 
 async def delete_desk(ctx: KernelCtx, desk_row: Desk) -> None:

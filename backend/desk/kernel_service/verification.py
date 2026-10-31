@@ -6,7 +6,8 @@ person on record has that contact does the kernel make a challenge: a fresh six-
 the CSPRNG, kept only as `sha256(canonical_json({challenge_id, code}))`, and written as text into
 one Demo inbox entry addressed to the masked contact on record. The code never reaches a ledger
 summary, a log line, a `kernel_ro` view, the API's answer or Claude. A contact not on record is
-kept as a lead note for the owner instead.
+kept as a lead note for the owner instead. An agent session starts and checks the same way, with
+its signature on its turn in place of a token.
 
 A challenge lives ten minutes and takes five wrong codes. One is live per person, across every
 session, and one per session: a new start cancels both. A person gets at most five challenges and
@@ -313,12 +314,13 @@ router = APIRouter()
 
 
 async def _route_session(ctx: KernelCtx, request: Request, session_id: str) -> SessionRow:
-    """The visitor session a verify route names, once its token, state and Desk pass, locked. The
-    session's state and its Desk are checked again on the held row, read afresh, so a Desk deleted
-    or a session closed while the route waited for the row answers 409 `closed`, ledgered, as it
-    would had it come first: a start makes no challenge and sends no code, a check verifies no one.
-    A Desk's deletion closes its visitor sessions too, so `require_open` refuses first; the Desk's
-    own recheck is defence in depth behind it."""
+    """The visitor or agent session a verify route names, once its credential (a visitor's token, or
+    an agent's signature on its turn), state and Desk pass, locked. The session's state and its Desk
+    are checked again on the held row, read afresh, so a Desk deleted or a session closed while the
+    route waited for the row answers 409 `closed`, ledgered, as it would had it come first: a start
+    makes no challenge and sends no code, a check verifies no one. A Desk's deletion closes its
+    sessions too, so `require_open` refuses first; the Desk's own recheck is defence in depth behind
+    it."""
     row = await auth.require_session(ctx, request, session_id)
     await auth.require_desk(ctx, request, row, row.desk_id)
     locked = await locked_session(ctx, row.session_id)

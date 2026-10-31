@@ -40,6 +40,7 @@ from sqlalchemy.sql.functions import Function
 import desk.db
 from desk.contracts import ActorKind, Assurance, Claim, DecisionState, Outcome, RenderedBlock, Review, SessionMode
 from desk.contracts import PolicyVersion as PolicyVersionContract
+from desk.contracts import ToolProfile as ToolProfileContract
 from desk.db.models import (
     ActorSession,
     Approval,
@@ -640,6 +641,7 @@ STATE_COLUMNS = {   # each kernel state column admits exactly its contract's val
     ("policy_versions", "status"): PolicyVersionContract.model_fields["status"].annotation,
     ("decisions", "outcome"): Outcome,
     ("decisions", "state"): DecisionState,
+    ("tools", "review_reason"): get_args(ToolProfileContract.model_fields["review_reason"].annotation)[0],
 }
 
 
@@ -851,6 +853,40 @@ def test_state_columns_admit_only_contract_values(admin):
         assert set(re.findall(r"'([^']*)'::text", checks[0][0])) == set(get_args(literal)), (table, column)
 
 
+def test_a_tool_has_a_review_reason_only_while_it_needs_review(kernel_tx):
+    def tool(name: str, status: str, reason: str | None) -> Tool:
+        return Tool(desk_id="desk-a", tool=name, copy_id="copy-a", source="mcp", effects=["private_data"],
+                    reversible=True, status=status, description_confirmed="d", review_reason=reason)
+
+    kernel_tx.add_all([tool("payments.list_charges", "needs_review", "changed"),
+                       tool("payments.create_refund", "disabled", None)])
+    kernel_tx.flush()
+    for status in ("enabled", "disabled"):
+        savepoint = kernel_tx.begin_nested()
+        kernel_tx.add(tool(f"x.{status}", status, "new"))
+        with pytest.raises(IntegrityError):
+            kernel_tx.flush()
+        savepoint.rollback()
+
+
+def test_a_version_lists_the_tools_it_turns_on(kernel_tx):
+    # a tools-confirm draft names each tool it enables at the hash it was proved with; any other
+    # version enables none
+    def version(number: int, **values) -> PolicyVersion:
+        return PolicyVersion(desk_id="desk-e", version=number, copy_id="copy-a", cards=[], status="draft",
+                             cedar_sha256="c", schema_sha256="s", baseline_sha256="b", profiles_sha256="p",
+                             invariants_sha256="i", review_thresholds_version=1, **values)
+
+    pin = {"tool": "payments.list_charges", "definition_sha256": "a" * 64}
+    kernel_tx.add_all([version(1), version(2, enables=[pin])])
+    kernel_tx.flush()
+    kernel_tx.expire_all()
+    rows = kernel_tx.scalars(select(PolicyVersion).where(PolicyVersion.desk_id == "desk-e")
+                             .order_by(PolicyVersion.version)).all()
+    assert [[p.model_dump() for p in row.enables] for row in rows] == [[], [pin]]
+    assert_refused_before_the_database(kernel_tx, version(3, enables=[{**pin, "definition_sha256": "nope"}]))
+
+
 def test_one_active_policy_version_per_desk(kernel_tx):
     def version(desk_id: str, number: int, status: str) -> PolicyVersion:
         return PolicyVersion(desk_id=desk_id, version=number, copy_id="copy-a", cards=[], status=status,
@@ -1059,7 +1095,7 @@ COPY_READ_POLICY = {"people": f"({COPY_POLICY} AND (removed_at IS NULL))"}
 # each key a hash or an ID that is no secret, never a token.
 RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash", "session_id"},
                   "desks": {"copy_id", "slug"}, "decisions": {"copy_id", "decision_id"},
-                  "document_links": {"copy_id", "token_sha256"}}
+                  "document_links": {"copy_id", "token_sha256"}, "payment_links": {"copy_id", "token_sha256"}}
 
 
 def test_every_kernel_table_forces_copy_row_security(admin):
@@ -1338,7 +1374,7 @@ def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
 
 COPY_RESOLVERS = ("kernel.copy_of_session(text)", "kernel.copy_of_session_id(text)",
                   "kernel.copy_of_desk_slug(text)", "kernel.copy_of_decision_id(text)",
-                  "kernel.copy_of_document_link(text)", "kernel.copy_ids()")
+                  "kernel.copy_of_document_link(text)", "kernel.copy_of_payment_link(text)", "kernel.copy_ids()")
 
 
 def test_copy_resolvers_are_narrow(admin):
@@ -1375,6 +1411,13 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(admin, committed_co
             " VALUES (%s, %s, %s, %s, %s, 'person-1', %s, %s, now(), now() + interval '1 day')",
             (f"link-{copy_id}", copy_id, f"desk-{copy_id}", f"doc-{copy_id}", f"session-{copy_id}",
              link_token(copy_id), hashlib.sha256(link_token(copy_id).encode()).hexdigest()))
+        admin.execute(   # and a payment link, found by its token's hash alone
+            "INSERT INTO kernel.payment_links (link_id, copy_id, desk_id, session_id, quote_id, action_id, title,"
+            " amount_cents, state, token, token_sha256, provider_checkout_id, customer_id, expires_at, created_at,"
+            " updated_at) VALUES (%s, %s, %s, %s, 'quote-1', %s, 'Drain clearing', 18000, 'issued', %s, %s, 'co-1',"
+            " %s, now() + interval '1 day', now(), now())",
+            (f"paylink-{copy_id}", copy_id, f"desk-{copy_id}", f"session-{copy_id}", f"act-{copy_id}",
+             f"pay-token-{copy_id}", token_hash(f"pay-{copy_id}"), f"session:session-{copy_id}"))
     try:
         for copy_id in committed_copies:
             assert await resolve_copy("copy_of_session", token_hash(copy_id)) == copy_id
@@ -1385,11 +1428,14 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(admin, committed_co
             assert await resolve_copy("copy_of_document_link",
                                       hashlib.sha256(link_token(copy_id).encode()).hexdigest()) == copy_id
             assert await resolve_copy("copy_of_document_link", link_token(copy_id)) is None
+            assert await resolve_copy("copy_of_payment_link", token_hash(f"pay-{copy_id}")) == copy_id
+            assert await resolve_copy("copy_of_payment_link", f"pay-token-{copy_id}") is None   # never by the token
         assert await resolve_copy("copy_of_session", "0" * 64) is None
         assert await resolve_copy("copy_of_session_id", "no-such-session") is None
         assert await resolve_copy("copy_of_desk_slug", "no-such-desk") is None
         assert await resolve_copy("copy_of_decision_id", "no-such-decision") is None
         assert await resolve_copy("copy_of_document_link", "0" * 64) is None
+        assert await resolve_copy("copy_of_payment_link", "0" * 64) is None
         assert set(committed_copies) <= set(await copy_ids())
         with pytest.raises(ValueError):
             await resolve_copy("copy_of_anything", "x")
@@ -1408,7 +1454,7 @@ def test_only_the_kernel_runs_the_copy_resolvers(committed_copies):
         with connect(prefix) as conn:
             for call in ("kernel.copy_of_session(%s)", "kernel.copy_of_session_id(%s)",
                          "kernel.copy_of_desk_slug(%s)", "kernel.copy_of_decision_id(%s)",
-                         "kernel.copy_of_document_link(%s)"):
+                         "kernel.copy_of_document_link(%s)", "kernel.copy_of_payment_link(%s)"):
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     conn.execute(f"SELECT {call}", (token_hash(committed_copies[0]),))
             with pytest.raises(psycopg.errors.InsufficientPrivilege):

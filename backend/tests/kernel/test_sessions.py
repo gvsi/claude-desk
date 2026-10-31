@@ -93,16 +93,22 @@ async def test_unknown_slug_is_404(app, client):
 async def test_agent_sessions_need_agent_auth(app, client):
     rows = await make_copy_rows(app)
     response = await client.post("/sessions", json={"desk_slug": rows.slug, "kind": "agent"})
-    assert (response.status_code, response.json()) == (401, {"code": "auth"})   # agent signatures: Plan 01c
+    assert (response.status_code, response.json()) == (401, {"code": "auth"})   # unsigned (tests/kernel/test_agent_auth.py)
     # an owner's preview session needs its owner check (Plan 01b): refused until then, the same way
     response = await client.post("/sessions", json={"desk_slug": rows.slug, "kind": "visitor", "preview": True})
     assert (response.status_code, response.json()) == (401, {"code": "auth"})
     response = await client.post("/sessions", json={"desk_slug": rows.slug, "kind": "agent", "preview": True})
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
+    # only an agent presents a mandate
+    mandate = {"mandate_id": "mandate-1", "issuer": "demo-wallet", "agent_key_id": "0" * 16, "desk_id": rows.desk_id,
+               "allowed_effects": ["charge"], "per_charge_cents": 2_000, "total_cents": 10_000, "currency": "usd",
+               "expires_at": "2026-10-30T18:04:05.123456Z", "nonce": "n" * 22, "sig": "0" * 128}
+    response = await client.post("/sessions", json={"desk_slug": rows.slug, "kind": "visitor", "mandate": mandate})
+    assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert await rows_of(app, rows.copy_id, select(ActorSession).where(ActorSession.desk_id == rows.desk_id)) == []
     entries = await ledger_rows(app, rows)                                         # ledgered on that Desk
     assert [(e.event.kind, e.event.session_id, e.event.summary) for e in entries] == [
-        ("auth", None, {"route": "POST /sessions", "reason": "agent_auth_unavailable"}),
+        ("agent_auth", None, {"route": "POST /sessions", "reason": "unsigned"}),
         ("auth", None, {"route": "POST /sessions", "reason": "preview_unavailable"}),
     ]
 

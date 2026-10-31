@@ -67,7 +67,7 @@ from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessag
 from desk.db.models import Booking, Business, CalendarSlot, Desk
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
-from desk.kernel_service import auth, context, labels, lang, ledger, render
+from desk.kernel_service import agents, auth, context, labels, lang, ledger, render
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
@@ -75,7 +75,7 @@ from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, rout
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
-KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed"})   # only the kernel issues these clauses
+KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed", "link_cancelled"})   # only the kernel issues these
 NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one number: "1.234,56", "10:30"
 NO_CANARIES = labels.NO_CANARIES
 
@@ -707,9 +707,11 @@ router = APIRouter()
 
 @router.post("/check_reply", response_model=ReplyVerdict)
 async def post_check_reply(body: CheckReplyRequest, ctx: Ctx, request: Request) -> ReplyVerdict:
-    """A visitor session's draft, once the session-state rows pass: its own token, open, at its
-    generation, on a Desk not deleted, and not taken over by the owner (409 `mode_owner`); each
-    refusal is ledgered `auth`."""
+    """A visitor or agent session's draft, once the session-state rows pass: its own token (an
+    agent's signature), open, at its generation, on a Desk not deleted, and not taken over by the
+    owner (409 `mode_owner`); each refusal is ledgered. An agent's check counts against its turn,
+    which a passing verdict, an immediate handoff or the turn's second check ends
+    (`agents.end_turn`), in the verdict's transaction."""
     draft = body.draft
     # seen at the end (`finalize`), so the session row isn't locked while the model reads the draft
     row = await auth.require_session(ctx, request, draft.session_id, generation=draft.generation, seen=False)
@@ -717,4 +719,7 @@ async def post_check_reply(body: CheckReplyRequest, ctx: Ctx, request: Request) 
     if row.mode == "owner":
         raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),
                         named=Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id))
-    return await check_draft(ctx, row, draft)
+    verdict = await check_draft(ctx, row, draft)
+    if row.kind == "agent":
+        await agents.end_turn(ctx, request, verdict)
+    return verdict

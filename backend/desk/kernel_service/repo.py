@@ -27,7 +27,8 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    adapter's own rows), and by the owner's write to them (`desks.put_people`);
 6. their live verification challenges, after the people (a Desk's deletion, which locks no
    person, takes its live codes after its sessions);
-7. a payment link (Plan 01c);
+7. a payment link (Plan 01c), written before its fact; a Desk's deletion locks its issued ones
+   before its document links (`payments.lock_desk_links`) and cancels them after;
 8. document links: an open marks its link in one UPDATE, and a person's removal or new contact,
    or a Desk's deletion, voids theirs in one;
 9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which
@@ -146,7 +147,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from desk.db import logs as db_logs
-from desk.db.models import Desk, Execution, PolicyVersion, Tool
+from desk.db.models import Desk, Execution, PaymentLink, PolicyVersion, Tool
 from desk.db.session import CopyResolver, KernelRepo, resolve_copy
 from desk.kernel_api import KernelError
 from desk.kernel_service.clock import Clock
@@ -311,15 +312,16 @@ def route_template(request: Request) -> str:
 
 
 # Credential lookups. A request names a session token, a session ID, a decision ID (whose session
-# `GET /decisions/{id}` names), a public slug or a document link's token, not a copy; these find
-# the copy it belongs to (a token by its sha256, never the token itself) through the database's
-# copy resolvers (SECURITY DEFINER functions that return only a copy id), on their own connection,
-# so the caller can bind the request's transaction to that copy and read the rows through
-# KernelRepo as usual. Only auth.py, GET /whoami, GET /decisions/{id}, POST /sessions,
-# GET /public/{desk_slug} and GET /document_links/{token} use them, and they run before the
-# request's transaction has run anything: a request that held its transaction's connection while it
-# waited for a resolver's would, with as many such requests at once as the pool has connections,
-# wait until checkout timed out. Asked later, a resolver raises (500 `internal`) instead.
+# `GET /decisions/{id}` names), a public slug or a document or payment link's token, not a copy;
+# these find the copy it belongs to (a token by its sha256, never the token itself) through the
+# database's copy resolvers (SECURITY DEFINER functions that return only a copy id), on their own
+# connection, so the caller can bind the request's transaction to that copy and read the rows
+# through KernelRepo as usual. Only auth.py, GET /whoami, GET /decisions/{id}, POST /sessions,
+# GET /public/{desk_slug}, GET /document_links/{token} and the three /payment_links/{token} routes
+# use them, and they run before the request's transaction has run anything: a request that held
+# its transaction's connection while it waited for a resolver's would, with as many such requests
+# at once as the pool has connections, wait until checkout timed out. Asked later, a resolver
+# raises (500 `internal`) instead.
 
 async def _resolve(ctx: KernelCtx, resolver: CopyResolver, key: str) -> str | None:
     if ctx.db.in_transaction():
@@ -350,9 +352,15 @@ async def copy_of_document_link(ctx: KernelCtx, token_sha256: str) -> str | None
     return await _resolve(ctx, "copy_of_document_link", token_sha256)
 
 
-# Startup's lookups across copies: which copies hold an execution to settle, and, one copy at a time
-# so the startup rebuild can stop within its budget, which Desks of a copy have an active rules
-# version an earlier kernel stored, to rebuild, or lack a native tool this kernel registers, to add.
+async def copy_of_payment_link(ctx: KernelCtx, token_sha256: str) -> str | None:
+    """The copy of the payment link whose token has this sha256: the resolver sees only hashes."""
+    return await _resolve(ctx, "copy_of_payment_link", token_sha256)
+
+
+# Startup's lookups across copies: which copies hold an execution or a payment link to settle, and,
+# one copy at a time so the startup rebuild can stop within its budget, which Desks of a copy have
+# an active rules version an earlier kernel stored, to rebuild, or lack a native tool this kernel
+# registers, to add.
 
 async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[tuple[str, str]]:
     """`(copy_id, action_id)` of every execution startup reconciliation must settle: an intent
@@ -374,9 +382,29 @@ async def orphan_intents(runtime: KernelRuntime, older_than: datetime) -> list[t
     return found
 
 
+async def unsettled_links(runtime: KernelRuntime, older_than: datetime) -> list[tuple[str, str]]:
+    """`(copy_id, link_id)` of every payment link startup reconciliation must settle: one left
+    `unknown`, or an issued one whose completion started before `older_than` and never finished.
+    Used only by startup reconciliation (`payments.reconcile_links_at_startup`), on the same terms
+    as `orphan_intents`: it visits every copy and reads each through its own `KernelRepo`, so
+    row-level security still holds every read to one copy."""
+    found: list[tuple[str, str]] = []
+    for copy_id in await copy_ids(runtime):
+        copy = KernelRepo(copy_id)
+        async with runtime.sessions() as db:
+            copy.bind(db)
+            rows = await db.scalars(copy.scoped(select(PaymentLink.link_id).where(or_(
+                PaymentLink.state == "unknown",
+                and_(PaymentLink.state == "issued", PaymentLink.completion_started_at < older_than)))
+                .order_by(PaymentLink.link_id)))
+            found += [(copy_id, link_id) for link_id in rows]
+    return found
+
+
 async def copy_ids(runtime: KernelRuntime) -> list[str]:
     """Every copy's ID (`kernel.copy_ids()`), in order: the copies the startup rebuild
-    (`activation.rebuild_at_startup`) looks at one at a time, through `desks_to_bring_up`."""
+    (`activation.rebuild_at_startup`) looks at one at a time, through `desks_to_bring_up`, and the
+    ones startup reconciliation visits for unsettled payment links (`unsettled_links`)."""
     async with runtime.engine.connect() as conn:
         return sorted((await conn.scalars(select(func.kernel.copy_ids()))).all())
 

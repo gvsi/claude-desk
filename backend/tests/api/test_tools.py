@@ -85,11 +85,11 @@ async def test_model_tools_are_enabled_sorted_and_end_with_send_reply(visitor):
         for profile in context.tools]})
     assert next(tool for tool in model_tools(drifted) if tool["name"] == "native__book")["defer_loading"] is True
 
-    # send_reply: prose and clauses, closed objects, every template but the kernel's own two
+    # send_reply: prose and clauses, closed objects, every template but the kernel's own three
     schema = SEND_REPLY_TOOL["input_schema"]
     assert set(schema["properties"]) == {"prose", "clauses"} and closed_everywhere(schema)
     templates = schema["properties"]["clauses"]["items"]["properties"]["template"]["enum"]
-    assert set(templates) == set(get_args(ClauseTemplate)) - {"owner_said", "payment_confirmed"}
+    assert set(templates) == set(get_args(ClauseTemplate)) - {"owner_said", "payment_confirmed", "link_cancelled"}
 
 
 def stored(value):
@@ -653,6 +653,8 @@ async def test_reply_rejects_owner_said_and_bad_input(api_conn, caller, fake):
          [{"kind": "unknown_fact", "span": "owner_said"}]),
         ({"prose": "", "clauses": [{"template": "payment_confirmed"}]},
          [{"kind": "unknown_fact", "span": "payment_confirmed"}]),
+        ({"prose": "", "clauses": [{"template": "link_cancelled", "fact_id": "payment_link:paylink-1"}]},
+         [{"kind": "unknown_fact", "span": "link_cancelled"}]),
         ({"prose": "Hi", "clauses": [{"template": "made_up"}]}, [{"kind": "invalid_input", "span": "made_up"}]),
         ({"prose": 42, "clauses": []}, [{"kind": "invalid_input", "span": "prose"}]),
         ({"prose": "Hi", "clauses": [], "tone": "firm"}, [{"kind": "invalid_input", "span": "tone"}]),

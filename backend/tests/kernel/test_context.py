@@ -26,6 +26,7 @@ from desk.kernel_service.sessions import principal_for
 from .fakes import FakeAdapter
 from .helpers import CopyRows, kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
 from .test_adapters import Rivera, add_slot, book, objects, quote_args, visitor_of
+from .test_agent_auth import mint, open_agent, turn
 from .test_approvals import add_person, answered
 from .test_compiler import card
 from .test_decide import add_desk, decided, desk_with, open_visitor, set_mode, set_session
@@ -84,21 +85,40 @@ async def test_tools_follow_the_session_kind(app, client, registry):
     # a stranger on Rivera Plumbing gets every native tool a stranger is given, all declared
     copy, stranger = await visitor_of(app, client)
     seen = await context_of(client, stranger.session_id, stranger.headers)
-    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.quote",
-                                 "native.request_callback", "native.start_verification"]
+    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
+                                 "native.quote", "native.request_callback", "native.start_verification"]
     assert {profile.status for profile in seen.tools} == {"enabled"}
     declared = {profile.tool: profile for profile in seen.tools_declared}
     assert all(declared[profile.tool] == profile for profile in seen.tools)
-    # verified as Dana, the same visitor asks for her own documents instead of a code
+    # verified as Dana, the same visitor asks for her own documents instead of a code, and gets her
+    # payment history and refunds from the mock payments server the copy connects (plan 01c)
     [dana] = await rows_of(app, copy.copy_id, select(Person).where(Person.ref == "dana"))
     await verify_session(app, copy.copy_id, stranger.session_id, dana.person_id)
     seen = await context_of(client, stranger.session_id, stranger.headers)
-    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.quote",
-                                 "native.release_document", "native.request_callback"]
+    assert tools(seen.tools) == ["native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
+                                 "native.quote", "native.release_document", "native.request_callback",
+                                 "payments.create_refund", "payments.list_charges"]
     assert {profile.status for profile in seen.tools} == {"enabled"}
-    # the owner has no setup tool on this Desk yet
+    # a new Desk in the same copy connects nothing, so even a verified customer there gets neither
+    response = await client.post("/desks", headers=copy.owner, json={
+        "business": {"name": "Lopez Electric", "owner_display_name": "Ana Lopez", "timezone": "America/Chicago"},
+        "desk": {"name": "Main line", "charter": [], "hours": [], "price_items": [], "calendar_slots": [],
+                 "people": [{"ref": "kim", "display_name": "Kim Park", "contact": "kim@example.com"}],
+                 "documents": [], "notifications": {"now": ["approval"], "briefing": []}}})
+    assert response.status_code == 200, response.text
+    lopez = response.json()
+    response = await client.put(f"/desks/{lopez['desk_id']}/answering", headers=copy.owner, json={"on": True})
+    assert response.status_code == 200, response.text
+    kim = await open_visitor(client, Rivera(copy_id=copy.copy_id, desk_id=lopez["desk_id"], slug=lopez["slug"],
+                                            owner_token=copy.owner_token))
+    [kim_row] = await rows_of(app, copy.copy_id, select(Person).where(Person.ref == "kim"))
+    await verify_session(app, copy.copy_id, kim.session_id, kim_row.person_id)
+    seen = await context_of(client, kim.session_id, kim.headers)
+    assert "native.release_document" in tools(seen.tools)
+    assert not {"payments.create_refund", "payments.list_charges"} & set(tools(seen.tools_declared))
+    # the owner is given the setup tools: reading the website and the owner's memory
     owner = await context_of(client, await owner_session_id(client, copy.owner), copy.owner, desk_id=copy.desk_id)
-    assert (owner.tools, owner.tools_declared) == ([], [])
+    assert tools(owner.tools) == tools(owner.tools_declared) == ["native.fetch_website", "native.read_memory"]
 
     # each kind and standing is given its own tools; a kind's tools are declared in any standing
     # or status, and only that kind's
@@ -145,6 +165,29 @@ async def test_tools_follow_the_session_kind(app, client, registry):
             ever_given |= given
         assert decide.declared_tools(kind) == ever_given, kind
     assert "payments.create_refund" not in decide.declared_tools("agent")
+
+
+async def test_an_agent_session_is_given_its_own_tools(app, client, registry, frozen_clock):
+    # an agent signs for its own session and is given an agent's tools: money only with a mandate,
+    # never a refund, whatever the Desk enables
+    fakes = [FakeAdapter(tool, **settings) for tool, settings in {
+        **STANDING_FAKES, "native.payment_link": {"effects": ["charge"], "resource_kind": "quote"}}.items()]
+    rows = await desk_with(app, fakes, [card("leads", "native.capture_lead")])
+    agent = await mint(client, rows.owner, rows.desk_id)
+    declared = ["native.capture_lead", "native.charge_mandate", "native.payment_link", "native.release_document",
+                "native.start_verification"]
+    for mandate, given in ((True, ["native.capture_lead", "native.charge_mandate", "native.payment_link",
+                                   "native.start_verification"]),
+                           (False, ["native.capture_lead", "native.start_verification"])):
+        created = await open_agent(client, rows.slug, agent, frozen_clock, mandate=mandate)
+        signed = turn(agent, rows.slug, created.state.session_id, frozen_clock)
+        seen = await context_of(client, signed.session_id, signed.headers)
+        assert (tools(seen.tools), tools(seen.tools_declared)) == (given, declared), mandate
+        assert fact_ids(seen.facts) == []                       # this Desk has no public charter facts
+    # once verified, it reads its person's documents and loses the verification tool, as a visitor does
+    await verify_session(app, rows.copy_id, created.state.session_id, "person-dana")
+    seen = await context_of(client, signed.session_id, signed.headers)
+    assert tools(seen.tools) == ["native.capture_lead", "native.release_document"]
 
 
 async def test_tools_carry_strict_input_schemas_and_confirmed_descriptions(app, client, registry):
@@ -240,7 +283,11 @@ async def test_unlabelled_data_is_owner_only(app, client):
     [invoice] = await rows_of(app, copy.copy_id, select(Document).where(Document.ref == "dana-invoice"))
     await verify_session(app, copy.copy_id, stranger.session_id, dana.person_id)
     seen = await context_of(client, stranger.session_id, stranger.headers)
-    assert fact_ids(seen.facts) == [*PUBLIC_CHARTER, f"document:{invoice.document_id}"]
+    charges = sorted(fact.fact_id for fact in await rows_of(app, copy.copy_id, select(FactRow).where(
+        FactRow.kind == "charge", FactRow.record_owner == dana.person_id)))      # her past payments (plan 01c)
+    assert len(charges) == 2
+    # all seeded with the copy, so in fact ID order: the catalog, her charges, the charter, her invoice
+    assert fact_ids(seen.facts) == sorted([*charges, *PUBLIC_CHARTER, f"document:{invoice.document_id}"])
     other = await open_visitor(client, copy)
     assert fact_ids((await context_of(client, other.session_id, other.headers)).facts) == PUBLIC_CHARTER
 

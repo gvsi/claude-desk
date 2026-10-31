@@ -1498,7 +1498,8 @@ class FakeKernelState:
             "copy_id": desk.copy_id, "desk_id": desk.desk_id, "tool": profile.tool, "source": profile.source,
             "effects": profile.effects, "reversible": profile.reversible, "status": profile.status,
             "description_confirmed": profile.description_confirmed, "definition_sha256": profile.definition_sha256,
-            "pending_definition_text": profile.pending_definition_text, "pending_sha256": profile.pending_sha256})
+            "pending_definition_text": profile.pending_definition_text, "pending_sha256": profile.pending_sha256,
+            "review_reason": profile.review_reason})
 
     def append(self, desk: Desk, kind: str, summary: dict, *, origin: str = "kernel", session_id: str | None = None,
                ref_id: str | None = None) -> LedgerEntry:

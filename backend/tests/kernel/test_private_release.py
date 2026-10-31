@@ -160,12 +160,15 @@ async def test_an_approved_quote_still_runs_for_a_closed_session(app, client):
 
 def test_every_adapter_declares_whether_it_releases_private_data(registry):
     """Each registered adapter says, in its own class, whether its result gives the session data it
-    reads only as its person; only the document release does. An adapter that doesn't say isn't
-    registered."""
+    reads only as its person: the document release (a link to the person's document) and the
+    connected payments tools (the person's own charges and refunds, labelled for the person alone)
+    do; a payment link and a mandate charge (the session's own quote, labelled for the session too)
+    and the owner's setup reads don't. An adapter that doesn't say isn't registered."""
     assert all(isinstance(adapter.__class__.__dict__.get("releases_private_data"), bool)
                for adapter in adapters.ADAPTERS.values()), sorted(
         tool for tool, adapter in adapters.ADAPTERS.items() if "releases_private_data" not in vars(type(adapter)))
-    assert {tool for tool, adapter in adapters.ADAPTERS.items() if adapter.releases_private_data} == {TOOL}
+    assert {tool for tool, adapter in adapters.ADAPTERS.items() if adapter.releases_private_data} == {
+        TOOL, "payments.list_charges", "payments.create_refund"}
     undeclared = FakeAdapter("native.quote")
     del undeclared.releases_private_data
     with pytest.raises(ValueError):

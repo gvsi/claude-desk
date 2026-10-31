@@ -8,9 +8,14 @@ The kernel picks its proof mode at startup from `desk-prove --selftest`. The `ap
 `DESK_PROVE` at nothing, so it starts in `bounded` mode whatever is installed; a test that asks for
 the `desk_prove` fixture gets the real prover (and `symcc` mode). Tests marked `solver` need cvc5
 and a built `desk-prove` (`make kernel`) and are skipped without them.
+
+Every `app` calls one mock payments server for the whole run (`mockpay`), in a thread on a free
+loopback port with a fresh key, as a kernel calls its child; no test app starts a child itself.
 """
 
+import dataclasses
 import os
+import secrets
 import shutil
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
@@ -26,7 +31,8 @@ from desk.db.session import database_url, dispose_engines, libpq_url
 from desk.db.tables import KERNEL_TABLES
 from desk.kernel_service import activation, adapters
 from desk.kernel_service import app as kernel_app
-from desk.kernel_service.app import create_app
+from desk.kernel_service.app import KernelSettings, create_app
+from desk.mockpay import server as mockpay_server
 
 from .fakes import FakeDecisions, FrozenClock
 
@@ -77,6 +83,21 @@ def migrated_db() -> None:
     command.upgrade(config, "head")
 
 
+@dataclasses.dataclass(frozen=True)
+class Mockpay:
+    url: str
+    key: str = dataclasses.field(repr=False)
+
+
+@pytest.fixture(scope="session")
+def mockpay(migrated_db: None) -> Iterator[Mockpay]:
+    """The mock payments server every kernel app in the run calls: a thread, a free port, a fresh key."""
+    key = secrets.token_hex(32)
+    app = mockpay_server.create_app(database_url("MOCKPAY"), key, env="test")
+    with mockpay_server.serve_in_thread(app) as url:
+        yield Mockpay(url=url, key=key)
+
+
 @pytest.fixture(autouse=True)
 def empty_kernel_tables(migrated_db: None) -> None:
     with psycopg.connect(libpq_url(database_url("ADMIN")), autocommit=True) as admin:
@@ -102,11 +123,11 @@ def kernel_pool() -> dict:
 
 
 @pytest.fixture
-async def app(frozen_clock: FrozenClock, reviewer: FakeDecisions, kernel_pool: dict, monkeypatch: pytest.MonkeyPatch,
-              request: pytest.FixtureRequest) -> AsyncIterator:
+async def app(frozen_clock: FrozenClock, reviewer: FakeDecisions, kernel_pool: dict, mockpay: Mockpay,
+              monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> AsyncIterator:
     """The kernel app with its lifespan entered, signing with the dev key, in `bounded` proof mode
     (`symcc` when the test asks for `desk_prove`), with the scripted `reviewer`, so no test calls
-    a model, and its engine built with `kernel_pool`'s options."""
+    a model, its engine built with `kernel_pool`'s options, and the run's mock payments server."""
     monkeypatch.delenv("DESK_SIGNING_SEED", raising=False)
     if "desk_prove" in request.fixturenames:
         request.getfixturevalue("desk_prove")
@@ -116,7 +137,9 @@ async def app(frozen_clock: FrozenClock, reviewer: FakeDecisions, kernel_pool: d
         make_engine = kernel_app.create_async_engine
         monkeypatch.setattr(kernel_app, "create_async_engine",
                             lambda url, **options: make_engine(url, **options, **kernel_pool))
-    kernel = create_app(clock=frozen_clock, decisions=reviewer)
+    settings = dataclasses.replace(KernelSettings.from_env(), mockpay_url=mockpay.url, mockpay_key=mockpay.key,
+                                   mockpay_spawn=False)
+    kernel = create_app(settings, clock=frozen_clock, decisions=reviewer)
     try:
         async with kernel.router.lifespan_context(kernel):
             yield kernel

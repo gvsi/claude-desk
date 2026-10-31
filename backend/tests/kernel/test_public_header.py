@@ -8,7 +8,8 @@ owner write of any of them that carries a document's canary, even split or disgu
 new Desk's slug would carry, is refused (422 `invalid`) and ledgered `desk_data` `{part, refused:
 "canary", fields, fact_ids}`, naming the fields and the documents, never the text. A header value
 stored before that check is withheld from the page, which shows the field's safe fallback
-instead, and the owner is alerted in the Demo inbox. Tests run on Rivera Plumbing copies as `POST /copies` seeds
+instead, in the header and in the Agent Card that names the business and the owner, and the owner
+is alerted in the Demo inbox. Tests run on Rivera Plumbing copies as `POST /copies` seeds
 them (Friday 10:04 in Oakland).
 """
 
@@ -18,7 +19,7 @@ import httpx
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Claim, PriceItem
+from desk.contracts import Claim, PriceItem, RenderedBlock
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as InboxRow
 from desk.db.models import Fact as FactRow
@@ -45,6 +46,12 @@ async def public_page(client: httpx.AsyncClient, copy: Rivera) -> PublicDesk:
     response = await client.get(f"/public/{copy.slug}")
     assert response.status_code == 200, response.text
     return PublicDesk.model_validate(response.json())
+
+
+def card_naming(card: list[RenderedBlock], name: str, shown: str) -> list[RenderedBlock]:
+    """The Agent Card `card`, which names `name`, naming it as the header now shows it (`shown`)."""
+    assert any(name in block.text for block in card)
+    return [block.model_copy(update={"text": block.text.replace(name, shown)}) for block in card]
 
 
 async def test_a_document_body_in_the_business_name_is_refused(app, client):
@@ -306,8 +313,9 @@ async def test_a_stored_canary_is_withheld_from_the_public_page(app, client, fro
     assert response.status_code == 200, response.text
     assert dana.canary not in response.text and "Dana Whitfield" not in response.text
     page = PublicDesk.model_validate(response.json())
-    # the name gives way to its fallback, and the rest of the page is served as it was
-    assert page == clean.model_copy(update={"business_name": ""})
+    # the name gives way to its fallback, in the Agent Card too, and the rest of the page is served as it was
+    assert page == clean.model_copy(update={"business_name": "",
+                                            "agent_card": card_naming(clean.agent_card, "Rivera Plumbing", "")})
     # the owner hears of it at most once an hour
     alert = ("Text from one of your private documents is in your business name, so your public page doesn't show "
              "it. Change it to show it again.")
@@ -329,7 +337,8 @@ async def test_each_field_is_withheld_alone_and_a_split_withholds_them_all(app, 
     # the owner's name and a brand color, each holding a canary however written, give way alone
     await store_business(app, copy, owner_display_name=f"Maria {bob.canary.upper()}",
                          brand={"primary": "#1F4E4A", "accent": full_width(dana.canary)})
-    assert await public_page(client, copy) == clean.model_copy(update={"owner_display_name": "", "brand": {}})
+    assert await public_page(client, copy) == clean.model_copy(update={
+        "owner_display_name": "", "brand": {}, "agent_card": card_naming(clean.agent_card, "Maria Rivera", "")})
     assert await withheld_alerts(app, copy) == [
         "Text from one of your private documents is in your display name and brand colors, so your public page "
         "doesn't show them. Change them to show them again."]

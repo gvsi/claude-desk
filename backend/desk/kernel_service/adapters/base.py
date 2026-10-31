@@ -16,6 +16,9 @@ hooks in this order:
 - `reconcile(xctx, action)`: for an `unknown` action, by `action_id`: a result means it executed,
   None that it failed, `AdapterUnknown` that it is still unknown.
 
+`ExecCtx.recheck_version` is the rules version the execution re-check (step 6) passed under, which
+`prepare`, `execute` and `on_failed` see; reconciliation runs no re-check, so it is None there.
+
 An adapter whose `execute` writes the session's own rows (a verification start) sets
 `locks_session = True` (optional, looked up with `getattr`): the execution then holds the session
 row `FOR UPDATE` rather than `FOR SHARE`, so two of them in one session take turns.
@@ -89,6 +92,7 @@ class ExecCtx:
     desk_row: Desk
     session_row: ActorSession
     principal: Principal
+    recheck_version: int | None = None    # the rules version the execution re-check passed under; None in reconciliation
 
 
 @runtime_checkable

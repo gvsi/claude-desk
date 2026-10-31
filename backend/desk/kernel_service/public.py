@@ -6,7 +6,12 @@ the language asked for (`?lang=es`, else English): its hours, its contact, then 
 charter fact with nothing to show (hours with no windows) or carrying a document canary is left
 out; owner writes of the charter refuse a canary (`desks.refuse_public_canaries`), so only one
 stored before that check could carry it. Nothing else is read: no people, prices, quotes,
-bookings or documents. `agent_card` stays empty until Plan 01c.
+bookings or documents. `agent_card` is how a visiting agent talks to the Desk, in prose the kernel
+writes (`render.agent_card`): the tools an agent session may be given on this Desk now (its enabled
+tools with an adapter, of those an agent declares, kept to lead capture and callbacks while
+Answering is off), by plain label, the endpoint, how to sign, and that agent keys aren't business
+credentials. It names the business and the owner as the header shows them, so a name the header
+withholds is withheld there too, and a block carrying a canary is left out.
 
 `open_status` is the header's open-now line ("Open status"), computed from the same `charter:hours`
 fact in the business's time zone on the kernel's clock (`desks.open_window_status`), with its text
@@ -29,7 +34,7 @@ but that alert, so it has no ledger entry.
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any
@@ -43,7 +48,7 @@ from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import OpenStatus, PublicDesk
-from desk.kernel_service import demo_inbox, desks, labels, render, reply_check, repo
+from desk.kernel_service import adapters, decide, demo_inbox, desks, labels, render, reply_check, repo
 from desk.kernel_service.render.cards import DeskInfo, NothingToShow, hours_windows
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure
 
@@ -68,6 +73,16 @@ def withheld_alert(fields: Sequence[str]) -> str:
     it = "it" if len(words) == 1 else "them"
     return (f"Text from one of your private documents is in your {named}, so your public page doesn't show {it}. "
             f"Change {it} to show {it} again.")
+
+
+def header_of(desk: Desk, business: Business, canaries: Mapping[str, str]) -> tuple[dict[str, Any], list[str]]:
+    """The page's header as it is served, each field holding a canary of `canaries`, however
+    written or split (`labels.canary_fields`), in its fallback; and the fields withheld. The mock
+    checkout names the business by this header's name too (`payments.link_view`)."""
+    header: dict[str, Any] = {"business_name": business.name, "desk_name": desk.name,
+                              "owner_display_name": business.owner_display_name, "brand": business.brand}
+    withheld = labels.canary_fields(header, canaries)
+    return header | {field: deepcopy(HEADER_FALLBACKS[field]) for field in withheld}, withheld
 
 
 async def _alert_withheld(ctx: KernelCtx, desk_id: str, fields: Sequence[str]) -> None:
@@ -128,10 +143,8 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
         FactRow.desk_id == desk.desk_id, FactRow.kind == "charter").order_by(FactRow.fact_id)))
     facts = [labels.fact_of(row) for row in rows if labels.can_read(row.readers, PUBLIC)]
     canaries = await labels.copy_canaries(ctx)
-    header: dict[str, Any] = {"business_name": business.name, "desk_name": desk.name,
-                              "owner_display_name": business.owner_display_name, "brand": business.brand}
-    if withheld := labels.canary_fields(header, canaries):
-        header |= {field: deepcopy(HEADER_FALLBACKS[field]) for field in withheld}
+    header, withheld = header_of(desk, business, canaries)
+    if withheld:
         await _alert_withheld(ctx, desk.desk_id, withheld)
     info = DeskInfo(owner_display_name=header["owner_display_name"], timezone=business.timezone)
     now = ctx.clock.now()
@@ -147,7 +160,14 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
                 continue
             if not reply_check.carries(block, canaries):
                 charter.append(block)
-    return PublicDesk(**header, charter=charter, agent_card=[], open_status=_open_status(facts, info, now, lang))
+    tools = set(await decide.enabled_tools(ctx, desk.desk_id)) & decide.declared_tools("agent") & set(adapters.ADAPTERS)
+    if not desk.answering:
+        tools &= decide.ANSWERING_OFF_TOOLS
+    card = render.agent_card(lang, business=header["business_name"], owner=header["owner_display_name"],
+                             slug=desk.slug, tools=tools)
+    return PublicDesk(**header, charter=charter,
+                      agent_card=[block for block in card if not reply_check.carries(block, canaries)],
+                      open_status=_open_status(facts, info, now, lang))
 
 
 router = APIRouter()

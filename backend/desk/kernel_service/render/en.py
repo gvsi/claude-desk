@@ -25,6 +25,8 @@ STATUS: dict[str, str] = {
     "failed": "That didn't go through",
     "unknown": "Still confirming this",
     "refused_at_execution": "The rules changed, so this didn't go ahead",
+    # refused_at_execution's line when a connected tool's server can't be reached
+    "tool_unavailable": "This isn't available right now, so it didn't go ahead",
     "reply_checked": "Reply checked against {owner}'s rules",
     "reply_handed_off": "Passed to {owner} to answer",
     "owner_said": "Written by {owner}",
@@ -52,6 +54,10 @@ EXECUTED: dict[str, str] = {
     "native.request_callback": "Callback request saved for {owner}",
     "native.start_verification": "Verification started",
     "native.release_document": "Document shared from {owner}'s records",
+    "native.payment_link": "Payment link made for this quote",
+    "payments.list_charges": "Charges read from {owner}'s payments",
+    "payments.create_refund": "Refunded to the original payment",
+    "native.charge_mandate": "Charged within the limit of your mandate",
 }
 
 # The kernel's other visitor texts, key for key with `es.MESSAGES`: the verify card's messages,
@@ -75,6 +81,7 @@ OWNER_PREVIEWS: dict[str, str] = {
     "callback": "Callback requested",
     "rules": "Your rules need checking",
     "public_page": "Hidden from your public page",
+    "drift": "A connected tool changed",
 }
 
 
@@ -186,6 +193,45 @@ def document_link(fact: Fact | None, desk: DeskInfo) -> Card:
     return Card(title=title_claim(fact))
 
 
+def payment_link(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{title}, {total}`; the link itself is the card's `href`, which the reply check fills."""
+    return Card(title=f"{title_claim(fact)}, {money(claims(fact)['total'])}")
+
+
+def charges(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{total}` / `{title}`, or `Payment` when the kernel holds none / `{date and time}` when the
+    fact has one: one past payment of the verified customer's."""
+    found = claims(fact)
+    lines = [title_claim(fact) if "title" in found else "Payment"]
+    if "starts_at" in found:
+        lines.append(when(local(found["starts_at"], desk)))
+    return Card(title=money(found["total"]), lines=tuple(lines))
+
+
+def refund_issued(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{total} refunded`: what the refund paid back to the original payment."""
+    return Card(title=f"{money(claims(fact)['total'])} refunded")
+
+
+def charge_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{title}, {total}`, or `Payment, {total}` when the kernel holds no title: a charge that went
+    through, from its `charge` fact (a visiting agent's mandate charge, or a paid link Claude cites
+    once it is reconciled)."""
+    found = claims(fact)
+    return Card(title=f"{title_claim(fact) if 'title' in found else 'Payment'}, {money(found['total'])}")
+
+
+def payment_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
+    """`{title}, {total}`: what the test checkout paid, from the link's `charge` fact."""
+    return Card(title=f"{title_claim(fact)}, {money(claims(fact)['total'])}")
+
+
+def link_cancelled(fact: Fact | None, desk: DeskInfo) -> Card:
+    """The kernel's line for a payment link a rule change cancelled; it names the owner and no fact."""
+    return Card(title=(f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "
+                      "Ask again if you still want to pay."))
+
+
 # ---- The public header's open-now line ("Open status") ----------------------------------------------
 
 def _day(moment: datetime, as_of: datetime) -> str:
@@ -224,3 +270,34 @@ def open_status(is_open: bool, boundary: datetime | None, as_of: datetime) -> st
     if boundary is None:
         raise ValueError("a closed business names when it opens")
     return f"Closed now. Opens {_day(boundary, as_of)} at {clock(boundary)}"
+
+
+# The Agent Card on the public page (`render.agent_card`): plain prose the kernel writes, with no
+# amount, key, mandate or private field. A tool reads by what an agent can ask for, never by name.
+AGENT_TOOLS: dict[str, str] = {
+    "native.quote": "get a quote from the price list",
+    "native.find_slots": "find open times",
+    "native.book": "book a visit",
+    "native.payment_link": "get a payment link for a quote",
+    "native.charge_mandate": "pay for a quote within the limit of a signed mandate",
+    "native.capture_lead": "leave contact details",
+    "native.request_callback": "ask for a callback",
+    "native.start_verification": "verify a customer with a code sent to their contact on record",
+    "native.release_document": "receive a verified customer's own documents",
+    "payments.list_charges": "list a verified customer's own charges",
+}
+
+AGENT_CARD: tuple[str, ...] = (
+    "Visiting agents can talk to {business} here too. Answers come from Claude, an AI, working within "
+    "{owner}'s rules, unless a message is marked as {owner}'s own.",
+    "What an agent can do here: {tools}.",
+    "Send each request to POST /api/a2a/{slug} on this site; {slug} is this Desk's slug.",
+    "Sign every request with Ed25519 and send the headers X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce and "
+    "X-Agent-Sig. The signature covers the RFC 8785 canonical JSON of desk_slug, ts, nonce and body_sha256, the "
+    "lowercase hex SHA-256 of the raw request body.",
+    "A signature counts for 5 minutes either side of its timestamp, and each nonce covers one turn of the "
+    "conversation.",
+    "Agent keys only say which agent is asking. They are not business credentials: they can't change {owner}'s "
+    "rules or show anyone's private data, and money moves only as those rules and a signed mandate allow.",
+)
+AGENT_CARD_NO_TOOLS = "nothing for now"

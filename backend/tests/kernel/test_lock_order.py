@@ -9,7 +9,8 @@ transaction of a path takes (`LockLog`) and check that they come in that order: 
 their reconciliation (a private action's too, refused once its session closed), answers, cancels
 and reads, a verification start allowed or approved, a right code checked, a document link
 opened, a person removed or given another contact, a Desk deleted, and a handoff closed, after
-the Desk row an owner's write holds first.
+the Desk row an owner's write holds first; and Plan 01c's payment paths, over the real adapters
+and the mock payments server.
 """
 
 import asyncio
@@ -25,20 +26,28 @@ from sqlalchemy import event, select
 from sqlalchemy.engine import Connection
 
 from desk.contracts import Decision, ExecResult, NormalizedAction
-from desk.db.models import CalendarSlot, DemoInboxEntry, Execution, PolicyVersion
+from desk.contracts import PolicyVersion as PolicyVersionContract
+from desk.db.models import CalendarSlot, DemoInboxEntry, Execution, PaymentLink, PolicyVersion
 from desk.db.session import database_url, libpq_url
 from desk.kernel_service import demo_inbox, execute
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, AdapterUnknown, ExecCtx
 
 from .fakes import FakeAdapter
 from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of
-from .test_adapters import book, visitor_of
+from .test_adapters import book, rivera, visitor_of
 from .test_approvals import ASK_QUOTES, answered, held_on, post_answer, post_cancel
 from .test_compiler import card
 from .test_decide import PASS, decided, desk_with, open_visitor, owner_decide, set_mode, set_session
 from .test_desk_writes import slot_body, updated
 from .test_execute import Crash, crash, executed, fake_quote_desk, post_execute, read, store_intent
 from .test_lead_tools import callback, handoff_done
+from .test_link_completion import PASS as LINK_PASS
+from .test_link_completion import RV_LINK_100, charged, completed, rivera_cards, rv_link
+from .test_mandates import CHARGE, asked, rivera_agent
+from .test_mandates import quoted as agent_quoted
+from .test_money_cap import post_draft
+from .test_payment_links import confirm, delay, landed, link_for, quoted, view
+from .test_payments_adapters import LIST, REFUND, person_of, provider_charges
 from .test_private_release import verified_fake_desk
 from .test_release_document import DANA, confirmed, documents, links, open_link, released
 from .test_reply_check import checked
@@ -477,9 +486,10 @@ async def test_deleting_a_desk_runs_in_the_lock_order(app, client):
         response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
     assert response.status_code == 204, response.text
     # after the Desk row: its open sessions closed, its live codes cancelled (none, but the lock is
-    # asked for), its links voided in one UPDATE (`ON_DELETE`), their facts expired, then the deletion
-    # ledgered
-    assert log.transactions == [["sessions", "verification_challenges", "document_links", "facts", "ledger_heads"]]
+    # asked for), its payment links locked (none either), its document links voided in one UPDATE
+    # (`ON_DELETE`), their facts expired, then the deletion ledgered
+    assert log.transactions == [["sessions", "verification_challenges", "payment_links", "document_links", "facts",
+                                 "ledger_heads"]]
     assert all(map(in_lock_order, log.transactions))
 
 
@@ -515,3 +525,142 @@ async def test_a_calendar_write_runs_in_the_lock_order(app, client):
         await updated(client, copy, "calendar", {"calendar_slots": slots[1:]})
     # an owner's write to the Desk's data: the Desk row first, then the Desk's slots, then the entry
     assert log.transactions == [["desks", "calendar_slots", "ledger_heads"]], log.transactions
+
+
+# ---- Plan 01c's payment paths ---------------------------------------------------------------------
+# The same log over the real adapters and the mock payments server: a payment link issued and paid,
+# a customer's charges listed and refunded, a demo agent's mandate charge, their reconciliation, an
+# activation that cancels a link and a Desk's deletion that cancels one. Each transaction takes its
+# rows in the kernel's order.
+
+async def test_a_payment_link_is_issued_and_paid_in_the_lock_order(app, client, reviewer):
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    reviewer.answer = LINK_PASS
+    decision = await link_for(client, visitor, await quoted(client, visitor, ("deposit", 1)))
+    assert decision.outcome == "allow", decision.reason_plain
+    with lock_log(app) as issued:
+        assert (await executed(client, visitor, decision)).state == "succeeded"
+    assert issued.transactions == [
+        ["sessions", "decisions", "executions"],                    # T1: the intent
+        # T2: the active version FOR SHARE before the new link, then its fact and the ledger head
+        ["sessions", "decisions", "executions", "policy_versions", "payment_links", "facts", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, issued.transactions))
+    [link] = await rows_of(app, copy.copy_id, select(PaymentLink))
+    with lock_log(app) as paid:
+        assert (await completed(client, link.token)).state == "paid"
+    assert paid.transactions == [
+        ["payment_links"],                                          # C1: the marker
+        ["sessions", "payment_links", "facts", "ledger_heads"],     # C2: paid, its fact and its verdict
+    ]
+    assert all(map(in_lock_order, paid.transactions))
+
+
+async def test_a_charge_listing_and_an_approved_refund_keep_the_lock_order(app, client):
+    copy = await rivera(app, client)
+    dana_id = await person_of(app, copy, "dana")
+    [(charge_id, _, _), *_] = provider_charges(copy, dana_id)
+    dana = await confirmed(client, copy, DANA)
+    listing = await decided(client, dana, LIST, {}, call_id="call-list")
+    assert listing.outcome == "allow", listing.reason_plain
+    with lock_log(app) as listed:
+        assert (await executed(client, dana, listing)).state == "succeeded"
+    assert listed.transactions == [
+        ["sessions", "decisions", "executions"],                    # T1: the intent
+        # T2, the tool's pin checked on the way, then the charges' facts
+        ["sessions", "decisions", "executions", "facts", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, listed.transactions))
+    held = await decided(client, dana, REFUND, {"charge_id": charge_id}, call_id="call-refund")
+    assert held.outcome == "hold", held.reason_plain
+    with lock_log(app) as refunded:
+        result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.execution.state) == ("executed", "succeeded")
+    assert refunded.transactions == [
+        ["decisions", "executions", "ledger_heads"],                # the answer: approved, with its intent
+        # T2 on the approved path: the session row FOR SHARE first, as on an allow's
+        ["sessions", "decisions", "executions", "facts", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, refunded.transactions))
+
+
+async def test_an_agents_mandate_charge_runs_in_the_lock_order(app, client, frozen_clock):
+    setup = await rivera_agent(app, client, frozen_clock)
+    signed = setup.turn()
+    decision = await asked(client, signed, CHARGE, await agent_quoted(client, signed))
+    assert decision.outcome == "allow", decision.reason_plain
+    with lock_log(app) as charged_log:
+        assert (await executed(client, signed, decision)).state == "succeeded"
+    # the mandate's reservation is the adapter's own row (step 10), taken in T1 before the intent's insert
+    assert charged_log.transactions == [
+        ["sessions", "decisions", "executions"],                    # T1: the reservation and the intent
+        # T2: the charge, the spend committed, the charge's fact
+        ["sessions", "decisions", "executions", "facts", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, charged_log.transactions))
+
+
+async def test_payment_reconciliation_keeps_the_lock_order(app, client, reviewer, mockpay):
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    reviewer.answer = LINK_PASS
+    # a link issue the provider answers too late: its execution is unknown, and a read settles it
+    decision = await link_for(client, visitor, await quoted(client, visitor, ("deposit", 1)))
+    await delay(mockpay, copy, "checkout", 3)
+    assert (await executed(client, visitor, decision)).state == "unknown"
+    await landed(copy, decision.action.action_id)
+    with lock_log(app) as issue:
+        assert (await read(client, visitor.headers, decision)).state == "executed"
+    assert issue.transactions == [
+        # the decision and the execution SKIP LOCKED, then the issue's own rows, then the ledger head
+        ["decisions", "executions", "policy_versions", "payment_links", "facts", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, issue.transactions))
+    # a completion the provider answers too late: the link is unknown, and a view settles it
+    [link] = await rows_of(app, copy.copy_id, select(PaymentLink))
+    await delay(mockpay, copy, "complete", 3)
+    assert (await completed(client, link.token)).state == "unknown"
+    await charged(copy, f"{link.action_id}:charge")
+    with lock_log(app) as completion:
+        assert (await view(client, link.token)).state == "paid"
+    assert completion.transactions == [["payment_links", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, completion.transactions))
+
+
+@pytest.mark.solver
+async def test_an_activation_cancels_a_link_in_the_lock_order(desk_prove, app, client, reviewer):
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    over = await rv_link(app, client, reviewer, copy, visitor, ("heater", 2), call_id="call-over")   # $300, auto
+    response = await post_draft(client, copy, rivera_cards(link=RV_LINK_100), 1, auto_money_cap_cents=10_000)
+    assert response.status_code == 200, response.text
+    version = PolicyVersionContract.model_validate(response.json())
+    with lock_log(app) as activation:
+        await confirm(client, copy, version.version)
+    # the active version and the draft, then the links it cancels, their facts, then the ledger head
+    assert activation.transactions == [["policy_versions", "payment_links", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, activation.transactions))
+    [link] = await rows_of(app, copy.copy_id, select(PaymentLink).where(PaymentLink.link_id == over.link_id))
+    assert (link.state, link.cancel_reason) == ("cancelled", "rules_changed")
+
+
+async def test_deleting_a_desk_cancels_its_payment_links_in_the_lock_order(app, client, reviewer):
+    # a visitor's payment link is issued, and Dana's invoice link is unopened
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    reviewer.answer = LINK_PASS
+    decision = await link_for(client, visitor, await quoted(client, visitor, ("deposit", 1)))
+    assert (await executed(client, visitor, decision)).state == "succeeded"
+    dana = await confirmed(client, copy, DANA)
+    await released(client, dana, (await documents(app, copy))["dana-invoice"])
+    with lock_log(app) as log:
+        response = await client.delete(f"/desks/{copy.desk_id}", headers=copy.owner)
+    assert response.status_code == 204, response.text
+    # the payment link is locked before the document link (`payments.lock_desk_links`), and both
+    # links' facts expire after them, then the cancellation and the deletion are ledgered
+    assert log.transactions == [["sessions", "verification_challenges", "payment_links", "document_links", "facts",
+                                 "ledger_heads"]]
+    assert all(map(in_lock_order, log.transactions))
+    [link] = await rows_of(app, copy.copy_id, select(PaymentLink))
+    assert link.state == "cancelled"
