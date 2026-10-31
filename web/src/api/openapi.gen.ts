@@ -356,6 +356,19 @@ export interface KnowledgeIn {
   item: KnowledgeItem;
 }
 /**
+ * An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view
+ * masks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows
+ * without a timestamp. Every field is always sent.
+ */
+export interface KnowledgeRow {
+  item_id: string;
+  title: string | null;
+  text: string | null;
+  readers: string[];
+  source: "website" | "upload" | "setup" | "memory_import";
+  created_at: string | null;
+}
+/**
  * Details a visitor left: the name and note as they typed them (untrusted text, either may be missing).
  */
 export interface Lead {
@@ -966,6 +979,7 @@ export const API_OPERATIONS = {
   "GET /api/owner/desks/{desk_id}/tools/{tool}/decisions": { 200: "ToolDecisions" },
   "POST /api/owner/desks/{desk_id}/tools/connect": { 200: "ToolRow[]" },
   "POST /api/owner/desks/{desk_id}/tools/simulate_change": { 200: "ToolProfile" },
+  "GET /api/owner/desks/{desk_id}/knowledge": { 200: "KnowledgeRow[]" },
   "POST /api/owner/desks/{desk_id}/knowledge": { 200: "KnowledgeItem" },
   "POST /api/owner/desks/{desk_id}/documents": { 201: "DocumentCreated" },
   "POST /api/owner/policy/{desk_id}/chat": { 200: "RuleChatOut", 202: "ProvingPending" },

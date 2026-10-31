@@ -38,6 +38,24 @@ def test_openapi_export_is_current():
     assert export_openapi() == json.loads(OPENAPI_PATH.read_text()), "run: cd backend && uv run python scripts/export_openapi.py"
 
 
+def test_knowledge_list_has_required_nullable_fields():
+    document = export_openapi()
+    operation = document["paths"]["/api/owner/desks/{desk_id}/knowledge"]["get"]
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "type": "array", "items": {"$ref": "#/components/schemas/KnowledgeRow"}, "title": "Response Owner Knowledge"}
+    schema = document["components"]["schemas"]["KnowledgeRow"]
+    fields = ["item_id", "title", "text", "readers", "source", "created_at"]
+    assert schema["required"] == fields
+    assert set(schema["properties"]) == set(fields)
+    assert all("default" not in prop for prop in schema["properties"].values())
+    for field in ("title", "text"):
+        assert schema["properties"][field]["anyOf"] == [{"type": "string"}, {"type": "null"}]
+    assert schema["properties"]["created_at"]["anyOf"] == [
+        {"type": "string", "format": "date-time"}, {"type": "null"}]
+    assert schema["properties"]["readers"]["items"] == {"type": "string"}
+    assert schema["properties"]["source"]["enum"] == ["website", "upload", "setup", "memory_import"]
+
+
 def test_every_route_has_typed_responses():
     document = export_openapi()
     schemas = document["components"]["schemas"]

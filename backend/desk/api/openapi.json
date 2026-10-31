@@ -5820,6 +5820,79 @@
       }
     },
     "/api/owner/desks/{desk_id}/knowledge": {
+      "get": {
+        "summary": "Knowledge",
+        "description": "The owner's knowledge on this Desk, oldest first by `created_at`, null timestamps first, ties by `item_id`.\nContent the kernel's read-only view masks stays null; listing never writes or asks the kernel for masked text.",
+        "operationId": "owner_knowledge",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KnowledgeRow"
+                  },
+                  "title": "Response Owner Knowledge"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
       "post": {
         "summary": "Add Knowledge",
         "description": "Tell Claude something about the business, kept by the kernel under its `item_id` (posting it again replaces\nit): owner-only, or public once the owner marks it so (`Label(readers=[\"public\"])`). It is information for Claude,\nnever a rule; the kernel refuses other readers or a text over 100 KiB (422), and keeps an item that quotes a\nprivate document owner-only.",
@@ -9012,6 +9085,76 @@
           "label"
         ],
         "title": "KnowledgeItem"
+      },
+      "KnowledgeRow": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "title": "Item Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "readers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Readers"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "website",
+              "upload",
+              "setup",
+              "memory_import"
+            ],
+            "title": "Source"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_id",
+          "title",
+          "text",
+          "readers",
+          "source",
+          "created_at"
+        ],
+        "title": "KnowledgeRow",
+        "description": "An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view\nmasks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows\nwithout a timestamp. Every field is always sent."
       },
       "Label": {
         "properties": {
