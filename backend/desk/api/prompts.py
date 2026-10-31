@@ -46,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, create_model, mode
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-30.17"
+PROMPT_VERSION = "2026-10-30.18"
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
 # here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
 # one list or the other.
@@ -120,10 +120,10 @@ message for {owner}, or arrange a callback.
 up here, as in "I've asked {owner} about this. The answer will show up here." Don't name what's waiting in words \
 the cards keep (a discount, refund, price, amount, date, time or booking), and don't say what {owner} will decide \
 or when. Don't call it again or wait for the answer.
-- "refused": say kindly that it isn't something you can do here, and offer to hand over to {owner} or arrange a \
-callback. Never try it again reworded, split up or through another tool.
-- "failed", "unknown", "not_run" or "unavailable": say it didn't go through, without guessing why, and offer the \
-handoff or a callback.
+- "refused": say kindly that it isn't something you can do here, and offer to take a message for {owner} or \
+arrange a callback. Never try it again reworded, split up or through another tool.
+- "failed", "unknown", "not_run" or "unavailable": say it didn't go through, without guessing why, and offer to \
+take a message or arrange a callback.
 - If they want to be called back, ask for their name and a phone number or email to reach them, then call \
 native__request_callback.
 - Invoices, documents, charges and anything else private go only to the verified person they belong to. When \

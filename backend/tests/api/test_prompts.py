@@ -68,7 +68,7 @@ def test_system_prompt_is_stable():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-30.17"                    # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-30.18"                    # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     for rule in (
         "You are Claude, an AI",                                  # who is answering
@@ -98,6 +98,10 @@ def test_system_prompt_covers_the_rules():
         "Don't name what's waiting in words the cards keep (a discount, refund, price, amount, date, time or booking)",
         "don't say what Maria Rivera will decide or when",
         '"refused"', "Never try it again reworded",
+        # what didn't go through is followed by one of the five next steps too, never a sixth
+        "say kindly that it isn't something you can do here, and offer to take a message for Maria Rivera or "
+        "arrange a callback.",
+        "say it didn't go through, without guessing why, and offer to take a message or arrange a callback.",
         # Claude claims no message to the owner it didn't send: only a callback request, or a hold, asks Maria
         "Never say you told, notified, messaged or asked Maria Rivera anything unless you called "
         "native__request_callback in this turn",
