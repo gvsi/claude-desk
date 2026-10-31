@@ -263,12 +263,14 @@ function daysWords(days: readonly string[]): string {
 
 /** A contract time of day ("18:00:00") as the owner reads it, "6:00 pm"; midnight as "midnight". Null when it can't be read. */
 function timeOfDay(time: string): string | null {
-  const match = /^(\d{2}):(\d{2})/.exec(time);
+  const match = /^(\d{2}):(\d{2})(?::(\d{2}))?/.exec(time);
   if (!match) return null;
   const hour = Number(match[1]);
   const minute = Number(match[2]);
   if (hour > 23 || minute > 59) return null;
-  return hour === 0 && minute === 0 ? 'midnight' : clock({ hour, minute });
+  // Midnight only to the second: 00:00:30 is a clock time, so a window ending then isn't all day.
+  const second = Number(match[3] ?? '0');
+  return hour === 0 && minute === 0 && second === 0 ? 'midnight' : clock({ hour, minute });
 }
 
 /**

@@ -223,6 +223,9 @@ describe('format', () => {
     expect(parts('08:00:00', '00:00:00')).toMatchObject({ times: '8:00 am to midnight', allDay: false });
     expect(parts('00:00:00', '18:00:00')).toMatchObject({ times: 'midnight to 6:00 pm', allDay: false });
     expect(parts('00:00:00', '23:59:00')).toMatchObject({ allDay: false });
+    // A time is midnight only when its seconds are zero too; otherwise it reads as a clock time.
+    expect(parts('00:00:00', '00:00:30')).toEqual({ days: 'Weekdays', times: 'midnight to 12:00 am', allDay: false });
+    expect(parts('00:00:30', '00:00:00')).toEqual({ days: 'Weekdays', times: '12:00 am to midnight', allDay: false });
     // A time that can't be read is never all day.
     expect(parts('24:00:00', '00:00:00')).toMatchObject({ times: '24:00:00 to midnight', allDay: false });
   });
