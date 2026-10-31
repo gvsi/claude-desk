@@ -102,7 +102,7 @@ On pull requests, CI runs `make evals-results-check`. It:
 
 Before merging, fetch origin and run `make evals-merge-ready HEAD=origin/<branch>`; it refuses when both the PR and `origin/main` changed gated inputs, recorded rates or results files since their merge base. Rebase onto `origin/main`, regenerate results for the combined inputs (`make evals-tier2 MAX_USD=0` while every scenario is pending; a pass that runs scenarios spends money and needs the owner's go first), remove the stale file, push and wait for green before checking readiness again and merging.
 
-On pushes to `main`, CI also runs the results check against `HEAD~1`, the previous main commit, to detect merged gated inputs without matching results.
+On pushes to `main` and manual runs, CI checks the head against the repository's root commit to require passing results for the head's gated inputs, so a gap left by a merge whose run was cancelled still fails the next run.
 
 Its limit, said plainly: CI can recompute pass or fail from the committed rows, but it can't prove the rows came from a real run, since it holds no model credentials. The results files are self-attested.
 
