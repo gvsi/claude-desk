@@ -222,7 +222,8 @@ function toolSummary(row: ToolRow, key: ConnectorKey, active: ActiveCards, peopl
 /**
  * The Rules page's sections: one per connector that is on (`connectorOn`), in the catalog's order,
  * never Google Calendar or the setup interview's own tools. Each lists the tools of that connector
- * the Desk has, with their outcome, and links to the connector's page under Connectors; the
+ * the Desk has, with their outcome, and names the connector's page under Connectors, which the
+ * screens link to once it's built (`connectorPageHref`); the
  * payment limit leads Payments and Stripe. A connector turned off leaves the list and comes back
  * through the picker.
  */

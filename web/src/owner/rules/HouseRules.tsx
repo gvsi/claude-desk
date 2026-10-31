@@ -16,6 +16,7 @@ import {
   type RuleRowProps,
   type RulesLinkProps,
 } from '../../ds/index.ts';
+import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { useReadFailure } from '../useReadFailure.ts';
@@ -41,7 +42,10 @@ function defaultRow(tool: string): RuleRowProps {
   return { rule: { card_id: `default:${tool}`, mode: DEFAULT_SIDE.mode, reason: DEFAULT_SIDE.reason }, words: [...DEFAULT_SIDE.words] };
 }
 
-/** One connector's tools, each with every rule that governs it, read-only. */
+/**
+ * One connector's tools, each with every rule that governs it, read-only; each tool's name and line
+ * link to its page once the Connectors pages are built (`connectorPageHref`).
+ */
 function ConnectorRules({ deskId, section, view, people }: { deskId: string; section: HubSection; view: RulesView; people: PeopleOut | null }) {
   return (
     <section className="cd-house-rules__connector" aria-label={section.connector.name}>
@@ -54,7 +58,7 @@ function ConnectorRules({ deskId, section, view, people }: { deskId: string; sec
           <ToolRulesCard
             key={tool.key}
             label={tool.name}
-            tool={{ name: tool.name, description: tool.description, href: `${deskPath(deskId)}/${tool.href}` }}
+            tool={{ name: tool.name, description: tool.description, href: connectorPageHref(deskId, tool.href) }}
             rules={rules.length > 0 ? rules : [defaultRow(tool.key)]}
             fallback={rules.length > 0 && toolFallback(row, view.active)}
             linkComponent={RouterLink}
