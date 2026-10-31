@@ -114,6 +114,16 @@ const INTRO_FALLBACK_NAME = /PlainIntroDialog/;
 const EXPORTS_INTRO_DIALOG = /\bexport\s*\{[^}]*\bIntroDialog\b[^}]*\}\s*from\b/;
 const IMPORTS_INTRO_FROM_THE_INDEX = /\bimport\s*\{[^}]*\bIntroDialog\b[^}]*\}\s*from\s*['"](?:\.\.\/)+ds\/index(?:\.ts)?['"]/;
 
+// Resource hints and speculation rules, which have a browser fetch a link before anyone clicks it,
+// and the path of a card's single-use document link, which no screen fetches or writes out: the web
+// opens one only from the card's own link, which the visitor clicks. As whole words, so React
+// Query's `prefetchQuery`, which reads the app's own data, isn't one.
+const LINK_HINT = /(?<![\w-])(?:dns-prefetch|prefetch|preload|prerender|prefetchDNS)(?![\w-])|speculationrules/i;
+const DOCUMENT_LINK = /\/api\/d\//i;
+
+/** The app's page, read as the browser first gets it. */
+const INDEX_HTML: Source = { file: '../index.html', text: readFileSync(path.join(SRC, '..', 'index.html'), 'utf8') };
+
 /** Every file under `src/` but this one, by path relative to `src/`. */
 function everyFileButThisOne(): string[] {
   return readdirSync(SRC, { recursive: true, encoding: 'utf8' })
@@ -321,6 +331,27 @@ describe('app source guards', () => {
     // Allowed in the design system, which these sources leave out, and in the panel the exception is for.
     expect(sources.some(({ file }) => file.startsWith('ds/'))).toBe(false);
     expect(hits(HOLDS_CARDS, sources.filter(({ file }) => file !== HOLDS_CARDS_FILE))).toEqual([]);
+  });
+
+  it('document_links_are_never_prefetched', () => {
+    // The matchers, on known samples first.
+    const bad = [
+      '<link rel="prefetch" href="/api/d/tok" />',
+      "link.rel = 'preload';",
+      '<link rel="prerender" href="/d/rivera">',
+      '<link rel="dns-prefetch" href="//desk.example">',
+      '<script type="speculationrules">{}</script>',
+      "import { prefetchDNS } from 'react-dom';",
+    ];
+    for (const text of bad) expect(hits(LINK_HINT, sample(text)), text).toHaveLength(1);
+    expect(hits(LINK_HINT, sample("queryClient.prefetchQuery(desksQuery()); <link rel=\"modulepreload\" href=\"/x.js\">; // a link never prefetched"))).toEqual([]);
+    expect(hits(DOCUMENT_LINK, sample("fetch(`/api/d/${token}`); const href = '/API/d/x';"))).toHaveLength(2);
+    expect(hits(DOCUMENT_LINK, sample("request('paymentLink', { params: { token } }); const page = '/d/rivera';"))).toEqual([]);
+
+    // The app's code and its page: no hint that fetches a link ahead, and no document link written out.
+    expect(INDEX_HTML.text).toContain('<div id="root"></div>');
+    expect(hits(LINK_HINT, [...sources, INDEX_HTML])).toEqual([]);
+    expect(hits(DOCUMENT_LINK, [...sources, INDEX_HTML])).toEqual([]);
   });
 
   it('visitor_code_never_shows_owner_reasons', () => {
