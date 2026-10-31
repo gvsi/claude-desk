@@ -118,9 +118,10 @@ CATEGORIES = {"number": "number_in_prose", "money": "number_in_prose", "percent"
 # text has no accents, so "si" (if) counts only where the prose writes no mark on it (`_conditioned`).
 BOOKING_CONDITION = re.compile(
     r"(?<!\w)(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as soon as"
-    r"|cuando|(?P<si>s[il])|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) \Z",
+    r"|cuando|(?P<si>s[il])|una vez que|en cuanto|apenas|tan pronto como|despues de que|antes de que|hasta que) "
+    r"(?:(?:ya|me|te|le|lo|la|nos|os|les|los|las|se) ){0,3}\Z",
     re.IGNORECASE)
-CONDITION_REACH = 32               # more characters than the longest condition and its space ("tan pronto como ")
+CONDITION_REACH = 48               # longest condition plus bounded Spanish clitics and ya before he/hemos
 
 
 # Default-ignorable code points beyond category Cf (Unicode's DerivedCoreProperties): the combining
