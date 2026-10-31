@@ -1459,7 +1459,11 @@ async def confirm(ctx: KernelCtx, desk_id: str, version: int) -> PolicyVersion:
                             persist=partial(_ledger_unavailable, copy_id=copy_id, desk_id=desk_id, version=version))
     if pins.state != "ok":
         raise ConfirmConflict(copy_id, desk_id, version, "pin_changed", drifted=pins.drifted)
-    if _proved_against(row) != await current_hashes(ctx, desk_id, row.auto_money_cap_cents, enables=row.enables):
+    try:
+        hashes = await current_hashes(ctx, desk_id, row.auto_money_cap_cents, enables=row.enables)
+    except mcp_pins.BusinessProfileChanged:
+        raise ConfirmConflict(copy_id, desk_id, version, "pin_changed") from None
+    if _proved_against(row) != hashes:
         raise ConfirmConflict(copy_id, desk_id, version, "hash_changed")
     if compiler.above_money_cap(row.cards, row.auto_money_cap_cents):
         raise ConfirmConflict(copy_id, desk_id, version, "above_money_cap")
@@ -1999,8 +2003,13 @@ async def _probe_tools(ctx: KernelCtx, row: PolicyVersionRow) -> dict[str, _Prob
     if row.status not in ("active", "superseded"):
         for pin in row.enables or ():
             adapter = await adapters.resolve(ctx, row.desk_id, pin.tool)
+            if adapter is None and pin.tool.startswith('desk.'):
+                raise ConfirmConflict(ctx.copy_id, row.desk_id, row.version, 'pin_changed')
             if adapter is not None:    # a tool no adapter runs is never given
-                profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256, adapter.profile)
+                try:
+                    profile = mcp_pins.pinned_profile(pin.tool, pin.definition_sha256, adapter.profile)
+                except mcp_pins.BusinessProfileChanged:
+                    raise ConfirmConflict(ctx.copy_id, row.desk_id, row.version, 'pin_changed') from None
                 tools[pin.tool] = _ProbeTool(profile, adapters.profile_sha256(profile))
     return tools
 

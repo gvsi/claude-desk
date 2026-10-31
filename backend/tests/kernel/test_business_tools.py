@@ -93,6 +93,77 @@ async def test_reput_refreshes_a_profile_changed_by_kernel_code_and_can_confirm(
     assert (await business_rows(app, copy))[old.tool].status == 'enabled'
 
 
+@pytest.mark.solver
+@pytest.mark.parametrize('phase', ['after_check', 'before_enable', 'probe'])
+async def test_config_races_return_pin_changed_conflicts(app, client, monkeypatch, desk_prove, phase):
+    from desk.kernel_service import mcp_pins
+    from .test_probe import probe
+
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake()])).status_code == 200
+    row = (await business_rows(app, copy))['desk.new-enquiry']
+    response = await client.post('/tools/confirm', headers=copy.owner, json={
+        'desk_id': copy.desk_id, 'tools': [{'tool': row.tool, 'definition_sha256': row.definition_sha256}], 'enable': True})
+    assert response.status_code == 200, response.text
+    version = response.json()['draft']['version']
+
+    async def change():
+        response = await put(client, copy, [intake(config={'block': 'intake', 'questions': ['Where?']})])
+        assert response.status_code == 200, response.text
+
+    if phase == 'probe':
+        await change()
+        response = await client.post(f'/policy/{version}/probe', headers=copy.owner, json={
+            'desk_id': copy.desk_id, 'probes': [probe(row.tool, {'name': 'Dana', 'answers': ['Consult']})]})
+    else:
+        if phase == 'after_check':
+            original = mcp_pins.check_enables
+
+            async def after_check(*args, **kwargs):
+                result = await original(*args, **kwargs)
+                assert result.state == 'ok'
+                await change()
+                return result
+
+            monkeypatch.setattr(mcp_pins, 'check_enables', after_check)
+        else:
+            original = mcp_pins.enable_tools
+
+            async def before_enable(*args, **kwargs):
+                await change()
+                return await original(*args, **kwargs)
+
+            monkeypatch.setattr(mcp_pins, 'enable_tools', before_enable)
+        response = await client.post('/policy/confirm', headers=copy.owner,
+                                     json={'desk_id': copy.desk_id, 'version': version})
+    assert response.status_code == 409, response.text
+    assert response.json()['code'] == 'conflict'
+    events = [row.event for row in await ledger_rows(app, copy) if row.event.kind == 'policy']
+    assert events[-1].summary == {'version': version, 'refused': 'pin_changed'}
+    assert (await business_rows(app, copy))[row.tool].status == 'needs_review'
+
+
+async def test_resolver_logs_factory_failures_without_owner_text(app, client, monkeypatch, caplog):
+    import logging
+    from desk.kernel_service.adapters import blocks
+
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake()])).status_code == 200
+    secret = 'untrusted owner text must not reach the log'
+
+    def broken(*args):
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(blocks, 'BlockAdapter', broken)
+    with caplog.at_level(logging.ERROR, logger='desk.kernel_service.adapters'):
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            assert await adapters.resolve(ctx, copy.desk_id, 'desk.new-enquiry') is None
+    assert 'business_adapter_resolution_failed' in caplog.text
+    assert 'kind=RuntimeError' in caplog.text
+    assert secret not in caplog.text
+
+
 async def test_intake_default_ask_auto_execution_and_owner_only_answers(app, client):
     copy = await rivera(app, client)
     assert (await put(client, copy, [intake()])).status_code == 200
