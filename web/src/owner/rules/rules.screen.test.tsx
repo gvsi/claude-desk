@@ -4,7 +4,7 @@
  * house rules.
  */
 import { describe, expect, it } from 'vitest';
-import { userEvent } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 
 import { RULES_UNAVAILABLE_COPY } from '../../api/http.ts';
 import type { Suggestion } from '../../api/views.ts';
@@ -217,6 +217,48 @@ describe('rules page', () => {
     await expect.element(panel).not.toBeInTheDocument();
     await expect.element(composer).toHaveFocus();
     expect(desk().policy.version).toBe(7);
+  });
+
+  it('rules_header_keeps_its_title_whole_beside_ask_claude', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: "Why was Dana's refund held?" }).click();
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    await expect.element(panel.getByRole('log').getByText(/^Dana's refund waited for you/)).toBeVisible();
+    const box = (el: Element) => el.getBoundingClientRect();
+    /** How many lines an element's words run over. */
+    const lines = (el: Element) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size;
+    };
+    /** The window at `width`, once the shell has its layout for it (the top bar under 768 px), and the header's parts. */
+    const at = async (width: number) => {
+      await page.viewport(width, 900);
+      await expect.poll(() => window.innerWidth).toBe(width);
+      await expect.poll(() => screen.container.querySelector('.cd-app-shell')?.classList.contains('cd-app-shell--compact')).toBe(width < 768);
+      const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
+      const header = title.closest('.cd-page-header') as HTMLElement;
+      // The panel stays beside the page at every width here.
+      expect(box(panel.element()).left, `${width}`).toBeGreaterThan(box(header).right);
+      return { title, header, text: title.closest('.cd-page-header__text') as HTMLElement, menu: screen.getByRole('button', { name: 'Start from a preset' }).element() };
+    };
+
+    // With room beside the panel, the menu stays at the right of the title's line (N-Conn-12-Chat).
+    for (const width of [1440, 1280]) {
+      const { title, menu } = await at(width);
+      expect(lines(title), `${width}`).toBe(1);
+      expect(box(menu).left, `${width}`).toBeGreaterThan(box(title).right);
+      expect(Math.round(box(menu).top - box(title).top), `${width}`).toBe(4);
+    }
+    // In a narrower column the menu goes under the title and its subtitle, which keep the
+    // column's whole width, and the title stays on one line.
+    for (const width of [1024, 960, 940, 660, 640]) {
+      const { title, header, text, menu } = await at(width);
+      expect(lines(title), `${width}`).toBe(1);
+      expect(Math.round(box(text).width), `${width}`).toBe(Math.round(box(header).width));
+      expect(Math.round(box(menu).top - box(text).bottom), `${width}`).toBe(16);
+    }
+    expectNoHorizontalScroll();
   });
 
   it('rule_chat_without_change_drafts_nothing', async () => {
