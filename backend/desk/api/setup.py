@@ -36,9 +36,10 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   own question's model, whose message leaves the memory and website out, and code drops it from any other turn's
   patch too, so no other turn, and nothing the website or memory says, can set it. A limit question's model has no
   fact either (its turn reads none of the facts so far), and code drops a fact from a limit turn's patch too, but for
-  the quote question's prices, named from the owner's answer alone (the turn reads no price list): code updates the
-  item of each title or adds it, never removing one. A fact question clears the hours or the prices only by its
-  flag, since an empty list leaves them as they are. A new website is read only with consent; a new owner or business
+  the quote question's pricing text and price items, named from the owner's answer alone (the turn reads neither):
+  code replaces the pricing text and updates or adds price items by title, never removing one. A fact question
+  clears the hours or the prices only by its flag, since an empty list leaves them as they are. A new website is
+  read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
   after its retry gets the fixed transition line instead.
@@ -1301,8 +1302,9 @@ def _priced(listed: list[dict], named: list[PriceAnswer], key: QuestionKey) -> l
 def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupAnswers:
     """`answers` with what the patch sets (a blank text sets nothing). Each limit is taken only on the turn answering
     its own question (`LIMIT_QUESTIONS`), and a fact only on a turn answering a question that owns no limit, but for
-    the prices the quote question names, which only update or add items (`_priced`); anything else is dropped and
-    logged (by its label or field name, never its value). Names are reduced as the Desk takes them."""
+    the explicit facts in `LIMIT_TURN_FACTS`: the quote question replaces pricing text and only updates or adds
+    price items (`_priced`). Anything else is dropped and logged (by its label or field name, never its value).
+    Names are reduced as the Desk takes them."""
     values = answers.model_dump()
     limit_turn = key in LIMIT_QUESTIONS.values()
     for name, value in patch:
@@ -1313,7 +1315,7 @@ def merged(answers: SetupAnswers, patch: SetupPatch, key: QuestionKey) -> SetupA
             continue
         if limit_turn and name not in LIMIT_QUESTIONS:
             if LIMIT_TURN_FACTS.get(name) == key:
-                values[name] = _priced(values[name], value, key)
+                values[name] = _priced(values[name], value, key) if name == "price_items" else value
             else:
                 logger.warning("a setup turn answering %s carried %s; it was dropped", key, name)
             continue

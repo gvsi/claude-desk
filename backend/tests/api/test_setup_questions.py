@@ -19,6 +19,7 @@ import re
 import secrets
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
+from datetime import date
 from typing import get_args, get_origin
 
 import httpx
@@ -1625,7 +1626,24 @@ LIMIT_QUESTIONS = {"quote_limit": ("quote_auto_max_cents",), "discounts": ("disc
                    "money_limit": ("auto_money_cap_cents", "refunds", "payment_link_auto_max_cents")}
 
 
-def test_business_policy_facts_never_reach_or_change_on_limit_turns(caplog):
+def test_only_the_quote_limit_schema_can_record_a_pricing_policy(caplog):
+    answers = SetupAnswers(summary="Tax advice.", pricing="A fixed menu.")
+    for key in LIMIT_QUESTIONS:
+        schema = SETUP_TURNS[key].model_json_schema()
+        if key == "quote_limit":
+            assert "pricing" in schema["properties"]
+            assert "pricing" in schema["required"]
+            assert schema["properties"]["pricing"]["maxLength"] == 500
+        else:
+            assert "pricing" not in schema["properties"], key
+            with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+                SETUP_TURNS[key].model_validate({**blank(SETUP_TURNS[key]),
+                                                "pricing": "Priced per case after a consult."})
+            assert desk_setup.merged(answers, SetupPatch(pricing="Changed."), key) == answers
+            assert f"{key} carried pricing; it was dropped" in caplog.text
+
+
+def test_business_policy_facts_never_reach_limit_turns(caplog):
     facts = {"pricing": "Per case after a consult.", "intake": "Ask about the business type.",
              "urgent": "Take the filing notice and request a callback."}
     answers = SetupAnswers(summary="Tax advice.", **facts)
@@ -1638,19 +1656,22 @@ def test_business_policy_facts_never_reach_or_change_on_limit_turns(caplog):
         (block,) = message["content"]
         text = html.unescape(block["text"])
         assert all(name not in text and value not in text for name, value in facts.items()), key
-        assert set(facts).isdisjoint(SETUP_TURNS[key].model_fields), key
-        for name in facts:
+        blocked = set(facts) - ({"pricing"} if key == "quote_limit" else set())
+        assert blocked.isdisjoint(SETUP_TURNS[key].model_fields), key
+        for name in blocked:
             with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
                 SETUP_TURNS[key].model_validate({**blank(SETUP_TURNS[key]), name: "Changed."})
-        assert desk_setup.merged(answers, patch, key) == answers
-        assert all(f"{key} carried {name}" in caplog.text for name in facts)
+        expected = answers.model_copy(update={"pricing": patch.pricing}) if key == "quote_limit" else answers
+        assert desk_setup.merged(answers, patch, key) == expected
+        assert all(f"{key} carried {name}" in caplog.text for name in blocked)
+        assert desk_setup.merged(answers, SetupPatch(pricing=" \n "), key) == answers
 
 
 def test_fact_turns_capture_business_policies_with_bounded_fields():
     descriptions = {
-        "pricing": 'how the business prices (a fixed menu, "from" prices, or per case after a consult)',
-        "intake": "what to ask a new customer before the owner takes them on",
-        "urgent": "what this business treats as urgent and what to do then",
+        "pricing": 'How the business prices (a fixed menu, "from" prices, or per case after a consult)',
+        "intake": "What to ask a new customer before the owner takes them on",
+        "urgent": "What this business treats as urgent and what to do then",
         "after_hours": "What a customer is told about contacting the business outside its hours; public text, "
                        "never private owner instructions or personal phone numbers",
     }
@@ -1687,6 +1708,8 @@ def test_fact_turns_capture_business_policies_with_bounded_fields():
 
 
 def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
+    assert ("On the quote question, pricing records how the business prices in words, only from the owner's "
+            "answer; price_items holds only the prices that answer names.") in SETUP_TURN_SYSTEM
     assert ("For pricing, intake, after_hours and urgent, describe the policy in words; keep amounts, percentages, "
             "times, days and numbers out. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
     assert ("after_hours is what a customer is told about contacting the business outside its hours, rendered "
@@ -1758,10 +1781,10 @@ async def test_limits_patch_only_from_their_questions(app, browser, fake, kernel
 
 async def test_a_limit_turn_sets_only_its_own_limits(app, browser, fake, kernel_http, model, engine, caplog):
     # A limit question's model has its own limits, the reply, a website named and step_done, and no fact but the quote
-    # question's prices: its turn reads none of the other facts so far, so it can't set them blind.
+    # question's pricing text and price items: its turn still reads none of the facts so far.
     for key, names in LIMIT_QUESTIONS.items():
-        prices = {"price_items"} if key == "quote_limit" else set()
-        assert set(SETUP_TURNS[key].model_fields) == {"reply", "website", "step_done", *names, *prices}, key
+        facts = {"pricing", "price_items"} if key == "quote_limit" else set()
+        assert set(SETUP_TURNS[key].model_fields) == {"reply", "website", "step_done", *names, *facts}, key
     caplog.set_level(logging.WARNING, logger="desk.api.setup")
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
@@ -1790,6 +1813,31 @@ async def test_a_limit_turn_sets_only_its_own_limits(app, browser, fake, kernel_
     assert "carried price_items" not in caplog.text
     assert desk_setup.merged(patched, SetupPatch(price_items=drain), "discounts") == patched      # not its fact
     assert "discounts carried price_items" in caplog.text
+
+
+async def test_the_quote_turn_stores_and_publishes_a_pricing_policy(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False)
+    await answered_up_to(owner, model, interview_id, "quote_limit")
+
+    pricing = "priced per case after a consult"
+    reply = await answer(owner, model, interview_id, "We price per case after a consult. Always ask me first.",
+                         turn(pricing=pricing, quote_auto_max_cents=0))
+    assert reply.status_code == 200, reply.text
+    answers = (await stored(engine, interview_id))["answers"]
+    assert answers["pricing"] == pricing
+    assert answers["price_items"] == []
+    for key in QUESTION_KEYS[QUESTION_KEYS.index("discounts"):]:
+        reply = await answer(owner, model, interview_id, f"About {key}.")
+        assert reply.status_code == 200, reply.text
+    answers = SetupAnswers.model_validate((await stored(engine, interview_id))["answers"])
+    assert answers.pricing == pricing
+    parts = desk_setup.seed_parts(answers, TIMEZONE, business_type="office", today=date(2026, 10, 31))
+    assert [(claim.kind, claim.value) for claim in parts.charter if claim.key == "policy:pricing"] == [
+        ("text", pricing)]
+    assert parts.prices == []
 
 
 async def test_the_quote_turn_adds_or_updates_prices_and_never_removes_one(app, browser, fake, kernel_http, model,
