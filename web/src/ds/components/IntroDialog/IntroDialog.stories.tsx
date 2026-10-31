@@ -101,7 +101,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Intro-D',
     canvasNote:
-      'N-Intro-D draws the reply card’s mark at 18 px inside a dark 32 px tile; the owner dropped that frame on 2026-10-30, so the mark stands alone at 32 px, with no tile, in its dark ink (N-Explore-Mark-Decided), and the brand’s mark has no tile.',
+      'N-Intro-D draws the reply card’s mark at 18 px inside a dark 32 px tile; the owner dropped that frame on 2026-10-30, so the mark stands alone at 32 px, with no tile, in its dark ink (N-Explore-Mark-Decided), and the brand’s mark has no tile. The board’s brand row ends in a “Demo” pill; the owner replaced it on 2026-10-30 with the Wordmark’s “Preview” badge, the sidebar lockup’s one label.',
   },
 } satisfies Meta<typeof IntroDialog>;
 

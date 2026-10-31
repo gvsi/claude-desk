@@ -72,10 +72,6 @@
   gap: var(--space-8);
 }
 
-.cd-intro__brand > .cd-pill {
-  margin-left: var(--space-4);
-}
-
 .cd-intro__lede {
   display: flex;
   flex-direction: column;

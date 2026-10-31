@@ -12,7 +12,7 @@
 | The owner app's sidebar, in the lockup with the `Wordmark` and its "Preview" badge | 36 px | No tile, light ink |
 | The phone top bar, beside the business's name | 20 px | No tile, light ink |
 | "Powered by Claude Desk" in the public page's footer | 16 px | No tile, light ink |
-| The first-visit intro dialog, beside the `Wordmark` | 20 px | No tile, light ink |
+| The first-visit intro dialog, beside the `Wordmark` and its "Preview" badge | 20 px | No tile, light ink |
 | A standalone page and the owner app while it opens, beside the `Wordmark` | 20 px | No tile, light ink |
 | The intro illustration's reply card, alone in an avatar's place | 32 px | No tile, dark ink (`ground="light"`) |
 | The About pages' top bar, beside the `Wordmark`: with its "Preview" badge on the desktop bar, the name alone on the phone bar | 20 px | The white tile (`tile`) |

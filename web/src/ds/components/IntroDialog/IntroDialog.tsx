@@ -15,7 +15,6 @@ import { Button } from '../Button/Button.tsx';
 import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import { Mark, Wordmark } from '../Mark/Mark.tsx';
 import { Notice } from '../Notice/Notice.tsx';
-import { Pill } from '../Pill/Pill.tsx';
 import { INTRO_ERROR_COPY, type IntroErrorCode } from './introCopy.ts';
 
 import './IntroDialog.css';
@@ -167,8 +166,7 @@ export function IntroDialog({ title, intro, thingsToTry, submitLabel, onSubmit, 
         <div className="cd-intro__content">
           <div className="cd-intro__brand">
             <Mark />
-            <Wordmark />
-            <Pill>Demo</Pill>
+            <Wordmark preview />
           </div>
 
           <div className="cd-intro__lede">
