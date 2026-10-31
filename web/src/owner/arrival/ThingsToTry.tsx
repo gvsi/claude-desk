@@ -163,7 +163,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
           <Thing
             icon="conversations"
             title={CHAT.title}
-            detail="Your public page opens in a new tab. Ask about a leak, a price or a time."
+            detail="Your public page opens in a new tab. Ask about a price or a time."
             end={rowDone(signals.done.chat, CHAT.done)}
           >
             <Button variant="secondary" href={link} external>

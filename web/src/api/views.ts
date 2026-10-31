@@ -36,17 +36,16 @@ import type {
   ToolName,
   ToolProfile,
 } from './contracts.ts';
+import type { DeskSetup, DeskSummary } from './openapi.gen.ts';
 
 // Copy and Desks
 
-export interface DeskSummary {
-  desk_id: string;
-  slug: string;
-  name: string;
-  business_name: string;
-  hours: HoursWindow[];
-  answering: boolean;
-}
+/**
+ * One of the copy's Desks (`DeskSummary`), with its setup interview while that hasn't gone live
+ * (`DeskSetup`), or null: the API's own models, from its document. Answering is separate from
+ * setup: an owner can turn it on before setup finishes, and the Desk still names its setup.
+ */
+export type { DeskSetup, DeskSummary };
 
 /** The demo copy this browser's owner cookie names (copies, `me`, `start_over`). */
 export interface CopyOut {
@@ -419,7 +418,13 @@ export interface RuleChatOut {
 
 // Setup
 
-export type SetupStep = 'questions' | 'tools' | 'rules' | 'situations' | 'safety_check' | 'preview' | 'live';
+/** Setup's steps, in the order an interview goes through them: it only ever moves forward, and `live` is the last. */
+export const SETUP_STEPS = ['questions', 'tools', 'rules', 'situations', 'safety_check', 'preview', 'live'] as const;
+
+export type SetupStep = (typeof SETUP_STEPS)[number];
+
+/** The steps a setup that hasn't gone live can be at, as the API's `DeskSetup` names them: every step but `live`. */
+export type UnfinishedSetupStep = DeskSetup['step'];
 
 /** The setup interview's seven questions (plan 02b Task 6, `QUESTION_KEYS`). */
 export type QuestionKey =

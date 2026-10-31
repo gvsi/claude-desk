@@ -106,7 +106,8 @@ export interface SessionRecord {
 export type ToolRecord = ToolProfile & { review_reason: ToolReviewReason | null };
 
 export interface DeskRecord {
-  summary: DeskSummary;
+  /** The Desk as the copy lists it, but its setup, which is its interview's (`withSetupDesks`). */
+  summary: Omit<DeskSummary, 'setup'>;
   /** The active rules version, with its money cap. */
   policy: PolicyVersionOut;
   ledger: LedgerEntry[];

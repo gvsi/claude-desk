@@ -1272,6 +1272,16 @@ describe('OwnerLayout', () => {
 });
 
 describe('Today', () => {
+  it('chat_row_suggests_questions_any_business_gets', async () => {
+    // "Chat as a customer" suggests what any business is asked, not the plumbing demo's own leak:
+    // every new Desk's Today shows the same row.
+    const { screen } = await renderRoute(TODAY);
+    const chat = screen.getByRole('region', { name: 'Things to try' }).getByRole('listitem').first();
+    await expect.element(chat.getByRole('heading', { level: 3, name: 'Chat as a customer' })).toBeVisible();
+    await expect.element(chat.getByText('Your public page opens in a new tab. Ask about a price or a time.', { exact: true })).toBeVisible();
+    expect(chat.element().textContent).not.toMatch(/leak/i);
+  });
+
   it('held_request_item_waits_for_a_hold', async () => {
     const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
     const things = screen.getByRole('region', { name: 'Things to try' });
