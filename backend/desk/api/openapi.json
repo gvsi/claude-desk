@@ -10802,9 +10802,22 @@
             "enum": [
               "proposed",
               "accepted",
-              "declined"
+              "declined",
+              "changed"
             ],
             "title": "State"
+          },
+          "superseded_by": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^p-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded By"
           },
           "job": {
             "anyOf": [

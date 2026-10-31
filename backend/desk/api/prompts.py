@@ -993,12 +993,15 @@ class ProposalCard(BaseModel):
 
     proposal_id: str = Field(pattern=r"^p-[0-9a-f]{12}$")
     kind: Literal["job", "connector"]
-    state: Literal["proposed", "accepted", "declined"]
+    state: Literal["proposed", "accepted", "declined", "changed"]
+    superseded_by: str | None = Field(default=None, pattern=r"^p-[0-9a-f]{12}$")
     job: JobProposal | None
     connector: ConnectorProposal | None
 
     @model_validator(mode="after")
     def matching_payload(self) -> Self:
+        if (self.state == "changed") != (self.superseded_by is not None):
+            raise ValueError("only a changed card must name its replacement")
         if self.kind == "job":
             valid = self.job is not None and self.connector is None
         else:
@@ -1078,7 +1081,8 @@ class DraftOutput(BaseModel):
         errors = []
         if isinstance(value, dict):
             value = dict(value)
-            for name, draft_model in (("jobs", JobDraft), ("connectors", ConnectorDraft), ("add_jobs", JobDraft)):
+            for name, draft_model in (("jobs", JobDraft), ("connectors", ConnectorDraft),
+                                      ("add_jobs", JobDraft), ("revised", JobDraft)):
                 if name not in cls.model_fields or not isinstance(value.get(name), list):
                     continue
                 kept = []
@@ -1173,9 +1177,11 @@ SetupNextStep = create_model(
 
 SetupCardAnswer = create_model(
     "SetupCardAnswer", __base__=DraftOutput, __module__=__name__,
-    __doc__="A typed answer to the pending card; code applies only acceptance or decline.",
+    __doc__="A typed answer to the pending card; code applies its decision or mints a revised job.",
     reply=(str, Field(max_length=1000, description="A reply to the owner, at most 1000 characters.")),
-    decision=(Literal["accept", "decline", "none"], Field(description="Accept or decline this card, or leave it waiting.")),
+    decision=(Literal["accept", "decline", "change", "none"],
+              Field(description="Accept, decline or revise this card, or leave it waiting.")),
+    revised=(list[JobDraft], Field(max_length=1, description="At most one revised job; empty unless changing it.")),
     **planning_fields(),
 )
 

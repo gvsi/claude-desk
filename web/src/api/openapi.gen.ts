@@ -577,7 +577,8 @@ export interface PresetIn {
 export interface ProposalCard {
   proposal_id: string;
   kind: "job" | "connector";
-  state: "proposed" | "accepted" | "declined";
+  state: "proposed" | "accepted" | "declined" | "changed";
+  superseded_by?: string | null;
   job: JobProposal | null;
   connector: ConnectorProposal | null;
 }

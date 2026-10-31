@@ -1015,6 +1015,8 @@ def _setup_plan(interview: Interview) -> dict:
         status = (card.state if card.state != "proposed" else
                   "dropped" if card.proposal_id in interview.dropped else
                   "shown" if card.proposal_id in shown else "planned")
+        if card.state == "changed":
+            status = f"changed (replaced by {card.superseded_by})"
         payload = (card.job.model_dump(include={"title", "why", "how", "autonomy"}) if card.job else
                    card.connector.model_dump(include={"app", "label", "why"}))
         items.append({"id": card.proposal_id, "kind": card.kind, **payload, "status": status})
@@ -1276,6 +1278,23 @@ async def card_turn(owner, engine, model, interview: Interview, proposal_id: str
     reply = Entry(role="claude", text=following.reply.strip() if following else "")
     interview.transcript.append(reply)
     if text is not None:
+        if following.decision == "change":
+            if card.job is None or not following.revised:
+                return
+            replacement = _planned_job(interview, following.revised[0])
+            # Keep the stored plan and its shown copy settled together; only the replacement waits.
+            for entry in interview.transcript:
+                for planned in entry.planned:
+                    if planned.proposal_id == proposal_id:
+                        planned.state = "changed"
+                        planned.superseded_by = replacement.proposal_id
+            card.state = "changed"
+            card.superseded_by = replacement.proposal_id
+            reply.planned = [replacement]
+            if following.question.strip():
+                interview.transcript.append(Entry(role="claude", text=following.question.strip()))
+            interview.transcript.append(Entry(role="claude", text="", card=replacement.model_copy(deep=True)))
+            return
         if following.decision == "none" or not _decide_typed(interview, proposal_id,
                                                             following.decision == "accept"):
             return
@@ -1354,6 +1373,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
 # Finish ------------------------------------------------------------------------------------------------------
 
 def settle_plan(interview: Interview) -> None:
+    # Leave changed cards and their superseded_by links intact; settle only their replacements.
     pass
 
 

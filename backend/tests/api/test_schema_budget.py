@@ -125,6 +125,14 @@ def test_every_structured_route_is_counted():
     assert set(OUTPUTS) == ROUTES - {"conversation"}
 
 
+def test_typed_card_revisions_use_one_required_draft():
+    schema = strict_schema(SetupCardAnswer)
+    assert "revised" in schema["required"]
+    assert SetupCardAnswer.model_json_schema()["properties"]["revised"]["maxItems"] == 1
+    assert schema["properties"]["revised"]["items"]["$ref"] == "#/$defs/JobDraft"
+    assert schema["properties"]["decision"]["enum"] == ["accept", "decline", "change", "none"]
+
+
 @pytest.mark.parametrize("output", [SetupNextStep, SetupCardAnswer, *[model for key, model in SETUP_TURNS.items()
                                                   if key in {"what_you_do", "hours_and_area", "contact_and_after_hours"}]])
 def test_setup_planning_uses_one_required_shape(output):

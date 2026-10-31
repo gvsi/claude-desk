@@ -906,11 +906,13 @@ def proposal_entries() -> list[dict]:
         {"role": "claude", "text": "Here are two suggestions."},
         {"role": "claude", "text": "", "card": {
             "proposal_id": "p-012345abcdef", "kind": "job", "state": "proposed", "connector": None,
+            "superseded_by": None,
             "job": {"job": "schedule", "title": "Book an intro", "why": "Meet new clients", "how": "Book a slot",
                     "autonomy": "auto", "can_do_today": True,
                     "config": {"block": "typed_booking", "appointment_type": "Intro", "minutes": 30}}}},
         {"role": "claude", "text": "", "card": {
             "proposal_id": "p-fedcba543210", "kind": "connector", "state": "proposed", "job": None,
+            "superseded_by": None,
             "connector": {"app": "stripe", "label": "Stripe", "why": "Take payments", "connectable": True}}},
         {"role": "claude", "text": "Who do you help?", "question": "what_you_do",
          "choices": [{"text": "Individuals", "recommended": True}, {"text": "Businesses", "recommended": False}]},
@@ -2832,10 +2834,153 @@ async def test_a_limit_turns_own_reply_is_kept_before_the_next_limit_question(ap
 def card_answer(decision="none", **fields):
     from desk.api.prompts import SetupCardAnswer
     return structured(SetupCardAnswer(**{
-        "reply": "I'll set up repair requests.", "decision": decision,
+        "reply": "I'll set up repair requests.", "decision": decision, "revised": [],
         "next": next_ask("hours_and_area"), "question": "Where do you work?", "choices": [],
         "skip": [], "drop": [], "add_jobs": [], "plan": "", **fields,
     }))
+
+
+@pytest.mark.parametrize("business_tools_enabled", [False, True])
+async def test_typing_a_change_replaces_the_waiting_card(
+    app, browser, kernel_http, model, engine, business_tools_enabled,
+):
+    from desk.api.prompts import CAPABILITIES
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=business_tools_enabled)
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    revised = {**understanding()["jobs"][1], "title": "Book a 30-minute call", "autonomy": "ask",
+               "how": "Ask me before booking a call.",
+               "config": {"block": "typed_booking", "appointment_type": "Call", "minutes": 30}}
+    model.add(unparsed({"reply": "I'll ask before booking.", "decision": "change", "revised": [revised],
+                        "next": next_ask("done"), "question": "Set up this call?", "choices": [],
+                        "skip": [], "drop": [], "add_jobs": [], "plan": ""}))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+        json={"card": proposal_id, "text": "Make it a 30-minute call and check with me before booking."})
+    assert response.status_code == 200, response.text
+    state = response.json()
+    old, new = [message["card"] for message in state["messages"] if message["card"]]
+    assert old["state"] == "changed" and old["superseded_by"] == new["proposal_id"]
+    assert new["proposal_id"] != proposal_id and new["state"] == "proposed"
+    assert state["pending_card"] == new["proposal_id"] and state["question"] is None
+    assert new["job"]["title"] == revised["title"] and new["job"]["autonomy"] == "ask"
+    assert new["job"]["how"] == revised["how"] and new["job"]["job"] == "schedule"
+    assert new["job"]["can_do_today"] == CAPABILITIES["schedule"]
+    assert new["job"]["config"] == (revised["config"] if business_tools_enabled else None)
+    assert "amount_cents" not in json.dumps(new)
+    assert [message["text"] for message in state["messages"][-3:]] == [
+        "I'll ask before booking.", "Set up this call?", ""]
+    async with engine.connect() as conn:
+        loaded = await desk_setup._load(conn, owner.copy_id, interview_id)
+    original = next(card for entry in loaded.transcript for card in entry.planned if card.proposal_id == proposal_id)
+    assert original.state == "changed" and original.superseded_by == new["proposal_id"]
+    assert loaded.pending_card == new["proposal_id"]
+    planned = desk_setup._setup_plan(loaded)["items"]
+    assert next(item for item in planned if item["id"] == proposal_id)["status"] == \
+        f"changed (replaced by {new['proposal_id']})"
+
+
+@pytest.mark.parametrize("job", ["payment", "documents"])
+async def test_a_revision_uses_code_capabilities_and_never_model_payment_amounts(
+    app, browser, kernel_http, model, engine, job,
+):
+    from desk.api.prompts import CAPABILITIES
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    revision = {**understanding()["jobs"][0], "job": job,
+                "config": {"block": "purpose_payment", "purpose": "Deposit", "amount_cents": 99999}
+                          if job == "payment" else None}
+    model.add(card_answer("change", revised=[revision], question=""))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+        json={"card": proposal_id, "text": "Change the job."})
+    assert response.status_code == 200, response.text
+    card = response.json()["messages"][-1]["card"]
+    assert card["job"]["can_do_today"] == CAPABILITIES[job]
+    assert card["job"]["config"] == ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}
+                                     if job == "payment" else None)
+
+
+async def test_a_change_to_a_connector_card_keeps_it_waiting(app, browser, kernel_http, model, engine):
+    from desk.api.prompts import ConnectorProposal
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    async with engine.begin() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, interview_id)
+        card = interview.latest_ask.card
+        card.kind, card.job = "connector", None
+        card.connector = ConnectorProposal(app="stripe", label="Stripe", why="Payments", connectable=True)
+        await desk_setup._save(conn, interview)
+    before = await stored(engine, interview_id)
+    model.add(card_answer("change", revised=understanding()["jobs"][:1], reply="Stripe stays on its card."))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+        json={"card": proposal_id, "text": "Change how Stripe works."})
+    assert response.status_code == 200, response.text
+    assert response.json()["pending_card"] == proposal_id
+    row = await stored(engine, interview_id)
+    assert row["transcript"][:-2] == before["transcript"]
+    assert row["transcript"][-1]["text"] == "Stripe stays on its card."
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+async def test_a_change_without_a_valid_revision_keeps_the_card_waiting(
+    app, browser, kernel_http, model, engine, invalid,
+):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    before = await stored(engine, interview_id)
+    raw = {"reply": "What should I change?", "decision": "change", "question": "", "choices": [], "plan": "",
+           "next": next_ask("done"), "revised": [{**understanding()["jobs"][0], "title": "x" * 61}] if invalid else [],
+           "skip": list(QUESTION_KEYS), "drop": [proposal_id], "add_jobs": understanding()["jobs"][:1]}
+    model.add(unparsed(raw))
+    if invalid:
+        model.add(unparsed(raw))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+        json={"card": proposal_id, "text": "Make it different."})
+    assert response.status_code == 200, response.text
+    assert response.json()["pending_card"] == proposal_id
+    row = await stored(engine, interview_id)
+    assert row["transcript"][:-2] == before["transcript"]
+    assert row["transcript"][-1]["text"] == raw["reply"]
+    if invalid:
+        assert "revised.0.title: string_too_long" in json.dumps(model.requests[-1].messages)
+
+
+async def test_a_changed_card_is_never_asked_again(app, browser, kernel_http, model, engine):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    model.add(card_answer("change", revised=understanding()["jobs"][:1], question="   "))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+        json={"card": proposal_id, "text": "Ask me first."})
+    assert response.status_code == 200, response.text
+    replacement_id = response.json()["pending_card"]
+    async with engine.connect() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, interview_id)
+    # The planner tries to ask the old card again. Fallback must finish once the other items are dropped.
+    model.add(card_answer("decline", next={"kind": "job", "job": proposal_id}, skip=list(QUESTION_KEYS),
+                          drop=[card.proposal_id for card in interview.unshown]),
+              next_step("hours_and_area", next=next_ask("done"), plan="Your Desk will answer questions."))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+        json={"card": replacement_id, "text": "Not now."})
+    assert response.status_code == 200, response.text
+    state = response.json()
+    assert state["step"] == "tools" and state["pending_card"] is None
+    cards = [message["card"] for message in state["messages"] if message["card"]]
+    assert [card["proposal_id"] for card in cards] == [proposal_id, replacement_id]
+    assert cards[0]["state"] == "changed" and cards[0]["superseded_by"] == replacement_id
+    assert cards[1]["state"] == "declined"
+    closing_input = model.requests[-1].messages[0]["content"][0]["text"]
+    assert f"changed (replaced by {replacement_id})" in closing_input
+
+
+def test_proposal_card_changed_needs_superseded_by():
+    from desk.api.prompts import ProposalCard
+    raw = proposal_entries()[1]["card"]
+    raw.pop("superseded_by")  # Older stored cards still load with no replacement.
+    replacement_id = "p-123456789abc"
+    changed = {**raw, "state": "changed", "superseded_by": replacement_id}
+    assert ProposalCard.model_validate(changed).superseded_by == replacement_id
+    for fields in ({"state": "changed"}, {"state": "changed", "superseded_by": None},
+                   {"state": "changed", "superseded_by": "invalid"},
+                   *({"state": state, "superseded_by": replacement_id}
+                     for state in ("proposed", "accepted", "declined"))):
+        with pytest.raises(ValidationError):
+            ProposalCard.model_validate({**raw, **fields})
+    assert ProposalCard.model_validate(raw).superseded_by is None
 
 
 async def test_typing_yes_accepts_the_pending_card(app, browser, kernel_http, model, engine):
