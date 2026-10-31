@@ -51,7 +51,6 @@ from desk.api.sse import append_control, emit_inbox
 from desk.api.store import Ids, KeptDraft, append_stopped_draft
 from desk.api.triage import Stopped
 from desk.contracts import (
-    MONEY_TOOLS,
     ActorKind,
     Clause,
     Decision,
@@ -60,6 +59,7 @@ from desk.contracts import (
     ReplyVerdict,
     ToolCall,
     ToolProfile,
+    money_tool,
 )
 from desk.kernel_api import CheckReplyRequest, DecideRequest, ExecuteRequest, SessionContext
 
@@ -174,8 +174,6 @@ SEND_REPLY = SEND_REPLY_TOOL["name"]
 # After an /execute timeout the decision is read each second for ten seconds ("Fail-closed behavior").
 EXECUTE_POLL_S, EXECUTE_POLLS = 1.0, 10
 EXECUTED = frozenset({"executed", "failed", "unknown"})
-# The effects that move money (master plan, "Money cap"): taking it, and paying it out (a refund among them).
-MONEY_EFFECTS = frozenset({"charge", "pay_out"})
 # Violations Claude gets one rewrite for; any other kind hands off at once.
 REGENERABLE = frozenset({"number_in_prose", "promise_word", "soft_promise", "unknown_fact", "stale_fact",
                          "unentitled_fact"})
@@ -470,9 +468,10 @@ async def route_call(conn: AsyncConnection, caller: Caller, generation: int, blo
 
 
 def moves_money(decision: Decision) -> bool:
-    """Whether the decision's action moves money: a money tool, or an action with a money effect."""
+    """Whether the decision's action moves money: a money tool, or an action with a money effect
+    (`desk.contracts.money_tool`, the one definition the kernel holds them to)."""
     action = decision.action
-    return action is not None and (action.tool in MONEY_TOOLS or bool(MONEY_EFFECTS & set(action.effects)))
+    return action is not None and money_tool(action.tool, action.effects)
 
 
 async def recover_call(conn: AsyncConnection, caller: Caller, generation: int, block: dict, *,
