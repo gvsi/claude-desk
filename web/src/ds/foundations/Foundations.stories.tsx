@@ -14,7 +14,8 @@ const STEMS: Record<string, string> = {
   accent: 'Accent and focus',
   ring: 'Accent and focus',
   status: 'Status',
-  clay: 'The mark',
+  mark: 'The mark',
+  clay: 'The intro illustration',
   scrim: 'Scrim',
   illustration: 'The intro illustration',
 };

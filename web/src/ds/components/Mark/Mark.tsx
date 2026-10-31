@@ -8,26 +8,27 @@ export interface MarkProps {
 }
 
 /**
- * The Claude Desk mark, stroked in clay. Decorative (`aria-hidden`): it always sits beside the
- * name written out, in the `Wordmark` or "Powered by Claude Desk".
+ * The Claude Desk mark: a hand-drawn service bell on a white tile, drawn from `MARK_GEOMETRY` in the
+ * mark's fixed colors. Decorative (`aria-hidden`): it always sits beside the name written out, in
+ * the `Wordmark` or "Powered by Claude Desk".
  */
 export function Mark({ size = 20 }: MarkProps) {
-  const { viewBox, rect, path, strokeWidth, strokeLinecap, strokeLinejoin } = MARK_GEOMETRY;
+  const { viewBox, tile, art, clay, ink } = MARK_GEOMETRY;
   return (
-    <svg
-      className="cd-mark"
-      aria-hidden="true"
-      focusable="false"
-      width={size}
-      height={size}
-      viewBox={viewBox}
-      fill="none"
-      strokeWidth={strokeWidth}
-      strokeLinecap={strokeLinecap}
-      strokeLinejoin={strokeLinejoin}
-    >
-      <rect {...rect} />
-      <path d={path} />
+    <svg className="cd-mark" aria-hidden="true" focusable="false" width={size} height={size} viewBox={viewBox}>
+      <rect className="cd-mark__tile" {...tile} />
+      <g transform={art}>
+        <g className="cd-mark__clay">
+          {clay.map((d, index) => (
+            <path key={index} d={d} />
+          ))}
+        </g>
+        <g className="cd-mark__ink">
+          {ink.map((shape, index) =>
+            'd' in shape ? <path key={index} d={shape.d} /> : <circle key={index} cx={shape.cx} cy={shape.cy} r={shape.r} />,
+          )}
+        </g>
+      </g>
     </svg>
   );
 }

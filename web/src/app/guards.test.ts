@@ -1,7 +1,8 @@
 /**
  * Source guards for the app: everything under `src/` that runs in a browser, except the design
- * system (it has its own guards), the mock API and tests. Each guard first proves its matcher on a
- * known-bad sample, so it can't pass by matching nothing.
+ * system (it has its own guards), the mock API and tests; one guard, on the mark's and clay's colors,
+ * reads every text file. Each guard first proves its matcher on a known-bad sample, so it can't pass
+ * by matching nothing.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -113,6 +114,24 @@ function everyFileButThisOne(): string[] {
   return readdirSync(SRC, { recursive: true, encoding: 'utf8' })
     .map((file) => file.split(path.sep).join('/'))
     .filter((file) => file !== 'app/guards.test.ts');
+}
+
+// The Claude Desk mark's fixed colors and its parts' classes, only in the mark's folder; clay, the
+// intro illustration's field, only in the intro dialog's. Unlike the guards above, this one reads every
+// text file under `src/`, the design system included, but the token sources and the tables and tests
+// that list every token or prove the design system's own guards.
+const MARK_PARTS = /(?<![\w-])--mark-[a-z-]*[a-z]|\bcd-mark__[a-z-]*|#d97757\b|217\s*,\s*119\s*,\s*87/i;
+const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/i;
+const MARK_FOLDER = 'ds/components/Mark/';
+const CLAY_FOLDER = 'ds/components/IntroDialog/';
+const COLOR_TABLES = ['ds/tokens.json', 'ds/tokens.css', 'ds/contrast.ts', 'ds/tokens.test.ts', 'ds/guards.test.ts'];
+
+/** Every text file under `src/` but this one and the color tables, read. */
+function everyTextFile(): Source[] {
+  return everyFileButThisOne()
+    .filter((file) => /\.(tsx?|css|json|md|html|svg|mjs)$/.test(file) && !COLOR_TABLES.includes(file))
+    .sort()
+    .map((file) => ({ file, text: readFileSync(path.join(SRC, file), 'utf8') }));
 }
 
 /** Files under `src/` named after the stand-in, or whose code mentions it. */
@@ -383,5 +402,26 @@ describe('app source guards', () => {
     expect(functionBody(hook?.text ?? '', 'openStatusDelayMs'), 'openStatusDelayMs is in useOpenStatus.ts').not.toBeNull();
     const reducer = visitor.find((s) => s.file === 'public/chatReducer.ts');
     expect(functionBody(reducer?.text ?? '', 'ownerTypingDelayMs'), 'ownerTypingDelayMs is in chatReducer.ts').not.toBeNull();
+  });
+
+  it('mark_and_clay_colors_stay_in_their_components', () => {
+    // The matchers, on known samples first: the mark's tokens, its parts' classes and its clay;
+    // clay's token and color. The mark's own class and longer names aren't matched.
+    expect(hits(MARK_PARTS, sample('fill: var(--mark-clay); .cd-mark__ink {} color: #D97757; rgb(217, 119, 87)'))).toHaveLength(4);
+    expect(hits(MARK_PARTS, sample('.cd-mark { display: block } --bookmark-tile: 1; --marked: 1'))).toEqual([]);
+    expect(hits(CLAY_PARTS, sample('background: var(--clay-soft); color: #E08968; rgb(224, 137, 104)'))).toHaveLength(3);
+    expect(hits(CLAY_PARTS, sample('--clayton: 1; --mark-clay: 1'))).toEqual([]);
+
+    // Every text file under src/, the design system's stories, boards and docs included.
+    const everything = everyTextFile();
+    const files = everything.map((s) => s.file);
+    for (const file of ['ds/components/Mark/Mark.css', 'ds/components/IntroDialog/IntroDialog.css', 'ds/boards/parts.tsx', 'ds/README.md', 'about/reader.css']) {
+      expect(files, file).toContain(file);
+    }
+    // The matchers find the real uses in their own folders, and nothing anywhere else.
+    expect(hits(MARK_PARTS, everything.filter(({ file }) => file.startsWith(MARK_FOLDER))).length).toBeGreaterThan(0);
+    expect(hits(CLAY_PARTS, everything.filter(({ file }) => file.startsWith(CLAY_FOLDER))).length).toBeGreaterThan(0);
+    expect(hits(MARK_PARTS, everything.filter(({ file }) => !file.startsWith(MARK_FOLDER)))).toEqual([]);
+    expect(hits(CLAY_PARTS, everything.filter(({ file }) => !file.startsWith(CLAY_FOLDER)))).toEqual([]);
   });
 });

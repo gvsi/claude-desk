@@ -2,9 +2,10 @@
  * Source guards for the design system. They scan only code that runs in a browser: component
  * sources, icons, the package index, base styles and the artifact's own files. Stories, tests,
  * fixtures, references, foundations, the token sources and contrast tables are exempt, because
- * they are where raw values and sample data are meant to live. Two guards read further:
- * `no_invisible_characters_in_any_file` reads every text file, and `danger_only_for_refusing_answers`
- * every file but the docs, so a story or fixture can't show the red look on anything but a refusal.
+ * they are where raw values and sample data are meant to live. Some guards read further:
+ * `no_invisible_characters_in_any_file` reads every text file, `danger_only_for_refusing_answers`
+ * every file but the docs, so a story or fixture can't show the red look on anything but a refusal,
+ * and the clay and mark guards the canvas boards too.
  *
  * Each guard first proves its matcher on a known-bad sample, so it can't pass by matching nothing.
  */
@@ -40,6 +41,15 @@ function scannedSources(): Source[] {
   return readdirSync(DS, { recursive: true, encoding: 'utf8' })
     .map((file) => file.split(path.sep).join('/'))
     .filter(isScanned)
+    .sort()
+    .map((file) => ({ file, text: readFileSync(path.join(DS, file), 'utf8') }));
+}
+
+/** The canvas boards' code and styles (`boards/`), which the clay and mark guards read too. */
+function boardSources(): Source[] {
+  return readdirSync(path.join(DS, 'boards'), { recursive: true, encoding: 'utf8' })
+    .map((file) => `boards/${file.split(path.sep).join('/')}`)
+    .filter((file) => /\.(ts|tsx|css)$/.test(file))
     .sort()
     .map((file) => ({ file, text: readFileSync(path.join(DS, file), 'utf8') }));
 }
@@ -94,14 +104,24 @@ function rawColors(text: string, file: string): string[] {
   return [...matches(RAW_COLOR)(text), ...(file.endsWith('.css') ? namedColorsInCss(text) : [])];
 }
 
-// The clay of the Claude Desk mark: its token, its hex and its RGB triplet.
+// Clay, the field behind the intro illustration: its token, its hex and its RGB triplet. The mark's
+// own clay is guarded with its other fixed colors (MARK_COLOR).
 const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/gi;
 
-// The only folders that may use clay: the mark, and the field behind the first-visit intro's illustration.
-const CLAY_FOLDERS = ['components/Mark/', 'components/IntroDialog/'] as const;
+// The only folder that may use clay: the field behind the first-visit intro's illustration.
+const CLAY_FOLDERS = ['components/IntroDialog/'] as const;
 
 function mayUseClay(file: string): boolean {
   return CLAY_FOLDERS.some((folder) => file.startsWith(folder));
+}
+
+// The mark's fixed colors: its tokens by custom property, and its clay by hex or RGB triplet. Its
+// white and black are plain colors, which no_raw_colors_outside_tokens already keeps out of sources.
+const MARK_COLOR = /(?<![\w-])--mark-[a-z-]*[a-z]|#d97757\b|217\s*,\s*119\s*,\s*87/gi;
+
+// The only folder that may use them: the mark's own.
+function mayUseMarkColors(file: string): boolean {
+  return file.startsWith('components/Mark/');
 }
 
 // The danger buttons' tokens, as custom properties or by name: "--button-danger-fill",
@@ -258,7 +278,7 @@ describe('design system source guards', () => {
     expect(findAll(sources, rawColors)).toEqual([]);
   });
 
-  it('clay_only_in_the_mark_and_the_intro_dialog', () => {
+  it('clay_only_in_the_intro_dialog', () => {
     expect(matches(CLAY)('fill: var(--clay); color: #E08968; rgb(224, 137, 104)')).toHaveLength(3);
     // A token derived from clay ("--clay-soft") counts as clay; an unrelated name doesn't.
     expect(matches(CLAY)('color: var(--clay-soft)')).toEqual(['--clay']);
@@ -266,9 +286,33 @@ describe('design system source guards', () => {
     // The allowlist is whole folders: a sibling whose name only starts the same way is outside it.
     expect(mayUseClay('components/IntroDialog/IntroDialog.css')).toBe(true);
     expect(mayUseClay('components/IntroDialogBanner/IntroDialogBanner.css')).toBe(false);
+    // The mark has its own clay (mark-clay), guarded with its other colors.
+    expect(mayUseClay('components/Mark/Mark.css')).toBe(false);
     expect(mayUseClay('components/Sidebar/Sidebar.css')).toBe(false);
-    const outsideTheAllowlist = sources.filter(({ file }) => !mayUseClay(file));
+    // The canvas boards are drawn screens, so they're held to it too.
+    const scanned = [...sources, ...boardSources()];
+    expect(scanned.some(({ file }) => file.startsWith('boards/'))).toBe(true);
+    const outsideTheAllowlist = scanned.filter(({ file }) => !mayUseClay(file));
     expect(findAll(outsideTheAllowlist, matches(CLAY))).toEqual([]);
+  });
+
+  it('mark_colors_only_in_the_mark', () => {
+    // The mark's tokens by custom property, and its clay by hex or RGB triplet.
+    expect(
+      matches(MARK_COLOR)('fill: var(--mark-tile); stroke: var(--mark-hairline); color: #D97757; rgb(217, 119, 87)'),
+    ).toHaveLength(4);
+    expect(matches(MARK_COLOR)('fill: var(--mark-clay); fill: var(--mark-ink)')).toEqual(['--mark-clay', '--mark-ink']);
+    // A token derived from one counts; a longer name that only contains the word isn't the mark's.
+    expect(matches(MARK_COLOR)('color: var(--mark-clay-soft)')).toEqual(['--mark-clay-soft']);
+    expect(matches(MARK_COLOR)('--bookmark-tile: 1; --marked: 1')).toEqual([]);
+    expect(mayUseMarkColors('components/Mark/Mark.css')).toBe(true);
+    expect(mayUseMarkColors('components/IntroDialog/IntroDialog.css')).toBe(false);
+    expect(mayUseMarkColors('components/MarkBanner/MarkBanner.css')).toBe(false);
+    // The canvas boards are drawn screens, so they're held to it too.
+    const scanned = [...sources, ...boardSources()];
+    expect(scanned.some(({ file }) => file.startsWith('boards/'))).toBe(true);
+    const outsideTheMark = scanned.filter(({ file }) => !mayUseMarkColors(file));
+    expect(findAll(outsideTheMark, matches(MARK_COLOR))).toEqual([]);
   });
 
   it('danger_only_for_refusing_answers', () => {

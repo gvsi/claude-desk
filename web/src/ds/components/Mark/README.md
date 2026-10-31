@@ -1,11 +1,12 @@
 # Mark
 
-`Mark` draws the Claude Desk mark, a rounded square with one horizontal line stroked in clay.
+`Mark` draws the Claude Desk mark, a hand-drawn service bell on a white app tile: an uneven clay dome under black ink lines (the dome's outline, a looped knob, a small reflection, two sound waves and the counter line), the ink set slightly off the clay like a print that slipped.
 
 ## When to use
 
 - At the top of the owner app's sidebar, beside the `Wordmark`, and in "Powered by Claude Desk" on the public page.
-- It is the only mark, and the only use of `clay` apart from the field behind the first-visit intro's illustration (`IntroDialog`). Never recolor it, never put it on a light ground, and never place it beside a Claude or Anthropic logo.
+- It is the only mark. Its colors (`mark-tile`, `mark-clay`, `mark-ink`, `mark-hairline`) are its own: fixed, the same in every theme, and used nowhere else. Never recolor it, never draw it without its tile, and never place it beside a Claude or Anthropic logo.
+- The tile's hairline edge sets it off on a light ground, so it can sit on either; on the dark grounds the white tile carries it.
 
 ## What the consumer provides
 
@@ -30,4 +31,4 @@
 
 ## Geometry
 
-`MARK_GEOMETRY` (`markGeometry.ts`) holds the mark's shapes on its 20-unit grid: `rect` x 2.75, y 2.75, 14.5 by 14.5, corner radius 4; `path` `M6.5 11.5h7`; stroke 1.5 with round caps and joins. `Mark` renders from it and so does the design system artifact's standalone SVG, so the two can't drift.
+`mark.svg`, in this folder, is the mark's signed drawing, on a 100-unit grid, and the page's icon: `web/index.html` links it, so the build emits it under a hashed name. `npm run gen:mark` reads it into `MARK_GEOMETRY` (`markGeometry.ts`, generated, never edited by hand): the tile (x 0.5, y 0.5, 99 by 99, corner radius 22), the transform that places the bell inside it, one clay path, and the ink's six paths and twelve round dots. `Mark` draws from it, and a unit test (`scripts/gen-mark.test.mjs`) fails when the geometry or the `mark-*` tokens drift from the drawing. The reader refuses anything else in the drawing, so a redraw keeps the same structure: the tile, then the clay group, then the ink group.

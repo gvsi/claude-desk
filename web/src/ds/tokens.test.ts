@@ -37,6 +37,16 @@ function tokenValue(name: string): string | undefined {
   return undefined;
 }
 
+/** Color tokens that alias a `mark-*` color or clay, as "name: value". */
+function aliasesOfTheMarkOrClay(colors: readonly { name: string; value: { dark: string } }[]): string[] {
+  return colors
+    .filter((token) => {
+      const target = ALIAS.exec(token.value.dark)?.[1];
+      return target !== undefined && (target.startsWith('mark-') || target === 'clay' || target.startsWith('clay-'));
+    })
+    .map((token) => `${token.name}: ${token.value.dark}`);
+}
+
 /** The tokens with one more interface type style, for the builder's checks. */
 function withStyle(style: TypeStyle): DesignTokens {
   const copy: DesignTokens = structuredClone(tokens);
@@ -102,6 +112,35 @@ describe('design tokens', () => {
     const reply = voice?.styles.find((style) => style.name === 'illustration-reply');
     expect(reply).toMatchObject({ fontSize: '16px', lineHeight: '24px', fontWeight: 380, opticalSize: 20 });
     expect(reply).not.toHaveProperty('letterSpacing');
+  });
+
+  test('mark_tokens_match_the_signed_mark', () => {
+    // The mark's fixed colors, the same in every theme: its white tile and the tile's hairline edge,
+    // the clay of the bell's dome and the black ink. They are the favicon's own colors
+    // (scripts/gen-mark.test.mjs), and nothing but the mark uses them (guards.test.ts).
+    const expected = {
+      'mark-tile': '#ffffff',
+      'mark-clay': '#d97757',
+      'mark-ink': '#141413',
+      'mark-hairline': 'rgba(20,20,19,0.1)',
+    };
+    const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
+    expect(actual).toEqual(expected);
+    expect(colorNames.filter((name) => name.startsWith('mark-')).sort()).toEqual(Object.keys(expected).sort());
+    // The hairline only edges the tile on a light ground; the tile itself carries the contrast.
+    expect(DECORATIVE_COLORS['mark-hairline']).toBeDefined();
+  });
+
+  test('mark_and_clay_are_never_aliased', () => {
+    // An alias would carry the mark's colors, or clay, out of their components under another name.
+    const sample = [
+      { name: 'odd-tile', value: { dark: '{mark-tile}' } },
+      { name: 'odd-field', value: { dark: '{clay}' } },
+      { name: 'odd-soft', value: { dark: '{clay-soft}' } },
+      { name: 'fine', value: { dark: '{bg-app}' } },
+    ];
+    expect(aliasesOfTheMarkOrClay(sample)).toEqual(['odd-tile: {mark-tile}', 'odd-field: {clay}', 'odd-soft: {clay-soft}']);
+    expect(aliasesOfTheMarkOrClay(tokens.color.tokens)).toEqual([]);
   });
 
   test('figure_tokens_match_the_today_board', () => {
@@ -264,7 +303,11 @@ describe('design tokens', () => {
     const marks = ['accent-blue', 'ring-composer', 'status-handled', 'status-held', 'status-refused', 'status-info'];
     add(marks, ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'], 3);
     add(marks, ['fill-card'], 3, 'bg-app');
-    add(['clay'], ['bg-app', 'bg-panel'], 3);
+    // The mark: its tile on the app and the sidebar, and its drawing on the tile, the ink where it
+    // crosses the clay dome included.
+    add(['mark-tile'], ['bg-app', 'bg-panel'], 3);
+    add(['mark-ink', 'mark-clay'], ['mark-tile'], 3);
+    add(['mark-ink'], ['mark-clay'], 3);
     // The switch: its track when on, its knob on the track, on or off.
     add(['button-primary'], ['bg-app', 'bg-panel'], 3);
     add(['bg-app'], ['button-primary'], 3);
@@ -272,7 +315,7 @@ describe('design tokens', () => {
     // The switch row's label and description while it is hovered in the sidebar.
     add(['text-primary', 'text-secondary'], ['fill-hover'], 4.5, 'bg-panel');
     // The first-visit intro dialog: the mark on its surface and the passcode in its field.
-    add(['clay'], ['bg-surface'], 3);
+    add(['mark-tile'], ['bg-surface'], 3);
     add(['text-primary'], ['fill-card'], 4.5, 'bg-surface');
     // The intro illustration's light cards: their text, the initials, the check and receipt dots.
     add(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5);
@@ -411,6 +454,7 @@ describe('design tokens', () => {
 
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
+      'clay',
       'connector-google-blue',
       'connector-stripe',
       'connector-tile-brand',
@@ -420,6 +464,7 @@ describe('design tokens', () => {
       'line-control',
       'line-control-hover',
       'line-hairline',
+      'mark-hairline',
       'scrim',
     ]);
     for (const [name, reason] of Object.entries(DECORATIVE_COLORS)) {
