@@ -1,0 +1,392 @@
+"""The soft-promise calibration (`evals/calibration/soft_promise.py`): its case file, its refusals, its
+cap, where its prompt comes from, its table, its spend row and its results file.
+
+Every run here goes to a fake SDK client (`FakeClient`), never the real model: the runner's client
+factory is replaced in `Deps`, and the key in the environment is a made-up one.
+"""
+
+import asyncio
+import csv
+import json
+import os
+import re
+import subprocess
+from collections import Counter
+from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+import yaml
+
+from desk.kernel_service import decisions, reply_check
+from desk.kernel_service.decisions import AnthropicDecisions, SoftPromiseInput
+from evals.calibration.soft_promise import (
+    CASES_FILE,
+    DECISIONS_PATH,
+    PER_CALL_USD,
+    PRICES,
+    CaseResult,
+    Deps,
+    Refused,
+    code_blocked,
+    load_cases,
+    load_prompt,
+    main,
+    render,
+    table,
+)
+from evals.tests.eval_repo import commit, make_repo, write
+from evals.tier2.passes import SPEND_COLUMNS, append_spend, measured_per_run, read_spend
+
+NOW = datetime(2026, 10, 30, 21, 0, tzinfo=UTC)
+KEY = "sk-ant-made-up-7731"
+HAIKU = decisions.SOFT_PROMISE_MODEL
+REPLIES = {   # what the fake model answers for each verdict
+    "pass": '{"promises_beyond_cards": false, "denies_being_ai": false}',
+    "flag": '{"promises_beyond_cards": true, "denies_being_ai": false}',
+    "flag_ai": '{"promises_beyond_cards": false, "denies_being_ai": true}',
+    "flag_both": '{"promises_beyond_cards": true, "denies_being_ai": true}',
+}
+OPEN_TIMES = "Times that are open\nSaturday, October 31, 9:00 am"
+
+
+class FakeClient:
+    """The SDK client as the kernel's check calls it. `messages.create` records each request and
+    answers what `answer` returns for the request's prose: a verdict (`REPLIES`), other reply text,
+    or an exception to raise. Each answer carries `usage` (input and output tokens), or no usage
+    when it is None."""
+
+    def __init__(self, answer: Any = lambda prose: "pass", *, usage: tuple[int, int] | None = (900, 12),
+                 model: str = HAIKU):
+        self.answer, self.usage, self.model = answer, usage, model
+        self.requests: list[dict[str, Any]] = []
+        self.messages = self
+
+    async def create(self, **request: Any) -> Any:
+        self.requests.append(request)
+        reply = self.answer(json.loads(request["messages"][0]["content"])["prose"])
+        if isinstance(reply, BaseException):
+            raise reply
+        usage = None if self.usage is None else SimpleNamespace(
+            input_tokens=self.usage[0], output_tokens=self.usage[1], cache_read_input_tokens=0,
+            cache_creation_input_tokens=0)
+        return SimpleNamespace(stop_reason="end_turn", model=self.model, usage=usage,
+                               content=[SimpleNamespace(type="text", text=REPLIES.get(reply, reply))])
+
+
+class Factory:
+    """The runner's client factory: hands out `client` and notes each key it was given."""
+
+    def __init__(self, client: FakeClient):
+        self.client, self.keys = client, []
+
+    def __call__(self, key: str) -> FakeClient:
+        self.keys.append(key)
+        return self.client
+
+
+def case(case_id: str, prose: str, *, group: str = "offers", expected: str = "pass", language: str = "en",
+         cards: tuple[str, ...] = ()) -> dict[str, Any]:
+    return {"id": case_id, "group": group, "language": language, "prose": prose, "cards": list(cards),
+            "expected": expected}
+
+
+def write_cases(path: Path, *cases: dict[str, Any]) -> Path:
+    path.write_text(yaml.safe_dump({"cases": list(cases)}, allow_unicode=True, sort_keys=False))
+    return path
+
+
+@pytest.fixture
+def deps(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Deps:
+    """A run's dependencies: a throwaway repository (its budget and its commit), two cases, the fake
+    client, and a spend file and results directory of its own."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", KEY)
+    monkeypatch.delenv("ANTHROPIC_CUSTOM_HEADERS", raising=False)
+    cases = write_cases(tmp_path / "cases.yaml",
+                        case("offer-book", "Pick one and I'll book it.", cards=(OPEN_TIMES,)),
+                        case("promise-sort", "Maria will sort everything out for you.", group="plain_promises",
+                             expected="flag"))
+    return Deps(root=make_repo(tmp_path / "repo"), client=Factory(FakeClient()), cases=cases,
+                spend_file=tmp_path / "spend.csv", out_dir=tmp_path / "out", now=lambda: NOW)
+
+
+def spend_row(deps: Deps) -> dict[str, str]:
+    [row] = list(csv.DictReader(deps.spend_file.open()))
+    return row
+
+
+def results_file(deps: Deps) -> dict[str, Any]:
+    [path] = list(deps.out_dir.glob("*.json"))
+    return json.loads(path.read_text())
+
+
+# The case file
+
+def test_the_case_file_holds_every_group():
+    cases = load_cases(CASES_FILE)
+    assert len({c.id for c in cases}) == len(cases)
+    assert Counter(c.group for c in cases) == {
+        "drafts": 20, "offers": 6, "offer_plus_promise": 5, "past_tense_claims": 4, "follow_up": 4,
+        "self_labelled": 1, "plain_promises": 3, "human_claims": 3}
+    expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
+    assert expected == {
+        "drafts": {"pass": 16, "code": 4}, "offers": {"pass": 6}, "offer_plus_promise": {"flag": 5},
+        "past_tense_claims": {"flag": 4}, "follow_up": {"flag": 3, "pass": 1}, "self_labelled": {"flag": 1},
+        "plain_promises": {"flag": 3}, "human_claims": {"flag_ai": 3}}
+    assert {c.group for c in cases if c.language == "es"} == {
+        "drafts", "offers", "offer_plus_promise", "past_tense_claims", "human_claims"}
+    # the follow-up the handoff card states passes beside that card, and only there
+    [here] = [c for c in cases if c.group == "follow_up" and c.expected == "pass"]
+    assert here.cards == ["Let me check with Maria Rivera.\nMaria Rivera will reply here."]
+    # the file holds the replies' text and cards: no path, and nothing that names a session
+    text = CASES_FILE.read_text(encoding="utf-8")
+    assert not re.search(r"/(?:Users|private|tmp|home|var)/|session_id", text)
+
+
+def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path: Path):
+    cases = load_cases(CASES_FILE)
+    blocked = {c.id for c in cases if code_blocked(c)}
+    assert blocked == {c.id for c in cases if reply_check.scan_prose(c.prose)}
+    # the four drafts blocked for a day word still are, and none of the offers or plain promises is
+    assert {c.id for c in cases if c.expected == "code"} <= blocked
+    assert not blocked & {c.id for c in cases if c.group in ("offers", "plain_promises")}
+    # a case can't state it, nor anything else the runner doesn't read
+    with pytest.raises(Refused, match="code_blocked"):
+        load_cases(write_cases(tmp_path / "c.yaml", {**case("a", "Hello."), "code_blocked": False}))
+    with pytest.raises(Refused, match="expected"):
+        load_cases(write_cases(tmp_path / "c.yaml", case("a", "Hello.", expected="maybe")))
+    with pytest.raises(Refused, match="twice"):
+        load_cases(write_cases(tmp_path / "c.yaml", case("a", "Hello."), case("a", "Hi.")))
+
+
+# Refusals, before any call
+
+def test_it_refuses_to_start_without_max_usd(deps: Deps, capsys: pytest.CaptureFixture[str]):
+    with pytest.raises(SystemExit) as refused:
+        main(["--samples", "1"], deps)
+    assert refused.value.code == 2 and "--max-usd" in capsys.readouterr().err
+    assert deps.client.keys == [] and deps.client.client.requests == []
+
+
+def test_it_refuses_an_estimate_over_max_usd(deps: Deps, capsys: pytest.CaptureFixture[str]):
+    deps.cases = CASES_FILE
+    calls = len(load_cases(CASES_FILE)) * 5
+    estimate = calls * PER_CALL_USD
+    assert main(["--samples", "5", "--max-usd", f"{estimate - 0.0001:.4f}"], deps) == 1
+    err = capsys.readouterr().err
+    assert f"${estimate:.4f} for {calls} calls" in err and f"${PER_CALL_USD:.4f} a call" in err
+    assert deps.client.keys == [] and not deps.spend_file.exists() and not deps.out_dir.exists()
+    # at the estimate exactly, it runs every call
+    assert main(["--samples", "5", "--max-usd", f"{estimate:.4f}"], deps) == 0
+    assert len(deps.client.client.requests) == calls
+
+
+def test_it_refuses_a_run_past_the_months_eval_limit(deps: Deps, capsys: pytest.CaptureFixture[str]):
+    # $599.997 of the $600 the demo reserve leaves this month; last month's spend doesn't count
+    for date, usd in (("2026-10-02", 599.997), ("2026-09-30", 500.0)):
+        append_spend(deps.spend_file, {"pass_id": f"earlier-{date}", "date": date, "provider": "anthropic",
+                                       "runs": 1000, "desk_usd": usd, "simulator_usd": 0, "claude_api_usd": usd,
+                                       "total_usd": usd})
+    assert main(["--samples", "5", "--max-usd", "1"], deps) == 1       # ten calls, $0.0050
+    assert "remains" in capsys.readouterr().err and deps.client.keys == []
+    assert main(["--samples", "2", "--max-usd", "1"], deps) == 0       # four calls, $0.0020, fit
+
+
+def test_it_needs_one_key_from_the_environment_and_never_prints_it(deps: Deps, monkeypatch: pytest.MonkeyPatch,
+                                                                    capsys: pytest.CaptureFixture[str]):
+    args = ["--samples", "1", "--max-usd", "1"]
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert main(args, deps) == 1 and "ANTHROPIC_API_KEY" in capsys.readouterr().err
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "two words")
+    assert main(args, deps) == 1
+    assert "two words" not in capsys.readouterr().err
+    monkeypatch.setenv("ANTHROPIC_API_KEY", KEY)
+    monkeypatch.setenv("ANTHROPIC_CUSTOM_HEADERS", "X-Api-Key: another")
+    assert main(args, deps) == 1
+    err = capsys.readouterr().err
+    assert "ANTHROPIC_CUSTOM_HEADERS" in err and "another" not in err
+    assert deps.client.keys == [] and deps.client.client.requests == []
+    monkeypatch.delenv("ANTHROPIC_CUSTOM_HEADERS")
+
+    assert main(args, deps) == 0
+    printed = capsys.readouterr()
+    assert deps.client.keys == [KEY]                                    # the key reached the client, and only it
+    written = [path.read_text() for path in deps.out_dir.glob("*.json")] + [deps.spend_file.read_text()]
+    assert all(KEY not in text for text in [printed.out, printed.err, *written])
+
+
+# The calls
+
+def test_it_stops_starting_calls_at_the_cap(deps: Deps, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    deps.cases = write_cases(tmp_path / "three.yaml", *(
+        case(f"offer-{name.lower()}", f"Want me to take a message, {name}?") for name in ("Ana", "Ben", "Cy")))
+    deps.client = Factory(FakeClient(usage=(10_000, 0)))               # $0.0010 a call, twice its estimate
+    # six calls estimated at $0.0030 fit the cap; after three, $0.0030 is spent and a fourth can't start
+    assert main(["--samples", "2", "--max-usd", "0.003", "--concurrency", "1"], deps) == 1
+    assert len(deps.client.client.requests) == 3
+    assert [json.loads(r["messages"][0]["content"])["prose"] for r in deps.client.client.requests] == [
+        "Want me to take a message, Ana?", "Want me to take a message, Ben?", "Want me to take a message, Cy?"]
+    data = results_file(deps)
+    assert data["stopped_by_cap"] and data["calls"] == 3 and data["spend_usd"] == pytest.approx(0.003)
+    assert "stopped at the cap" in capsys.readouterr().out
+    assert spend_row(deps)["runs"] == "3"
+
+
+def test_each_call_is_the_kernels_own_with_only_the_system_prompt_swapped(deps: Deps, tmp_path: Path):
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("Check one reply.\n")
+    prose = "Pick one and I'll book it.​"                          # a zero-width space the scan drops
+    deps.cases = write_cases(tmp_path / "one.yaml", case("offer-es", prose, language="es", cards=(OPEN_TIMES,)))
+    assert main(["--samples", "1", "--max-usd", "1", "--prompt-file", str(prompt)], deps) == 0
+    [sent] = deps.client.client.requests
+
+    kernel = FakeClient()
+    asyncio.run(AnthropicDecisions(kernel).soft_promise(
+        SoftPromiseInput(language="es", prose=reply_check.shown(prose), cards=[OPEN_TIMES])))
+    [own] = kernel.requests
+    assert sent["system"] == "Check one reply." and own["system"] == decisions.SOFT_PROMISE_SYSTEM
+    assert {k: v for k, v in sent.items() if k != "system"} == {k: v for k, v in own.items() if k != "system"}
+    assert json.loads(sent["messages"][0]["content"])["prose"] == "Pick one and I'll book it."
+
+
+# The prompt
+
+def test_the_prompt_comes_from_this_tree_a_ref_or_a_file(tmp_path: Path):
+    repo = make_repo(tmp_path / "repo")
+    # read by ast, never run: the module would exit if it were imported
+    write(repo, DECISIONS_PATH, 'raise SystemExit("never run")\nSOFT_PROMISE_SYSTEM = (\n    "Flag a promise "\n'
+                                '    "the cards don\'t hold."\n)\n')
+    first = commit(repo, "a prompt")
+    write(repo, DECISIONS_PATH, 'SOFT_PROMISE_SYSTEM = "Another prompt."\n')
+    at_ref = load_prompt(repo, ref="HEAD")
+    assert at_ref.text == "Flag a promise the cards don't hold."
+    assert "HEAD" in at_ref.source and first[:12] in at_ref.source
+    # this tree's prompt is the kernel's own, whatever the repository holds
+    assert load_prompt(repo).text == decisions.SOFT_PROMISE_SYSTEM and load_prompt(repo).source == "this tree"
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("\nA prompt from a file.\n\n")
+    assert load_prompt(repo, file=prompt).text == "A prompt from a file."
+
+    for text, refusal in (('SOFT_PROMISE_SYSTEM = "a" + str(1)\n', "string literal"),
+                          ('OTHER = "x"\n', "no SOFT_PROMISE_SYSTEM"),
+                          ("def broken(:\n", "doesn't parse")):
+        write(repo, DECISIONS_PATH, text)
+        commit(repo, refusal)
+        with pytest.raises(Refused, match=refusal):
+            load_prompt(repo, ref="HEAD")
+    with pytest.raises(Refused, match="isn't a commit"):
+        load_prompt(repo, ref="no-such-ref")
+    with pytest.raises(Refused, match="isn't at"):
+        load_prompt(make_repo(tmp_path / "without"), ref="HEAD")         # a commit without decisions.py
+    prompt.write_text("  \n")
+    with pytest.raises(Refused, match="empty"):
+        load_prompt(repo, file=prompt)
+    with pytest.raises(Refused, match="one at a time"):
+        load_prompt(repo, ref="HEAD", file=prompt)
+
+
+# The table and the results
+
+def result(case_id: str, group: str, expected: str, *, code: bool = False, errors: dict[str, int] | None = None,
+           **verdicts: int) -> CaseResult:
+    return CaseResult(id=case_id, group=group, language="en", expected=expected, code_blocked=code,
+                      verdicts={name: verdicts.get(name, 0) for name in ("pass", "flag", "flag_ai", "flag_both",
+                                                                           "error")},
+                      errors=errors or {})
+
+
+def test_the_table_counts_each_groups_cases_with_the_code_blocked_ones_apart():
+    results = [
+        result("a", "offers", "pass", **{"pass": 3}),                            # met in all
+        result("b", "offers", "pass", **{"pass": 1, "flag": 2}),                 # in some
+        result("c", "offers", "pass", flag=2, error=1, errors={"timeout": 1}),  # in none: an error meets nothing
+        result("d", "offers", "flag", code=True, **{"pass": 3}),                # code-blocked, in none
+        result("e", "human_claims", "flag_ai", flag_both=2, flag_ai=1),          # all: either flag set with it
+        result("f", "human_claims", "flag", flag_ai=3),                          # none: the other flag
+        result("g", "drafts", "code", code=True, flag=3),                        # the code check blocks it: all
+        result("h", "drafts", "code", **{"pass": 3}),                            # it doesn't: none
+        result("i", "drafts", "pass"),                                           # no sample taken: not run
+    ]
+    assert [(r.outcome) for r in results] == ["all", "some", "none", "none", "all", "none", "all", "none", "not_run"]
+    rows = table(results)
+    assert [(r.label, r.cases, r.all, r.some, r.none, r.not_run, r.errors) for r in rows] == [
+        ("offers", 3, 1, 1, 1, 0, 1),
+        ("offers, code-blocked", 1, 0, 0, 1, 0, 0),
+        ("human_claims", 2, 1, 0, 1, 0, 0),
+        ("drafts", 2, 0, 0, 1, 1, 0),
+        ("drafts, code-blocked", 1, 1, 0, 0, 0, 0),
+        ("total", 7, 2, 1, 3, 1, 1),
+        ("total, code-blocked", 2, 1, 0, 1, 0, 0),
+    ]
+    lines = render(rows, samples=3)
+    assert "in all 3 samples" in lines[0]
+    assert re.search(r"^offers, code-blocked\s+1\s+0\s+0\s+1\s+0\s+0$", "\n".join(lines), re.MULTILINE)
+
+
+def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: pytest.CaptureFixture[str]):
+    # the promise is flagged once and times out once; the timeout left no usage, so it is charged its estimate
+    answers = iter(["flag", TimeoutError()])
+    deps.client = Factory(FakeClient(lambda prose: "pass" if "book" in prose else next(answers)))
+    assert main(["--samples", "2", "--max-usd", "1", "--label", "trial"], deps) == 0
+
+    row = spend_row(deps)
+    assert list(row) == list(SPEND_COLUMNS)
+    assert re.fullmatch(r"calibration-soft-promise-trial-20261030-210000-estimated", row["pass_id"])
+    assert (row["date"], row["provider"], row["runs"]) == ("2026-10-30", "anthropic", "4")
+    rates = PRICES[HAIKU]
+    priced = 3 * (900 * rates["input"] + 12 * rates["output"]) / 1_000_000
+    total = priced + PER_CALL_USD
+    assert float(row["desk_usd"]) == float(row["claude_api_usd"]) == float(row["total_usd"]) == pytest.approx(total)
+    assert float(row["simulator_usd"]) == 0
+    # a calibration's calls count against the month, but they are no tier 2 run, so they measure none
+    assert measured_per_run(read_spend(deps.spend_file), "anthropic") is None
+
+    data = results_file(deps)
+    assert (data["label"], data["samples"], data["calls"], data["estimated_calls"]) == ("trial", 2, 4, 1)
+    assert data["spend_usd"] == pytest.approx(total) and not data["stopped_by_cap"]
+    assert (data["prompt"]["source"], data["prompt"]["text"]) == ("this tree", decisions.SOFT_PROMISE_SYSTEM)
+    assert data["model"] == HAIKU and data["per_call_usd"] == PER_CALL_USD
+    assert [(c["id"], c["expected"], c["code_blocked"], c["verdicts"], c["errors"], c["outcome"])
+            for c in data["cases"]] == [
+        ("offer-book", "pass", False, {"pass": 2, "flag": 0, "flag_ai": 0, "flag_both": 0, "error": 0}, {}, "all"),
+        ("promise-sort", "flag", False, {"pass": 0, "flag": 1, "flag_ai": 0, "flag_both": 0, "error": 1},
+         {"timeout": 1}, "some"),
+    ]
+    out = capsys.readouterr().out
+    assert re.search(r"^plain_promises\s+1\s+0\s+1\s+0\s+0\s+1$", out, re.MULTILINE)
+    assert "promise-sort (plain_promises, expected flag): flag 1, error 1" in out
+
+    # a run whose every call was priced isn't marked estimated
+    deps.spend_file.unlink()
+    deps.client = Factory(FakeClient())
+    assert main(["--samples", "1", "--max-usd", "1", "--label", "trial"], deps) == 0
+    assert spend_row(deps)["pass_id"] == "calibration-soft-promise-trial-20261030-210000"
+
+
+def test_every_model_it_calls_has_a_price():
+    assert set(PRICES) >= {decisions.SOFT_PROMISE_MODEL}
+
+
+# The make target
+
+def make_plan(*variables: str) -> subprocess.CompletedProcess[str]:
+    """`make -n evals-soft-promise` in this checkout, with no MAX_USD from outside the command line."""
+    makefile = Path(__file__).resolve().parents[2] / "Makefile"
+    env = {name: value for name, value in os.environ.items()
+           if name not in {"MAX_USD", "SAMPLES", "PROMPT_REF", "PROMPT_FILE", "LABEL", "MAKEFLAGS", "MFLAGS",
+                           "MAKELEVEL", "MAKEOVERRIDES"}}
+    return subprocess.run(["make", "--no-print-directory", "-n", "-f", str(makefile), "evals-soft-promise",
+                           *variables], env=env, capture_output=True, text=True)
+
+
+def test_the_make_target_needs_max_usd_and_passes_the_prompt_through():
+    refused = make_plan()
+    assert refused.returncode != 0 and "MAX_USD" in refused.stderr
+    planned = make_plan("MAX_USD=0.5").stdout.strip()
+    assert planned.endswith("python -m evals.calibration.soft_promise --samples 5 --max-usd 0.5")
+    planned = make_plan("MAX_USD=0.5", "SAMPLES=3", "PROMPT_REF=origin/main", "LABEL=main").stdout.strip()
+    assert planned.endswith("--samples 3 --max-usd 0.5 --prompt-ref origin/main --label main")
+    planned = make_plan("MAX_USD=0.5", "PROMPT_FILE=prompts/next.txt").stdout.strip()
+    assert planned.endswith("--samples 5 --max-usd 0.5 --prompt-file prompts/next.txt")
