@@ -451,6 +451,8 @@ describe('rule draft review', () => {
   });
 
   it('lost_custom_confirm_reads_the_rules_first', async () => {
+    const clock = freezeClock();
+
     // A caller that applies the draft its own way (setup's confirm) loses the answer too: the rules
     // as they stand settle it, since applying it makes the draft's version the active one.
     const confirmed: number[] = [];
@@ -481,6 +483,21 @@ describe('rule draft review', () => {
     expect(second.screen.getByText('Your rules are updated.', { exact: true }).elements()).toHaveLength(0);
     expect(confirmed).toEqual([applied.version, lost.version]);
     expect(desk().policy.version).toBe(applied.version);
+
+    // Its confirm still being checked when the app stopped waiting a minute in: the rules are read
+    // again, don't show it yet, and it may still apply, so the review says it couldn't confirm it.
+    const checking = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-quote'], mode: 'ask' }]);
+    mockStore.inject({ route: 'confirmRules', status: 202, body: stillChecking(checking.version) });
+    const third = await reviewOf(checking);
+    await expect.element(third.screen.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    const reads = requests('rules').length;
+    await confirmAfterTheMinute(third.screen, clock);
+    await expect.element(third.screen.getByRole('alert')).toHaveTextContent("We couldn't confirm whether your change went through. Open Rules to see where it stands.");
+    expect(requests('rules').length).toBeGreaterThan(reads);
+    expect(third.screen.container.textContent).not.toContain("can't be applied");
+    expect(third.screen.getByText('Your rules are updated.', { exact: true }).elements()).toHaveLength(0);
+    expect(confirmed).toEqual([applied.version, lost.version, checking.version]);
+    expect(desk().policy.version).toBe(applied.version);
   });
 
   it('given_up_confirm_reads_the_rules_first', async () => {
@@ -502,8 +519,12 @@ describe('rule draft review', () => {
     const checking = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-quote'], mode: 'ask' }]);
     mockStore.inject({ route: 'confirmRules', status: 202, body: stillChecking(checking.version) });
     const second = await openDraft(checking.version);
+    await expect.element(second.screen.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    const reads = requests('rules').length;
     await confirmAfterTheMinute(second.screen, clock);
     await expect.element(second.screen.getByRole('alert')).toHaveTextContent("We couldn't confirm whether your change went through. Open Rules to see where it stands.");
+    // The rules were read again after it stopped waiting, not only when the review opened.
+    expect(requests('rules').length).toBeGreaterThan(reads);
     const text = second.screen.container.textContent ?? '';
     expect(text).not.toContain("can't be applied");
     expect(text).not.toContain('Your current rules stay in place.');
@@ -521,6 +542,22 @@ describe('rule draft review', () => {
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('alert')).toHaveTextContent(RULES_UNAVAILABLE_COPY);
     expect(screen.getByText('Your rules are updated.', { exact: true }).elements()).toHaveLength(0);
+    expect(requests('confirmRules')).toHaveLength(1);
+    expect(desk().policy.version).toBe(7);
+  });
+
+  it('unchecked_5xx_confirm_is_uncertain', async () => {
+    // The same code on a 5xx is no clear answer: the change may still apply, so the review reads the
+    // rules, which don't show it yet, and never says it can't be applied.
+    const draft = mockStore.world.draft(desk(), [{ ...rivera.ruleCards['rv-book-sat'], mode: 'ask' }]);
+    mockStore.inject({ route: 'confirmRules', status: 503, body: { error: 'rules_cannot_be_checked' } });
+    const { screen } = await openDraft(draft.version);
+    await expect.element(screen.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    const reads = requests('rules').length;
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent("We couldn't confirm whether your change went through. Open Rules to see where it stands.");
+    expect(requests('rules').length).toBeGreaterThan(reads);
+    expect(screen.container.textContent).not.toContain("can't be applied");
     expect(requests('confirmRules')).toHaveLength(1);
     expect(desk().policy.version).toBe(7);
   });
