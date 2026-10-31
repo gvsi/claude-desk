@@ -51,7 +51,7 @@ function links(blocks: Block[]): Extract<Inline, { kind: 'link' }>[] {
 }
 
 // The page's one change to the proposal's words, as the About readers plan writes it, so a change to the
-// pattern or the words in documents.ts fails here.
+// pattern or the words in documents.ts fails here: the replacement test checks the reader's pattern is this one.
 const PROTOTYPE_SENTENCE = /The prototype, v1['’]s enforced core, is at .+?, with the code at (.+?)\.(?=\s|$)/g;
 const ON_THE_PAGE = 'You’re in it. The code is at $1.';
 
@@ -280,10 +280,16 @@ describe('the About documents', () => {
     expect(filled).not.toContain('[owner:');
     expect(proposal.match(PROTOTYPE_SENTENCE)).toHaveLength(1);
     expect(filled.match(PROTOTYPE_SENTENCE)).toHaveLength(1);
-    // The reader's `$1` is the whole repository link, its dots included, and the placeholder before it was given.
+    // The reader's pattern is the plan's.
+    expect(READERS_SENTENCE.source).toBe(PROTOTYPE_SENTENCE.source);
+    expect(READERS_SENTENCE.flags).toBe(PROTOTYPE_SENTENCE.flags);
+    // Its `$1` is the whole repository link, its dots included, and the placeholder before it was given. It ends at
+    // the sentence's period, whether whitespace follows or the text ends there.
     const repository = (markdown: string) => [...markdown.matchAll(READERS_SENTENCE)].map((match) => match[1]);
     expect(repository(proposal)).toEqual([REPO]);
     expect(repository(filled)).toEqual([REPO]);
+    expect(sentence.endsWith(`${REPO}.`)).toBe(true);
+    expect(repository(sentence)).toEqual([REPO]);
     expect(repository(proposal.replace(REPO, '[owner: repo link]'))).toEqual(['[owner: repo link]']);
 
     // Before the fill: the hosted address goes, the repository link stays, and nothing else changes.
