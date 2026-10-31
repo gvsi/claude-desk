@@ -13,6 +13,7 @@ import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, heldOldestFirst, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
+import { ContinueSetup } from './ContinueSetup.tsx';
 import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem, type ReadFailure } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
@@ -43,7 +44,7 @@ export const COPIED_FOR_MS = 1_600;
 
 /**
  * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy,
- * "Things to try", then, in this order, "Needs you" and "Live now" when they have something, and
+ * "Not live yet" while the Desk's setup isn't finished, "Things to try", then, in this order, "Needs you" and "Live now" when they have something, and
  * "Since last night" always; the right column has the public page a new tab away and the last 7
  * days. Today opens no visitor chat itself, and has no composer: changing a rule by asking Claude
  * lives on Rules. An address that names a held request (`#request-<id>`, as the Demo inbox links an
@@ -81,6 +82,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const [inboxOpen, setInboxOpen] = useState(false);
 
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
+  // The Desk's setup while it hasn't gone live, as the copy's Desks name it; none once it is live.
+  const setup = desk.setup ?? null;
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
@@ -215,6 +218,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
             {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
           </p>
         </div>
+        {setup !== null && setup.step !== 'live' ? (
+          <ContinueSetup business={desk.business_name} interviewId={setup.interview_id} step={setup.step} />
+        ) : null}
         <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
         {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
           <NeedsYou

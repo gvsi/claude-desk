@@ -37,6 +37,51 @@
   min-height: 100dvh;
 }
 
+/* Not live yet: a Desk whose setup isn't finished, first in the page's column. The words, with
+   "Continue setup" at their right, then the setup steps under them. */
+
+.cd-continue-setup__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-14);
+}
+
+.cd-continue-setup__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-16);
+}
+
+.cd-continue-setup__words {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-continue-setup__status,
+.cd-continue-setup__title,
+.cd-continue-setup__line {
+  margin: 0;
+}
+
+.cd-continue-setup__status {
+  color: var(--text-secondary);
+}
+
+.cd-continue-setup__title {
+  margin-top: var(--space-6);
+  color: var(--text-primary);
+}
+
+.cd-continue-setup__line {
+  margin-top: var(--space-4);
+  color: var(--text-secondary);
+}
+
+.cd-continue-setup__action {
+  display: flex;
+  flex: none;
+}
+
 /* Things to try */
 
 .cd-things {
