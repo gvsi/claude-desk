@@ -434,6 +434,9 @@ class BriefingList(BaseModel):
 
 
 class WeekDay(BaseModel):
+    """One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,
+    not Claude's own drafts the reply check stopped."""
+
     date: LocalDate                        # a local date in the business's time zone
     conversations: int
     bookings: int
@@ -444,7 +447,9 @@ class ThisWeek(BaseModel):
     """"Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
     `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
     booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
-    one `end`."""
+    one `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the
+    reply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the
+    drafts."""
 
     timezone: str
     start: LocalDate
