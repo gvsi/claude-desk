@@ -83,6 +83,9 @@ export function TodayPage() {
   // whose items are unchanged: after a conflict, it is what lets a request's answers back.
   const readAt = needsYou.dataUpdatedAt;
   const firstHeld = held[0] ?? null;
+  // What the answers given here settled each request as: Things to try ticks "Answer a held request"
+  // from them as soon as one lands, before the record is read again.
+  const answeredDecisions = [...answers.answered.values()].map((a) => a.decision);
   // A failed read says so in Needs you, over whatever was read before, so it never looks as if
   // nothing needs the owner. It stays until a read works: React Query starts each read of a query
   // with nothing read yet as loading again and drops the error, so the section would blink out at
@@ -184,7 +187,7 @@ export function TodayPage() {
             {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
           </p>
         </div>
-        <ThingsToTry firstHeld={firstHeld} onFocusRequest={focusFirstHeld} />
+        <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} onFocusRequest={focusFirstHeld} />
         {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
           <NeedsYou
             held={held}

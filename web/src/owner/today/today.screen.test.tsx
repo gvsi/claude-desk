@@ -832,8 +832,11 @@ describe('Today', () => {
     await expect
       .poll(() => visitor?.events.some(({ ev }) => ev.type === 'resolved' && ev.decision_id === decisionId), { timeout: 2_000 })
       .toBe(true);
-    // Nothing is held now, so Things to try no longer offers it.
+    // Nothing is held now, so Things to try no longer offers to open it: its row stays, ticked off.
     await expect.element(screen.getByRole('button', { name: 'Open the request' })).not.toBeInTheDocument();
+    const things = region(screen, 'Things to try');
+    await expect.element(things.getByText("Done. Your answer went to the visitor's chat.", { exact: true })).toBeVisible();
+    await expect.element(things.getByRole('heading', { level: 3, name: 'Answer a held request' })).toBeVisible();
   });
 
   it('answer_conflict_shows_final_state', async () => {

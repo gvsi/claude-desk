@@ -10,7 +10,7 @@ import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { observeRequests } from '../api/http.ts';
-import { rivera } from '../ds/fixtures/index.ts';
+import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
 import { readLocal } from '../lib/storage.ts';
@@ -1117,6 +1117,346 @@ describe('Today', () => {
     await expectScreenBasics(arrival.screen.container, { owner: true });
   });
 });
+
+describe('Things to try ticks off', () => {
+  it('fresh_copy_has_nothing_done', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    await expect.element(things.getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
+    // Let the list's reads come in a few times: the seed's own hold, its stopped reply and its chats tick nothing.
+    await expect.poll(() => requests('ledger').length, { timeout: 5_000 }).toBeGreaterThan(2);
+    await expect.poll(() => requests('conversations').length, { timeout: 5_000 }).toBeGreaterThan(2);
+    expect(things.getByText(/^Done\./).elements()).toHaveLength(0);
+    expect(things.getByText('Done', { exact: true }).elements()).toHaveLength(0);
+    await expect.element(things.getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
+  });
+
+  it('answering_ticks_the_held_request_in_place', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    const item = row.element();
+    const watching = watchTheList(item, things.element(), screen.getByRole('region', { name: 'Needs you' }).element(), ANSWERED_LINE);
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    const frames = await watching;
+
+    // The row stayed in the list through the answer, never gone for a frame, and it is the same row.
+    expect(frames.every((frame) => frame.drawn)).toBe(true);
+    expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
+    // It ticked: its check drew once, its line says it's done, and a Done pill took the button's place.
+    expect(frames.some((frame) => frame.drawing)).toBe(true);
+    await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    expect(item.querySelector('.cd-pill .cd-status-dot--handled')).not.toBeNull();
+    expect(item.querySelector('.cd-status-dot--held')).toBeNull();
+    expect(row.getByRole('button').elements()).toHaveLength(0);
+    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+  });
+
+  it.each(['desktop', 'phone'] as const)('nothing_under_the_list_moves_at_%s', async (viewport) => {
+    const { screen } = await renderRoute(TODAY, { viewport });
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    const allow = heldCard(screen).getByRole('button', { name: 'Allow this time' });
+    allow.element().scrollIntoView({ block: 'center' });
+    const needsYou = screen.getByRole('region', { name: 'Needs you' }).element();
+    const watching = watchTheList(row.element(), things.element(), needsYou, ANSWERED_LINE);
+    await allow.click();
+    const frames = await watching;
+
+    // Needs you starts where it did, below the list's top, on every frame from the answer to the tick.
+    const below = frames.map((frame) => frame.below);
+    expect(Math.max(...below) - Math.min(...below)).toBeLessThan(0.5);
+    await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+  });
+
+  it('a_ticked_row_shown_again_is_drawn_still', async () => {
+    const { screen } = await renderRoute(TODAY);
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await thingsToTry(screen).getByRole('button', { name: 'Hide this list' }).click();
+    await expect.element(thingsToTry(screen)).not.toBeInTheDocument();
+
+    // Shown again, the row is done as it was, its check drawn still: it ticked before, not now.
+    const animated = watchListAnimations();
+    await screen.getByRole('button', { name: 'Show things to try' }).click();
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(requests('needsYou').length + 2);
+    expect(animated()).toEqual([]);
+  });
+
+  it('late_answer_ticks_nothing', async () => {
+    // The answer comes back 409: the request had already expired. That isn't an answer.
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    const held = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === rivera.decisions.held.reason_plain)?.decision;
+    if (!held) throw new Error('the seed holds the 15% quote');
+    mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: { ...held, state: 'expired', answers: [] } } });
+    const card = heldCard(screen);
+    await card.getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(card.getByText('This request expired before you answered. Nothing was done.', { exact: true })).toBeVisible();
+
+    // Let Today read a while: nothing ticks, and the line still says how long it takes.
+    const reads = { needsYou: requests('needsYou').length, ledger: requests('ledger').length };
+    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(reads.needsYou + 6);
+    expect(things.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
+    expect(things.getByText('Done', { exact: true }).elements()).toHaveLength(0);
+    await expect.element(things.getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
+    // The record was read again meanwhile, and showed no answer either.
+    expect(requests('ledger').length).toBeGreaterThan(reads.ledger);
+  });
+
+  it('reload_after_answering_is_done_at_once', async () => {
+    const before = await renderRoute(TODAY);
+    await heldCard(before.screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(thingRow(before.screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+
+    // Reloaded, nothing is held and nothing was answered in this view: only the record says it was.
+    const animated = watchListAnimations();
+    const { screen } = await renderRoute(TODAY);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Open the request' }).elements()).toHaveLength(0);
+    // Done before this view, so its check is drawn still: nothing in the list animated.
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(2);
+    expect(animated()).toEqual([]);
+  });
+
+  it('stopped_attempt_in_the_preview_ticks_try_to_break_it', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Try to break it');
+    await expect.element(row.getByRole('button', { name: 'Show me ideas' })).toBeVisible();
+
+    // The owner's new tab opens a preview of the Desk, and the checkpoint stops a reply there.
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    const preview = mockStore.visitorSession(RIVERA.slug);
+    if (!preview?.ownerPreview) throw new Error('the owner has a preview chat');
+    mockStore.world.reply(preview, [proseBlock('It costs $1 today.')], 'en', { blocked: true });
+
+    await expect.element(row.getByText('Done. Safety shows what was stopped.', { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    expect(row.getByRole('button').elements()).toHaveLength(0);
+    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    // Nothing was delivered in the chat, so the owner hasn't chatted as a customer yet.
+    expect(thingRow(screen, 'Chat as a customer').getByRole('link', { name: 'Open your public page' }).elements()).toHaveLength(1);
+  });
+
+  it('focus_in_a_row_that_ticks_stays_with_the_row', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const row = thingRow(screen, 'Try to break it');
+    vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
+    vi.spyOn(window, 'open').mockReturnValue({ opener: window } as unknown as Window);
+    await row.getByRole('button', { name: 'Show me ideas' }).click();
+    const idea = row.getByRole('group', { name: 'Ideas to try' }).getByRole('button').first();
+    await idea.click();
+    await expect.element(row.getByText('Copied. Paste it into the chat.', { exact: true })).toBeVisible();
+    expect(document.activeElement).toBe(idea.element());
+
+    // The idea pasted in the preview is stopped: the row ticks, its ideas go, and focus stays with the row.
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    const preview = mockStore.visitorSession(RIVERA.slug);
+    if (!preview?.ownerPreview) throw new Error('the owner has a preview chat');
+    mockStore.world.reply(preview, [proseBlock('It costs $1 today.')], 'en', { blocked: true });
+    await expect.element(row.getByText('Done. Safety shows what was stopped.', { exact: true })).toBeVisible();
+    await expect.element(row.getByRole('heading', { level: 3, name: 'Try to break it' })).toHaveFocus();
+    expect(row.getByRole('group', { name: 'Ideas to try' }).elements()).toHaveLength(0);
+
+    // Focus elsewhere is left where it is when a row ticks.
+    const greetingLink = screen.getByRole('button', { name: 'Copy your Desk link' });
+    (greetingLink.element() as HTMLElement).focus();
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
+    await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
+    await expect.element(greetingLink).toHaveFocus();
+  });
+
+  it('all_four_done', async () => {
+    // A copy with a second Desk already: "Create your own Desk" is done from the start.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
+    const things = thingsToTry(screen);
+    await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+
+    // The owner chats in a preview of the Desk, and Claude replies; then a reply there is stopped.
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
+    await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    const preview = mockStore.visitorSession(RIVERA.slug);
+    if (!preview?.ownerPreview) throw new Error('the owner has a preview chat');
+    mockStore.world.reply(preview, [proseBlock('It costs $1 today.')], 'en', { blocked: true });
+    await expect.element(thingRow(screen, 'Try to break it').getByText('Done. Safety shows what was stopped.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('3 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+
+    // And the held request is answered.
+    await heldCard(screen).getByRole('button', { name: 'Deny this time' }).click();
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await expect.element(things.getByText('All 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(things.getByText('Done', { exact: true }).elements()).toHaveLength(4);
+    expect(things.getByRole('listitem').getByRole('button').elements()).toHaveLength(0);
+    // "Hide this list" still hides it.
+    await things.getByRole('button', { name: 'Hide this list' }).click();
+    await expect.element(things).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: 'Show things to try' })).toHaveFocus();
+  });
+
+  it('count_reads_of_4_before_anything_is_held', async () => {
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    const things = thingsToTry(screen);
+    const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
+    await expect.element(things).toBeVisible();
+    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Create your own Desk']);
+
+    // The owner chats in a preview and Claude replies: one of the four is done, though only three show.
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
+    await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    // Nothing is held, so "Answer a held request" still waits.
+    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(2);
+    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Create your own Desk']);
+  });
+
+  it('second_desk_reads_the_desk_the_copy_started_with', async () => {
+    const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
+    const things = thingsToTry(screen);
+    await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+    // Nothing is held on Emergencies, so "Answer a held request" waits.
+    expect(thingRow(screen, 'Answer a held request').elements()).toHaveLength(0);
+
+    // The owner chats in a preview of the main line, the Desk the copy started with.
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
+    await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
+
+    // The main line's held request is answered elsewhere: its record ticks the row here, which shows done.
+    const held = [...mockStore.world.decisions.values()].find((d) => d.deskId === RIVERA.deskId && d.decision.state === 'held')?.decision;
+    if (!held) throw new Error('the main line holds a request');
+    await mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'deny_once' } });
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await expect.element(things.getByText('3 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+
+    // Every read behind them was the main line's.
+    for (const key of ['conversations', 'ledger'] as const) {
+      expect(requests(key).length, key).toBeGreaterThan(0);
+      expect(requests(key).filter((r) => !r.path.startsWith(mainLinePath(key))), key).toEqual([]);
+    }
+  });
+
+  it('deleting_the_desk_the_copy_started_with_keeps_what_was_seen', async () => {
+    const { screen, router } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
+    const things = thingsToTry(screen);
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await expect.element(things.getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+
+    // The owner deletes the main line in its Settings, and lands on Emergencies' Today.
+    await router.navigate(`/app/${RIVERA.deskId}/settings/general`);
+    const section = screen.getByRole('region', { name: 'Delete this Desk' });
+    await section.getByRole('button', { name: 'Delete this Desk' }).click();
+    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+
+    // What this view saw stays done, drawn still; Emergencies is a Desk besides the one the copy started with.
+    const animated = watchListAnimations();
+    await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    // And nothing more is read from the Desk that's gone.
+    const reads = { conversations: requests('conversations').length, ledger: requests('ledger').length };
+    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(requests('needsYou').length + 4);
+    expect(requests('conversations').slice(reads.conversations).filter((r) => r.path.startsWith(mainLinePath('conversations')))).toEqual([]);
+    expect(requests('ledger').slice(reads.ledger).filter((r) => r.path.startsWith(mainLinePath('ledger')))).toEqual([]);
+    expect(animated()).toEqual([]);
+  });
+});
+
+/** A read of the main line, the Desk the copy started with, by its path. */
+function mainLinePath(key: 'conversations' | 'ledger'): string {
+  return ROUTES[key].path.replace('{desk_id}', RIVERA.deskId);
+}
+
+/**
+ * The animations that ran in Things to try, by name, from now until the test ends, read every frame
+ * (a reload included: it watches the document, not one list).
+ */
+function watchListAnimations(): () => string[] {
+  const seen = new Set<string>();
+  let frame = 0;
+  const look = () => {
+    for (const animation of document.getAnimations()) {
+      const target = (animation.effect as KeyframeEffect | null)?.target;
+      if (target instanceof Element && target.closest('.cd-things') !== null) seen.add((animation as CSSAnimation).animationName);
+    }
+    frame = requestAnimationFrame(look);
+  };
+  frame = requestAnimationFrame(look);
+  onTestFinished(() => cancelAnimationFrame(frame));
+  return () => [...seen];
+}
+
+/** The line under "Things to try" until something on it is done. */
+const ABOUT_TEN_MINUTES = 'About 10 minutes. No real customer sees any of it.';
+/** "Answer a held request" once it's done. */
+const ANSWERED_LINE = "Done. Your answer went to the visitor's chat.";
+
+/** Today's "Things to try". */
+function thingsToTry(screen: RenderResult) {
+  return screen.getByRole('region', { name: 'Things to try' });
+}
+
+/** A row of Things to try, by its title. */
+function thingRow(screen: RenderResult, title: string) {
+  return thingsToTry(screen)
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('heading', { level: 3, name: title, exact: true }) });
+}
+
+/** One frame of the list as a row ticks. */
+interface ListFrame {
+  /** The row is in the list. */
+  drawn: boolean;
+  /** Something in the row animates: its check drawing. */
+  drawing: boolean;
+  /** Where `next` starts, below the top of the list's section. */
+  below: number;
+}
+
+/** How long a row may take to tick and settle before the watch gives up. */
+const TICK_TIMEOUT_MS = 5_000;
+
+/**
+ * Reads every frame from now until `row` says `doneLine` and nothing in the list or in `next` (the
+ * section after it) has moved or animated for two frames running.
+ */
+function watchTheList(row: Element, list: Element, next: Element, doneLine: string): Promise<ListFrame[]> {
+  const frames: ListFrame[] = [];
+  const started = performance.now();
+  let still = 0;
+  return new Promise((resolve, reject) => {
+    const step = () => {
+      const frame: ListFrame = {
+        drawn: row.isConnected && list.contains(row),
+        drawing: row.getAnimations({ subtree: true }).length > 0,
+        below: next.getBoundingClientRect().top - list.getBoundingClientRect().top,
+      };
+      frames.push(frame);
+      const done = row.textContent.includes(doneLine);
+      const quiet = list.getAnimations({ subtree: true }).length === 0 && next.getAnimations({ subtree: true }).length === 0;
+      still = done && quiet ? still + 1 : 0;
+      if (still >= 2) resolve(frames);
+      else if (performance.now() - started > TICK_TIMEOUT_MS) reject(new Error('the row never ticked and settled'));
+      else requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  });
+}
 
 /** Rivera's held request on Today. */
 function heldCard(screen: RenderResult) {
