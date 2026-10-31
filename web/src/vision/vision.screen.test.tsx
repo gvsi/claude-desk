@@ -83,6 +83,16 @@ const ACCOUNT = {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * focus_order_is_logical, from the top of the page. A tab walk that ran off the end of an earlier
+ * page left the browser's focus outside this document, where the first Tab only brings it back, so
+ * the walk starts with the document focused.
+ */
+async function expectTabOrderFromTheTop(stops: HTMLElement[]): Promise<void> {
+  window.focus();
+  await expectTabOrder(userEvent, stops);
+}
+
 function main(screen: RenderResult) {
   return screen.getByRole('main');
 }
@@ -172,7 +182,7 @@ describe('Vision pages', () => {
       const { screen, router } = await renderRoute(path);
       await screen.getByRole('note', { name: 'Vision' }).getByRole('link', { name: 'Back to your Desk' }).click();
       // Back on the Desk they came from, through the app's entry, which reads the copy's Desks.
-      await expect.poll(() => router.state.location.pathname, path).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
+      await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
       await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
     }
 
@@ -279,7 +289,7 @@ describe('Vision pages against their boards', () => {
     await expectFooter(root);
 
     // focus_order_is_logical: the bar's link, the sidebar, then the page from the top.
-    await expectTabOrder(userEvent, [
+    await expectTabOrderFromTheTop([
       bar.querySelector('a') as HTMLElement,
       sidebar.getByRole('button', { name: 'Switch business, current: Meridian Bay Permits' }).element() as HTMLElement,
       sidebar.getByRole('switch', { name: 'Answering' }).element() as HTMLElement,
@@ -373,7 +383,7 @@ describe('Vision pages against their boards', () => {
     await expectFooterAtFoot(root);
 
     // focus_order_is_logical: the bar, the sidebar, the page's action, the teammates, the conversation's controls, then access.
-    await expectTabOrder(userEvent, [
+    await expectTabOrderFromTheTop([
       bar.querySelector('a') as HTMLElement,
       sidebar.getByRole('button', { name: 'Switch Desk, current: Team' }).element() as HTMLElement,
       sidebar.getByRole('switch', { name: 'Answering' }).element() as HTMLElement,
@@ -443,7 +453,7 @@ describe('Vision pages against their boards', () => {
     await expectFooter(root);
 
     // focus_order_is_logical: the bar, Ask for Maria Rivera, the download, then the composer.
-    await expectTabOrder(userEvent, [
+    await expectTabOrderFromTheTop([
       bar.querySelector('a') as HTMLElement,
       main(screen).getByRole('button', { name: 'Ask for Maria Rivera' }).element() as HTMLElement,
       download.element() as HTMLElement,
