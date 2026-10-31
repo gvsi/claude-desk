@@ -28,3 +28,4 @@
 | `blocks` | `readonly RenderedBlock[]` | Required. |
 | `language` | `'en' \| 'es'` | Required. |
 | `ownerName` | `string` | Required. |
+| `inertDownload` | `boolean` | Vision pages only: passed to each `ReplyCard`, so a document card's Download goes nowhere. `false` by default. |

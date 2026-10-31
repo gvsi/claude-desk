@@ -13,6 +13,7 @@ import type { ApprovalAnswer, Decision, DecisionState } from '../../../api/contr
 import { Icon } from '../../icons/index.tsx';
 import { Button, type ButtonVariant } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
+import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { OWNER_STATE_WORDS, receiptTone } from '../MarginReceipt/receiptTone.ts';
 import { errorCopy } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
@@ -100,6 +101,12 @@ export interface ApprovalCardProps {
   pending?: boolean;
   /** The answer may not have gone through: `true` shows the card's line, a string the screen's own. */
   error?: boolean | string;
+  /**
+   * Vision pages only, which make no requests: the answers keep their look, focus and tab order, a
+   * menu still opens, and choosing an answer does nothing. The card never locks or shows a spinner,
+   * and `onAnswer` is never called.
+   */
+  inertAnswers?: boolean;
 }
 
 /** The click that is waiting for its result, and the screen's `pending` and `error` it last saw. */
@@ -167,7 +174,17 @@ function statusLine(state: DecisionState): string {
  * plain button; a side with two opens a menu of them. After an answer or an event, the final line
  * takes the place of "Waiting for your answer" with its receipt dot, and the answers go.
  */
-export function ApprovalCard({ decision, heldBy, context, waiting, personName, onAnswer, pending = false, error }: ApprovalCardProps) {
+export function ApprovalCard({
+  decision,
+  heldBy,
+  context,
+  waiting,
+  personName,
+  onAnswer,
+  pending = false,
+  error,
+  inertAnswers = false,
+}: ApprovalCardProps) {
   const offered = offeredAnswers(decision);
   const showAnswers = offered.length > 0;
   const failed = error === true || (typeof error === 'string' && error !== '');
@@ -179,6 +196,8 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
   // an error (`error` on and `pending` off, after either of them changed since the click), or the
   // promise `onAnswer` returned rejects.
   const [lock, setLock] = useState<AnswerLock | null>(null);
+  // On a vision page: whether an answer has been chosen, so its line shows from then on.
+  const [inertPressed, setInertPressed] = useState(false);
   const clicks = useRef(0);
   let locked = false;
   // The side whose answer is being sent, while this card knows it; null when the screen reports
@@ -212,6 +231,11 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
   }, [showAnswers]);
 
   const answer = (value: ApprovalAnswer) => {
+    // A vision page's card: the answer goes nowhere, so nothing waits for it, and the line says why.
+    if (inertAnswers) {
+      setInertPressed(true);
+      return;
+    }
     if (waitingForResult) return;
     answeredHere.current = true;
     clicks.current += 1;
@@ -359,6 +383,7 @@ export function ApprovalCard({ decision, heldBy, context, waiting, personName, o
           <p role="status" className="cd-approval-card__progress cd-type-caption">
             {pending ? SENDING_LINE : null}
           </p>
+          {inertAnswers ? <VisionInertLine shown={inertPressed} /> : null}
           {failed && !pending ? (
             <div className="cd-approval-card__error">
               <Notice tone="error">{error === true ? ERROR_LINE : error}</Notice>

@@ -1,0 +1,51 @@
+/* ChannelList: a Card of rows with no padding of its own, as both Channels boards draw it. Each
+   row is padded 14 px 16 px under a hairline (none above the first): the channel's name in body
+   type at weight 520, how someone is known there 2 px under it in secondary meta, and the status
+   at the right, 16 px after the words, on one line. */
+
+.cd-channel-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-channel-list__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  padding: var(--space-14) var(--space-16);
+}
+
+.cd-channel-list__row + .cd-channel-list__row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-channel-list__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cd-channel-list__text > p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-channel-list__name {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-channel-list__text > .cd-channel-list__how {
+  margin-top: var(--space-2);
+  color: var(--text-secondary);
+}
+
+/* "On", beside its sage dot: the words say what the dot shows. */
+.cd-channel-list__on {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--text-primary);
+  white-space: nowrap;
+}

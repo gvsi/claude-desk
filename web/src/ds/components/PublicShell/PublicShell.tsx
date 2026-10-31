@@ -66,6 +66,11 @@ export interface PublicShellProps {
   footer?: boolean;
   /** The visitor's `Composer`, under the conversation. */
   composer: ReactNode;
+  /**
+   * A full-width line above the brand header, inside the window's height, such as the `VisionBar`
+   * over a vision page. Left out, the brand header is the top of the page.
+   */
+  banner?: ReactNode;
   /** The conversation: a `Transcript` and what goes with it. */
   children: ReactNode;
 }
@@ -117,6 +122,7 @@ export function PublicShell({
   aboutLinks,
   footer = true,
   composer,
+  banner,
   children,
 }: PublicShellProps) {
   const copy = COPY[language] ?? COPY.en;
@@ -139,6 +145,7 @@ export function PublicShell({
 
   return (
     <div className={`cd-public-shell${embedded ? ' cd-public-shell--embedded' : ''}`} lang={language}>
+      {banner ? <div className="cd-public-shell__banner">{banner}</div> : null}
       <PublicBrandHeader brand={brand} language={language} openStatus={openStatus} landmark={!embedded} nameAsHeading={!embedded} />
       <div className="cd-public-shell__body">
         <Chat className="cd-public-shell__chat">

@@ -22,7 +22,7 @@
   - in the keyboard order, after the main nav and before Answering. On a narrow screen, `AppShell`'s sheet shows the same sidebar, so the same group.
   Without `about`, nothing is drawn and nothing else moves: the foot stays at the bottom.
 - When the window is too short for it all, the nav and the about group scroll inside the column, between the pinned top (the mark, the business row and the Desk picker) and the pinned foot, so the Answering switch and the owner always show. The scrolling part reaches 4 px past its rows, so a focused row's ring is never clipped, and at normal heights every row sits where it would without it.
-- At the foot, above a hairline: the "Answering" `Switch` ("Claude answers under your rules"), then the owner: an initials avatar (`aria-hidden`, the first letters of the first and last words of the name, as written) beside the name and a status line. The owner row isn't a control.
+- At the foot, above a hairline: the "Answering" `Switch` with its line, "Claude answers under your rules" unless the Desk passes its own (`answeringDescription`), then the owner: an initials avatar (`aria-hidden`, the first letters of the first and last words of the name, as written) beside the name and a status line. The owner row isn't a control.
 
 ## What the consumer provides
 
@@ -31,6 +31,7 @@
 - `peopleLabel`, the business's word for the people it serves ("Customers", "Clients").
 - `counts`, each `{ n, label }`, with the number in the label's words.
 - `answering` and `onAnsweringChange`. The switch shows whatever `answering` the screen passes back, so a failed change can revert it.
+- `answeringDescription`, only where a Desk answers someone other than the public or under someone else's rules, as the vision boards draw it: "Claude answers your team under your rules" on a team Desk (N-R2-Vision-TeamDesk). Left out, the owner app's line.
 - `about`, for the prototype's own documents: the group's `title` and its `links`, each `{ id, label, href, current? }`. The words are the screen's.
 
 ## Props
@@ -48,6 +49,7 @@
 | `counts` | `{ conversations?: NavCount; safety?: NavCount & { attention?: boolean } }` | `NavCount` is `{ n: number; label: string }`. |
 | `answering` | `boolean` | Required. |
 | `onAnsweringChange` | `(answering: boolean) => void` | Required. |
+| `answeringDescription` | `string` | The switch's line. "Claude answers under your rules" by default. |
 | `owner` | `{ name: string; status: string }` | Required. |
 | `linkComponent` | `ComponentType<SidebarLinkProps>` | A plain `<a>` by default. The about links use it too. |
 | `about` | `SidebarAbout` | `{ title: string; links: { id: string; label: string; href: string; current?: boolean }[] }`. Left out, no group. |

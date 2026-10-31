@@ -75,9 +75,24 @@ export { PublicShell, type PublicBrand, type PublicOpenStatus, type PublicShellP
 export { PublicBrandHeader, type PublicBrandHeaderProps } from './components/PublicShell/PublicBrandHeader.tsx';
 export { Dialog, type DialogProps } from './components/Dialog/Dialog.tsx';
 
+// Vision pages
+export { VISION_LINE, VisionBar, type VisionBarProps } from './components/VisionBar/VisionBar.tsx';
+export { VISION_INERT_LINE } from './components/VisionBar/visionInert.tsx';
+export {
+  PhoneFrame,
+  PhoneTabBar,
+  type PhoneFrameProps,
+  type PhoneTab,
+  type PhoneTabBarProps,
+} from './components/PhoneFrame/PhoneFrame.tsx';
+export { AccessPanel, type AccessPanelProps } from './components/AccessPanel/AccessPanel.tsx';
+// FactCard is for the vision pages' sample facts only: a conversation's facts are the kernel's ReplyCards.
+export { FactCard, type FactCardProps } from './components/FactCard/FactCard.tsx';
+
 // Settings
 export { DetailList, type DetailItem, type DetailListProps } from './components/DetailList/DetailList.tsx';
 export { AlertList, type AlertListItem, type AlertListProps } from './components/AlertList/AlertList.tsx';
+export { ChannelList, LATER_CHANNELS, type ChannelListProps, type ChannelView } from './components/ChannelList/ChannelList.tsx';
 
 // Navigation
 export {
