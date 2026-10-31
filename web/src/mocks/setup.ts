@@ -626,6 +626,14 @@ function nextConsultant(interview: Interview): void {
   }
 }
 
+/** Connecting in chat still leaves every newly discovered tool awaiting review. */
+function connectAcceptedProposal(world: MockWorld, interview: Interview, card: ProposalCard): void {
+  if (card.state !== 'accepted' || card.connector?.app !== 'stripe' || !card.connector.connectable) return;
+  const desk = world.desk(interview.state.desk_id);
+  if (!desk) throw new Error('the setup Desk must exist');
+  connectPayments(desk);
+}
+
 function finishQuestions(world: MockWorld, interview: Interview, suggestions = false): void {
   if (interview.consultant) {
     const shown = new Set(interview.state.messages.flatMap(({ card }) => card ? [card.proposal_id] : []));
@@ -758,6 +766,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
     } else if (!/[?]/.test(words) && /^(?:yes\b|accept\b|set it up\b|connect\b|no\b|not now\b|skip\b|decline\b)/i.test(words)) {
       const unpriced = payment?.amount_cents === null;
       card.state = unpriced || /^(?:no\b|not now\b|skip\b|decline\b)/i.test(words) ? 'declined' : 'accepted';
+      connectAcceptedProposal(world, interview, card);
       nextConsultant(interview);
     } else {
       // Questions and unknown words leave the proposal pending, with no permission granted.
@@ -1117,6 +1126,7 @@ export const SETUP_ROUTES: ServedRoutes = {
       if (proposal.job && (body.autonomy === 'auto' || body.autonomy === 'ask')) proposal.job.autonomy = body.autonomy;
       if (proposal.job && typeof body.title === 'string') proposal.job.title = body.title;
       if (proposal.job?.config?.block === 'purpose_payment' && typeof body.amount_cents === 'number') proposal.job.config.amount_cents = body.amount_cents;
+      connectAcceptedProposal(sv.world, interview, proposal);
       if (interview.state.pending_card === proposal.proposal_id) nextConsultant(interview);
     };
     if (interview.holdDecision) {

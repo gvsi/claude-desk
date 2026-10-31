@@ -175,6 +175,8 @@ export const SETUP_COPY = {
 
   proposal: {
     changed: 'Changed below',
+    connectLabel: 'Connect', connectedLabel: 'Connected',
+    setItUp: 'Set it up', setUp: 'Set up',
     amount: 'Amount', amountHint: 'In dollars. The payment link asks for this amount.', amountError: 'Enter an amount to accept this.',
     failed: 'I couldn’t save that just now. Try again.', tryAgain: 'Try again',
     name: 'Name', nameHint: 'Up to 60 characters.', outcome: 'Outcome', save: 'Save', cancel: 'Cancel',

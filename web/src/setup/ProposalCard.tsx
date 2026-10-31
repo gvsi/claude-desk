@@ -7,7 +7,6 @@ import {
   ConnectorIcon,
   type ConnectorIconName,
   ConnectorName,
-  ConnectorOfferCard,
   OUTCOME_GROUP_WORDS,
   OUTCOME_WORDS,
   Pill,
@@ -57,8 +56,34 @@ function DecisionLine({ state }: { state: Proposal['state'] }) {
   );
 }
 
+function ConnectorCard({ proposal, live, disabled, busyAction, failed, onRetry, onDecision }: ProposalCardProps) {
+  const connector = proposal.connector!;
+  const connected = connector.connectable && proposal.state === 'accepted';
+  const view = { id: connector.app, name: connector.label, icon: connector.app as ConnectorIconName, description: '', source: { kind: 'external' as const, mock: true as const } };
+  return <Card as="article" label={connector.label} padding={16}>
+    <div className={`cd-setup-c3${connected ? ' cd-setup-c3--set' : ''}`}>
+      <div className="cd-setup-c3__head">
+        <ConnectorIcon icon={view.icon} size="section" />
+        <div className="cd-setup-c3__titles">
+          <h3 className="cd-setup-c3__title cd-type-body"><ConnectorName connector={view} size="inline" />{!connector.connectable ? <Pill>{copy.later}</Pill> : null}</h3>
+          {!connected ? <p className="cd-setup-c3__line cd-type-body">{connector.why}</p> : null}
+        </div>
+        {connected ? <p className="cd-setup-job__decision cd-setup-job__decision--accepted cd-type-meta"><Icon name="check" size={16} />{copy.connectedLabel}</p> : proposal.state === 'declined' ? <DecisionLine state="declined" /> : null}
+      </div>
+      {connector.connectable && live ? failed ? <div className="cd-setup-job__failed cd-setup-c3__indent">
+        <p className="cd-setup-job__failed-line cd-type-meta" role="alert">{copy.failed}</p>
+        <Button variant="secondary" disabled={disabled} onClick={onRetry}>{copy.tryAgain}</Button>
+      </div> : <div className="cd-setup-job__actions cd-setup-c3__indent">
+        <Button variant="primary" disabled={disabled} busy={busyAction === 'accept'} onClick={() => onDecision({ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true } })}>{copy.connectLabel}</Button>
+        <Button variant="ghost" disabled={disabled} busy={busyAction === 'decline'} onClick={() => onDecision({ proposal_id: proposal.proposal_id, action: 'decline', body: { accept: false } })}>{copy.decline}</Button>
+      </div> : null}
+    </div>
+  </Card>;
+}
+
 /** A proposal is a transcript item, with actions only while it is the current question. */
-export function ProposalCard({ proposal, live, disabled, busyAction, failed, amountRequired, onRetry, onDecision }: ProposalCardProps) {
+export function ProposalCard(props: ProposalCardProps) {
+  const { proposal, live, disabled, busyAction, failed, amountRequired, onRetry, onDecision } = props;
   const { job, connector } = proposal;
   const [accepting, setAccepting] = useState(false);
   const payment = job?.config?.block === 'purpose_payment' ? job.config : null;
@@ -82,29 +107,10 @@ export function ProposalCard({ proposal, live, disabled, busyAction, failed, amo
       <span>{copy.changed}</span>
     </p>
   );
+  if (connector) return <ConnectorCard {...props} />;
   const editing = live && !failed && (changing || accepting);
-  const connectorView = connector
-    ? {
-        id: connector.app,
-        name: connector.label,
-        icon: connector.app as ConnectorIconName,
-        description: '',
-        source: { kind: 'external' as const, mock: true as const },
-      }
-    : null;
-  if (connector && !connector.connectable && connectorView)
-    return <ConnectorOfferCard connector={connectorView} toolsLine={connector.why} action="coming_soon" onReview={() => {}} />;
-  const title = job ? (
-    changing && editing ? (
-      name
-    ) : (
-      job.title
-    )
-  ) : proposal.state === 'proposed' ? (
-    copy.connect(connector!.label)
-  ) : (
-    <ConnectorName connector={connectorView!} size="inline" />
-  );
+  if (!job) return null;
+  const title = changing && editing ? name : job.title;
   const config = job?.config;
   const detail =
     config?.block === 'typed_booking'
@@ -156,28 +162,52 @@ export function ProposalCard({ proposal, live, disabled, busyAction, failed, amo
     }
     onDecision({ proposal_id: proposal.proposal_id, action, body: decision.body });
   };
+  if (payment) {
+    const accepted = proposal.state === 'accepted';
+    const paymentDecision = (action: 'accept' | 'decline') => {
+      if (disabled) return;
+      const cents = /^\d+(?:\.\d{1,2})?$/.test(amount.trim()) ? Math.round(Number(amount) * 100) : NaN;
+      const decision = decisionBody({ action, proposal, ...(action === 'accept' ? { amount_cents: cents } : {}) });
+      if (!decision.ok) { setError(decision.code === 'amount_required' ? copy.amountError : decision.message); return; }
+      onDecision({ proposal_id: proposal.proposal_id, action, body: decision.body });
+    };
+    return <Card as="article" label={job.title} padding={16}>
+      <div className={`cd-setup-c3${accepted ? ' cd-setup-c3--set' : ''}${proposal.state === 'declined' ? ' cd-setup-job--declined' : ''}`}>
+        <div className="cd-setup-c3__head">
+          <ConnectorIcon icon="quotes" glyph={JOB_GLYPH[job.job]} size="section" />
+          <div className="cd-setup-c3__titles">
+            <h3 className="cd-setup-c3__title cd-type-body">{job.title}</h3>
+            {!accepted ? <p className="cd-setup-c3__line cd-type-body">{job.how}</p> : null}
+          </div>
+          {accepted ? <p className="cd-setup-job__decision cd-setup-job__decision--accepted cd-type-meta"><Icon name="check" size={16} />{copy.setUp}</p> : proposal.state === 'declined' ? <DecisionLine state="declined" /> : null}
+        </div>
+        {proposal.state === 'proposed' ? <div className="cd-setup-c3__amount cd-setup-c3__indent">
+          <TextField label={copy.amount} value={amount} onChange={(value) => { setAmount(value); setError(null); }} hint={copy.amountHint} readOnly={disabled || !live} {...(error ? { error } : {})} />
+        </div> : null}
+        {live ? failed ? <div className="cd-setup-job__failed cd-setup-c3__indent">
+          <p className="cd-setup-job__failed-line cd-type-meta" role="alert">{copy.failed}</p>
+          <Button variant="secondary" disabled={disabled} onClick={onRetry}>{copy.tryAgain}</Button>
+        </div> : <div className="cd-setup-job__actions cd-setup-c3__indent">
+          <Button variant="primary" disabled={disabled || !amount.trim()} busy={busyAction === 'accept'} onClick={() => paymentDecision('accept')}>{copy.setItUp}</Button>
+          <Button variant="ghost" disabled={disabled} busy={busyAction === 'decline'} onClick={() => paymentDecision('decline')}>{copy.decline}</Button>
+        </div> : null}
+      </div>
+    </Card>;
+  }
   return (
-    <Card as="article" label={job?.title ?? connector!.label} padding={16}>
+    <Card as="article" label={job.title} padding={16}>
       <div className={`cd-setup-job${proposal.state === 'declined' ? ' cd-setup-job--declined' : ''}`}>
         <div className="cd-setup-job__identity">
-          {job ? (
-            <ConnectorIcon icon="quotes" glyph={JOB_GLYPH[job.job]} size="section" />
-          ) : (
-            <ConnectorIcon icon={connectorView!.icon} size="section" />
-          )}
+          <ConnectorIcon icon="quotes" glyph={JOB_GLYPH[job.job]} size="section" />
           <div className="cd-setup-job__text">
             <h3 className="cd-setup-job__title cd-type-body">
               {title}
               {job && !job.can_do_today ? <Pill>{copy.later}</Pill> : null}
             </h3>
-            <p className="cd-setup-job__why cd-type-meta">{job?.why ?? connector!.why}</p>
+            <p className="cd-setup-job__why cd-type-meta">{job.why}</p>
           </div>
         </div>
-        {job ? (
-          <p className="cd-setup-job__how cd-type-body">{job.how}</p>
-        ) : proposal.state === 'accepted' ? (
-          <p className="cd-setup-job__how cd-type-meta">{copy.connected}</p>
-        ) : null}
+        <p className="cd-setup-job__how cd-type-body">{job.how}</p>
         {!editing && detail ? (
           <div className="cd-setup-job__detail cd-type-meta">
             <span className="cd-setup-job__detail-label">{detail.label}</span>
@@ -251,7 +281,7 @@ export function ProposalCard({ proposal, live, disabled, busyAction, failed, amo
                   setAccepting(false);
                   setName(job?.title ?? '');
                   setAutonomy(job?.autonomy ?? 'ask');
-                  setAmount(payment?.amount_cents == null ? '' : (payment.amount_cents / 100).toFixed(2));
+                  setAmount('');
                   setError(null);
                   setErrorField(null);
                 }}

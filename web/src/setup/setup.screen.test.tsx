@@ -2935,6 +2935,19 @@ async function consultantAt(kind = 'opening'): Promise<SetupState> {
 }
 
 describe('consultant setup', () => {
+  it('connects_stripe_in_chat_and_collapses_it_without_turning_on_its_tools', async () => {
+    const state = await consultantAt('stripe');
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const stripe = screen.getByRole('article', { name: 'Stripe', exact: true });
+    await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
+    await stripe.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect.element(stripe.getByText('Connected', { exact: true })).toBeVisible();
+    expect(stripe.getByRole('button').elements()).toHaveLength(0);
+    expect(stripe.element().querySelector('.cd-setup-c3__line')).toBeNull();
+    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true });
+    expect(mockStore.world.desk(state.desk_id)!.tools.filter(({ tool }) => tool.startsWith('payments.')).map(({ status }) => status)).toEqual(['needs_review', 'needs_review']);
+  });
+
   it('collapses_the_old_card_to_changed_below_when_typing_reproposes_it', async () => {
     const state = await consultantAt('schedule');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -3065,33 +3078,6 @@ describe('consultant setup', () => {
     await expect.element(box).toHaveFocus();
   });
 
-  it('payment_changes_validate_the_name_and_amount_and_cancel_discards_edits', async () => {
-    const state = await consultantAt('payment');
-    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    const card = screen.getByRole('article', { name: 'Take a retainer for new work' });
-    const mark = requests('setupProposal').length;
-    await card.getByRole('button', { name: 'Change', exact: true }).click();
-    const name = card.getByRole('textbox', { name: 'Name', exact: true });
-    const amount = card.getByRole('textbox', { name: 'Amount', exact: true });
-    await amount.fill('750.00');
-    await name.fill('');
-    await card.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect.element(name).toHaveAttribute('aria-invalid', 'true');
-    expect(requests('setupProposal')).toHaveLength(mark);
-    await card.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await card.getByRole('button', { name: 'Accept', exact: true }).click();
-    await expect.element(amount).toHaveValue('');
-    await expect.element(card.getByRole('heading', { name: 'Take a retainer for new work', exact: true })).toBeVisible();
-    await card.getByRole('button', { name: 'Cancel', exact: true }).click();
-    await card.getByRole('button', { name: 'Change', exact: true }).click();
-    await amount.fill('750.00');
-    await name.fill('Engagement deposit');
-    await card.getByRole('radio', { name: 'Ask me first', exact: true }).click();
-    await card.getByRole('button', { name: 'Save', exact: true }).click();
-    await expect.element(screen.getByRole('article', { name: 'Engagement deposit' }).getByText('Accepted', { exact: true })).toBeVisible();
-    expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true, title: 'Engagement deposit', autonomy: 'ask', amount_cents: 75000 });
-  });
-
   it('a_page_opened_at_tools_skips_the_closing', async () => {
     const state = await consultantAt('intake');
     await mockStore.dispatch('setupSuggestions', { params: { id: state.interview_id }, query: { cards: '1' }, body: {} });
@@ -3153,11 +3139,11 @@ describe('consultant setup', () => {
     await expect.element(status.getByText('Coming later', { exact: true })).toBeVisible();
     expect(status.element().querySelector('.cd-setup-job__autonomy')).toBeNull();
     const calendar = screen.getByRole('article', { name: 'Google Calendar' });
-    await expect.element(calendar.getByText('Coming soon in this demo.', { exact: true })).toBeVisible();
+    await expect.element(calendar.getByText('Coming later', { exact: true })).toBeVisible();
     expect(calendar.getByRole('button').elements()).toHaveLength(0);
     const stripe = screen.getByRole('article', { name: 'Stripe' });
     await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
-    await expect.element(stripe.getByText('It connects when you reach Tools, and you review its tools there.', { exact: true })).toBeVisible();
+    await expect.element(stripe.getByText('Connected', { exact: true })).toBeVisible();
   });
 
   it('declines_a_card_and_keeps_decided_cards_read_only', async () => {
@@ -3175,10 +3161,9 @@ describe('consultant setup', () => {
     const state = await consultantAt('payment');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     const card = screen.getByRole('article', { name: 'Take a retainer for new work' });
-    await card.getByRole('button', { name: 'Accept', exact: true }).click();
     await card.getByRole('textbox', { name: 'Amount', exact: true }).fill('750');
     mockStore.inject({ route: 'setupProposal', status: 422, body: { error: 'amount_required' } });
-    await card.getByRole('button', { name: 'Accept', exact: true }).click();
+    await card.getByRole('button', { name: 'Set it up', exact: true }).click();
     await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
     await expect.element(card.getByRole('textbox', { name: 'Amount', exact: true })).toHaveValue('750');
     expect(card.getByRole('button', { name: 'Try again', exact: true }).elements()).toHaveLength(0);
@@ -3277,17 +3262,20 @@ describe('consultant setup', () => {
     const state = await consultantAt('payment');
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     const card = screen.getByRole('article', { name: 'Take a retainer for new work' });
-    await card.getByRole('button', { name: 'Accept', exact: true }).click();
     const amount = card.getByRole('textbox', { name: 'Amount', exact: true });
     await expect.element(amount).toBeVisible();
+    const setup = card.getByRole('button', { name: 'Set it up', exact: true });
+    await expect.element(setup).toBeDisabled();
     const mark = requests('setupProposal').length;
-    await card.getByRole('button', { name: 'Accept', exact: true }).click();
-    await expect.element(card.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
+    await amount.fill('bad');
+    await setup.click();
+    await expect.element(amount).toHaveAttribute('aria-invalid', 'true');
     expect(requests('setupProposal')).toHaveLength(mark);
     await amount.fill('750.00');
-    await card.getByRole('button', { name: 'Accept', exact: true }).click();
-    await expect.element(card.getByText('Engagement retainer, $750.00', { exact: true })).toBeVisible();
-    await expect.element(card.getByText('Accepted', { exact: true })).toBeVisible();
+    await setup.click();
+    await expect.element(card.getByText('Set up', { exact: true })).toBeVisible();
+    expect(card.getByRole('textbox').elements()).toHaveLength(0);
+    expect(card.getByRole('button').elements()).toHaveLength(0);
     expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: true, amount_cents: 75000 });
   });
 

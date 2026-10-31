@@ -141,13 +141,13 @@ describe('setup consultant run and decisions', () => {
     expect(await mockStore.dispatch('setupRules', { params: { id: state.interview_id } })).toMatchObject({ status: 200, body: { auto_money_cap_cents: 50000 } });
   });
 
-  it('both_finish_paths_connect_only_accepted_stripe_and_leave_its_tools_needing_review', async () => {
+  it('connects_accepted_stripe_in_chat_and_both_finish_paths_keep_its_tools_needing_review', async () => {
     for (const ending of ['answer', 'suggestions']) for (const accept of [true, false]) {
       let state = await cpaAt('stripe');
       const id = state.interview_id;
       state = await setupState('setupProposal', id, { accept }, state.pending_card!);
       const tools = () => mockStore.world.desk(state.desk_id)!.tools.filter(({ tool }) => tool.startsWith('payments.'));
-      expect(tools()).toHaveLength(0);
+      expect(tools().map(({ status }) => status)).toEqual(accept ? ['needs_review', 'needs_review'] : []);
       if (ending === 'suggestions') state = await setupState('setupSuggestions', id, {});
       else {
         state = await setupState('setupAnswer', id, { question: null, card: state.pending_card, text: 'Not now' });
