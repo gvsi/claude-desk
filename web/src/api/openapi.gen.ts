@@ -165,30 +165,57 @@ export interface Briefing {
   conversations: number;
   bookings: number;
   leads: number;
-  blocked: number;
+  turned_down: number;
   total: number;
   newest: BriefingNewest;
 }
 /**
- * The newest blocked attempt, booking, and lead or answer (the lead when both share a time); None when none.
+ * The newest refused request, booking, and lead or answer (the lead when both share a time); None when none.
  */
 export interface BriefingNewest {
-  blocked: BriefingItem | null;
+  turned_down: BriefingItem | null;
   booking: BriefingItem | null;
   lead_or_answer: BriefingItem | null;
 }
 /**
- * One thing that happened since last night. `ref_id` is what it links to: the attempt's `ref_id` for `blocked`,
+ * One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,
  * the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
- * refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None.
+ * refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
+ * and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
+ * refusals. Stopped drafts stay on Safety and out of the briefing.
  */
 export interface BriefingItem {
-  kind: "blocked" | "booking" | "lead" | "answer";
+  kind: "turned_down" | "booking" | "lead" | "answer";
   at: string;
   session_id: string | null;
   display_name: string | null;
   ref_id: string;
   line: string | null;
+  cause:
+    | (
+        | "owner_rule"
+        | "not_verified"
+        | "not_their_record"
+        | "recipient"
+        | "no_such_slot"
+        | "unknown_item"
+        | "over_quote_ceiling"
+        | "quote_unpayable"
+        | "no_such_charge"
+        | "not_refundable"
+        | "no_such_document"
+        | "no_amount"
+        | "tool_not_available"
+        | "incomplete_request"
+        | "paused"
+        | "no_rules"
+        | "rules_unchecked"
+        | "agent_pay_out"
+        | "agent_limit"
+        | "other_copy"
+        | "no_rule"
+      )
+    | null;
 }
 /**
  * `GET /api/owner/desks/{desk_id}/briefing`: every item since last night, newest first.
@@ -793,7 +820,7 @@ export interface Suggestion {
  * `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
  * booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
  * one `end`. `stopped` counts refused requests from visitors and agents (owner decision, 2026-10-31).
- * Safety lists Claude's stopped drafts too, without counting them; the briefing's blocked items keep the drafts.
+ * Safety lists Claude's stopped drafts too, without counting them; the briefing omits them.
  */
 export interface ThisWeek {
   timezone: string;

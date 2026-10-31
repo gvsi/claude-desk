@@ -412,23 +412,34 @@ class OwnerMessageIn(BaseModel):
     kind: Literal["say", "whisper"]
 
 
-class BriefingItem(BaseModel):
-    """One thing that happened since last night. `ref_id` is what it links to: the attempt's `ref_id` for `blocked`,
-    the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
-    refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None."""
+RefusalCause = Literal[
+    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
+    "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
+    "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
+    "agent_limit", "other_copy", "no_rule",
+]
 
-    kind: Literal["blocked", "booking", "lead", "answer"]
+
+class BriefingItem(BaseModel):
+    """One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,
+    the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
+    refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
+    and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
+    refusals. Stopped drafts stay on Safety and out of the briefing."""
+
+    kind: Literal["turned_down", "booking", "lead", "answer"]
     at: AwareDatetime
     session_id: str | None
     display_name: str | None
     ref_id: str
     line: str | None
+    cause: RefusalCause | None
 
 
 class BriefingNewest(BaseModel):
-    """The newest blocked attempt, booking, and lead or answer (the lead when both share a time); None when none."""
+    """The newest refused request, booking, and lead or answer (the lead when both share a time); None when none."""
 
-    blocked: BriefingItem | None
+    turned_down: BriefingItem | None
     booking: BriefingItem | None
     lead_or_answer: BriefingItem | None
 
@@ -441,7 +452,7 @@ class Briefing(BaseModel):
     conversations: int
     bookings: int
     leads: int
-    blocked: int
+    turned_down: int
     total: int
     newest: BriefingNewest
 
@@ -468,7 +479,7 @@ class ThisWeek(BaseModel):
     `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
     booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
     one `end`. `stopped` counts refused requests from visitors and agents (owner decision, 2026-10-31).
-    Safety lists Claude's stopped drafts too, without counting them; the briefing's blocked items keep the drafts."""
+    Safety lists Claude's stopped drafts too, without counting them; the briefing omits them."""
 
     timezone: str
     start: LocalDate
@@ -502,14 +513,6 @@ class Today(BaseModel):
     briefing: Briefing
     this_week: ThisWeek
     recorded_history: RecordedHistory
-
-
-RefusalCause = Literal[
-    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
-    "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
-    "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
-    "agent_limit", "other_copy", "no_rule",
-]
 
 
 class Attempt(BaseModel):

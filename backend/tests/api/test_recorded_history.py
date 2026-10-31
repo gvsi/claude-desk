@@ -778,7 +778,7 @@ async def test_a_refusal_of_unknown_origin_reads_as_recorded_history_everywhere(
         safety = (await client.get(f"/api/owner/desks/{desk_id}/safety")).json()
     for (shown, rows), flagged in ((read, False), (unread, True)):
         assert shown["recorded_history"] == flags(False, flagged, flagged)
-        assert shown["briefing"]["blocked"] == shown["this_week"]["stopped"] == 1
+        assert shown["briefing"]["turned_down"] == shown["this_week"]["stopped"] == 1
         assert [(row["decision_id"], row["replayed"]) for row in rows] == [(refused.decision_id, flagged)]
     assert [attempt["ref_id"] for attempt in safety] == [refused.decision_id]
 
