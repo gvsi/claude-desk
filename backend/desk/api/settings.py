@@ -74,7 +74,7 @@ class Settings:
     a2a_loopback: str = "http://127.0.0.1:8700"
     kernel_ro_schema: str = "kernel_ro"
     replay_night: bool = True               # each new copy asks for the recorded night; never from the environment
-    business_tools_enabled: bool = False   # enable configurations only once the kernel's blocks are deployed
+    business_tools_enabled: bool = False   # configurations stay hidden until the kernel blocks are deployed
     setup_policy_claims_enabled: bool = True   # runtime switch for publishing setup's policy claims
 
     @property
@@ -119,6 +119,9 @@ class Settings:
                 if _env(name) is not None:
                     raise RuntimeError(f"{name} is set; production holds no Bedrock credential")
         model_provider = _env("MODEL_PROVIDER") or cls.model_provider
+        business_tools = (_env("BUSINESS_TOOLS_ENABLED") or "0").lower()
+        if business_tools not in {"0", "1", "false", "true"}:
+            raise RuntimeError("BUSINESS_TOOLS_ENABLED must be 0, 1, false or true")
         return cls(
             desk_env=desk_env,
             api_database_url=database_url("API"),
@@ -131,6 +134,6 @@ class Settings:
             model_provider=model_provider,
             aws_region=(_env("AWS_REGION") or cls.aws_region) if model_provider == "bedrock" else cls.aws_region,
             bedrock_bearer_token=_env("BEDROCK_BEARER_TOKEN"),
-            business_tools_enabled=_env("BUSINESS_TOOLS_ENABLED") == "1",
+            business_tools_enabled=business_tools in {"1", "true"},
             setup_policy_claims_enabled=_env("SETUP_POLICY_CLAIMS_ENABLED") != "0",
         )

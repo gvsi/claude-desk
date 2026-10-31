@@ -197,9 +197,11 @@ from desk.api.prompts import (
     MemoryDraft,
     PlannedOutcome,
     PriceAnswer,
+    JobProposal,
     ProposalCard,
     SetupNextStep,
     SetupCardAnswer,
+    PurposePaymentConfig,
     QuestionKey,
     RuleCardDraft,
     SETUP_POLICY_CLAIMS,
@@ -226,6 +228,7 @@ from desk.api.schemas import (
     SafetyCheck,
     SafetyRow,
     SetupMessage,
+    SetupProposalIn,
     SetupStartIn,
     SetupState,
     SetupStep,
@@ -427,6 +430,32 @@ class Entry(BaseModel):
     connected_apps: list[ConnectorKey] | None = None
 
 
+def proposal_entries(jobs: Iterable[JobProposal | dict], connectors: Iterable[ConnectorProposal], *,
+                     business_tools_enabled: bool = False) -> list[Entry]:
+    """Mint stable proposal cards in job-then-connector order, with availability owned by code."""
+    cards = []
+    for drafted in jobs:
+        try:
+            proposed = JobProposal.model_validate(drafted).model_copy(deep=True)
+        except ValidationError:
+            logger.warning("an invalid setup job proposal was dropped")
+            continue
+        proposed.can_do_today = CAPABILITIES[proposed.job]
+        if isinstance(proposed.config, PurposePaymentConfig):
+            proposed.config.amount_cents = None
+        if not business_tools_enabled:
+            proposed.config = None
+        cards.append(ProposalCard(proposal_id=new_proposal_id(), kind="job", state="proposed",
+                                  job=proposed, connector=None))
+    for drafted_connector in connectors:
+        connector = drafted_connector.model_copy(deep=True)
+        connector.connectable = connector.app == "stripe"
+        connector.label = CONNECTOR_LABELS[connector.app]
+        cards.append(ProposalCard(proposal_id=new_proposal_id(), kind="connector", state="proposed",
+                                  job=None, connector=connector))
+    return [Entry(role="claude", text="", card=card) for card in cards]
+
+
 @dataclass
 class Interview:
     interview_id: str
@@ -598,6 +627,8 @@ async def _commit(engine: AsyncEngine, owner: OwnerCtx, interview: Interview, se
         current = await _load(conn, owner.copy_id, interview.interview_id, lock=True)
         if _stored(current) != seen:
             raise ApiProblem(409, "conflict")
+        if not owner.business_tools_enabled:
+            _clear_configs(interview)
         await _save(conn, interview)
 
 
@@ -617,15 +648,29 @@ def _turn(interview_id: str) -> Iterator[None]:
         _RUNNING.discard(interview_id)
 
 
-def setup_state(interview: Interview, slug: str, *, cards: bool = False) -> SetupState:
+def _clear_configs(interview: Interview) -> None:
+    for entry in interview.transcript:
+        if entry.card is not None and entry.card.job is not None:
+            entry.card.job.config = None
+
+
+def setup_state(interview: Interview, slug: str, *, cards: bool = False,
+                 business_tools_enabled: bool = False) -> SetupState:
     """The interview as the owner sees it. Its messages leave out the transcript's first entry, the owner's own
     description (`start` puts it there), which the owner isn't shown back; the stored transcript, which later turns
     read, keeps it. Card messages appear only when requested by a client that can render them."""
+    def visible(entry: Entry) -> ProposalCard | None:
+        card = entry.card
+        if card is not None and card.job is not None and not business_tools_enabled:
+            card = card.model_copy(deep=True)
+            card.job.config = None
+        return card
+
     return SetupState(interview_id=interview.interview_id, desk_id=interview.desk_id, slug=slug, step=interview.step,
                       consent=interview.consent, question=interview.question, busy=interview.busy,
                       pending_card=interview.pending_card,
                       held_policy_keys=interview.held_policy_keys,
-                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=entry.card)
+                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=visible(entry))
                                 for entry in interview.transcript[1:]
                                 if (entry.text or entry.choices or entry.card is not None) and
                                 (cards or entry.card is None) and (entry.role != "owner" or bool(entry.text))])
@@ -1039,7 +1084,7 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
         await _settle(engine, update(INTERVIEWS).where(*keyed).values(
             desk_id=created_desk_id, start_error=_failure_record(error), updated_at=func.now()))
         raise
-    return setup_state(interview, slug, cards=cards)
+    return setup_state(interview, slug, cards=cards, business_tools_enabled=owner.business_tools_enabled)
 
 
 async def _asking_for_desk(owner: OwnerCtx, engine: AsyncEngine, keyed: tuple) -> None:
@@ -1085,7 +1130,45 @@ def _turn_abandoned(interview: Interview) -> bool:
 
 async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, *, runs: TurnRuns, cards: bool = False) -> SetupState:
     interview = await _recover_turn(owner, engine, interview_id, runs)
-    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards)
+    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
+                       business_tools_enabled=owner.business_tools_enabled)
+
+
+async def decide_proposal(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, proposal_id: str,
+                          decision: SetupProposalIn, *, cards: bool = False) -> SetupState:
+    """Replace a card's decision during questions, under the same guard as an answer turn."""
+    with _turn(interview_id):
+        interview = await _read(engine, owner, interview_id)
+        owner.desk(interview.desk_id)
+        if interview.step != "questions" or interview.busy:
+            raise ApiProblem(409, "conflict")
+        seen = _stored(interview)
+        if not owner.business_tools_enabled:
+            _clear_configs(interview)
+        card = next((entry.card for entry in interview.transcript
+                     if entry.card is not None and entry.card.proposal_id == proposal_id), None)
+        if card is None:
+            raise ApiProblem(404, "not_found")
+        if card.job is None and (decision.title is not None or decision.autonomy is not None):
+            raise ApiProblem(422, "invalid")
+        config = card.job.config if card.job is not None else None
+        if decision.amount_cents is not None and not isinstance(config, PurposePaymentConfig):
+            raise ApiProblem(422, "invalid")
+        if decision.accept and isinstance(config, PurposePaymentConfig):
+            if decision.amount_cents is not None:
+                config.amount_cents = decision.amount_cents
+            if config.amount_cents is None:
+                raise ApiProblem(422, "amount_required")
+        card.state = "accepted" if decision.accept else "declined"
+        if card.job is not None:
+            if decision.title is not None:
+                card.job.title = decision.title
+            if decision.autonomy is not None:
+                card.job.autonomy = decision.autonomy
+        await _commit(engine, owner, interview, seen)
+    return setup_state(interview, await _slug(owner, interview.desk_id), cards=cards,
+                       business_tools_enabled=owner.business_tools_enabled)
+
 
 
 def _ask(interview: Interview, key: QuestionKey) -> Entry:
@@ -1870,13 +1953,50 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
     finish(interview)
 
 
+def accepted_jobs(interview: Interview) -> list[JobProposal]:
+    return [entry.card.job for entry in interview.transcript
+            if entry.card is not None and entry.card.state == "accepted" and entry.card.job is not None]
+
+
 def finish(interview: Interview) -> None:
-    interview.cover(QUESTION_KEYS)
+    """Accept remaining proposals and cover unanswered topics at their safe defaults, without I/O."""
+    for entry in interview.transcript:
+        if entry.card is not None and entry.card.state == "proposed":
+            entry.card.state = "accepted"
+    remaining = set(QUESTION_KEYS) - interview.covered
+    suggested = next((entry.suggested for entry in reversed(interview.transcript) if entry.suggested is not None), None)
+    if suggested is not None:
+        topics = {"summary": "what_you_do", "business_name": "what_you_do", "owner_display_name": "what_you_do",
+                  "hours": "hours_and_area", "service_area": "hours_and_area", "price_items": "quote_limit",
+                  "public_contact": "contact_and_after_hours", "after_hours": "contact_and_after_hours",
+                  "pricing": "what_you_do", "intake": "what_you_do", "urgent": "what_you_do"}
+        patch = SetupPatch.model_validate({name: value for name, value in suggested
+                                          if name in LIMIT_QUESTIONS or topics.get(name) in remaining})
+        # A fact merge drops every limit, even if a stored suggestion somehow carries one.
+        interview.answers = merged(interview.answers, patch, "what_you_do")
+    interview.cover(remaining)
+    interview.answers.how_we_help = "\n".join(f"{job.title}: {job.how}" for job in accepted_jobs(interview))[:1500] or None
     interview.step = "tools"
 
 
-async def after_finish(owner, interview) -> None:
-    pass
+async def _put_business_tools(owner: OwnerCtx, desk_id: str, accepted_jobs: list[JobProposal]) -> None:
+    """A5 (19) supplies the kernel business-tool write after the blocks are deployed."""
+
+
+async def after_finish(owner: OwnerCtx, interview: Interview) -> None:
+    """Apply the finished proposals after the setup commit, without a turn guard or database lock."""
+    desk_id = owner.desk(interview.desk_id)
+    for entry in interview.transcript:
+        card = entry.card
+        if (card is not None and card.state == "accepted" and card.connector is not None
+                and card.connector.connectable and card.connector.app == "stripe"):
+            try:
+                await connect_payments(owner, desk_id)
+            except Exception as failed:
+                logger.warning("a setup payments connection failed (%s)", type(failed).__name__)
+    await _put_business_tools(owner, desk_id, accepted_jobs(interview))
+
+
 
 
 # Setup, part 2 (Task 7): the Desk's parts, rule cards, situations, the safety check and going live -----------------
@@ -2194,7 +2314,8 @@ def _card(index: int, draft: RuleCardDraft) -> RuleCard:
 
 async def draft_cards(model: ModelClient, record: Record, business_type: BusinessType, answers: SetupAnswers,
                       tools: list[dict],
-                      post: Callable[[list[RuleCard]], Awaitable[PolicyVersion | None]]) -> PolicyVersion | None:
+                      post: Callable[[list[RuleCard]], Awaitable[PolicyVersion | None]], *,
+                      jobs: list[JobProposal] | None = None) -> PolicyVersion | None:
     """Claude's rule cards from the answers (route `card_draft`), ids `card-1`…, for the `tools` offered (every
     enabled tool but the utility cards' ones, as `{tool, effects}`) or an effect, as `post` drafts them on the kernel.
     A draft code can't use (no card, a target not offered, a card the contract refuses, a card against the owner's
@@ -2204,8 +2325,11 @@ async def draft_cards(model: ModelClient, record: Record, business_type: Busines
     draft gets, whichever found it. The version `post` drafted, or None when the retry can't be used either: the caller
     drafts the template cards."""
     cap = answers.auto_money_cap_cents
+    owner_answers = answers.model_dump(mode="json", exclude_defaults=True)
+    if jobs:
+        owner_answers["accepted_jobs"] = [job.model_dump(mode="json") for job in jobs]
     message = _user("\n\n".join([card_draft_head(business_type, cap), wrap(TOOLS_TAG, json.dumps(tools)),
-                                 wrap(ANSWERS_TAG, answers.model_dump_json(exclude_defaults=True))]))
+                                 wrap(ANSWERS_TAG, json.dumps(owner_answers))]))
     posted: list[PolicyVersion] = []
 
     async def usable(drafted: DraftedRules) -> str | None:
@@ -2311,7 +2435,7 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
             return await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
 
         version = await draft_cards(model, recorder(engine, owner, CARD_DRAFT_ROUTE), business_type, answers,
-                                    await _rule_tools(owner, desk_id), post)
+                                    await _rule_tools(owner, desk_id), post, jobs=accepted_jobs(interview))
     else:
         version = await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
     if (version is None or version.status == "rejected") and cards != template:

@@ -146,6 +146,7 @@ class OwnerCtx:
     owner_generation: int
     kernel: CredentialView = field(repr=False)
     ro: KernelRO = field(repr=False)
+    business_tools_enabled: bool = False
 
     def desk(self, desk_id: str) -> str:
         """`desk_id` when it is one of this copy's Desks; any other ID is 404, whether or not it exists."""
@@ -178,7 +179,8 @@ async def owner_context(state: Runtime, token: str) -> AsyncIterator[OwnerCtx]:
     async with state.engine.connect() as conn:
         yield OwnerCtx(copy_id=who.copy_id, desk_ids=tuple(who.desk_ids), owner_session_id=who.session.session_id,
                        owner_generation=who.session.generation,
-                       kernel=kernel, ro=KernelRO(conn, who.copy_id, state.settings.kernel_ro_schema))
+                       kernel=kernel, ro=KernelRO(conn, who.copy_id, state.settings.kernel_ro_schema),
+                       business_tools_enabled=state.settings.business_tools_enabled)
 
 
 async def owner_ctx(request: Request) -> AsyncIterator[OwnerCtx]:

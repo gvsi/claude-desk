@@ -29,6 +29,8 @@ from desk.api.prompts import (
     CARD_REASON_MAX_LENGTH,
     OWNER_CARDS_MAX,
     Choice,
+    Autonomy,
+    Cents,
     ProposalCard,
     PlannedOutcome,
     DemoTask,
@@ -632,6 +634,30 @@ class SetupAnswerIn(BaseModel):
         if (self.question is None) == (self.card is None):
             raise ValueError("exactly one of question and card is required")
         return self
+
+
+class SetupProposalIn(BaseModel):
+    """The owner's decision on a setup proposal, with optional changes when accepting it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accept: bool
+    title: str | None = Field(None, max_length=60)
+    amount_cents: Cents | None = None
+    autonomy: Autonomy | None = None
+
+    @model_validator(mode="after")
+    def accepting_changes(self) -> "SetupProposalIn":
+        changes = self.model_fields_set - {"accept"}
+        if changes and (not self.accept or any(getattr(self, name) is None for name in changes)):
+            raise ValueError("proposal changes require accepting and a value")
+        return self
+
+
+class SetupSuggestionsIn(BaseModel):
+    """Finish setup questions with the current suggestions; no additional answers are supplied."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class SetupMessage(BaseModel):

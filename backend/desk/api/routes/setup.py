@@ -36,6 +36,8 @@ from desk.api.schemas import (
     SafetyCheck,
     SetupAnswerIn,
     SetupConsentIn,
+    SetupProposalIn,
+    SetupSuggestionsIn,
     SetupStartIn,
     SetupState,
     SetupTools,
@@ -150,6 +152,25 @@ async def setup_answer(interview_id: InterviewId, body: SetupAnswerIn, request: 
     if answer.busy:
         return JSONResponse(answer.model_dump(mode="json"), status_code=202)
     return answer
+
+
+@router.post("/{id}/proposals/{proposal_id}", response_model=SetupState,
+             responses=error_responses(401, 404, 409, 422, 429, 503))
+async def setup_proposal(interview_id: InterviewId, proposal_id: Annotated[str, Path(max_length=64)],
+                          body: SetupProposalIn, request: Request,
+                          ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
+    """Accept, rename or decline a setup proposal while questions are open; later decisions replace earlier ones."""
+    state = await _moving_on(request, ctx, model=False)
+    return await setup.decide_proposal(ctx, state.database(), interview_id, proposal_id, body, cards=cards)
+
+
+@router.post("/{id}/suggestions", response_model=SetupState,
+             responses=error_responses(401, 404, 409, 422, 429, 503))
+async def setup_suggestions(interview_id: InterviewId, body: SetupSuggestionsIn, request: Request,
+                             ctx: Annotated[OwnerCtx, Depends(owner_ctx)], cards: bool = False) -> SetupState:
+    """Use the current proposals and finish questions with safe defaults for unanswered limits."""
+    state = await _moving_on(request, ctx, model=False)
+    return await setup.use_suggestions(ctx, state.database(), interview_id, cards=cards)
 
 
 @router.get("/{id}/tools", response_model=SetupTools, responses=error_responses(401, 404, 422, 503))
