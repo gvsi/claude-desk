@@ -22,6 +22,12 @@ contract test, before the task that first uses them.
   `set_mode`. `POST /owner/messages` takes a say or a whisper in any mode: a say is looked at for document canaries
   only, and a clean one is an `owner_statement` fact and one `owner_said` card of the text verbatim, signed at the
   session's generation; a whisper is ledgered with its length alone.
+- The handoff card's owner handoff (#96): a verdict of Claude's that shows the handoff card, in place of a blocked
+  draft (a paused session's included) or because the draft cited it, opens a `handoffs` row of kind `card` for the
+  session (open, no call-back window, the kernel's reason) unless the session has an open handoff of either kind,
+  alerts the owner (event kind `handoff`, when the Desk's preferences alert it at once; no decision) with who is
+  waiting, and ledgers it `desk_data` on the session. An owner's say opens none, nor does a replayed night's
+  blocked draft. A call-back request's handoff is kind `callback`; `POST /handoffs/{id}/done` closes either.
 - The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
   asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
   every ledger entry it writes appended now and marked `summary.replayed` with its moment and the recording, and the
@@ -298,7 +304,8 @@ RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:first_visit", kind="text",
                         value="The service call deposit is credited to the repair if you go ahead."),
                   Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
-NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout"], "briefing": ["lead", "callback", "booking"]}
+NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout", "handoff"],
+                 "briefing": ["lead", "callback", "booking"]}
 # The owner's simulated Claude memory (the kernel's fixtures/memory.json, Plan 01c): (title, text).
 MEMORY_ITEMS = [("Business", "Rivera Plumbing, run by Maria Rivera."),
                 ("Trade", "Plumbing: leaks, drains and water heaters."),
@@ -773,6 +780,8 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "verify": "Escribe el código enviado al contacto registrado.", "hours": "Horario",
                      "owner_said": "Escrito por {owner}",
                      "owner_say_blocked": "No se envió: incluía texto de un documento privado"}}
+# The reason of a handoff the handoff card opens (#96), the kernel's own words, never the draft's or the visitor's.
+CARD_HANDOFF_REASON = "The Desk handed this to you."
 OWNER_TEXT_MAX = 2000                   # an owner's say or whisper, in characters (Plan 01b)
 NUMBER_RULES = (("digit", re.compile(r"\d")), ("currency", re.compile(r"[$€£¥¢]")), ("percent", re.compile(r"%")))
 
@@ -1061,6 +1070,7 @@ class Desk:
     policy_version: int = 1
     versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
     auto_money_cap_cents: int = 0       # the active version's money cap: 0 for a Desk `POST /desks` makes
+    notify_now: list[str] = field(default_factory=list)              # event kinds that alert at once
     ledger: list[LedgerEntry] = field(default_factory=list)
     booked: set[str] = field(default_factory=set)                     # slot_ids with a confirmed booking
 
@@ -1605,6 +1615,7 @@ class FakeKernelState:
         for slot in seed.calendar_slots:
             desk.slots[slot.slot_id] = slot
             self._put("calendar_slots", (desk.desk_id, slot.slot_id), {**slot.model_dump(), **ids})
+        desk.notify_now = list(seed.notifications.now)
         self._put("notification_prefs", (desk.desk_id,), {**ids, **seed.notifications.model_dump()})
         for tool in tools:
             self._put_tool(desk, tool_profile(tool))
@@ -2857,13 +2868,17 @@ class FakeKernelState:
                  message_id: str | None = None) -> ReplyVerdict:
         """Step 7: the handoff alone unless ok, ledgered as `reply` with its author, signed over the six fields. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
-        handoff."""
+        handoff. A verdict of Claude's that shows the handoff card, in place of a blocked draft or because the draft
+        cited it, first opens the session's owner handoff (`_open_card_handoff`)."""
         ok = not violations
         if not ok and author == "owner":
             blocks = []
         elif not ok:
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
             blocks = [RenderedBlock(kind="card", template="handoff", text=text, title=text)]
+        # a replayed night holds only finished things and no Demo inbox entry (Plan 01d): its blocked drafts open none
+        if author == "claude" and self._replaying is None and any(block.template == "handoff" for block in blocks):
+            self._open_card_handoff(session, desk)
         message_id = message_id or new_id("msg")
         entry = self.append(desk, "reply", {
             "message_id": message_id, "author": author, "ok": ok, "language": language,
@@ -2880,6 +2895,30 @@ class FakeKernelState:
             signature=fake_signature({"session_id": session.session_id, "generation": session.generation,
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
+
+    def _open_card_handoff(self, session: Session, desk: Desk) -> str | None:
+        """The owner's handoff for a verdict that shows the handoff card (#96), as the kernel's
+        `reply_check.open_card_handoff`: none while the session has an open handoff of either kind (an earlier card's
+        or a call-back request); else one of kind `card`, open, with no call-back window and the kernel's reason, its
+        owner alert (`handoff`, only when the Desk's preferences alert it at once; no decision) naming only who is
+        waiting, and `desk_data {part: "handoffs", refs, kind: "card"}` on the session. Returns its ID, or None."""
+        if any(row["session_id"] == session.session_id and row["status"] == "open" for row in self.handoffs.values()):
+            return None
+        handoff_id = new_id("handoff")
+        self.handoffs[handoff_id] = {
+            "handoff_id": handoff_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id,
+            "session_id": session.session_id, "reason": CARD_HANDOFF_REASON, "callback_window": None,
+            "status": "open", "kind": "card"}
+        self._put("handoffs", (handoff_id,), dict(self.handoffs[handoff_id]))
+        if "handoff" in desk.notify_now:
+            person = desk.people.get(session.person_id or "") if session.verified else None
+            who = person.display_name if person is not None else "A visitor"
+            entry = DemoInboxEntry(entry_id=new_id("inbox"), to="owner", kind="alert", created_at=self.now,
+                                   body=f"{who} is waiting in a conversation the Desk handed to you.")
+            self.inbox.append((desk.copy_id, entry))
+        self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "kind": "card"},
+                    session_id=session.session_id)
+        return handoff_id
 
     def owner_message(self, request: Request, body: OwnerMessageRequest) -> OwnerMessageResult:
         """The owner's say or whisper into an open visitor or agent session of their copy, in any mode (Plan 01b):
@@ -2996,7 +3035,8 @@ class FakeKernelState:
         self.append(desk, "desk_data", {"part": "desk", "deleted": True})
 
     def handoff_done(self, request: Request, body: Any) -> DeskUpdated:
-        """The owner closes a callback request: `open` → `done` once, ledgered `desk_data` naming it."""
+        """The owner closes a handoff, a call-back request's or the handoff card's: `open` → `done` once, ledgered
+        `desk_data` naming it."""
         copy, _ = self.owner_of(request)
         handoff = self.handoffs.get(request.path_params["id"])
         if handoff is None or handoff["copy_id"] != copy.copy_id:
@@ -3120,6 +3160,7 @@ class FakeKernelState:
     def desk_notifications(self, request: Request, body: DeskNotificationsRequest) -> DeskUpdated:
         """What alerts the owner at once and what waits for the briefing."""
         desk = self._owners_desk(request, request.path_params["id"])
+        desk.notify_now = list(body.notifications.now)
         self._put("notification_prefs", (desk.desk_id,), {"copy_id": desk.copy_id, "desk_id": desk.desk_id,
                                                           **body.notifications.model_dump()})
         return self._part_updated(desk, "notifications")

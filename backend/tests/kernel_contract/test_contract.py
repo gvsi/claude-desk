@@ -1231,6 +1231,63 @@ async def test_handoff_done_closes_it_once(kernel, ro_read):
     assert closed == [{"part": "handoffs", "refs": [handoff_id]}]
 
 
+CARD_HANDOFF_REASON = "The Desk handed this to you."
+HANDED_TO_YOU = "A visitor is waiting in a conversation the Desk handed to you."
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_the_handoff_card_opens_one_owner_handoff_per_session(kernel, ro_read):
+    """The handoff card opens a handoff the owner sees (#96). A reply the check blocks shows the visitor the handoff
+    card and opens one handoff on the session, which the owner's Needs you lists from `kernel_ro.handoffs`: kind
+    `card`, no call-back window and the kernel's reason, never the draft's words. The owner gets one alert naming no
+    decision and nothing of the draft. A second blocked reply in the same session shows the card again but opens none
+    and alerts nothing. Claude's own draft citing the card opens one too. The alert follows the Desk's notification
+    preferences, as every alert does: with `handoff` taken out of "now", a card still opens a handoff but alerts
+    nothing."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    seeded = {entry.entry_id for entry in await owner.call("GET /demo_inbox")}
+
+    def open_handoffs() -> list[tuple]:
+        """The Desk's open handoffs as Needs you reads them: (session, kind, call-back window, reason)."""
+        rows = ro_read(ro_schema, copy.copy_id, "SELECT session_id, kind, callback_window, reason FROM {ro}.handoffs"
+                                                " WHERE desk_id = %s AND status = 'open'", (desk_id,))
+        return sorted(tuple(row.values()) for row in rows)
+
+    async def alerts() -> list[DemoInboxEntry]:
+        return [entry for entry in await owner.call("GET /demo_inbox") if entry.entry_id not in seeded]
+
+    blocked = await new_visitor(http, slug)
+    for _ in range(2):
+        verdict = await check_reply(http.session(blocked.session_token), blocked.state.session_id, 0,
+                                    "It comes to $89 for the visit.")
+        assert not verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
+        assert open_handoffs() == [(blocked.state.session_id, "card", None, CARD_HANDOFF_REASON)]
+        (alert,) = await alerts()
+        assert (alert.to, alert.kind, alert.decision_id, alert.body) == ("owner", "alert", None, HANDED_TO_YOU)
+
+    cited = await new_visitor(http, slug)
+    draft = ReplyDraft(session_id=cited.state.session_id, generation=0, prose="",
+                       clauses=[Clause(template="handoff")])
+    verdict = await http.session(cited.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+    assert verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
+    assert open_handoffs() == sorted([(blocked.state.session_id, "card", None, CARD_HANDOFF_REASON),
+                                      (cited.state.session_id, "card", None, CARD_HANDOFF_REASON)])
+    assert [entry.body for entry in await alerts()] == [HANDED_TO_YOU] * 2
+
+    quiet = NotificationDefaults(now=["approval", "emergency", "breaker", "lockout"],
+                                 briefing=["lead", "callback", "booking"])
+    await owner.call("PUT /desks/{id}/notifications", DeskNotificationsRequest(notifications=quiet),
+                     path={"id": desk_id})
+    unalerted = await new_visitor(http, slug)
+    verdict = await check_reply(http.session(unalerted.session_token), unalerted.state.session_id, 0,
+                                "It comes to $89 for the visit.")
+    assert not verdict.ok and len(open_handoffs()) == 3
+    assert (unalerted.state.session_id, "card", None, CARD_HANDOFF_REASON) in open_handoffs()
+    assert len(await alerts()) == 2
+
+
 @pytest.mark.kernel_plan("01b")
 async def test_owner_demo_inbox_is_the_copys(kernel, ro_read):
     """The owner's Demo inbox holds the copy's entries: a hold alerts the owner there, under the entry its notice
