@@ -109,17 +109,19 @@ export function TeamDeskPage() {
   );
 }
 
-/** A teammate's message, then Claude's answer with its card, and the receipt under it. */
+/** A teammate's message, then Claude's answer with its cards, and the receipts under it. */
 function Turn({ turn, ownerName }: { turn: TeamTurn; ownerName: string }) {
   return (
     <>
       <TranscriptRow>
         <VisitorMessage text={turn.asked} />
       </TranscriptRow>
-      <TranscriptRow margin={<MarginReceipt source={turn.receipt.source} plain={turn.receipt.plain} ledgerSeq={0} />}>
+      <TranscriptRow margin={turn.receipts.map((receipt) => <MarginReceipt key={receipt.plain} source={receipt.source} plain={receipt.plain} ledgerSeq={0} />)}>
         <div className="cd-vision-reply">
           <ClaudeWords text={turn.reply} ownerName={ownerName} />
-          {turn.fact ? <FactCard {...turn.fact} /> : null}
+          {turn.facts.map((fact) => (
+            <FactCard key={fact.label} {...fact} />
+          ))}
         </div>
       </TranscriptRow>
     </>

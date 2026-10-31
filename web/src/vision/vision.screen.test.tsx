@@ -12,7 +12,7 @@ import {
   SPEC,
   expectConversationType,
   expectFooter,
-  expectFooterAtFoot,
+  expectNoFactsInProse,
   expectOwnerFrame,
   expectReceiptsUnderMessages,
   expectTabOrder,
@@ -183,6 +183,9 @@ describe('Vision pages against their boards', () => {
     await expect.element(chat.getByText('In Slack, from the van, 9:42 am', { exact: true })).toBeVisible();
     const log = chat.getByRole('log', { name: 'Conversation with Luis Ortega' }).element() as HTMLElement;
     expectConversationType(log);
+    // Claude's words state no date, not even a relative one ("today", "last week"), and nothing else
+    // only a card may say; the cards carry the dates.
+    expect(await expectNoFactsInProse(log)).toBe(3);
     expect(await expectReceiptsUnderMessages(log)).toBe(3);
     expect(some(log, '.cd-visitor-message__bubble').map((bubble) => bubble.textContent)).toEqual([
       'Heading to Ana Ruiz in Eastshore. What’s the history there?',
@@ -190,21 +193,34 @@ describe('Vision pages against their boards', () => {
       'Also, what did Ben make on the Harbor Street job last week?',
     ]);
     expect(some(log, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual([
-      'Here’s Ana’s history. The gate code is on today’s job card.',
+      'Here’s Ana’s history. The gate code is on her job card.',
       'Here it is.',
-      'I can’t share pay. Payroll is open to Maria and Grace only. I can show your own logged hours for last week if that helps.',
+      'I can’t share pay. Payroll is open to Maria and Grace only. Here are your own logged hours.',
     ]);
     const facts = some(log, '.cd-fact-card');
-    expect(facts.map((fact) => one(fact, '.cd-fact-card__label').textContent)).toEqual(['Customer history', 'Document, only for Luis']);
+    expect(facts.map((fact) => fact.textContent)).toEqual([
+      'Customer historyAna Ruiz, customer since 2023Water heater replaced, March 2024; under warranty until 2030Kitchen drain cleared, September 12; camera inspection declined',
+      'Job cardFriday, October 30, 10:30 amAna Ruiz, Eastshore: water heater checkGate code 2580, at the side gate',
+      'Document, only for LuisWater heater warranty, Ana Ruiz',
+      'Your logged hoursMonday, October 19 to Friday, October 2338.5 hours over 5 days',
+    ]);
     // Ana's history is there, word for word, and it is in her card.
     const history = chat.getByText('Water heater replaced, March 2024; under warranty until 2030', { exact: true });
     await expect.element(history).toBeVisible();
     expect(history.element().closest('.cd-fact-card')).toBe(facts[0]);
-    // The payroll answer declines with no card, and its receipt says it was refused.
-    expect(some(log, '.cd-margin-line').map((receipt) => one(receipt, '.cd-status-dot').className.replace('cd-status-dot cd-status-dot--', ''))).toEqual([
+    // The payroll request is refused, sharing no pay; Luis's own hours, from his time records, are shown.
+    const receipts = some(log, '.cd-margin-line');
+    expect(receipts.map((receipt) => receipt.textContent)).toEqual([
+      'From job records and her customer file. Luis is assigned to her 10:30 am visit, so the address and gate code are open to him.',
+      'Warranty released to the assigned plumber. Logged on Ana’s file.',
+      'Declined by team access: payroll is owner and office manager only. No pay was shared.',
+      'Luis’s own hours, from his time records.',
+    ]);
+    expect(receipts.map((receipt) => one(receipt, '.cd-status-dot').className.replace('cd-status-dot cd-status-dot--', ''))).toEqual([
       'handled',
       'handled',
       'refused',
+      'handled',
     ]);
 
     // Luis's access beside it: 260 px, 28 px to the conversation's right.
@@ -224,7 +240,9 @@ describe('Vision pages against their boards', () => {
     await expectFooter(root);
     const footer = one(root, '[data-ds="concept-footer"]');
     expect(round(top(footer) - bottom(today))).toBe(16);
-    await expectFooterAtFoot(root);
+    // With the job and hours cards the page runs past the window; the footer ends it, 20 px from its foot.
+    const page = main(screen).element();
+    expect(round(page.scrollHeight - (bottom(footer) - top(page) + page.scrollTop))).toBe(20);
 
     // focus_order_is_logical: the bar, the sidebar, the page's action, the teammates, the conversation's controls, then access.
     await expectTabOrderFromTheTop([

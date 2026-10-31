@@ -103,39 +103,58 @@ export const TEAM_CHAT = {
   actions: ['Whisper', 'Take over'],
 } as const;
 
-/** A teammate's turn and Claude's answer, with its card and receipt. */
+/** A teammate's turn and Claude's answer, with its cards and receipts. */
 export interface TeamTurn {
   asked: string;
   reply: string;
-  fact?: FactCardProps;
-  receipt: VisionReceipt;
+  facts: readonly FactCardProps[];
+  receipts: readonly VisionReceipt[];
 }
 
+/**
+ * Luis's conversation. Owner's copy ruling, 2026-10-30, for invariant 2: Claude's words state no
+ * date, not even "today" or "last week"; the visit's date and time are in a job card and the week's
+ * dates in an hours card beside them.
+ */
 export const TEAM_TURNS: readonly TeamTurn[] = [
   {
     asked: 'Heading to Ana Ruiz in Eastshore. What’s the history there?',
-    reply: 'Here’s Ana’s history. The gate code is on today’s job card.',
-    fact: {
-      label: 'Customer history',
-      icon: 'document',
-      title: 'Ana Ruiz, customer since 2023',
-      lines: ['Water heater replaced, March 2024; under warranty until 2030', 'Kitchen drain cleared, September 12; camera inspection declined'],
-    },
-    receipt: {
-      source: CHECKED,
-      plain: 'From job records and her customer file. Luis is assigned to her 10:30 am visit, so the address and gate code are open to him.',
-    },
+    reply: 'Here’s Ana’s history. The gate code is on her job card.',
+    facts: [
+      {
+        label: 'Customer history',
+        icon: 'document',
+        title: 'Ana Ruiz, customer since 2023',
+        lines: ['Water heater replaced, March 2024; under warranty until 2030', 'Kitchen drain cleared, September 12; camera inspection declined'],
+      },
+      {
+        label: 'Job card',
+        icon: 'calendar',
+        title: 'Friday, October 30, 10:30 am',
+        lines: ['Ana Ruiz, Eastshore: water heater check', 'Gate code 2580, at the side gate'],
+      },
+    ],
+    receipts: [
+      {
+        source: CHECKED,
+        plain: 'From job records and her customer file. Luis is assigned to her 10:30 am visit, so the address and gate code are open to him.',
+      },
+    ],
   },
   {
     asked: 'Send me the warranty in case it’s the tank.',
     reply: 'Here it is.',
-    fact: { label: 'Document, only for Luis', icon: 'document', title: 'Water heater warranty, Ana Ruiz' },
-    receipt: { source: decided('executed'), plain: 'Warranty released to the assigned plumber. Logged on Ana’s file.' },
+    facts: [{ label: 'Document, only for Luis', icon: 'document', title: 'Water heater warranty, Ana Ruiz' }],
+    receipts: [{ source: decided('executed'), plain: 'Warranty released to the assigned plumber. Logged on Ana’s file.' }],
   },
   {
     asked: 'Also, what did Ben make on the Harbor Street job last week?',
-    reply: 'I can’t share pay. Payroll is open to Maria and Grace only. I can show your own logged hours for last week if that helps.',
-    receipt: { source: decided('refused'), plain: 'Declined by team access: payroll is owner and office manager only. Nothing shared.' },
+    reply: 'I can’t share pay. Payroll is open to Maria and Grace only. Here are your own logged hours.',
+    facts: [{ label: 'Your logged hours', icon: 'clock', title: 'Monday, October 19 to Friday, October 23', lines: ['38.5 hours over 5 days'] }],
+    receipts: [
+      { source: decided('refused'), plain: 'Declined by team access: payroll is owner and office manager only. No pay was shared.' },
+      { source: CHECKED, plain: 'Luis’s own hours, from his time records.' },
+    ],
   },
 ];
 
