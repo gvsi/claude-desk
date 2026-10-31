@@ -937,23 +937,22 @@ export class MockWorld {
   /**
    * A callback request in Needs you, and the lead it makes: the name, and the rest of what they typed
    * as its note. As the kernel's `native.request_callback` does (plan 01b), a chat holds one open
-   * handoff: when it has one, the handoff card's or an earlier call-back's, that one becomes this
-   * call-back's under the same id, so the owner keeps one item for the conversation.
+   * handoff: it first closes the chat's open ones, the handoff card's or an earlier call-back's, each
+   * as the owner's mark of done does but naming the call-back that replaced it, then opens its own.
+   * A handoff's kind never changes, so the owner keeps one item for the conversation, and a stale
+   * Done on a closed one is 409.
    */
   private openHandoff(session: SessionRecord, fields: { reason: string; callbackWindow: string | null; lead: string }): void {
     const sessionId = session.state.session_id;
-    const written = { reason: fields.reason, callback_window: fields.callbackWindow, kind: 'callback' } as const;
-    const open = [...this.handoffs.values()].find((h) => h.handoff.session_id === sessionId && h.handoff.status === 'open');
-    if (open) {
-      open.handoff = { ...open.handoff, ...written };
-    } else {
-      const handoffId = this.id('handoff');
-      this.handoffs.set(handoffId, {
-        handoff: { handoff_id: handoffId, session_id: sessionId, status: 'open', ...written },
-        deskId: session.deskId,
-        createdAt: this.now(),
-      });
+    const handoffId = this.id('handoff');
+    for (const record of this.handoffs.values()) {
+      if (record.handoff.session_id === sessionId && record.handoff.status === 'open') this.closeHandoff(record, handoffId);
     }
+    this.handoffs.set(handoffId, {
+      handoff: { handoff_id: handoffId, session_id: sessionId, reason: fields.reason, callback_window: fields.callbackWindow, status: 'open', kind: 'callback' },
+      deskId: session.deskId,
+      createdAt: this.now(),
+    });
     const named = `${fields.lead} · `;
     this.leads.push({
       leadId: this.id('lead'),
@@ -1007,10 +1006,11 @@ export class MockWorld {
   }
 
   /**
-   * The owner marks a handoff done, a call-back request or the handoff card's, as the kernel records
-   * it: a `desk_data` entry naming it, on no chat and with no `kind`.
+   * A handoff closed, a call-back request's or the handoff card's, as the kernel records it: a
+   * `desk_data` entry naming it, on no chat and with no `kind`. The owner marking it done gives no
+   * more; a call-back closing it adds `replaced_by`, the call-back's own handoff.
    */
-  closeHandoff(record: HandoffRecord): void {
+  closeHandoff(record: HandoffRecord, replacedBy?: string): void {
     const desk = this.desk(record.deskId);
     if (!desk) throw new Error(`handoff ${record.handoff.handoff_id} has no Desk`);
     record.handoff = { ...record.handoff, status: 'done' };
@@ -1019,7 +1019,7 @@ export class MockWorld {
       origin: 'kernel',
       session_id: null,
       ref_id: null,
-      summary: { part: 'handoffs', refs: [record.handoff.handoff_id] },
+      summary: { part: 'handoffs', refs: [record.handoff.handoff_id], ...(replacedBy === undefined ? {} : { replaced_by: replacedBy }) },
     });
   }
 

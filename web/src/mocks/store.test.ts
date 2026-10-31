@@ -740,15 +740,15 @@ describe('the scripted Desk', () => {
     expect(mockStore.world.inbox.filter((record) => record.sessionId === session.session_id)).toEqual([]);
     expect([...mockStore.world.links.values()].filter((link) => link.sessionId === session.session_id)).toEqual([]);
 
-    // A callback still goes through, with its receipt and card, and takes over the handoff the card
-    // opened.
+    // A callback still goes through, with its receipt and card, and closes the handoff the card
+    // opened as it opens its own.
     const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
     expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
     const callback = await turn('Can you call me back?');
     expect(callback.map((ev) => ev.type)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
     expect(shown(callback).map(([, template]) => template)).toEqual(['callback_confirmed']);
     expect(toolsDecided(session.session_id)).toEqual(['native.request_callback']);
-    expect(mine().map((h) => [h.kind, h.status])).toEqual([['callback', 'open']]);
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'done'], ['callback', 'open']]);
 
     // An agent sent from the chat gets the handoff too, and decides nothing.
     const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
@@ -947,22 +947,36 @@ describe('the scripted Desk', () => {
     expect(mine()).toHaveLength(2);
   });
 
-  it('callback_takes_over_the_open_card_handoff', async () => {
+  it('callback_closes_the_open_handoff_and_opens_its_own', async () => {
     // As the kernel's `native.request_callback` does (plan 01b): a chat holds one open handoff, so a
-    // call back asked for while the card's is open becomes that one, under the same id, now of kind
-    // `callback` with its window, and the owner keeps one item for the conversation.
+    // call back first closes the open one, the card's here, exactly as the owner's mark of done does
+    // (`done`, a `desk_data` entry naming it), then opens its own of kind `callback`. A row's kind
+    // never changes, so the owner keeps one item, the call-back's, and a stale Done on the card's is 409.
     const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
     const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
     await send('Can I talk to Maria?');
     await drain();
-    const card = mine()[0]?.handoff_id;
+    const card = mine()[0]?.handoff_id ?? '';
     expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
 
+    const ledgered = desk.ledger.length;
     await send('Can you call me back?');
     await drain();
-    expect(mine().map((h) => [h.handoff_id, h.kind, h.status, h.callback_window])).toEqual([[card, 'callback', 'open', CALLBACK_WINDOW]]);
+    expect(mine().map((h) => [h.handoff_id === card, h.kind, h.status, h.callback_window])).toEqual([
+      [true, 'card', 'done', null],
+      [false, 'callback', 'open', CALLBACK_WINDOW],
+    ]);
+    // Its closing entry names the call-back that replaced it, which the owner's own mark of done doesn't.
+    const callback = mine()[1]?.handoff_id;
+    const closed = desk.ledger.slice(ledgered).map((entry) => entry.event).filter((event) => event.kind === 'desk_data');
+    expect(closed).toEqual([
+      { kind: 'desk_data', origin: 'kernel', session_id: null, ref_id: null, summary: { part: 'handoffs', refs: [card], replaced_by: callback } },
+    ]);
     const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(items.filter((item) => item.handoff?.session_id === session.session_id).map((item) => item.handoff?.kind)).toEqual(['callback']);
+    expect((await call('handoffDone', { params: { handoff_id: card } })).status).toBe(409);
   });
 
   it('open_handoff_quotes_its_visitors_latest_words', async () => {
