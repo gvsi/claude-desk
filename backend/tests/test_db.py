@@ -1107,6 +1107,63 @@ def test_a_code_entry_from_before_the_inbox_challenge_revision_names_none(scratc
         scratch.migrate(command.upgrade, "head")
 
 
+HANDOFF_KIND_REVISION = "01b_2b_handoff_kind"
+
+
+def test_a_handoff_from_before_the_kind_revision_is_a_callback(scratch):
+    """Every handoff written before the kind revision was a call-back request, and reads as one;
+    from then on each row names its kind, `callback` or `card`, and a card's handoff, which no
+    action wrote, names its own id where a call-back names its action, so no action's lookup can
+    find it. The downgrade deletes nothing, and the revision runs again over what it added."""
+    admin = scratch.conn
+
+    def insert(handoff_id: str, action_id: str, *kind: str) -> None:
+        names, values = (", kind", ", %s") if kind else ("", "")
+        admin.execute(f"INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, status,"
+                      f" action_id{names}) VALUES (%s, 'copy-kind', 'desk-kind', 'session-kind', 'open', %s{values})",
+                      (handoff_id, action_id, *kind))
+
+    def kinds() -> dict[str, str]:
+        rows = admin.execute("SELECT handoff_id, kind FROM kernel.handoffs WHERE copy_id = 'copy-kind'").fetchall()
+        return dict(rows)
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(HANDOFF_KIND_REVISION).down_revision
+    try:
+        scratch.migrate(command.downgrade, before)
+        assert "kind" not in columns(admin, "kernel", "handoffs")
+        assert "kind" not in columns(admin, "kernel_ro", "handoffs")
+        insert("handoff-before", "act-before")
+        scratch.migrate(command.upgrade, "head")
+        assert kinds() == {"handoff-before": "callback"}
+        assert nullable_columns(admin, "kernel", "handoffs")["kind"] is False
+        (default,) = admin.execute("SELECT column_default FROM information_schema.columns WHERE table_schema = 'kernel'"
+                                   " AND table_name = 'handoffs' AND column_name = 'kind'").fetchone()
+        assert default is None                                       # a new row names its kind
+        assert columns(admin, "kernel_ro", "handoffs")[-1] == "kind"
+        insert("handoff-card", "handoff-card", "card")
+        insert("handoff-callback", "act-callback", "callback")
+        for refused in (("handoff-x", "act-x", "card"), ("handoff-z", "act-z", "other")):
+            with pytest.raises(psycopg.errors.CheckViolation):
+                insert(*refused)
+        with pytest.raises(psycopg.errors.NotNullViolation):
+            insert("handoff-unnamed", "act-unnamed")
+
+        # down again with a card's handoff in the table: nothing is deleted, and it stays a valid row, which
+        # the next upgrade reads as a call-back request, as it reads every row from before it
+        scratch.migrate(command.downgrade, before)
+        assert admin.execute("SELECT count(*) FROM kernel.handoffs WHERE copy_id = 'copy-kind'").fetchone() == (3,)
+        scratch.migrate(command.upgrade, "head")
+        assert kinds() == dict.fromkeys(("handoff-before", "handoff-card", "handoff-callback"), "callback")
+        scratch.migrate(command.stamp, before)                       # the revision runs again over what it added
+        scratch.migrate(command.upgrade, HANDOFF_KIND_REVISION)
+        checks = admin.execute("SELECT count(*) FROM pg_constraint WHERE conrelid = 'kernel.handoffs'::regclass"
+                               " AND conname IN ('handoffs_kind_check', 'handoffs_card_names_itself')").fetchone()
+        assert checks == (2,)
+    finally:
+        admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-kind'")
+        scratch.migrate(command.upgrade, "head")
+
+
 def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:
     """Whether the database behind `conn` has kernel.demo_inbox.decision_id, and whether it has its check."""
     (checks,) = conn.execute("SELECT count(*) FROM pg_constraint WHERE conrelid = 'kernel.demo_inbox'::regclass"

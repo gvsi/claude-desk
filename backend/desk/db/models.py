@@ -549,8 +549,9 @@ class PaymentLink(Base):
 
 
 class Handoff(Base):
-    """A callback a visitor asked for: one per `native.request_callback` action, `open` until the
-    owner marks it `done` (01b_2_handoffs)."""
+    """A conversation handed to the owner, `open` until the owner marks it `done`: a callback a
+    visitor asked for, one per `native.request_callback` action (01b_2_handoffs), or one the
+    handoff card opened, at most one open per session (01b_2b_handoff_kind)."""
 
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}
@@ -561,7 +562,8 @@ class Handoff(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     callback_window: Mapped[str | None] = mapped_column(Text)    # ISO 8601 "<start>/<end>", or None
     status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
-    action_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)                      # "callback" or "card"; no default
+    action_id: Mapped[str] = mapped_column(Text)                 # a card's: its own handoff_id, never an action's
     window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # null without a window
     window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

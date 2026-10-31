@@ -56,7 +56,7 @@ KERNEL_RO_COLUMNS: dict[str, tuple[str, ...]] = {
     "bookings": ("booking_id", "copy_id", "desk_id", "slot_id", "starts_at", "person_id", "lead_id", "status"),
     "payment_links": ("link_id", "copy_id", "desk_id", "session_id", "quote_id", "action_id", "amount_cents",
                       "state", "expires_at"),
-    "handoffs": ("handoff_id", "copy_id", "desk_id", "session_id", "reason", "callback_window", "status"),
+    "handoffs": ("handoff_id", "copy_id", "desk_id", "session_id", "reason", "callback_window", "status", "kind"),
     "ledger_entries": ("copy_id", "desk_id", "seq", "prev_hash", "created_at", "event", "hash", "signature",
                        "key_id"),
 }

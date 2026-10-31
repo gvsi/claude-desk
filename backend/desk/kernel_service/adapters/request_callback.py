@@ -2,8 +2,8 @@
 
 The call names who to call, how to reach them and why, all text Claude writes into the call from
 what the visitor said (untrusted, and the owner reads it under "Claude's note"); it can't name a
-time. `execute` writes an `open` handoff whose reason carries that text for the owner and whose
-window is the Desk's next open hour (`desks.next_open_window`), or none, and a `handoff:<id>`
+time. `execute` writes an `open` handoff of kind `callback` whose reason carries that text for the
+owner and whose window is the Desk's next open hour (`desks.next_open_window`), or none, and a `handoff:<id>`
 fact labelled for the session (the callback confirmed card) whose only claims are the window, so
 no visitor text reaches a card. The fact expires when its window ends, and when the owner closes
 the handoff (`POST /handoffs/{id}/done`), so a callback that happened is never promised again.
@@ -92,7 +92,8 @@ class RequestCallbackAdapter:
         ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=action.copy_id, desk_id=action.desk_id,
                            session_id=session_id, reason=f"{args.name} · {args.contact} · {args.reason}",
                            callback_window=f"{start.isoformat()}/{end.isoformat()}" if start and end else None,
-                           status="open", action_id=action.action_id, window_start=start, window_end=end))
+                           status="open", kind="callback", action_id=action.action_id, window_start=start,
+                           window_end=end))
         ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=session_id,
                                    action_id=action.action_id))
         await ctx.db.flush()
