@@ -3,7 +3,7 @@
 A decision refused at execution tells its visitor only the state's generic line (`visitor_plain`).
 The owner reads why in `owner_plain`, a kernel line from a fixed table (`render.OWNER_STATUS`) picked
 by the refusal's own reason: the person's session ended (their contact changed, they were removed,
-or the session closed), the Desk was deleted, the rules changed (a failed re-check), or, for
+or the session closed), the Desk was deleted, the rules changed (the named rule re-checks), or, for
 anything else, a line that names no cause. It is the owner's, in the owner's language, and only
 the owner's reads carry it: every answer to a session (`/decide`, a session's
 `GET /decisions/{id}` and `/decisions/by_call`, `/execute`, cancel) has None, and no ledger entry
@@ -27,7 +27,7 @@ from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FakeAdapter
 from .helpers import CopyRows, kernel_ctx, ledger_rows, verify_session
-from .test_adapters import Rivera, quote_args, visitor_of
+from .test_adapters import Rivera, add_slot, local, quote_args, visitor_of
 from .test_agent_auth import mint, open_agent, turn
 from .test_approvals import (ASK_QUOTES, ENDINGS, add_person, answered, held_on, held_quote, person_id, post_cancel,
                              public_key)
@@ -35,7 +35,7 @@ from .test_compiler import card
 from .test_decide import (Visitor, by_call, decided, desk_with, open_visitor, post_decide, set_session,
                           verify_signature)
 from .test_desk_writes import updated
-from .test_execute import activate, post_execute, put_people
+from .test_execute import activate, executions_of, post_execute, put_people
 from .test_private_release import held_release, nothing_released
 
 OWNER_LINES = {
@@ -82,7 +82,9 @@ def test_an_owner_line_is_in_the_owners_language():
     ("rules_changed", "desk", "refused_desk_deleted"),
     ("session_ended", "desk", "refused_desk_deleted"),
     *[("rules_changed", check, "refused_rules_changed")
-      for check in ("tool", "session", "args", "profile", "policy", "binding", "pin", "unavailable")],
+      for check in ("tool", "session", "profile", "policy", "binding", "pin")],
+    ("rules_changed", "args", "refused_fallback"),         # normalization may refuse a slot that started
+    ("rules_changed", "unavailable", "refused_fallback"),  # a server outage changes no rule
     ("rules_changed", "prepare", "refused_fallback"),      # an adapter's own refusal is no re-check
     ("rules_changed", "closed", "refused_fallback"),       # an allow's session closed before it ran
     ("session_ended", "policy", "refused_fallback"),       # a pairing no path writes
@@ -91,7 +93,7 @@ def test_an_owner_line_is_in_the_owners_language():
 ])
 def test_a_refusals_own_reason_picks_the_owner_line(reason, check, key):
     """The refusal's ledgered `reason` and `check` pick the line: a session that ended says how, a
-    deleted Desk says so, a failed re-check says the rules changed, and anything else names no cause."""
+    deleted Desk says so, the named rule re-checks say the rules changed, and anything else names no cause."""
     assert decide.owner_refusal_key(reason, check) == key
 
 
@@ -336,7 +338,32 @@ async def test_a_spanish_visitor_reads_the_generic_line_while_the_owner_reads_en
     await assert_owner_only(client, visitor, held, HELD_QUOTE, OWNER_LINES["es"]["refused_rules_changed"], lang="es")
 
 
+async def test_a_held_booking_whose_slot_started_names_no_cause(app, client, frozen_clock):
+    """The slot starts while approval is pending, without any rule change. The adapter refuses
+    normalization at the `args` re-check, and the owner's answer and later read name no cause."""
+    copy, visitor = await visitor_of(app, client)
+    await activate(app, copy, [card("ask-book", "native.book", mode="ask")])
+    slot_id = "S-20261030-1100"
+    await add_slot(app, copy, slot_id)
+    held = await decided(client, visitor, "native.book", {"slot_id": slot_id})
+    assert held.state == "held"
+    frozen_clock.travel(local(slot_id))
+
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+
+    line = OWNER_LINES["en"]["refused_fallback"]
+    assert (result.decision.state, result.decision.owner_plain, result.execution) == (
+        "refused_at_execution", line, None)
+    read = await owner_read(client, copy.owner, held.decision_id)
+    assert (read.state, read.owner_plain) == ("refused_at_execution", line)
+    [refusal] = [entry.event for entry in await ledger_rows(app, copy)
+                 if entry.event.summary.get("state") == "refused_at_execution"]
+    assert (refusal.summary["reason"], refusal.summary["check"]) == ("rules_changed", "args")
+    assert await executions_of(app, copy.copy_id) == []
+
+
 # ---- The allow path ------------------------------------------------------------------------------
+
 
 async def test_an_allow_the_new_rules_refuse_tells_the_owner_the_rules_changed(app, client):
     """Maria stops quotes between a stranger's allowed quote and its execution: `/execute` is refused,
@@ -440,7 +467,31 @@ async def test_a_release_recovered_after_its_session_ended_tells_the_owner_why(a
     await assert_not_ledgered(app, rows, line)
 
 
+@pytest.mark.parametrize("ran", [False, True])
+async def test_a_private_action_recovered_after_desk_deletion_records_the_desk_check(app, client, registry, ran):
+    """Recovery records `desk` whether the adapter ran (withheld) or not (refused with the
+    Desk-deleted owner line). A completed action has no refusal line, even when withheld."""
+    release, rows, _, held = await unknown_release(app, client)
+    release.script["reconcile"] = AdapterResult(model_view={"ok": True}) if ran else None
+    await delete_desk(client, rows)
+
+    read = await owner_read(client, rows.owner, held.decision_id)
+
+    [recovered] = [entry.event for entry in await ledger_rows(app, rows)
+                   if entry.event.summary.get("reconciled") and entry.event.ref_id == held.decision_id]
+    assert recovered.summary["check"] == "desk"
+    if ran:
+        assert recovered.summary["withheld"] == "session_ended"
+        assert (read.state, read.owner_plain) == ("executed", None)
+        assert "on_failed" not in release.calls
+    else:
+        assert (read.state, read.owner_plain) == (
+            "refused_at_execution", OWNER_LINES["en"]["refused_desk_deleted"])
+        assert "on_failed" in release.calls
+
+
 # ---- Every other state ---------------------------------------------------------------------------
+
 
 async def in_state(client: httpx.AsyncClient, rows: CopyRows, quote: FakeAdapter, visitor: Visitor, held: Decision,
                    frozen_clock, state: str) -> Decision:

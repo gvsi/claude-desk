@@ -356,14 +356,16 @@ def status_line(state: str, *, tool: str, session: SessionRow, owner: str, key: 
 # How a session that no longer stands ended (`execute.session_ended`), and the parts of the re-check
 # that can fail (`execute.recheck_under`) other than the Desk's, each a refusal at execution's `check`.
 SESSION_ENDED_CHECKS = frozenset({"contact_changed", "person_removed", "session_closed"})
-RECHECK_CHECKS = frozenset({"tool", "session", "args", "profile", "policy", "binding", "pin", "unavailable"})
+# An unreachable server or an adapter's normalization refusal is no rule change; name no cause.
+RECHECK_CHECKS = frozenset({"tool", "session", "profile", "policy", "binding", "pin"})
 
 
 def owner_refusal_key(reason: str | None, check: str | None) -> str:
     """The owner line (`render.OWNER_STATUS`) for a refusal at execution, from its own ledgered
     `reason` and `check`: a deleted Desk (`desk`) says so; a private release whose session ended
-    (`session_ended`) says how; a failed re-check says the rules changed; anything else (an adapter's
-    own `prepare` refusal, an allow's session closed before it ran) names no cause."""
+    (`session_ended`) says how; the checks in `RECHECK_CHECKS` say the rules changed; anything else
+    (an adapter's normalization or `prepare` refusal, an unreachable server, an allow's session
+    closed before it ran) names no cause."""
     if check == "desk":
         return "refused_desk_deleted"
     if reason == "session_ended" and check in SESSION_ENDED_CHECKS:

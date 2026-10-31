@@ -151,8 +151,8 @@ async def _refused_at_execution(ctx: KernelCtx, row: DecisionRow, answer: Approv
     await decide.set_state(ctx, row, "refused_at_execution", kind="approval", status=status, summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer,
         "state": "refused_at_execution", "reason": reason, "check": check})
-    return ApprovalResult(decision=await decide.decision_contract(ctx, row, inbox=inbox, for_owner=True), execution=None,
-                          card_diff=None)
+    return ApprovalResult(decision=await decide.decision_contract(ctx, row, inbox=inbox, for_owner=True),
+                          execution=None, card_diff=None)
 
 
 async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: ApprovalAnswer) -> ApprovalResult:

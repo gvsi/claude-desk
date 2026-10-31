@@ -410,6 +410,8 @@ Owner decision, 2026-10-29 (master "Money cap"). The cap is a field of the polic
 
 ## Review Ledger
 
+- Private-action recovery after Desk deletion records `check: "desk"` instead of `"session_closed"` on both refused and withheld entries, distinguishing deletion so a refusal carries the Desk-deleted owner line; both recovery outcomes are tested.
+
 Round 1 (2026-10-29): seats Sol (P1 4, P2 7, P3 2), Opus (0, 12, 12), Fable (1, 6, 13). Major findings and changes:
 - Knowledge ledger key `canary` failed `check_summary`: renamed; summary keys and refs constrained.
 - Verification: failures by attempt time (`failed_at`); one live challenge per session and person under ordered locks; every start cancels the session's challenge; owner alerts never in visitor responses; session states.
