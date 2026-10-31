@@ -38,6 +38,7 @@ const meta = {
     canvasNote: [
       'The dialog with the board’s copy, over a still Today: the web app (plan 04) draws that preview behind it, and here it is the signed Today board (N-Today-Run1) without its reviewer bar, where the board shows an earlier Today with a composer and a Desk picker.',
       'The board draws no reviewer bar behind the dialog; the reviewer bar comes with Today once the passcode is in.',
+      'The board draws the reply card’s mark at 18 px inside a dark 32 px tile; the owner dropped that frame on 2026-10-30, so the mark stands alone at 32 px.',
     ].join(' '),
   },
 } satisfies Meta;

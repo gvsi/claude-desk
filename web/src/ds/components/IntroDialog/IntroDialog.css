@@ -238,17 +238,6 @@
   font-weight: 560;
 }
 
-.cd-intro__tile {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: var(--size-control);
-  height: var(--size-control);
-  border-radius: var(--radius-control);
-  background: var(--bg-app);
-}
-
 .cd-intro__card-body {
   flex: 1 1 auto;
   min-width: 0;

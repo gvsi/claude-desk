@@ -16,7 +16,7 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-const SIZES = [16, 20, 24] as const;
+const SIZES = [16, 20, 24, 32] as const;
 
 export const Mark: Story = {
   parameters: { canvasNote: 'N-Today-Run1 draws the earlier counter mark; the bell (N-Explore-Mark-Bell, signed 2026-10-30) replaced it.' },
@@ -29,7 +29,7 @@ export const Mark: Story = {
   ),
   play: async ({ canvasElement }) => {
     const marks = [...canvasElement.querySelectorAll<SVGSVGElement>('svg.cd-mark')];
-    await expect(marks.map((mark) => mark.getAttribute('width'))).toEqual(['16', '20', '24']);
+    await expect(marks.map((mark) => mark.getAttribute('width'))).toEqual(['16', '20', '24', '32']);
     for (const mark of marks) {
       await expect(mark).toHaveAttribute('aria-hidden', 'true');
       await expect(mark).toHaveAttribute('focusable', 'false');

@@ -3,8 +3,8 @@ import { MARK_GEOMETRY } from './markGeometry.ts';
 import './Mark.css';
 
 export interface MarkProps {
-  /** Drawn size in px; 20 (the default) in the sidebar, 16 at the smallest, 18 on the intro illustration's reply card. */
-  size?: 16 | 18 | 20 | 24;
+  /** Drawn size in px; 20 (the default) in the sidebar, 16 at the smallest, 32 alone in an avatar's place on the intro illustration's reply card. */
+  size?: 16 | 20 | 24 | 32;
 }
 
 /**

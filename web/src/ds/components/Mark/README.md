@@ -4,13 +4,13 @@
 
 ## When to use
 
-- At the top of the owner app's sidebar, beside the `Wordmark`, and in "Powered by Claude Desk" on the public page.
-- It is the only mark. Its colors (`mark-tile`, `mark-clay`, `mark-ink`, `mark-hairline`) are its own: fixed, the same in every theme, and used nowhere else. Never recolor it, never draw it without its tile, and never place it beside a Claude or Anthropic logo.
+- At the top of the owner app's sidebar, beside the `Wordmark`, in "Powered by Claude Desk" on the public page, and in the avatar's place on the intro illustration's reply card.
+- It is the only mark. Its colors (`mark-tile`, `mark-clay`, `mark-ink`, `mark-hairline`) are its own: fixed, the same in every theme, and used nowhere else. Never recolor it, never draw it without its tile, never set it inside a second tile or frame, and never place it beside a Claude or Anthropic logo.
 - The tile's hairline edge sets it off on a light ground, so it can sit on either; on the dark grounds the white tile carries it.
 
 ## What the consumer provides
 
-- A `size`: 20 px in the sidebar, 16 px at the smallest, 18 px on the intro illustration's reply card, 24 px at most.
+- A `size`: 20 px in the sidebar, 16 px at the smallest, 24 px at most beside a name, and 32 px only on the intro illustration's reply card, where it stands alone in an avatar's place.
 - The name written out next to it (`Wordmark`, or text): the mark is `aria-hidden`.
 
 ## Props
@@ -19,7 +19,7 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `size` | `16 \| 18 \| 20 \| 24` | 20 by default. |
+| `size` | `16 \| 20 \| 24 \| 32` | 20 by default. |
 
 `Wordmark`:
 
