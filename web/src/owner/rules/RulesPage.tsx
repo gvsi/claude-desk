@@ -37,7 +37,8 @@ import { moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
 import './RulesPage.css';
 
-const TITLE = 'Rules';
+/** The Rules page's title, which the pages under it (All rules, a change's review) name it by. */
+export const RULES_TITLE = 'Rules';
 
 /** What the owner can ask Claude for on Rules, in her words (the presets board's, with the owner's later words). */
 const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600', "Why was Dana's refund held?"] as const;
@@ -88,7 +89,7 @@ interface LimitField {
  */
 export function RulesPage() {
   const { desk } = useOwnerDesk();
-  useDocumentTitle(inApp(TITLE));
+  useDocumentTitle(inApp(RULES_TITLE));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const { ask } = useAskClaude();
@@ -222,7 +223,7 @@ export function RulesPage() {
     <div className="cd-rules" onClick={followInAppLinks(navigate)}>
       <div className="cd-rules__header">
         <PageHeader
-          title={TITLE}
+          title={RULES_TITLE}
           subtitle="What Claude can do on this Desk, where each tool comes from, and your rules for it."
           actions={<PresetMenu onPick={(preset) => void pickPreset(preset)} pending={presetPending} />}
           actionsBelowOnPhone

@@ -6,7 +6,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
 
-import { Sidebar, type SidebarHrefs, type SidebarProps } from './Sidebar.tsx';
+import { NAV_LABELS, Sidebar, type SidebarHrefs, type SidebarProps } from './Sidebar.tsx';
 
 declare global {
   // Tells React this test drives its updates inside act().
@@ -105,6 +105,9 @@ it('connectors_row_only_with_its_href', () => {
   expect([...without.querySelectorAll('.cd-sidebar__nav > a')].every((link) => link.getAttribute('href'))).toBe(true);
   // With it, the eighth row, fifth.
   expect(labels(withConnectors)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Share', 'Settings']);
+  // The labels the rows draw are the ones exported for pages to name themselves by; people's row is the consumer's.
+  const { today, conversations, rules, connectors, safety, share, settings } = NAV_LABELS;
+  expect(labels(withConnectors)).toEqual([today, conversations, 'Customers', rules, connectors, safety, share, settings]);
 
   // Nothing else moves: the top, the rows down to Rules and the pinned foot are where they were,
   // and the rows after Rules close up, one 38 px row apart as always, with no gap where it was.

@@ -54,4 +54,4 @@
 | `linkComponent` | `ComponentType<SidebarLinkProps>` | A plain `<a>` by default. The about links use it too. |
 | `about` | `SidebarAbout` | `{ title: string; links: { id: string; label: string; href: string; current?: boolean }[] }`. Left out, no group. |
 
-`NavKey`, `NavCount`, `SidebarHrefs`, `SidebarLinkProps`, `SidebarAbout` and `SidebarAboutLink` are exported with the component, and `initialsOf(name)`, the owner avatar's initials, which `SwitcherMenu`'s monograms share.
+`NavKey`, `NavCount`, `SidebarHrefs`, `SidebarLinkProps`, `SidebarAbout` and `SidebarAboutLink` are exported with the component, and `initialsOf(name)`, the owner avatar's initials, which `SwitcherMenu`'s monograms share. `NAV_LABELS` holds each row's label by key (people's row is `peopleLabel`), so a page can name itself, such as its tab's title, in the sidebar's words.

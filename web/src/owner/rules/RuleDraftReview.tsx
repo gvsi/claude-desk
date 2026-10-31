@@ -26,6 +26,7 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { cancelsLinksFor, changeRows } from './changeRows.ts';
 import { checkStatus } from './checkStatus.ts';
 import { draftFromAnswer, draftFromDiff, type RuleDraft } from './drafts.ts';
+import { RULES_TITLE } from './RulesPage.tsx';
 import { moneyCapWords } from './ruleWords.ts';
 
 import './RuleDraftReview.css';
@@ -129,7 +130,7 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
   // Where the trail starts, and where keeping the rules goes when there is nothing to go back to: a
   // turn-on's Connectors page once those pages are built (`connectorPageHref`), else Rules.
   const connectors = turningOn ? connectorPageHref(deskId, 'connectors') : undefined;
-  const root = connectors === undefined ? { label: 'Rules', href: rulesPath(deskId) } : { label: 'Connectors', href: connectors };
+  const root = connectors === undefined ? { label: RULES_TITLE, href: rulesPath(deskId) } : { label: 'Connectors', href: connectors };
 
   const finish = (outcome: 'confirmed' | 'kept') => {
     if (onDone) onDone(outcome);
@@ -302,7 +303,7 @@ export function RuleDraftPage() {
   // A built review names the tab itself. Without one, the tab follows the title this page shows; while
   // the draft is read, the page shows none (a change to the payment limit alone has its own), so the
   // tab names Rules, the page the review is under.
-  const shownTitle = notOpen || failed !== null ? REVIEW_TITLE : 'Rules';
+  const shownTitle = notOpen || failed !== null ? REVIEW_TITLE : RULES_TITLE;
   useDocumentTitle(built === null ? inApp(shownTitle) : null);
 
   if (built !== null) return <RuleDraftReview key={built.draft.version} deskId={deskId} draft={built.draft} {...(built.title === undefined ? {} : { title: built.title })} />;
@@ -344,7 +345,7 @@ export function RuleDraftPage() {
   return (
     <div className="cd-rule-draft" onClick={followInAppLinks(navigate)}>
       <div className="cd-rule-draft__header">
-        <Breadcrumb items={[{ label: 'Rules', href: rulesPath(deskId) }, { label: REVIEW_TITLE }]} linkComponent={RouterLink} />
+        <Breadcrumb items={[{ label: RULES_TITLE, href: rulesPath(deskId) }, { label: REVIEW_TITLE }]} linkComponent={RouterLink} />
         <PageHeader title={REVIEW_TITLE} subtitle={SUBTITLE} />
       </div>
       {body}

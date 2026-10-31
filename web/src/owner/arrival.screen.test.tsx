@@ -734,7 +734,7 @@ describe('OwnerLayout', () => {
       expect(document.title, path).toBe(`${title} · Claude Desk`);
     }
 
-    // Moving between pages, the tab follows, Back included, and the router's own move announces it.
+    // Moving between pages, the tab follows, Back included.
     const { screen, router } = await renderRoute(`${base}/today`);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Maria$/ })).toBeVisible();
     expect(document.title).toBe('Today · Claude Desk');
