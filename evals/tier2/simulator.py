@@ -16,6 +16,9 @@ the re-served response and leaves its `usage` as the serving model's. Served mod
 their production names through `BEDROCK_MODEL_IDS`. A turn both models refuse raises
 `SimulatorRefused`.
 
+**Invalid JSON.** A non-JSON structured answer is retried once with the same request and run
+state. Both calls' serving models and usage are recorded; other validation errors fail at once.
+
 **What it sees.** Only observations (`observe_events`, `observe_a2a`): the Desk's prose, its cards
 as `[card: <template>] <text>`, status lines as `[status] <visitor_plain>`, the visitor's own
 messages and harness notes. Ids, signatures, link tokens and Demo inbox entries never reach it.
@@ -39,6 +42,7 @@ from typing import Any, Literal, TextIO
 import anthropic
 import httpx2
 from anthropic import BetaFallbackState, BetaRefusalFallbackMiddleware
+from anthropic.types.beta import BetaMessage
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from desk.api.model import BEDROCK_MODEL_IDS, NO_API_KEY, bedrock_client_kwargs
@@ -307,21 +311,41 @@ class Simulator:
         return await self._turn(CHECK_SYSTEM, CHECK_USER, run, CHECK_MAX_TOKENS)
 
     async def _turn(self, system: str, text: str, run: SimulatorRun, max_tokens: int) -> VisitorTurn:
+        for attempt in range(2):
+            try:
+                message = await self._request_turn(system, text, run, max_tokens)
+                if message.stop_reason == "refusal":
+                    raise SimulatorRefused(f"{self.model} and its fallback {self.fallback_model} refused the turn")
+                turns = [VisitorTurn.model_validate_json(block.text) for block in message.content
+                         if block.type == "text"]
+                break
+            except ValidationError as error:   # pydantic's own text quotes the answer
+                if attempt == 0 and all(item["type"] == "json_invalid" for item in error.errors()):
+                    continue
+                raise SimulatorError("infra", f"the simulator's answer isn't a visitor turn (ValidationError: "
+                                              f"{validation_summary(error, VisitorTurn)})") from None
+            except ValueError as error:
+                raise SimulatorError("infra", f"the simulator's answer isn't a visitor turn ({type(error).__name__})") \
+                    from None
+        if message.stop_reason != "end_turn" or len(turns) != 1:
+            raise SimulatorError("infra", f"the simulator's answer stopped with {message.stop_reason} and "
+                                          f"{len(turns)} text blocks, not one visitor turn")
+        return turns[0]
+
+    async def _request_turn(self, system: str, text: str, run: SimulatorRun,
+                            max_tokens: int) -> BetaMessage:
+        """Record usage before parsing: even an invalid structured answer was a paid call."""
         started = time.monotonic()
-        try:
-            with run.state:
-                message = await self._client.beta.messages.parse(
-                    model=self.model_id, max_tokens=max_tokens,
-                    system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-                    messages=[{"role": "user", "content": text}],
-                    output_format=VisitorTurn, output_config={"effort": self.effort},
-                )
-        except ValidationError as error:   # told by field and error type: pydantic's own text quotes the answer
-            raise SimulatorError("infra", f"the simulator's answer isn't a visitor turn (ValidationError: "
-                                          f"{validation_summary(error, VisitorTurn)})") from None
-        except ValueError as error:
-            raise SimulatorError("infra", f"the simulator's answer isn't a visitor turn ({type(error).__name__})") \
-                from None
+        with run.state:
+            # The refusal middleware parses replies too. Ask for the same SDK-transformed schema,
+            # then validate locally so an invalid JSON body can't hide the serving model or usage.
+            message = await self._client.beta.messages.create(
+                model=self.model_id, max_tokens=max_tokens,
+                system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": text}],
+                output_config={"effort": self.effort, "format": {
+                    "type": "json_schema", "schema": anthropic.transform_schema(VisitorTurn)}},
+            )
         served = production_name(message.model)
         if served not in (self.model, self.fallback_model):
             raise SimulatorError("config_mismatch", f"a simulator turn was served by {served!r}, which is neither "
@@ -336,13 +360,7 @@ class Simulator:
                    "output_tokens": usage.output_tokens, "stop_reason": message.stop_reason,
                    "latency_ms": round((time.monotonic() - started) * 1000)},
         ))
-        if message.stop_reason == "refusal":
-            raise SimulatorRefused(f"{self.model} and its fallback {self.fallback_model} refused the turn")
-        texts = [block for block in message.content if block.type == "text"]
-        if message.stop_reason != "end_turn" or len(texts) != 1 or texts[0].parsed_output is None:
-            raise SimulatorError("infra", f"the simulator's answer stopped with {message.stop_reason} and "
-                                          f"{len(texts)} text blocks, not one visitor turn")
-        return texts[0].parsed_output
+        return message
 
 
 # python -m evals.run simulator-check

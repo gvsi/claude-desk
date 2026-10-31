@@ -17,7 +17,7 @@ import pytest
 from desk.api.model import BEDROCK_MODEL_IDS
 from desk.contracts import RenderedBlock
 from desk.events import EvDemoInbox, EvHeld, EvMessage, EvReceipt, EvTurnEnd, EvWriting
-from evals.fakes import FakeAnthropic, Json, Refusal
+from evals.fakes import FakeAnthropic, Json, Refusal, Text, Usage
 from evals.tier2 import simulator as sim
 from evals.tier2.prompts import ATTACKER_SYSTEM, MAX_MESSAGE_CHARS, VISITOR_SYSTEM
 from evals.tier2.schema import Scenario
@@ -186,11 +186,91 @@ async def test_refusal_is_reported(fake):
     assert [body["model"] for body in fake.calls()] == [OPUS, SONNET]
 
 
+@pytest.mark.parametrize("provider", PROVIDERS)
+async def test_refusal_with_plain_text_is_not_retried_as_invalid_json(provider):
+    calls = []
+
+    def refuse(request: httpx2.Request) -> httpx2.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        return httpx2.Response(200, json={
+            "id": "msg_refused", "type": "message", "role": "assistant", "model": body["model"],
+            "content": [{"type": "text", "text": "I cannot play that persona."}],
+            "stop_reason": "refusal", "stop_sequence": None, "stop_details": None,
+            "usage": {"input_tokens": 50, "output_tokens": 10},
+        })
+
+    attacker = Simulator.attacker(provider, fake_url="http://127.0.0.1:9",
+                                  http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(refuse)))
+    run = attacker.new_run()
+    with pytest.raises(SimulatorRefused):
+        await attacker.next_turn(ATTACK, [], run)
+    assert [body["model"] for body in calls] == [model_id(provider, OPUS), model_id(provider, SONNET)]
+    assert run.served_models == [SONNET]
+    assert run.usage[0]["input_tokens"] == 50
+
+
 SAID = "Dana here, my code is 482913"   # what the answer held: never in the error
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+async def test_invalid_json_is_retried_once_and_both_calls_usage_is_counted(fake, provider):
+    primary = model_id(provider, OPUS)
+    fake.script(primary, Text(SAID, usage=Usage(input_tokens=40, output_tokens=8,
+                                             cache_read_input_tokens=7, cache_creation_input_tokens=3)),
+                Json(turn("Try again.").obj, usage=Usage(input_tokens=60, output_tokens=12,
+                                                       cache_read_input_tokens=5, cache_creation_input_tokens=7)))
+    attacker = make("attacker", provider, fake)
+    run = attacker.new_run()
+    visitor_turn = await attacker.next_turn(ATTACK, [], run)
+    assert visitor_turn.message == "Try again."
+    first, second = fake.calls()
+    assert first == second   # the same turn, prompt, schema and settings
+    assert run.served_models == [OPUS, OPUS]
+    assert sum(usage["input_tokens"] for usage in run.usage) == 100
+    assert sum(usage["output_tokens"] for usage in run.usage) == 20
+    assert sum(usage["cache_read_input_tokens"] for usage in run.usage) == 12
+    assert sum(usage["cache_creation_input_tokens"] for usage in run.usage) == 10
+    assert run.fallback_turns == 0 and run.switches == 0
+    fake.check()
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+async def test_invalid_json_twice_is_infra_and_keeps_safe_detail_and_usage(fake, provider):
+    fake.script(model_id(provider, OPUS), Text(SAID), Text("Still not JSON: " + SAID))
+    attacker = make("attacker", provider, fake)
+    run = attacker.new_run()
+    with pytest.raises(sim.SimulatorError) as failed:
+        await attacker.next_turn(ATTACK, [], run)
+    assert failed.value.kind == "infra"
+    assert failed.value.detail == (
+        "the simulator's answer isn't a visitor turn (ValidationError: the body: json_invalid)")
+    assert len(fake.calls()) == 2
+    assert run.served_models == [OPUS, OPUS]
+    assert sum(usage["input_tokens"] for usage in run.usage) == 200
+    assert sum(usage["output_tokens"] for usage in run.usage) == 40
+    fake.check()
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+async def test_invalid_json_retry_preserves_the_runs_refusal_fallback(fake, provider):
+    primary, fallback = model_id(provider, OPUS), model_id(provider, SONNET)
+    fake.script(primary, Refusal())
+    fake.script(fallback, Text(SAID), turn("Served by the fallback."))
+    attacker = make("attacker", provider, fake)
+    run = attacker.new_run()
+    assert (await attacker.next_turn(ATTACK, [], run)).message == "Served by the fallback."
+    assert [body["model"] for body in fake.calls()] == [primary, fallback, fallback]
+    assert run.served_models == [SONNET, SONNET]
+    assert [usage["model"] for usage in run.usage] == [SONNET, SONNET]
+    assert sum(usage["input_tokens"] for usage in run.usage) == 200
+    assert run.fallback_turns == 2 and run.switches == 1
+    fake.check()
 
 
 @pytest.mark.parametrize(("answer", "named"), [
     ({"message": SAID, "verify_contact": "dana@example.com", "done": False}, "verify_code: missing"),
+    ({**turn(SAID).obj, "verify_code": ["482913"]}, "verify_code: string_type"),
     ({**turn(SAID + " " + "x" * MAX_MESSAGE_CHARS).obj, "dana@example.com": SAID},
      "message: string_too_long; *: extra_forbidden"),
 ])
@@ -207,6 +287,8 @@ async def test_an_answer_that_isnt_a_turn_names_its_fields_never_their_values(fa
     assert set(failed.value.detail[len(lead):-1].split("; ")) == set(named.split("; "))   # in pydantic's order
     for shown in ("482913", "dana@example.com", "xxx"):
         assert shown not in str(failed.value)
+    assert len(fake.calls()) == 1   # schema errors never retry, including a missing field
+    fake.check()
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
