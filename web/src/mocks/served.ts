@@ -23,6 +23,7 @@ import type {
 } from '../api/views.ts';
 import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
 import { idempotencyKeyOf } from './keys.ts';
+import { OWNER_LANGUAGE, loweredReason } from './moneyCap.ts';
 import {
   attempts,
   briefingList,
@@ -176,17 +177,20 @@ function aboveMoneyCap(desk: DeskRecord, cards: readonly RuleCard[]): Failure | 
 }
 
 /**
- * `cards` with each active automatic money rule above `cap` brought down to it, as plan 01b's
- * `desk.money_cap.lower_to_cap` drafts a lower limit: its own limit becomes `cap`, or at 0 it asks
- * first, with what only an automatic rule has dropped. A card no active card has, and every other
- * card, is unchanged, so the draft shows each one the new limit changes.
+ * `cards` with each active automatic money rule above `cap` brought down to it, as
+ * `desk.money_cap.lower_to_cap` drafts a new limit: its own limit becomes `cap`, or at 0 it asks
+ * first, with what only an automatic rule has dropped, and either way its reason is replaced whole
+ * by the sentence for the new limit, in the language the API's route writes it in. A card no active
+ * card has, and every other card, is unchanged, reason included, so the draft shows each one the
+ * new limit changes.
  */
 function lowerToCap(desk: DeskRecord, cards: readonly RuleCard[], cap: number): RuleCard[] {
   const carried = new Set(desk.policy.cards.map((card) => card.card_id));
+  const reason = loweredReason(cap, OWNER_LANGUAGE);
   return cards.map((card) => {
     if (!carried.has(card.card_id) || !autoMoneyAbove(desk, card, cap)) return card;
-    if (cap > 0) return { ...card, max_amount_cents: cap };
-    return { ...card, mode: 'ask', max_amount_cents: null, hours: null, max_discount_bp: 0, review: false };
+    if (cap > 0) return { ...card, max_amount_cents: cap, reason };
+    return { ...card, mode: 'ask', max_amount_cents: null, hours: null, max_discount_bp: 0, review: false, reason };
   });
 }
 
@@ -611,11 +615,11 @@ const SERVED: ServedRoutes = {
     const cap = isRecord(req.body) ? req.body.auto_money_cap_cents : undefined;
     if (req.malformed || typeof cap !== 'number' || !Number.isSafeInteger(cap) || cap < 0) return INVALID;
     if (cap > PLATFORM_CEILING_CENTS) return failWith(422, 'above_platform_ceiling');
-    // The active rules at the new limit. A lower one first brings each automatic money rule above it
-    // down to it, so the draft holds together on its own and its diff shows each one; a higher one
-    // keeps the rules as they are. Nothing changes until the owner confirms the draft.
-    const lower = cap < (desk.policy.auto_money_cap_cents ?? 0);
-    return ok(sv.world.draftCards(desk, lower ? lowerToCap(desk, desk.policy.cards, cap) : desk.policy.cards, { cap }));
+    // The active rules at the new limit, as the API drafts them: each automatic money rule above it
+    // comes down to it, so the draft holds together on its own and its diff shows each one; a higher
+    // limit leaves none above it, so the rules stay as they are. Nothing changes until the owner
+    // confirms the draft.
+    return ok(sv.world.draftCards(desk, lowerToCap(desk, desk.policy.cards, cap), { cap }));
   },
   ruleDraft(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);

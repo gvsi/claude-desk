@@ -1246,6 +1246,51 @@ describe('rules and tools', () => {
     expect((await rules()).active.version).toBe(7);
   });
 
+  it('money_cap_draft_lowers_each_money_rule_above_it_and_says_the_new_limit', async () => {
+    // As the API's money-limit route drafts it (desk.api.rules.draft_money_cap through
+    // desk.money_cap.lower_to_cap, in English): Rivera's limit is $500, with an automatic payment
+    // link up to $300 (`rv-link`) and visiting agents' deposits up to $20 (`rv-mandate`).
+    const draftCap = (body: unknown) => call('draftMoneyCap', { params: { desk_id: deskId }, body });
+    const link = rivera.ruleCards['rv-link'];
+    const mandate = rivera.ruleCards['rv-mandate'];
+
+    // Lowered to $100, the $300 link comes down to it, its reason replaced whole by the sentence
+    // for the new limit; the $20 deposit already fits and keeps its own.
+    const lowered = (await draftCap({ auto_money_cap_cents: 10_000 })).body as RulesDraft;
+    expect(lowered.auto_money_cap_cents).toBe(10_000);
+    expect(lowered.diff).toEqual({ added: [], removed: [], changed: [[link, { ...link, max_amount_cents: 10_000, reason: 'Up to $100, your payment limit.' }]] });
+    expect(lowered.cards.find((card) => card.card_id === mandate.card_id)).toEqual(mandate);
+
+    // At $0 each one asks instead, and says so, and the summary lists each reason once, as the
+    // API's `rules_draft` does: the two lowered cards are one line.
+    const zero = (await draftCap({ auto_money_cap_cents: 0 })).body as RulesDraft;
+    const asks = { mode: 'ask', max_amount_cents: null, max_discount_bp: 0, hours: null, review: false, reason: 'Your payment limit is $0.' } as const;
+    expect(zero.diff?.changed).toEqual([
+      [link, { ...link, ...asks }],
+      [mandate, { ...mandate, ...asks }],
+    ]);
+    expect(zero.summary?.asks_you).toEqual(['Your payment limit is $0.', rivera.ruleCards['rv-refund'].reason]);
+
+    // Raised to $800, no rule changes.
+    const raised = (await draftCap({ auto_money_cap_cents: 80_000 })).body as RulesDraft;
+    expect(raised).toMatchObject({ auto_money_cap_cents: 80_000, diff: { added: [], removed: [], changed: [] } });
+
+    // The API's refusals, with its test's bodies: above the $10,000 ceiling, or anything but a whole
+    // number of cents from 0 (its 500.0 parses as 500 here, so 500.5 stands in for it).
+    const refused: [unknown, string][] = [
+      [{ auto_money_cap_cents: 1_000_001 }, 'above_platform_ceiling'],
+      [{ auto_money_cap_cents: -1 }, 'invalid'],
+      [{ auto_money_cap_cents: 500.5 }, 'invalid'],
+      [{ auto_money_cap_cents: '500' }, 'invalid'],
+      [{ auto_money_cap_cents: true }, 'invalid'],
+      [{}, 'invalid'],
+    ];
+    for (const [body, error] of refused) expect(await draftCap(body), JSON.stringify(body)).toEqual({ status: 422, body: { error } });
+    expect((await draftCap({ auto_money_cap_cents: 1_000_000 })).status).toBe(200);
+    // Nothing applies until the owner confirms a draft.
+    expect((await rules()).active).toMatchObject({ version: 7, auto_money_cap_cents: 50_000 });
+  });
+
   it('confirm_tool_takes_the_batch_body', async () => {
     const stripe = ['payments.list_charges', 'payments.create_refund'];
     const entries = async () => Promise.all(stripe.map(async (tool) => ({ tool, definition_sha256: await hashOf(tool) })));

@@ -387,7 +387,8 @@ describe('rule draft review', () => {
 
   it('confirm_shows_the_cap_change_in_words_both_ways', async () => {
     const link = rivera.ruleCards['rv-link'];
-    const withLink = (cents: number) => desk().policy.cards.map((card) => (card.card_id === link.card_id ? { ...card, max_amount_cents: cents } : card));
+    const withLink = (cents: number, reason = link.reason) =>
+      desk().policy.cards.map((card) => (card.card_id === link.card_id ? { ...card, max_amount_cents: cents, reason } : card));
 
     // Raised from $500 to $5,000, the link rule with it: the new limit in words over the change, and nothing cancelled.
     const raise = mockStore.world.draftCards(desk(), withLink(100_000), { cap: 500_000 });
@@ -399,15 +400,20 @@ describe('rule draft review', () => {
     expect(raised.screen.getByText(CANCELS_LINKS, { exact: true }).elements()).toHaveLength(0);
     await expectScreenBasics(raised.screen.container, { owner: true });
 
-    // Lowered from $500 to $100, the $300 link rule down to $100: links may be cancelled, said above the buttons.
-    const lower = mockStore.world.draftCards(desk(), withLink(10_000), { cap: 10_000 });
+    // Lowered from $500 to $100, the $300 link rule down to $100 as the API lowers it, its reason the
+    // sentence for the new limit in place of the one that quoted $300: links may be cancelled, said
+    // above the buttons.
+    const lower = mockStore.world.draftCards(desk(), withLink(10_000, 'Up to $100, your payment limit.'), { cap: 10_000 });
     const lowered = await openDraft(lower.version);
     const newLimit = lowered.screen.getByRole('region', { name: 'Payment limit' });
     await expect.element(newLimit.getByText('New limit: no payment over $100 without asking you.', { exact: true })).toBeVisible();
     await expect.element(newLimit.getByText('Was $500', { exact: true })).toBeVisible();
     const row = lowered.screen.getByRole('region', { name: 'Changes' }).getByRole('listitem');
     await expect.element(row.getByRole('group', { name: 'Before' }).getByText('Automatic up to $300; over $300, ask me first', { exact: true })).toBeVisible();
+    await expect.element(row.getByRole('group', { name: 'Before' }).getByText(link.reason, { exact: true })).toBeVisible();
     await expect.element(row.getByRole('group', { name: 'After' }).getByText('Anyone · Up to $100 · Checked by the reviewer', { exact: true })).toBeVisible();
+    // The new reason reads as a change, tagged as the other changed lines are.
+    await expect.element(row.getByRole('group', { name: 'After' }).getByText('Up to $100, your payment limit. Changed', { exact: true })).toBeVisible();
     const cancels = lowered.screen.getByText(CANCELS_LINKS, { exact: true });
     await expect.element(cancels).toBeVisible();
     expect(before(cancels.element(), lowered.screen.getByRole('button', { name: 'Confirm change' }).element())).toBe(true);

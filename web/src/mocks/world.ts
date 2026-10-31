@@ -1032,7 +1032,9 @@ export class MockWorld {
       const old = was.get(card.card_id);
       return old !== undefined && canonicalCard(old) !== canonicalCard(card) ? [[{ ...old }, card]] : [];
     });
-    const reasons = (mode: RuleCard['mode']) => next.filter((c) => c.mode === mode).map((c) => c.reason);
+    // Each reason once, in card order, as the API's summary lists them (`desk.api.versions.rules_draft`):
+    // rules lowered to the same payment limit share one sentence, and it shows once.
+    const reasons = (mode: RuleCard['mode']) => [...new Set(next.filter((c) => c.mode === mode).map((c) => c.reason))];
     const proof = desk.policy.proof;
     desk.lastVersion += 1;
     const draft: RulesDraft = {
