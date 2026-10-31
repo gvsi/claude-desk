@@ -21,7 +21,7 @@ import pytest
 from sqlalchemy import select
 
 from desk.contracts import Claim, Fact, Label, NormalizedAction
-from desk.db.models import Approval, DocumentLink, Execution, Quote
+from desk.db.models import Approval, DocumentLink, Execution, PaymentLink, Quote
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import SessionContext
@@ -38,7 +38,9 @@ from .test_context import context_of, fact_ids, owner_session_id
 from .test_decide import decided, desk_with, open_visitor, set_session
 from .test_desk_writes import updated
 from .test_execute import executed, read
+from .test_link_completion import PASS as LINK_PASS
 from .test_link_completion import rv_link
+from .test_payment_links import checkouts, link_for, quoted
 from .test_release_document import DANA, TOOL, confirmed, documents
 
 ASK_FOR_DOCUMENTS = card("ask-docs", TOOL, mode="ask", who="record_owner")
@@ -329,6 +331,30 @@ async def test_a_payment_link_for_a_verified_person_is_the_sessions_own(app, cli
     [fact] = await rows_of(app, copy.copy_id, select(FactRow).where(FactRow.fact_id == f"payment_link:{link.link_id}"))
     assert (fact.readers, fact.record_owner) == (["owner", f"session:{dana.session_id}", f"person:{dana_id}"],
                                                  dana_id)
+
+
+async def test_a_link_for_another_conversations_quote_is_refused_before_anything_is_made(app, client, reviewer):
+    """The link adapter makes a link only for one of this conversation's quotes, as its description
+    tells Claude, so it never makes one its own declaration would then withhold. Dana, verified,
+    gets a deposit quote; verified again in a new conversation, she asks for a link to that quote
+    there: refused at step 1, before any checkout or link exists, with `no_such_quote` on its entry,
+    nothing withheld and no violation ledgered. In the conversation the quote was made in, it gets
+    its link."""
+    copy = await rivera(app, client)
+    dana = await confirmed(client, copy, DANA)
+    quote_id = await quoted(client, dana, ("deposit", 1))
+    later = await confirmed(client, copy, DANA)
+    refused = await link_for(client, later, quote_id)
+    assert (refused.outcome, refused.state, refused.action) == ("refuse", "refused", None), refused.reason_plain
+    entries = await ledger_rows(app, copy)
+    assert [entry.event.summary for entry in entries if entry.event.kind == "decide"
+            and entry.event.session_id == later.session_id and entry.event.summary.get("outcome") == "refuse"] == [
+        {"outcome": "refuse", "tool": "native.payment_link", "reason": "adapter_refused", "check": "no_such_quote"}]
+    assert not [entry for entry in entries if "violation" in entry.event.summary]
+    assert await rows_of(app, copy.copy_id, select(PaymentLink)) == [] and checkouts(copy) == []
+    reviewer.answer = LINK_PASS
+    own = await link_for(client, dana, quote_id, call_id="call-own")
+    assert (own.outcome, own.card_ids) == ("allow", ["rv-link"]), own.reason_plain
 
 
 async def verified_fake_desk(app, client, fake: FakeAdapter, cards):

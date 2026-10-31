@@ -21,6 +21,7 @@ among them. Agents sign each turn as `test_agent_auth` does.
 import asyncio
 import dataclasses
 import time
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -30,16 +31,17 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import Decision, PolicyVersion, PriceItem, RuleCard
+from desk.contracts import Decision, ExecResult, PolicyVersion, PriceItem, RuleCard
 from desk.db.models import Mandate as MandateRow
-from desk.db.models import MandateReservation, PaymentLink
+from desk.db.models import MandateReservation, PaymentLink, Quote
 from desk.db.session import database_url, libpq_url
+from desk.kernel_api import PaymentLinkStateResult
 from desk.kernel_service import execute, mandates, payments
 from desk.kernel_service.adapters.charge_mandate import ChargeMandateAdapter
 from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FrozenClock
-from .helpers import draft_and_confirm, ledger_rows, rows_of
+from .helpers import connections_of, draft_and_confirm, ledger_rows, rows_of, until_waiting
 from .test_adapters import Rivera, quote_args, rivera
 from .test_agent_auth import Agent, SignedTurn, mint, open_agent, turn
 from .test_approvals import answered, post_answer
@@ -764,3 +766,110 @@ async def test_demo_agent_pays_the_rivera_deposit(app, client, frozen_clock):
         [_, card] = verdict.blocks
         assert (card.kind, card.template, card.fact_id, card.title, card.lines, card.href) == (
             "card", "charge_confirmed", fact.fact_id, "Service call deposit, $20.00", [], None)
+
+
+# ---- A quote is paid once -------------------------------------------------------------------------------
+
+async def quote_status(app: FastAPI, copy_id: str, quote_id: str) -> str:
+    [quote] = await rows_of(app, copy_id, select(Quote).where(Quote.quote_id == quote_id))
+    return quote.status
+
+
+@pytest.mark.solver
+async def test_a_quote_is_charged_once(desk_prove, app, client, frozen_clock):
+    """A quote is paid once. The agent charges its deposit quote, then asks to charge the same quote
+    again, as a repeated tool call in the turn would, and again in a new turn, as a resent one
+    would: each is refused at step 1, before any action exists, with the adapter's `quote_paid` on
+    its `decide` entry and the generic line for the visitor. One charge reached the provider, $20 is
+    committed and nothing is held."""
+    setup = await agent_desk(app, client, frozen_clock)
+    copy_id = setup.desk.copy_id
+    signed = setup.turn()
+    quote_id = await quoted(client, signed)
+    first = await asked(client, signed, CHARGE, quote_id, call_id="call-charge-1")
+    assert first.outcome == "allow", first.reason_plain
+    assert (await executed(client, signed, first)).state == "succeeded"
+    assert await quote_status(app, copy_id, quote_id) == "paid"
+    for call_id, turn_of in (("call-charge-2", signed), ("call-charge-3", setup.turn("Paying the deposit again."))):
+        again = await asked(client, turn_of, CHARGE, quote_id, call_id=call_id)
+        assert (again.outcome, again.state, again.action) == ("refuse", "refused", None), again.reason_plain
+        assert "It didn't match your records, so it was refused." in again.reason_plain
+        assert again.visitor_plain == "Not something I can do here"
+    refusals = [entry for entry in decide_entries(await ledger_rows(app, setup.desk), setup.session_id)
+                if entry.get("outcome") == "refuse"]
+    assert refusals == [{"outcome": "refuse", "tool": CHARGE, "reason": "adapter_refused", "check": "quote_paid"}] * 2
+    assert [(key, amount) for key, amount, _, _ in agent_charges(copy_id)] == [(first.action.action_id, 2_000)]
+    assert mandate_spend(copy_id) == [(2_000, 0)]
+
+
+@pytest.mark.solver
+@pytest.mark.parametrize("first", ["charge", "completion"])
+async def test_a_charge_and_a_link_completion_of_one_quote_pay_once(desk_prove, app, client, frozen_clock,
+                                                                     monkeypatch, first):
+    """Of a mandate charge and a link's completion for the same quote, exactly one pays it. The
+    agent has an open link to its deposit quote and an allowed charge of the same quote. Whichever
+    reaches the provider first holds the quote's row across the call (held there by the test); the
+    other waits for that row, then finds the quote paid and sends nothing: a completion is 409, its
+    link cancelled (no `cancel_reason`) and ledgered `quote_paid`, its $20 released; a charge fails
+    with `quote_paid`, its $20 released. One payment reaches the provider, the mandate commits $20
+    and holds nothing, and the quote is paid."""
+    setup = await agent_desk(app, client, frozen_clock)
+    copy_id = setup.desk.copy_id
+    signed = setup.turn()
+    quote_id = await quoted(client, signed)
+    issuing = await asked(client, signed, LINK, quote_id, call_id="call-link")
+    assert issuing.outcome == "allow", issuing.reason_plain
+    assert (await executed(client, signed, issuing)).state == "succeeded"
+    [link] = await rows_of(app, copy_id, select(PaymentLink))
+    charging = await asked(client, signed, CHARGE, quote_id, call_id="call-charge")
+    assert charging.outcome == "allow", charging.reason_plain
+
+    at_provider, answer = asyncio.Event(), asyncio.Event()
+    method = "charge" if first == "charge" else "complete"
+    original = getattr(payments.ProviderClient, method)
+
+    async def held_at_the_provider(self, *args, **kwargs):
+        at_provider.set()
+        await answer.wait()
+        return await original(self, *args, **kwargs)
+
+    def charge() -> Awaitable[httpx.Response]:
+        return post_execute(client, signed, charging)
+
+    def complete() -> Awaitable[httpx.Response]:
+        return client.post(f"/payment_links/{link.token}/complete", json={})
+
+    holder, waiter = (charge, complete) if first == "charge" else (complete, charge)
+    monkeypatch.setattr(payments.ProviderClient, method, held_at_the_provider)
+    with connections_of(app) as pids:
+        holding = asyncio.create_task(holder())
+        await asyncio.wait_for(at_provider.wait(), 5)              # it holds the quote's row at the provider
+        waiting = asyncio.create_task(waiter())
+        await until_waiting(app, waiting, pids, table="kernel.quotes")
+        assert not waiting.done()
+        answer.set()
+        charged_response, completed_response = await asyncio.wait_for(
+            asyncio.gather(*((holding, waiting) if first == "charge" else (waiting, holding))), 10)
+
+    assert charged_response.status_code == 200, charged_response.text
+    charge_result = ExecResult.model_validate(charged_response.json())
+    entries = await ledger_rows(app, setup.desk)
+    if first == "charge":
+        assert charge_result.state == "succeeded"
+        assert (completed_response.status_code, completed_response.json()) == (409, {"code": "conflict"})
+        assert await link_state(app, setup, link) == ("cancelled", None, (2_000, "released"))
+        assert payment_entries(entries, link)[-1] == {"link_id": link.link_id, "state": "cancelled",
+                                                      "reason": "quote_paid"}
+        assert await reservation_of(app, copy_id, charging.action.action_id) == (2_000, "committed")
+        assert [(key, amount) for key, amount, _ in charges(setup.desk)] == [(charging.action.action_id, 2_000)]
+    else:
+        assert completed_response.status_code == 200, completed_response.text
+        assert PaymentLinkStateResult.model_validate(completed_response.json()).state == "paid"
+        assert charge_result.state == "failed"
+        [failed] = [e for e in execute_entries(entries, charging.decision_id) if e.get("state") == "failed"]
+        assert failed["reason"] == "quote_paid"
+        assert await link_state(app, setup, link) == ("paid", None, (2_000, "committed"))
+        assert await reservation_of(app, copy_id, charging.action.action_id) == (2_000, "released")
+        assert [(key, amount) for key, amount, _ in charges(setup.desk)] == [(f"{link.action_id}:charge", 2_000)]
+    assert mandate_spend(copy_id) == [(2_000, 0)]
+    assert await quote_status(app, copy_id, quote_id) == "paid"

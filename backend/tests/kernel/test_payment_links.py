@@ -1,7 +1,8 @@
 """Payment links: a quote's single-use link to the mock checkout ("Test payment, no money moves").
 
 `native.payment_link` takes a quote by its ID and nothing else: the amount is the quote's, priced by
-the kernel, and the quote must be one the session may read, on its Desk, available and unexpired.
+the kernel, and the quote must be the session's own, on its Desk, available, unexpired and unpaid. A
+quote has one open link at a time: asking again answers with it.
 Executing it creates a checkout at the mock payments server (idempotency key: the action's ID) and
 a link whose token opens `/pay/{token}` once within a day. The token stays in the link's row: Claude
 sees the link's fact, title and amount, and the visitor sees the token only in the `href` of a
@@ -186,13 +187,54 @@ async def test_another_sessions_quote_is_refused(desk_prove, app, client, frozen
         quote.expires_at = frozen_clock.now()
     refused = await link_for(client, owner_of_quote, quote_id, call_id="call-late")
     assert (refused.outcome, refused.action) == ("refuse", None)
-    # a verified person reads their quotes from any session they verify in, so may pay them there
+    # a link is for one of this conversation's quotes: a verified person's quote from an earlier
+    # conversation is refused in a new one, though she may read it there
     dana = await confirmed(client, copy, "dana@example.com")
     dana_quote = await quoted(client, dana, ("deposit", 1))
     again = await confirmed(client, copy, "dana@example.com")
-    assert (await link_for(client, again, dana_quote)).outcome == "allow"
+    assert (await link_for(client, again, dana_quote)).outcome == "refuse"
     assert (await link_for(client, stranger, dana_quote, call_id="call-stranger")).outcome == "refuse"
+    assert (await link_for(client, dana, dana_quote, call_id="call-own")).outcome == "allow"
     assert await links_of(app, copy) == [] and checkouts(copy) == []
+
+
+@pytest.mark.solver
+async def test_a_quote_has_one_open_link_and_is_paid_once(desk_prove, app, client):
+    """Asking again for a link to a quote that has an open one answers with that link: one checkout,
+    one link and one `issued` entry, the same fact for both actions, and the receipt the owner
+    signed off. Once the link is paid the quote is paid, and a further request for it is refused at
+    step 1, before any action exists, with the adapter's `quote_paid` on its `decide` entry."""
+    copy = await link_desk(client, await rivera(app, client))
+    visitor = await open_visitor(client, copy)
+    quote_id = await quoted(client, visitor, ("deposit", 1))
+    first = await link_for(client, visitor, quote_id, call_id="call-link-1")
+    second = await link_for(client, visitor, quote_id, call_id="call-link-2")
+    assert (first.outcome, second.outcome) == ("allow", "allow"), (first.reason_plain, second.reason_plain)
+    issued = await executed(client, visitor, first)
+    again = await executed(client, visitor, second)
+    assert again.state == "succeeded"
+    assert ([fact.fact_id for fact in again.facts], again.model_view) == (
+        [fact.fact_id for fact in issued.facts], issued.model_view)
+    [link] = await links_of(app, copy)
+    assert link.action_id == first.action.action_id
+    assert checkouts(copy) == [(first.action.action_id, 2_000, "Service call deposit",
+                                f"session:{visitor.session_id}", "open")]
+    assert await payment_entries(app, copy) == [
+        (visitor.session_id, {"link_id": link.link_id, "state": "issued", "version": 2})]
+    done = await read(client, visitor.headers, second)
+    assert (done.state, done.visitor_plain) == ("executed", "Payment link made for this quote")
+
+    response = await client.post(f"/payment_links/{link.token}/complete", json={})
+    assert response.status_code == 200, response.text
+    [quote] = await rows_of(app, copy.copy_id, select(Quote).where(Quote.quote_id == quote_id))
+    assert quote.status == "paid"
+    refused = await link_for(client, visitor, quote_id, call_id="call-link-3")
+    assert (refused.outcome, refused.state, refused.action) == ("refuse", "refused", None), refused.reason_plain
+    assert "It didn't match your records, so it was refused." in refused.reason_plain
+    refusals = [entry.event.summary for entry in await ledger_rows(app, copy)
+                if entry.event.kind == "decide" and entry.event.summary.get("outcome") == "refuse"]
+    assert refusals == [{"outcome": "refuse", "tool": TOOL, "reason": "adapter_refused", "check": "quote_paid"}]
+    assert len(await links_of(app, copy)) == 1 and len(checkouts(copy)) == 1
 
 
 async def delay(mockpay: Mockpay, copy: Rivera, op: str, seconds: float) -> None:

@@ -24,8 +24,8 @@ Only the activation's re-evaluation of an open agent link counts that link's own
 (`own_action_id`), since the link already holds it: a link that took the last of a mandate isn't
 cancelled for having taken it.
 
-**Lock order.** The mandate row comes after the session, decision, execution, active version and
-payment link rows a caller holds, and before the ledger head; a reservation row after its mandate.
+**Lock order.** The mandate row comes after the session, decision, execution, active version, quote
+and payment link rows a caller holds, and before the ledger head; a reservation row after its mandate.
 """
 
 import logging

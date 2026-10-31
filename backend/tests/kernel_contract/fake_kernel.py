@@ -2161,7 +2161,9 @@ class FakeKernelState:
         elif tool in ("native.payment_link", "native.charge_mandate"):
             quote = self.quotes.get(args["quote_id"])
             fact = desk.facts.get(f"quote:{args['quote_id']}")
-            if (quote is None or quote["desk_id"] != desk.desk_id or fact is None or not self._current(fact)
+            # this conversation's own quote, unpaid: a quote is paid once (Plan 01c)
+            if (quote is None or quote["desk_id"] != desk.desk_id or quote["session_id"] != session.session_id
+                    or quote["status"] != "available" or fact is None or not self._current(fact)
                     or not self._readable(session, fact)):
                 return None
             resource = ResourceRef(kind="quote", id=quote["quote_id"], owner_person_id=None)
@@ -2531,6 +2533,10 @@ class FakeKernelState:
                               claims=[Claim(key="title", kind="text", value=document.title),
                                       Claim(key="ref", kind="ref", value=link_id)]))
             view = {"fact_id": facts[0].fact_id, "title": document.title, "link_ready": True}
+        elif tool == "native.payment_link" and (open_link := self._open_link(action.resource.id)) is not None:
+            # the quote's open link answers for it: no second link (Plan 01c)
+            facts.append(desk.facts[f"payment_link:{open_link.link_id}"])
+            view = {"fact_id": facts[0].fact_id, "title": open_link.title, "amount_cents": open_link.amount_cents}
         elif tool == "native.payment_link":
             quote = self.quotes[action.resource.id]
             title = ", ".join(item["title"] + (f" × {item['qty']}" if item["qty"] > 1 else "")
@@ -2556,6 +2562,7 @@ class FakeKernelState:
                               for item in quote["items"])
             record.committed_cents += action.amount_cents     # reserved and committed at once: no provider here
             self._put("mandates", (record.mandate.mandate_id,), record.ro_row())
+            self._quote_paid(quote)
             charge_id = new_id("charge")
             self.append(desk, "payment", {"charge_id": charge_id, "mandate_id": record.mandate.mandate_id,
                                           "action_id": action.action_id, "state": "charged"},
@@ -3422,6 +3429,16 @@ class FakeKernelState:
                                language=session.last_language or "en", business_name=desk.business_name,
                                customer_name=customer, cancel_reason="rules_changed" if rules_changed else None)
 
+    def _open_link(self, quote_id: str) -> PaymentLink | None:
+        """The quote's open link (issued and unexpired), if it has one."""
+        return next((link for link in self.payment_links.values() if link.quote_id == quote_id
+                     and link.state == "issued" and link.expires_at > self.now), None)
+
+    def _quote_paid(self, quote: dict) -> None:
+        """A quote is paid once (Plan 01c): `paid` once a mandate charge or a link's completion pays it."""
+        quote["status"] = "paid"
+        self._put("quotes", (quote["quote_id"],), dict(quote))
+
     def payment_link_complete(self, request: Request, body: Any) -> PaymentLinkStateResult:
         """The mock payment: an `issued` link is paid once (no provider in the fake), a `charge` fact goes to its
         session, and the answer carries the kernel's `payment_confirmed` verdict for that session at its current
@@ -3437,6 +3454,7 @@ class FakeKernelState:
                           Claim(key="ref", kind="ref", value=charge_id)])
         self._put_fact(desk, charge)
         self._move_link(link, "paid")
+        self._quote_paid(self.quotes[link.quote_id])
         language = session.last_language or "en"
         title, lines = PAYMENT_CONFIRMED[language], [link.title, money(link.amount_cents)]
         block = RenderedBlock(kind="card", template="payment_confirmed", text="\n".join([title, *lines]),

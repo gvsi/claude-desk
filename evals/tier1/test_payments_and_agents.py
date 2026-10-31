@@ -6,10 +6,10 @@ The Desk's payments tools are pinned to the definitions the owner reviewed. A ch
 the rules are proved and confirmed again; an operation the server lists that no adapter pins is
 given to no one and refused when called; and a refund resolves only its own copy's charges. A
 payment link pays once, within a day, and a completion whose outcome is unknown settles at the
-provider once. A demo agent's mandate allows five $20 charges and no more, nothing above $20 at
-once, nothing after its hour and no refund; two calls racing for its last $20 leave one spend; and a
-charge whose kernel died after the provider charged, or whose provider answered late, is committed
-once on reconciliation. Every agent call is signed by the session's own key, with a fresh
+provider once. A quote is paid once. A demo agent's mandate allows five $20 charges and no more,
+nothing above $20 at once, nothing after its hour and no refund; two calls racing for its last $20
+leave one spend; and a charge whose kernel died after the provider charged, or whose provider
+answered late, is committed once on reconciliation. Every agent call is signed by the session's own key, with a fresh
 timestamp, under a nonce that lasts one turn. An owner's setup call reaches only its own copy.
 
 On the real kernel each case also reads what the kernel stored (`kernel_ro`: tools, facts,
@@ -744,6 +744,33 @@ async def test_mandate_expired_refused(k: KernelHarness, records):
     await decide_spend(k, desk, agent, CHARGE, expect=spent(CHARGE, "refuse"))
 
     if k.is_real:
+        await assert_spend(records, desk, agent, committed=DEPOSIT_CENTS, reserved=0)
+        await assert_charged(k, records, desk, agent, 1, store)
+
+
+@pytest.mark.requires("01c")
+async def test_pay_the_same_quote_twice(k: KernelHarness, records):
+    """A quote is paid once. A demo agent's charge of its $20 deposit quote is allowed and run; the
+    same charge of the same quote asked again in a new turn, as a resent request would ask it, is
+    refused at `/decide` before it is normalized, with nothing to run or approve, and its `decide`
+    entry names why (`quote_paid`). $20 is committed, nothing is reserved, and the copy's store
+    gained one $20 charge."""
+    desk = await golden_desk(k)
+    store = await store_before(k, desk)
+    agent = await open_caller(k, desk, "agent")
+    quote_id = await make_quote(k, desk, agent, DEPOSIT)
+    agent.turn()
+    first = await decide(k, agent, CHARGE, charge_mandate_args(quote_id), expect=spent(CHARGE, "allow"))
+    await execute(k, agent, first, expect=SUCCEEDED)
+    agent.turn()
+    async with assert_ledgered(records, desk.copy, desk.desk_id, "decide", session_id=agent.state.session_id) as new:
+        again = await decide(k, agent, CHARGE, charge_mandate_args(quote_id), expect=UNNORMALIZED)
+    await execute(k, agent, again, expect=CONFLICT)   # a refusal has nothing to run
+    await read(k, desk.owner, again, "refused")
+
+    if k.is_real:
+        why = [entry.event.summary.get("check") for entry in new if entry.event.kind == "decide"]
+        assert why == ["quote_paid"], f"the second charge's decide entries name {why}, not quote_paid"
         await assert_spend(records, desk, agent, committed=DEPOSIT_CENTS, reserved=0)
         await assert_charged(k, records, desk, agent, 1, store)
 

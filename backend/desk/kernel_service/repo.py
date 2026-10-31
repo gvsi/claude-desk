@@ -27,8 +27,11 @@ Row locks are taken in one order, so no two kernel transactions wait on each oth
    adapter's own rows), and by the owner's write to them (`desks.put_people`);
 6. their live verification challenges, after the people (a Desk's deletion, which locks no
    person, takes its live codes after its sessions);
-7. a payment link (Plan 01c), written before its fact; a Desk's deletion locks its issued ones
-   before its document links (`payments.lock_desk_links`) and cancels them after;
+7. a quote (Plan 01c), `FOR UPDATE`, by each payment of it before the provider is asked, held
+   across the provider call (a mandate charge's T2, a payment link's issue in T2 and its
+   completion's C2; reconciliation takes it `NOWAIT` or `SKIP LOCKED`), then a payment link (Plan
+   01c), written before its fact; a Desk's deletion locks its issued ones before its document links
+   (`payments.lock_desk_links`) and cancels them after;
 8. document links: an open marks its link in one UPDATE, and a person's removal or new contact,
    or a Desk's deletion, voids theirs in one;
 9. documents, which a person's removal takes `FOR UPDATE` in ID order, and knowledge items, which

@@ -737,8 +737,8 @@ async def decide_call(ctx: KernelCtx, principal: Principal, session_row: Session
     try:
         normalized = await call.adapter.normalize(NormalizeCtx(ctx=ctx, desk_row=desk_row, principal=principal),
                                                   call.args)
-    except AdapterRefusal:
-        return await _refuse(ctx, call, "adapter_refused")
+    except AdapterRefusal as refusal:
+        return await _refuse(ctx, call, "adapter_refused", check=refusal.code)
 
     args_json = call.args.model_dump(mode="json", exclude_none=True)
     profile = tools[tool]
@@ -814,8 +814,8 @@ async def _review(ctx: KernelCtx, call: _Call, pending: list[RuleCard]) -> Revie
 
 
 async def _refuse(ctx: KernelCtx, call: _Call, reason: str, *, args_json: dict[str, Any] | None = None,
-                  evaluation: Evaluation | None = None) -> Decision:
-    return await _store(ctx, call, "refuse", reason=reason, args_json=args_json, evaluation=evaluation)
+                  evaluation: Evaluation | None = None, check: str | None = None) -> Decision:
+    return await _store(ctx, call, "refuse", reason=reason, args_json=args_json, evaluation=evaluation, check=check)
 
 
 async def _repeat(ctx: KernelCtx, row: DecisionRow, sha: str) -> Decision:
@@ -900,11 +900,14 @@ def _status_key(call: _Call, state: str, reason: str | None, evaluation: Evaluat
 
 
 async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str | None = None,
-                 args_json: dict[str, Any] | None = None, evaluation: Evaluation | None = None) -> Decision:
+                 args_json: dict[str, Any] | None = None, evaluation: Evaluation | None = None,
+                 check: str | None = None) -> Decision:
     """Writes the decision (and its action, when one was normalized) with its ledger entries, the
     breaker's strike and the owner's alerts, in the caller's transaction, and signs it with its
     status line (`_status_key`). A twin call that committed first wins: its decision is returned
-    instead."""
+    instead. `check` is an adapter's own code for a step-1 refusal (`AdapterRefusal.code`), which
+    its `decide` entry records beside the reason, through `ledger.safe_ref`; it changes neither the
+    owner's words nor the visitor's line."""
     principal, session_row, action = call.principal, call.session_row, call.action
     now = ctx.clock.now()
     state = STATE_OF[outcome]
@@ -945,6 +948,8 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         await _append(ctx, row, "review", {"decision_id": row.decision_id, **evaluation.usage.model_dump()})
     if action is None:
         summary: dict[str, Any] = {"outcome": "refuse", "tool": ledger.safe_ref(call.req.call.tool), "reason": reason}
+        if check is not None:
+            summary["check"] = ledger.safe_ref(check)
     else:
         summary = {"decision_id": row.decision_id, "action_id": action.action_id, "tool": action.tool,
                    "outcome": outcome, "card_ids": row.card_ids, "policy_version": row.policy_version,

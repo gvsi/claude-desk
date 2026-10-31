@@ -1,9 +1,11 @@
 """`native.payment_link`: a single-use link to the mock checkout for one of the session's quotes.
 
-The call names a quote by its ID and nothing else. `normalize` resolves it from `quotes`: it must be
-on this Desk (and so in this copy), readable by the session (its fact's readers), `available` and
-unexpired, else the call is refused at step 1. The amount is the quote's, which the kernel priced;
-the effect is `charge`. No argument can name an amount, a title or a customer.
+The call names a quote by its ID and nothing else. `normalize` resolves it from `quotes`
+(`payable_quote`): it must be on this Desk (and so in this copy), this session's own, readable by
+the session (its fact's readers), `available` and unexpired, and unpaid, else the call is refused at
+step 1 with the reason ledgered (`no_such_quote`, or `quote_paid` / `quote_paying`). The resource is
+`ResourceRef(kind="quote")` with no record owner. The amount is the quote's, which the kernel
+priced; the effect is `charge`. No argument can name an amount, a title or a customer.
 
 `execute` runs once the intent row has committed. For an auto-allowed link (not one the owner
 approved, whose single-use approval was bound to this call), it first takes the Desk's active rules
@@ -11,7 +13,11 @@ version `FOR SHARE` (`payments.lock_active_version`), the row `activation.confir
 UPDATE`, and keeps it to the end of the transaction: a confirm either waits for this link, or
 committed first and this sees its version. If that version isn't the one the execution re-check ran
 under (`ExecCtx.recheck_version`), `payments.link_rules_allow` checks the link against it, and a
-link it no longer allows fails before anything is sent (`rules_changed`). Then the checkout
+link it no longer allows fails before anything is sent (`rules_changed`). Then it takes the quote's
+row `FOR UPDATE` and checks it again (`payable_quote` with `lock`): a quote paid or being paid since
+the re-check fails with that reason, before anything is sent. A quote with an open link (`issued`
+and unexpired: `payments.open_link_fact`) is answered with that link, so asking twice makes one
+checkout and one link, and an agent's reservation for this action is released. Otherwise the checkout
 (idempotency key: the action's ID; customer `person:<id>` when the session is verified, else
 `session:<id>`), the `payment_links` row (`issued`, a `secrets.token_urlsafe(32)` token and its
 sha256, for `LINK_TTL`) and a `payment_link:<link_id>` fact holding the title, the total and the
@@ -33,9 +39,11 @@ used is voided, so a request still in flight fails, and the action `failed`. A c
 is checked against the active version (no execution re-check ran in this call), its lock taken
 `NOWAIT`, because reconciliation has already written to the ledger in its transaction and must not
 wait on a confirm that waits on the ledger head (a confirm in progress leaves it `unknown` for the
-next read). A link the rules no longer allow has its checkout cancelled at the provider and no link
-is written (a cancel that fails leaves it `unknown`); otherwise the link and its fact are written as
-above, with a fresh token.
+next read), and then its quote, `NOWAIT` too (`payments.lock_quote_nowait`: a payment of it in
+progress leaves it `unknown` for the next read). A link the rules no longer allow, or for a quote
+that is paid, being paid or has another open link by now, has its checkout cancelled at the provider
+and no link is written (a cancel that fails leaves it `unknown`); otherwise the link and its fact are
+written as above, with a fresh token.
 
 The `payment_link` card shows the link's title and amount and links to `/pay/{token}` (`href_for`)
 while the link is issued and unexpired; the API proxies the checkout page's reads and writes.
@@ -66,6 +74,7 @@ log = logging.getLogger(__name__)
 
 LINK_TTL = timedelta(hours=24)
 FACT_PREFIX = "payment_link:"
+NO_SUCH_QUOTE = "no_such_quote"
 
 
 class PaymentLinkArgs(BaseModel):
@@ -105,19 +114,37 @@ async def stored_quote(ctx: KernelCtx, desk_id: str, quote_id: str) -> tuple[Quo
     return (quote, fact) if fact is not None else None
 
 
-async def payable_quote(ctx: KernelCtx, desk_id: str, quote_id: str, session_id: str) -> tuple[Quote, FactRow] | None:
-    """The quote, if a link may be made for it in this session now: on the Desk, available and
-    unexpired, with a current fact the session may read."""
-    found = await stored_quote(ctx, desk_id, quote_id)
-    if found is None:
-        return None
-    quote, fact = found
+async def payable_quote(ctx: KernelCtx, desk_id: str, quote_id: str, session_id: str, *, lock: bool = False,
+                        action_id: str | None = None) -> tuple[Quote, FactRow] | str:
+    """The quote and its fact, if a payment of it may start in this session now, else why not
+    (`NO_SUCH_QUOTE`, `quote_paid` or `quote_paying`). It must be on the Desk and this session's own
+    (made in it: the tool is for "one of this conversation's quotes", so a verified person's quote
+    from an earlier conversation is refused before anything is made), available and unexpired, with
+    a current fact the session may read, and unpaid (`payments.quote_unpayable`; `action_id` is the
+    caller's own action, left out). With `lock`, the quote's row is held `FOR UPDATE` until the
+    transaction ends (`payments.lock_quote`'s place in repo.py's order), as an execution's check
+    before anything is sent needs it; `normalize` reads it without a lock, and the execution checks
+    again under it."""
+    if not desks.storable(quote_id):
+        return NO_SUCH_QUOTE
+    stmt = select(Quote).where(Quote.desk_id == desk_id, Quote.quote_id == quote_id)
+    if lock:
+        stmt = stmt.with_for_update()
+    quote = (await ctx.db.scalars(ctx.repo.scoped(stmt.execution_options(populate_existing=True)))).one_or_none()
+    fact = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == desk_id, FactRow.fact_id == f"quote:{quote_id}")))).one_or_none()
+    if quote is None or fact is None or quote.session_id != session_id:
+        return NO_SUCH_QUOTE
     session_row = (await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
         ActorSession.session_id == session_id)))).one()
     now = ctx.clock.now()
-    live = (quote.status == "available" and quote.expires_at is not None and quote.expires_at > now
-            and fact.status == "available" and (fact.expires_at is None or fact.expires_at > now))
-    return found if live and labels.can_read(fact.readers, labels.session_readers(session_row)) else None
+    live = (quote.status in ("available", payments.QUOTE_PAID) and quote.expires_at is not None
+            and quote.expires_at > now and fact.status == "available"
+            and (fact.expires_at is None or fact.expires_at > now))
+    if not live or not labels.can_read(fact.readers, labels.session_readers(session_row)):
+        return NO_SUCH_QUOTE
+    unpayable = await payments.quote_unpayable(ctx, quote, action_id=action_id)
+    return unpayable if unpayable is not None else (quote, fact)
 
 
 # ---- Who decided it -----------------------------------------------------------------------------------
@@ -188,8 +215,8 @@ class PaymentLinkAdapter:
 
     async def normalize(self, nctx: NormalizeCtx, args: PaymentLinkArgs) -> Normalized:
         found = await payable_quote(nctx.ctx, nctx.desk_row.desk_id, args.quote_id, nctx.principal.session_id)
-        if found is None:
-            raise AdapterRefusal("no_such_quote")
+        if isinstance(found, str):
+            raise AdapterRefusal(found)
         quote, _ = found
         return Normalized(resource=ResourceRef(kind="quote", id=quote.quote_id, owner_person_id=None),
                           amount_cents=quote.amount_cents)
@@ -225,10 +252,18 @@ class PaymentLinkAdapter:
                                   and not await payments.link_rules_allow(ctx, decision, action, active)):
                 raise AdapterFailure("rules_changed")
             version = active.version
-        found = await payable_quote(ctx, action.desk_id, action.resource.id, xctx.session_row.session_id)
-        if found is None or found[0].amount_cents != action.amount_cents:
+        found = await payable_quote(ctx, action.desk_id, action.resource.id, xctx.session_row.session_id, lock=True,
+                                    action_id=action.action_id)
+        if isinstance(found, str) and found != NO_SUCH_QUOTE:
+            raise AdapterFailure(found)                      # paid, or being paid, since the re-check
+        if isinstance(found, str) or found[0].amount_cents != action.amount_cents:
             raise AdapterFailure("quote_changed")
         quote, quote_fact = found
+        if (open_fact := await payments.open_link_fact(ctx, quote)) is not None:
+            # the quote's open link answers for it: no second checkout or link, and nothing held for
+            # this action, since the open link holds what it needs
+            await mandates.release(ctx, action.action_id)
+            return AdapterResult(facts=[open_fact], model_view=model_view(open_fact))
         try:
             checkout_id = await payments.provider(ctx).create_checkout(
                 idempotency_key=action.action_id, amount_cents=action.amount_cents, title=items_text(quote.items),
@@ -270,6 +305,15 @@ class PaymentLinkAdapter:
                 found = None
             else:
                 version = active.version
+        if found is not None:
+            # a quote paid, being paid or with another open link meanwhile takes no second link
+            try:
+                quote_row = await payments.lock_quote_nowait(ctx, found[0].quote_id)
+            except payments.QuoteBusy:
+                raise AdapterUnknown("quote_busy") from None      # a payment of it is running: the next read
+            if (quote_row is None or await payments.quote_unpayable(ctx, quote_row) is not None
+                    or await payments.open_link_fact(ctx, quote_row) is not None):
+                found = None
         if found is None:
             await _cancel_checkout(client, settled.object_id)
             return None

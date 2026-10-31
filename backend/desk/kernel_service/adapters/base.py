@@ -51,7 +51,13 @@ from desk.kernel_service.repo import KernelCtx
 
 
 class AdapterRefusal(Exception):
-    """The call can't go ahead (at normalize: refused at step 1; at prepare: refused at execution)."""
+    """The call can't go ahead (at normalize: refused at step 1; at prepare: refused at execution).
+    Its first argument, when it is a string, is the adapter's code for why (`code`): a step-1
+    refusal ledgers it, through `ledger.safe_ref`, and never shows it to the visitor."""
+
+    @property
+    def code(self) -> str | None:
+        return self.args[0] if self.args and isinstance(self.args[0], str) else None
 
 
 class AdapterFailure(Exception):

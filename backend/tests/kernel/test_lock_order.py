@@ -1,7 +1,7 @@
 """The kernel's lock order (`repo.py`): the session row, then the decision row, then the execution
-row, then the policy row, people and their verification codes, payment links, document links,
-documents, the rows an adapter's hooks lock (a handoff) and facts, then the ledger head, so two
-kernel transactions never deadlock.
+row, then the policy row, people and their verification codes, a quote, payment links, document
+links, documents, the rows an adapter's hooks lock (a handoff) and facts, then the ledger head, so
+two kernel transactions never deadlock.
 
 Two tests race requests that once took a pair of rows in opposite orders: the session and the
 decision rows, and an adapter's row and the ledger head. The others record the row locks each
@@ -57,7 +57,8 @@ from .test_verification import check, code_in, entry_of, started
 # The tables whose rows the kernel locks, in the order it locks them (repo.py); `handoffs` stands
 # for an adapter's own rows.
 LOCK_ORDER = ("sessions", "decisions", "executions", "policy_versions", "people", "verification_challenges",
-              "payment_links", "document_links", "documents", "calendar_slots", "handoffs", "facts", "ledger_heads")
+              "quotes", "payment_links", "document_links", "documents", "calendar_slots", "handoffs", "facts",
+              "ledger_heads")
 _LOCKING = re.compile(
     r"^\s*(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+kernel\.(?P<written>\w+)"
     r"|^\s*SELECT\b.*?\bFROM\s+kernel\.(?P<read>\w+)\b.*\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b",
@@ -544,8 +545,10 @@ async def test_a_payment_link_is_issued_and_paid_in_the_lock_order(app, client, 
         assert (await executed(client, visitor, decision)).state == "succeeded"
     assert issued.transactions == [
         ["sessions", "decisions", "executions"],                    # T1: the intent
-        # T2: the active version FOR SHARE before the new link, then its fact and the ledger head
-        ["sessions", "decisions", "executions", "policy_versions", "payment_links", "facts", "ledger_heads"],
+        # T2: the active version FOR SHARE, the quote FOR UPDATE before the new link, then its fact and
+        # the ledger head
+        ["sessions", "decisions", "executions", "policy_versions", "quotes", "payment_links", "facts",
+         "ledger_heads"],
     ]
     assert all(map(in_lock_order, issued.transactions))
     [link] = await rows_of(app, copy.copy_id, select(PaymentLink))
@@ -553,7 +556,8 @@ async def test_a_payment_link_is_issued_and_paid_in_the_lock_order(app, client, 
         assert (await completed(client, link.token)).state == "paid"
     assert paid.transactions == [
         ["payment_links"],                                          # C1: the marker
-        ["sessions", "payment_links", "facts", "ledger_heads"],     # C2: paid, its fact and its verdict
+        # C2: the quote before the link, then paid, its fact and its verdict
+        ["sessions", "quotes", "payment_links", "facts", "ledger_heads"],
     ]
     assert all(map(in_lock_order, paid.transactions))
 
@@ -596,8 +600,9 @@ async def test_an_agents_mandate_charge_runs_in_the_lock_order(app, client, froz
     # the mandate's reservation is the adapter's own row (step 10), taken in T1 before the intent's insert
     assert charged_log.transactions == [
         ["sessions", "decisions", "executions"],                    # T1: the reservation and the intent
-        # T2: the charge, the spend committed, the charge's fact
-        ["sessions", "decisions", "executions", "facts", "ledger_heads"],
+        # T2: the quote FOR UPDATE across the charge, then the quote paid, the spend committed, the
+        # charge's fact
+        ["sessions", "decisions", "executions", "quotes", "facts", "ledger_heads"],
     ]
     assert all(map(in_lock_order, charged_log.transactions))
 
@@ -614,8 +619,9 @@ async def test_payment_reconciliation_keeps_the_lock_order(app, client, reviewer
     with lock_log(app) as issue:
         assert (await read(client, visitor.headers, decision)).state == "executed"
     assert issue.transactions == [
-        # the decision and the execution SKIP LOCKED, then the issue's own rows, then the ledger head
-        ["decisions", "executions", "policy_versions", "payment_links", "facts", "ledger_heads"],
+        # the decision and the execution SKIP LOCKED, then the issue's own rows (the quote NOWAIT before
+        # the link), then the ledger head
+        ["decisions", "executions", "policy_versions", "quotes", "payment_links", "facts", "ledger_heads"],
         ["decisions"],      # committed at once; the read goes on holding the decision again
     ]
     assert all(map(in_lock_order, issue.transactions))
@@ -626,7 +632,8 @@ async def test_payment_reconciliation_keeps_the_lock_order(app, client, reviewer
     await charged(copy, f"{link.action_id}:charge")
     with lock_log(app) as completion:
         assert (await view(client, link.token)).state == "paid"
-    assert completion.transactions == [["payment_links", "facts", "ledger_heads"]]
+    # the quote SKIP LOCKED before the link, since settling it records the payment
+    assert completion.transactions == [["quotes", "payment_links", "facts", "ledger_heads"]]
     assert all(map(in_lock_order, completion.transactions))
 
 

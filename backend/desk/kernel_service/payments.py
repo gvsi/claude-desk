@@ -30,6 +30,14 @@ and at startup). Completion rechecks the baseline, never the rules (`recheck_lin
 change reaches open links when it activates instead (`cancel_disallowed_links`, an
 `activation.ON_ACTIVATE` hook), and the chat hears of each link it cancelled (`cancelled_links`). A
 Desk's deletion cancels its open links (`cancel_desk_links`, a `desks.ON_DELETE` hook).
+
+A quote is paid once, by a mandate charge or by one of its links. Each payment checks the quote under
+its row lock (`lock_quote`, `FOR UPDATE`, before its link in repo.py's order) before the provider is
+asked, and holds that lock across the provider call, so of two payments of one quote the second
+waits and then finds it `paid` (`quote_unpayable`); the payment that lands marks it `paid` in the
+transaction that records it (`mark_quote_paid`). A payment of the quote that may be at the provider
+with nobody knowing (an `unknown` link or mandate charge, or one orphaned before its outcome was
+written) keeps the quote unpayable until it is settled.
 """
 
 import asyncio
@@ -43,13 +51,15 @@ from urllib.parse import quote
 
 import httpx2
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt, ValidationError
+from psycopg import errors as pg_errors
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import DBAPIError
 
 from desk.contracts import (AUTO_MONEY_HARD_CAP_CENTS, Claim, Clause, Fact, Label, LedgerEvent, NormalizedAction,
                             ReplyVerdict)
 from desk.db.models import Action as ActionRow
-from desk.db.models import Approval, Business, Desk, PaymentLink, Person
+from desk.db.models import Approval, Business, Desk, Execution, PaymentLink, Person, Quote
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import Mandate as MandateRow
@@ -73,6 +83,8 @@ COPY_HEADER = "X-Desk-Copy"
 TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")           # a payment link's token: secrets.token_urlsafe(32)
 PERSON = "person:"                                  # a link's customer that is a person on record
 LINK_FACT = "payment_link:"                         # a link's fact: `payment_link:<link_id>`
+QUOTE_PAID = "paid"                                 # a quote's status once a payment for it has landed
+CHARGE_TOOL = "native.charge_mandate"               # the tool whose actions pay a quote outright
 CANCEL_REASONS = ("rules_changed", "person_removed", "mandate_expired", "amount_mismatch")   # cancel_reason values
 
 
@@ -322,6 +334,106 @@ async def owner_approved(ctx: KernelCtx, decision: DecisionRow) -> bool:
     return approval is not None and approval.consumed_at is not None and approval.binding_sha256 is not None
 
 
+# ---- One payment per quote ---------------------------------------------------------------------------------
+
+class QuoteBusy(Exception):
+    """Another transaction holds the quote's row, and the caller doesn't wait for it."""
+
+
+async def lock_quote(ctx: KernelCtx, quote_id: str, *, skip_locked: bool = False) -> Quote | None:
+    """The quote, locked `FOR UPDATE` until the transaction ends (passed over while another holds
+    it, with `skip_locked`), as last committed; None when there is none, or it was passed over."""
+    return (await ctx.db.scalars(ctx.repo.scoped(select(Quote).where(Quote.quote_id == quote_id).with_for_update(
+        skip_locked=skip_locked).execution_options(populate_existing=True)))).one_or_none()
+
+
+async def lock_quote_nowait(ctx: KernelCtx, quote_id: str) -> Quote | None:
+    """`lock_quote` for a reconciliation, which mustn't wait on a payment in progress: a row another
+    transaction holds raises `QuoteBusy` at once, the transaction still usable, and the next read
+    tries again."""
+    try:
+        async with ctx.db.begin_nested():
+            return (await ctx.db.scalars(ctx.repo.scoped(select(Quote).where(Quote.quote_id == quote_id)
+                                                         .with_for_update(nowait=True)
+                                                         .execution_options(populate_existing=True)))).one_or_none()
+    except DBAPIError as error:
+        if isinstance(error.orig, pg_errors.LockNotAvailable):
+            raise QuoteBusy(quote_id) from None
+        raise
+
+
+async def quote_unpayable(ctx: KernelCtx, quote_row: Quote, *, link_id: str | None = None,
+                          action_id: str | None = None) -> str | None:
+    """Why no payment of the quote may start now, or None: `quote_paid` once a payment of it has
+    landed (its status, or a paid link or succeeded mandate charge of it); `quote_paying` while
+    another payment of it may be at the provider with nobody knowing, until it is settled: a link
+    of it that is `unknown` or whose completion marker is older than `execute.ORPHAN_AFTER`, or a
+    mandate charge on it whose execution is `unknown` or an intent that old. `link_id` and
+    `action_id` are the caller's own link or action, left out. A payment in progress is not counted:
+    it holds the quote's row across its provider call, so the caller, which holds that row too,
+    finds it either not started or ended (paid, failed or unknown)."""
+    if quote_row.status == QUOTE_PAID:
+        return "quote_paid"
+    orphaned = ctx.clock.now() - execute.ORPHAN_AFTER
+    links = (await ctx.db.execute(ctx.repo.scoped(select(
+        PaymentLink.link_id, PaymentLink.state, PaymentLink.completion_started_at).where(
+        PaymentLink.desk_id == quote_row.desk_id, PaymentLink.quote_id == quote_row.quote_id,
+        PaymentLink.state.in_(("paid", "unknown", "issued")))))).all()
+    paying = False
+    for found_id, state, started_at in links:
+        if found_id == link_id:
+            continue
+        if state == "paid":
+            return "quote_paid"
+        paying = paying or state == "unknown" or (started_at is not None and started_at <= orphaned)
+    charges = (await ctx.db.execute(ctx.repo.scoped(select(
+        ActionRow.action_id, ActionRow.resource, Execution.state, Execution.started_at).join(
+        Execution, Execution.action_id == ActionRow.action_id).where(
+        ActionRow.desk_id == quote_row.desk_id, ActionRow.session_id == quote_row.session_id,
+        ActionRow.tool == CHARGE_TOOL)))).all()
+    for found_id, resource, state, started_at in charges:
+        if found_id == action_id or resource.id != quote_row.quote_id:
+            continue
+        if state == "succeeded":
+            return "quote_paid"
+        paying = paying or state == "unknown" or (state == "intent" and started_at <= orphaned)
+    return "quote_paying" if paying else None
+
+
+async def mark_quote_paid(ctx: KernelCtx, quote_id: str | None, *, paid_by: str) -> None:
+    """The quote `paid`, in the caller's transaction, which records a payment of it that landed
+    (`paid_by`: the link or the action), under the quote's row lock (taken here unless the caller
+    holds it already). A quote another payment paid first stays `paid`, and the second payment is
+    recorded all the same, since its money moved; the log says so. That happens only when an
+    outcome nobody knew landed after the quote was paid another way."""
+    if quote_id is None:
+        log.error("quote_payment_without_quote paid_by=%s", paid_by)
+        return
+    quote_row = await lock_quote(ctx, quote_id)
+    if quote_row is None:
+        log.error("quote_payment_without_quote quote_id=%s paid_by=%s", quote_id, paid_by)
+        return
+    if quote_row.status == QUOTE_PAID:
+        log.error("quote_paid_twice quote_id=%s paid_by=%s", quote_id, paid_by)
+    quote_row.status = QUOTE_PAID
+    await ctx.db.flush()
+
+
+async def open_link_fact(ctx: KernelCtx, quote_row: Quote) -> Fact | None:
+    """The quote's open link (`issued` and unexpired; the newest, if somehow more than one), as its
+    fact; None when it has none."""
+    now = ctx.clock.now()
+    found = (await ctx.db.execute(ctx.repo.scoped(select(PaymentLink.link_id, PaymentLink.created_at).where(
+        PaymentLink.desk_id == quote_row.desk_id, PaymentLink.quote_id == quote_row.quote_id,
+        PaymentLink.state == "issued", PaymentLink.expires_at > now)))).all()
+    if not found:
+        return None
+    link_id = max(found, key=lambda row: (row.created_at, row.link_id)).link_id
+    row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+        FactRow.desk_id == quote_row.desk_id, FactRow.fact_id == f"{LINK_FACT}{link_id}")))).one_or_none()
+    return labels.fact_of(row) if row is not None else None
+
+
 # ---- A link's life after it is issued -------------------------------------------------------------------
 #
 # Every transition is ledgered `payment` `{link_id, state, ...}` with the link's session, and leaving
@@ -384,6 +496,13 @@ async def _by_token(ctx: KernelCtx, digest: str) -> PaymentLink:
 def _due(link: PaymentLink, now: datetime) -> bool:
     """Whether an issued link no completion has started has passed its expiry."""
     return link.completion_started_at is None and (link.expires_at is None or link.expires_at <= now)
+
+
+def _may_settle(state: str, completion_started_at: datetime | None, now: datetime) -> bool:
+    """Whether `reconcile_link` may settle a link in this state at the provider: `unknown`, or
+    `issued` with a completion marker older than `execute.ORPHAN_AFTER`."""
+    return state == "unknown" or (state == "issued" and completion_started_at is not None
+                                  and completion_started_at <= now - execute.ORPHAN_AFTER)
 
 
 async def _move(ctx: KernelCtx, link: PaymentLink, state: str, *, cancel_reason: str | None = None,
@@ -518,14 +637,18 @@ async def complete_link(ctx: KernelCtx, token: str) -> PaymentLinkStateResult:
       baseline (`recheck_link_baseline`): a failure cancels the link (its `cancel_reason`) and
       answers 409 `conflict`. Then it sets the link's completion marker and commits.
     - C2 holds the session row `FOR SHARE` (so the verdict's generation holds, and nothing closes
-      the session until C2 commits), locks the link, and needs it still `issued` with this
-      completion's marker, else 409 `conflict` with no provider call (an activation moved it). Then,
-      under that session row and before the provider is asked, the link's session must still stand
-      (`_session_ended`, as an execution's T2 asks `auth.session_stands` before its adapter acts):
-      one that doesn't cancels the link, ledgered with why, and answers 409 `conflict`, with nothing
-      sent. Then the provider completes the checkout, and the link is `paid`, with its `charge`
-      fact and a signed `payment_confirmed` verdict, committed with a plain commit: it records what
-      the provider did, which nothing after may take back.
+      the session until C2 commits), then the link's quote `FOR UPDATE` (`lock_quote`, held across
+      the provider call, so no other payment of the quote runs meanwhile), locks the link, and
+      needs it still `issued` with this completion's marker, else 409 `conflict` with no provider
+      call (an activation moved it). Then, under that session row and before the provider is asked,
+      the link's session must still stand (`_session_ended`, as an execution's T2 asks
+      `auth.session_stands` before its adapter acts): one that doesn't cancels the link, ledgered
+      with why, and answers 409 `conflict`, with nothing sent. So does a quote that is already paid,
+      or that another payment may be paying (`quote_unpayable`: the reason is ledgered, the link
+      cancelled with no `cancel_reason`). Then the provider completes the checkout, and the link is
+      `paid`, the quote too, with its `charge` fact and a signed `payment_confirmed` verdict,
+      committed with a plain commit: it records what the provider did, which nothing after may take
+      back.
     - C3 settles an exception in C2, which rolled back, only while the link is still `issued` with
       the marker: a `ProviderError` (nothing reached the provider) returns it to `issued` without
       its marker, 502 `internal`; anything else leaves it `unknown`, marker kept, for
@@ -564,6 +687,9 @@ async def _pay(ctx: KernelCtx, link_id: str, session_id: str,
     session_row = (await ctx.db.scalars(ctx.repo.scoped(select(SessionRow).where(
         SessionRow.session_id == session_id).with_for_update(read=True)
         .execution_options(populate_existing=True)))).one()
+    quote_id = (await ctx.db.execute(ctx.repo.scoped(select(PaymentLink.quote_id).where(
+        PaymentLink.link_id == link_id)))).scalar_one()            # a link's quote never changes
+    quote_row = await lock_quote(ctx, quote_id) if quote_id is not None else None   # before the link: repo.py
     link = await _locked(ctx, link_id)
     if link.state != "issued" or link.completion_started_at != marker:
         return await _refused(ctx, link, "moved")
@@ -574,6 +700,14 @@ async def _pay(ctx: KernelCtx, link_id: str, session_id: str,
         await _ledger(ctx, link, state="cancelled", reason=ended)
         await ctx.db.commit()
         return KernelFailure(409, "conflict", f"payment_link_session:{ended}")
+    unpayable = "no_such_quote" if quote_row is None else await quote_unpayable(ctx, quote_row, link_id=link.link_id)
+    if unpayable is not None:
+        # checked under the quote's row, which this step holds across the provider call, so of two
+        # payments of one quote only one is sent; nothing is sent for this one
+        await _move(ctx, link, "cancelled")
+        await _ledger(ctx, link, state="cancelled", reason=unpayable)
+        await ctx.db.commit()
+        return KernelFailure(409, "conflict", f"payment_link_quote:{unpayable}")
     completed = await provider(ctx).complete(link.provider_checkout_id)
     verdict = await record_paid(ctx, link, session_row, completed.charge_id, confirm=True)
     await ctx.db.commit()                                 # what the provider did, recorded: never taken back
@@ -661,7 +795,8 @@ async def write_charge_fact(ctx: KernelCtx, copy_id: str, desk_id: str, fact: Fa
 
 async def record_paid(ctx: KernelCtx, link: PaymentLink, session_row: SessionRow, charge_id: str, *,
                       confirm: bool) -> ReplyVerdict | None:
-    """The link `paid` by the provider's charge, in the caller's transaction: a `charge:<charge_id>`
+    """The link `paid` by the provider's charge, in the caller's transaction: its quote `paid`
+    (`mark_quote_paid`; the caller holds the quote's row), a `charge:<charge_id>`
     fact (the link's title and total, and its ID; readable by the owner, the link's session and,
     for a link made for a verified person, that person, its record owner), through
     `write_charge_fact`, so a listing that wrote it first gives way; the link's own fact expired, an
@@ -670,6 +805,7 @@ async def record_paid(ctx: KernelCtx, link: PaymentLink, session_row: SessionRow
     `confirm`, a completion's: the signed verdict with one `payment_confirmed` block in the
     session's last language, at its current generation (ledgered `reply`), in any session mode,
     since `deliver()` decides what is shown; a reconciliation's is None, and Claude cites the fact."""
+    await mark_quote_paid(ctx, link.quote_id, paid_by=link.link_id)
     label = labels.new_fact_label(session_row)
     if link.customer_id.startswith(PERSON):
         person = link.customer_id.removeprefix(PERSON)
@@ -729,11 +865,26 @@ async def reconcile_link(ctx: KernelCtx, link_id: str) -> bool:
     - `unknown`: the provider cancels the checkout, atomically, and says what became of it: paid
       (`succeeded`, with its charge) is `paid`, with the charge fact and no verdict; `cancelled` is
       `cancelled` for a link an activation moved for its mandate or its rules (its `cancel_reason`),
-      else `expired`; a provider that can't be reached leaves it `unknown`."""
+      else `expired`; a provider that can't be reached leaves it `unknown`.
+
+    Settling one at the provider may record its payment, which marks its quote `paid`, so for a
+    link that may come to that the quote's row is taken first, `FOR UPDATE SKIP LOCKED`, before the
+    link's (repo.py): a quote a payment holds leaves the link for the next read, and so does a link
+    that came to need it only after it was first read."""
+    now = ctx.clock.now()
+    peek = (await ctx.db.execute(ctx.repo.scoped(select(
+        PaymentLink.quote_id, PaymentLink.state, PaymentLink.completion_started_at).where(
+        PaymentLink.link_id == link_id)))).one_or_none()
+    if peek is None:
+        return False
+    quote_held = False
+    if _may_settle(peek.state, peek.completion_started_at, now):
+        if peek.quote_id is not None and await lock_quote(ctx, peek.quote_id, skip_locked=True) is None:
+            return False                                  # a payment of its quote holds it: the next read
+        quote_held = True
     link = await _lock(ctx, PaymentLink.link_id == link_id, skip_locked=True)
     if link is None:
         return False
-    now = ctx.clock.now()
     orphaned = False
     if link.state == "issued":
         if _due(link, now):
@@ -741,10 +892,12 @@ async def reconcile_link(ctx: KernelCtx, link_id: str) -> bool:
             return True
         if link.completion_started_at is None or link.completion_started_at > now - execute.ORPHAN_AFTER:
             return False
+        if not quote_held:
+            return False                                  # orphaned since it was read: the next read
         await _move(ctx, link, "unknown")
         await _ledger(ctx, link, state="unknown", reason="orphaned")
         orphaned = True
-    if link.state != "unknown":
+    if link.state != "unknown" or not quote_held:
         return orphaned
     try:
         settled = await provider(ctx).cancel(link.provider_checkout_id)
