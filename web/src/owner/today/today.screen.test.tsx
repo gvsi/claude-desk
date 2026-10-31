@@ -1803,6 +1803,26 @@ describe("Today's unfinished setup", () => {
     await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
   });
 
+  it('the_card_waits_for_today_to_open', async () => {
+    // Leaving setup for Today while what Today first shows is still being read: Today holds its
+    // loading line alone, with no card, then opens with the card first.
+    const state = await deskAtRules();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', state.desk_id));
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
+
+    needsYou.release();
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect.element(card).toBeVisible();
+    const things = screen.getByRole('heading', { level: 2, name: 'Things to try' }).element();
+    expect(card.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('unfinished_setup_fits_a_laptop_and_a_phone', async () => {
     // On a laptop "Continue setup" sits at the words' right, level with their top. On a phone the
     // card still comes first, and the button drops under the words, from their left edge, as Today's
