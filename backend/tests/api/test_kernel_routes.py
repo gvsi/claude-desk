@@ -2,10 +2,11 @@
 
 The API's tests answer from a fake kernel and the web checks its routes against the API's own OpenAPI document, so
 neither notices when the API calls a `KERNEL_ROUTES` key that the kernel doesn't register yet: the contract lists a
-route before the kernel plan that adds its handler lands. This test reads the keys the API's code names (an AST scan
-of `desk/api/`) and asserts that the kernel app (`desk.kernel_service.app`) registers each one, or that
-`PENDING_KERNEL_ROUTES` names the kernel plan that adds it. It also fails when a pending route is registered or isn't
-called by the API at all, so the list only shrinks as kernel plans land.
+route before the kernel plan that adds its handler lands. This test reads the route each kernel call in `desk/api/`
+passes (an AST scan of its `.call(...)` and `.stream(...)` sites, where a route it can't read fails the test) and
+asserts that the kernel app (`desk.kernel_service.app`) registers each one, or that `PENDING_KERNEL_ROUTES` names the
+kernel plan that adds it. It also fails when a pending route is registered or isn't called by the API at all, so the
+list only shrinks as kernel plans land.
 
 Whichever lands second of this test and a kernel plan's PR (01b, 01c) updates `PENDING_KERNEL_ROUTES`: the later
 change takes out the entries the kernel on `main` serves by then.
@@ -20,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
 
 import desk.api
+from desk.api.kernel_client import PROVING_ROUTES, SET_FIELDS_ONLY, STREAM_ROUTES
 from desk.kernel_api import KERNEL_ROUTES
 from desk.kernel_service.app import KernelSettings, create_app
 
@@ -56,57 +58,82 @@ PENDING_KERNEL_ROUTES: dict[str, str] = {
 }
 
 API = Path(desk.api.__file__).parent
-ROUTE_SHAPE = re.compile(r"(?:GET|POST|PUT|PATCH|DELETE) /\S*")
 SEGMENT = r"[^/?\s]+"     # what an f-string's formatted value stands for: one path segment
+MODEL_CLIENTS = frozenset({"model", "self.model"})   # receivers whose `.call` is the model client's (desk.api.model)
 
 
-class RouteStrings(ast.NodeVisitor):
-    """The `KERNEL_ROUTES` keys a module names: a string that is a key, wherever it sits (a `kernel.call` argument,
-    a module constant, a dict's value), and each key an f-string can spell, its formatted values one path segment
-    each. The client refuses any route that isn't a key, so every kernel call names one of these ways. A string
-    shaped like a route that names no key ("PUT /desks/{id}/" + part) is one the scan can't read, kept in
-    `unreadable` by line so the test fails rather than miss the route."""
+def module_constants(tree: ast.Module) -> dict[str, ast.expr]:
+    """The names a module assigns once, at its top level, with the expression each holds."""
+    assigned: dict[str, list[ast.expr]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets, value = [node.target], node.value
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                assigned.setdefault(target.id, []).append(value)
+    return {name: values[0] for name, values in assigned.items() if len(values) == 1}
 
-    def __init__(self, keys: Set[str]):
-        self.keys, self.named, self.unreadable = keys, set(), []
 
-    def visit_Set(self, node: ast.Set) -> None:
-        """A set of routes says how the client sends them (kernel_client's PROVING_ROUTES), not that the API calls
-        them."""
-
-    def visit_Constant(self, node: ast.Constant) -> None:
-        if isinstance(node.value, str) and ROUTE_SHAPE.fullmatch(node.value):
-            self._found({node.value} & self.keys, node)
-
-    def visit_JoinedStr(self, node: ast.JoinedStr) -> None:
-        for part in node.values:
-            if isinstance(part, ast.FormattedValue):
-                self.visit(part)       # an expression inside can name a route too; the literal parts are read below
-        head = node.values[0] if node.values else None
-        if not (isinstance(head, ast.Constant) and ROUTE_SHAPE.match(head.value)):
-            return
+def route_keys(node: ast.expr, constants: Mapping[str, ast.expr], keys: Set[str]) -> set[str]:
+    """The keys a kernel call's route argument names: a string that is one, each key an f-string can spell (its
+    formatted values one path segment each), or a module constant that holds one, or a dict whose values all are
+    (`STEPS[step]`). Empty when it names none or can't be read."""
+    if isinstance(node, ast.Constant):
+        return {node.value} & keys if isinstance(node.value, str) else set()
+    if isinstance(node, ast.JoinedStr):
         spelled = re.compile("".join(re.escape(part.value) if isinstance(part, ast.Constant) else SEGMENT
                                      for part in node.values))
-        self._found({key for key in self.keys if spelled.fullmatch(key)}, node)
+        return {key for key in keys if spelled.fullmatch(key)}
+    if isinstance(node, ast.Name) and node.id in constants:
+        return route_keys(constants[node.id], {}, keys)
+    if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
+            and isinstance(constants.get(node.value.id), ast.Dict)):
+        named = [route_keys(value, {}, keys) for value in constants[node.value.id].values]
+        return set().union(*named) if named and all(named) else set()
+    return set()
 
-    def _found(self, keys: set[str], node: ast.expr) -> None:
-        if not keys:
-            self.unreadable.append(f"line {node.lineno}: {ast.unparse(node)}")
-        self.named |= keys
+
+def route_argument(call: ast.Call) -> ast.expr | None:
+    """The route a kernel view's `.call(route, ...)` or `.stream(route, ...)` passes, by position or as `route=`.
+    None for a call that isn't one: another method, the model client's `.call`, or a call with no argument that could
+    be a route (Starlette's `request.stream()`, the Anthropic client's `messages.stream(**kwargs)`)."""
+    func = call.func
+    if (not isinstance(func, ast.Attribute) or func.attr not in ("call", "stream")
+            or ast.unparse(func.value) in MODEL_CLIENTS):
+        return None
+    if call.args:
+        return call.args[0]
+    return next((keyword.value for keyword in call.keywords if keyword.arg == "route"), None)
 
 
-def routes_named(source: str, keys: Set[str]) -> tuple[set[str], list[str]]:
-    """The keys of `keys` a module's source names, and the route-shaped strings in it that name none."""
-    scan = RouteStrings(keys)
-    scan.visit(ast.parse(source))
-    return scan.named, scan.unreadable
+def routes_called(source: str, keys: Set[str]) -> tuple[set[str], list[str]]:
+    """The keys of `keys` a module's kernel calls name, and by line each call whose route the scan can't read. Every
+    `.call(...)` and `.stream(...)` but the model client's is taken for a kernel view's, so a call the scan can't read
+    fails the test instead of going unchecked. A route named anywhere else (an error's text, the client's route sets)
+    isn't a call."""
+    tree = ast.parse(source)
+    constants = module_constants(tree)
+    called, unreadable = set(), []
+    for node in ast.walk(tree):
+        route = route_argument(node) if isinstance(node, ast.Call) else None
+        if route is None:
+            continue
+        named = route_keys(route, constants, keys)
+        if not named:
+            unreadable.append((node.lineno, f"line {node.lineno}: {ast.unparse(route)}"))
+        called |= named
+    return called, [line for _, line in sorted(unreadable)]
 
 
 def api_routes() -> tuple[set[str], list[str]]:
-    """The `KERNEL_ROUTES` keys the API's code names, and the route-shaped strings in it that name none."""
+    """The `KERNEL_ROUTES` keys the API's kernel calls name, and the calls whose route the scan can't read."""
     called, unreadable = set(), []
     for path in sorted(API.rglob("*.py")):
-        named, lines = routes_named(path.read_text(), frozenset(KERNEL_ROUTES))
+        named, lines = routes_called(path.read_text(), frozenset(KERNEL_ROUTES))
         called |= named
         unreadable += [f"{path.relative_to(API)} {line}" for line in lines]
     return called, unreadable
@@ -184,38 +211,58 @@ def test_a_pending_route_the_api_doesnt_call_fails():
 
 SCAN_KEYS = frozenset({"GET /health", "GET /whoami", "GET /demo_inbox", "GET /demo_inbox?session_id=",
                        "PUT /desks/{id}/hours", "PUT /desks/{id}/prices", "GET /payment_links/{token}",
-                       "POST /payment_links/{token}/complete", "POST /tools/confirm"})
+                       "POST /payment_links/{token}/complete", "POST /payment_links/{token}/cancel",
+                       "GET /document_links/{token}", "POST /tools/confirm"})
 
 
-def test_the_scan_reads_each_way_the_api_names_a_route():
+def test_the_scan_reads_each_kernel_call_site():
     source = '''
 LINK_ROUTE = "GET /payment_links/{token}"
-STEPS = {"complete": "POST /payment_links/{token}/complete"}
+STEPS = {"complete": "POST /payment_links/{token}/complete", "cancel": "POST /payment_links/{token}/cancel"}
 PROVING_ROUTES = frozenset({"POST /tools/confirm"})
 
-async def read(kernel, part):
-    """GET /health, named in a docstring, isn't a call."""
-    log.info("GET /whoami %s", part)
+async def read(kernel, view, model, request, part, step):
     await kernel.call("GET /demo_inbox?session_id=", query={"session_id": "s1"})
     await kernel.call("GET /demo_inbox")
     await kernel.call(f"PUT /desks/{{id}}/{part}", path={"id": "d1"})
+    await kernel.public().call(LINK_ROUTE, path={"token": "t1"})
+    await view.call(STEPS[step], path={"token": "t1"})
+    await view.call(route="GET /whoami")
+    async with kernel.stream("GET /document_links/{token}", {"token": "t1"}):
+        pass
+    await model.call(request)
+    raise KernelUnavailable("GET /health")
 '''
-    assert routes_named(source, SCAN_KEYS) == ({
-        "GET /payment_links/{token}", "POST /payment_links/{token}/complete",     # through a constant and a dict
+    assert routes_called(source, SCAN_KEYS) == ({
         "GET /demo_inbox?session_id=", "GET /demo_inbox",                         # told apart by their query
         "PUT /desks/{id}/hours", "PUT /desks/{id}/prices",                        # every part the f-string can name
-    }, [])
+        "GET /payment_links/{token}",                                             # a module constant
+        "POST /payment_links/{token}/complete", "POST /payment_links/{token}/cancel",   # each value of a dict
+        "GET /whoami", "GET /document_links/{token}",                             # by keyword; a stream
+    }, [])   # not the model client's call, a route in an error or a set of routes
 
 
-def test_the_scan_reports_a_route_it_cant_read():
+def test_the_scan_reports_a_call_it_cant_read():
     source = '''
-async def read(kernel, part, query):
-    await kernel.call("PUT /desks/{id}/" + part, path={"id": "d1"})
-    await kernel.call(f"GET /demo_inbox{query}")
+TIMEOUT = 6.0
+
+async def read(kernel, path, routes):
+    await kernel.call("GET " + path)
+    await kernel.call(f"GET {path}")
+    for route in {"GET /demo_inbox", "GET /whoami"}:
+        await kernel.call(route)
     await kernel.call("GET /demo-inbox")
+    await kernel.call(TIMEOUT)
+    await kernel.call(*routes)
 '''
-    assert routes_named(source, SCAN_KEYS) == (set(), [
-        "line 3: 'PUT /desks/{id}/'", "line 4: f'GET /demo_inbox{query}'", "line 5: 'GET /demo-inbox'"])
+    assert routes_called(source, SCAN_KEYS) == (set(), [
+        "line 5: 'GET ' + path", "line 6: f'GET {path}'", "line 8: route", "line 9: 'GET /demo-inbox'",
+        "line 10: TIMEOUT", "line 11: *routes"])
+
+
+def test_the_clients_route_sets_name_only_kernel_routes():
+    # how the client sends a route (a proving deadline, a byte stream, set fields only), not calls of it
+    assert sorted((PROVING_ROUTES | STREAM_ROUTES | SET_FIELDS_ONLY) - set(KERNEL_ROUTES)) == []
 
 
 def test_a_route_is_served_when_the_kernel_runs_its_method_and_path():
