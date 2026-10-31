@@ -421,7 +421,7 @@ class ReplyDraft(BaseModel):              # send_reply input: Claude's schema ha
 
 class Violation(BaseModel):
     kind: Literal["number_in_prose", "promise_word", "soft_promise", "unknown_fact", "unentitled_fact",
-                  "stale_fact", "canary", "unsupported_language", "session_paused"]
+                  "stale_fact", "canary", "unsupported_language", "uncertain_language", "check_unavailable", "session_paused"]
     span: str
     fact_ids: list[str] = []
     rule_id: str

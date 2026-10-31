@@ -3,7 +3,8 @@
 `collect_usage(records, session_ids)` reads one `UsageRecord` per model call from a run's records:
 the API's `app.model_calls` rows (route as the row names it), the kernel's ledger, whose `review`
 entries hold the reviewer's call (route `reviewer`) and whose `reply` entries hold the soft-promise
-check's under `soft_promise` (route `soft_promise`, null when the check made no call), and the
+check's under `soft_promise` (route `soft_promise`, null when the check made no call; a bounded
+recheck's summed tokens and latency are one record, irrespective of its violation kind), and the
 simulated visitor's usage per turn (route `simulator`). A row or entry naming another session than
 `session_ids` is left out; one naming no session is the copy's own and is kept. `kernel_check_call(event)`
 is that reading of one ledger entry, which the tier 2 runner shares for a run's usage and spend.

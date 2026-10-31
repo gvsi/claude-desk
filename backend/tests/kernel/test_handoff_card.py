@@ -288,10 +288,10 @@ async def test_a_card_a_take_over_keeps_from_the_visitor_opens_none(app, client,
     reviewer.soft_answer = FLAGGED
     soft_promise = reviewer.soft_promise
 
-    async def slow_model(data):
+    async def slow_model(data, *, timeout_s=None):
         asked.set()
         await answer.wait()                                      # the model answers only once the test lets it
-        return await soft_promise(data)
+        return await soft_promise(data, timeout_s=timeout_s)
 
     reviewer.soft_promise = slow_model
     frozen_clock.advance(60)

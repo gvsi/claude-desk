@@ -888,3 +888,21 @@ async def test_latency_command_names_a_failed_call_without_its_body(tmp_path, ca
         assert await run.latency_command(["--max-usd", "3", "--base-url", "https://desk.example.com"], deps) == 1
         out = capsys.readouterr().out
         assert out == said
+
+
+@pytest.mark.parametrize("status", ["ok", "invalid", "timeout"])
+def test_soft_check_pair_is_one_cost_record_including_unavailable(status):
+    from evals.latency import spend_usd
+    from evals.usage import collect_usage
+
+    first = call_usage(HAIKU, input_tokens=900, cached=100, write=50, output=40, ms=420)
+    pair = {**first, "status": status, "first_status": "error", "tries": 2,
+            **{key: first[key] * 2 for key in
+               ("input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens", "latency_ms")}}
+    event = {"kind": "reply", "session_id": SESSION,
+             "summary": {"soft_promise": pair, "violations": [] if status == "ok" else ["check_unavailable"]}}
+    records = collect_usage({"ledger_entries": [{"event": event}]}, [SESSION])
+    [record] = records
+    assert (record.route, record.ms) == ("soft_promise", 840)
+    assert record.cost_usd("anthropic") == pytest.approx(2 * priced(first))
+    assert spend_usd(records, "anthropic").kernel_usd == pytest.approx(2 * priced(first))

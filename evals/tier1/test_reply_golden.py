@@ -24,9 +24,10 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
 from desk.contracts import ClauseTemplate, LedgerEntry, OwnerMessageResult, ReplyVerdict, RuleCard, Violation
-from evals.fakes import FakeAnthropic, HttpError, Json, Reply, Sleep, Text
+from desk.rewrites import REWRITABLE
+from evals.fakes import FakeAnthropic, HttpError, Json, Refusal, Reply, Sleep, Text
 from evals.oracles import card_amount_problems, denies_ai, scan_visible, verify_verdict_sig, visible_texts
-from evals.tier1.args import book_args, quote_args
+from evals.tier1.args import book_args, payment_link_args, quote_args
 from evals.tier1.golden_desk import (
     GOLDEN_DIR,
     P,
@@ -62,12 +63,14 @@ HANDED_OFF = ["handoff"]
 _ROW = ConfigDict(extra="forbid")
 ViolationKind = Violation.model_fields["kind"].annotation
 FactRole = Literal["own-quote", "other-session-quote", "own-booking", "other-session-booking",
-                   "other-session-owner-statement"]
+                   "other-session-owner-statement", "own-payment-link"]
 QUOTE_ROLES = ("own-quote", "other-session-quote")
 BLOCK_NAMES = ("prose", *get_args(ClauseTemplate))
 LINED_CARDS = ("quote", "charges")   # cards that fill lines as well as a title (the master's "Clauses" row)
 # The soft-promise check's reply a row scripts; with `pass` the target's default answers (it passes).
 SOFT_PROMISE_REPLIES: dict[str, Reply] = {
+    "pass": Json(SOFT_PROMISE_PASS),
+    "refusal": Refusal(),
     "flag": Json({**SOFT_PROMISE_PASS, "promises_beyond_cards": True}),
     "denies_ai": Json({**SOFT_PROMISE_PASS, "denies_being_ai": True}),   # the reply claims to be a person
     "error": HttpError(500),
@@ -143,7 +146,9 @@ class ReplyRow(BaseModel):
     setup: Literal["session_language_es", "travel_past_expiry"] | None = None
     prose: str
     clauses: list[ClauseSpec] = []
-    soft_promise: Literal["pass", "flag", "denies_ai", "error", "timeout", "unparsable"] = "pass"
+    final: StrictBool = True
+    soft_promise: list[Literal["pass", "flag", "denies_ai", "error", "timeout", "unparsable", "refusal"]] = Field(
+        default_factory=lambda: ["pass"], min_length=1, max_length=2)
     expect: ReplyExpect
 
     @model_validator(mode="after")
@@ -156,24 +161,34 @@ class ReplyRow(BaseModel):
                              "so it requires it")
         if self.expect.blocks is not None and self.expect.blocks != self.blocks:
             raise ValueError(f"the draft shows {self.blocks}, not {self.expect.blocks}: a failed check shows "
-                             "only the handoff clause, a passing one its prose (when not empty) and then its cards "
+                             "the handoff clause (or no blocks on a rewritable first attempt), a passing one its prose and cards "
                              "in order")
         if self.setup == "travel_past_expiry" and not any(clause.fact in QUOTE_ROLES for clause in self.clauses):
             raise ValueError("travel_past_expiry travels past a cited quote's expiry, so the row cites a quote")
-        if self.soft_promise != "pass" and self.expect.violations != ["soft_promise"]:
-            raise ValueError("any soft-promise reply but pass is a soft_promise violation, and the only one")
+        failure = {"timeout", "error", "unparsable"}
+        if (self.soft_promise[0] in failure) != (len(self.soft_promise) == 2):
+            raise ValueError("a failed first try stages exactly one recheck; a verdict or refusal stages no recheck")
+        if self.soft_promise != ["pass"]:
+            last = self.soft_promise[-1]
+            kinds = [] if last == "pass" else ["soft_promise"] if last in ("flag", "denies_ai") else ["check_unavailable"]
+            if self.expect.ok != (not kinds) or (kinds and self.expect.violations != kinds):
+                raise ValueError("the deciding staged try must give exactly its verdict and violation kind")
         return self
 
     @property
     def needs(self) -> str:
-        """The last kernel plan the row needs: owner statements are Plan 01b's, the rest Plan 01a's."""
+        """The last kernel plan needed: payments 01c, owner statements 01b, other facts 01a."""
+        if any(clause.fact == "own-payment-link" for clause in self.clauses):
+            return "01c"
         return "01b" if any(clause.fact == "other-session-owner-statement" for clause in self.clauses) else "01a"
 
     @property
     def blocks(self) -> list[str]:
-        """What the draft shows, in order: only the handoff clause on a failed check; else its prose
-        (when not empty) and a card per clause. A row's stated `blocks` must say the same."""
+        """A failed check shows the handoff, or nothing on a rewritable first attempt; a passing
+        one its prose and cited cards. A row's stated `blocks` must say the same."""
         if not self.expect.ok:
+            if not self.final and set(self.expect.kinds) <= REWRITABLE:
+                return []
             return HANDED_OFF
         return (["prose"] if self.prose else []) + [clause.template for clause in self.clauses]
 
@@ -238,7 +253,7 @@ ROWS = load_rows()
 
 async def check_reply(
     k: KernelHarness, caller: Caller, prose: str, clauses: list[dict[str, Any]] | None = None, *,
-    expect: Expect, generation: int | None = None,
+    expect: Expect, generation: int | None = None, final: bool | None = None,
 ) -> Any:
     """`POST /check_reply` for one draft, at the caller's current generation unless given."""
     draft = {
@@ -247,7 +262,8 @@ async def check_reply(
         "prose": prose,
         "clauses": clauses or [],
     }
-    return await k.call("POST /check_reply", body={"draft": draft}, auth=caller.auth, expect=expect)
+    body = {"draft": draft, **({"final": final} if final is not None else {})}
+    return await k.call("POST /check_reply", body=body, auth=caller.auth, expect=expect)
 
 
 def passes(caller: Caller, blocks: list[str], *, language: str | None = None) -> Expect:
@@ -323,8 +339,19 @@ async def cite_facts(
     another visitor's, or an owner statement in another visitor's session."""
     roles = {clause.fact for clause in row.clauses if clause.fact is not None}
     facts = {}
-    if "own-quote" in roles:
+    if roles & {"own-quote", "own-payment-link"}:
         facts["own-quote"] = await make_quote_fact(k, desk, caller, "drain")
+    if "own-payment-link" in roles:
+        fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
+        caller.turn()
+        decision = await decide(k, caller, "native.payment_link",
+                                payment_link_args(facts["own-quote"].removeprefix("quote:")),
+                                expect=Expect(fields={"outcome": "allow", "state": "allowed"}))
+        result = await k.call("POST /execute", body={"decision_id": decision.decision_id,
+                              "session_id": caller.state.session_id, "generation": caller.state.generation},
+                              auth=caller.auth, expect=Expect(fields={"state": "succeeded"}))
+        facts["own-payment-link"] = (next(f.fact_id for f in result.facts if f.kind == "payment_link")
+                                     if k.is_real else "payment_link:stub-link")
     if "other-session-quote" in roles:
         other = await open_caller(k, desk, "visitor")
         facts["other-session-quote"] = await make_quote_fact(k, desk, other, "drain")
@@ -402,7 +429,7 @@ async def assert_auth_ledgered(records: Any, desk: GoldenDesk, session_id: str, 
 async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: ReplyRow):
     desk = await golden_desk(k)
     caller = await open_caller(k, desk, "visitor")
-    if row.soft_promise == "denies_ai":   # the fixture only tests the flag if its prose really denies being an AI
+    if row.soft_promise[-1] == "denies_ai":   # the fixture only tests the flag if its prose really denies being an AI
         assert denies_ai(row.prose), f"{row.id}'s prose must deny being an AI: {row.prose!r}"
     made_from = k.clock.now()
     facts = await cite_facts(k, fake, records, desk, caller, row)
@@ -412,11 +439,13 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
     elif row.setup == "travel_past_expiry":
         cited = [facts[clause.fact] for clause in row.clauses if clause.fact in QUOTE_ROLES]
         await travel_past_expiry(k, records, desk, caller, cited)
-    if row.soft_promise != "pass":
-        fake.script(SOFT_PROMISE_MODEL, SOFT_PROMISE_REPLIES[row.soft_promise])
+    if row.soft_promise != ["pass"]:
+        fake.script(SOFT_PROMISE_MODEL, *(SOFT_PROMISE_REPLIES[step] for step in row.soft_promise),
+                    repeat_last=row.soft_promise[-1] in ("timeout", "error", "unparsable"))
     checks_before = len(fake.calls(SOFT_PROMISE_MODEL))
     verdict = await check_reply(
-        k, caller, row.prose, row.draft_clauses(facts), expect=row.verdict_expect(caller.state.generation, facts)
+        k, caller, row.prose, row.draft_clauses(facts), final=row.final,
+        expect=row.verdict_expect(caller.state.generation, facts)
     )
 
     if k.is_real:
@@ -431,9 +460,10 @@ async def test_reply_row(k: KernelHarness, fake: FakeAnthropic, records, row: Re
                     block, {P}, headline=P, percents=(), items=[SEED_TITLES["drain"]],
                     expires=quote_expiries(made_from, made_until, row.expect.language))
                 assert not problems, f"the quote card, for one drain clearing at {P} cents: {problems}"
-        if row.soft_promise != "pass":
-            assert len(fake.calls(SOFT_PROMISE_MODEL)) - checks_before == 1, "one soft-promise check, as scripted"
-        if row.soft_promise == "denies_ai":   # the only model-free handling of a reply that denies being an AI
+        if row.soft_promise != ["pass"] or (row.expect.ok and row.prose):
+            assert len(fake.calls(SOFT_PROMISE_MODEL)) - checks_before == len(row.soft_promise), (
+                "exactly one model call per staged try, never an extra retry")
+        if row.soft_promise[-1] == "denies_ai":   # the only model-free handling of a reply that denies being an AI
             denials = [violation for violation in verdict.violations if violation.kind == "soft_promise"]
             assert denials and all(violation.rule_id == DENIES_AI_RULE_ID for violation in denials), (
                 f"a reply the check read as denying it is an AI is {DENIES_AI_RULE_ID}: "
@@ -613,3 +643,21 @@ async def test_visitor_bound_kernel_text_has_no_digits(k: KernelHarness, fake: F
         hits = [(text, hit.kind, hit.span) for text in texts for hit in scan_visible(text)
                 if hit.kind in ("digit", "currency", "percent")]
         assert hits == [], f"visitor-bound kernel text carries digits or money: {hits}"
+
+
+@pytest.mark.requires("01c")
+async def test_unmarked_payment_caption_rewrites_then_delivers(k: KernelHarness, fake: FakeAnthropic, records):
+    desk = await golden_desk(k)
+    visitor = await open_caller(k, desk, "visitor")
+    row = next(row for row in ROWS if row.id == "c-unmarked-payment-rewrite")
+    facts = await cite_facts(k, fake, records, desk, visitor, row)
+    clauses = row.draft_clauses(facts)
+    await check_reply(k, visitor, row.prose, clauses, final=False,
+                      expect=row.verdict_expect(visitor.state.generation, facts))
+    verdict = await check_reply(k, visitor, "Here is the link to pay.", clauses, final=True,
+                                expect=passes(visitor, ["prose", "payment_link"]))
+    if k.is_real:
+        assert verify_verdict_sig(visitor.state.session_id, verdict, await signing_key(k))
+        events = [e.event for e in await records.ledger_entries(desk.copy.copy_id, desk.desk_id)
+                  if e.event.session_id == visitor.state.session_id]
+        assert not [e for e in events if e.kind == "desk_data" and e.summary.get("part") == "handoffs"]

@@ -12,7 +12,7 @@ from typing import get_args
 from desk.contracts import Violation
 
 REWRITABLE: frozenset[str] = frozenset({"number_in_prose", "promise_word", "soft_promise", "unknown_fact",
-                                        "stale_fact", "unentitled_fact"})
+                                        "stale_fact", "unentitled_fact", "uncertain_language"})
 
 if not REWRITABLE <= set(get_args(Violation.model_fields["kind"].annotation)):
     raise RuntimeError("every rewritable kind is a violation kind")

@@ -1,4 +1,4 @@
-"""The language of a draft's prose: English, Spanish, another language, or too little to tell.
+"""The language of a draft's prose: English, Spanish, another language, unmarked, or too little to tell.
 
 `detect` counts function words. The text is NFKC-normalized and lowercased, and its words are
 runs of letters, accents kept, so "qué" is Spanish and "que", which French and Portuguese share,
@@ -16,21 +16,20 @@ Italian or Portuguese write as their own ("on", "in", "an", "am", "was", "will",
 am Montag.", "Il tecnico arriva all'una." and "Se for urgente, vou às dez." hand off. "para" and
 "por" count for none, since Portuguese writes them as often as Spanish does.
 
-Prose in any language but English or Spanish hands off to the owner (`unsupported_language`), so
-a misreading in that direction costs a handoff, never an unchecked reply: both lexicons run on
-every draft whatever its language. Four or more words with no marker of any language are
-another language on every reply, the session's first included, so prose in a language no list
-covers, and a time or a price in its words, hands off rather than resting on the model check.
+Only positive evidence of another language hands off (`unsupported_language`): another script,
+leading markers of another language, or a mixed-script word found by the prose scan. Four or more
+words with no marker are `unmarked`: one fully checked rewrite, never an unchecked reply. Both
+lexicons still run on every draft whatever its language.
 """
 
 import re
 import unicodedata
 from typing import Literal
 
-Detected = Literal["en", "es", "other", "none"]
+Detected = Literal["en", "es", "other", "unmarked", "none"]
 
 NON_LATIN_SHARE = 0.3                     # more of the letters than this outside the Latin script: other
-MIN_UNMARKED_WORDS = 4                    # this many words with no marker of any language: other
+MIN_UNMARKED_WORDS = 4                    # this many words with no marker of any language: unmarked
 SPANISH_MARKS = ("ñ", "¿", "¡")
 SPANISH_MARK_BONUS = 2
 
@@ -81,7 +80,7 @@ WORD = re.compile(r"[^\W\d_]+")
 def detect(text: str) -> Detected:
     """`en` or `es` when that language's markers lead; `other` for another script, more markers
     of another language than of English (leaving out the English ones it writes too, `EN_SHARED`)
-    and at least as many as of Spanish, or four or more words with no marker of any language;
+    and at least as many as of Spanish; `unmarked` for four or more words with no language marker;
     `none` for no words, a tie between English and Spanish, or a few unmarked words ("OK")."""
     lowered = unicodedata.normalize("NFKC", text).lower()
     words = WORD.findall(lowered)
@@ -100,7 +99,7 @@ def detect(text: str) -> Detected:
     if other > en - shared and other >= es:
         return "other"
     if en == es == 0:
-        return "other" if len(words) >= MIN_UNMARKED_WORDS else "none"
+        return "unmarked" if len(words) >= MIN_UNMARKED_WORDS else "none"
     if en == es:
         return "none"
     return "en" if en > es else "es"

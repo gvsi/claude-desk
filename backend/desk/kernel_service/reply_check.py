@@ -5,14 +5,15 @@ the session-state rows ("Session state responses": token, copy, closed, generati
 
 1. A paused session (the breaker) gets only the handoff clause and a `session_paused` violation;
    nothing is scanned.
-2. Language: `lang.detect` on the prose. Another language is `unsupported_language`; too little to
-   tell falls back to the session's language, else English. Cards render in this language. The
-   session's language is set at turn start from the visitor's latest message
-   (`POST /sessions/{session_id}/turn`, `turn.py`), and kept or changed at the end by the language
-   of Claude's prose (step 7). It decides only the language a reply whose prose can't be told
-   renders in: the code's checks find the same in a draft whichever language the session reads,
-   since both lexicons always run; the soft-promise check is told that language, with the cards
-   rendered in it.
+2. Language: `lang.detect` on the prose. Positive evidence of another language is
+   `unsupported_language`; four or more unmarked words are `uncertain_language`, one checked
+   rewrite. Both use the session's language, else English, as does too little to tell. Cards
+   render in this language. The session's language is set at turn start from the visitor's latest
+   message (`POST /sessions/{session_id}/turn`, `turn.py`), and kept or changed at the end by the
+   language of Claude's prose (step 7); neither unmarked nor unsupported prose changes it. It
+   decides only the language a reply whose prose can't be told renders in: the code's checks find
+   the same in a draft whichever language the session reads, since both lexicons always run; the
+   soft-promise check is told that language, with the cards rendered in it.
 3. `scan_prose`: numerals and the letters drawn as digits, currency and percent signs, words
    mixing Latin letters with another script (but for the Desk's own name and its business's
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
@@ -34,15 +35,18 @@ the session-state rows ("Session state responses": token, copy, closed, generati
 5. The soft-promise check, only when steps 2 to 4 found nothing and there is prose: Haiku 5.5
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
-   (`soft.denies_ai`). No verdict (a timeout, an error, a refusal, an unparsable answer) blocks
-   too (`soft.unavailable`). While the session has an open handoff the handoff card opened
+   (`soft.denies_ai`). Timeout, error or unparsable output gets one unchanged-input recheck,
+   both tries within one 4 s deadline (at most 2 s each; no recheck below 0.5 s remaining).
+   A refusal gets no recheck. No verdict is `check_unavailable` (`soft.unavailable`), final.
+   While the session has an open handoff the handoff card opened
    (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
    doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
    here" is backed, as the card that opened it said. A call-back request backs nothing (the
    owner's decision of 2026-10-31): its own card names a time and never says the owner will
    reply here, and once its window has passed nothing promises a call. That handoff is read
-   without a lock, so the model never holds one; a reply that passes with its card is checked
-   again in step 7.
+   without a session or handoff lock; an agent request holds its nonce row `FOR UPDATE`, and
+   each check one pooled connection, across both tries. A reply that passes with the handoff's
+   card is checked again in step 7.
 6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
    handoff clause, in the reply's language, or no block at all for a first attempt the API
    rewrites (`final` false, every violation one a rewrite can fix), which is never shown.
@@ -74,6 +78,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -89,9 +94,9 @@ from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Perso
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
-from desk.kernel_service import agents, auth, context, demo_inbox, labels, lang, ledger, render
+from desk.kernel_service import agents, auth, context, decisions, demo_inbox, labels, lang, ledger, render
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
-from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
+from desk.kernel_service.decisions import SoftPromiseInput, SoftPromiseUsage
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
 from desk.kernel_service.sessions import verified
@@ -572,9 +577,11 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     detected = lang.detect(prose)
     language: render.Language = detected if detected in ("en", "es") else fallback
     violations: list[Violation] = []
-    if detected == "other":
+    if detected in ("other", "unmarked"):
         excerpt, _ = _blank_canaries(prose, canaries)
-        violations.append(Violation(kind="unsupported_language", span=_span(excerpt), rule_id="language"))
+        violations.append(Violation(
+            kind="uncertain_language" if detected == "unmarked" else "unsupported_language",
+            span=_span(excerpt), rule_id="language_uncertain" if detected == "unmarked" else "language"))
     # the clauses first, so the scan knows whether a booking card is shown; their refusals follow the prose's
     cards, refused = await check_clauses(ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     violations += scan_prose(draft.prose, canaries, await desk_names(ctx, desk_id),
@@ -601,19 +608,32 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 
 
 async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
-                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None]:
-    """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
-    rendered for it, and an open handoff's card). A `soft_promise` violation per flag set
-    (`soft.promise`, `soft.denies_ai`), or `soft.unavailable` when there is no verdict, each
-    spanning the prose's start; and the call's usage, for the ledger. (`finalize` adds
-    `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
-    verdict, usage = await ctx.decisions.soft_promise(
-        SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards]))
+                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], SoftPromiseUsage | None]:
+    """Step 5: one unchanged-input recheck after timeout, error or invalid output, within one
+    deadline of twice the per-try timeout. Under 0.5 s left skips the recheck; a refusal never
+    retries. Only a verdict can pass. Usage is summed once for the reply ledger, with the first
+    status and the deciding try's status. `finalize` still checks handoff backing under lock."""
+    data = SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards])
+    timeout = decisions.SOFT_PROMISE_TIMEOUT_S
+    deadline = time.monotonic() + 2 * timeout
+    verdict, first = await ctx.decisions.soft_promise(data, timeout_s=timeout)
+    deciding, tries = first, 1
+    remaining = deadline - time.monotonic()
+    if verdict is None and (first is None or first.status != "refusal") and remaining >= 0.5:
+        verdict, deciding = await ctx.decisions.soft_promise(data, timeout_s=min(timeout, remaining))
+        tries = 2
+    calls = [call for call in (first, deciding if tries == 2 else None) if call is not None]
+    usage = None
+    if calls:
+        usage = SoftPromiseUsage(
+            model=calls[-1].model, status=deciding.status if deciding is not None else "error",
+            first_status=first.status if first is not None else "error", tries=tries,
+            **{key: sum(getattr(call, key) for call in calls) for key in
+               ("input_tokens", "cached_tokens", "cache_write_tokens", "output_tokens", "latency_ms")})
     if verdict is None:
-        rule_ids = ["soft.unavailable"]
-    else:
-        rule_ids = (["soft.promise"] if verdict.promises_beyond_cards else []) + (
-            ["soft.denies_ai"] if verdict.denies_being_ai else [])
+        return [Violation(kind="check_unavailable", span=_span(prose), rule_id="soft.unavailable")], usage
+    rule_ids = (["soft.promise"] if verdict.promises_beyond_cards else []) + (
+        ["soft.denies_ai"] if verdict.denies_being_ai else [])
     return [Violation(kind="soft_promise", span=_span(prose), rule_id=rule_id) for rule_id in rule_ids], usage
 
 
@@ -632,7 +652,7 @@ def sign_verdict(signer: desk_kernel.Signer, *, session_id: str, generation: int
 
 async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[RenderedBlock],
                    violations: Sequence[Violation], language: render.Language, author: str,
-                   fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None, seen: bool = False,
+                   fact_ids: Sequence[str] = (), soft_promise: SoftPromiseUsage | None = None, seen: bool = False,
                    detected: render.Language | None = None, visitor_plain_key: str | None = None,
                    message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES,
                    handoff_backed: bool = False, final: bool = True) -> ReplyVerdict:
@@ -913,6 +933,6 @@ async def post_check_reply(body: CheckReplyRequest, ctx: Ctx, request: Request) 
         raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),
                         named=Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id))
     verdict = await check_draft(ctx, row, draft, final=body.final)
-    if row.kind == "agent":            # a turn ends at a blocked check only when the API said it was final
+    if row.kind == "agent":            # immediate kinds, an explicit final check, or the second check end the turn
         await agents.end_turn(ctx, request, verdict, final=body.final and "final" in body.model_fields_set)
     return verdict

@@ -198,6 +198,13 @@ class CallUsage(BaseModel):
     latency_ms: int
 
 
+class SoftPromiseUsage(CallUsage):
+    """One reply check's deciding status and summed usage across its bounded pair of tries."""
+
+    first_status: CallStatus
+    tries: Literal[1, 2]
+
+
 class Reviewed(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -232,9 +239,10 @@ class DecisionsBackend(Protocol):
         """The reviewer's scores for one action; `review` is None on any failure."""
         ...
 
-    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
+    async def soft_promise(self, data: SoftPromiseInput, *,
+                           timeout_s: float | None = None) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
         """The soft-promise verdict on one reply, None on any failure; the usage is None when no
-        call was made."""
+        call was made. `timeout_s` bounds this try within the reply check's shared deadline."""
         ...
 
 
@@ -296,7 +304,8 @@ class OfflineDecisions:
     async def review(self, data: ReviewInput) -> Reviewed:
         return Reviewed(review=None, usage=None)
 
-    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
+    async def soft_promise(self, data: SoftPromiseInput, *,
+                           timeout_s: float | None = None) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
         return SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False), None
 
 
@@ -318,12 +327,13 @@ class AnthropicDecisions:
             timeout_s=REVIEW_TIMEOUT_S, failed="review_failed")
         return Reviewed(review=review, usage=usage)
 
-    async def soft_promise(self, data: SoftPromiseInput) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
+    async def soft_promise(self, data: SoftPromiseInput, *,
+                           timeout_s: float | None = None) -> tuple[SoftPromiseVerdict | None, CallUsage | None]:
         return await self._ask(
             SoftPromiseVerdict, data, model=SOFT_PROMISE_MODEL, max_tokens=SOFT_PROMISE_MAX_TOKENS,
             system=SOFT_PROMISE_SYSTEM, schema=SOFT_PROMISE_SCHEMA,
             thinking={"type": "disabled"},                              # Haiku 5.5 takes it at effort low
-            timeout_s=SOFT_PROMISE_TIMEOUT_S, failed="soft_promise_failed")
+            timeout_s=SOFT_PROMISE_TIMEOUT_S if timeout_s is None else timeout_s, failed="soft_promise_failed")
 
     async def _ask(self, answer: type[Answer], data: BaseModel, *, model: str, max_tokens: int, system: str,
                    schema: dict[str, Any], thinking: dict[str, str], timeout_s: float,

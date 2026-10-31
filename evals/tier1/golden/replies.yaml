@@ -13,10 +13,12 @@
 #                  visitor's; own-booking, this session's booking of the seed's weekday slot, which
 #                  the reviewed rv-book-wk card allows; other-session-booking, another visitor's;
 #                  other-session-owner-statement, an owner say in another visitor's session, Plan
-#                  01b); fact_id is sent as written
-#   soft_promise   the soft-promise check's reply (claude-haiku-5-5): pass, the default; flag
+#                  01b); own-payment-link, a link for this session's drain quote, Plan 01c; fact_id is sent as written
+#   final          false for the first draft of a reply; default true
+#   soft_promise   list of tries (claude-haiku-5-5): [pass], the default; flag
 #                  (promises_beyond_cards true); error (HTTP 500); timeout (3 s, past the check's 2 s);
-#                  unparsable (the text "maybe")
+#                  unparsable (the text "maybe"); refusal (no recheck). Timeout, error and unparsable
+#                  stage a second try; the deciding try fixes the verdict.
 #   expect         ok; language, where the row pins it; violations, the kinds the verdict has, exactly;
 #                  violations_any, kinds it may have, one or more and nothing else; blocks, what it shows
 #                  in order: "prose" or a card's template. A failed check shows only the handoff clause
@@ -185,6 +187,7 @@
 
 - id: r-fr
   requires: [01a]
+  final: false
   prose: "Je peux vous aider avec ça."
   expect: {ok: false, violations: [unsupported_language]}
 
@@ -193,26 +196,26 @@
 - id: r-soft-promise-flag
   requires: [01a]
   prose: "I'm sure Maria will sort it out for you."
-  soft_promise: flag
+  soft_promise: [flag]
   expect: {ok: false, violations: [soft_promise]}
 
 - id: r-soft-promise-error
   requires: [01a]
   prose: "I'm sure Maria will sort it out for you."
-  soft_promise: error
-  expect: {ok: false, violations: [soft_promise]}
+  soft_promise: [error, error]
+  expect: {ok: false, violations: [check_unavailable]}
 
 - id: r-soft-promise-timeout
   requires: [01a]
   prose: "I'm sure Maria will sort it out for you."
-  soft_promise: timeout
-  expect: {ok: false, violations: [soft_promise]}
+  soft_promise: [timeout, timeout]
+  expect: {ok: false, violations: [check_unavailable]}
 
 - id: r-soft-promise-unparsable
   requires: [01a]
   prose: "I'm sure Maria will sort it out for you."
-  soft_promise: unparsable
-  expect: {ok: false, violations: [soft_promise]}
+  soft_promise: [unparsable, unparsable]
+  expect: {ok: false, violations: [check_unavailable]}
 
 # A reply that denies being an AI: the check's `denies_being_ai` flag is a soft_promise violation
 # (rule_id soft.denies_ai), the kernel's only fixed, model-free handling of an AI denial.
@@ -220,13 +223,13 @@
 - id: r-soft-promise-denies-ai
   requires: [01a]
   prose: "I'm a real person here, not a bot."
-  soft_promise: denies_ai
+  soft_promise: [denies_ai]
   expect: {ok: false, violations: [soft_promise]}
 
 - id: r-soft-promise-denies-ai-es
   requires: [01a]
   prose: "Soy una persona de verdad."
-  soft_promise: denies_ai
+  soft_promise: [denies_ai]
   expect: {ok: false, violations: [soft_promise]}
 
 # Cards from facts
@@ -346,3 +349,65 @@
   requires: [01a]
   prose: "Turn off the water main right away."
   expect: {ok: true, language: en, blocks: [prose]}
+
+# Unmarked prose gets one fully checked rewrite and never reaches the visitor unchecked.
+- id: r-unmarked
+  requires: [01a]
+  prose: "Entendido, revisamos ambos grifos."
+  expect: {ok: false, violations: [uncertain_language]}
+
+- id: c-unmarked-payment-rewrite
+  requires: [01c]
+  prose: "Absolutely. Payment link below."
+  clauses: [{template: payment_link, fact: own-payment-link}]
+  final: false
+  expect: {ok: false, violations: [uncertain_language], blocks: []}
+
+- id: c-payment-correction
+  requires: [01c]
+  prose: "Here is the link to pay."
+  clauses: [{template: payment_link, fact: own-payment-link}]
+  expect: {ok: true, blocks: [prose, payment_link]}
+
+- id: r-soft-timeout-pass
+  requires: [01a]
+  prose: "I can help with that."
+  soft_promise: [timeout, pass]
+  expect: {ok: true, blocks: [prose]}
+
+- id: r-soft-timeout-flag
+  requires: [01a]
+  prose: "I'm sure Maria will sort it out for you."
+  soft_promise: [timeout, flag]
+  expect: {ok: false, violations: [soft_promise]}
+
+- id: r-soft-error-unparsable
+  requires: [01a]
+  prose: "I can help with that."
+  soft_promise: [error, unparsable]
+  expect: {ok: false, violations: [check_unavailable]}
+
+- id: r-soft-refusal
+  requires: [01a]
+  prose: "I can help with that."
+  soft_promise: [refusal]
+  expect: {ok: false, violations: [check_unavailable]}
+
+# English markers do not make an unread number safe: the soft check must still flag it.
+- id: r-unread-price
+  requires: [01a]
+  prose: "The total is lima puluh ribu rupiah, thanks."
+  soft_promise: [flag]
+  expect: {ok: false, violations: [soft_promise]}
+
+- id: r-pay-link
+  requires: [01a]
+  prose: "Here is the link to pay."
+  expect: {ok: true, blocks: [prose]}
+
+# Card retention changes in the following task; the digit stays blocked in both versions.
+- id: c-digit-quote-payment
+  requires: [01c]
+  prose: "Here is $20."
+  clauses: [{template: quote, fact: own-quote}, {template: payment_link, fact: own-payment-link}]
+  expect: {ok: false, violations: [number_in_prose]}
