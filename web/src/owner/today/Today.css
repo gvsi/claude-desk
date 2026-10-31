@@ -162,8 +162,10 @@
   display: flex;
 }
 
-/* A row done in view: its check draws once, and its done line and pill come in. Without the
-   animation (reduced motion), the check is drawn whole and the words are there. */
+/* A row done in view: its check draws once, short arm first, as every check in the app does (the
+   shared path starts at the long arm's tip, so the dash comes in from its end), and its done line
+   and pill come in. Without the animation (reduced motion), the check is drawn whole and the words
+   are there. */
 .cd-things__check--draws path {
   stroke-dasharray: 24;
   animation: cd-things-check-draw var(--motion-base) var(--motion-ease-emphasis);
@@ -176,7 +178,7 @@
 
 @keyframes cd-things-check-draw {
   from {
-    stroke-dashoffset: 24;
+    stroke-dashoffset: -24;
   }
 
   to {

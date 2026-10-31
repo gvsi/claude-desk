@@ -1154,6 +1154,39 @@ describe('Things to try ticks off', () => {
     await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
   });
 
+  it('the_check_draws_from_its_short_arm', async () => {
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(thingRow(screen, 'Answer a held request').getByRole('button', { name: 'Open the request' })).toBeVisible();
+    const things = thingsToTry(screen).element();
+    // The check's path as it starts to draw, caught in the commit that ticks the row.
+    const drawing = new Promise<SVGPathElement>((resolve) => {
+      const watch = new MutationObserver(() => {
+        const path = things.querySelector<SVGPathElement>('.cd-things__check--draws path');
+        if (path === null) return;
+        watch.disconnect();
+        resolve(path);
+      });
+      watch.observe(things, { childList: true, subtree: true, attributes: true });
+      onTestFinished(() => watch.disconnect());
+    });
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    const path = await drawing;
+    const [draw] = path.getAnimations();
+    if (!draw) throw new Error('the check draws');
+
+    // A third of the way in, the short arm's end (4,12) shows and the long arm's tip (20,6) doesn't yet.
+    draw.pause();
+    draw.currentTime = Number(draw.effect?.getComputedTiming().duration ?? 0) / 3;
+    const length = path.getTotalLength();
+    const tip = path.getPointAtLength(0);
+    const end = path.getPointAtLength(length);
+    expect([tip.x, tip.y]).toEqual([20, 6]);
+    expect([Math.round(end.x), Math.round(end.y)]).toEqual([4, 12]);
+    expect(dashShows(path, length), 'the short arm’s end').toBe(true);
+    expect(dashShows(path, 0), 'the long arm’s tip').toBe(false);
+    draw.finish();
+  });
+
   it.each(['desktop', 'phone'] as const)('nothing_under_the_list_moves_at_%s', async (viewport) => {
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
@@ -1501,6 +1534,16 @@ function thingRow(screen: RenderResult, title: string) {
   return thingsToTry(screen)
     .getByRole('listitem')
     .filter({ has: page.getByRole('heading', { level: 3, name: title, exact: true }) });
+}
+
+/** Whether the stroke's dash covers the point `at` along `path` now, from its computed dash array and offset. */
+function dashShows(path: SVGPathElement, at: number): boolean {
+  const style = getComputedStyle(path);
+  const offset = Number.parseFloat(style.strokeDashoffset) || 0;
+  const [dash = 0, gap = dash] = style.strokeDasharray.split(/[\s,]+/).map((part) => Number.parseFloat(part));
+  const period = dash + gap;
+  const into = (((at + offset) % period) + period) % period;
+  return into < dash;
 }
 
 /** One frame of the list as a row ticks. */
