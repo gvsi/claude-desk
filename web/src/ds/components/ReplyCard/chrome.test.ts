@@ -55,4 +55,24 @@ describe('cardChrome', () => {
     expect(cardChrome('policy', 'en')?.label).toBe('Policy');
     expect(cardChrome('hours', 'en', 'charter:policy:service_area')?.label).toBe('Hours');
   });
+
+  it('each_named_policy_says_what_it_is', () => {
+    // The owner's labels for the About claims setup publishes, by their charter key.
+    const named: [string, string, string][] = [
+      ['about', 'About us', 'Sobre nosotros'],
+      ['pricing', 'Pricing', 'Precios'],
+      ['intake', 'Getting started', 'Cómo empezar'],
+      ['after_hours', 'After hours', 'Fuera de horario'],
+      ['urgent', 'Urgent help', 'Ayuda urgente'],
+      ['how_we_help', 'How we help', 'Cómo ayudamos'],
+    ];
+    for (const [key, en, es] of named) {
+      expect(cardChrome('policy', 'en', `charter:policy:${key}`)?.label, key).toBe(en);
+      expect(cardChrome('policy', 'es', `charter:policy:${key}`)?.label, key).toBe(es);
+    }
+    // Only a whole key names one: a key that merely starts like one, or another kind of fact, is "Policy".
+    expect(cardChrome('policy', 'en', 'charter:policy:about_us')?.label).toBe('Policy');
+    expect(cardChrome('policy', 'en', 'charter:policy:constructor')?.label).toBe('Policy');
+    expect(cardChrome('policy', 'en', 'charter:contact')?.label).toBe('Policy');
+  });
 });

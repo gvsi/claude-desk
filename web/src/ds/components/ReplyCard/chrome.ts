@@ -66,20 +66,31 @@ export const CARD_CHROME: Readonly<Record<ClauseTemplate, Readonly<Record<CopyLa
   link_cancelled: { en: { label: 'Payment link cancelled' }, es: { label: 'Enlace de pago cancelado' } },
 };
 
+/** A policy card's fact: setup's charter claim `policy:<key>`. */
+const POLICY_FACT = 'charter:policy:';
+
 /**
- * The policy card for the Desk's service area (setup's charter claim `policy:service_area`), named
- * for what it is (the owner's decision); every other policy card stays "Policy".
+ * The policy cards named for what they are (the owner's decisions), by their charter claim's key:
+ * the Desk's service area and the About claims setup publishes. Every other policy card stays "Policy".
  */
-const SERVICE_AREA_FACT = 'charter:policy:service_area';
-const SERVICE_AREA: Readonly<Record<CopyLanguage, CardChrome>> = { en: { label: 'Service area' }, es: { label: 'Zona de servicio' } };
+const NAMED_POLICIES: Readonly<Record<string, Readonly<Record<CopyLanguage, CardChrome>>>> = {
+  service_area: { en: { label: 'Service area' }, es: { label: 'Zona de servicio' } },
+  about: { en: { label: 'About us' }, es: { label: 'Sobre nosotros' } },
+  pricing: { en: { label: 'Pricing' }, es: { label: 'Precios' } },
+  intake: { en: { label: 'Getting started' }, es: { label: 'Cómo empezar' } },
+  after_hours: { en: { label: 'After hours' }, es: { label: 'Fuera de horario' } },
+  urgent: { en: { label: 'Urgent help' }, es: { label: 'Ayuda urgente' } },
+  how_we_help: { en: { label: 'How we help' }, es: { label: 'Cómo ayudamos' } },
+};
 
 /**
  * The template's chrome in `language`, or null for a template this build doesn't know. `factId` is
- * the card's fact, which names the service area's policy card apart from the Desk's other policies.
+ * the card's fact, which names a policy card in `NAMED_POLICIES` apart from the Desk's other policies.
  */
 export function cardChrome(template: string, language: CopyLanguage, factId?: string | null): Readonly<CardChrome> | null {
   if (!Object.hasOwn(CARD_CHROME, template)) return null;
-  if (template === 'policy' && factId === SERVICE_AREA_FACT) return SERVICE_AREA[language];
+  const key = template === 'policy' && factId?.startsWith(POLICY_FACT) ? factId.slice(POLICY_FACT.length) : null;
+  if (key !== null && Object.hasOwn(NAMED_POLICIES, key)) return NAMED_POLICIES[key]?.[language] ?? null;
   const chrome = CARD_CHROME[template as ClauseTemplate];
   return Object.hasOwn(chrome, language) ? chrome[language] : chrome.en;
 }
