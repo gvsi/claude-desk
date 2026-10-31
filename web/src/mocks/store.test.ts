@@ -920,6 +920,22 @@ describe('the scripted Desk', () => {
     expect(mine()).toHaveLength(2);
   });
 
+  it('open_handoff_quotes_its_visitors_latest_words', async () => {
+    // As the API reads Needs you (`last_texts`): an open handoff quotes what its visitor wrote last,
+    // on every read, not what they had written when it opened.
+    const { session } = await openChat();
+    const quoted = async () =>
+      ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
+        .filter((item) => item.handoff?.session_id === session.session_id)
+        .map((item) => [item.handoff?.kind, item.from_the_visitor]);
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'Can I talk to Maria?']]);
+    await send('It is about the leak under my sink.');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink.']]);
+  });
+
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
     // As the API's turn in a chat the breaker paused: no model call and no "writing", only the
     // kernel's handoff, which its check stops as paused (`session_paused`, no attempt anyone made)

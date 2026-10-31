@@ -189,11 +189,11 @@ export interface DecisionRecord {
   fromTheVisitor: string | null;
 }
 
+/** An open or done handoff. What its visitor wrote is read from its chat on every read, as the API does. */
 export interface HandoffRecord {
   handoff: Handoff;
   deskId: string;
   createdAt: number;
-  fromTheVisitor: string | null;
 }
 
 /** A lead, as the kernel keeps one: someone who left their name and how to reach them. */
@@ -948,7 +948,6 @@ export class MockWorld {
       },
       deskId: session.deskId,
       createdAt: this.now(),
-      fromTheVisitor: session.lastVisitorText,
     });
     const named = `${fields.lead} · `;
     this.leads.push({
@@ -979,7 +978,6 @@ export class MockWorld {
       handoff: { handoff_id: handoffId, session_id: sessionId, reason: CARD_REASON, callback_window: null, status: 'open', kind: 'card' },
       deskId: session.deskId,
       createdAt: this.now(),
-      fromTheVisitor: session.lastVisitorText,
     });
     const entry: DemoInboxEntry = {
       entry_id: this.id('inbox'),

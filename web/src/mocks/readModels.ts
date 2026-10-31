@@ -119,19 +119,23 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
         from_the_visitor: d.fromTheVisitor,
       } satisfies NeedsYouItem,
     }));
+  // An open handoff quotes what its visitor wrote last, as of this read (the API's `last_texts`).
   const callbacks = [...world.handoffs.values()]
     .filter((h) => h.deskId === deskId && h.handoff.status === 'open')
-    .map((h) => ({
-      at: h.createdAt,
-      item: {
-        handoff: h.handoff,
-        decision: null,
-        held_by: null,
-        held_at: null,
-        session: needsYouSession(world.sessions.get(h.handoff.session_id), h.handoff.session_id),
-        from_the_visitor: h.fromTheVisitor,
-      } satisfies NeedsYouItem,
-    }));
+    .map((h) => {
+      const session = world.sessions.get(h.handoff.session_id);
+      return {
+        at: h.createdAt,
+        item: {
+          handoff: h.handoff,
+          decision: null,
+          held_by: null,
+          held_at: null,
+          session: needsYouSession(session, h.handoff.session_id),
+          from_the_visitor: session?.lastVisitorText ?? null,
+        } satisfies NeedsYouItem,
+      };
+    });
   return [...held, ...callbacks].sort((a, b) => a.at - b.at).map(({ item }) => item);
 }
 
