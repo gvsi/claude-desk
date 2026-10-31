@@ -6,7 +6,7 @@
  * cookies: kept in the store for the screen tests' one page, real ones on the dev server. Nothing
  * here is a credential.
  */
-import type { ApprovalAnswer, Decision, DeskUpdated, PaymentLinkState, PaymentLinkStateResult, RuleCard } from '../api/contracts.ts';
+import { MONEY_EFFECTS, type ApprovalAnswer, type Decision, type DeskUpdated, type PaymentLinkState, type PaymentLinkStateResult, type RuleCard } from '../api/contracts.ts';
 import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../api/routes.ts';
 import type {
   AgentRunStarted,
@@ -152,9 +152,6 @@ const CARD_WHO: ReadonlySet<unknown> = new Set<RuleCard['who']>(['anyone', 'veri
 
 /** The platform ceiling on the payment limit, $10,000 (master "Money cap"): no limit is drafted above it. */
 const PLATFORM_CEILING_CENTS = 1_000_000;
-
-/** The effects that move money. */
-const MONEY_EFFECTS: ReadonlySet<string> = new Set(['charge', 'pay_out']);
 
 /** Whether `card` is a rule that moves money: on a tool that charges or pays out, or on every tool that does. */
 function movesMoney(desk: DeskRecord, card: RuleCard): boolean {

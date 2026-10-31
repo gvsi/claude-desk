@@ -133,9 +133,14 @@ export async function invalidateCopy(queryClient: QueryClient): Promise<void> {
   await Promise.all([queryClient.invalidateQueries({ queryKey: DESKS_KEY }), queryClient.invalidateQueries({ queryKey: ME_KEY })]);
 }
 
+/** A Desk's own address in the owner app, which its pages sit under. */
+export function deskPath(deskId: string): string {
+  return `/app/${encodeURIComponent(deskId)}`;
+}
+
 /** A Desk's Today. */
 export function todayPath(deskId: string): string {
-  return `/app/${encodeURIComponent(deskId)}/today`;
+  return `${deskPath(deskId)}/today`;
 }
 
 /** The business that holds `deskId`, and the Desk, or null when the copy has no such Desk. */

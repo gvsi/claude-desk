@@ -6,17 +6,17 @@
  * copy: the not-found screen.
  */
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import type { PeopleOut } from '../../api/views.ts';
 import { OutsideTheCopy } from '../../app/NotFound.tsx';
 import { pollMs } from '../../app/poll.ts';
-import { Breadcrumb, Card, LoadingLine, PageHeader, PersonRules, type PersonRuleView, type RulesLinkProps } from '../../ds/index.ts';
+import { Breadcrumb, Card, LoadingLine, PageHeader, PersonRules, type PersonRuleView } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { rulesQuery } from '../rules/RuleDraftReview.tsx';
 import { ruleWords, targetWords } from '../rules/ruleWords.ts';
 import { useReadFailure } from '../useReadFailure.ts';
@@ -25,15 +25,6 @@ import { PEOPLE_LABEL, ReadFailed, peoplePath, usePeople } from './PeoplePage.ts
 import './People.css';
 
 const rulesPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/rules`;
-
-/** The breadcrumb's and the rules' links through the router, so the app stays loaded. */
-function RouterLink({ href, children, ...rest }: RulesLinkProps) {
-  return (
-    <Link to={href} {...rest}>
-      {children}
-    </Link>
-  );
-}
 
 /**
  * The active cards just for `personId`, in card order, as the person's page lists them: what each

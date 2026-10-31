@@ -8,22 +8,23 @@
  * system's Rivera fixtures and the kernel's visitor templates, in the turn's language. Nothing here
  * is a model; it stands in for the API's turn runner so screens can be built and tested.
  */
-import type {
-  ApprovalAnswer,
-  CardBlock,
-  ClauseTemplate,
-  Decision,
-  DecisionState,
-  EvDemoInbox,
-  EvMessage,
-  Effect,
-  NormalizedAction,
-  Outcome,
-  RenderedBlock,
-  RuleCard,
-  SseEvent,
-  StatusEvent,
-  ToolName,
+import {
+  MONEY_EFFECTS,
+  type ApprovalAnswer,
+  type CardBlock,
+  type ClauseTemplate,
+  type Decision,
+  type DecisionState,
+  type EvDemoInbox,
+  type EvMessage,
+  type Effect,
+  type NormalizedAction,
+  type Outcome,
+  type RenderedBlock,
+  type RuleCard,
+  type SseEvent,
+  type StatusEvent,
+  type ToolName,
 } from '../api/contracts.ts';
 import { RIVERA_MONEY_CAP_CENTS, cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { executedLine, type ExecutedTool } from '../ds/fixtures/receipts.ts';
@@ -418,9 +419,6 @@ export function heldDiscount(text: string, person: { name: string } | null): Dec
     reasonPlain: `${who} asked for a drain clearing quote at ${percentText(discountBp, '.')}% off, ${moneyText(amountCents)} instead of ${moneyText(listCents)}.`,
   };
 }
-
-/** The effects that move money: a request with one is a money request. */
-const MONEY_EFFECTS: ReadonlySet<Effect> = new Set<Effect>(['charge', 'pay_out']);
 
 /**
  * The answers a hold offers, as the kernel works them out (master plan, "Decision lifecycle"):

@@ -5,7 +5,7 @@
  * the payment limit's field (`parseLimit`). It reads the rules and decides nothing: the kernel
  * decides every request.
  */
-import type { PolicyVersion, RuleCard, ToolName } from '../../api/contracts.ts';
+import { MONEY_EFFECTS, type PolicyVersion, type RuleCard, type ToolName } from '../../api/contracts.ts';
 import type { PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import {
   describeEffects,
@@ -19,7 +19,7 @@ import {
 import { aboveMoneyCapCopy, formatCents, listWords } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, connectorOn, toolState, type ConnectorKey } from '../connectors/catalog.ts';
 import { coveredTools } from './changeRows.ts';
-import { PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
+import { ABOVE_CEILING, PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
 
 /** The rules a tool is read against: the active version's cards. */
 type ActiveCards = Pick<PolicyVersion, 'cards'>;
@@ -167,10 +167,7 @@ export function toolFallback(row: Pick<ToolRow, 'tool' | 'effects'>, active: Act
   return !governingRules(row, active).some((card) => card.mode === 'never' && card.who === 'anyone');
 }
 
-/** The effects that move money, so an automatic rule on them takes a limit. */
-const MONEY_EFFECTS: ReadonlySet<string> = new Set(['charge', 'pay_out']);
-
-/** The rule moves money: it is on a tool that charges or pays out, or on every tool that does. */
+/** The rule moves money, so an automatic one takes a limit: it is on a tool that charges or pays out, or on every tool that does. */
 function movesMoney(card: RuleCard, row: Pick<ToolRow, 'effects'>): boolean {
   if (isShared(card)) return MONEY_EFFECTS.has(card.applies_to.slice('effect:'.length));
   return row.effects.some((effect) => MONEY_EFFECTS.has(effect));
@@ -257,8 +254,6 @@ export function hubSections(view: RulesView, people: PeopleOut | null | undefine
   });
 }
 
-/** The payment limit's field, when it holds more than a single payment may be. */
-const ABOVE_CEILING = 'No single payment can be above $10,000.';
 /** The payment limit's field, when it holds anything but whole dollars. */
 const WHOLE_DOLLARS = 'Enter whole dollars, from 0 to 10,000.';
 

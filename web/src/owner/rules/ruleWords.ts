@@ -114,6 +114,12 @@ export function targetWords(appliesTo: string): string {
 export const PAYMENT_MAX_CENTS = 1_000_000;
 
 /**
+ * The payment limit's field, when it holds more than a single payment may be: `parseLimit`'s answer,
+ * and the page's when the API refuses an amount above the platform ceiling.
+ */
+export const ABOVE_CEILING = `No single payment can be above ${formatCents(PAYMENT_MAX_CENTS)}.`;
+
+/**
  * The payment limit in the signed words (N-Conn-19, N-Conn-19b, N-Conn-20): the most Claude takes
  * or pays out in one action without asking, whatever the rules say. "no payment over $1,000
  * without asking you"; at 0, "every payment asks you first".

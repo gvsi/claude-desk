@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 
 import { ownerErrorCopy } from '../../api/http.ts';
 import type { PeopleOut, RulesView } from '../../api/views.ts';
@@ -14,12 +14,12 @@ import {
   PageHeader,
   ToolRulesCard,
   type RuleRowProps,
-  type RulesLinkProps,
 } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
+import { deskPath } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { DEFAULT_SIDE } from './changeRows.ts';
 import { hubSections, toolFallback, toolRuleRows, type HubSection } from './hub.ts';
@@ -29,17 +29,6 @@ import { RULES_TITLE } from './RulesPage.tsx';
 import './HouseRules.css';
 
 const TITLE = 'All rules';
-
-const deskPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}`;
-
-/** A link through the router, so the app stays loaded. */
-function RouterLink({ href, children, ...rest }: RulesLinkProps) {
-  return (
-    <Link to={href} {...rest}>
-      {children}
-    </Link>
-  );
-}
 
 /** A tool no rule of the owner's covers: the default ask, in the house rules' words. */
 function defaultRow(tool: string): RuleRowProps {
