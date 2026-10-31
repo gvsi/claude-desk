@@ -82,6 +82,10 @@ export const REFERENCE_BOARDS = [
   'N-R2-Agents-05-Over-Limit',
   // The chat: a payment link a rule change cancelled.
   'N-R2-Chat-Link-Cancelled',
+  // The public page while the owner is in the chat, take-over option A, signed on 2026-10-30: the
+  // chat's head says she is in the chat and Claude, an AI, is paused, with no Ask for her.
+  'N-R2-TakeOver-A-1512-EN',
+  'N-R2-TakeOver-A-390-EN',
   // The Demo inbox as a sheet: a visitor's from the bottom of a phone, the owner's beside Today.
   'N-R2-Inbox-Sheet-Public',
   'N-R2-Inbox-Sheet-Owner',
@@ -157,6 +161,8 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-R2-Agents-04-Run': 'laptop-1150',
   'N-R2-Agents-05-Over-Limit': 'laptop',
   'N-R2-Chat-Link-Cancelled': 'laptop',
+  'N-R2-TakeOver-A-1512-EN': 'laptop',
+  'N-R2-TakeOver-A-390-EN': 'phone',
   'N-R2-Inbox-Sheet-Public': 'phone',
   'N-R2-Inbox-Sheet-Owner': 'laptop',
   'N-Run2-Share': 'laptop',
