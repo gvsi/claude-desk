@@ -35,9 +35,10 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   instead. A row written before the key was required may hold none (the column stays nullable); it is read and
   moved on like any other.
 - **Consent** (`consent`): the shared turn runner stores the owner's answer at once, then searches
-  their Claude memory (`native.read_memory`) and reads the named website (`native.fetch_website`) on yes. On no it
-  skips both. `_after_consent` appends the consultant opening and first fact question; the labels and reply are saved together.
-  No memory or website read ever runs after no, and a website the owner names later is kept as text.
+  their Claude memory (`native.read_memory`), reads the named website (`native.fetch_website`) and runs up to three
+  keyword web searches (`native.web_search`) on yes. On no it skips every read. `_after_consent` appends the consultant
+  opening and first fact question; the labels and reply are saved together. Web search content reaches only that
+  opening's understanding call. A website the owner names later after no is kept as text.
 - **Answer** (`answer`): one structured model call over the business type, the question asked, the answers so far
   and the wrapped memory, website, current question's earlier owner answers and Claude replies, and owner's answer,
   answered in that question's own model (`SETUP_TURNS`). With one ask, the exchange starts after it; with follow-ups,
@@ -188,6 +189,7 @@ from desk.api.prompts import (
     SITUATION_PRICE_REQUIRED,
     SITUATION_TOOLS_BY_WHO,
     TOOLS_TAG,
+    WEB_SEARCH_TAG,
     BlockConfig,
     BusinessType,
     Choice,
@@ -342,6 +344,8 @@ MEMORY_FAILED_LABEL = "Couldn't search your Claude memory"
 WEBSITE_LABEL = "Read {host}"
 WEBSITE_PAGES_LABEL = "Read {host}, {pages} pages"
 WEBSITE_FAILED_LABEL = "Couldn't read {host}"
+WEB_SEARCH_LABEL = "Searched the web: {query}"
+WEB_SEARCH_FAILED_LABEL = "Couldn't search the web just now"
 QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can use."
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
@@ -425,9 +429,10 @@ class Entry(BaseModel):
     role: Literal["claude", "owner", "tool_label"]
     text: str
     question: Literal["consent"] | QuestionKey | None = None
-    read: Literal["memory", "website"] | None = None
+    read: Literal["memory", "website", "web_search"] | None = None
     content: str | None = None
     website: str | None = None
+    search_queries: list[str] | None = None
     choices: list[Choice] = []
     card: ProposalCard | None = None
     covered: list[QuestionKey] = []
@@ -876,6 +881,18 @@ async def _read_website(owner: OwnerCtx, desk_id: str, url: str, host: str) -> E
     return Entry(role="tool_label", text=label, read="website", content=content[:READ_TEXT_MAX], website=url)
 
 
+async def _search_web(owner: OwnerCtx, desk_id: str, query: str) -> Entry:
+    """Keep the search's plain result lines as untrusted homework for the understanding call alone."""
+    result = await run_setup_tool(owner, desk_id, "native.web_search", {"query": query})
+    if result is None or result.state != "succeeded":
+        return Entry(role="tool_label", text=WEB_SEARCH_FAILED_LABEL, read="web_search")
+    results = result.model_view.get("results")
+    lines = [item[key] for item in (results if isinstance(results, list) else []) if isinstance(item, dict)
+             for key in ("title", "url", "snippet") if isinstance(item.get(key), str)]
+    return Entry(role="tool_label", text=WEB_SEARCH_LABEL.format(query=query[:80]), read="web_search",
+                 content="\n".join(lines)[:READ_TEXT_MAX])
+
+
 # The interview -----------------------------------------------------------------------------------------------------
 
 
@@ -955,7 +972,8 @@ async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart,
                              owner_display_name=(reduce_name(body.owner_display_name)
                                                  or reduce_name(described.owner_display_name) or None)),
         transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None,
-                          connected_apps=described.connected_apps),
+                          connected_apps=described.connected_apps,
+                          search_queries=described.search_queries or None),
                     Entry(role="claude", text=CONSENT_QUESTION, question="consent")])
     return interview, created.slug
 
@@ -1283,6 +1301,8 @@ def _understanding_message(interview: Interview, entries: list[Entry]) -> dict:
             parts.append(wrap(MEMORY_TAG, entry.content))
         elif entry.read == "website" and entry.content:
             parts.append(wrap_website(entry.content, entry.website or ""))
+        elif entry.read == "web_search" and entry.content:
+            parts.append(wrap(WEB_SEARCH_TAG, entry.content))
     return _user("\n\n".join(parts))
 
 
@@ -1507,6 +1527,8 @@ async def consent(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inte
             site = website_url(interview.transcript[0].website)
             if site is not None:
                 entries.append(await _read_website(ctx, interview.desk_id, *site))
+            for query in (interview.transcript[0].search_queries or [])[:3]:
+                entries.append(await _search_web(ctx, interview.desk_id, query))
         interview.transcript += entries
         interview.business_tools_enabled = business_tools_enabled
         await _after_consent(ctx, engine, model, interview, entries)
