@@ -9,14 +9,15 @@
  *
  * The copy's inbox is read once as Today opens, so the button counts what is there and the sheet
  * opens onto entries already read, never onto an inbox that only looks empty. It is read again as
- * the sheet opens and every few seconds while it is open, and not while it is closed. While that
- * first read is out, the button's place says the inbox is opening; if it fails, the inbox's title
- * says it couldn't be opened, with "Try again". A later read that fails says the same under the
- * sheet's button, and inside the sheet while it is open, where the page behind is out of reach, so
- * the entries read before never pass for current.
+ * the sheet opens and every few seconds while it is open, and sends no new read from the moment it
+ * closes (a read already out finishes, with its one retry). While that first read is out, the
+ * button's place says the inbox is opening; if it fails, the inbox's title says it couldn't be
+ * opened, with "Try again". A later read that fails says the same under the sheet's button, and
+ * inside the sheet while it is open, where the page behind is out of reach, so the entries read
+ * before never pass for current.
  */
-import { useQueries, useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useState } from 'react';
+import { focusManager, hashKey, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
@@ -39,9 +40,14 @@ export interface OwnerInboxProps {
 
 export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   const titleId = `${useId()}-title`;
-  // Whether the sheet is open, as the sheet says each time it opens or closes.
+  // Whether the sheet is open, as the sheet says each time it opens or closes. `openNow` changes the
+  // moment it says so, before Today draws the change. The poll and a return to the tab or the
+  // network ask it, so the inbox sends no new read from the moment it closes, not even one that
+  // comes while the close is still being drawn (a read already out finishes, with its one retry).
   const [open, setOpen] = useState(false);
+  const openNow = useRef(false);
   const openChanged = (next: boolean) => {
+    openNow.current = next;
     setOpen(next);
     onOpenChange?.(next);
   };
@@ -49,9 +55,8 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
     queryKey: OWNER_INBOX_KEY,
     queryFn: () => request('ownerInbox'),
     // Once as Today opens; after that, only while the sheet is open.
-    refetchInterval: open ? pollMs('inbox') : false,
-    refetchOnWindowFocus: open,
-    refetchOnReconnect: open,
+    refetchOnWindowFocus: () => openNow.current,
+    refetchOnReconnect: () => openNow.current,
   });
   const failure = useReadFailure(inbox);
 
@@ -60,6 +65,32 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   useEffect(() => {
     if (open) void refetch();
   }, [open, refetch]);
+
+  // Then every few seconds while it stays open and the tab is in view, counted again from each change
+  // to the read (it going out, its answer, read or failed), as React Query's `refetchInterval` counts.
+  // The count starts again as the change happens, from the query cache, not once Today has drawn it,
+  // so a poll can't come due just after an answer. The poll is the sheet's own: `refetchInterval`
+  // would stop only once Today had drawn the close, and a poll that came due in between would read.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!open) return undefined;
+    let poll: number | undefined;
+    const startCount = () => {
+      window.clearInterval(poll);
+      poll = window.setInterval(() => {
+        if (openNow.current && focusManager.isFocused()) void refetch({ cancelRefetch: false });
+      }, pollMs('inbox'));
+    };
+    startCount();
+    const inboxHash = hashKey(OWNER_INBOX_KEY);
+    const stopHearing = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === 'updated' && event.query.queryHash === inboxHash) startCount();
+    });
+    return () => {
+      stopHearing();
+      window.clearInterval(poll);
+    };
+  }, [open, refetch, queryClient]);
 
   // The held requests the alerts name, each read for its Desk while the sheet is open. A read that
   // hasn't answered, failed, or names no action draws no link.
