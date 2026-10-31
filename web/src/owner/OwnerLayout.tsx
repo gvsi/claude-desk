@@ -38,7 +38,19 @@ import {
 import { writeLocal } from '../lib/storage.ts';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
-import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead, withAnswering } from './useDesks.ts';
+import {
+  DESKS_KEY,
+  desksQuery,
+  dropTheOldInbox,
+  findDesk,
+  invalidateCopy,
+  lastOrFirst,
+  todayPath,
+  useDesks,
+  useToday,
+  useTodayReadAhead,
+  withAnswering,
+} from './useDesks.ts';
 
 import './OwnerLayout.css';
 
@@ -304,6 +316,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
     async (copy: CopyOut) => {
       setConfirming(false);
       const first = copy.desks[0];
+      // The old copy's inbox goes before the new copy's Desk frame reads its Today ahead.
+      await dropTheOldInbox(queryClient);
       // Leave this Desk first: read again while it is still shown, the copy without it would say it's gone.
       await navigate(first ? todayPath(first.desk_id) : '/', { replace: true });
       await invalidateCopy(queryClient);

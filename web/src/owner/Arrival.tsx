@@ -8,7 +8,7 @@ import type { SessionEndedState } from '../app/providers.tsx';
 import { IntroDialog, type IntroErrorCode } from '../ds/index.ts';
 import { THINGS_TO_TRY } from './arrival/ideas.ts';
 import { TodayPreview } from './arrival/TodayPreview.tsx';
-import { DESKS_KEY, invalidateCopy, lastOrFirst, READ_AHEAD_MS, readTodayAhead, todayPath } from './useDesks.ts';
+import { DESKS_KEY, dropTheOldInbox, invalidateCopy, lastOrFirst, READ_AHEAD_MS, readTodayAhead, todayPath } from './useDesks.ts';
 
 const TITLE = 'A Claude front desk for your business';
 const INTRO =
@@ -101,6 +101,7 @@ export function Arrival() {
     const first = copy.desks[0];
     if (!first) return false;
     if (!shown.current) return true;
+    await dropTheOldInbox(queryClient);
     await invalidateCopy(queryClient);
     if (!shown.current) return true;
     await readAhead(queryClient, first.desk_id);

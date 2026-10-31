@@ -4,7 +4,7 @@
  * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, start over),
  * with the public page always a new tab away and never opened on Today itself.
  */
-import { http } from 'msw';
+import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
@@ -1051,6 +1051,56 @@ describe('OwnerLayout', () => {
     await expect.poll(() => requests('ownerInbox').length).toBe(2);
   });
 
+  it('start_over_drops_the_old_copys_late_inbox', async () => {
+    // This copy's inbox holds an entry the new copy's doesn't, so whose inbox Today shows is plain.
+    const leftBehind = 'A note in the copy left behind.';
+    mockStore.world.inbox.push({
+      entry: { entry_id: 'inbox-left-behind', to: 'owner', kind: 'alert', body: leftBehind, created_at: new Date().toISOString(), decision_id: null },
+      deskId: RIVERA.deskId,
+      sessionId: null,
+    });
+    // Polls far apart, so only the reads that open a page land.
+    const oldInbox = holdTheAnswerTo('ownerInbox');
+    const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
+    await expect.element(heldCard(screen)).toBeVisible();
+    await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
+
+    // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
+    const newDesks = holdReads(ROUTES.desks.path);
+    await screen.getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
+    const fresh = `/app/${mockStore.world.ids.deskId}/today`;
+    expect(router.state.location.pathname).toBe(fresh);
+    await vi.waitFor(() => expect(newDesks.held()).toBeGreaterThan(0));
+    // The old copy's Today is gone (its inbox was still opening), and the new copy's loading page is up.
+    expect(pageNow()).toBe('loading');
+    const sawItOpening = watchFor('Opening your Demo inbox');
+
+    // The old copy's inbox answers late, before the new copy's Desks do.
+    const late = nextAnswerTo('ownerInbox');
+    oldInbox.release();
+    await late.settled;
+    newDesks.release();
+
+    // The new copy's Today reads its own inbox ahead with the rest of it, so it opens with its one
+    // entry counted, never with the inbox still opening.
+    await expect.element(heldCard(screen)).toBeVisible();
+    await expect.poll(() => requests('ownerInbox').length).toBe(2);
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    expect(sawItOpening()).toBe(false);
+
+    // With the sheet's own read held, it shows what Today read: the new copy's alert, linking to the
+    // new copy's held request, and nothing of the old copy.
+    const newHold = mockStore.world.inbox.find((record) => record.entry.decision_id != null)?.entry.decision_id;
+    if (newHold == null) throw new Error("the new copy's hold alerted the owner, naming it");
+    holdReads(ROUTES.ownerInbox.path);
+    await screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true }).click();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toHaveAttribute('href', `${fresh}#request-${encodeURIComponent(newHold)}`);
+    expect(sheet.getByText(leftBehind).elements()).toHaveLength(0);
+  });
+
   it('late_answering_failure_keeps_the_fresh_copy', async () => {
     const { screen, router } = await renderRoute(TODAY);
     const sawNotFound = watchFor("This page doesn't exist");
@@ -1405,6 +1455,52 @@ function nextAnswerTo(key: RouteKey): { came: () => boolean; settled: Promise<vo
   });
   onTestFinished(() => stop());
   return { came: () => came, settled };
+}
+
+/**
+ * Holds every read of `path` until `release()`, or the test's end, lets them through to the mock:
+ * `held()` counts the reads that came.
+ */
+function holdReads(path: string): { held: () => number; release: () => void } {
+  let held = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.get(path, async () => {
+      held += 1;
+      await released;
+      return undefined;
+    }),
+  );
+  return { held: () => held, release };
+}
+
+/**
+ * The next read of `key`, answered by the mock as it is sent, so from the copy as it is then, and
+ * held until `release()`, or the test's end, sends that answer on. `sent()` says whether it came.
+ */
+function holdTheAnswerTo(key: RouteKey): { sent: () => boolean; release: () => void } {
+  let sent = false;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.get(ROUTES[key].path, async ({ request }) => {
+      if (sent) return undefined;
+      sent = true;
+      const url = new URL(request.url);
+      const answer = await mockStore.dispatch(key, { path: url.pathname, query: url.searchParams });
+      await released;
+      if ('network' in answer) return HttpResponse.error();
+      return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
+    }),
+  );
+  return { sent: () => sent, release };
 }
 
 /** Links to the owner's preview of Rivera's public page. */
