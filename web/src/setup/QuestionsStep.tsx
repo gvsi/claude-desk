@@ -32,6 +32,8 @@ interface Answer {
   question: QuestionKey;
   text: string;
   seen: number;
+  /** The API refused it (a 409 to its first send): final, whatever a later read holds. */
+  refused?: true;
 }
 
 /**
@@ -142,7 +144,8 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
       const now = refused || isUncertain(err) ? await reread() : null;
       setSending(null);
       if (now === null) {
-        setFailed(answer);
+        // Kept with "Try again"; a first send's refusal is remembered, since a read can't undo it.
+        setFailed(refused && !again ? { ...answer, refused: true } : answer);
         return;
       }
       if (refused && !again) {
@@ -170,6 +173,12 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     setRetrying(false);
     if (now === null) return;
     const kept = failed;
+    // A send the API refused gets its words back, whatever the conversation now holds.
+    if (kept.refused) {
+      setFailed(null);
+      setRefill({ text: kept.text });
+      return;
+    }
     const outcome = outcomeOf(now, kept);
     if (outcome === 'unknown') {
       void submit(kept, true);

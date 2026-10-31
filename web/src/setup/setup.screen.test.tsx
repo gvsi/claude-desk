@@ -356,6 +356,23 @@ describe('setup', () => {
     await page.getByRole('button', { name: 'Send' }).click();
     await expect.element(page.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
     await expect.element(twinBox).toHaveValue('Same words.');
+
+    // The same refusal when the read after it fails: kept with "Try again", which, once the read
+    // works, puts the words back. A 409 to a first send is final, whatever the conversation holds.
+    const again = await startInterview();
+    const other = (await renderRoute(`/app/setup/${again.interview_id}`)).screen;
+    const otherBox = other.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(otherBox).toBeVisible();
+    await mockStore.dispatch('setupAnswer', { params: { id: again.interview_id }, body: { question: 'what_you_do', text: 'Same words.' } });
+    const sent = mockStore.requests.length;
+    mockStore.inject({ route: 'setup', status: 503 });
+    await otherBox.fill('Same words.');
+    await other.getByRole('button', { name: 'Send' }).click();
+    await expect.element(other.getByText(FAILED_LINE, { exact: true })).toBeVisible();
+    await other.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(other.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
+    await expect.element(otherBox).toHaveValue('Same words.');
+    expect(requests('setupAnswer', sent)).toHaveLength(1);
   });
 
   it('lost_consent_is_read_before_it_is_sent_again', async () => {
