@@ -21,10 +21,12 @@
   min-width: 0;
 }
 
+/* A greeting that wraps balances its lines, as page titles do (`PageHeader`). */
 .cd-greeting__title {
   margin: 0;
   color: var(--text-primary);
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .cd-greeting__presence {

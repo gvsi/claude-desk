@@ -3,6 +3,7 @@ import { expect, fn } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { lineWords } from '../../test/lineWords.ts';
 import { Greeting } from './Greeting.tsx';
 
 /** The public link as the owner's screen would show it: a display string, never fetched. */
@@ -70,5 +71,26 @@ export const WithPresence: Story = {
 
     // The link sits at the right of the greeting's line.
     await expect(copy.getBoundingClientRect().left).toBeGreaterThan(heading.getBoundingClientRect().right);
+  },
+};
+
+export const LongGreetingOnAPhone: Story = {
+  name: 'Long greeting on a phone',
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: { text: 'Good morning, Maximiliana', link: { label: PUBLIC_LINK, onCopy: fn() } },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No reference board draws Today's greeting on a phone with a long name. The nearest is N-Today-Run1, at the canvas's width; on a phone a long name takes the greeting's second line, and the link drops under it.",
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(390);
+    // The greeting balances its lines, as page titles do: the name whole on the second, nothing cut.
+    const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maximiliana' });
+    expectComputed(heading, { textWrapStyle: 'balance' });
+    await expect(lineWords(heading)).toEqual([['Good', 'morning,'], ['Maximiliana']]);
+    await expect(heading.getBoundingClientRect().height).toBe(2 * 44);
+    await expect(canvas.getByRole('button', { name: 'Copy your Desk link' }).getBoundingClientRect().top).toBeGreaterThan(heading.getBoundingClientRect().bottom);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };

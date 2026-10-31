@@ -18,7 +18,7 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `text` | `string` | Required. `.cd-type-greeting` (serif, 36/44, weight 300). |
+| `text` | `string` | Required. `.cd-type-greeting` (serif, 36/44, weight 300). Balanced when it wraps, as `PageHeader`'s title is: on a phone, "Good morning, Maximiliana" takes two lines with the name whole on the second. |
 | `presence` | `{ line: string; people: PresenceGlyph[] }` | The line in `body` type, `text-secondary`. At most three glyphs. |
 | `link` | `{ label: string; onCopy: () => void }` | An outlined pill at the right; it drops under the text on a narrow line. |
 

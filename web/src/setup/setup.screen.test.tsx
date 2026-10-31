@@ -25,6 +25,7 @@ import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
+import { lineWords } from '../ds/test/lineWords.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { retryAfterMs } from '../app/poll.ts';
 import { SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
@@ -1759,6 +1760,39 @@ describe('setup', () => {
       expect(el.scrollWidth, text).toBeLessThanOrEqual(el.clientWidth);
     }
     expectNoHorizontalScroll();
+  });
+
+  it('live_title_balances_a_long_name', async () => {
+    // A 78-character name, near the API's 80, given as an owner gives it: the description's first
+    // sentence. Screen tests load no web fonts, so the title is drawn in the platform's fallback
+    // serif (Georgia on a Mac, Liberation Serif on Linux), and the lines it takes differ by platform.
+    // The name is long enough to wrap in setup's column in either, and the test compares the title's
+    // lines with the ones it would take unbalanced rather than counting them. The exact lines in
+    // Source Serif 4 are the PageHeader stories' (LongTitle, LongTitleOnAPhone).
+    const name = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland and the East Bay';
+    const state = await interviewAtPreview(`${name}. I'm Sam, a plumber in Oakland.`);
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      const title = screen.getByRole('heading', { level: 1, name: `${name} is live` });
+      await expect.element(title).toBeVisible();
+      const element = title.element() as HTMLElement;
+      expect(getComputedStyle(element).textWrapStyle, viewport).toBe('balance');
+      const balanced = lineWords(element);
+      // The lines the browser's greedy rule gives the same title, filling each line in turn.
+      const before = element.style.textWrap;
+      element.style.textWrap = 'wrap';
+      const greedy = lineWords(element);
+      element.style.textWrap = before;
+      const read = `${viewport}: balanced ${JSON.stringify(balanced)}, greedy ${JSON.stringify(greedy)}`;
+      // The title wraps, and balancing keeps the lines it takes anyway, so nothing under it moves.
+      expect(greedy.length, read).toBeGreaterThan(1);
+      expect(balanced.length, read).toBe(greedy.length);
+      // "live", the word the whole setup builds to, doesn't sit alone on the last line.
+      expect(balanced.at(-1)?.length ?? 0, read).toBeGreaterThan(1);
+      expectNoHorizontalScroll();
+    }
   });
 
   it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {
