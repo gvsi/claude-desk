@@ -715,7 +715,8 @@ async def test_a_draft_holding_an_auto_charge_above_its_cap_is_refused(k: Kernel
 async def test_a_draft_holding_an_auto_charge_at_a_cap_of_zero_is_refused(k: KernelHarness, records):
     """At a cap of 0 no auto money card can be drafted. A draft adding an auto `effect:charge` card
     for $20 is 422 `invalid` whether it names a cap of 0 over the copy's $500 version or keeps the
-    cap of 0 of a confirmed version holding no money card, and neither makes a version."""
+    cap of 0 of a confirmed version holding no money card, and neither makes a version; the same
+    draft at a $20 cap is proved."""
     desk = await golden_desk(k)
     with_charge = [FIND_SLOTS_CARD, charge_card("m-auto-charge-20", CAP_20)]
     seeded = await active_version(k, desk)
@@ -726,6 +727,7 @@ async def test_a_draft_holding_an_auto_charge_at_a_cap_of_zero_is_refused(k: Ker
     versions = await version_numbers(k, records, desk)
     await draft_at(k, desk, with_charge, None, expect=INVALID)
     await assert_no_new_version(k, records, desk, versions, active.version, "a draft keeping a cap of 0")
+    await draft_at(k, desk, with_charge, CAP_20)        # the control: refused for the cap, not the cards
 
 
 @pytest.mark.requires("01b")
