@@ -39,7 +39,7 @@ async def create_copy(ctx: KernelCtx) -> CopyCreated:
         await mcp_pins.connect(ctx, created.desk_id, server, seed_pins=mcp_client.seed_pins())
     await seed.seed_charges(ctx, created.desk_id, seed.RIVERA_MOCKPAY_CHARGES)
     await activation.activate_shipped(ctx, created.desk_id, "rivera", desk.auto_money_cap_cents)
-    await seed.seed_held_request(ctx, copy_id, created.desk_id)
+    seeded_chat = await seed.seed_held_request(ctx, copy_id, created.desk_id)
     token = auth.new_token()
     owner = SessionRow(session_id=auth.new_session_id(), copy_id=copy_id, desk_id=None, kind="owner",
                        secret_hash=auth.hash_token(token), verified=True, assurance="owner_session", mode="ai",
@@ -47,7 +47,7 @@ async def create_copy(ctx: KernelCtx) -> CopyCreated:
     ctx.db.add(owner)
     await ctx.db.flush()
     return CopyCreated(copy_id=copy_id, desk_ids=[created.desk_id], owner_session=session_state(owner),
-                       owner_token=token)
+                       owner_token=token, seeded_chat=seeded_chat)
 
 
 @router.post("/copies", response_model=CopyCreated)

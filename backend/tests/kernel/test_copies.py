@@ -13,7 +13,7 @@ import pytest
 from fastapi import FastAPI, Request
 from sqlalchemy import select
 
-from desk.contracts import Claim
+from desk.contracts import Claim, Decision
 from desk.db.models import (ActorSession, Business, CalendarSlot, Copy, Desk, Document, Fact, LedgerEntry,
                              NotificationPref, Person, PriceItem, Tool)
 from desk.db.models import KnowledgeItem as KnowledgeRow
@@ -26,6 +26,7 @@ from .fakes import FakeAdapter
 from .helpers import kernel_ctx, rows_of
 from .test_adapters import visitor_of
 from .test_context import context_of
+from .test_decide import verify_signature
 
 TZ = ZoneInfo("America/Los_Angeles")
 
@@ -43,6 +44,26 @@ async def create_copy(client) -> dict:
     response = await client.post("/copies", json={})
     assert response.status_code == 200, response.text
     return response.json()
+
+
+async def test_copy_returns_seeded_chat(client):
+    created = await create_copy(client)
+    chat = created["seeded_chat"]
+    decision = Decision.model_validate(chat["decision"])
+    assert chat["session_id"] == decision.session_id
+    assert chat["visitor_line"] == seed.HELD_REQUEST_VISITOR_LINE
+    assert (decision.outcome, decision.state, decision.visitor_plain) == (
+        "hold", "held", "Waiting for Maria Rivera to approve")
+    verify_signature((await client.get("/health")).json()["public_key_hex"], decision)
+
+    # The owner's pending approvals name this same hold, in this same visitor session.
+    assert api_rows(created["copy_id"],
+                    "SELECT decision_id, session_id FROM kernel_ro.decisions WHERE state = 'held'") == [
+        (decision.decision_id, chat["session_id"])]
+    response = await client.get(f"/decisions/{decision.decision_id}",
+                                headers={"X-Owner-Session": created["owner_token"]})
+    assert response.status_code == 200, response.text
+    assert Decision.model_validate(response.json()) == decision.model_copy(update={"inbox": []})
 
 
 def api_rows(copy_id: str, sql: str) -> list[tuple]:

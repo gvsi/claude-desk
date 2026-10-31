@@ -23,7 +23,6 @@ from desk.contracts import (
     BusinessSeed,
     CalendarSlot,
     Claim,
-    Decision,
     DeskSeed,
     Fact,
     HoursWindow,
@@ -34,6 +33,7 @@ from desk.contracts import (
     RuleCard,
     SeedDocument,
     SeedPerson,
+    SeededChat,
     ToolCall,
 )
 from desk.db.models import Person
@@ -118,6 +118,7 @@ RIVERA_KNOWLEDGE: list[KnowledgeItem] = [
 # The held request: drain clearing at 15% off, which `rv-quote` (list price only) holds for Maria.
 HELD_REQUEST = ToolCall(call_id="seed-held-quote", tool="native.quote",
                         args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 1500})
+HELD_REQUEST_VISITOR_LINE = "Could you do the drain clearing at 15% off?"
 
 
 def rivera_seed(now: datetime) -> tuple[BusinessSeed, DeskSeed]:
@@ -223,15 +224,17 @@ async def seed_charges(ctx: KernelCtx, desk_id: str, charges: list[SeedCharge]) 
     return charge_ids
 
 
-async def seed_held_request(ctx: KernelCtx, copy_id: str, desk_id: str) -> Decision:
+async def seed_held_request(ctx: KernelCtx, copy_id: str, desk_id: str) -> SeededChat:
     """The request waiting on a new copy's Today: a visitor session of its own (its token is
     discarded, so no one can speak for it) asks for `HELD_REQUEST`, and `decide.decide_call`
     decides it as it would any call, so it is a signed, ledgered hold that alerts the owner. Runs
-    in the caller's transaction, after the seed's cards are active."""
+    in the caller's transaction, after the seed's cards are active. Returns the session, the
+    visitor's own words (untrusted text) and that decision for the API's transcript."""
     from desk.kernel_service import decide       # decide imports activation, which imports this module
 
     ctx.bind(copy_id)
     visitor, _ = await sessions.open_visitor(ctx, copy_id, desk_id)
     request = DecideRequest(session_id=visitor.session_id, generation=visitor.generation,
                             call=HELD_REQUEST.model_copy(deep=True))
-    return await decide.decide_call(ctx, sessions.principal_for(visitor), visitor, request)
+    decision = await decide.decide_call(ctx, sessions.principal_for(visitor), visitor, request)
+    return SeededChat(session_id=visitor.session_id, visitor_line=HELD_REQUEST_VISITOR_LINE, decision=decision)

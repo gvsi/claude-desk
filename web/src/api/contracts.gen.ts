@@ -345,6 +345,7 @@ export interface CopyCreated {
   desk_ids: string[];
   owner_session: SessionState;
   owner_token: string;
+  seeded_chat?: SeededChat | null;
   replayed_messages?: ReplayedEvent[];
   replay_id?: string | null;
 }
@@ -355,6 +356,11 @@ export interface SessionState {
   assurance: "none" | "demo_code" | "owner_session";
   mode: "ai" | "owner" | "paused";
   generation: number;
+}
+export interface SeededChat {
+  session_id: string;
+  visitor_line: string;
+  decision: Decision;
 }
 export interface ReplayedEvent {
   session_id: string;
