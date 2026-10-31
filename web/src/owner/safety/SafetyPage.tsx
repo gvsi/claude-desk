@@ -85,21 +85,37 @@ function ReadFailed({ failure }: { failure: ReadFailure | null }) {
 }
 
 /**
+ * One line for several failed reads: the first one's words, busy while any of them reads again, and
+ * "Try again" reads each of them again. Null when none failed.
+ */
+function anyFailed(...failures: (ReadFailure | null)[]): ReadFailure | null {
+  const failed = failures.filter((f): f is ReadFailure => f !== null);
+  const [first] = failed;
+  if (first === undefined) return null;
+  return { line: first.line, retrying: failed.some((f) => f.retrying), retry: () => failed.forEach((f) => f.retry()) };
+}
+
+/**
  * This week's count of the requests the kernel refused, in Claude's voice: the figure Today's
  * "Last 7 days" shows. With none, what will show up here and how to see one, but only once the
- * attempts say nothing else was stopped this week either; with Claude's own stopped drafts alone
- * nobody tried to talk Claude around, so nothing shows here and the list below has the drafts. A
- * failed read of the count says so first.
+ * attempts say nothing else was stopped this week either, and only while neither read has failed
+ * since it last worked, so an earlier read never passes for current; with Claude's own stopped
+ * drafts alone nobody tried to talk Claude around, so nothing shows here and the list below has the
+ * drafts. A failed read of the count or of the attempts says so first, in either view, since
+ * "Every entry" has no list of the attempts to say it over.
  */
 function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   const today = useToday(deskId);
-  const attempts = useAttempts(deskId).data;
-  const failure = useReadFailure(today);
+  const safety = useAttempts(deskId);
+  const todayFailure = useReadFailure(today);
+  const attemptsFailure = useReadFailure(safety);
+  const failure = anyFailed(todayFailure, attemptsFailure);
   const week = today.data?.this_week;
+  const attempts = safety.data;
   let shown: ReactNode = null;
   if (week !== undefined && week.stopped > 0) {
     shown = <p className="cd-safety__headline cd-type-summary">{stoppedHeadline(week.stopped)}</p>;
-  } else if (week !== undefined && attempts !== undefined && !anythingStoppedIn(attempts, week)) {
+  } else if (week !== undefined && attempts !== undefined && failure === null && !anythingStoppedIn(attempts, week)) {
     shown = (
       <EmptyState
         title="Nothing stopped this week"
@@ -179,7 +195,8 @@ interface AttemptsViewProps {
 /**
  * The attempts, each a link that opens it beside the list: the one the address names, else the
  * newest. With none, the list is left out: the empty state above already says nothing was stopped.
- * A failed read says so first, over the attempts read before.
+ * A failed read is said above, beside the headline (`Headline`), over the attempts read before, and
+ * with nothing read yet it takes the place of "Reading the attempts".
  */
 function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewProps) {
   const safety = useAttempts(deskId);
@@ -203,54 +220,49 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
   }, [picked, openId]);
 
   if (safety.data === undefined) {
-    return failure !== null ? (
-      <ReadFailed failure={failure} />
-    ) : (
+    return failure !== null ? null : (
       <p className="cd-safety__loading cd-type-meta" role="status">
         Reading the attempts
       </p>
     );
   }
-  if (attempts.length === 0) return <ReadFailed failure={failure} />;
+  if (attempts.length === 0) return null;
   const now = new Date();
 
   return (
-    <>
-      <ReadFailed failure={failure} />
-      <div className="cd-safety__split">
-        <div className="cd-attempts">
-          <Filters chosen={filter} onChoose={setFilter} />
-          {shown.length === 0 ? (
-            <p className="cd-safety__hint cd-type-meta">No attempts of this kind. Choose All to see every attempt.</p>
-          ) : (
-            <ul className="cd-attempts__list" aria-label="Attempts, newest first">
-              {shown.map((a) => (
-                // The row's link opens the attempt through the page's in-app links; this only notes the pick.
-                <li key={a.ref_id} onClick={() => setPicked({ refId: a.ref_id })}>
-                  <AttemptRow
-                    time={formatWhen(attemptTime(a, page), timezone, now)}
-                    title={triageOf(a)?.summary ?? a.reason_plain}
-                    who={originCopy(a.origin)}
-                    stoppedBy={stoppedBy(a)}
-                    href={attemptPath(deskId, a.ref_id)}
-                    current={a.ref_id === open?.ref_id}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="cd-safety__beside">
-          {open !== null ? (
-            <div ref={opened} className="cd-safety__opened" tabIndex={-1}>
-              <AttemptDetail key={open.ref_id} attempt={open} page={page} devKey={devKey} deskId={deskId} timezone={timezone} />
-            </div>
-          ) : refId !== undefined ? (
-            <EmptyState title="This attempt isn't in the list" body="It may be from an earlier copy of this Desk. Choose one from the list to see how it was stopped." />
-          ) : null}
-        </div>
+    <div className="cd-safety__split">
+      <div className="cd-attempts">
+        <Filters chosen={filter} onChoose={setFilter} />
+        {shown.length === 0 ? (
+          <p className="cd-safety__hint cd-type-meta">No attempts of this kind. Choose All to see every attempt.</p>
+        ) : (
+          <ul className="cd-attempts__list" aria-label="Attempts, newest first">
+            {shown.map((a) => (
+              // The row's link opens the attempt through the page's in-app links; this only notes the pick.
+              <li key={a.ref_id} onClick={() => setPicked({ refId: a.ref_id })}>
+                <AttemptRow
+                  time={formatWhen(attemptTime(a, page), timezone, now)}
+                  title={triageOf(a)?.summary ?? a.reason_plain}
+                  who={originCopy(a.origin)}
+                  stoppedBy={stoppedBy(a)}
+                  href={attemptPath(deskId, a.ref_id)}
+                  current={a.ref_id === open?.ref_id}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-    </>
+      <div className="cd-safety__beside">
+        {open !== null ? (
+          <div ref={opened} className="cd-safety__opened" tabIndex={-1}>
+            <AttemptDetail key={open.ref_id} attempt={open} page={page} devKey={devKey} deskId={deskId} timezone={timezone} />
+          </div>
+        ) : refId !== undefined ? (
+          <EmptyState title="This attempt isn't in the list" body="It may be from an earlier copy of this Desk. Choose one from the list to see how it was stopped." />
+        ) : null}
+      </div>
+    </div>
   );
 }
 

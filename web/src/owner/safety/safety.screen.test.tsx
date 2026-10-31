@@ -738,6 +738,45 @@ describe('Safety', () => {
     expect(fresh.screen.getByText('Checking the record').elements()).toHaveLength(0);
   });
 
+  it.each([
+    ['attempts', SAFETY],
+    ['entries', `${SAFETY}?view=entries`],
+  ])('empty_state_waits_out_a_failed_attempts_read_%s', async (view, path) => {
+    // A fresh copy with nothing stopped: the attempts were read, empty, and the empty state shows.
+    mockStore.reset('rivera_quiet');
+    const { screen } = await renderRoute(path);
+    const nothing = screen.getByText(NOTHING, { exact: true });
+    await expect.element(nothing).toBeVisible();
+
+    // Then a draft of Claude's is stopped (Rivera's copy keeps one, and no request refused, so the
+    // week still counts none) and every read of the attempts fails. The empty list read before
+    // mustn't pass for current: the failure says so beside the headline, in either view, and the
+    // empty state doesn't show while the reads fail.
+    mockStore.reset('rivera');
+    mockStore.inject({ route: 'safety', status: 503, times: 10_000 });
+    const line = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+    await expect.element(nothing).not.toBeInTheDocument();
+    expect(line.element().compareDocumentPosition(screen.getByText('Every entry checks out').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await readsMore('safety', 2);
+    await readsMore('today', 1);
+    expect(nothing.elements()).toHaveLength(0);
+    expect(line.elements()).toHaveLength(1);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Once a read works, the line is gone, and the stopped draft shows no empty state either.
+    mockStore.reset('rivera');
+    await expect.element(line, { timeout: 5_000 }).not.toBeInTheDocument();
+    await readsMore('safety', 1);
+    await readsMore('today', 1);
+    expect(nothing.elements()).toHaveLength(0);
+    expect(screen.getByText(HEADLINE).elements()).toHaveLength(0);
+    if (view === 'attempts') {
+      const rows = screen.getByRole('list', { name: 'Attempts, newest first' }).getByRole('link', { name: /Stopped by: Reply checkpoint$/ });
+      await expect.element(rows.first()).toBeVisible();
+    }
+  });
+
   it('attempts_read_failure_says_so', async () => {
     // The attempts were read; then a later read fails. The line says so over the attempts already
     // read, which stay with the one open beside them, until a read works.
