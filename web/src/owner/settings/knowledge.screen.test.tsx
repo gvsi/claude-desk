@@ -519,6 +519,17 @@ describe('knowledge', () => {
     }
   });
 
+  it('knowledge_unparseable_added_date_has_no_detail_line', async () => {
+    mockStore.inject({ route: 'knowledge', status: 200, body: [
+      { item_id: 'legacy', title: 'Your website', text: 'Your website', readers: ['public'], source: 'website', created_at: 'soon' },
+    ] });
+    const { screen } = await renderRoute(KNOWLEDGE);
+    const row = main(screen).getByRole('list', { name: 'What I know now' }).getByRole('listitem');
+    await expect.element(row).toBeVisible();
+    expect(row.element().querySelector('.cd-knowledge-list__detail')).toBeNull();
+    expect(row.element().textContent).toBe('Your websiteCustomers can see this');
+  });
+
   it('knowledge_keeps_api_order_and_handles_unknown_added_dates', async () => {
     const rows: KnowledgeRow[] = [
       { item_id: 'legacy', title: 'An older note', text: 'An older note', readers: ['owner'], source: 'setup', created_at: null },

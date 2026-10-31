@@ -64,12 +64,15 @@ const knowledgeQuery = (deskId: string) =>
  * no title, no words, "Only you".
  */
 function rowsOf(items: readonly KnowledgeRow[], timeZone: string): KnowledgeRowView[] {
-  return items.map((item) => ({
-    id: item.item_id,
-    title: item.title === null || item.text === null ? null : item.title,
-    detail: item.created_at === null ? null : `Added ${formatDate(item.created_at, timeZone)}`,
-    readers: item.readers,
-  }));
+  return items.map((item) => {
+    const date = item.created_at === null ? '' : formatDate(item.created_at, timeZone);
+    return {
+      id: item.item_id,
+      title: item.title === null || item.text === null ? null : item.title,
+      detail: date === '' ? null : `Added ${date}`,
+      readers: item.readers,
+    };
+  });
 }
 
 /** "What I know now": the list once read, the loading line while it is, and a failed read with Try again over it. */
