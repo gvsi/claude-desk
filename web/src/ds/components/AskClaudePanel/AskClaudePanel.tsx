@@ -148,6 +148,9 @@ export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskC
       role={modal ? 'dialog' : 'complementary'}
       aria-modal={modal ? 'true' : undefined}
       aria-labelledby={headingId}
+      // As a sheet it can take focus itself, so a press on text inside it (the heading, the
+      // conversation) lands on it rather than on the page, and Escape and Tab still reach it.
+      tabIndex={modal ? -1 : undefined}
       className={`cd-ask-claude${modal ? ' cd-ask-claude--sheet' : ''}`}
       onKeyDown={onKeyDown}
       onMouseDown={onMouseDown}

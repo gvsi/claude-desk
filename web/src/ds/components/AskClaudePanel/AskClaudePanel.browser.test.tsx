@@ -277,6 +277,34 @@ it('ask_claude_sheet_keyboard_walk_at_320', async () => {
   await walkTheSheet(NARROWEST.width, NARROWEST.height);
 });
 
+it('a_click_on_text_in_the_sheet_keeps_focus_in_it', async () => {
+  // Text that can't take focus (the heading, the conversation) hands a press to the sheet itself, so
+  // focus never falls to the page: Shift+Tab wraps to the sheet's last control, and Escape closes it
+  // and returns focus to what opened it. On a tablet's docked sheet and on a phone's.
+  for (const { width, height } of [TABLET, PHONE]) {
+    await page.viewport(width, height);
+    act(() => root.render(<Phone />));
+    const opener = page.getByRole('button', { name: 'Ask Claude to change a rule' });
+    await userEvent.click(opener);
+    await vi.waitFor(() => expect(panel().getAttribute('role'), `${width} px`).toBe('dialog'));
+    const heading = panel().querySelector<HTMLElement>('h2');
+    if (!heading) throw new Error('No heading');
+
+    await userEvent.click(heading);
+    expect(panel().contains(document.activeElement), `${width} px: focus stays in the sheet`).toBe(true);
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    const controls = [...panel().querySelectorAll<HTMLElement>('button:not([disabled]), textarea')];
+    expect(document.activeElement, `${width} px: Shift+Tab wraps to the last control`).toBe(controls[controls.length - 1]);
+
+    await userEvent.click(heading);
+    await userEvent.keyboard('{Escape}');
+    await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude'), `${width} px: Escape closes it`).toBeNull());
+    expect(document.activeElement, `${width} px: focus returns to the opener`).toBe(opener.element());
+    expect(container.querySelector('[inert]')).toBeNull();
+    act(() => root.render(<div />));
+  }
+});
+
 it('a_click_on_the_scrim_keeps_the_sheet_and_its_focus', async () => {
   // Closing on a scrim click would throw away a half-written question, so the click changes
   // nothing: the sheet stays open, focus stays on the composer, and Escape still closes it.
