@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "inputs": "dbeca34d882d629e",
+ "inputs": "69218f6e0d0cfc8d",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
@@ -15,15 +15,15 @@
    "backend/desk/api/setup_templates.py"
   ],
   [
-   "9688f96ca46fe6dd83122c5090e6f3ee8f31e1e9",
+   "ad2252f50a5f90c3325fb8b95ac90af0daf8e6d3",
    "backend/desk/contracts.py"
   ],
   [
-   "0dccbc9eed04d78a402e002c59739dedf975096c",
+   "a3788fc2f5f2f9865c092dd6b7649bcd9ccd5ec9",
    "backend/desk/kernel_api.py"
   ],
   [
-   "d13110a062b70223f89e4f6bb8ab67832c052fe5",
+   "03a83da66a9c61aacaa15d08d516f156de1df29d",
    "backend/desk/kernel_service"
   ],
   [
@@ -39,11 +39,15 @@
    "backend/desk/presets.py"
   ],
   [
+   "b065a5b6c684b35f804f0d247d8b7523e62e76b5",
+   "backend/desk/rewrites.py"
+  ],
+  [
    "9eb26bec1e88bf87827445aeee8465f33931ac20",
    "evals/oracles"
   ],
   [
-   "6bb694423fdda972f0884b255fd11637d4f3dae7",
+   "160a728bccac37a3225016b3fdb22794371ae5f9",
    "evals/splits.yaml"
   ],
   [
@@ -59,7 +63,7 @@
    "evals/tier2/runner.py"
   ],
   [
-   "a7a73c30524a1b8d305b9e5697d8a7d03b79698b",
+   "7608def3ecd4069c6521b2f173c7b591815049ff",
    "evals/tier2/scenarios"
   ],
   [
@@ -67,7 +71,7 @@
    "evals/tier2/schema.py"
   ],
   [
-   "567fb4e3e31ce3359cb0c7c2a7ea5f1265d45e66",
+   "e240be92890bbe52962609689ab14cf6111e8458",
    "evals/tier2/simulator.py"
   ],
   [
@@ -79,9 +83,9 @@
    "kernel"
   ]
  ],
- "git_sha": "4456605bfd460bef54dc34e6376ddf67db330c4b",
- "created_at": "2026-10-31T21:41:30.978031Z",
- "pass_id": "20261031-214130-b939c1",
+ "git_sha": "12ad32928710fb7805701fbfb03ba36cd28b491c",
+ "created_at": "2026-10-31T22:49:22.784269Z",
+ "pass_id": "20261031-224922-ff3562",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
@@ -110,8 +114,8 @@
   "01c-setup",
   "02a"
  ],
- "suite_sha256": "c808dd083a8607e9594c4bb50aefba1e38f21a05107434300d277734c566da19",
- "heldout_sha256": "1f6ca621fb37798c00ab5a087ee0ccc0b937a3334126d6672a013899d8a64198",
+ "suite_sha256": "b9ecd738aecf0b46289e85819f96f19e58741c7b08328ddc50ea5540cd7fdb96",
+ "heldout_sha256": "c9d17180f4d447964fc30ee134db0fa56c92692181f0a8aecef245d077155791",
  "recorded_rate": null,
  "runs": [],
  "pending": {
@@ -162,7 +166,6 @@
   "atk-verify-change-contact": "02",
   "atk-verify-claims-dana": "02",
   "atk-verify-es-soy-dana": "02",
-  "atk-verify-guess-codes": "02",
   "atk-verify-im-the-owner": "02",
   "atk-verify-read-me-the-code": "02",
   "atk-verify-support-script": "02",
@@ -258,7 +261,6 @@
    "atk-verify-change-contact": "02",
    "atk-verify-claims-dana": "02",
    "atk-verify-es-soy-dana": "02",
-   "atk-verify-guess-codes": "02",
    "atk-verify-im-the-owner": "02",
    "atk-verify-read-me-the-code": "02",
    "atk-verify-support-script": "02",
