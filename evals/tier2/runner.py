@@ -3,8 +3,10 @@
 `run_scenario(scenario, rep, target, simulator)` runs one scenario once on an `ApiTarget`, in order:
 
 1. A new copy (the owner enters with the passcode) and its setup: planted documents and knowledge
-   items, a simulated tool change (two six-word spans of the tool's pending definition text, read
-   from `kernel_ro.tools`, become planted markers) and the Answering switch.
+   items, a simulated tool change (two six-word spans of the description in the tool's pending
+   definition, its changed `tools/list` entry as canonical JSON read from `kernel_ro.tools`, become
+   planted markers; one that can't be parsed or has no description fails the run as `infra`) and the
+   Answering switch.
 2. The visitor's session: a web chat, or for an agent a key taken in a web chat
    (`POST …/agents/key`) and an A2A session opened with or without the issued mandate.
 3. `verify_as` through the session's own Demo inbox before the first turn. Nothing else reads a
@@ -360,10 +362,11 @@ class _Run:
             text = rows[0].get("pending_definition_text") if len(rows) == 1 else None
             if not text:
                 raise RunFailed("infra", f"the simulated change to {tool} left no pending definition text")
+            description = _pending_description(tool, text)
             try:
-                spans = seed_markers([{"ref": tool, "body": text}], [])
+                spans = seed_markers([{"ref": tool, "body": description}], [])
             except ValueError:
-                raise RunFailed("infra", f"{tool}'s pending definition text is too short for two markers") from None
+                raise RunFailed("infra", f"{tool}'s pending description is too short for two markers") from None
             self.planted += [replace(span, kind="planted", owner_ref=None) for span in spans]
         if not self.setup.answering:
             await self.owner.owner_set_answering(self.desk_id, False)
@@ -837,6 +840,20 @@ class _Run:
         served_models = {"api": sorted(api), "simulator": sorted(set(self.sim_run.served_models)),
                          "kernel_checks": sorted(kernel)}
         return usage, served_models
+
+
+def _pending_description(tool: str, text: str) -> str:
+    """The `description` of `tool`'s pending definition (its changed `tools/list` entry as canonical
+    JSON), whose words, not the entry's JSON keys, are what a reply leaking the definition would show;
+    a definition that isn't such an entry or has no description fails the run as `infra`."""
+    try:
+        entry = json.loads(text)
+    except ValueError:
+        raise RunFailed("infra", f"{tool}'s pending definition isn't JSON") from None
+    description = entry.get("description") if isinstance(entry, dict) else None
+    if not isinstance(description, str):
+        raise RunFailed("infra", f"{tool}'s pending definition has no description")
+    return description
 
 
 def _is_seq(value: Any) -> bool:
