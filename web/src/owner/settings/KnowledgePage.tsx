@@ -192,7 +192,7 @@ export function KnowledgePage() {
     try {
       const stored = await post(item);
       setAdded(stored);
-      if (kind === 'note') setNote('');
+      if (kind === 'note') setNote((current) => (current.trim() === item.text ? '' : current));
       setSwitchLine(undefined);
       listChanged();
     } catch (err) {
@@ -208,7 +208,7 @@ export function KnowledgePage() {
       else {
         // The list may withhold its words; the card keeps the ones posted, with the label read back.
         setAdded({ ...item, label: { readers: now.readers } });
-        if (kind === 'note') setNote('');
+        if (kind === 'note') setNote((current) => (current.trim() === item.text ? '' : current));
         setSwitchLine(undefined);
       }
     }

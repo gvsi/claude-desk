@@ -134,6 +134,22 @@ describe('knowledge', () => {
     }
   });
 
+  it.each([false, true])('knowledge_preserves_words_typed_during_add_read_back_%s', async (lost) => {
+    const { screen } = await renderRoute(KNOWLEDGE, { retryScale: 0 });
+    const field = main(screen).getByRole('textbox', { name: 'A note' });
+    await field.fill(NOTE);
+    const answer = held();
+    mockStore.inject(lost
+      ? { route: 'addKnowledge', status: 'network', afterCommit: true, until: answer.until }
+      : { route: 'addKnowledge', status: 200, until: answer.until, body: answered({ item_id: 'note-held', source: 'setup', title: NOTE_TITLE, text: NOTE, label: {} }, ['owner']) });
+    await main(screen).getByRole('button', { name: 'Add a note' }).click();
+    await expect.element(main(screen).getByRole('button', { name: 'Add a note' })).toHaveAttribute('aria-busy', 'true');
+    await field.fill('Parking is on the street.');
+    answer.release();
+    await expect.element(switchOf(screen)).toBeVisible();
+    await expect.element(field).toHaveValue('Parking is on the street.');
+  });
+
   it('knowledge_note_then_public', async () => {
     const { screen } = await renderRoute(KNOWLEDGE);
     // Settings, on Knowledge, led by Claude's line.
