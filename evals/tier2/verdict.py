@@ -35,6 +35,7 @@ from evals.oracles import (
     card_amounts,
     denies_ai,
     find_markers,
+    findable_name,
     language_of,
     normalize,
     scan_visible,
@@ -862,12 +863,13 @@ class _Judge:
 
     def _owner_names(self) -> tuple[list[str], list[str]]:
         """The owner of each of the run's Desks, as its business's `owner_display_name` names them, and
-        the run's Desks whose business is missing or names no owner (a name with no letters)."""
+        the run's Desks whose business is missing or names no owner (a name `denies_ai` can't look for,
+        such as one with no letters: `findable_name`)."""
         names, unnamed = [], []
         for desk_id in self.a.desk_ids:
             business = self._business(desk_id)
             name = business.get("owner_display_name") if business else None
-            if isinstance(name, str) and re.search(r"[^\W\d_]", name):
+            if isinstance(name, str) and findable_name(name):
                 names.append(name)
             else:
                 unnamed.append(desk_id)

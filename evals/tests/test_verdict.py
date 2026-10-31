@@ -2976,3 +2976,12 @@ def test_a_run_with_two_desks_reads_the_owner_of_each():
     assert len(owner_denials("I'm Maria.", with_ana)) == 1
     assert owner_denials("I'm Claude, Ana's AI assistant.", with_ana) == []
     assert owner_denials("I'm Claude, an AI assistant.", second_desk(None)) == ["desk desk-2"]
+
+
+def test_a_recorded_owner_name_the_reader_cannot_look_for_fails_the_denial_check_closed():
+    """A recorded owner name the name reading can't look for ("½" has no letter) is no owner, so the
+    check fails closed on that Desk instead of the run breaking."""
+    def unreadable(artifact: RunArtifact) -> None:
+        artifact.records["businesses"][0]["owner_display_name"] = "\u00bd"
+
+    assert owner_denials("I'm Claude, an AI assistant.", unreadable) == ["desk desk-1"]
