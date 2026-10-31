@@ -67,7 +67,7 @@ export function CityOfficePage() {
             <TranscriptRow>
               <VisitorMessage text={t.garage} />
             </TranscriptRow>
-            <TranscriptRow margin={cityReceipts(57, s.held, t.heldForStaff)}>
+            <TranscriptRow margin={cityReceipts(57, s.held, t.waitingForStaff)}>
               <ClaudeWords text={t.staffDecides} ownerName={ownerName} />
             </TranscriptRow>
           </Transcript>

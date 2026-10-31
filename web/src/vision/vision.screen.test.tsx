@@ -27,6 +27,7 @@ import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
+import { CITY_DESK, CITY_INSPECTION_TIMES, CITY_VERIFY_PROMPT } from './data.ts';
 
 const CITY_OFFICE = '/vision/city-office';
 const TEAM_DESK = '/vision/team-desk';
@@ -55,6 +56,32 @@ const CITY_FACTS = [
   'Monday, November 9, 8:00 am to 12:00 pm',
 ];
 
+/** The master plan's slot id, `S-<yyyymmdd>-<hhmm>`: the slot's start in the business's time zone. */
+const SLOT_ID = /^S-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})$/;
+
+/**
+ * The fact each kernel template reads, by the start of its `fact_id` (the kernel's render
+ * registry): open times read a `slots:` fact, the about cards the charter's. A code's prompt reads none.
+ */
+const TEMPLATE_FACT_IDS: Readonly<Record<string, RegExp>> = {
+  booking_options: /^slots:/,
+  hours: /^charter:hours$/,
+  policy: /^charter:policy:/,
+  contact: /^charter:contact$/,
+};
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** The start a slot id names, as an open time's label writes it ("Wednesday, November 4, 8:00 am"), or null for no slot id. */
+function slotStart(slotId: string): string | null {
+  const match = SLOT_ID.exec(slotId);
+  if (!match) return null;
+  const [year, month, day, hour, minute] = match.slice(1).map(Number) as [number, number, number, number, number];
+  const weekday = WEEKDAYS[new Date(Date.UTC(year, month - 1, day)).getUTCDay()];
+  return `${weekday}, ${MONTHS[month - 1]} ${day}, ${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'am' : 'pm'}`;
+}
+
 /** A fee, a permit's number or its recorded status: on the city office, only ever in a card. */
 const CITY_FACT_ANYWHERE = /[$€£]\s?\d|\bB-\d{4}-\d{4}\b|\b(?:passed|approved|issued|denied)\b/i;
 
@@ -76,7 +103,7 @@ const CITY = {
     'Thanks, Marcus. Here’s where your kitchen remodel stands.',
     'Here’s what comes next.',
     'These times are open on the inspection calendar. Which one works for you?',
-    'Whether your garage conversion needs a permit is a plan checker’s decision, so I’ve asked one to get back to you.',
+    'Whether your garage conversion needs a permit is a plan checker’s decision. I’ve asked Permit Center staff, and the answer will show up here.',
   ],
   /** Marcus's messages, in order. */
   marcus: [
@@ -94,7 +121,7 @@ const CITY = {
     ['Reply checked against the City’s rules', 'handled'],
     ['Times read from the inspection calendar', 'handled'],
     ['Reply checked against the City’s rules', 'handled'],
-    ['Held for a person: whether work needs a permit is a staff decision', 'held'],
+    ['Waiting for Permit Center staff to approve', 'held'],
   ],
   /** The cards in the conversation, in order: what draws each, its label, then its words. */
   cards: [
@@ -376,12 +403,11 @@ describe('Vision pages against their boards', () => {
     // As the public page names its tab: the business.
     expect(document.title).toBe('Meridian Bay Permits');
 
-    // The city's public page right under the bar: its header, its name, the Permit Center and the
-    // kernel's open status. The header takes the shell's own field and rule, where the board draws
-    // the city's slate (the page's data holds no brand colors).
+    // The city's public page right under the bar: its header in the city's slate with its lighter
+    // rule, its name, the Permit Center and its open status.
     const header = screen.getByRole('banner').element();
     expect(top(header)).toBe(bottom(bar));
-    expectComputed(header, { height: '76px', backgroundColor: 'rgb(34, 34, 32)', borderBottomColor: 'rgba(250, 249, 245, 0.12)' });
+    expectComputed(header, { height: '76px', backgroundColor: 'rgb(45, 61, 76)', borderBottomColor: 'rgb(111, 139, 163)' });
     await expect.element(screen.getByRole('banner').getByRole('heading', { level: 1 })).toHaveTextContent('Meridian Bay Permits');
     expect(header.textContent).toContain('City of Meridian Bay, Permit Center');
     expect(one(header, '.cd-public-shell__open-status').textContent).toContain('Open now, until 4:30 pm');
@@ -426,6 +452,17 @@ describe('Vision pages against their boards', () => {
     // The open times are a list to answer in the chat, not buttons.
     expect(cards[3]?.querySelectorAll('li')).toHaveLength(3);
     expect(cards[3]?.querySelector('button')).toBeNull();
+    // The city's cards keep the kernel's contract: each open time is a slot id naming the time its
+    // label starts at, and each card reads its template's kind of fact.
+    expect(CITY_INSPECTION_TIMES.options).toHaveLength(3);
+    for (const option of CITY_INSPECTION_TIMES.options ?? []) {
+      expect(option.option_id, 'an open time is a slot id').toMatch(SLOT_ID);
+      expect(option.label.startsWith(`${slotStart(option.option_id)} `), `${option.option_id} starts its label "${option.label}"`).toBe(true);
+    }
+    for (const block of [CITY_INSPECTION_TIMES, ...CITY_DESK.charter]) {
+      expect(block.fact_id, `${block.template}'s fact`).toMatch(TEMPLATE_FACT_IDS[block.template ?? ''] ?? /^$/);
+    }
+    expect(CITY_VERIFY_PROMPT.fact_id).toBeNull();
     // Claude's words lead into each fact card, 12 px above it.
     for (const index of [1, 2]) {
       const fact = cards[index]?.closest('.cd-fact-card') as HTMLElement;
