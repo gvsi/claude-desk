@@ -5,6 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import type { RuleCard } from '../../api/contracts.ts';
+import type { RulesView } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -43,6 +45,48 @@ function addLead({ name, note, minutesAgo, replayed }: LeadFields): string {
   });
   return new Date(createdAt).toISOString();
 }
+
+/** The rules as the mock reads them now, with `cards` added to the active version, answering every read from here on. */
+async function withCards(cards: RuleCard[]): Promise<void> {
+  const answer = await mockStore.dispatch('rules', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads the rules');
+  const view = answer.body as RulesView;
+  mockStore.inject({ route: 'rules', status: 200, times: 10_000, body: { ...view, active: { ...view.active, cards: [...view.active.cards, ...cards] } } });
+}
+
+const CARD = { agent_key_id: null, max_amount_cents: null, max_discount_bp: 0, hours: null, review: false, is_default: false } as const;
+
+/** Dana's own rules (N-Run2-People-Person), a payment link of hers up to $300, and one for Bob. */
+const DANA_BOOK: RuleCard = {
+  ...CARD,
+  card_id: 'card-dana-book',
+  applies_to: 'native.book',
+  mode: 'auto',
+  who: 'person',
+  person_id: dana.personId,
+  hours: { days: ['sat'], start: '09:00', end: '13:00' },
+  reason: 'Dana can book Saturday morning visits.',
+};
+const DANA_DOCS: RuleCard = {
+  ...CARD,
+  card_id: 'card-dana-docs',
+  applies_to: 'native.release_document',
+  mode: 'auto',
+  who: 'person',
+  person_id: dana.personId,
+  reason: "Dana gets her own invoices and warranties after confirming it's her.",
+};
+const DANA_LINK: RuleCard = {
+  ...CARD,
+  card_id: 'card-dana-link',
+  applies_to: 'native.payment_link',
+  mode: 'auto',
+  who: 'person',
+  person_id: dana.personId,
+  max_amount_cents: 30_000,
+  reason: 'Dana can get a payment link for her quote.',
+};
+const BOB_REFUND: RuleCard = { ...CARD, card_id: 'card-bob-refund', applies_to: 'payments.create_refund', mode: 'never', who: 'person', person_id: bob.personId, reason: 'No refunds for Bob.' };
 
 const SAM = { name: 'Sam Ortiz', note: 'Wants a quote to replace a kitchen faucet.', minutesAgo: 20 };
 const JORDAN = { name: 'Jordan Pike', note: 'Asked about a gas line for an outdoor grill. Not on your price list.', minutesAgo: 60 * 26 };
@@ -208,5 +252,79 @@ describe('customers', () => {
     await screen.getByRole('button', { name: 'Try again' }).click();
     await expect.element(screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
     expect(screen.getByText(UNAVAILABLE, { exact: true }).query()).toBeNull();
+  });
+
+  it('person_rules_from_cards', async () => {
+    await withCards([DANA_BOOK, DANA_DOCS, DANA_LINK, BOB_REFUND]);
+    const { screen, router } = await renderRoute(PEOPLE);
+
+    // From the list, a person's page: the way back to Customers, and their name as its title.
+    await screen.getByRole('link', { name: new RegExp(`^${dana.name}`) }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`${PEOPLE}/${dana.personId}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: dana.name })).toBeVisible();
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    await expect.element(crumbs.getByRole('link', { name: 'Customers' })).toHaveAttribute('href', PEOPLE);
+
+    // The contact on record as the API masked it, and that codes go only there.
+    const contact = screen.getByRole('region', { name: 'Contact on record' });
+    await expect.element(contact.getByText(dana.maskedContact, { exact: true })).toBeVisible();
+    await expect.element(contact.getByText('Codes go only to this contact. A number typed in a chat never replaces it.', { exact: true })).toBeVisible();
+
+    // Her rules, from the active cards for her alone, in card order: what each is on, its reason,
+    // what it enforces in the rules' words and its outcome, read only, with the way to change them.
+    const rules = screen.getByRole('region', { name: `Rules for ${dana.name}` });
+    await expect.element(rules).toBeVisible();
+    const rows = rules.getByRole('listitem').elements();
+    expect(rows.map((row) => row.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
+      `Book a visit ${DANA_BOOK.reason} ${dana.name} · Saturdays, 9:00 am to 1:00 pm Automatic`,
+      `Share a document ${DANA_DOCS.reason} ${dana.name} · Verified Automatic`,
+      `Payment link ${DANA_LINK.reason} ${dana.name} · Up to $300 Automatic up to $300; over $300, ask me first`,
+    ]);
+    expect(rules.getByRole('button').elements()).toEqual([]);
+    await expect.element(rules.getByRole('link', { name: 'Change them on Rules' })).toHaveAttribute('href', `${DESK}/rules`);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Bob's page lists only his.
+    const bobs = (await renderRoute(`${PEOPLE}/${bob.personId}`)).screen;
+    const his = bobs.getByRole('region', { name: `Rules for ${bob.name}` });
+    await expect.element(his.getByText(BOB_REFUND.reason, { exact: true })).toBeVisible();
+    expect(his.getByRole('listitem').elements()).toHaveLength(1);
+
+    // On a fresh copy, with no rule just for him, it says so and still offers the way to Rules.
+    const fresh = (await renderRoute(`${PEOPLE}/${bob.personId}`, { seed: 'rivera' })).screen;
+    const none = fresh.getByRole('region', { name: `Rules for ${bob.name}` });
+    await expect.element(none.getByText(`No rules just for ${bob.name}.`, { exact: true })).toBeVisible();
+    expect(none.getByRole('listitem').elements()).toEqual([]);
+    await expect.element(none.getByRole('link', { name: 'Change them on Rules' })).toBeVisible();
+  });
+
+  it('person_page_states_name_a_next_step', async () => {
+    // Someone outside this copy's list: what happened and the way back, nothing of anyone's.
+    const { screen, router } = await renderRoute(`${PEOPLE}/per-someone-else`);
+    await expect.element(screen.getByText("This customer isn't in your copy", { exact: true })).toBeVisible();
+    expect(screen.getByRole('region').query()).toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+    await screen.getByRole('link', { name: 'Go to Customers' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(PEOPLE);
+
+    // While the list is on its way, the loading line; while the rules are, theirs.
+    mockStore.inject({ route: 'people', status: 200, delayMs: 300, body: (await mockStore.dispatch('people', { params: { desk_id: RIVERA.deskId } }) as { body: unknown }).body });
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    const slow = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100 })).screen;
+    await expect.element(slow.getByRole('status').filter({ hasText: /^Loading this customer$/ })).toBeVisible();
+    // The rules can't be read: her contact still shows, and the rules say what went wrong.
+    await expect.element(slow.getByRole('region', { name: 'Contact on record' })).toBeVisible();
+    await expect.element(slow.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    expect(slow.getByRole('region', { name: `Rules for ${dana.name}` }).query()).toBeNull();
+    await slow.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(slow.getByRole('region', { name: `Rules for ${dana.name}` })).toBeVisible();
+
+    // A failed read of the list: what went wrong and Try again, no one's contact.
+    mockStore.inject({ route: 'people', status: 503, times: 2 });
+    const failed = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100 })).screen;
+    await expect.element(failed.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    expect(failed.getByText(dana.maskedContact).query()).toBeNull();
+    await failed.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(failed.getByRole('heading', { level: 1, name: dana.name })).toBeVisible();
   });
 });

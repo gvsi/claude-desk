@@ -50,3 +50,56 @@
     margin-top: var(--space-16);
   }
 }
+
+/* A person's page (N-Run2-People-Person): the breadcrumb, their name 24 px under it, then 24 px
+   under that their rules at the left and, 32 px to their right, the contact on record in a 320 px
+   column. The card: its title, the masked contact 8 px under it, and where codes go 6 px under
+   that. Below 1024 px the contact goes under the rules. */
+.cd-person {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+  min-width: 0;
+}
+
+.cd-person__columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--space-24) var(--space-32);
+  align-items: start;
+}
+
+.cd-person__main,
+.cd-person__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-person__card-title,
+.cd-person__contact,
+.cd-person__codes {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-person__card-title {
+  color: var(--text-primary);
+}
+
+.cd-person__contact {
+  margin-top: var(--space-8);
+  color: var(--text-primary);
+}
+
+.cd-person__codes {
+  margin-top: var(--space-6);
+  color: var(--text-secondary);
+}
+
+@media (max-width: 1023.98px) {
+  .cd-person__columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
