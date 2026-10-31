@@ -23,7 +23,7 @@
 
 ## Arriving live
 
-A row with `live` lands once, in about 450 ms, so the eye sees the Desk's checks arrive with the reply they explain:
+A row with `live` lands once, in about half a second, at most 650 ms (the last line starts by 450 ms). Its receipts arrive with their reply, a beat apart, so the eye sees the Desk's checks arrive with the reply they explain:
 
 - The message rises `space-4` and fades in, over `motion-base` on `motion-ease-emphasis`.
 - What is attached lands one by one, `motion-stagger` apart, the first one beat after the message: each slides in `space-4` from the left and fades in, and a receipt's dot grows from half size with it (`MarginReceipt`). From the third on they share the third beat, so a long list never keeps the reply waiting.
