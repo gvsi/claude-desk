@@ -3401,15 +3401,23 @@ describe('consultant setup', () => {
     await expect.element(stripe.getByText('Connected', { exact: true })).toBeVisible();
   });
 
-  it('declines_a_card_and_keeps_decided_cards_read_only', async () => {
-    const state = await consultantAt('schedule');
-    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    const card = screen.getByRole('article', { name: 'Book a free intro call' });
+  it.each(['schedule', 'google_calendar'] as const)('collapses_a_declined_%s_card_to_its_tile_title_and_decision', async (kind) => {
+    const state = await consultantAt(kind);
+    const proposal = state.messages.at(-1)!.card!;
+    const title = proposal.job?.title ?? proposal.connector!.label;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
+    const card = screen.getByRole('article', { name: title, exact: true });
     await card.getByRole('button', { name: 'Not now', exact: true }).click();
     await expect.poll(() => card.getByRole('button').elements().length).toBe(0);
     await expect.element(card.getByText('Not now', { exact: true })).toBeVisible();
+    await expect.element(card.getByRole('heading', { name: kind === 'google_calendar' ? 'Google Calendar Mock' : title, exact: true })).toBeVisible();
+    expect(card.element().querySelector('.cd-connector-icon')).not.toBeNull();
+    expect(card.element().querySelector('.cd-setup-c3__line')).toBeNull();
+    expect(card.element().querySelector('dl')).toBeNull();
+    expect(card.getByRole('textbox').elements()).toHaveLength(0);
     expect(requests('setupProposal').at(-1)?.body).toEqual({ accept: false });
     expect(card.element().querySelector('.cd-setup-c3--declined')).not.toBeNull();
+    if (kind === 'google_calendar') await expect.element(card.getByText('Mock', { exact: true })).toBeVisible();
   });
 
   it('shows_the_signed_amount_error_when_the_server_requires_an_amount', async () => {

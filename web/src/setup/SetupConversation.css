@@ -250,7 +250,8 @@
   color: var(--text-secondary);
 }
 
-.cd-setup-c3--set .cd-setup-c3__head {
+.cd-setup-c3--set .cd-setup-c3__head,
+.cd-setup-c3--declined .cd-setup-c3__head {
   align-items: center;
 }
 

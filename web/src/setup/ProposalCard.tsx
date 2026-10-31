@@ -57,7 +57,7 @@ function ConnectorCard({ proposal, live, disabled, busyAction, failed, onRetry, 
         <ConnectorIcon icon={view.icon} size="section" />
         <div className="cd-setup-c3__titles">
           <h3 className="cd-setup-c3__title cd-type-body"><ConnectorName connector={view} size="inline" />{!connector.connectable ? <Pill>{copy.later}</Pill> : null}</h3>
-          {!connected ? <p className="cd-setup-c3__line cd-type-body">{connector.why}</p> : null}
+          {proposal.state === 'proposed' ? <p className="cd-setup-c3__line cd-type-body">{connector.why}</p> : null}
         </div>
         {connected || proposal.state === 'declined' ? <DecisionLine accepted={connected} connector /> : null}
       </div>
@@ -90,6 +90,7 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
   const [error, setError] = useState<string | null>(null);
   useEffect(() => { if (amountRequired) setError(copy.amountError); }, [amountRequired]);
   const accepted = proposal.state === 'accepted';
+  const collapsed = accepted || proposal.state === 'declined';
   const rows = jobRows(job);
   const decide = (action: CardAction) => {
     if (disabled || !live || proposal.state !== 'proposed') return;
@@ -103,12 +104,12 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
       <div className="cd-setup-c3__head">
         <ConnectorIcon icon="quotes" glyph={JOB_GLYPH[job.job]} size="section" />
         <div className="cd-setup-c3__titles">
-          <h3 className="cd-setup-c3__title cd-type-body">{job.title}{!job.can_do_today ? <Pill>{copy.later}</Pill> : null}</h3>
-          {!accepted ? <p className="cd-setup-c3__line cd-type-body">{job.how}</p> : null}
+          <h3 className="cd-setup-c3__title cd-type-body">{job.title}{!job.can_do_today && proposal.state !== 'declined' ? <Pill>{copy.later}</Pill> : null}</h3>
+          {!collapsed ? <p className="cd-setup-c3__line cd-type-body">{job.how}</p> : null}
         </div>
         {proposal.state === 'accepted' || proposal.state === 'declined' ? <DecisionLine accepted={accepted} /> : null}
       </div>
-      {!accepted && rows.length ? <dl className="cd-setup-c3__rows">
+      {!collapsed && rows.length ? <dl className="cd-setup-c3__rows">
         {rows.map(([label, value]) => <div className="cd-setup-c3__row" key={label}><dt className="cd-type-meta">{label}</dt><dd className="cd-type-body">{value}</dd></div>)}
       </dl> : null}
       {payment && proposal.state === 'proposed' ? <div className="cd-setup-c3__amount cd-setup-c3__indent">
