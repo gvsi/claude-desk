@@ -32,6 +32,12 @@ export interface OwnerBoardOptions {
 /** Where a conversation's reply cards sit: in Claude's messages. */
 const IN_A_MESSAGE = '.cd-claude-message';
 
+/** Where a rules change's cards sit: in the change review, which draws its two cards compact. */
+const IN_A_CHANGE_REVIEW = '.cd-change-review';
+
+/** The change review's cards: the card look at the compact 16 px padding the design system gives them. */
+const CHANGE_REVIEW_CARD = { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' } as const;
+
 /**
  * An owner page as its signed board draws it: the frame with `current` as the current page, the
  * concept footer, every card in the card look, a conversation's type and receipts, and the order
@@ -39,7 +45,8 @@ const IN_A_MESSAGE = '.cd-claude-message';
  *
  * In a conversation, the cards in Claude's messages are the chat's reply cards, in their own look
  * (`ReplyCard`, as the design system's conversation boards draw and check them), so the card look
- * is checked on every other card there, such as a held request's.
+ * is checked on every other card there, such as a held request's. On a rules change's review, the
+ * change review's own two cards are checked at the compact padding `ChangeReview` gives them.
  */
 export async function expectOwnerBoard(root: HTMLElement, { current, fill = false, transcript = false, tabStops, user }: OwnerBoardOptions): Promise<void> {
   await expectOwnerFrame(root, current, { fill });
@@ -51,6 +58,12 @@ export async function expectOwnerBoard(root: HTMLElement, { current, fill = fals
     expectConversationType(root);
     const rows = await expectReceiptsUnderMessages(root);
     if (rows < 1) throw new Error('expected receipts under at least one message');
+  } else if (root.querySelector(IN_A_CHANGE_REVIEW) !== null) {
+    // A rules change's review (N-Conn-10, N-Conn-18, N-Conn-20): its "Changes" and checks cards are
+    // compact, as `ChangeReview` draws them; every other card is in the card look.
+    for (const card of root.querySelectorAll<HTMLElement>('.cd-card')) {
+      expectComputed(card, card.closest(IN_A_CHANGE_REVIEW) === null ? SPEC.card : CHANGE_REVIEW_CARD);
+    }
   } else {
     expectCards(root);
   }

@@ -5,6 +5,7 @@
  * they show the kernel's text. The one exception is the mock checkout's amount, which the page
  * writes from the link's `amount_cents` with `formatMoneyExact`.
  */
+import type { HoursWindow } from '../api/contracts.ts';
 import type { ConversationSummary } from '../api/views.ts';
 
 /** A moment on the business's clock: its local date and its 24-hour time. */
@@ -218,4 +219,78 @@ export function aboveMoneyCapCopy(capCents: number | null): string {
   if (capCents === 0) return "You haven't set a limit for taking money without asking. Set one first.";
   if (capCents === null) return "That's above your limit for taking money without asking. Raise the limit first.";
   return `That's above your limit of ${formatCents(capCents)}. Raise the limit first.`;
+}
+
+const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+const DAY_NAMES = { mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday', sun: 'Sunday' } as const;
+
+/** "a", "a and b", "a, b and c". */
+export function listWords(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items.at(-1) ?? ''}`;
+}
+
+/** Day `i` of the week, Monday first, by name: "Monday". */
+const dayName = (i: number) => DAY_NAMES[WEEK[i] ?? 'mon'];
+
+/**
+ * A window's days as the boards say them: "Weekdays" (Monday to Friday), "Weekends", "Every day";
+ * else each day by its plural name, Monday first ("Mondays, Wednesdays and Fridays"), three or more
+ * in a row as a range ("Monday to Thursday"), with Monday to Friday as "Weekdays" and Saturday and
+ * Sunday as "weekends" where they come with other days ("Weekdays and Saturdays", "Mondays and weekends").
+ */
+function daysWords(days: readonly string[]): string {
+  const on = WEEK.map((day) => days.includes(day));
+  if (on.every(Boolean)) return 'Every day';
+  const parts: string[] = [];
+  let from = 0;
+  if (on.slice(0, 5).every(Boolean)) {
+    parts.push('weekdays');
+    from = 5;
+  }
+  for (let i = from; i < WEEK.length; i += 1) {
+    if (!on[i]) continue;
+    let end = i;
+    while (end + 1 < WEEK.length && on[end + 1]) end += 1;
+    if (i === 5 && end === 6) parts.push('weekends');
+    else if (end - i >= 2) parts.push(`${dayName(i)} to ${dayName(end)}`);
+    else for (let d = i; d <= end; d += 1) parts.push(`${dayName(d)}s`);
+    i = end;
+  }
+  const words = listWords(parts);
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+/** A contract time of day ("18:00:00") as the owner reads it, "6:00 pm"; midnight as "midnight". Null when it can't be read. */
+function timeOfDay(time: string): string | null {
+  const match = /^(\d{2}):(\d{2})(?::(\d{2}))?/.exec(time);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  // Midnight only to the second: 00:00:30 is a clock time, so a window ending then isn't all day.
+  const second = Number(match[3] ?? '0');
+  return hour === 0 && minute === 0 && second === 0 ? 'midnight' : clock({ hour, minute });
+}
+
+/**
+ * A window's two parts, in the business's own local times (a window carries no time zone of its
+ * own): its days ("Weekdays", "Saturdays", "Mondays, Wednesdays and Fridays", `daysWords`) and its
+ * times ("8:00 am to 6:00 pm", or "all day" from midnight to midnight). An end at 00:00 is midnight,
+ * the day's end. A time that can't be read is shown as it came. `allDay` is true exactly when the
+ * window runs from midnight to midnight, so a caller needn't compare `times` with its words.
+ * Settings joins them with a space ("Weekdays 8:00 am to 6:00 pm"); `formatHours` with a comma.
+ */
+export function hoursParts(w: HoursWindow): { days: string; times: string; allDay: boolean } {
+  const days = daysWords(w.days);
+  const start = timeOfDay(w.start);
+  const end = timeOfDay(w.end);
+  if (start === 'midnight' && end === 'midnight') return { days, times: 'all day', allDay: true };
+  return { days, times: `${start ?? w.start} to ${end ?? w.end}`, allDay: false };
+}
+
+/** A rule's hours in the boards' words: "Weekdays, 8:00 am to 6:00 pm", "Saturdays, 9:00 am to 1:00 pm", "Every day, all day". */
+export function formatHours(w: HoursWindow): string {
+  const { days, times } = hoursParts(w);
+  return `${days}, ${times}`;
 }

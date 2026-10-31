@@ -28,6 +28,7 @@ import type {
   RuleCard,
   SessionMode,
   SessionState,
+  ToolConfirmed,
   ToolName,
   ToolProfile,
 } from './contracts.ts';
@@ -317,12 +318,27 @@ export interface ToolRow {
   pending_sha256: string | null;
 }
 
-export type RulesPreset = 'ask_first' | 'auto' | 'custom';
+/**
+ * A rules version with its money cap, `auto_money_cap_cents`: the most an auto rule takes or pays
+ * out in one action without asking (kernel verification plan 01b Task 3b; master "Money cap"). The
+ * active version's is the Desk's. Typed here, and optional, until the regenerated contract types
+ * have it; a missing cap is 0, the kernel's default, under which every payment asks.
+ */
+export interface PolicyVersionOut extends PolicyVersion {
+  auto_money_cap_cents?: number;
+}
+
+/** The presets the owner can start from (the master plan's `desk.presets.PRESETS`); there is no "custom". */
+export type RulesPreset = 'ask_first' | 'auto';
 
 export interface RulesView {
-  active: PolicyVersion;
+  active: PolicyVersionOut;
   tools: ToolRow[];
-  preset: RulesPreset;
+  /**
+   * The preset the active owner cards came from, provenance only; null when they match neither
+   * (plan 02b Task 9, typed here until the API sends it).
+   */
+  preset: RulesPreset | null;
 }
 
 export interface CardDiff {
@@ -337,6 +353,8 @@ export interface RulesDraft {
   /** The draft version's cards, default cards left out. */
   cards: RuleCard[];
   diff: CardDiff | null;
+  /** The draft's money cap (plan 02b; typed here, and optional, until the API sends it): missing is 0. */
+  auto_money_cap_cents?: number;
   proof: ProofReport;
   /** Each a card's `reason`. */
   summary: { on_its_own: string[]; asks_you: string[]; never: string[] };
@@ -527,17 +545,37 @@ export interface DraftAddBody {
 }
 
 export interface PresetBody {
-  preset: Exclude<RulesPreset, 'custom'>;
+  preset: RulesPreset;
 }
 
 export interface ConfirmRulesBody {
   version: number;
 }
 
-export interface ConfirmToolBody {
+/** One tool of a `confirmTool` batch, with the hash of the definition the owner confirms. */
+export interface ToolConfirmEntry {
   tool: ToolName;
-  enable: boolean;
+  /**
+   * The row's `definition_sha256`, the hash it was listed at; only the changed-tool review sends its
+   * `pending_sha256`, the hash of the definition the owner just read.
+   */
   definition_sha256: string;
+}
+
+/**
+ * `confirmTool`'s batch body (plan 02b Task 7, with kernel payments Task 4, plan 01c; typed here
+ * until the regenerated types have it): a whole connector in one action, one tool a list of one.
+ * Turning on drafts one version for the listed tools, confirmed like any rules draft; turning off
+ * applies at once, with no draft.
+ */
+export interface ConfirmToolBody {
+  tools: ToolConfirmEntry[];
+  enable: boolean;
+}
+
+/** `confirmTool`'s answer: the kernel's `ToolConfirmed`, its draft carrying the draft's money cap. */
+export interface ToolConfirmedOut extends Omit<ToolConfirmed, 'draft'> {
+  draft: PolicyVersionOut | null;
 }
 
 export interface StartSetupBody {
