@@ -25,20 +25,9 @@ import { capOf } from '../owner/rules/drafts.ts';
 import { peopleQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { moneyLimitLine, ruleWords } from '../owner/rules/ruleWords.ts';
 import { SETUP_COPY } from './copy.ts';
-import { aroundBusiness } from './ToolsStep.tsx';
+import { aroundBusiness, setupRulesQuery } from './shared.ts';
 
 const copy = SETUP_COPY.rules;
-
-/** Setup's rules draft: posted once on the way in, and read again by the same post (the API answers the same draft). */
-export function setupRulesQuery(id: string) {
-  return {
-    queryKey: ['setupRules', id] as const,
-    queryFn: () => request('setupRules', { params: { id } }),
-    staleTime: Infinity,
-    retry: false,
-    refetchOnWindowFocus: false,
-  };
-}
 
 export interface RulesStepProps {
   state: SetupState;

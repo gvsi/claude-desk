@@ -9,7 +9,7 @@ import { capOf, draftFromDiff, draftFromVersion, type RuleDraft } from '../owner
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
-import { setupRulesQuery } from './RulesStep.tsx';
+import { gaveUp, setupRulesQuery } from './shared.ts';
 
 const copy = SETUP_COPY.safety;
 
@@ -19,15 +19,6 @@ export interface SafetyStepProps {
   onConfirmed: () => void;
   /** Reads the interview again after a write whose answer was lost; null when it can't be read. */
   reread: () => Promise<SetupState | null>;
-}
-
-/**
- * The checking ran out of time on this side: the client's own give-up after a minute of proving
- * retries (no answer from the server, so no status), as against the server's 409 that the rules
- * can't be checked.
- */
-export function gaveUp(err: unknown): boolean {
-  return err instanceof ApiError && err.code === 'rules_cannot_be_checked' && err.status === null;
 }
 
 /** A setup confirm's answer that is a rules draft, which a proving retry can give, rather than the confirmed version. */

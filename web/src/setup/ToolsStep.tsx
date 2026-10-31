@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 
 import type { RuleCard, ToolName } from '../api/contracts.ts';
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
@@ -22,22 +22,9 @@ import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOn, toolState, type Ca
 import { draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { SETUP_COPY } from './copy.ts';
+import { aroundBusiness } from './shared.ts';
 
 const copy = SETUP_COPY.tools;
-
-/**
- * A line around the business's name: the name is the owner's own words (`data-copy="user"`), never
- * read as the screen's; "your business" until the API names it.
- */
-export function aroundBusiness([before, after]: readonly [string, string] | readonly string[], business: string): ReactNode {
-  return (
-    <>
-      {before}
-      {business === '' ? SETUP_COPY.yourBusiness : <span data-copy="user">{business}</span>}
-      {after}
-    </>
-  );
-}
 
 export interface ToolsStepProps {
   state: SetupState;

@@ -8,7 +8,7 @@ import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { DESKS_KEY } from '../owner/useDesks.ts';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
-import { gaveUp } from './SafetyStep.tsx';
+import { gaveUp } from './shared.ts';
 
 const copy = SETUP_COPY.live;
 
