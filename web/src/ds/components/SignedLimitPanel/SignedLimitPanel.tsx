@@ -9,8 +9,10 @@ export interface SignedLimitPanelProps {
   /** The most its charges can add up to, in the page's words: "$100". The mandate's `total_cents`. */
   total: string;
   /**
-   * What the agent's charges on the limit add up to so far, in the screen's words: "$20". The screen
-   * formats it, as it does the other figures; without it, no Used term.
+   * What the agent has used of the limit, in the screen's words: "$20". It is the kernel's committed
+   * amount for the mandate, which reaches the owner's screen through an owner-view field; a screen
+   * never adds it up from the conversation's text. The screen formats it, as it does the other
+   * figures; without it, no Used term.
    */
   used?: string;
   /** How long the limit lasts, in the page's words: "One hour". The mandate's lifetime. */

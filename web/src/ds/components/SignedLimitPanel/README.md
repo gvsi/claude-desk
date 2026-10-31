@@ -14,7 +14,7 @@ The panel sits on a visitor page, which never formats money (the web app's guard
 
 - `perCharge` ("$20") and `total` ("$100") stand for the mandate's `per_charge_cents` and `total_cents`. The page's test (`limits_line_matches_the_seed`, the web app's plan, Task 11) checks them equal to the seed's mandate, as the panel's story does with the Rivera fixture's `DemoAgentIssued.mandate`.
 - `duration` ("One hour") is how long the mandate lasts, from when it was signed to its `expires_at`. The built-in agent's mandate always lasts one hour (the master plan's "Agent demo" row).
-- `used` ("$20") is what the agent's charges on the limit add up to so far, formatted by the screen like the other figures: the design system formats no amount. Without it, the panel has no Used term, as on the agents page before a run.
+- `used` ("$20") is what the agent has used of the limit: the kernel's committed amount for the mandate (its `committed_cents`), passed to the owner's screen through an owner-view field. The contract has no such field yet, so the conversation board passes the board's own words. A screen never adds it up from the conversation's text or its receipts. Whether a pending payment link's reservation (the kernel's `reserved_cents`) counts toward it is open until that field is in the contract. The screen formats it like the other figures: the design system formats no amount. Without it, the panel has no Used term, as on the agents page before a run.
 - `source` says whose wallet signed it ("Signed limit from Alex Kim’s demo wallet"). On the agents page the built-in agent acts for Alex Kim, the demo's own fixed name. A name a third party chose, such as another wallet's `on_behalf_of`, never goes in this line: it would run into the word "Signed". That agent's name is set off on its own, as `AgentMessage` sets it.
 - A value that is blank or only spaces draws no panel at all, `used` included when it is given, so the panel never shows part of a limit.
 
@@ -37,7 +37,7 @@ The panel shows the mandate the built-in agent will carry before the run starts,
 | --- | --- | --- |
 | `perCharge` | `string` | Required. The page's words for `Mandate.per_charge_cents`: "$20". |
 | `total` | `string` | Required. The page's words for `Mandate.total_cents`: "$100". |
-| `used` | `string` | What the agent's charges on the limit add up to so far, in the screen's words: "$20". Optional; shown as "Used" after "In total". Blank or only spaces draws no panel. |
+| `used` | `string` | The kernel's committed amount for the mandate, from an owner-view field, in the screen's words: "$20". Optional; shown as "Used" after "In total". Blank or only spaces draws no panel. |
 | `duration` | `string` | Required. How long the mandate lasts, in the page's words: "One hour". |
 | `source` | `string` | Required. Whose wallet signed it, in the page's words. |
 | `language` | `'en' \| 'es'` | Required. The panel's own words and its `lang`. |
