@@ -5,17 +5,20 @@ scan grows with the text and with the canaries it looks for. A scan with no cana
 it reads the text; one with many reads the text once for all of them, however many there are. A
 Desk holds at most 50 documents and 200 knowledge items, and a knowledge item found clean isn't
 read again for a visitor's context until the copy's canaries change, so a full copy still gives a
-visitor their context within half a second. Tests run on Rivera Plumbing copies as `POST /copies`
+visitor their context within half a second on a laptop; a slower machine's budget is scaled by a
+calibration the run takes of its own speed. Tests run on Rivera Plumbing copies as `POST /copies`
 seeds them (Friday 10:04 in Oakland).
 """
 
 import random
+import re
 import time
+import unicodedata
 from collections import OrderedDict
 from collections.abc import Mapping
 
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from desk.contracts import Label, SeedDocument
 from desk.db.models import Document
@@ -246,12 +249,39 @@ async def test_a_canary_split_between_a_knowledge_items_id_and_title_keeps_it_th
 
 
 CONTEXT_BUDGET = 0.5                      # seconds for one `/context` call, on a laptop
+# The run's own speed against the laptop's: a fixed share of the work a `/context` call does, round trips to the
+# kernel's database and a scan of text in plain Python, none of it kernel code, so a slower kernel can't widen its
+# own budget. Its quickest of five took CALIBRATION_ON_A_LAPTOP on the laptop the budget was set on; a run that
+# takes longer (a busy CI runner) has the budget scaled by as much, and a quicker one keeps it as it is.
+CALIBRATION_ON_A_LAPTOP = 0.030
+CALIBRATION_TEXT = "lorem ipsum dolor sit amet, consectetur 0177 " * 9_600
+CALIBRATION_NEEDLES = [re.compile(re.escape(f"amet{n:02d}x")) for n in range(16)]
+
+
+async def calibrated_budget(app: FastAPI) -> float:
+    """`CONTEXT_BUDGET`, scaled by how much longer than on the laptop this run takes, at its quickest
+    of five, to make 20 round trips on one of the kernel engine's connections, then fold
+    `CALIBRATION_TEXT`, turn its words around and look for 16 needles it doesn't hold; never less
+    than the budget itself."""
+    async def once() -> float:
+        started = time.perf_counter()
+        async with app.state.kernel.engine.connect() as conn:
+            for _ in range(20):
+                await conn.execute(text("SELECT 1"))
+        folded = unicodedata.normalize("NFKD", CALIBRATION_TEXT).casefold()
+        words = " ".join(word[::-1] for word in re.findall(r"\w+", folded))
+        assert not any(needle.search(words) for needle in CALIBRATION_NEEDLES)
+        return time.perf_counter() - started
+
+    quickest = min([await once() for _ in range(5)])
+    return CONTEXT_BUDGET * max(1.0, quickest / CALIBRATION_ON_A_LAPTOP)
 
 
 async def test_a_full_copy_reads_its_context_within_budget(app, client, monkeypatch):
     """A copy with 100 documents (two Desks of 50) and a public 100 KiB knowledge item, written to
-    near-miss every one of their canaries, gives a visitor their context within half a second: the
-    first time the item is read, as after a restart, and every time after, when it isn't."""
+    near-miss every one of their canaries, gives a visitor their context within half a second (on a
+    laptop, and within the run's calibrated budget elsewhere): the first time the item is read, as
+    after a restart, and every time after, when it isn't."""
     copy, visitor = await visitor_of(app, client)
     await add_documents(app, copy, desks.MAX_DOCUMENTS - 2)
     seeded = [SeedDocument(ref=f"estimate-{n}", title="Estimate", body="Panel upgrade.") for n in range(50)]
@@ -272,5 +302,6 @@ async def test_a_full_copy_reads_its_context_within_budget(app, client, monkeypa
         assert [item.item_id for item in given.knowledge] == ["kb-references"]
         return elapsed
 
-    assert min([await timed(restarted=True) for _ in range(3)]) < CONTEXT_BUDGET
-    assert min([await timed(restarted=False) for _ in range(3)]) < CONTEXT_BUDGET
+    budget = await calibrated_budget(app)
+    assert min([await timed(restarted=True) for _ in range(3)]) < budget
+    assert min([await timed(restarted=False) for _ in range(3)]) < budget
