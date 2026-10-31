@@ -6,7 +6,8 @@
  * tooltip reads. Subtrees marked `aria-hidden="true"` are skipped, so an initials monogram beside
  * the name written out passes. Text a person wrote (a visitor's message, an owner's whisper)
  * carries `data-copy="user"`; the voice rules (all caps, exclamation marks) don't apply to it, the
- * design rules (arrows, uppercase styling) still do. Machine text shown as written (an address, a
+ * design rules (arrows, uppercase styling) still do. The one all-caps label is the lockup's "Preview"
+ * badge (`CAPS_BADGE`). Machine text shown as written (an address, a
  * request, a key) carries `data-copy="code"` and is read the same way.
  */
 
@@ -112,6 +113,16 @@ function drawsText(el: Element): boolean {
   return el.hasAttribute('placeholder') || valueLabel(el) !== null;
 }
 
+/**
+ * The product's one all-caps label (owner, 2026-10-30): the lockup's badge, `Pill caps`, whose word is
+ * written "Preview" and drawn in capitals. Only that element, with exactly that word, may be uppercased.
+ */
+export const CAPS_BADGE = { selector: '[data-ds="preview-badge"]', text: 'Preview' } as const;
+
+function isTheCapsBadge(el: Element): boolean {
+  return el.matches(CAPS_BADGE.selector) && el.children.length === 0 && el.textContent === CAPS_BADGE.text;
+}
+
 /** Capitals drawn by CSS: uppercase or title case transforms and small caps. */
 function checkStyle(el: Element, ctx: Context): void {
   const view = el.ownerDocument.defaultView;
@@ -120,7 +131,9 @@ function checkStyle(el: Element, ctx: Context): void {
   const tag = el.localName;
   const text = sample(el.textContent || el.getAttribute('placeholder') || valueLabel(el) || '');
   const transform = /\b(?:uppercase|capitalize)\b/.exec(style.textTransform)?.[0];
-  if (transform) ctx.problems.push(`text-transform ${transform} on <${tag}>: "${text}"`);
+  if (transform && !(transform === 'uppercase' && isTheCapsBadge(el))) {
+    ctx.problems.push(`text-transform ${transform} on <${tag}>: "${text}"`);
+  }
   const caps = style.fontVariantCaps;
   if (caps && caps !== 'normal') ctx.problems.push(`font-variant-caps ${caps} on <${tag}>: "${text}"`);
 }

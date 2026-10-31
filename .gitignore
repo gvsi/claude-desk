@@ -6,6 +6,7 @@ node_modules/
 dist/
 storybook-static/
 __screenshots__/
+__traces__/
 .vitest/
 test-results/
 playwright-report/

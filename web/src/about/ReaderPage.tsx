@@ -10,7 +10,7 @@
 import { Fragment, useContext, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
 
-import { Card, ConceptFooter, Icon, Mark, Wordmark } from '../ds/index.ts';
+import { Card, ConceptFooter, Icon, Mark, MarkAppIcon, Wordmark } from '../ds/index.ts';
 import { ABOUT_DOCUMENTS, readingMinutes, type AboutDocument, type Block, type FigureName } from './documents.ts';
 import { ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
@@ -336,11 +336,16 @@ function DocumentSwitch({ current, compact }: { current: AboutId; compact: boole
   );
 }
 
-function Brand() {
+/**
+ * The app's lockup (owner, 2026-10-30): the bell with no tile and the wordmark, 36 px with the Preview
+ * badge on the desktop bar. A phone's top bar carries no badge, so the phone bar shows a 32 px bell
+ * and the name alone, on one line at a phone's width. The white tile is the article's app icon.
+ */
+function Brand({ compact }: { compact: boolean }) {
   return (
     <span className="cd-about-brand">
-      <Mark />
-      <Wordmark beta />
+      <Mark size={compact ? 32 : 36} />
+      <Wordmark preview={!compact} />
     </span>
   );
 }
@@ -352,7 +357,7 @@ function TopBar({ current, compact }: { current: AboutId; compact: boolean }) {
       <>
         <header className="cd-about-top cd-about-top--compact">
           <PrototypeLink compact />
-          <Brand />
+          <Brand compact />
         </header>
         <DocumentSwitch current={current} compact />
       </>
@@ -360,7 +365,7 @@ function TopBar({ current, compact }: { current: AboutId; compact: boolean }) {
   }
   return (
     <header className="cd-about-top">
-      <Brand />
+      <Brand compact={false} />
       <DocumentSwitch current={current} compact={false} />
       <PrototypeLink />
     </header>
@@ -404,6 +409,7 @@ export function ReaderPage({ id }: ReaderPageProps) {
       <TopBar current={id} compact={compact} />
       <main className="cd-about-main">
         <div className="cd-about-hero" data-hero="">
+          <MarkAppIcon size={compact ? 'compact' : 'large'} />
           <p className="cd-about-hero__kicker cd-type-meta">About this prototype</p>
           <h1 className={`cd-about-hero__title ${compact ? 'cd-type-greeting' : 'cd-type-article-title'}`}>
             {about.title}

@@ -1,7 +1,7 @@
 // @vitest-environment node
-// The mark's generator (gen-mark.mjs): mark.svg is the mark's signed drawing and the page's icon,
-// the geometry `Mark` draws is generated from it, and the mark's tokens are its colors, so the three
-// can't drift.
+// The mark's generator (gen-mark.mjs): mark.svg is the mark's signed drawing, the geometry `Mark`
+// draws and the page's icon are generated from it, and the mark's tokens are its colors, so none of
+// them can drift.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -9,10 +9,12 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import tokens from '../src/ds/tokens.json' with { type: 'json' };
-import { buildMarkGeometry, readMark } from './gen-mark.mjs';
+import { LIGHT_INK, buildFavicon, buildMarkGeometry, generatedFiles, readMark } from './gen-mark.mjs';
 
 const DRAWING = readFileSync(fileURLToPath(new URL('../src/ds/components/Mark/mark.svg', import.meta.url)), 'utf8');
 const GEOMETRY = fileURLToPath(new URL('../src/ds/components/Mark/markGeometry.ts', import.meta.url));
+const FAVICON = fileURLToPath(new URL('../src/ds/components/Mark/favicon.svg', import.meta.url));
+const WEB = fileURLToPath(new URL('..', import.meta.url));
 
 /** A color token's value. */
 function color(name) {
@@ -49,14 +51,51 @@ describe('the mark', () => {
       ink: color('mark-ink'),
       hairline: color('mark-hairline'),
     }).toEqual(readMark(DRAWING).colors);
+    // Without its tile on a dark ground, the bell is drawn in the light ink in place of the
+    // drawing's dark ink (owner, 2026-10-30): the variant is the generator's, and its token matches it.
+    expect(LIGHT_INK).toBe('#faf9f5');
+    expect(color('mark-ink-light')).toBe(LIGHT_INK);
   });
 
-  it('the_page_icon_is_the_mark', () => {
-    // The browser tab shows the mark: index.html links the drawing itself, so the build emits it
-    // under a hashed name and a redrawn mark never sticks in a browser's cache.
+  it('the_page_icon_is_the_generated_favicon', () => {
+    // The browser tab shows the bell: index.html links the icon generated from the drawing, so the
+    // build emits it under a hashed name and a redrawn mark never sticks in a browser's cache.
     const index = readFileSync(fileURLToPath(new URL('../index.html', import.meta.url)), 'utf8');
     const icons = [...index.matchAll(/<link\b[^>]*\brel="icon"[^>]*>/g)].map(([tag]) => tag);
-    expect(icons).toEqual(['<link rel="icon" type="image/svg+xml" href="/src/ds/components/Mark/mark.svg" />']);
+    expect(icons).toEqual(['<link rel="icon" type="image/svg+xml" href="/src/ds/components/Mark/favicon.svg" />']);
+  });
+
+  it('favicon_is_generated_from_the_drawing', () => {
+    expect(buildFavicon(DRAWING)).toBe(readFileSync(FAVICON, 'utf8'));
+    // `--check` compares both generated files with what is on disk, and the write mode writes both.
+    expect(generatedFiles(DRAWING).map(({ file }) => file)).toEqual([
+      'src/ds/components/Mark/markGeometry.ts',
+      'src/ds/components/Mark/favicon.svg',
+    ]);
+    for (const { file, text } of generatedFiles(DRAWING)) {
+      expect(readFileSync(`${WEB}/${file}`, 'utf8'), file).toBe(text);
+    }
+  });
+
+  it('favicon_is_the_bell_without_its_tile_in_the_tab_bars_ink', () => {
+    // One icon for both tab bars: the bell with no tile, its ink dark on a light tab bar and light
+    // on a dark one, by the browser's color scheme inside the icon itself.
+    const favicon = buildFavicon(DRAWING);
+    const { geometry, colors } = readMark(DRAWING);
+    expect(favicon).not.toMatch(/<rect\b/);
+    expect(favicon).toContain(`viewBox="${geometry.viewBox}"`);
+    expect(favicon).toContain(`<g transform="${geometry.art}">`);
+    expect(favicon).toContain(`<g fill="${colors.clay}"><path d="${geometry.clay[0]}"/></g>`);
+    // The ink is the drawing's dark ink by default, so an icon read without its style still shows.
+    expect(favicon).toContain(`<g class="ink" fill="${colors.ink}">`);
+    expect(favicon).toContain(`<style>@media (prefers-color-scheme: dark) { .ink { fill: ${LIGHT_INK} } }</style>`);
+    // Every shape of the drawing's ink, in its order, and nothing else.
+    for (const shape of geometry.ink) {
+      expect(favicon).toContain('d' in shape ? `<path d="${shape.d}"/>` : `<circle cx="${shape.cx}" cy="${shape.cy}" r="${shape.r}"/>`);
+    }
+    expect(favicon.match(/<(?:path|circle)\b/g)).toHaveLength(geometry.clay.length + geometry.ink.length);
+    // The generator reads the drawing strictly before it writes the icon.
+    expect(() => buildFavicon(DRAWING.replace('</svg>', '<script>alert(1)</script></svg>'))).toThrow(/script/);
   });
 
   it('refuses_a_drawing_it_does_not_know', () => {

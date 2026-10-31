@@ -1,7 +1,8 @@
 /* ToolPageHeader: the serif title, its description in secondary body type 4 px under it, then the
-   source line 8 px under that: the 24 px tile, "From {connector}" with its badge, and 16 px on,
-   the status. On a narrow line the status wraps under the source. For a connected tool that is
-   on, the demo's simulate strip sits 20 px under the source line. */
+   source line 8 px under that: the connector's inline icon (a 24 px tile built in, a 20 px brand
+   mark), "From {connector}" with its badge, and 16 px on, the status. On a narrow line the status
+   wraps under the source. For a connected tool that is on, the demo's simulate strip sits 20 px
+   under the source line. */
 
 .cd-tool-page-header {
   min-width: 0;

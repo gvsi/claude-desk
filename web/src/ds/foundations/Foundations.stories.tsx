@@ -36,7 +36,7 @@ const SAMPLES: Record<string, string> = {
   caption: 'Reply checked against your rules.',
   pill: 'Plumbing',
   count: '3',
-  beta: 'Beta',
+  'badge-caps': 'Preview',
   'brand-name': 'Rivera Plumbing',
   amount: '$20.00',
   figure: '$1,860',
@@ -179,13 +179,17 @@ function TypeSheet() {
                 'fontStyle' in style ? style.fontStyle : null,
                 'opticalSize' in style ? `optical size ${style.opticalSize}` : null,
                 'letterSpacing' in style ? `tracking ${style.letterSpacing}` : null,
+                'textTransform' in style ? 'in capitals' : null,
                 'fontVariantNumeric' in style ? 'tabular figures' : null,
               ]
                 .filter(Boolean)
                 .join(', ');
               return (
                 <li key={style.name} style={{ display: 'grid', gap: 'var(--space-4)' }}>
-                  <span className={`cd-type-${style.name}`}>{SAMPLES[style.name] ?? style.name}</span>
+                  {/* The badge's style draws capitals, so its sample is the badge itself, the one all-caps label. */}
+                  <span className={`cd-type-${style.name}`} data-ds={style.name === 'badge-caps' ? 'preview-badge' : undefined}>
+                    {SAMPLES[style.name] ?? style.name}
+                  </span>
                   <span className="cd-type-caption" style={secondary}>
                     {`cd-type-${style.name}, ${spec}. ${style.usage}`}
                   </span>

@@ -9,7 +9,7 @@
 import type { DemoAgentIssued, RenderedBlock } from '../api/contracts.ts';
 import type { AgentCardOut, AgentTurn, DemoAgentRun } from '../api/views.ts';
 import { placeholderHex, proseBlock, rivera } from '../ds/fixtures/index.ts';
-import { DECISIONS, type DecisionSpec, type Language } from './script.ts';
+import { DECISIONS, TOOLS_WHILE_NOT_ANSWERING, type DecisionSpec, type Language } from './script.ts';
 import { isoTime, type DeskRecord, type MockWorld, type SessionRecord } from './world.ts';
 
 /** The mock's `PUBLIC_ORIGIN`: the API builds the address agents use from it, never from a request's host. */
@@ -181,27 +181,34 @@ function copyBlock(block: RenderedBlock): RenderedBlock {
   return { ...block, lines: [...(block.lines ?? [])], options: [...(block.options ?? [])] };
 }
 
-/** Makes one turn of the run, numbered `n`, and applies it to the copy. */
-type TurnStep = (n: number) => AgentTurn;
+/** Makes one turn of the run, numbered `n`, and applies it to the copy; `last` ends the run there. */
+type TurnStep = (n: number) => { turn: AgentTurn; last?: true };
 
 /**
  * A task's turns for `agent`, in order, each applied when its time comes: the agent's request joins
  * the owner's view of the chat, and the Desk's answer is decided, checked and recorded as a
  * visitor's turn is. The agent's turn carries no words and no blocks.
+ *
+ * Each answer goes by the Desk as it is at that request, as the API gives each request its tools.
+ * While the Desk's Answering switch is off, the agent's session keeps only callbacks and leads
+ * (master plan, "Model-visible tools"): a request that needs another tool gets the handoff, which
+ * decides nothing, and the run ends there.
  */
-function turnsFor(world: MockWorld, agent: SessionRecord, task: DemoAgentTask): TurnStep[] {
+function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task: DemoAgentTask): TurnStep[] {
   return exchangesFor(task).flatMap((exchange): TurnStep[] => [
     (n) => {
       world.agentText(agent, exchange.request);
-      return { author: 'agent', n, blocks: [], receipts: [] };
+      return { turn: { author: 'agent', n, blocks: [], receipts: [] } };
     },
     (n) => {
       const ctx = world.context(agent, 'en', exchange.request);
-      const receipt = ctx.status('receipt', ctx.decide(exchange.decision));
-      world.emit(agent, receipt);
-      const reply = ctx.reply(exchange.reply.map(copyBlock));
+      const allowed = desk.summary.answering || TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool);
+      const receipts = allowed ? [ctx.status('receipt', ctx.decide(exchange.decision))] : [];
+      for (const receipt of receipts) world.emit(agent, receipt);
+      const reply = ctx.reply((allowed ? exchange.reply : [rivera.blocks.handoff.en]).map(copyBlock));
       world.emit(agent, reply);
-      return { author: 'desk', n, blocks: reply.blocks, receipts: [receipt] };
+      const turn: AgentTurn = { author: 'desk', n, blocks: reply.blocks, receipts };
+      return allowed ? { turn } : { turn, last: true };
     },
   ]);
 }
@@ -226,12 +233,16 @@ export class AgentRuns {
     };
     const record: { run: DemoAgentRun; timer: ReturnType<typeof setTimeout> | null } = { run, timer: null };
     this.runs.set(run.run_id, record);
-    const steps = turnsFor(world, agent, task);
+    const steps = turnsFor(world, desk, agent, task);
     const tick = () => {
       record.timer = setTimeout(() => {
         record.timer = null;
         const step = steps.shift();
-        if (step) run.turns.push(step(run.turns.length + 1));
+        if (step) {
+          const { turn, last } = step(run.turns.length + 1);
+          run.turns.push(turn);
+          if (last) steps.length = 0;
+        }
         if (steps.length === 0) run.state = 'done';
         else tick();
       }, AGENT_TURN_GAP_MS);
@@ -259,7 +270,7 @@ export class AgentRuns {
  */
 export function seedAgentChat(world: MockWorld, desk: DeskRecord, from: number): void {
   const agent = world.at(from, () => world.addSession(desk, { sessionId: world.scoped('ses-alex-agent'), agent: AGENT_NAME }));
-  turnsFor(world, agent, 'quote_and_deposit').forEach((step, i) => {
+  turnsFor(world, desk, agent, 'quote_and_deposit').forEach((step, i) => {
     world.at(from + (i + 1) * 20_000, () => step(i + 1));
   });
 }

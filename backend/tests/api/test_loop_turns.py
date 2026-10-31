@@ -4,25 +4,39 @@ shows, and each stop reason handled (Plan 02a, Task 5)."""
 import asyncio
 import html
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import timedelta
 
 import httpx
+import httpx2
 import pytest
 from pydantic import TypeAdapter
 from sqlalchemy import text
 
+from desk.api import prompts
 from desk.api.kernel_client import KernelHttp
 from desk.api.loop import MAX_MODEL_CALLS, run_turn
-from desk.api.model import ModelUsage
+from desk.api.model import AnthropicModel, ModelUsage
 from desk.api.prompts import NOTES, REWRITE_INSTRUCTION, DeskIdentity, conversation_system
 from desk.api.store import append_message, has_pending
 from desk.api.tools import Caller
 from desk.contracts import AgentAuth
 from desk.events import SseEvent
 from tests.api.conftest import new_visitor
-from tests.api.fakes import FINISHED_AT, ScriptedModel, response, thinking, tool_use, unavailable
+from tests.api.fakes import (
+    FINISHED_AT,
+    FakeMessagesApi,
+    ScriptedModel,
+    bound_elsewhere,
+    response,
+    thinking,
+    tool_use,
+    unavailable,
+)
+from tests.api.test_model import USAGE as STREAM_USAGE
+from tests.api.test_model import BOUND_ELSEWHERE_TEXT, bad_request, stream_events
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 EVENT = TypeAdapter(SseEvent)
@@ -647,6 +661,275 @@ async def test_tool_change_mid_conversation(api_conn, caller, fake):
     assert summary["text"].startswith("<conversation_so_far>") and "Can you book me in?" in summary["text"]
     assert [block["text"].split(">")[0] for block in rest] == ["<visitor_message", "<desk_context"]
     assert (await rows(api_conn, caller.session_id, "context_start", "model_context"))[-1] == (1,)
+
+
+def thinking_blocks(request) -> list[dict]:
+    return [block for message in request.messages if message["role"] == "assistant" for block in message["content"]
+            if block["type"] in ("thinking", "redacted_thinking")]
+
+
+async def frozen_systems(conn, session_id: str) -> list[tuple[int, list[dict] | None]]:
+    """Each model context the session opened, with the system prompt its `context_start` row froze."""
+    return [(context, start.get("system")) for context, start in await rows(
+        conn, session_id, "context_start", "model_context", "model_content")]
+
+
+def opens_from_the_summary(request, *lines: str) -> None:
+    """The request is a fresh context's first: one user message, opening with the summary that holds these lines,
+    and no earlier assistant content, so no earlier thinking."""
+    assert [message["role"] for message in request.messages] == ["user"]
+    summary = request.messages[0]["content"][0]["text"]
+    assert summary.startswith("<conversation_so_far>")
+    for line in lines:
+        assert line in summary, line
+
+
+async def test_a_context_sends_the_prompt_it_opened_with_and_a_new_template_starts_a_fresh_one(
+        api_conn, caller, monkeypatch):
+    """Opus 5.5 binds each thinking block to the conversation it was made in, the system prompt included. A context
+    sends the prompt it opened with on every call, and a turn whose prompt renders differently (a deploy changed the
+    template) starts a fresh context from the summary, with the new prompt and no earlier thinking."""
+    opened_with = conversation_system(RIVERA)
+    await said(api_conn, caller, "Hi, when are you open?")
+    first = ScriptedModel([response(thinking(), reply("We're open on weekdays and Saturday mornings.", HOURS))])
+    assert await run_turn(api_conn, caller, first) == "done"
+
+    def deployed(request):                       # the template changes while the next turn's first call is out
+        monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + "\n- Mention our new rule.")
+        return response(thinking(), tool_use("native__find_slots", {"days": 3}))
+
+    await said(api_conn, caller, "Can I book a visit?")
+    second = ScriptedModel([deployed, response(thinking(), reply("Here are the open times."))])
+    assert await run_turn(api_conn, caller, second) == "done"
+    assert [request.system for request in (*first.requests, *second.requests)] == [opened_with] * 3
+    (asked,) = first.requests
+    assert second.requests[0].messages[:len(asked.messages)] == asked.messages        # append-only
+    assert len(thinking_blocks(second.requests[1])) == 2                             # replayed, as made
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, opened_with)]
+
+    # the next turn renders the new template: a fresh context, from the summary, with the new prompt frozen in it
+    await said(api_conn, caller, "Thanks!")
+    third = ScriptedModel([response(reply("You're welcome."))])
+    assert await run_turn(api_conn, caller, third) == "done"
+    renders_now = conversation_system(RIVERA)
+    assert renders_now != opened_with and "Mention our new rule." in renders_now[0]["text"]
+    (fresh,) = third.requests
+    assert fresh.system == renders_now and thinking_blocks(fresh) == []
+    opens_from_the_summary(fresh, "visitor: Hi, when are you open?", "visitor: Can I book a visit?",
+                           "claude (shown to the visitor): We're open on weekdays and Saturday mornings.")
+    assert [block["text"].split(">")[0] for block in fresh.messages[0]["content"][1:]] == [
+        "<visitor_message", "<desk_context"]                       # the new words in full, and the facts again
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, opened_with), (1, renders_now)]
+
+
+NEW_NAMES = {"business_name": "Rivera Plumbing & Sons", "desk_name": "Evenings line",
+             "owner_name": "Maria Rivera Ortiz"}
+
+
+def rename(fake, desk_id: str, renamed: str) -> None:
+    """The owner renames the business, the Desk or themselves in their app: the kernel's records change."""
+    desk = fake.desks[desk_id]
+    if renamed == "desk_name":
+        desk.name = NEW_NAMES[renamed]
+        fake._put_desk(desk)
+    elif renamed == "business_name":
+        desk.business_name = NEW_NAMES[renamed]
+        fake._put_business(desk)
+    else:
+        desk.owner_display_name = NEW_NAMES[renamed]
+        fake._put_business(desk)
+    fake.flush()
+
+
+@pytest.mark.parametrize("renamed", list(NEW_NAMES))
+async def test_an_owner_rename_mid_chat_starts_a_fresh_context(api_conn, caller, fake, renamed):
+    """The prompt names the business, the Desk and the owner, so renaming any of them changes it under the context's
+    thinking. A rename that lands mid-chat, while a call of the turn is out, leaves that turn's calls on the prompt
+    their context opened with; the next turn starts a fresh context with the new name."""
+    opened_with = conversation_system(RIVERA)
+    await said(api_conn, caller, "Hi, can I book a visit?")
+
+    def renamed_meanwhile(request):
+        rename(fake, caller.desk_id, renamed)
+        return response(thinking(), tool_use("native__find_slots", {"days": 3}))
+
+    first = ScriptedModel([renamed_meanwhile, response(thinking(), reply("Here are the open times."))])
+    assert await run_turn(api_conn, caller, first) == "done"
+    assert [request.system for request in first.requests] == [opened_with] * 2
+    assert len(thinking_blocks(first.requests[1])) == 1
+
+    await said(api_conn, caller, "Thanks!")
+    second = ScriptedModel([response(reply("You're welcome."))])
+    assert await run_turn(api_conn, caller, second) == "done"
+    now = conversation_system(RIVERA.model_copy(update={renamed: NEW_NAMES[renamed]}))
+    (fresh,) = second.requests
+    assert fresh.system == now != opened_with and thinking_blocks(fresh) == []
+    assert NEW_NAMES[renamed] in now[0]["text"]
+    opens_from_the_summary(fresh, "visitor: Hi, can I book a visit?",
+                           "claude (shown to the visitor): Here are the open times.")
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, opened_with), (1, now)]
+
+
+async def test_a_context_opened_before_prompts_were_frozen_starts_a_fresh_one(api_conn, caller):
+    """A conversation already under way when contexts began to freeze their prompt has a context with none: its
+    thinking can't be known to match this prompt, so its next turn starts a fresh context."""
+    await said(api_conn, caller, "Hi, when are you open?")
+    first = ScriptedModel([response(thinking(), reply("We're open on weekdays and Saturday mornings.", HOURS))])
+    assert await run_turn(api_conn, caller, first) == "done"
+    await api_conn.execute(text("UPDATE app.messages SET model_content = model_content - 'system'"
+                                " WHERE session_id = :s AND kind = 'context_start'"), {"s": caller.session_id})
+    await api_conn.commit()
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, None)]
+
+    await said(api_conn, caller, "Thanks!")
+    second = ScriptedModel([response(reply("You're welcome."))])
+    assert await run_turn(api_conn, caller, second) == "done"
+    (fresh,) = second.requests
+    assert fresh.system == conversation_system(RIVERA) and thinking_blocks(fresh) == []
+    opens_from_the_summary(fresh, "visitor: Hi, when are you open?")
+    assert await frozen_systems(api_conn, caller.session_id) == [(0, None), (1, conversation_system(RIVERA))]
+
+
+async def test_after_a_deploy_a_turn_past_the_call_cap_opens_the_new_prompt_at_once(api_conn, caller, fake,
+                                                                                     monkeypatch):
+    """A turn that hit the call cap ended with results Claude hadn't read. That isn't a recovery, so after a deploy the
+    next turn opens a fresh context with the new prompt at once, its summary carrying the unread result, instead of
+    waiting on the old prompt for as long as turns keep hitting the cap."""
+    opened_with = conversation_system(RIVERA)
+    await said(api_conn, caller, "Keep checking for a free slot.")
+    model = ScriptedModel([response(thinking(), tool_use("native__find_slots", {"days": 3}))
+                           for _ in range(MAX_MODEL_CALLS)])
+    assert await run_turn(api_conn, caller, model) == "handoff"
+    monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + "\n- Mention our new rule.")
+
+    await said(api_conn, caller, "Any luck?")
+    model = ScriptedModel([response(reply("Here are the open times."))])
+    assert await run_turn(api_conn, caller, model) == "done"
+    (fresh,) = model.requests
+    assert fresh.system == conversation_system(RIVERA) != opened_with and thinking_blocks(fresh) == []
+    opens_from_the_summary(fresh, "visitor: Keep checking for a free slot.", "result of native__find_slots: ")
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
+
+
+async def test_two_prompt_changes_before_claude_answers_keep_the_unread_result(api_conn, caller, monkeypatch):
+    """Claude found open times beside a reply, then two deploys changed the prompt before it answered again (the
+    model was unavailable in between): each fresh context's summary carries the result it hadn't read."""
+    await said(api_conn, caller, "When can someone come?")
+    model = ScriptedModel([response(thinking(), tool_use("native__find_slots", {"days": 3}, id="toolu_slots"),
+                                    reply("Let me look.", id="toolu_say"))])
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    summaries = []
+    for rule, model in (("one", ScriptedModel([unavailable()])), ("two", ScriptedModel([response(reply("Yes."))]))):
+        monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + f"\n- Rule {rule}.")
+        await said(api_conn, caller, "Still there?")
+        await run_turn(api_conn, caller, model)
+        summaries.append(model.requests[0].messages[0]["content"][0]["text"])
+    assert all("result of native__find_slots: " in summary for summary in summaries), summaries
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1, 2]
+
+
+def sent(server: FakeMessagesApi) -> list[dict]:
+    """The bodies the fake Messages API was sent."""
+    return [json.loads(request.content) for request in server.requests]
+
+
+def streamed_reply(prose: str) -> httpx2.Response:
+    return stream_events(reply(prose), stop_reason="tool_use", usage=STREAM_USAGE)
+
+
+async def test_a_thinking_binding_400_starts_a_fresh_context_and_calls_once_more(api_conn, caller, fake):
+    """The backstop: should a replayed thinking block still be refused as bound to a different conversation, the turn
+    starts a fresh context from the summary and calls once more, instead of handing off."""
+    await said(api_conn, caller, "Hi, when are you open?")
+    first = ScriptedModel([response(thinking(), reply("We're open on weekdays and Saturday mornings.", HOURS))])
+    assert await run_turn(api_conn, caller, first) == "done"
+
+    await said(api_conn, caller, "Can someone come tomorrow?")
+    server = FakeMessagesApi(bad_request(BOUND_ELSEWHERE_TEXT), streamed_reply("Let me find the open times."))
+    model = AnthropicModel("test-key", base_url="https://model.test", http_client=server.client())
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    refused, again = sent(server)
+    assert any(block["type"] == "thinking" for message in refused["messages"] for block in message["content"])
+    assert again["system"] == refused["system"] and [message["role"] for message in again["messages"]] == ["user"]
+    summary = again["messages"][0]["content"][0]["text"]
+    assert summary.startswith("<conversation_so_far>") and "visitor: Can someone come tomorrow?" in summary
+    assert "claude (shown to the visitor): We're open on weekdays and Saturday mornings." in summary
+    *_, message, end = await events(api_conn, caller.session_id)
+    assert (message.type, message.handoff, end.type) == ("message", False, "turn_end")
+    assert message.blocks[0].text == "Let me find the open times."
+    assert [stopped for stopped, *_ in await model_call_rows(api_conn, caller.session_id)] == [
+        "tool_use", "error", "tool_use"]                               # the refused call is on record too
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
+
+
+async def test_a_second_binding_400_or_any_other_400_hands_off(api_conn, kernel_http, fake, ro_schema):
+    cases = [("a second binding 400", bad_request(BOUND_ELSEWHERE_TEXT), 2, [0, 1]),
+             ("another 400", bad_request("prompt is too long: 230000 tokens > 200000 maximum"), 1, [0])]
+    for name, answer, calls, contexts in cases:
+        caller = await new_caller(kernel_http, fake, ro_schema)
+        await said(api_conn, caller, "Hi, when are you open?")
+        first = ScriptedModel([response(thinking(), reply("We're open on weekdays and Saturday mornings.", HOURS))])
+        assert await run_turn(api_conn, caller, first) == "done", name
+
+        await said(api_conn, caller, "Can someone come tomorrow?")
+        server = FakeMessagesApi(answer)                        # it answers every call so
+        model = AnthropicModel("test-key", base_url="https://model.test", http_client=server.client())
+        assert await run_turn(api_conn, caller, model) == "handoff", name
+        assert len(server.requests) == calls, name
+        await assert_handed_off(api_conn, fake, caller, checks=2)
+        assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == contexts, name
+
+
+async def turn_metric(conn, session_id: str) -> dict:
+    (turn,) = [payload for type, payload in await metric_rows(conn, session_id) if type == "turn"]
+    return turn
+
+
+def binding_warnings(caplog) -> list[str]:
+    return [record.getMessage() for record in caplog.records
+            if record.name == "desk.api.loop" and "bound to a different conversation" in record.getMessage()]
+
+
+async def test_a_binding_400_on_the_turns_last_call_hands_off(api_conn, caller, fake, caplog):
+    """The retry is a model call like any other: on the turn's last allowed call there is none left, so the turn
+    hands off."""
+    caplog.set_level(logging.WARNING, logger="desk.api.loop")
+    await said(api_conn, caller, "Keep checking for a free slot.")
+    model = ScriptedModel([*(response(tool_use("native__find_slots", {"days": 3})) for _ in range(MAX_MODEL_CALLS - 1)),
+                           bound_elsewhere("messages.9.content.0")])
+    assert await run_turn(api_conn, caller, model) == "handoff"
+    assert len(model.requests) == MAX_MODEL_CALLS == 6
+    await assert_handed_off(api_conn, fake, caller)
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0]
+    assert (await turn_metric(api_conn, caller.session_id))["rebound"] is False
+    (warning,) = binding_warnings(caplog)
+    assert caller.session_id in warning and "messages.9.content.0" in warning and "hands off" in warning
+
+
+async def test_a_binding_400_after_a_call_retries_from_a_summary_that_carries_its_result(api_conn, caller, fake,
+                                                                                         caplog):
+    """A binding 400 after a call in the same turn: the fresh context's summary carries the call's result, which the
+    refused call was to read, so Claude goes on from it instead of calling again. The turn's metric and the log record
+    the retry, the log naming the refused block by its path alone."""
+    caplog.set_level(logging.WARNING, logger="desk.api.loop")
+    await said(api_conn, caller, "When can someone come?")
+    model = ScriptedModel([response(thinking(), tool_use("native__find_slots", {"days": 3}, id="toolu_slots")),
+                           bound_elsewhere("messages.2.content.0"), response(reply("Here are the open times."))])
+    assert await run_turn(api_conn, caller, model) == "done"
+    assert (await turn_metric(api_conn, caller.session_id))["rebound"] is True
+    (warning,) = binding_warnings(caplog)
+    assert caller.session_id in warning and "messages.2.content.0" in warning and "fresh context" in warning
+    assert "When can someone come?" not in warning
+
+    found, refused, again = model.requests
+    (slots,) = [block for block in refused.messages[-1]["content"] if block["type"] == "tool_result"]
+    assert slots["tool_use_id"] == "toolu_slots" and json.loads(slots["content"])["outcome"] == "done"
+    assert len(thinking_blocks(refused)) == 1 and again.system == refused.system and thinking_blocks(again) == []
+    opens_from_the_summary(again, "visitor: When can someone come?", "result of native__find_slots: " + html.escape(
+        slots["content"], quote=False))
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
 
 
 async def metric_rows(conn, session_id: str) -> list[tuple[str, dict]]:

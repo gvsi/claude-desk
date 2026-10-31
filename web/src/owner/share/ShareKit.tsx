@@ -12,11 +12,6 @@ export interface ShareKitProps {
   business: string;
   /** The owner's display name, whom a customer can ask for. */
   ownerName: string;
-  /**
-   * The link card with Copy link and Open (true by default). Setup's live step leaves it out: its
-   * own link, with those two buttons, is already above.
-   */
-  showLink?: boolean;
 }
 
 /** Marks the page while the browser prints, so the print styles leave only the card on paper. */
@@ -41,24 +36,22 @@ async function writeToClipboard(text: string): Promise<void> {
  * and the website embed, which is coming later. Each is built from `publicUrl`; a link under the
  * API's paths, a document link among them, throws before anything shows.
  */
-export function ShareKit({ publicUrl, business, ownerName, showLink = true }: ShareKitProps) {
+export function ShareKit({ publicUrl, business, ownerName }: ShareKitProps) {
   const words = SHARE_COPY(business, ownerName, publicUrl);
   return (
     <div className="cd-share-kit">
-      {showLink ? (
-        <Card as="section" label="Your link">
-          <p className="cd-share-kit__caption cd-type-caption">Your link</p>
-          <CopyLink
-            url={publicUrl}
-            look="text"
-            actions={
-              <Button variant="secondary" size="main" href={publicUrl} external>
-                Open
-              </Button>
-            }
-          />
-        </Card>
-      ) : null}
+      <Card as="section" label="Your link">
+        <p className="cd-share-kit__caption cd-type-caption">Your link</p>
+        <CopyLink
+          url={publicUrl}
+          look="text"
+          actions={
+            <Button variant="secondary" size="main" href={publicUrl} external>
+              Open
+            </Button>
+          }
+        />
+      </Card>
       <div className="cd-share-kit__kit">
         <div className="cd-share-kit__card">
           <ShareCard name={business} url={displayLink(publicUrl)} ownerName={ownerName} language="en" qr={<QrCode url={publicUrl} />} onPrint={printCard} />

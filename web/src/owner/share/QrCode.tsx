@@ -1,6 +1,8 @@
 import QRCode from 'qrcode';
 import { useEffect, useState } from 'react';
 
+import './QrCode.css';
+
 export interface QrCodeProps {
   /** The Desk's public link, which the code opens. */
   url: string;
@@ -8,8 +10,9 @@ export interface QrCodeProps {
 
 /**
  * The QR code for the Desk's link, made here in the browser and shown as an image that fills the
- * printable card's square: dark modules on its own light quiet zone, so it scans on paper. Nothing
- * shows until it is made, or if it can't be; the link is written out under it either way.
+ * square its parent gives it (the printable card's, or setup's live step's): dark modules on its own
+ * light quiet zone, so it scans on paper and on any phone. Nothing shows until it is made, or if it
+ * can't be; the link is written out near it either way.
  */
 export function QrCode({ url }: QrCodeProps) {
   const [made, setMade] = useState<{ url: string; src: string } | null>(null);

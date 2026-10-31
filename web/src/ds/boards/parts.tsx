@@ -4,7 +4,7 @@
  * its "Last 7 days" column and briefing, and the conversation page's columns. They are composed
  * here from the components and tokens, only for the `Boards/*` stories, and exported nowhere else.
  */
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { fn } from 'storybook/test';
 
 import type { Effect, EvMessage, PublicDesk, RenderedBlock, RuleCard, StatusEvent, ToolName } from '../../api/contracts.ts';
@@ -1024,18 +1024,36 @@ export function PageSection({ title, caption, children }: { title: string; capti
 // Setup
 
 /**
+ * The About pages' compact breakpoint. Below it a top bar is a phone's, and a phone's top bar carries
+ * no lockup badge (owner, 2026-10-30), so the setup bar shows the bell and "Claude Desk" alone.
+ */
+const COMPACT_BAR = '(max-width: 1099.98px)';
+
+function subscribeCompactBar(onChange: () => void): () => void {
+  const query = window.matchMedia(COMPACT_BAR);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function isCompactBar(): boolean {
+  return window.matchMedia(COMPACT_BAR).matches;
+}
+
+/**
  * The setup interview's page (plan 04, Task 12): a bar with the mark, the wordmark and the business,
- * "Save and exit" at its right, then one 720 px column and the footer at the window's foot. The
- * step list in the bar is `Steps`, which comes with the Connectors and rules change, so it is left
- * out here.
+ * "Save and exit" at its right, then one 720 px column and the footer at the window's foot. Below the
+ * About pages' compact breakpoint the wordmark drops its Preview badge, as every phone top bar does.
+ * The step list in the bar is `Steps`, which comes with the Connectors and rules change, so it is
+ * left out here.
  */
 export function SetupFrame({ business, children }: { business: string; children: ReactNode }) {
+  const compact = useSyncExternalStore(subscribeCompactBar, isCompactBar, () => false);
   return (
     <div className="board-setup">
       <header className="board-setup__bar">
         <span className="board-setup__brand">
           <Mark size={16} />
-          <Wordmark beta />
+          <Wordmark preview={!compact} />
         </span>
         <span className="board-setup__business cd-type-control" data-copy="user">
           {business}
