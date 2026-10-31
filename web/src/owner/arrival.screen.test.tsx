@@ -1251,7 +1251,7 @@ describe('OwnerLayout', () => {
       {
         path: SAFETY_ENTRIES,
         settled: async (screen: RenderResult) => {
-          await expect.element(screen.getByText(/^\d+ attempts? to talk me around (?:was|were) stopped this week\.$/)).toBeVisible();
+          await expect.element(screen.getByText(/^I turned down \d+ requests? this week\.$/)).toBeVisible();
           await expect.element(screen.getByRole('list', { name: 'Every entry, newest first' })).toBeVisible();
         },
         controls: (screen: RenderResult) => [

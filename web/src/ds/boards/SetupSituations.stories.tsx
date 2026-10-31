@@ -66,7 +66,7 @@ export const Board: Story = {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1100]);
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Real situations' }), SPEC.pageTitle);
 
-    // The card of rows: 720 px, centered, each row with its hairline and the outcome column at 300 px.
+    // The card of rows: 720 px, centered, hairlines between rows and the outcome column at 300 px.
     const list = canvas.getByRole('list', { name: 'Real situations' });
     const box = list.getBoundingClientRect();
     await expect([Math.round(box.left), Math.round(box.width)]).toEqual([396, 720]);
@@ -80,9 +80,9 @@ export const Board: Story = {
       'Does it',
       'Never',
     ]);
-    // One line each side: 69 px with the hairline. (The flagged row grows by its line; its long
+    // One line each side: 68 px first, then 69 px with the hairline. (The flagged row grows by its line; its long
     // title can wrap where the fonts load late, so only the others are measured.)
-    await expect(rows.filter((_, index) => index !== 4).map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([69, 69, 69, 69, 69]);
+    await expect(rows.filter((_, index) => index !== 4).map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([68, 69, 69, 69, 69]);
     await expect(Math.round(one(rows[0]!, '.cd-situation-row__result').getBoundingClientRect().left)).toBe(799);
     await expect(rows.filter((row) => row.querySelector('.cd-situation-row__flag'))).toEqual([rows[4]]);
 

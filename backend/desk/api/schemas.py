@@ -331,20 +331,32 @@ class NeedsYouSession(BaseModel):
 
 
 class Handoff(BaseModel):
-    """An open callback request (`kernel_ro.handoffs`). `reason` is "<name> · <contact> · <reason>" as the visitor
-    typed them (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one."""
+    """A conversation handed to the owner (`kernel_ro.handoffs`), of one of two kinds:
+
+    - `callback`: a visitor's call-back request. `reason` is "<name> · <contact> · <reason>" as the visitor typed them
+      (untrusted text); `callback_window` is "<start>/<end>" in ISO 8601, or None without one.
+    - `card`: the handoff card the session saw (a passed reply citing it, or a blocked final draft or one no rewrite
+      fixes). `reason` is the kernel's own template ("The Desk handed this to you."), and `callback_window` is None:
+      no call back was promised.
+
+    A null window alone can't tell them apart; `kind` does, and a row's kind never changes. A card handoff opens
+    none in the owner's preview, while a held request awaits the owner, or while the session has an open handoff. A
+    call-back request closes the session's open card handoff (it reads `done` from then on) and opens its own
+    `callback` row with a new ID."""
 
     handoff_id: str
     session_id: str
     reason: str
     callback_window: str | None
     status: Literal["open", "done"]
+    kind: Literal["callback", "card"]
 
 
 class NeedsYouItem(BaseModel):
     """`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
     applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
-    an open callback request (`handoff`), never both; who it came from, and the last thing they wrote (untrusted)."""
+    an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last
+    thing they wrote (untrusted)."""
 
     decision: Decision | None
     held_by: str | None
@@ -412,23 +424,34 @@ class OwnerMessageIn(BaseModel):
     kind: Literal["say", "whisper"]
 
 
-class BriefingItem(BaseModel):
-    """One thing that happened since last night. `ref_id` is what it links to: the attempt's `ref_id` for `blocked`,
-    the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
-    refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None."""
+RefusalCause = Literal[
+    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
+    "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
+    "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
+    "agent_limit", "other_copy", "no_rule",
+]
 
-    kind: Literal["blocked", "booking", "lead", "answer"]
+
+class BriefingItem(BaseModel):
+    """One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,
+    the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
+    refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
+    and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
+    refusals. Stopped drafts stay on Safety and out of the briefing."""
+
+    kind: Literal["turned_down", "booking", "lead", "answer"]
     at: AwareDatetime
     session_id: str | None
     display_name: str | None
     ref_id: str
     line: str | None
+    cause: RefusalCause | None
 
 
 class BriefingNewest(BaseModel):
-    """The newest blocked attempt, booking, and lead or answer (the lead when both share a time); None when none."""
+    """The newest refused request, booking, and lead or answer (the lead when both share a time); None when none."""
 
-    blocked: BriefingItem | None
+    turned_down: BriefingItem | None
     booking: BriefingItem | None
     lead_or_answer: BriefingItem | None
 
@@ -441,7 +464,7 @@ class Briefing(BaseModel):
     conversations: int
     bookings: int
     leads: int
-    blocked: int
+    turned_down: int
     total: int
     newest: BriefingNewest
 
@@ -454,8 +477,8 @@ class BriefingList(BaseModel):
 
 
 class WeekDay(BaseModel):
-    """One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,
-    not Claude's own drafts the reply check stopped."""
+    """One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` counts refused requests that day
+    (owner decision, 2026-10-31). Claude's stopped drafts are listed on Safety but not counted."""
 
     date: LocalDate                        # a local date in the business's time zone
     conversations: int
@@ -467,9 +490,8 @@ class ThisWeek(BaseModel):
     """"Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
     `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
     booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
-    one `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the
-    reply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the
-    drafts."""
+    one `end`. `stopped` counts refused requests from visitors and agents (owner decision, 2026-10-31).
+    Safety lists Claude's stopped drafts too, without counting them; the briefing omits them."""
 
     timezone: str
     start: LocalDate
@@ -506,10 +528,13 @@ class Today(BaseModel):
 
 
 class Attempt(BaseModel):
-    """An attempt the checkpoint stopped (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its
+    """A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its
     `decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the
     kernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;
-    `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b)."""
+    `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a
+    closed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`
+    and the session's verified state;
+    the web holds its words. It is null for held requests, stopped drafts and unmapped refusals."""
 
     ref_id: str
     kind: Literal["refused", "held", "reply_blocked"]
@@ -519,6 +544,13 @@ class Attempt(BaseModel):
     created_at: AwareDatetime
     triage: Triage | None
     ledger_seq: int
+    cause: RefusalCause | None
+
+    @model_validator(mode="after")
+    def _cause_requires_refusal(self) -> "Attempt":
+        if self.cause is not None and self.kind != "refused":
+            raise ValueError("Only refused requests can have a cause")
+        return self
 
 
 # The mock checkout (Plan 02b) ------------------------------------------------------------------------------------

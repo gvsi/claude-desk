@@ -2,8 +2,8 @@
 
 **The inputs key.** `GATED_PATHS` are the owner's scope (owner decision, 2026-10-30): the kernel
 (the Rust crate with its Cedar policies and proofs, the kernel service with its seed and reviewer
-thresholds, the kernel API and the shared contracts it decides over, and the mock payments server
-behind its money tools), the prompts, the policies (setup's rule card templates, the presets and
+thresholds, the kernel API and the shared contracts it decides over, the violations a rewrite can
+fix, and the mock payments server behind its money tools), the prompts, the policies (setup's rule card templates, the presets and
 the money cap's cards), the model settings (the Desk's model settings, the models the runner holds
 a run's Desk side and kernel checks to, and the simulator with its models), and the tier 2
 scenarios and judges (the scenarios, `splits.yaml`, `landed.toml`, the scenario schema, the
@@ -126,6 +126,7 @@ GATED_PATHS = (
     "backend/desk/kernel_service",          # the kernel process: gateway, reply check, seed, reviewer thresholds
     "backend/desk/kernel_api.py",           # the requests the kernel decides on and the answers it gives
     "backend/desk/contracts.py",            # the cards, decisions and labels the kernel checks and renders
+    "backend/desk/rewrites.py",             # the violations a rewrite can fix: when a handoff opens
     "backend/desk/mockpay",                 # the payment server behind the kernel's money tools
     # The prompts.
     "backend/desk/api/prompts.py",          # every fixed string the Desk's model sees

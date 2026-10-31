@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useId, useState } from 'react';
+import { useCallback, useId, useState, type Ref } from 'react';
 import { useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
@@ -42,6 +42,10 @@ export interface NeedsYouProps {
   answeredFocus: AnsweredFocus;
   /** The latest read failed: said first, over whatever was read before it. */
   readFailure: ReadFailure | null;
+  /** Lets Today check whether the section survived a dismissal after React commits. */
+  sectionRef: Ref<HTMLElement>;
+  /** Dismisses the answer, then focuses the adjacent answered card or section after React commits. */
+  onDismiss: (id: string, next: string | undefined) => void;
 }
 
 /**
@@ -50,7 +54,7 @@ export interface NeedsYouProps {
  * each open callback. A request answered here stays where it was answered, with its final line and
  * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
  */
-export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure }: NeedsYouProps) {
+export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, sectionRef, onDismiss }: NeedsYouProps) {
   const titleId = useId();
   const now = new Date();
   const open = held.length + callbacks.length;
@@ -66,18 +70,16 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
   );
 
   const dismiss = (id: string) => {
-    // Focus goes to the next answered card, else the one before, else the section.
+    // Prefer the next answered card, else the one before. Today checks which section remains
+    // after dismissal commits: a cached hold can reappear while the answer's refresh is still out.
     const ids = requests.map((item) => item.decision.decision_id).filter((decisionId) => answers.answered.has(decisionId));
     const at = ids.indexOf(id);
     const next = ids[at + 1] ?? ids[at - 1];
-    answers.dismiss(id);
-    const target = next === undefined ? undefined : answeredFocus.cardFor(next);
-    if (target) target.focus();
-    else document.getElementById(titleId)?.closest<HTMLElement>('section')?.focus();
+    onDismiss(id, next);
   };
 
   return (
-    <section className="cd-today__section" aria-labelledby={titleId} tabIndex={-1}>
+    <section ref={sectionRef} className="cd-today__section" aria-labelledby={titleId} tabIndex={-1}>
       <SectionHeader id={titleId} title="Needs you" count={open > 0 ? { n: open, label: countLabel(open) } : undefined} />
       {readFailure !== null ? (
         <Notice
