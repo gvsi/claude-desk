@@ -404,6 +404,19 @@ class Interview:
     business_tools_enabled: bool = False   # runtime setting, never stored in the interview row
     updated_at: datetime | None = None
 
+    def __post_init__(self) -> None:
+        """Recover sequential progress only when no entry has consultant coverage metadata."""
+        if any(entry.covered or "covered" in entry.model_fields_set for entry in self.transcript):
+            return
+        waiting = self.question
+        if waiting is None:
+            return
+        completed = list(dict.fromkeys(entry.question for entry in self.transcript
+                                       if entry.question in QUESTION_KEYS and entry.question != waiting))
+        if completed:
+            # Persist on the next normal save, preserving the waiting question and every stored answer.
+            self.latest_ask.covered = completed
+
     @property
     def shows_cards(self) -> bool:
         return any(entry.role == "owner" and entry.cards is True for entry in self.transcript)

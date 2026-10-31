@@ -1052,6 +1052,63 @@ def test_a_transcript_from_before_keeps_its_stored_form():
     assert all(not ({"choices", "card", "covered"} & entry.keys()) for entry in dumped)
 
 
+async def test_a_legacy_interviews_final_answer_reaches_tools_without_repeating_topics(
+    app, browser, kernel_http, model, engine,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    interview_id = state["interview_id"]
+    transcript = [{"role": "owner", "text": "Tax advice"},
+                  {"role": "claude", "text": "Read memory?", "question": "consent"},
+                  {"role": "owner", "text": "No"}]
+    for key in QUESTION_KEYS:
+        transcript.append({"role": "claude", "text": question_text(key, "office"), "question": key})
+        if key != "contact_and_after_hours":
+            transcript.extend([{"role": "owner", "text": "Answered"},
+                               {"role": "claude", "text": "Understood"}])
+    answers = SetupAnswers(summary="Tax advice", service_area="Oakland", quote_auto_max_cents=2500,
+                           discount_auto_max_bp=500, documents="verified_owner",
+                           payment_link_auto_max_cents=5000, auto_money_cap_cents=10000, refunds="never").model_dump()
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET consent = FALSE,"
+                               " transcript = CAST(:transcript AS jsonb), answers = CAST(:answers AS jsonb)"
+                               " WHERE interview_id = :id"),
+                           {"transcript": json.dumps(transcript), "answers": json.dumps(answers), "id": interview_id})
+    resumed = await owner.browser.get(f"/api/owner/setup/{interview_id}")
+    assert resumed.status_code == 200 and resumed.json()["question"] == "contact_and_after_hours"
+    assert (await stored(engine, interview_id))["transcript"] == transcript  # Reading alone does not write a migration.
+    response = await answer(owner, model, interview_id, "Take a message.", turn(next=next_ask("done")))
+    assert response.status_code == 200, response.text
+    assert response.json()["step"] == "tools" and response.json()["question"] is None
+    row = await stored(engine, interview_id)
+    assert row["answers"] == answers
+    assert [entry["question"] for entry in row["transcript"] if entry.get("question") in QUESTION_KEYS] == list(QUESTION_KEYS)
+    async with engine.connect() as conn:
+        loaded = await desk_setup._load(conn, owner.copy_id, interview_id)
+    assert loaded.covered == set(QUESTION_KEYS)
+
+
+@pytest.mark.parametrize("step, explicit_coverage", [("questions", False), ("questions", True), ("tools", False)])
+def test_legacy_coverage_requires_missing_metadata_and_never_infers_unasked_topics(step, explicit_coverage):
+    entries = [desk_setup.Entry(role="claude", text="What do you do?", question="what_you_do"),
+               desk_setup.Entry(role="owner", text="Tax advice"),
+               desk_setup.Entry(role="claude", text="Where?", question="hours_and_area")]
+    if explicit_coverage:
+        entries[0].covered = []  # Even an explicit empty list identifies the consultant format.
+    answers = SetupAnswers(summary="Tax advice", quote_auto_max_cents=2500)
+    before = answers.model_dump()
+    interview = desk_setup.Interview(interview_id="setup-test", copy_id="copy-test", desk_id="desk-test",
+                                     business_type="office", step=step, consent=False, answers=answers, transcript=entries)
+    assert interview.covered == ({"what_you_do"} if step == "questions" and not explicit_coverage else set())
+    assert interview.question == ("hours_and_area" if step == "questions" else None)
+    assert answers.model_dump() == before
+    assert not interview.covered.intersection(LIMIT_QUESTIONS)
+    interview.cover(["documents_and_payments", "money_limit"])
+    assert answers.documents == "ask" and answers.refunds == "ask"
+    assert answers.auto_money_cap_cents == 0 and answers.payment_link_auto_max_cents is None
+    assert answers.quote_auto_max_cents == 2500
+
+
 def test_covering_a_skipped_limit_topic_leaves_it_asking():
     answers = SetupAnswers(summary="Tax advice", service_area="Oakland", public_contact="hello@example.test",
                            quote_auto_max_cents=2500, discount_auto_max_bp=500, refunds="never")
