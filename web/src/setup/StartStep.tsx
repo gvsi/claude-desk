@@ -60,6 +60,8 @@ export function StartStep() {
   const [unresolved, setUnresolved] = useState<Unresolved | null>(null);
   // Aborted when the page goes away, which ends a wait between tries and stops anything after it.
   const leaving = useRef<AbortController | null>(null);
+  // Where focus goes when "Try again" goes with its line.
+  const titleRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     const controller = new AbortController();
     leaving.current = controller;
@@ -112,14 +114,20 @@ export function StartStep() {
   };
 
   const tryAgain = unresolved === null ? null : (
-    <Button variant="secondary" onClick={() => void send(unresolved.attempt)}>
+    <Button
+      variant="secondary"
+      onClick={() => {
+        titleRef.current?.focus({ preventScroll: true });
+        void send(unresolved.attempt);
+      }}
+    >
       {SETUP_COPY.questions.tryAgain}
     </Button>
   );
 
   return (
     <form className="cd-setup-step" noValidate onSubmit={(event) => void start(event)}>
-      <PageHeader title={copy.title} subtitle={copy.subtitle} />
+      <PageHeader title={copy.title} subtitle={copy.subtitle} titleRef={titleRef} />
       <TextField
         label={copy.field}
         multiline
@@ -130,6 +138,8 @@ export function StartStep() {
         }}
         hint={copy.hint}
         maxLength={DESCRIPTION_MAX}
+        // A start in flight or unresolved is sent again with these words as they were.
+        readOnly={pending || unresolved !== null}
         {...(empty ? { error: copy.empty } : {})}
       />
       {error === null ? null : <Notice tone="error">{error}</Notice>}

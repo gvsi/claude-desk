@@ -29,6 +29,7 @@
 - `error` in plain words that say what to do, never a code: "That passcode didn't work. Check it and try again." Clear it when the owner fixes the field or submits again.
 - `autoComplete` where the browser can help: `current-password` for the passcode.
 - `maxLength` where the text has a limit: 1500 for the business description that starts setup. Typing and pasting stop there, and the counter shows from 90% of it.
+- `readOnly` while what was sent from the field is still being settled: setup's description after a start whose answer was lost, which "Try again" sends as it was. The text stays readable and selectable.
 - The form around it, and its submit button. The field doesn't submit anything itself.
 
 ## Props
@@ -44,5 +45,6 @@
 | `error` | `string` | Shown under the hint; sets `aria-invalid`. |
 | `autoComplete` | `string` | Passed to the field. |
 | `maxLength` | `number` | Caps the text; a counter from 90% of it. |
+| `readOnly` | `boolean` | Shows the text but takes no typing. |
 
 Nothing moves: the outline keeps its color on hover, and focus shows the ring.

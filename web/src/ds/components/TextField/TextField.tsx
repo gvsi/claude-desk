@@ -22,6 +22,8 @@ export interface TextFieldProps {
   autoComplete?: string;
   /** Caps the text at this many characters (1500 for a business description), with a counter from 90% of it. */
   maxLength?: number;
+  /** Shows the text but takes no typing, while what was sent from it is still being settled. */
+  readOnly?: boolean;
 }
 
 /** The share of `maxLength` from which the counter shows. */
@@ -33,7 +35,7 @@ const COUNTER_FROM = 0.9;
  * counter describe the field (`aria-describedby`), and an error also marks it `aria-invalid`. The
  * error line is announced when it appears.
  */
-export function TextField({ label, value, onChange, type = 'text', multiline = false, hint, error, autoComplete, maxLength }: TextFieldProps) {
+export function TextField({ label, value, onChange, type = 'text', multiline = false, hint, error, autoComplete, maxLength, readOnly }: TextFieldProps) {
   const id = useId();
   const fieldId = `${id}-field`;
   const hintId = `${id}-hint`;
@@ -51,6 +53,7 @@ export function TextField({ label, value, onChange, type = 'text', multiline = f
     value,
     autoComplete,
     maxLength,
+    readOnly,
     'aria-invalid': invalid || undefined,
     'aria-describedby': describedBy,
     onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value),

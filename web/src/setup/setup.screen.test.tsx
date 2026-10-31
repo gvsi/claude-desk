@@ -215,6 +215,7 @@ describe('setup', () => {
       const line = ownerErrorCopy(new ApiError(refusal.kind, { route: 'startSetup', method: 'POST', status: refusal.status, code: refusal.body.error }));
       await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
       await expect.element(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
+      await expect.element(screen.getByRole('textbox', { name: 'Your business' })).not.toHaveAttribute('readonly');
       expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
     }
     await screen.getByRole('button', { name: 'Start' }).click();
@@ -259,10 +260,22 @@ describe('setup', () => {
       await page.getByRole('button', { name: 'Start' }).click();
       await expect.element(page.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
       await expect.element(page.getByRole('button', { name: 'Start' })).toBeDisabled();
+      // "Try again" sends the words as they were: until the start is settled, they can't be changed.
+      await expect.element(page.getByRole('textbox', { name: 'Your business' })).toHaveAttribute('readonly');
       expect(requests('startSetup', mark)).toHaveLength(1);
 
-      await page.getByRole('button', { name: 'Try again' }).click();
+      // "Try again" goes with its line, so focus moves to the step's heading rather than the page.
+      const focused: Element[] = [];
+      const onFocus = (event: FocusEvent) => focused.push(event.target as Element);
+      document.addEventListener('focusin', onFocus);
+      const tryAgain = page.getByRole('button', { name: 'Try again' });
+      const button = tryAgain.element();
+      await tryAgain.click();
       await expect.element(page.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+      document.removeEventListener('focusin', onFocus);
+      const heading = focused[focused.indexOf(button) + 1];
+      expect(heading?.tagName, JSON.stringify(fault)).toBe('H1');
+      expect(heading?.textContent).toBe('Tell me about your business');
       const sent = requests('startSetup', mark).map((r) => r.body as Record<string, unknown>);
       expect(sent, JSON.stringify(fault)).toHaveLength(2);
       expect(sent[1]).toEqual(sent[0]);
@@ -372,6 +385,8 @@ describe('setup', () => {
     await expect.element(screen.getByText(setupStartSlowLine(), { exact: true })).toBeVisible();
     expect(screen.getByText(setupStartLostLine()).elements()).toHaveLength(0);
     await expect.element(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    await expect.element(screen.getByRole('textbox', { name: 'Your business' })).toHaveAttribute('readonly');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Tell me about your business' })).toHaveFocus();
     expect(requests('startSetup')).toHaveLength(5);
 
     end('made');
