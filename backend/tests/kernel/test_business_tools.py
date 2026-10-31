@@ -185,6 +185,34 @@ async def test_public_receipt_title_refuses_promises_money_and_percent(app, clie
     assert response.status_code == 200, response.text
 
 
+async def test_put_rejects_unsafe_titles_before_they_can_reach_a_signed_receipt(app, client):
+    from .test_approvals import public_key
+    from .test_decide import verify_signature
+    from .test_execute import read
+
+    copy = await rivera(app, client)
+    for title in ('Pay $twenty', 'twenty dollars', '20 percent', 'guaranteed', 'USD',
+                  '$', 'CHF', 'Tomorrow intake'):
+        response = await put(client, copy, [intake(title=title)])
+        assert response.status_code == 422, (title, response.text)
+        assert await business_rows(app, copy) == {}
+    assert (await put(client, copy, [intake(title='New client intake')])).status_code == 200
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [row] = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+            Tool.desk_id == copy.desk_id, Tool.tool == 'desk.new-enquiry')))
+        row.status, row.review_reason = 'enabled', None
+        await activate_cards(ctx, copy.desk_id, [RuleCard(
+            card_id='intake', applies_to=row.tool, mode='auto', who='anyone', reason='Take enquiries.')])
+    visitor = await open_visitor(client, copy)
+    allowed = await decided(client, visitor, 'desk.new-enquiry', {'name': 'Dana', 'answers': ['Consult']})
+    assert allowed.outcome == 'allow'
+    assert (await executed(client, visitor, allowed)).state == 'succeeded'
+    receipt = await read(client, visitor.headers, allowed)
+    assert receipt.visitor_plain == '“New client intake”: details saved for Maria Rivera'
+    verify_signature(await public_key(client), receipt)
+
+
 @pytest.mark.parametrize('path', ['approved', 'allow', 'allowed_before_execute'])
 async def test_changed_config_after_authorization_never_executes(app, client, monkeypatch, path):
     from desk.kernel_service import execute

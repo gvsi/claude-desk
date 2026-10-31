@@ -1,6 +1,7 @@
 """Owner-only whole replacement of a Desk's trusted block configurations."""
 
 import re
+import unicodedata
 from collections.abc import Mapping
 from functools import partial
 
@@ -16,6 +17,19 @@ from desk.kernel_service.adapters import blocks
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, storable
 
 router = APIRouter()
+
+# Currency codes are unsafe even without an amount. Keep this local until the shared B7 check lands.
+CURRENCY_CODE = re.compile(r"\b(?:" + "|".join("""
+    AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BOV BRL BSD
+    BTN BWP BYN BZD CAD CDF CHE CHF CHW CLF CLP CNY COP COU CRC CUP CVE CZK DJF DKK DOP DZD
+    EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD
+    IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL
+    MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MXV MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN
+    PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SLL SOS SRD SSP
+    STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD USN UYI UYU UYW UZS VED
+    VES VND VUV WST XAF XAG XAU XBA XBB XBC XBD XCD XCG XDR XOF XPD XPF XPT XSU XTS XUA
+    XXX YER ZAR ZMW ZWG ZWL
+""".split()) + r")\b", re.IGNORECASE)
 
 
 def config_texts(value):
@@ -45,14 +59,10 @@ def public_promise_fields(values: Mapping[str, str]) -> list[str]:
     """The temporary B7 shim's pure check. No structured amount is passed here."""
     from desk.kernel_service import reply_check
 
-    currency_or_percent = re.compile(
-        r"[$€£¥₹₽₩]\s*\d|(?:usd|eur|gbp|cad|aud|mxn|jpy|inr)\s*\d"
-        r"|\d[\d.,\s]*(?:[%٪‰‱]|usd|eur|gbp|cad|aud|mxn|jpy|inr)", re.IGNORECASE)
-    patterns = [pattern for entries in reply_check.LEXICONS.values() for category, pattern in entries
-                if category in ("promise", "booking", "money", "percent")]
     return [field for field, text in values.items()
-            if any(currency_or_percent.search(reading) or any(pattern.search(reading) for pattern in patterns)
-                   for reading in reply_check._readings(reply_check.shown(text)))]
+            if reply_check.scan_prose(text)
+            or CURRENCY_CODE.search(reply_check.shown(text))
+            or any(unicodedata.category(ch) == "Sc" for ch in reply_check.shown(text))]
 
 
 async def refuse_public_promises(ctx: KernelCtx, *, part: str, values: Mapping[str, str], desk_id: str) -> None:
