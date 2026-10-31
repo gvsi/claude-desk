@@ -147,6 +147,22 @@ async function atRest(canvasElement: HTMLElement): Promise<void> {
   await settled(canvasElement);
 }
 
+/** The illustration's mark once its story has played to the end. */
+const PLAYED = 'cd-intro__illustration--played';
+
+/**
+ * The illustration as its story ends and the board draws it: both cards and both receipts in place
+ * at full opacity, and the booking's check drawn whole, with nothing left to animate.
+ */
+async function expectTheStoryEnded(art: HTMLElement): Promise<void> {
+  const pieces = [...art.querySelectorAll(':scope > .cd-intro__card, .cd-intro__receipt')];
+  await expect(pieces).toHaveLength(4);
+  for (const el of pieces) {
+    expectComputed(el, { animationName: 'none', opacity: '1', transform: 'none' });
+  }
+  expectComputed(the(art, '.cd-intro__check path'), { animationName: 'none', strokeDasharray: 'none', strokeDashoffset: '0px' });
+}
+
 /** The element `selector` finds in `root`; throws when there is none. */
 function the<T extends Element = HTMLElement>(root: ParentNode, selector: string): T {
   const el = root.querySelector<T>(selector);
@@ -418,16 +434,39 @@ export const PlaysOnce: Story = {
     const moving = [content, ...content.querySelectorAll('*')].filter((el) => getComputedStyle(el).animationName !== 'none');
     await expect(moving).toEqual([]);
 
-    // Played once, the illustration rests as the board draws it.
-    const played = dialog.getAnimations({ subtree: true });
-    await expect(played).toHaveLength(6);
-    await Promise.all(played.map((animation) => animation.finished));
-    await expect(dialog.getAnimations({ subtree: true }).map((animation) => animation.playState)).toEqual(Array(6).fill('finished'));
-    // A filled animation ends on the identity matrix, which draws as no transform at all.
-    for (const el of [panel, dana, claude, checked, booked]) {
-      expectComputed(el, { opacity: '1', transform: /^(?:none|matrix\(1, 0, 0, 1, 0, 0\))$/ });
+    // played_once: once the last receipt has ticked in, and not before, the illustration is marked
+    // played. Its animations are dropped, and every piece rests where the story ended, as the board
+    // draws it; only the panel's finished arrival is left.
+    const ended: Element[] = [];
+    const watchTheEnds = (event: AnimationEvent) => ended.push(event.target as Element);
+    art.addEventListener('animationend', watchTheEnds);
+    let endedAsItWasPlayed: Element[] | null = null;
+    const watchPlayed = new MutationObserver(() => {
+      if (endedAsItWasPlayed === null && art.classList.contains(PLAYED)) endedAsItWasPlayed = [...ended];
+    });
+    watchPlayed.observe(art, { attributes: true, attributeFilter: ['class'] });
+    try {
+      const playing = dialog.getAnimations({ subtree: true });
+      await expect(playing).toHaveLength(6);
+      await Promise.all(playing.map((animation) => animation.finished));
+      await waitFor(() => expect(art).toHaveClass(PLAYED));
+      await expect(endedAsItWasPlayed).toEqual(beats);
+    } finally {
+      watchPlayed.disconnect();
+      art.removeEventListener('animationend', watchTheEnds);
     }
-    expectComputed(check, { strokeDashoffset: '0px' });
+    await expect(dialog.getAnimations({ subtree: true }).map((animation) => animation.playState)).toEqual(['finished']);
+    expectComputed(panel, { opacity: '1', transform: /^(?:none|matrix\(1, 0, 0, 1, 0, 0\))$/ });
+    await expectTheStoryEnded(art);
+
+    // plays_only_once: under 960 px the illustration isn't drawn, which cancels its animations, and
+    // drawing it again would start them over. Hidden and shown again, as when a window narrows and
+    // widens or a tablet turns, it stays where the story ended.
+    art.style.display = 'none';
+    await expect(art.getClientRects()).toHaveLength(0);
+    art.style.removeProperty('display');
+    await expect(art.getAnimations({ subtree: true }).map((animation) => (animation as CSSAnimation).animationName)).toEqual([]);
+    await expectTheStoryEnded(art);
   },
 };
 

@@ -112,6 +112,8 @@ export function IntroDialog({
   const closed = useRef(false);
   const onClosedRef = useRef(onClosed);
   const [passcode, setPasscode] = useState('');
+  // Set once the illustration's story has played to its end, so it never plays again.
+  const [played, setPlayed] = useState(false);
 
   // While it leaves, the demo is still starting: the spinner stays and nothing more is sent.
   const starting = busy || leaving;
@@ -290,19 +292,26 @@ export function IntroDialog({
           </div>
         </div>
 
-        <Illustration />
+        <Illustration played={played} onPlayed={() => setPlayed(true)} />
       </div>
     </dialog>
   );
+}
+
+interface IllustrationProps {
+  /** Its story has played to the end: it rests there and never plays again. */
+  played: boolean;
+  /** Called as the story ends, when the last receipt has ticked in. */
+  onPlayed: () => void;
 }
 
 /**
  * The clay half: Dana asks for a visit on Rivera's public page, and Claude books it within Maria's
  * rules. Decoration only, so it is `aria-hidden` and holds nothing focusable.
  */
-function Illustration() {
+function Illustration({ played, onPlayed }: IllustrationProps) {
   return (
-    <div className="cd-intro__illustration" aria-hidden="true">
+    <div className={played ? 'cd-intro__illustration cd-intro__illustration--played' : 'cd-intro__illustration'} aria-hidden="true">
       <svg className="cd-intro__arcs" width="420" height="600" viewBox="0 0 420 600" fill="none" focusable="false">
         <path d="M-60 150 C 80 60, 260 40, 480 -40" />
         <path d="M-40 640 C 120 520, 300 520, 470 430" />
@@ -340,7 +349,13 @@ function Illustration() {
               <span className="cd-intro__dot" />
               Reply checked against Maria Rivera’s rules
             </p>
-            <p className="cd-intro__receipt">
+            {/* The story ends as this last receipt ticks in. */}
+            <p
+              className="cd-intro__receipt"
+              onAnimationEnd={(event) => {
+                if (event.target === event.currentTarget) onPlayed();
+              }}
+            >
               <span className="cd-intro__dot" />
               Booked on Maria Rivera’s calendar
             </p>

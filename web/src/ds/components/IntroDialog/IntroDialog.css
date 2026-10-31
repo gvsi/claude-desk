@@ -352,6 +352,20 @@
     animation-delay: calc(var(--motion-base) * 5 + var(--motion-stagger));
   }
 
+  /* Played once, it stays played. Under 960 px the illustration isn't drawn, which cancels its
+     animations, and drawing it again (a window widened, a tablet turned) would start them over. So
+     once the last receipt is in, the animations go and every piece rests where the story ended. */
+  .cd-intro__illustration--played > .cd-intro__card,
+  .cd-intro__illustration--played .cd-intro__check path,
+  .cd-intro__illustration--played .cd-intro__receipt {
+    animation: none;
+  }
+
+  .cd-intro__illustration--played .cd-intro__check path {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+  }
+
   /* Leaving, on a passcode that works: faster than it arrived, the scrim fades to clear and the
      panel goes, onto the page under it. The dialog closes when the scrim's fade ends. */
   .cd-intro.cd-intro--leaving {

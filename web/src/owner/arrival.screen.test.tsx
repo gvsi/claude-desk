@@ -6,7 +6,7 @@
  */
 import { http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { userEvent } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { observeRequests } from '../api/http.ts';
@@ -18,7 +18,7 @@ import { worker } from '../mocks/browser.ts';
 import { copyOut } from '../mocks/readModels.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
-import { renderRoute } from '../test/renderRoute.tsx';
+import { renderRoute, VIEWPORTS } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 import { watchFor, watchPages } from '../test/watch.ts';
 import { FRESH_MS } from './useDesks.ts';
@@ -88,6 +88,22 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(screen.getByText(/^You're Maria Rivera today\. This is a concept prototype\.$/)).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Maria$/ })).toBeVisible();
+  });
+
+  it('the_illustration_plays_once_as_the_window_changes', async () => {
+    // Under 960 px the illustration isn't drawn. Played once at the desktop width, it stays where its
+    // story ended when the window narrows past that and widens again, as a tablet does when it turns.
+    const { screen } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const art = dialog.element().querySelector('.cd-intro__illustration') as HTMLElement;
+    await settled(art);
+    await page.viewport(900, VIEWPORTS.desktop.height);
+    expect(art.getClientRects()).toHaveLength(0);
+    await page.viewport(VIEWPORTS.desktop.width, VIEWPORTS.desktop.height);
+    expect(art.getClientRects().length).toBeGreaterThan(0);
+    const playing = art.getAnimations({ subtree: true }).filter((animation) => animation.playState !== 'finished');
+    expect(playing.map((animation) => (animation as CSSAnimation).animationName)).toEqual([]);
   });
 
   it('start_the_demo_opens_today_drawn', async () => {
