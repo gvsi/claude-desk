@@ -20,6 +20,10 @@ describe('traceLine', () => {
     expect(traceLine({ kind: 'whisper', origin: 'api', summary: {} })).toBe(`A whisper to Claude. ${REPORTED}`);
   });
 
+  it('a_paused_chats_count_reads_as_turned_down_requests', () => {
+    expect(traceLine({ kind: 'breaker', origin: 'kernel', summary: {} })).toBe(`A turned-down request counted against the chat. ${RECORDED}`);
+  });
+
   it('unknown_origin_reads_as_reported_never_as_checked', () => {
     // Only an entry the kernel wrote says the checkpoint recorded it.
     for (const origin of ['bogus', 'Kernel', 'kernel ', '', undefined, null]) {

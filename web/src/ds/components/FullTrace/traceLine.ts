@@ -9,7 +9,7 @@ const KIND_LINES = {
   verify: 'A step in confirming who someone is.',
   decide: 'A decision on an action Claude asked to take.',
   review: "The auto reviewer's second look at an action.",
-  breaker: 'A blocked attempt counted against the chat.',
+  breaker: 'A turned-down request counted against the chat.',
   approval: 'A request held for you, or your answer to it.',
   execute: 'An action being carried out, or its result.',
   payment: 'A step in a test payment.',
