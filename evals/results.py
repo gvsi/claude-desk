@@ -43,7 +43,12 @@ never text, codes or ids beyond scenario ids. It lists the gated map as [object 
 **`results-check --base <ref>`** (`make evals-results-check`), with no database, network or key:
 exit 0 when `git diff --no-renames -z --name-only <ref>...HEAD` touches no gated path and leaves
 `recorded_rates.json` and `evals/results/` alone (without renames, moving a gated file out lists its
-old path too; `-z` keeps non-ASCII paths unquoted); otherwise, stopping at the first failure, the
+old path too; `-z` keeps non-ASCII paths unquoted). When every committed head scenario requires a
+plan its committed `landed.toml` lacks (`unarmed`), no results file is needed or regenerated: the
+head's rate history must be empty, its history must still extend the base's unchanged, its landed
+plans must keep the base's, and any added or edited results JSON must validate. `merge_ready` uses
+the same rule over both sides' scenarios (both requirements for a shared id) against the union of
+their landed plans. Once any scenario can run, the strict check is unchanged: stopping at the first failure, the
 committed file for the head's key exists, validates and is gating evidence, its suite hash,
 held-out hash and recorded rate are the head's (a rate that is gating evidence), it holds exactly
 one row per head scenario and repeat (a scenario that `requires` a plan the head's `landed.toml`
@@ -217,8 +222,27 @@ def _needs_results(path: str) -> bool:
     return is_gated(path) or path == RATES_PATH or path.startswith(RESULTS_DIR + "/")
 
 
+def unarmed(rev: str = "HEAD", root: Path = REPO_ROOT, *, other_rev: str | None = None) -> bool:
+    """Every committed scenario waits for an unlanded plan. With two revisions, use their union of
+    landed plans and retain both requirement sets for a shared scenario id: either side can arm it.
+    Missing or malformed eval files fail closed through the loaders, never the working tree."""
+    requirements: list[set[str]] = []
+    landed: set[str] = set()
+    for at in (rev,) if other_rev is None else (rev, other_rev):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = _materialize(root, at, Path(tmp))
+            try:
+                suite = load_suite(tree / SCENARIOS_PATH)
+                landed.update(load_landed(tree / LANDED_PATH))
+            except (OSError, ValueError) as error:
+                whose = "the head's" if at == "HEAD" else f"{at}'s"
+                raise CheckFailed(f"{whose} eval files don't load: {error}") from None
+        requirements.extend(set(scenario.requires) for scenario in suite.scenarios.values())
+    return all(required - landed for required in requirements)
+
+
 def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
-    """Refuse when both sides changed results inputs since their merge base; git errors propagate."""
+    """An unarmed union is ready; otherwise refuse both sides changing results inputs. Git errors propagate."""
     head_commit = git(root, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{head}^{{commit}}").strip()
     main_commit = git(root, "rev-parse", "--verify", "--quiet", "origin/main^{commit}").strip()
     base = git(root, "merge-base", head_commit, main_commit).strip()
@@ -229,6 +253,13 @@ def merge_ready(head: str = "HEAD", root: Path = REPO_ROOT) -> tuple[bool, str]:
 
     pr_paths, main_paths = changed_inputs(head_commit), changed_inputs(main_commit)
     if pr_paths and main_paths:
+        try:
+            pending_only = unarmed(head_commit, root, other_rev=main_commit)
+        except CheckFailed as error:
+            raise GitError(str(error)) from None
+        if pending_only:
+            return True, ("ready: every scenario is pending under both sides' combined landed plans; "
+                          "no results file is needed")
         return False, (f"not ready: PR gated paths: {', '.join(repr(path) for path in pr_paths)}; "
                        f"origin/main gated paths: {', '.join(repr(path) for path in main_paths)}; "
                        "rebase onto origin/main and regenerate the results file")
@@ -688,34 +719,59 @@ def _check(base: str, root: Path) -> str:
                if path]
     if not any(_needs_results(path) for path in changed):
         return f"no gated path, recorded rate or results file changed since {base}; no results file needed"
+    pending_only = unarmed(root=root)
     name = f"{RESULTS_DIR}/{inputs_key('HEAD', root)}.json"
-    raw = show(root, "HEAD", name)
-    if raw is None:
-        raise CheckFailed(f"{name} isn't committed: the head's gated inputs have no results file "
-                          "(run make evals-tier2 and commit what it writes)")
-    try:
-        file = ResultsFile.model_validate_json(raw)
-    except ValidationError as error:
-        raise CheckFailed(f"{name} doesn't validate: {_first_error(error)}") from None
-    head = reconcile(file, root, "HEAD", name=name)
+    if pending_only:
+        for path in changed:
+            if path.startswith(RESULTS_DIR + "/") and path.endswith(".json"):
+                if (raw := show(root, "HEAD", path)) is not None:
+                    try:
+                        file = ResultsFile.model_validate_json(raw)
+                    except ValidationError as error:
+                        raise CheckFailed(f"{path} doesn't validate: {_first_error(error)}") from None
+                    if path == name:
+                        # Supplying evidence for this head still has to describe its suite and pending plans.
+                        reconcile(file, root, "HEAD", name=path)
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = _materialize(root, "HEAD", Path(tmp), only=(RATES_PATH, LANDED_PATH))
+            rates = load_recorded_rates(tree / RATES_PATH) if (tree / RATES_PATH).exists() \
+                else RecordedRates(history=[])
+            landed = load_landed(tree / LANDED_PATH)
+    else:
+        raw = show(root, "HEAD", name)
+        if raw is None:
+            raise CheckFailed(f"{name} isn't committed: the head's gated inputs have no results file "
+                              "(run make evals-tier2 and commit what it writes)")
+        try:
+            file = ResultsFile.model_validate_json(raw)
+        except ValidationError as error:
+            raise CheckFailed(f"{name} doesn't validate: {_first_error(error)}") from None
+        head = reconcile(file, root, "HEAD", name=name)
+        rates, landed = head.rates, head.landed
     with tempfile.TemporaryDirectory() as tmp:
         base_dir = _materialize(root, base, Path(tmp), only=(RATES_PATH, LANDED_PATH))
         base_rates = load_recorded_rates(base_dir / RATES_PATH) if (base_dir / RATES_PATH).exists() \
             else RecordedRates(history=[])
         base_landed = load_landed(base_dir / LANDED_PATH) if (base_dir / LANDED_PATH).exists() else ()
     before = [entry.model_dump(mode="json") for entry in base_rates.history]
-    after = [entry.model_dump(mode="json") for entry in head.rates.history]
+    after = [entry.model_dump(mode="json") for entry in rates.history]
     if after[:len(before)] != before:
         raise CheckFailed(f"recorded_rates.json rewrites the history {base} holds; it only grows at its end")
-    if dropped := [plan for plan in base_landed if plan not in head.landed]:
+    if dropped := [plan for plan in base_landed if plan not in landed]:
         raise CheckFailed(f"landed.toml drops plans {base} lists: {', '.join(dropped)}")
-    result = gate_of(file, head.rates)
+    if pending_only:
+        if rates.history:
+            raise CheckFailed("recorded_rates.json has a recorded rate, so the head cannot pass as unarmed; "
+                              "a recorded rate means the gate was armed once")
+        return ("every scenario is pending at the head, so no results file is needed; "
+                "the strict check applies once any scenario can run")
+    result = gate_of(file, rates)
     if not result.passed:
         raise CheckFailed(f"the gate recomputed from {name}'s rows fails: {result.reasons[0]}")
     # Runs that skipped checks while a plan hadn't landed are counted as the gate's summary line counts them, so
     # a file whose rows were made before that plan never reads as clean.
     skipped = [skipped_summary(len(result.skipped_runs), result.skipped_checks)] if result.skipped_runs else []
-    lowered = [notice for entry in head.rates.history[len(before):] if (notice := lowered_notice(entry))]
+    lowered = [notice for entry in rates.history[len(before):] if (notice := lowered_notice(entry))]
     return "; ".join([f"{name} passes: {len(file.runs)} runs, {len(file.pending)} scenarios pending, "
                       f"recorded rate {_rate(file.recorded_rate)}", *skipped, *lowered])
 
@@ -756,5 +812,5 @@ __all__ = [
     "ResultsProviders", "ResultsRefused", "dirty_gated", "final_gate", "gated_from_pairs", "gated_map", "gated_pairs",
     "gating_refusal", "inputs_key", "history_refusal", "is_gated", "key_of", "lowered_notice", "merge_ready", "pass_target",
     "rate_refusal", "reconcile", "reconcile_pass", "results_check", "results_file", "selection_problems",
-    "unchecked_refusal", "write_results",
+    "unarmed", "unchecked_refusal", "write_results",
 ]
