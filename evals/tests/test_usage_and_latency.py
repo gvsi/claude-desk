@@ -843,6 +843,32 @@ async def test_a_hosted_run_stops_at_max_usd_by_the_usage_it_meters(tmp_path, mo
     assert last["total_usd"] == last["claude_api_usd"] == last["estimated_usd"] == "0.4500"
 
 
+async def test_a_latency_run_that_breaks_off_is_charged_at_least_what_it_last_metered(tmp_path, monkeypatch):
+    """A run that breaks off mid-run is charged the larger of its estimate and the spend its budget last
+    read between turns, all of it on the Claude API and marked as estimated, never the flat estimate
+    below what it already knew it had spent. Here each turn costs $0.40 and the estimate for nine turns
+    is $0.45; the meter reads $0.80 before the third turn, then fails."""
+    root = make_repo(tmp_path / "repo")
+    api = ChargingApi(turns=3, input_tokens=100_000)   # $0.40 a turn
+    on_the_deployment(monkeypatch, api)
+
+    async def fails_after_two_turns(chats: Any) -> list[UsageRecord]:
+        if len(api.sent) > 2:
+            raise ApiCallFailed("owner_ledger", 503, {"error": "unavailable"})
+        sessions = {chat.session_id for chat in chats}
+        return [call for call in api.calls if call.session_id in sessions]
+
+    deps = LatencyDeps(root=root, hosted_usage=fails_after_two_turns, credential=KEYS.get,
+                       spend_file=root / "spend.csv", now=lambda: NOW)
+    with pytest.raises(ApiCallFailed):
+        await run_latency(latency_config(turns=3, max_usd=3.0, base_url="https://desk.example.com"), deps)
+
+    assert len(api.sent) == 3
+    [row] = read_spend(root / "spend.csv")
+    assert row["pass_id"].startswith("latency-") and row["runs"] == "0"
+    assert row["total_usd"] == row["claude_api_usd"] == row["estimated_usd"] == "0.8000"
+
+
 async def test_latency_command_names_a_failed_call_without_its_body(tmp_path, capsys):
     """A call that fails outside a turn (entering a copy, opening a chat, reading the owner's ledger) ends
     the command with exit 1 and says which call and its status, never the body the API sent."""

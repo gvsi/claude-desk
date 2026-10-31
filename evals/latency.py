@@ -228,6 +228,14 @@ UsageReader = Callable[[Sequence[Chat]], Awaitable[list[UsageRecord]]]
 
 
 @dataclass
+class Meter:
+    """The spend a run's budget last read between turns, at list prices (`under_budget`): a run that
+    breaks off before its calls are read is charged no less."""
+
+    last_usd: float = 0.0
+
+
+@dataclass
 class Measured:
     """What a latency run measured: each turn, and what the records hold of its chats (none when hosted
     but the reviewer's entries in the owner's ledger)."""
@@ -319,10 +327,10 @@ class _Clients:
 
 async def measure_local(target: Any, *, turns: int, kinds: Sequence[Kind] = KINDS,
                         turn_timeout_s: float = TURN_TIMEOUT_S, max_usd: float | None = None,
-                        api_provider: str = "anthropic") -> Measured:
+                        api_provider: str = "anthropic", meter: Meter | None = None) -> Measured:
     """Turns on an in-process `ApiTarget`, then each chat's `app.run_events` rows, its copy's ledger and
     its model calls, read from the target's records. With `max_usd`, no turn starts once the chats'
-    calls cost that much at list prices."""
+    calls cost that much at list prices, and `meter` keeps the last figure read."""
     records = target.kernel.records
 
     async def usage_of(chats: Sequence[Chat]) -> list[UsageRecord]:
@@ -338,7 +346,7 @@ async def measure_local(target: Any, *, turns: int, kinds: Sequence[Kind] = KIND
     try:
         chats, samples, stopped = await drive(
             clients, turns=turns, kinds=kinds, turn_timeout_s=turn_timeout_s,
-            keep_going=under_budget(max_usd, usage_of, api_provider) if max_usd is not None else None)
+            keep_going=under_budget(max_usd, usage_of, api_provider, meter) if max_usd is not None else None)
         run_events, ledger = [], []
         for chat in chats:
             run_events += await records.run_events(chat.session_id)
@@ -351,15 +359,17 @@ async def measure_local(target: Any, *, turns: int, kinds: Sequence[Kind] = KIND
 
 
 async def measure_hosted(base_url: str, passcode: str, *, turns: int, max_usd: float, usage_of: UsageReader,
-                         kinds: Sequence[Kind] = KINDS, turn_timeout_s: float = TURN_TIMEOUT_S) -> Measured:
+                         kinds: Sequence[Kind] = KINDS, turn_timeout_s: float = TURN_TIMEOUT_S,
+                         meter: Meter | None = None) -> Measured:
     """Turns on the hosted deployment, then the reviewer's entries in each copy's ledger, read through
     the owner's ledger route (its database is private), and the chats' model calls as `usage_of` reads
     them. No turn starts once those calls cost `max_usd` at the Claude API's list prices (a deployment
-    runs on it), as `usage_of` reads them before each turn: a hosted run is never uncapped."""
+    runs on it), as `usage_of` reads them before each turn: a hosted run is never uncapped. `meter`
+    keeps the last figure read."""
     clients = _Clients(base_url, passcode, max(turn_timeout_s, 30.0))
     try:
         chats, samples, stopped = await drive(clients, turns=turns, kinds=kinds, turn_timeout_s=turn_timeout_s,
-                                              keep_going=under_budget(max_usd, usage_of, "anthropic"))
+                                              keep_going=under_budget(max_usd, usage_of, "anthropic", meter))
         ledger = []
         for chat in chats:
             ledger += (await chat.owner.owner_ledger(chat.desk_id))["entries"]
@@ -369,13 +379,17 @@ async def measure_hosted(base_url: str, passcode: str, *, turns: int, max_usd: f
         await clients.aclose()
 
 
-def under_budget(max_usd: float, usage_of: UsageReader, api_provider: str) -> Callable[[list[Chat]], Awaitable[bool]]:
+def under_budget(max_usd: float, usage_of: UsageReader, api_provider: str,
+                 meter: Meter | None = None) -> Callable[[list[Chat]], Awaitable[bool]]:
     """`drive`'s budget: another turn may start while the chats' calls so far, as `usage_of` reads them,
-    cost less than `max_usd` at list prices (`spend_usd`). A read or a price that fails raises, which
-    stops the run."""
+    cost less than `max_usd` at list prices (`spend_usd`), each figure read kept in `meter`. A read or a
+    price that fails raises, which stops the run, and leaves `meter` at the last figure read."""
 
     async def keep_going(chats: list[Chat]) -> bool:
-        return spend_usd(await usage_of(chats), api_provider).total_usd < max_usd
+        spent = spend_usd(await usage_of(chats), api_provider).total_usd
+        if meter is not None:
+            meter.last_usd = spent
+        return spent < max_usd
 
     return keep_going
 
@@ -449,7 +463,7 @@ class LatencyRun(BaseModel):
     kinds: list[Kind]
     estimate_usd: float
     spend_usd: float | None                      # at list prices; None for a dry run
-    spend_estimated: bool                        # spend_usd is the estimate: the calls couldn't be priced
+    spend_estimated: bool                        # spend_usd is estimated: the calls couldn't all be read or priced
     stopped_by_budget: bool
     latency: Latency
     proving: dict[str, Any] | None               # `scripts.prove_latency --json` as it printed
@@ -500,7 +514,8 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
     once the turns' calls cost `--max-usd`, and after it what they cost is appended to the shared
     spend file with no tier 2 runs, so the monthly guard counts it and no pass's cost per run does. A
     hosted run's calls are priced at the Claude API's list prices, which a deployment runs on. When the
-    calls can't all be read or priced, the run is charged its estimate instead, and the spend row
+    calls can't all be read or priced, as when the run breaks off, it is charged the larger of its
+    estimate and the spend its budget last read between turns (`Meter`) instead, and the spend row
     (`estimated_usd`) and the run's file (`spend_estimated`) say so. No dry run spends anything."""
     deps = deps or LatencyDeps()
     hosted, real = config.base_url is not None, not config.dry_run
@@ -541,6 +556,7 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
     latency_id = f"{now.astimezone(UTC):%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
     git_sha = results.git(deps.root, "rev-parse", "--verify", "HEAD^{commit}").strip()
     measured: Measured | None = None
+    meter = Meter()
     spend, estimated = None, False
     started = False
     try:
@@ -548,18 +564,19 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
             started = True
             measured = await deps.measure_hosted(config.base_url, passcode, turns=config.turns,
                                                  max_usd=config.max_usd, usage_of=deps.hosted_usage, kinds=KINDS,
-                                                 turn_timeout_s=config.turn_timeout_s)
+                                                 turn_timeout_s=config.turn_timeout_s, meter=meter)
         else:
             async with deps.target(config) as target:
                 started = True
                 measured = await deps.measure_local(target, turns=config.turns, kinds=KINDS,
                                                     turn_timeout_s=config.turn_timeout_s,
                                                     max_usd=config.max_usd if real else None,
-                                                    api_provider=api_provider)
+                                                    api_provider=api_provider, meter=meter)
     finally:
         # Recorded before the numbers are read, so a run whose numbers disagree still counts.
         if real and started:
-            spend, estimated = _charge(deps.spend_file, f"latency-{latency_id}", now, estimate, measured, api_provider)
+            spend, estimated = _charge(deps.spend_file, f"latency-{latency_id}", now, estimate, measured, api_provider,
+                                       metered=meter.last_usd)
     if hosted:
         latency = Latency(hosted=hosted_latency(measured.samples, ledger_entries=measured.ledger_entries,
                                                 session_ids=measured.session_ids))
@@ -581,12 +598,13 @@ async def run_latency(config: LatencyConfig, deps: LatencyDeps | None = None) ->
 
 
 def _charge(spend_file: Path, row_id: str, now: datetime, estimate: float, measured: Measured | None,
-            api_provider: str) -> tuple[float, bool]:
+            api_provider: str, *, metered: float = 0.0) -> tuple[float, bool]:
     """Appends a real latency run's spend to the shared spend file, with no tier 2 runs, and returns it
-    and whether it is the estimate: its calls at list prices (the API's at `api_provider`'s, the kernel's
+    and whether it is estimated: its calls at list prices (the API's at `api_provider`'s, the kernel's
     checks at the Claude API's), or, for a run that broke off before its calls were read or whose calls
-    can't all be priced, its estimate, all of it on the Claude API, which the row marks as estimated."""
-    spend = claude_api = estimate
+    can't all be priced, the larger of its estimate and the spend its budget last read (`metered`), so
+    never less than it knew it had spent, all of it on the Claude API, which the row marks as estimated."""
+    spend = claude_api = max(estimate, metered)
     estimated = True
     if measured is not None:
         try:
@@ -640,7 +658,8 @@ async def in_process_target(config: LatencyConfig, *, kernel_target: Callable[..
 
 
 __all__ = ["HOSTED_UNMETERED", "KINDS", "MESSAGES", "PER_TURN_USD", "Chat", "Kind", "LatencyConfig", "LatencyDeps",
-           "LatencyMismatch", "LatencyRefused", "LatencyRun", "Measured", "Reveal", "Spent", "Turn", "TurnSample",
-           "UsageReader", "decide_ms", "drive", "errored_turns", "full_turn", "hosted_latency", "in_process_target",
-           "local_latency", "measure_hosted", "measure_local", "metric_rows", "one_turn", "prove_latency",
-           "proving_spread", "reveals", "reviewer_ms", "run_latency", "spend_usd", "spread", "under_budget"]
+           "LatencyMismatch", "LatencyRefused", "LatencyRun", "Measured", "Meter", "Reveal", "Spent", "Turn",
+           "TurnSample", "UsageReader", "decide_ms", "drive", "errored_turns", "full_turn", "hosted_latency",
+           "in_process_target", "local_latency", "measure_hosted", "measure_local", "metric_rows", "one_turn",
+           "prove_latency", "proving_spread", "reveals", "reviewer_ms", "run_latency", "spend_usd", "spread",
+           "under_budget"]
