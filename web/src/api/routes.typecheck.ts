@@ -113,10 +113,7 @@ export const ROUTE_MODELS = {
  * missing from the document: once the API serves one, both checks fail until it comes off this
  * list and its answers match `ROUTE_MODELS`.
  */
-export const NOT_YET_SERVED = [
-  // Proving
-  'confirmTool',
-] as const satisfies readonly RouteKey[];
+export const NOT_YET_SERVED = [] as const satisfies readonly RouteKey[];
 
 /**
  * Operations the API serves that the web deliberately never calls, as "METHOD /path": one served

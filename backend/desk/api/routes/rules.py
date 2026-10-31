@@ -46,6 +46,7 @@ from desk.api.schemas import (
     Suggestion,
     ToolDecisions,
     ToolRow,
+    ToolsConfirmIn,
     error_responses,
     operation_ids,
 )
@@ -55,6 +56,8 @@ from desk.kernel_api import (
     DocumentCreated,
     DocumentUploadRequest,
     KnowledgeRequest,
+    ToolConfirmed,
+    ToolsConfirmRequest,
     ToolsSimulateChangeRequest,
 )
 
@@ -241,6 +244,19 @@ async def draft_money_cap(desk_id: DeskId, body: MoneyCapIn, request: Request,
         return await rules.draft_money_cap(owner, desk_id, body.auto_money_cap_cents)
 
     return await _drafting(request, ctx, desk_id, work, body=body)
+
+
+@policy_router.post("/tools/confirm", response_model=ToolConfirmed, responses=PROVING_RESPONSES)
+async def confirm_tools(desk_id: DeskId, body: ToolsConfirmIn, request: Request,
+                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Send the owner's reviewed pins to the kernel. Enabling drafts a rules version; only explicit policy
+    confirmation activates it. Disabling takes effect immediately. A slow proof answers 202 with this request."""
+    checked = ToolsConfirmRequest(desk_id=ctx.desk(desk_id), **body.model_dump())
+
+    async def work(owner: OwnerCtx, state: Runtime) -> ToolConfirmed:
+        return await owner.kernel.call("POST /tools/confirm", checked)
+
+    return await _drafting(request, ctx, desk_id, work, body=body, changes_rules=not body.enable)
 
 
 @policy_router.post("/confirm", response_model=PolicyVersion, responses=PROVING_RESPONSES)

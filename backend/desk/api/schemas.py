@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from datetime import date as LocalDate
 from functools import cache
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 from zoneinfo import available_timezones
 
 from fastapi.routing import APIRoute
@@ -59,7 +59,7 @@ from desk.contracts import (
     Violation,
 )
 from desk.events import EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved
-from desk.kernel_api import Health
+from desk.kernel_api import Health, ToolPin, ToolsConfirmRequest
 from desk.presets import PresetName
 
 
@@ -874,6 +874,20 @@ class DraftAddIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     add: list[OwnerCard] = Field(min_length=1, max_length=OWNER_CARDS_MAX)
+
+
+class ToolsConfirmIn(BaseModel):
+    """The shared batch review body; the checked Desk ID comes from the route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tools: Annotated[list[ToolPin], ToolsConfirmRequest.model_fields["tools"]]
+    enable: bool
+
+    @model_validator(mode="after")
+    def _shared_contract(self) -> Self:
+        ToolsConfirmRequest(desk_id="", tools=self.tools, enable=self.enable)
+        return self
 
 
 class ConfirmRulesIn(BaseModel):

@@ -9,8 +9,8 @@ kernel compiles and proves every draft: the API sends cards, never Cedar. The pr
 wait passes, and the same request sent again joins the work or takes its answer; a proof that timed out or ran bounded
 is "Rules can't be checked right now". Answering stays off through the confirm, and only going live turns it on.
 
-The app runs on FakeKernel with a scripted model; `PROVING_WAIT_S` is shortened where a test waits past it. The batch
-`{desk_id}/tools/confirm` route waits for the kernel contract that carries it.
+The app runs on FakeKernel with a scripted model; `PROVING_WAIT_S` is shortened where a test waits past it. Batch
+tool review goes through the owner's policy route, drafting enables until explicit policy confirmation.
 """
 
 import asyncio
@@ -50,7 +50,7 @@ from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResul
 from desk.api.setup import after_hours_start, calendar_slots, price_items
 from desk.api.setup_templates import SAFETY_PROBES, template_cards
 from desk.contracts import ITEM_ID_PATTERN, SLOT_ID_PATTERN, HoursWindow, PolicyVersion, RuleCard
-from desk.kernel_api import PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest
+from desk.kernel_api import PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest, ToolConfirmed
 from desk.presets import PRESETS
 from tests.api.fakes import ScriptedModel, gated, response
 from tests.api.fakes import text as text_block
@@ -1173,6 +1173,125 @@ async def test_setup_lists_tools_and_connects_mock_payments_for_review(app, brow
     other, _ = await ready(app, browser, kernel_http, model)
     assert (await other.browser.get(tools)).status_code == 404
     assert (await other.browser.post(f"{tools}/connect")).status_code == 404
+
+
+async def test_setup_reviews_both_payment_tools_before_explicit_policy_confirmation(app, browser, fake,
+                                                                                   kernel_http, model):
+    owner, state = await ready(app, browser, kernel_http, model, business_type="office")
+    desk_id = state["desk_id"]
+    tools = f"/api/owner/setup/{state['interview_id']}/tools"
+    connected = (await owner.browser.post(f"{tools}/connect")).json()
+    body = {"tools": [{"tool": row["tool"], "definition_sha256": row["definition_sha256"]}
+                      for row in connected], "enable": True}
+    path = f"/api/owner/policy/{desk_id}/tools/confirm"
+    active_cards = list(fake.desks[desk_id].cards)
+    active_version = fake.desks[desk_id].policy_version
+    reply = await owner.browser.post(path, json=body)
+    assert reply.status_code == 200, reply.text
+    reviewed = ToolConfirmed.model_validate(reply.json())
+    assert [profile.tool for profile in reviewed.profiles] == [row["tool"] for row in connected]
+    assert all(profile.status == "needs_review" for profile in reviewed.profiles)
+    assert reviewed.draft is not None and reviewed.draft.status == "proved"
+    assert reviewed.draft.parent_version == active_version
+    assert [card for card in reviewed.draft.cards if not card.is_default] == [
+        card for card in active_cards if not card.is_default]
+    assert reviewed.draft.auto_money_cap_cents == fake.desks[desk_id].auto_money_cap_cents
+    assert fake.called("POST /tools/confirm")[-1].body == {"desk_id": desk_id, **body}
+    assert fake.desks[desk_id].policy_version == active_version
+    listed = SetupTools.model_validate((await owner.browser.get(tools)).json())
+    assert all(row.status == "needs_review" for row in listed.tools if row.source == "mcp")
+
+    reply = await owner.browser.post(f"/api/owner/policy/{desk_id}/confirm", json={"version": reviewed.draft.version})
+    assert reply.status_code == 200, reply.text
+    listed = SetupTools.model_validate((await owner.browser.get(tools)).json())
+    assert {row.tool for row in listed.tools if row.source == "mcp" and row.status == "enabled"} == {
+        row["tool"] for row in connected}
+    assert fake.desks[desk_id].answering is False
+
+
+@pytest.mark.parametrize(("case", "status", "error"), [
+    ("unknown", 404, {"error": "kernel", "code": "not_found"}),
+    ("hash", 409, {"error": "kernel", "code": "conflict"}),
+    ("foreign", 404, {"error": "not_found"}),
+    ("deleted", 409, {"error": "kernel", "code": "closed"}),
+    ("no_active", 409, {"error": "kernel", "code": "conflict"}),
+])
+async def test_setup_tool_review_preserves_refusals(app, browser, fake, kernel_http, model, case, status, error):
+    owner, state = await ready(app, browser, kernel_http, model)
+    desk_id = state["desk_id"]
+    body = {"tools": [{"tool": "payments.create_refund", "definition_sha256": "0" * 64}], "enable": True}
+    if case != "unknown":
+        rows = (await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/tools/connect")).json()
+        body["tools"] = [{"tool": row["tool"], "definition_sha256": row["definition_sha256"]} for row in rows]
+    if case == "hash":
+        body["tools"][-1]["definition_sha256"] = "0" * 64
+    elif case == "foreign":
+        owner = await new_owner(app, browser, kernel_http)
+    elif case == "no_active":
+        fake.desks[desk_id].policy_version = 0
+    before = len(fake.called("POST /tools/confirm"))
+    path = f"/api/owner/policy/{desk_id}/tools/confirm"
+    if case == "deleted":
+        # Deleted Desks are absent from whoami. Delete after the API's ownership check to exercise a kernel
+        # refusal on an in-flight request, rather than the API's earlier 404 for an unlisted Desk.
+        release = fake.gate("POST /tools/confirm")
+        pending = asyncio.create_task(owner.browser.post(path, json=body))
+        try:
+            async with asyncio.timeout(10):
+                while len(fake.called("POST /tools/confirm")) == before:
+                    await asyncio.sleep(0.01)
+            fake.desks[desk_id].deleted_at = fake.now
+        finally:
+            release.set()
+        reply = await pending
+    else:
+        reply = await owner.browser.post(path, json=body)
+    assert (reply.status_code, reply.json()) == (status, error)
+    assert len(fake.called("POST /tools/confirm")) == before + (case != "foreign")
+    assert not fake.desks[desk_id].versions
+    assert all(profile.status == "needs_review" for profile in fake.desks[desk_id].tools.values()
+               if profile.source == "mcp")
+
+
+async def test_setup_tool_review_retries_one_proof_with_the_browser_body(app, browser, fake, kernel_http,
+                                                                       model, monkeypatch):
+    owner, state = await ready(app, browser, kernel_http, model)
+    rows = (await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/tools/connect")).json()
+    body = {"tools": [{"tool": row["tool"], "definition_sha256": row["definition_sha256"]} for row in rows],
+            "enable": True}
+    path = f"/api/owner/policy/{state['desk_id']}/tools/confirm"
+    monkeypatch.setattr(proving, "PROVING_WAIT_S", 0.1)
+    release = fake.gate("POST /tools/confirm")
+    try:
+        reply = await owner.browser.post(path, json=body)
+        assert (reply.status_code, reply.json()) == (202, {"retry": {"path": path, "body": body}})
+        assert (await owner.browser.post(path, json=body)).status_code == 202
+    finally:
+        release.set()
+    monkeypatch.setattr(proving, "PROVING_WAIT_S", 25)
+    reply = await owner.browser.post(path, json=body)
+    assert reply.status_code == 200, reply.text
+    assert ToolConfirmed.model_validate(reply.json()).draft is not None
+    assert len(fake.called("POST /tools/confirm")) == 1
+    assert len(fake.desks[state["desk_id"]].versions) == 1
+
+
+@pytest.mark.parametrize("case", ["empty", "duplicate", "bad_hash", "extra"])
+async def test_setup_tool_review_uses_shared_batch_validation(app, browser, fake, kernel_http, model, case):
+    owner, state = await ready(app, browser, kernel_http, model)
+    pin = {"tool": "payments.create_refund", "definition_sha256": "0" * 64}
+    body = {"tools": [pin], "enable": True}
+    if case == "empty":
+        body["tools"] = []
+    elif case == "duplicate":
+        body["tools"] = [pin, pin]
+    elif case == "bad_hash":
+        pin["definition_sha256"] = "unreviewed"
+    else:
+        body["desk_id"] = state["desk_id"]
+    reply = await owner.browser.post(f"/api/owner/policy/{state['desk_id']}/tools/confirm", json=body)
+    assert (reply.status_code, reply.json()) == (422, {"error": "invalid"})
+    assert fake.called("POST /tools/confirm") == []
 
 
 async def test_an_answer_error_is_kept_for_one_retry_without_its_frames():

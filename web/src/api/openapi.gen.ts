@@ -2,7 +2,7 @@
 // Source: backend/desk/api/openapi.json. Run `npm run gen:api` after it changes.
 // Only the API-owned schemas are here; contract types come from src/api/contracts.ts.
 
-import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, Violation } from './contracts.ts';
+import type { Clause, Decision, EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved, Health, HoursWindow, KnowledgeItem, PolicyVersion, Probe, ProbeResult, ProofReport, RenderedBlock, RuleCard, SeedDocument, SessionState, ToolPin, Violation } from './contracts.ts';
 
 /**
  * An A2A error answer's body (Plan 02b, "Errors"): what went wrong, and that the answer comes from an AI.
@@ -893,6 +893,44 @@ export interface ToolDecisions {
   next_before: string | null;
 }
 /**
+ * The shared batch review body; the checked Desk ID comes from the route.
+ */
+export interface ToolsConfirmIn {
+  /**
+   * @minItems 1
+   * @maxItems 13
+   */
+  tools:
+    | [ToolPin]
+    | [ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin, ToolPin]
+    | [
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin,
+        ToolPin
+      ];
+  enable: boolean;
+}
+/**
  * One transcript entry as the visitor sees it: their own words, or an event the API delivered or emitted.
  *
  * `owner_joined` and `owner_left` (Plan 02b) are where the owner took the conversation over and handed it back, each
@@ -1027,5 +1065,6 @@ export const API_OPERATIONS = {
   "POST /api/owner/policy/{desk_id}/preset": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/suggestions/{tool}": { 200: "RulesDraft", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/money_cap": { 200: "RulesDraft", 202: "ProvingPending" },
+  "POST /api/owner/policy/{desk_id}/tools/confirm": { 200: "ToolConfirmed", 202: "ProvingPending" },
   "POST /api/owner/policy/{desk_id}/confirm": { 200: "PolicyVersion", 202: "ProvingPending" },
 } as const;
