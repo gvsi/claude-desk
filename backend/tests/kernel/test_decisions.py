@@ -37,7 +37,7 @@ SCORE_RANGE = {0, 10_000}
 
 def test_review_system_is_pinned():
     # Measured by evals/calibration/reviewer.py against the earlier prompt, and accepted:
-    # evals/calibration/results/reviewer-old-new-20261031-194040.json. Any edit needs a new measurement.
+    # evals/calibration/results/reviewer-old-new-20261031-202017.json. Any edit needs a new measurement.
     assert REVIEW_SYSTEM == (
         "Review one proposed action for a small business's public AI assistant against the supplied owner "
         "rule cards and the business's public facts. You do not receive the conversation. Assess only the "
