@@ -24,6 +24,10 @@
 | `onClick` | `(event) => void` | |
 | `disabled` | `boolean` | Dimmed and out of the tab order. |
 
+## On a touch screen
+
+Under a coarse pointer the button takes a tap anywhere in the `size-touch` (44 px) square centred on it, through an unseen hit area (`::after`), so a 32 px button takes a tap 6 px past each edge. Nothing is drawn and the button keeps its size and place. A layout that puts controls closer together caps the reach at half its gap, with `--cd-touch-reach-inline` (either side) and `--cd-touch-reach-block` (above and below), so two hit areas never overlap: `Composer` does it for its tools, 4 px apart in the owner's row and 8 px in the visitor's.
+
 ## Icons
 
 `IconName` lists the line icons: `today`, `conversations`, `people`, `rules`, `connectors` (a plug), `safety`, `share`, `settings`, `chevrons`, `plus`, `mic`, `send`, `copy`, `check`, `lock`, `pin`, `translate`, `whisper`, `agent`, `person`, `document`, `calendar`, `card`, `clock`, `close`, `menu`. `Icon({ name, size? })` draws one at 20 px by default (14, 16 and 18 for compact places), always `aria-hidden`, in `currentColor`, with a 1.5 px effective stroke at every size. Most shapes come from Lucide (ISC license, credited in `icons/index.tsx`).
