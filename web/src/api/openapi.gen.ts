@@ -201,7 +201,7 @@ export interface DeskSummary {
  */
 export interface DeskSetup {
   interview_id: string;
-  step: "questions" | "tools" | "rules" | "situations" | "safety_check" | "preview" | "live";
+  step: "questions" | "tools" | "rules" | "situations" | "safety_check" | "preview";
 }
 /**
  * 202: the held request is withdrawn; its outcome arrives on the event stream as `resolved`.

@@ -83,8 +83,9 @@ def operation_ids(router: str) -> Callable[[APIRoute], str]:
     return lambda route: f"{router}_{route.name}"
 
 
-# Setup's steps (Plan 02b): an interview runs from `questions` to `live`, when its Desk goes live.
-SetupStep = Literal["questions", "tools", "rules", "situations", "safety_check", "preview", "live"]
+# Setup's steps (Plan 02b): an interview runs from `questions` to `live`, its go-live step, where it is finished.
+UnfinishedSetupStep = Literal["questions", "tools", "rules", "situations", "safety_check", "preview"]
+SetupStep = Literal[UnfinishedSetupStep, "live"]
 
 
 class DeskSetup(BaseModel):
@@ -93,7 +94,7 @@ class DeskSetup(BaseModel):
     (`preview`) is still unfinished, since going live is setup's last step."""
 
     interview_id: str
-    step: SetupStep
+    step: UnfinishedSetupStep
 
 
 class DeskSummary(BaseModel):

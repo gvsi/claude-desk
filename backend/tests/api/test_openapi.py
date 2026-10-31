@@ -50,6 +50,9 @@ def test_every_route_has_typed_responses():
     # Each Desk the owner's lists name carries its unfinished setup interview, or null, always sent (#233).
     assert "setup" in schemas["DeskSummary"]["required"]
     assert schemas["DeskSetup"]["required"] == ["interview_id", "step"] == list(schemas["DeskSetup"]["properties"])
+    assert schemas["DeskSetup"]["properties"]["step"]["enum"] == [   # a live interview is finished: never listed
+        "questions", "tools", "rules", "situations", "safety_check", "preview"]
+    assert schemas["SetupState"]["properties"]["step"]["enum"][-1] == "live"
     assert schemas["A2AError"]["properties"]["disclosure"] == {"const": "ai", "title": "Disclosure", "type": "string"}
     assert schemas["A2AResponse"]["properties"]["disclosure"]["const"] == "ai"
 

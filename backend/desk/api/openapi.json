@@ -8352,8 +8352,7 @@
               "rules",
               "situations",
               "safety_check",
-              "preview",
-              "live"
+              "preview"
             ],
             "title": "Step"
           }
