@@ -1,0 +1,247 @@
+import type { Meta, StoryObj } from '@storybook/react-vite';
+import { expect, within } from 'storybook/test';
+
+import { expectComputed } from '../test/expectComputed.ts';
+import {
+  FACT_IN_PROSE,
+  SPEC,
+  expectConversationType,
+  expectFooter,
+  expectNoFactsInProse,
+  expectReceiptsUnderMessages,
+  expectTabOrder,
+  expectVisionBar,
+  one,
+  some,
+} from './spec.ts';
+import { CityOfficeChat, VISION_BACK_HREF } from './vision.tsx';
+
+const DISCLOSURE = "You're chatting with Claude, an AI answering for Meridian Bay Permits. Ask for Permit Center staff anytime.";
+
+/** Claude's words, word for word as the board writes them, in order. */
+const CLAUDE_LINES = [
+  'I can look that up after you confirm it’s you.',
+  'Thanks, Marcus. Here’s where your kitchen remodel stands.',
+  'Here’s what comes next.',
+  'These times are open on the inspection calendar. Which one works for you?',
+  'Whether your garage conversion needs a permit is a plan checker’s decision, so I’ve asked one to get back to you.',
+];
+
+/** Marcus Bell's messages, in order. */
+const MARCUS_LINES = [
+  'Hi, it’s Marcus Bell. What’s the status of my kitchen remodel permit?',
+  'When can an inspector come out?',
+  'One more thing. I’d like to turn my garage into a home office. Does that need a permit at all?',
+];
+
+const CHECKED = 'Reply checked against the City’s rules';
+
+/** The receipts under Claude's four answers, in order, each with its dot. */
+const RECEIPTS = [
+  [CHECKED, 'handled'],
+  ['Code sent to the email on the application', 'handled'],
+  [CHECKED, 'handled'],
+  ['Read from your own permit file', 'handled'],
+  [CHECKED, 'handled'],
+  ['Times read from the inspection calendar', 'handled'],
+  [CHECKED, 'handled'],
+  ['Held for a person: whether work needs a permit is a staff decision', 'held'],
+] as const;
+
+/** The cards in the conversation, in order: what draws each, its label, then its words. */
+const CONVERSATION_CARDS = [
+  ['reply', 'Confirm it\'s you', ['I’ll send a code to the email on the application.']],
+  ['fact', 'Permit status', ['Plan check passed', 'Kitchen remodel, permit B-2026-0412', 'Fee due before issue: $1,286']],
+  [
+    'fact',
+    'Next steps',
+    ['Pay the fee, then book the first inspection', 'Pay online or at the Permit Center, 250 Harbor Street', 'First inspection: rough-in for electrical, plumbing and framing'],
+  ],
+  [
+    'reply',
+    'Open times',
+    [
+      'Rough-in inspection',
+      'Permit B-2026-0412, once the fee is paid',
+      'Wednesday, November 4, 8:00 am to 12:00 pm',
+      'Thursday, November 5, 1:00 pm to 4:00 pm',
+      'Monday, November 9, 8:00 am to 12:00 pm',
+    ],
+  ],
+] as const;
+
+/** The about column's cards, the kernel's charter templates, in order. */
+const ABOUT_CARDS = [
+  ['Hours', ['Monday to Friday, 8:00 am to 4:30 pm', 'Inspections, Monday to Friday, 8:00 am to 4:00 pm']],
+  ['Policy', ['Plan checkers decide what needs a permit and what’s exempt.']],
+  ['Contact', ['(415) 555-0186', 'Permit Center, 250 Harbor Street']],
+] as const;
+
+const SUGGESTIONS = ['Book an inspection', 'Pay the fee', 'Talk to staff'];
+
+/**
+ * The page's height at the laptop's width: the board's 1485 px, plus 18 px for the shell's own AI
+ * disclosure, whose longer sentence takes a second line, less 6 px for each of the two fact cards,
+ * 109 px where the board draws 115 px boxes in the reply card's look.
+ */
+const PAGE_HEIGHT = 1485 + 18 - 2 * 6;
+
+/** Each line of text a person reads under `root`, one text node at a time, outside any card. */
+function linesOutsideCards(root: HTMLElement): string[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const lines: string[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent?.trim() ?? '';
+    if (text !== '' && !node.parentElement?.closest('.cd-card, [aria-hidden="true"]')) lines.push(text);
+  }
+  return lines;
+}
+
+/** A card's words, one per paragraph or list item, after its label. */
+function cardWords(card: HTMLElement): string[] {
+  return [...card.querySelectorAll('p, li')]
+    .filter((line) => !line.matches('.cd-reply-card__label, .cd-fact-card__label'))
+    .map((line) => line.textContent ?? '');
+}
+
+const meta = {
+  title: 'Boards/Vision, city office',
+  render: () => <CityOfficeChat />,
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  parameters: {
+    layout: 'fullscreen',
+    canvas: 'N-R2-Vision-CityOffice-Resident',
+    canvasNote: [
+      'Signed on 2026-10-30. Marcus Bell, a resident, asks Meridian Bay Permits’ public Desk about his kitchen remodel permit; Meridian Bay is a fictional city, and no vision page names a real city office.',
+      'He is verified with a code sent to the email on the application; his permit’s status with the fee due, and the next steps, are fact cards, and the open inspection times are the kernel’s open-times card. The garage conversion is a plan checker’s decision, so it is held for staff. Every status, fee, date and time is in a card; Claude’s words state none.',
+      'The page is PublicShell under the vision bar (its banner), with the kernel’s open status, the city’s charter cards in the about column, and the suggestions under the conversation. The composer and the suggestions send nothing.',
+      'The AI disclosure is the shell’s own sentence, which can’t be changed or turned off, where the board writes DisclosureLine’s shorter “Meridian Bay Permits answers with Claude, an AI.”; it takes a second line, so the page is 18 px longer.',
+      'The permit status and the next steps are FactCards, at most 420 px wide, padded 12 px 14 px, with a 14 px icon and the fact in body type, where the board draws them in the reply card’s look (520 px, padded 16 px, a 16 px icon, the headline in section type); each is 109 px tall where the board’s is 115 px. With the disclosure, the page is 1491 px where the board draws 1485 px.',
+      'The footer’s “Powered by” mark is the bell, where the board draws the earlier counter mark.',
+    ].join(' '),
+  },
+} satisfies Meta;
+
+export default meta;
+
+type Story = StoryObj<typeof meta>;
+
+export const Board: Story = {
+  play: async ({ canvas, canvasElement, userEvent }) => {
+    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
+    // The heights below are the page's once its two typefaces have loaded.
+    await Promise.all([document.fonts.load('15px "Hanken Grotesk"'), document.fonts.load('15px "Source Serif 4"')]);
+    await document.fonts.ready;
+    const bar = await expectVisionBar(canvasElement, VISION_BACK_HREF);
+
+    // The city's public page right under the bar: its header, its name, the Permit Center and the kernel's open status.
+    const header = canvas.getByRole('banner');
+    await expect(header.getBoundingClientRect().top).toBe(bar.getBoundingClientRect().bottom);
+    expectComputed(header, { height: '76px', backgroundColor: 'rgb(45, 61, 76)', borderBottomColor: 'rgb(111, 139, 163)' });
+    await expect(within(header).getByRole('heading', { level: 1 })).toHaveTextContent('Meridian Bay Permits');
+    await expect(header).toHaveTextContent('City of Meridian Bay, Permit Center');
+    await expect(one(header, '.cd-public-shell__open-status')).toHaveTextContent('Open now, until 4:30 pm');
+    // A fictional office: no vision page names a real one.
+    await expect(canvasElement.textContent).not.toMatch(/Oakland/);
+
+    // The page runs past the window, as the board draws it: the shell is the page, nothing outside it.
+    const shellHeight = Math.round(one(canvasElement, '.cd-public-shell').getBoundingClientRect().height);
+    await expect(document.documentElement.scrollHeight).toBe(shellHeight);
+    await expect(shellHeight).toBe(PAGE_HEIGHT);
+    await expect(document.documentElement.scrollWidth).toBe(document.documentElement.clientWidth);
+
+    // The AI disclosure under the chat's title, and the staff to ask for.
+    const main = canvas.getByRole('main');
+    const disclosure = [...main.querySelectorAll('p')].filter((line) => line.textContent === DISCLOSURE);
+    await expect(disclosure).toHaveLength(1);
+    const askStaff = within(main).getByRole('button', { name: 'Ask for Permit Center staff' });
+
+    // The conversation: Marcus's messages, and Claude's words, which state no status, fee, date or time.
+    const log = within(main).getByRole('log', { name: 'Conversation with Meridian Bay Permits' });
+    expectConversationType(log);
+    await expect(await expectNoFactsInProse(log)).toBe(CLAUDE_LINES.length);
+    await expect(some(log, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual(CLAUDE_LINES);
+    await expect(some(log, '.cd-visitor-message__bubble').map((bubble) => bubble.textContent)).toEqual(MARCUS_LINES);
+
+    // Verified with a code to the email on the application, between the code's prompt and his permit.
+    const verified = within(log).getByRole('status');
+    await expect(verified).toHaveTextContent('Verified with a code sent to the email on the application');
+    const [verifyCard, permitCard] = within(log).getAllByRole('article');
+    await expect(verifyCard?.compareDocumentPosition(verified)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    await expect(permitCard?.compareDocumentPosition(verified)).toBe(Node.DOCUMENT_POSITION_PRECEDING);
+
+    // Every card in the conversation, word for word: the status and the next steps are fact cards,
+    // the code's prompt and the open times the kernel's reply cards.
+    const cards = within(log).getAllByRole('article');
+    await expect(cards.map((card) => card.getAttribute('aria-label'))).toEqual(CONVERSATION_CARDS.map(([, label]) => label));
+    for (const [index, [kind, label, words]] of CONVERSATION_CARDS.entries()) {
+      const card = cards[index] as HTMLElement;
+      await expect(card.closest(kind === 'fact' ? '.cd-fact-card' : '.cd-reply-card'), `${label}: a ${kind} card`).not.toBeNull();
+      await expect(cardWords(card), `${label}: its words`).toEqual([...words]);
+    }
+    // The open times are a list to answer in the chat, not buttons.
+    await expect(within(cards[3] as HTMLElement).getAllByRole('listitem')).toHaveLength(3);
+    await expect(within(cards[3] as HTMLElement).queryByRole('button')).toBeNull();
+
+    // The fee is in the permit's card and nowhere else on the page.
+    const money = linesWith(canvasElement, '$');
+    await expect(money).toEqual(['Fee due before issue: $1,286']);
+    await expect(within(cards[1] as HTMLElement).getByText('Fee due before issue: $1,286')).toBeVisible();
+    // Outside the cards, nothing in the conversation states a status, fee, date or time.
+    for (const line of linesOutsideCards(log)) {
+      await expect(line, `outside a card: "${line}"`).not.toMatch(FACT_IN_PROSE);
+    }
+
+    // The receipts under each answer, in order: the reply's check, then what ran or what waits for a person.
+    await expect(await expectReceiptsUnderMessages(log)).toBe(4);
+    const receipts = some(log, '.cd-margin-line');
+    await expect(receipts.map((line) => line.textContent)).toEqual(RECEIPTS.map(([words]) => words));
+    await expect(receipts.map((line) => one(line, '.cd-status-dot').className)).toEqual(RECEIPTS.map(([, tone]) => `cd-status-dot cd-status-dot--${tone}`));
+    await expect(log.querySelector('.cd-transcript-row__margin button')).toBeNull();
+    // The garage question goes to staff: Claude's words alone, no card under them.
+    const lastAnswer = some(log, '.cd-transcript-row__main').at(-1) as HTMLElement;
+    await expect(lastAnswer).toHaveTextContent(CLAUDE_LINES[4] as string);
+    await expect(lastAnswer.querySelector('.cd-card')).toBeNull();
+
+    // What to try next, 20 px under the conversation.
+    const chips = within(main).getByRole('group', { name: 'Try asking' });
+    const chipButtons = within(chips).getAllByRole('button');
+    await expect(chipButtons.map((chip) => chip.textContent)).toEqual(SUGGESTIONS);
+    await expect(Math.round(chips.getBoundingClientRect().top - log.getBoundingClientRect().bottom)).toBe(20);
+
+    // The about column: the city's hours, who decides what needs a permit, and how to reach the Permit Center.
+    const about = canvas.getByRole('complementary', { name: 'About Meridian Bay Permits' });
+    const aboutCards = within(about).getAllByRole('article');
+    await expect(aboutCards.map((card) => card.getAttribute('aria-label'))).toEqual(ABOUT_CARDS.map(([label]) => label));
+    for (const [index, [label, words]] of ABOUT_CARDS.entries()) {
+      await expect(cardWords(aboutCards[index] as HTMLElement), `${label}: its words`).toEqual([...words]);
+    }
+
+    // The composer and the footer; a vision page makes no requests.
+    const composer = within(main).getByRole('textbox', { name: 'Message Meridian Bay Permits' });
+    expectComputed(one(main, '.cd-composer__box'), SPEC.composer);
+    await expectFooter(canvasElement);
+    await expect(canvasElement.querySelectorAll('[href*="/api/"]')).toHaveLength(0);
+
+    // focus_order_is_logical: the bar, Ask for Permit Center staff, the suggestions, then the composer.
+    await expectTabOrder(userEvent, [within(bar).getByRole('link', { name: 'Back to your Desk' }), askStaff, ...chipButtons, composer]);
+
+    // A vision page sends nothing: typed words stay after Send and after Enter.
+    await userEvent.type(composer, 'Thanks');
+    await userEvent.click(within(main).getByRole('button', { name: 'Send' }));
+    await expect(composer).toHaveValue('Thanks');
+    await userEvent.click(composer);
+    await userEvent.keyboard('{Enter}');
+    await expect(composer).toHaveValue('Thanks');
+  },
+};
+
+/** Every line of text under `root` holding `needle`, as its element reads it. */
+function linesWith(root: HTMLElement, needle: string): string[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const lines: string[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.textContent?.includes(needle)) lines.push(node.parentElement?.textContent ?? '');
+  }
+  return lines;
+}

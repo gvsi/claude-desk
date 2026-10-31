@@ -97,11 +97,12 @@ export const REFERENCE_BOARDS = [
   'N-Run2-Settings-Channels',
   'N-R2-Vision-Channels',
   // The vision pages, signed on 2026-10-30, each under the vision bar: a team Desk's conversations;
-  // a returning visitor signed in with a Claude account; and Today and the public chat as phone
-  // apps. The city office's page is being redrawn from a resident's side and comes in a later change.
+  // a returning visitor signed in with a Claude account; Today and the public chat as phone apps;
+  // and a resident on a city permits office's public page, longer than the window.
   'N-R2-Vision-TeamDesk',
   'N-R2-Vision-ClaudeAccount',
   'N-R2-Vision-Phone',
+  'N-R2-Vision-CityOffice-Resident',
 ] as const;
 
 export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];
@@ -163,6 +164,7 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-R2-Vision-TeamDesk': 'laptop-1061',
   'N-R2-Vision-ClaudeAccount': 'laptop-994',
   'N-R2-Vision-Phone': 'laptop',
+  'N-R2-Vision-CityOffice-Resident': 'laptop',
 };
 
 /** The window `board` is drawn at, so its render's size and its story's viewport. */
