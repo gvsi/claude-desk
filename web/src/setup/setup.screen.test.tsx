@@ -1856,6 +1856,29 @@ describe('setup', () => {
     expect(line.bottom).toBeLessThanOrEqual(link.getBoundingClientRect().top);
   });
 
+  it('stale_preview_never_claims_answering_that_is_off', async () => {
+    // The preview is open here; elsewhere the owner finishes setup, then turns Answering off.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Go live' })).toBeVisible();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: false } });
+    expect(deskOf(state).summary.answering).toBe(false);
+    const mark = mockStore.requests.length;
+
+    // "Go live" in the stale preview: the API says it is live already (409), the interview read again
+    // says so, and the step shows live, its check drawn, but with Answering off it never says
+    // "Answering now", before or after the Desks are read again.
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(requests('goLive', mark)).toHaveLength(1);
+    await expect.element(setupSteps(screen).last()).toHaveTextContent('Live, done');
+    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
+    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(deskOf(state).summary.answering).toBe(false);
+  });
+
   it('going_live_under_reduced_motion_is_drawn_still', async () => {
     await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     try {

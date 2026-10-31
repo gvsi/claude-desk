@@ -174,9 +174,10 @@ function SetupInterview({ setupId }: { setupId: string }) {
 
   const name = business ?? '';
   const wentLiveHere = state.step === 'live' && openedAt !== null && openedAt !== 'live';
-  // Answering is on: the Desk went live here, or the Desks say so. A live Desk whose owner has
-  // turned Answering off since doesn't claim it.
-  const answering = wentLiveHere || desk?.answering === true;
+  // "Answering now" follows the latest Desks read alone, whatever this page saw happen: going live
+  // here writes Answering on into them, and a Desk whose owner has turned Answering off since, here
+  // or elsewhere, doesn't claim it. The check's drawing is the page's own history, kept apart.
+  const answering = desk?.answering === true;
   let body: ReactNode;
   switch (state.step) {
     case 'questions':

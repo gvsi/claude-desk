@@ -2,12 +2,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
-import type { SetupState, WentLive } from '../api/views.ts';
+import type { BusinessOut, SetupState, WentLive } from '../api/views.ts';
 import { Button, Card, Notice, PageHeader, Pill, StatusDot } from '../ds/index.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { QrCode } from '../owner/share/QrCode.tsx';
-import { DESKS_KEY } from '../owner/useDesks.ts';
+import { DESKS_KEY, withAnswering } from '../owner/useDesks.ts';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { gaveUp } from './shared.ts';
 
@@ -17,7 +17,7 @@ export interface LiveStepProps {
   state: SetupState;
   /** The business's name, once known. */
   business: string;
-  /** Answering is on: the Desk went live on this page, or the Desks say so. */
+  /** Answering is on, as the latest Desks read says. */
   answering: boolean;
   /** The Desk went live. */
   onLive: () => void;
@@ -58,17 +58,19 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
   const goLive = async () => {
     setPending(true);
     setError(null);
-    // Answering is on now: the Desks the app read before say it's off, so they are read again.
-    const answering = () => void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
+    // Going live turns Answering on, and one gone live elsewhere may have changed since: the Desks are read again.
+    const readDesksAgain = () => void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
     try {
       setWentLive(await request('goLive', { params: { id } }));
-      answering();
+      // It went live here, so this Desk answers now: the Desks say so at once, until they are read again.
+      queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => withAnswering(now, state.desk_id, true));
+      readDesksAgain();
       onLive();
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
       // A lost answer, the give-up, or a 409 (it is live already): the interview says whether the Desk is live.
       const now = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict') ? await reread() : null;
-      if (now?.step === 'live') answering();
+      if (now?.step === 'live') readDesksAgain();
       else setError(gaveUp(err) ? stillCheckingLine() : ownerErrorCopy(err));
     } finally {
       setPending(false);

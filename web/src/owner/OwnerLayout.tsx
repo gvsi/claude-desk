@@ -26,7 +26,7 @@ import {
 import { writeLocal } from '../lib/storage.ts';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
-import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead } from './useDesks.ts';
+import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead, withAnswering } from './useDesks.ts';
 
 import './OwnerLayout.css';
 
@@ -115,12 +115,6 @@ export function RouterLink({ href, children, ...rest }: SidebarLinkProps | Rules
       {children}
     </Link>
   );
-}
-
-/** The same Desks with this Desk's Answering set to `on`; the same list when it doesn't hold the Desk. */
-function withAnswering(businesses: BusinessOut[] | undefined, deskId: string, on: boolean): BusinessOut[] | undefined {
-  if (businesses === undefined || findDesk(businesses, deskId) === null) return businesses;
-  return businesses.map((b) => ({ ...b, desks: b.desks.map((d) => (d.desk_id === deskId ? { ...d, answering: on } : d)) }));
 }
 
 const onOff = (on: boolean) => (on ? 'on' : 'off');
