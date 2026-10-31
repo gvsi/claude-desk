@@ -153,19 +153,38 @@ const PLATFORM_CEILING_CENTS = 1_000_000;
 /** The effects that move money. */
 const MONEY_EFFECTS: ReadonlySet<string> = new Set(['charge', 'pay_out']);
 
+/** Whether `card` is a rule that moves money: on a tool that charges or pays out, or on every tool that does. */
+function movesMoney(desk: DeskRecord, card: RuleCard): boolean {
+  return card.applies_to.startsWith('effect:')
+    ? MONEY_EFFECTS.has(card.applies_to.slice('effect:'.length))
+    : (desk.tools.find((tool) => tool.tool === card.applies_to)?.effects ?? []).some((effect) => MONEY_EFFECTS.has(effect));
+}
+
+/** Whether `card` takes money on its own above `cap`: an automatic money rule whose own limit is over it. */
+const autoMoneyAbove = (desk: DeskRecord, card: RuleCard, cap: number) => card.mode === 'auto' && movesMoney(desk, card) && (card.max_amount_cents ?? 0) > cap;
+
 /**
  * The kernel's refusal to draft an automatic rule that moves money above the active version's
- * payment limit (a rule on a tool that charges or pays out, or on every tool that does), with the
- * limit it went over; null when every card fits.
+ * payment limit, with the limit it went over; null when every card fits.
  */
 function aboveMoneyCap(desk: DeskRecord, cards: readonly RuleCard[]): Failure | null {
   const cap = desk.policy.auto_money_cap_cents ?? 0;
-  const movesMoney = (card: RuleCard) =>
-    card.applies_to.startsWith('effect:')
-      ? MONEY_EFFECTS.has(card.applies_to.slice('effect:'.length))
-      : (desk.tools.find((tool) => tool.tool === card.applies_to)?.effects ?? []).some((effect) => MONEY_EFFECTS.has(effect));
-  const over = cards.some((card) => card.mode === 'auto' && movesMoney(card) && (card.max_amount_cents ?? 0) > cap);
-  return over ? failWith(422, 'above_money_cap', { cap_cents: cap }) : null;
+  return cards.some((card) => autoMoneyAbove(desk, card, cap)) ? failWith(422, 'above_money_cap', { cap_cents: cap }) : null;
+}
+
+/**
+ * `cards` with each active automatic money rule above `cap` brought down to it, as plan 01b's
+ * `desk.money_cap.lower_to_cap` drafts a lower limit: its own limit becomes `cap`, or at 0 it asks
+ * first, with what only an automatic rule has dropped. A card no active card has, and every other
+ * card, is unchanged, so the draft shows each one the new limit changes.
+ */
+function lowerToCap(desk: DeskRecord, cards: readonly RuleCard[], cap: number): RuleCard[] {
+  const carried = new Set(desk.policy.cards.map((card) => card.card_id));
+  return cards.map((card) => {
+    if (!carried.has(card.card_id) || !autoMoneyAbove(desk, card, cap)) return card;
+    if (cap > 0) return { ...card, max_amount_cents: cap };
+    return { ...card, mode: 'ask', max_amount_cents: null, hours: null, max_discount_bp: 0, review: false };
+  });
 }
 
 const isPreset = (value: unknown): value is RulesPreset => typeof value === 'string' && Object.hasOwn(PRESETS, value);
@@ -565,8 +584,11 @@ const SERVED: ServedRoutes = {
     const cap = isRecord(req.body) ? req.body.auto_money_cap_cents : undefined;
     if (req.malformed || typeof cap !== 'number' || !Number.isSafeInteger(cap) || cap < 0) return INVALID;
     if (cap > PLATFORM_CEILING_CENTS) return failWith(422, 'above_platform_ceiling');
-    // The active rules at the new limit: nothing changes until the owner confirms the draft.
-    return ok(sv.world.draftCards(desk, desk.policy.cards, { cap }));
+    // The active rules at the new limit. A lower one first brings each automatic money rule above it
+    // down to it, so the draft holds together on its own and its diff shows each one; a higher one
+    // keeps the rules as they are. Nothing changes until the owner confirms the draft.
+    const lower = cap < (desk.policy.auto_money_cap_cents ?? 0);
+    return ok(sv.world.draftCards(desk, lower ? lowerToCap(desk, desk.policy.cards, cap) : desk.policy.cards, { cap }));
   },
   ruleDraft(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);

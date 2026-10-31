@@ -4,7 +4,7 @@
  * anything applies. `chatTurn` asks Claude (`ruleChat`) and says what came back in turns.
  */
 import type { QueryClient } from '@tanstack/react-query';
-import { forwardRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 
 import type { RenderedBlock } from '../../api/contracts.ts';
 import { ApiError, RULES_UNAVAILABLE_COPY, request } from '../../api/http.ts';
@@ -86,24 +86,66 @@ export interface RuleChatProps {
 }
 
 /**
+ * Brings each new turn into view in the conversation as it is added, and, for a change Claude
+ * drafted, the review's buttons too once they show (the review may read the rules first), so
+ * "Confirm change" and "Keep my rules" are never left below the conversation's edge. Only a new
+ * turn scrolls: the owner's own scrolling is left alone.
+ */
+function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonly ChatTurn[]): void {
+  const last = turns.at(-1);
+  const lastId = last?.id;
+  const drafted = last?.kind === 'claude' && last.draft !== null;
+  useEffect(() => {
+    const turn = lastId === undefined ? null : root.current?.querySelector<HTMLElement>(`[data-turn="${lastId}"]`);
+    if (!turn) return undefined;
+    turn.scrollIntoView({ block: 'nearest' });
+    if (!drafted) return undefined;
+    // The review's last button ("Keep my rules", or "Try again" when the rules couldn't be read)
+    // closes it: in view, the whole row of its buttons is.
+    const revealActions = () => {
+      const buttons = turn.querySelectorAll('.cd-rule-draft button');
+      const end = buttons[buttons.length - 1];
+      if (end === undefined) return false;
+      end.scrollIntoView({ block: 'nearest' });
+      return true;
+    };
+    if (revealActions()) return undefined;
+    const observer = new MutationObserver(() => {
+      if (revealActions()) observer.disconnect();
+    });
+    observer.observe(turn, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [root, lastId, drafted]);
+}
+
+/**
  * The panel and the conversation in it, in order: the owner's words in a bubble, Claude's answer
  * in serif and the change it drafted as an inline review, and any line on what went wrong.
  */
 export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleChat({ deskId, ownerName, turns, busy, onSend, onClose, onSettled }, ref) {
+  const root = useRef<HTMLDivElement>(null);
+  useImperativeHandle(ref, () => root.current as HTMLDivElement, []);
+  useRevealNewTurns(root, turns);
   return (
-    <div ref={ref} className="cd-rule-chat">
+    <div ref={root} className="cd-rule-chat">
       <AskClaudePanel onClose={onClose} onSend={onSend} busy={busy}>
         {turns.map((turn) => {
-          if (turn.kind === 'owner') return <VisitorMessage key={turn.id} text={turn.text} />;
+          if (turn.kind === 'owner') {
+            return (
+              <div key={turn.id} data-turn={turn.id} className="cd-rule-chat__turn">
+                <VisitorMessage text={turn.text} />
+              </div>
+            );
+          }
           if (turn.kind === 'notice') {
             return (
-              <Notice key={turn.id} tone={turn.tone}>
-                {turn.line}
-              </Notice>
+              <div key={turn.id} data-turn={turn.id} className="cd-rule-chat__turn">
+                <Notice tone={turn.tone}>{turn.line}</Notice>
+              </div>
             );
           }
           return (
-            <div key={turn.id} className="cd-rule-chat__answer">
+            <div key={turn.id} data-turn={turn.id} className="cd-rule-chat__turn cd-rule-chat__answer">
               <ClaudeMessage blocks={[prose(turn.answer)]} language="en" ownerName={ownerName} />
               {turn.draft === null ? null : turn.settled === 'kept' ? (
                 <p className="cd-rule-chat__kept cd-type-meta">Nothing changed. Your rules stay as they are.</p>

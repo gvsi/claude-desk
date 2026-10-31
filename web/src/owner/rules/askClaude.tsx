@@ -21,6 +21,15 @@ export interface AskClaude {
   close: () => void;
 }
 
+/** Plan 02's limit on the owner's words to Claude, which the page's composer stops at. */
+export const WORDS_MAX = 2000;
+
+/**
+ * Words past `WORDS_MAX` that reached the panel, from its own composer: they aren't sent, since the
+ * API would only refuse them, and they stay in the conversation to shorten.
+ */
+export const WORDS_TOO_LONG = "That's over 2,000 characters. Shorten it and try again.";
+
 const AskClaudeContext = createContext<AskClaude | null>(null);
 
 /** The panel's provider, which the owner frame puts around the page. */
@@ -71,6 +80,14 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
       }
       const at = conversation.current;
       setTurns((now) => [...now, { id: id(), kind: 'owner', text }]);
+      if (text.length > WORDS_MAX) {
+        // Said after any answer still on its way, in the order sent. The panel's composer has no
+        // limit of its own yet (the design system's AskClaudePanel takes no maxLength).
+        queue.current = queue.current.then(() => {
+          if (conversation.current === at) setTurns((now) => [...now, { id: id(), kind: 'notice', tone: 'error', line: WORDS_TOO_LONG }]);
+        });
+        return;
+      }
       setWaiting((n) => n + 1);
       queue.current = queue.current.then(async () => {
         const answered = await chatTurn(deskId, text, queryClient).catch((): Awaited<ReturnType<typeof chatTurn>> => [

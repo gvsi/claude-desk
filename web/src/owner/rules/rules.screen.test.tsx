@@ -38,6 +38,13 @@ function reviewRows(screen: { container: HTMLElement }): { title: string; before
   }));
 }
 
+/** Whether `el` is wholly inside the visible part of `scroller`. */
+function inView(el: Element, scroller: Element): boolean {
+  const box = el.getBoundingClientRect();
+  const port = scroller.getBoundingClientRect();
+  return box.height > 0 && box.top >= port.top && box.bottom <= port.bottom;
+}
+
 /** A rule Maria's answers suggest: Dana's refunds up to $50 without asking. */
 const DANA_REFUNDS: Suggestion = {
   tool: 'payments.create_refund',
@@ -192,6 +199,15 @@ describe('rules page', () => {
     await expect.element(changes.getByRole('group', { name: 'After' }).getByText(/Weekdays, all day/)).toBeVisible();
     await expect.element(log.getByText('Checked against the always-on rules and your other rules.', { exact: true })).toBeVisible();
     await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+    // The review's buttons are in view in the conversation, without scrolling it by hand.
+    for (const name of ['Confirm change', 'Keep my rules']) {
+      await expect.poll(() => inView(log.getByRole('button', { name }).element(), log.element()), { message: name }).toBe(true);
+    }
+    // The page beside it keeps its header: "Start from a preset" stays at the right of the title's line (N-Conn-12-Chat).
+    const preset = screen.getByRole('button', { name: 'Start from a preset' }).element().getBoundingClientRect();
+    const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element().getBoundingClientRect();
+    expect(preset.left).toBeGreaterThan(title.right);
+    expect(Math.round(preset.top - title.top)).toBe(4);
     // Nothing applied yet.
     expect(desk().policy.version).toBe(7);
 
@@ -221,6 +237,17 @@ describe('rules page', () => {
     await expect.element(log.getByText(/^I can explain what a rule does/)).toBeVisible();
     expect(log.getByText("Why was Dana's refund held?", { exact: true }).elements()).toHaveLength(1);
     expect(desk().drafts.size).toBe(0);
+
+    // Words past Plan 02's 2,000 characters aren't sent: the line says so, and the words stay in
+    // the conversation to shorten.
+    const long = `Stop quoting on weekends ${'and holidays '.repeat(160)}`.trim();
+    expect(long.length).toBeGreaterThan(2000);
+    await box.fill(long);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log.getByText("That's over 2,000 characters. Shorten it and try again.", { exact: true })).toBeVisible();
+    await expect.element(log.getByText(long, { exact: true })).toBeInTheDocument();
+    expect(requests('ruleChat')).toHaveLength(2);
+    expect(log.getByText("I couldn't draft that just now. Try again.", { exact: true }).elements()).toHaveLength(0);
   });
 
   it('rules_cannot_be_checked_on_rule_chat', async () => {
@@ -292,9 +319,17 @@ describe('rules page', () => {
         ),
     };
     const { screen, router } = await renderRoute(`${DESK}/rules`);
+    // "See all rules" sits at the end of Rules, so the page is scrolled down to reach it.
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const scroller = screen.getByRole('main').element();
+    scroller.scrollTop = scroller.scrollHeight;
+    expect(scroller.scrollTop).toBeGreaterThan(0);
     await screen.getByRole('link', { name: 'See all rules' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules/all`);
+    // All rules opens at its top, its trail and title in view.
+    expect(screen.getByRole('main').element().scrollTop).toBe(0);
+    expect(inView(screen.getByRole('heading', { level: 1, name: 'All rules' }).element(), screen.getByRole('main').element())).toBe(true);
 
     const link = screen.getByRole('region', { name: 'Payment link' });
     await expect.element(link.getByText('Anyone · Up to $400 · Checked by the reviewer', { exact: true })).toBeVisible();
@@ -376,7 +411,15 @@ describe('rules page', () => {
     await expect.element(screen.getByText('New limit: no payment over $100 without asking you.', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Was $500', { exact: true })).toBeVisible();
     await expect.element(screen.getByText(CANCELS_LINKS, { exact: true })).toBeVisible();
+    // Payment link's own $300 comes down to the new limit in the draft, and the review shows it;
+    // the agents' $20 deposit already fits, so it is the one change.
+    const lowered = reviewRows(screen);
+    expect(lowered.map((row) => row.title)).toEqual(['Payment link']);
+    expect(lowered[0]?.before).toContain('Automatic up to $300; over $300, ask me first');
+    expect(lowered[0]?.after).toContain('Automatic up to $100; over $100, ask me first');
+    expect(screen.getByText('Your rules stay the same.', { exact: true }).elements()).toHaveLength(0);
     expect(desk().policy.auto_money_cap_cents).toBe(50_000);
+    expect(desk().policy.cards.find((card) => card.card_id === 'rv-link')?.max_amount_cents).toBe(30_000);
 
     // Keeping her rules keeps $500.
     await screen.getByRole('button', { name: 'Keep my rules' }).click();
@@ -392,6 +435,9 @@ describe('rules page', () => {
     await screen.getByRole('link', { name: 'See your rules' }).click();
     const limit100 = 'No payment over $100 goes through without asking you, whatever the rules below say.';
     for (const name of ['Payments', 'Stripe']) await expect.element(screen.getByRole('region', { name }).getByText(limit100, { exact: true })).toBeVisible();
+    // No rule beside it still takes more on its own.
+    await expect.element(screen.getByRole('link', { name: /^Payment link: .*, Automatic up to \$100; over \$100, ask me first\. Open$/ })).toBeVisible();
+    expect(screen.container.querySelector('main')?.textContent).not.toContain('$300');
 
     // At 0, every payment asks, and no "$0" anywhere.
     const payments = screen.getByRole('region', { name: 'Payments' });
@@ -399,12 +445,18 @@ describe('rules page', () => {
     await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('0');
     await payments.getByRole('button', { name: 'Review change' }).click();
     await expect.element(screen.getByText('New limit: every payment asks you first.', { exact: true })).toBeVisible();
+    // Each rule that took money on its own now asks first, in the review.
+    const asks = reviewRows(screen);
+    expect(asks.map((row) => row.title).sort()).toEqual(['Charge within a signed limit', 'Payment link']);
+    for (const row of asks) expect(row.after, row.title).toContain('Ask me first');
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
     await screen.getByRole('link', { name: 'See your rules' }).click();
     for (const name of ['Payments', 'Stripe']) {
       await expect.element(screen.getByRole('region', { name }).getByText('Every payment asks you first.', { exact: true })).toBeVisible();
     }
+    await expect.element(screen.getByRole('link', { name: /^Payment link: .*, Ask me first\. Open$/ })).toBeVisible();
+    await expect.element(screen.getByRole('link', { name: /^Charge within a signed limit: .*, Ask me first\. Open$/ })).toBeVisible();
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
   });
 
@@ -465,6 +517,16 @@ describe('rules page', () => {
     expect(phone.screen.getByText('What Claude can do on this Desk, where each tool comes from, and your rules for it.').element()).not.toBeVisible();
     expectNoHorizontalScroll();
     await expectScreenBasics(phone.screen.container, { owner: true });
+
+    // Ask Claude as a sheet over the page: the drafted change's buttons are in view.
+    await phone.screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Stop quoting on weekends');
+    await userEvent.keyboard('{Enter}');
+    const sheet = phone.screen.getByRole('dialog', { name: 'Ask Claude' }).getByRole('log');
+    await expect.element(sheet.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+    for (const name of ['Confirm change', 'Keep my rules']) {
+      await expect.poll(() => inView(sheet.getByRole('button', { name }).element(), sheet.element()), { message: name }).toBe(true);
+    }
+    expectNoHorizontalScroll();
   });
 });
 

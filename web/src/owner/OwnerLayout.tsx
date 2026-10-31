@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { Link, Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { Link, Outlet, useLocation, useMatches, useNavigate, useOutletContext, useParams } from 'react-router';
 
 import { ABOUT_LINKS } from '../about/links.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
@@ -140,6 +140,21 @@ function DeskGate({ deskId }: { deskId: string }) {
   return <OwnerState />;
 }
 
+/**
+ * Opens each page at its top: the shell's main area scrolls on its own and would keep the last
+ * page's place, so "See all rules" at the end of Rules would open All rules near its end. A page
+ * is its route on this Desk; moving within one page (an attempt or a conversation beside its list)
+ * keeps the page's place, as those routes are made to.
+ */
+function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string): void {
+  const matches = useMatches();
+  const page = matches[matches.length - 1]?.id;
+  useLayoutEffect(() => {
+    const main = inside.current?.closest('main');
+    if (main) main.scrollTop = 0;
+  }, [inside, deskId, page]);
+}
+
 interface DeskFrameProps extends ShownDesk {
   businesses: BusinessOut[];
   /** Holds this business and Desk on screen, or lets them go (null). */
@@ -154,6 +169,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const today = useToday(deskId);
   // Ask Claude, beside the page that opened it (the Rules page, a tool's page).
   const askClaude = useAskClaudeHost(deskId, business.owner_display_name);
+  const layout = useRef<HTMLDivElement>(null);
+  useOpenPagesAtTop(layout, deskId);
   const [switching, setSwitching] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -271,7 +288,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       fill={fill}
       panel={askClaude.panel}
     >
-      <div className={layoutClass}>
+      <div ref={layout} className={layoutClass}>
         {notice !== null ? (
           <div className="cd-owner-layout__notice">
             <Notice tone="error">{notice}</Notice>

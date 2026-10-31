@@ -5,6 +5,11 @@
   display: contents;
 }
 
+/* Each turn is one of the conversation's rows, so a new one can be brought into view. */
+.cd-rule-chat__turn {
+  min-width: 0;
+}
+
 .cd-rule-chat__answer {
   display: flex;
   flex-direction: column;

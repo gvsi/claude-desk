@@ -26,7 +26,7 @@ import {
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { useReadFailure } from '../useReadFailure.ts';
-import { useAskClaude } from './askClaude.tsx';
+import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
 import { hubSections, parseLimit } from './hub.ts';
 import { draftFailure } from './RuleChat.tsx';
@@ -40,9 +40,6 @@ const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up
 
 const COMPOSER_LABEL = 'Ask Claude to change a rule';
 const COMPOSER_HELPER = 'Claude shows you the change and example situations before anything applies.';
-
-/** Plan 02's limit on the owner's words. */
-const WORDS_MAX = 2000;
 
 /** The payment limit's field, when the API says the amount is above the platform's ceiling. */
 const ABOVE_CEILING = 'No single payment can be above $10,000.';

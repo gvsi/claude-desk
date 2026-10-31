@@ -15,6 +15,15 @@
   padding-top: var(--space-4);
 }
 
+/* The title and subtitle give way before the menu wraps, so with Ask Claude open beside the page
+   the menu stays at the right of the title's line (N-Conn-12-Chat) and the header doesn't jump.
+   Under 640 px the menu takes its own line (below). */
+@media (min-width: 640px) {
+  .cd-rules__header .cd-page-header__text {
+    flex: 1 1 0;
+  }
+}
+
 .cd-rules__ask {
   display: grid;
   gap: var(--space-10);
