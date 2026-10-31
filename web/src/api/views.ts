@@ -563,6 +563,8 @@ export interface SetupState {
   busy?: boolean;
   /** The question waiting for an answer; null before consent and after the last one. */
   question: QuestionKey | null;
+  /** The proposal awaiting an answer; when set, question is null. Absent on older APIs. */
+  pending_card?: string | null;
 }
 
 export interface SetupTools {
@@ -780,10 +782,10 @@ export interface StartSetupBody {
  * refuses it with 409 `conflict` once the interview has moved past that question, so an answer
  * sent twice never answers the next one (plan 02b Task 6, as amended).
  */
-export interface SetupAnswerBody {
-  question: QuestionKey;
-  text: string;
-}
+export type SetupAnswerBody = { text: string } & (
+  | { question: QuestionKey; card?: never }
+  | { question: null; card: string }
+);
 
 /** Changes always accept: title 1..60, job autonomy, payment-only integer cents 0..1_000_000. */
 export type SetupProposalBody = { accept: boolean; title?: string; amount_cents?: number; autonomy?: 'auto' | 'ask' };

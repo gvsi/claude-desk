@@ -89,7 +89,7 @@ const PLAN_02: Record<RouteKey, string> = {
 };
 
 /** The model turns: the routes that wait on Claude rather than on the kernel. */
-const MODEL_ROUTES = ['startSetup', 'setupConsent', 'setupAnswer', 'setupSuggestions'];
+const MODEL_ROUTES = ['startSetup', 'setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions'];
 
 const entries = Object.entries(ROUTES) as [RouteKey, (typeof ROUTES)[RouteKey]][];
 
@@ -121,7 +121,7 @@ describe('ROUTES', () => {
     // batch body, a whole connector in one action and one tool a list of one (plan 02b Task 7).
     expectTypeOf<RouteBody<'confirmTool'>>().toEqualTypeOf<{ tools: { tool: AnyToolName; definition_sha256: string }[]; enable: boolean }>();
     // A setup answer names the question it answers, so one sent twice can't answer the next (plan 02b Task 6).
-    expectTypeOf<RouteBody<'setupAnswer'>>().toEqualTypeOf<{ question: QuestionKey; text: string }>();
+    expectTypeOf<RouteBody<'setupAnswer'>>().toEqualTypeOf<{ text: string } & ({ question: QuestionKey; card?: never } | { question: null; card: string })>();
     // draftMoneyCap's body, the payment limit a draft changes to, is the API's own model, from its
     // document (`MoneyCapIn`, openapi.gen.ts), not typed by hand.
     expectTypeOf<RouteBody<'draftMoneyCap'>>().toEqualTypeOf<MoneyCapIn>();

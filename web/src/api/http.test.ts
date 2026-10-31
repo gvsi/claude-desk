@@ -100,6 +100,19 @@ afterEach(() => {
 });
 
 describe('request', () => {
+  it('async_answers_and_decisions_require_a_state_body_without_a_proving_retry', async () => {
+    for (const key of ['setupAnswer', 'setupProposal'] as const) {
+      const sendTurn = () => key === 'setupAnswer'
+        ? request('setupAnswer', { params: { id: 's1' }, body: { question: 'what_you_do', text: 'Yes' } })
+        : request('setupProposal', { params: { id: 's1', proposal_id: 'p1' }, body: { accept: true } });
+      const state = { interview_id: 's1', busy: true, pending_card: 'p1', question: null };
+      replies = [{ status: 202, body: state }];
+      await expect(sendTurn()).resolves.toEqual(state);
+      replies = [{ status: 202 }];
+      await expect(sendTurn()).rejects.toMatchObject({ kind: 'unavailable' });
+    }
+  });
+
   it('consent_202_requires_and_returns_the_interview_without_a_proving_retry', async () => {
     const state = { interview_id: 's1', step: 'questions', consent: true, question: null, busy: true, messages: [] };
     reply({ status: 202, body: state });
