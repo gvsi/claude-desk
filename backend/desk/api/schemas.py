@@ -971,6 +971,19 @@ class SimulateChangeIn(BaseModel):
     tool: ToolName
 
 
+class KnowledgeRow(BaseModel):
+    """An owner-only read of `kernel_ro.knowledge_items`. `title` and `text` are null exactly when the view
+    masks them for a kernel-forced owner-only item. `created_at` is when it was first added, null for legacy rows
+    without a timestamp. Every field is always sent."""
+
+    item_id: str
+    title: str | None
+    text: str | None
+    readers: list[str]
+    source: Literal["website", "upload", "setup", "memory_import"]
+    created_at: AwareDatetime | None
+
+
 class KnowledgeIn(BaseModel):
     """`POST /api/owner/desks/{desk_id}/knowledge`: something the owner tells Claude about the business (untrusted
     text, never policy), owner-only (`Label(readers=["owner"])`) or public (`Label(readers=["public"])`); posting an

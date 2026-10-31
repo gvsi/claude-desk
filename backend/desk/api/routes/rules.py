@@ -36,6 +36,7 @@ from desk.api.schemas import (
     DraftAddIn,
     DraftCardsIn,
     KnowledgeIn,
+    KnowledgeRow,
     MoneyCapIn,
     PresetIn,
     RuleChatIn,
@@ -119,6 +120,15 @@ async def simulate_tool_change(desk_id: DeskId, body: SimulateChangeIn,
     changed definition is pending, as untrusted text). The kernel refuses a native tool (422)."""
     return await ctx.kernel.call("POST /tools/simulate_change",
                                  ToolsSimulateChangeRequest(desk_id=ctx.desk(desk_id), tool=body.tool))
+
+
+@router.get("/knowledge", response_model=list[KnowledgeRow], responses=error_responses(401, 404, 422, 503))
+async def knowledge(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[KnowledgeRow]:
+    """The owner's knowledge on this Desk, oldest first by `created_at`, null timestamps first, ties by `item_id`.
+    Content the kernel's read-only view masks stays null; listing never writes or asks the kernel for masked text."""
+    rows = [KnowledgeRow.model_validate(row)
+            for row in await ctx.ro.rows("knowledge_items", desk_id=ctx.desk(desk_id))]
+    return sorted(rows, key=lambda row: (row.created_at is not None, row.created_at, row.item_id))
 
 
 @router.post("/knowledge", response_model=KnowledgeItem, responses=error_responses(401, 404, 409, 422, 503))
