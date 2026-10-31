@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
-import { observeRequests } from '../api/http.ts';
+import { newIdempotencyKey, observeRequests } from '../api/http.ts';
+import type { SetupState } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
@@ -1115,6 +1116,36 @@ describe('Today', () => {
     expectNoHorizontalScroll();
     await settled(introDialog(arrival.screen).element());
     await expectScreenBasics(arrival.screen.container, { owner: true });
+  });
+
+  it('phone_menu_shows_a_long_business_name_in_full', async () => {
+    // A business named at length, as setup names it: on a phone the top bar cuts its name with an
+    // ellipsis, and the menu's business row shows it whole, on up to three lines.
+    const name = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland';
+    const body = { description: `${name}. I'm Sam, a plumber in Oakland.`, timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey() };
+    const started = await mockStore.dispatch('startSetup', { body });
+    if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+    const deskId = (started.body as SetupState).desk_id;
+    const { screen } = await renderRoute(`/app/${encodeURIComponent(deskId)}/today`, { viewport: 'phone' });
+    await expect.element(screen.getByRole('button', { name: 'Menu' })).toBeVisible();
+    await expect.element(screen.getByText(name, { exact: true }).first()).toBeVisible();
+    const header = document.querySelector<HTMLElement>('.cd-app-shell__topbar [data-copy="user"]');
+    if (!header) throw new Error('the top bar shows no business');
+    expect([header.textContent, header.title, header.scrollWidth > header.clientWidth]).toEqual([name, name, true]);
+
+    await screen.getByRole('button', { name: 'Menu' }).click();
+    const sheet = screen.getByRole('dialog', { name: 'Menu' });
+    const row = sheet.getByRole('button', { name: `Switch business, current: ${name}` });
+    await expect.element(row).toBeVisible();
+    const shown = row.element().querySelector<HTMLElement>('[data-copy="user"]');
+    if (!shown) throw new Error('the menu shows no business name');
+    const lineHeight = parseFloat(getComputedStyle(shown).lineHeight);
+    expect(shown.clientHeight).toBe(3 * lineHeight);
+    expect(shown.scrollHeight).toBeLessThanOrEqual(shown.clientHeight);
+    expect(shown.title).toBe(name);
+    expect(row.element().getBoundingClientRect().height).toBeGreaterThanOrEqual(44);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
   });
 });
 

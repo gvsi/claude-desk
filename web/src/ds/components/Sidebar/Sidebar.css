@@ -70,6 +70,31 @@
   font-weight: 520;
 }
 
+/* In the AppShell's phone menu (owner, 2026-10-31), the business row is drawn for touch: the name
+   wraps onto up to three lines, so a long one reads in full, and one longer still ends with an
+   ellipsis on the third. The row grows with it from a 44 px touch target, and the caret's box is
+   the first line's height, so it stays on the middle of the first line. */
+.cd-sidebar--sheet .cd-sidebar__business {
+  align-items: flex-start;
+  height: auto;
+  min-height: calc(var(--size-control-main) + var(--space-4));
+  padding-top: var(--space-12);
+  padding-bottom: var(--space-12);
+}
+
+.cd-sidebar--sheet .cd-sidebar__business > .cd-sidebar__ellipsis {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.cd-sidebar--sheet .cd-sidebar__business > .cd-sidebar__quiet-icon {
+  height: 1lh;
+}
+
 .cd-sidebar__desks {
   display: flex;
   flex-direction: column;

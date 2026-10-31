@@ -55,6 +55,13 @@ export type SetPanelModal = (modal: boolean, focusTo?: HTMLElement | null) => vo
 
 export const AppShellPanelContext = createContext<SetPanelModal | null>(null);
 
+/**
+ * True for what the shell draws in its compact navigation's sheet, the phone menu, and false in
+ * the column. The `Sidebar` reads it to draw its business row for touch there: the sheet and the
+ * column are the same width, so nothing else tells them apart.
+ */
+export const AppShellSheetContext = createContext(false);
+
 /** React 18 has no `inert` prop: the attribute, present while `on`. */
 function inertWhen(on: boolean): object {
   return on ? { inert: '' } : {};
@@ -214,7 +221,7 @@ function CompactNav({ sidebar, business, inert }: { sidebar: ReactNode; business
           <div className="cd-app-shell__sheet-head">
             <IconButton label="Close menu" icon="close" onClick={close} />
           </div>
-          {sidebar}
+          <AppShellSheetContext.Provider value={true}>{sidebar}</AppShellSheetContext.Provider>
         </dialog>
       ) : null}
     </>

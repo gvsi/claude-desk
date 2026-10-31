@@ -1,6 +1,7 @@
-import { useId, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
+import { useContext, useId, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from 'react';
 
 import { Icon, type IconName } from '../../icons/index.tsx';
+import { AppShellSheetContext } from '../AppShell/AppShell.tsx';
 import { CountPill } from '../CountPill/CountPill.tsx';
 import { Mark, Wordmark } from '../Mark/Mark.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
@@ -141,10 +142,12 @@ export function Sidebar({
   about,
 }: SidebarProps) {
   const aboutId = useId();
+  // In the AppShell's phone menu, the business row is drawn for touch: the name on up to two lines.
+  const inSheet = useContext(AppShellSheetContext);
   // One page is current: while a document from the about group is open, the main nav marks none.
   const mainCurrent = about?.links.some((link) => link.current === true) ? null : current;
   return (
-    <div className="cd-sidebar">
+    <div className={`cd-sidebar${inSheet ? ' cd-sidebar--sheet' : ''}`}>
       {/* The lockup (owner, 2026-10-30): the 36 px bell, the name and the Preview badge, on one line. */}
       <div className="cd-sidebar__brand">
         <Mark size={36} />
