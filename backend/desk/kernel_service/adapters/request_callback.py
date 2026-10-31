@@ -21,7 +21,8 @@ The owner is alerted per the Desk's notification defaults; the alert is read onl
 inbox, so the result's `inbox` stays empty. In the owner's own preview (`session_row.preview`),
 the call-back instead inserts its row already `done`, skips `close_open` and sends no alert: no
 Needs-you item and no `desk_data` closing entry (the owner's decision of 2026-10-31). Its fact stays
-committed until its window ends, so the preview still shows the card; its row stays for reconciliation.
+committed until its window ends, readable only by the owner and that session even after verification,
+so the preview still shows the card; its row stays for reconciliation.
 """
 
 from datetime import datetime
@@ -30,7 +31,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
-from desk.contracts import Claim, Fact, LedgerEvent, NormalizedAction, ResourceRef, ToolProfile
+from desk.contracts import Claim, Fact, Label, LedgerEvent, NormalizedAction, ResourceRef, ToolProfile
 from desk.db.models import Fact as FactRow
 from desk.db.models import Handoff
 from desk.kernel_service import demo_inbox, desks, labels, ledger, render
@@ -128,8 +129,10 @@ class RequestCallbackAdapter:
             for fact_row in expired:
                 fact_row.status = "expired"
         # a callback whose window has passed can't be promised again
+        label = (Label(readers=["owner", f"session:{session_id}"]) if preview
+                 else labels.new_fact_label(xctx.session_row))
         fact = Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
-                    claims=window_claims(window), label=labels.new_fact_label(xctx.session_row), expires_at=end)
+                    claims=window_claims(window), label=label, expires_at=end)
         ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=session_id,
                                    action_id=action.action_id))
         await ctx.db.flush()
