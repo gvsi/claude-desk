@@ -73,6 +73,7 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
 - `composer`, a visitor `Composer` in the page's language, and `children`, the conversation.
 - `banner`, a full-width line above the brand header, such as the `VisionBar` on the Claude account vision page (N-R2-Vision-ClaudeAccount). It sits inside the shell, so the page stays the window's height and the composer and footer stay at its foot.
+- `inertAsk` is for the vision pages only (the city office and the Claude account), which make no requests. "Ask for {ownerName}" keeps its look, focus and place, but pressing it does nothing and `onAskForOwner` is never called. The first press shows "This is a vision page, so nothing is sent." (`VISION_INERT_LINE`) in a polite `role="status"` line, a secondary caption 8 px under the chat's head; later presses change nothing. The line is there, empty and taking no room, from the start, so its change is announced. Never on a real page.
 
 ## Props
 
@@ -83,6 +84,7 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
+| `inertAsk` | `boolean` | Vision pages only: Ask does nothing and its first press shows the vision line. `false` by default. |
 | `about` | `RenderedBlock[]` | The charter blocks. |
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
 | `footer` | `boolean` | `true` by default; `false` when embedded. |

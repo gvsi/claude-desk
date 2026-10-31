@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 
 import type { CardBlock, PublicDesk, RenderedBlock } from '../../../api/contracts.ts';
 import { Button } from '../Button/Button.tsx';
@@ -6,6 +6,7 @@ import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { ReplyCard } from '../ReplyCard/ReplyCard.tsx';
 import { TextLink } from '../TextLink/TextLink.tsx';
+import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { aboutLinkHref } from './guards.ts';
 import { PublicBrandHeader } from './PublicBrandHeader.tsx';
 
@@ -55,6 +56,12 @@ export interface PublicShellProps {
   openStatus?: PublicOpenStatus;
   /** Asks for the owner in the chat. */
   onAskForOwner: () => void;
+  /**
+   * Vision pages only, which make no requests: "Ask for {owner}" keeps its look, focus and place,
+   * but pressing it does nothing (`onAskForOwner` is never called), and the first press shows the
+   * vision line under the chat's head. Never on a real page.
+   */
+  inertAsk?: boolean;
   /** `PublicDesk.charter`: cards as `ReplyCard`s, prose as text, in the about column. */
   about?: RenderedBlock[];
   /** Links for people's AI agents, under "For AI agents" after the about blocks. */
@@ -118,6 +125,7 @@ export function PublicShell({
   language,
   openStatus,
   onAskForOwner,
+  inertAsk = false,
   about,
   aboutLinks,
   footer = true,
@@ -128,6 +136,7 @@ export function PublicShell({
   const copy = COPY[language] ?? COPY.en;
   const embedded = footer === false;
   const aboutId = useId();
+  const [inertAskPressed, setInertAskPressed] = useState(false);
   const name = <Name>{brand.name}</Name>;
   const owner = <Name>{ownerName}</Name>;
 
@@ -155,10 +164,12 @@ export function PublicShell({
                 <h2 className="cd-public-shell__heading cd-type-section">{copy.chatWith(name)}</h2>
                 <p className="cd-public-shell__disclosure cd-type-meta">{copy.disclosure(name, owner)}</p>
               </div>
-              <Button variant="secondary" onClick={onAskForOwner}>
+              {/* A vision page's Ask goes nowhere, and says so once. */}
+              <Button variant="secondary" onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
                 {copy.askFor(owner)}
               </Button>
             </div>
+            {inertAsk ? <VisionInertLine shown={inertAskPressed} /> : null}
             <div className="cd-public-shell__conversation">{children}</div>
             <div className="cd-public-shell__composer">
               {composer}

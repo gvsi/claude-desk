@@ -157,6 +157,23 @@ async def test_cumulative_budget_counts_claude_api_spend_only(repo):
         await run_pass(config(runs=8, split="heldout"), deps(repo, Scripted()))
 
 
+async def test_a_calibrations_spend_counts_against_the_month_but_measures_no_run(repo):
+    from evals.tier2.passes import CALIBRATION_PREFIX, append_spend, measured_per_run, read_spend
+
+    spend = repo / "spend.csv"
+    # tier 2 passes measured $0.40 a run; a calibration's 300 model calls then cost $0.90
+    spend_rows(spend, ("2026-10-02", "anthropic", 1497, 598.8, 598.8))
+    append_spend(spend, {"pass_id": f"{CALIBRATION_PREFIX}soft-promise-tree-20261030-120000", "date": "2026-10-30",
+                         "provider": "anthropic", "runs": 300, "desk_usd": 0.9, "simulator_usd": 0,
+                         "claude_api_usd": 0.9, "total_usd": 0.9})
+    assert measured_per_run(read_spend(spend), "anthropic") == pytest.approx(0.40)   # not $0.33 a "run"
+    # the calibration's $0.90 counts against the month: $0.30 remains, so two runs at $0.40 don't fit
+    run_one = Scripted()
+    with pytest.raises(PassRefused, match=r"this pass's \$0\.80 .* \$0\.30 remains"):
+        await run_pass(config(runs=1, split="heldout"), deps(repo, run_one))
+    assert run_one.calls == []
+
+
 async def test_spend_is_shared_across_worktrees(repo, tmp_path):
     from evals.tests.eval_repo import git
     from evals.tier2.passes import shared_spend_file

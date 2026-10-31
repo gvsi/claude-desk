@@ -819,8 +819,11 @@ describe('rules and tools', () => {
     expect(before.tools.map((row) => row.tool)).toContain('payments.create_refund');
     expect(before.tools.every((row) => row.status === 'enabled')).toBe(true);
     expect(Object.keys(before.tools[0] ?? {}).sort()).toEqual(
-      ['definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'source', 'status', 'tool'],
+      ['cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'source', 'status', 'tool'],
     );
+    // Each row lists the active cards that cover its tool, in card order, a shared one marked so (plan 02b Task 9).
+    const quote = rivera.ruleCards['rv-quote'];
+    expect(before.tools.find((row) => row.tool === 'native.quote')?.cards).toEqual([{ card_id: quote.card_id, mode: quote.mode, reason: quote.reason, shared: false }]);
 
     // A draft reads back by its version until it is confirmed; nothing applies before then.
     const quoteAsks = { ...rivera.ruleCards['rv-quote'], mode: 'ask' as const };
@@ -868,6 +871,22 @@ describe('rules and tools', () => {
     // Only the replayed one says so; a live lead leaves the flag out, as the API does until it has one.
     expect(byId.get('lead-recorded')).toMatchObject({ display_name: 'Jordan Pike', replayed: true });
     expect(byId.get('lead-live')).toEqual({ lead_id: 'lead-live', display_name: 'Sam Ortiz', note: lead.note, created_at: expect.any(String) });
+  });
+
+  it('draft_rules_hold_only_money_rules_to_the_payment_limit', async () => {
+    const draft = (card: unknown) => call('draftRules', { params: { desk_id: deskId }, body: { add: [card] } });
+    // A $600 limit on an automatic quote rule moves no money, so Rivera's $500 payment limit doesn't hold it back.
+    const quote600 = { ...rivera.ruleCards['rv-quote'], max_amount_cents: 60_000 };
+    const quoted = await draft(quote600);
+    expect(quoted.status).toBe(200);
+    expect(quoted.body as RulesDraft).toMatchObject({ version: 8, diff: { changed: [[rivera.ruleCards['rv-quote'], quote600]] } });
+
+    // An automatic payment link above it is refused with the limit, and nothing is drafted.
+    const link600 = { ...rivera.ruleCards['rv-link'], max_amount_cents: 60_000 };
+    expect(await draft(link600)).toEqual({ status: 422, body: { error: 'above_money_cap', cap_cents: 50_000 } });
+    // Asking first above it takes no money on its own, so it drafts.
+    expect((await draft({ ...link600, mode: 'ask' })).status).toBe(200);
+    expect((await rules()).active.version).toBe(7);
   });
 
   it('confirm_tool_takes_the_batch_body', async () => {

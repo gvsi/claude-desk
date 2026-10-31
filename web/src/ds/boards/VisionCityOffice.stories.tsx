@@ -142,7 +142,7 @@ const meta = {
     canvasNote: [
       'Signed on 2026-10-30. Marcus Bell, a resident, asks Meridian Bay Permits’ public Desk about his kitchen remodel permit; Meridian Bay is a fictional city, and no vision page names a real city office.',
       'He is verified with a code sent to the email on the application; his permit’s status with the fee due, and the next steps, are fact cards, as no reply card template covers a permit, and the open inspection times are an open-times card. The garage conversion is a plan checker’s decision, so it is held for staff. Every status, fee, date and time is in a card; Claude’s words state none.',
-      'The page is PublicShell under the vision bar (its banner), with the open status, the city’s charter cards in the about column, and the suggestions under the conversation. The composer and the suggestions send nothing. The open times keep the kernel’s contract: a slots fact, and each option’s id the slot id of its start.',
+      'The page is PublicShell under the vision bar (its banner), with the open status, the city’s charter cards in the about column, and the suggestions under the conversation. The composer, Ask for Permit Center staff and the suggestions send nothing, and the first press of each shows the vision line under it, which the board doesn’t draw (owner’s ruling: say it once for every pictured control). The open times keep the kernel’s contract: a slots fact, and each option’s id the slot id of its start.',
       'Beyond what the kernel’s templates and lines render today, and drawn as a vision of what they could carry: the code prompt’s “to the email on the application” (the kernel writes “I’ll send a code to the contact on record.”); the open-times card’s title “Rough-in inspection”, its permit line and its time ranges (the kernel writes “Times that are open” and one start time per slot); the hours card’s “Inspections, …” line and the contact card’s second line (the kernel writes each window of the hours, unlabelled, and the contact verbatim, as one line); the system line’s “sent to the email on the application” (the app writes “Verified with a code”); and the receipts “Reply checked against the City’s rules”, “Code sent to the email on the application”, “Read from your own permit file” and “Times read from the inspection calendar” (the kernel’s visitor lines are “Reply checked against {owner}’s rules”, “Verification started” and “Times read from {owner}’s calendar”, and no tool reads a permit file). The permit answer is one reply drawn as prose, card, prose, card, where the kernel delivers a reply’s prose, then its cards.',
       'By the owner’s vision-copy ruling (2026-10-30: follow the product’s rules, keep the warmth), two lines differ from the board: Claude’s garage reply reads “Whether your garage conversion needs a permit is a plan checker’s decision. I’ve asked Permit Center staff, and the answer will show up here.” where the board writes “…, so I’ve asked one to get back to you.”, and its receipt is the kernel’s visitor line for a hold, “Waiting for Permit Center staff to approve”, where the board writes “Held for a person: whether work needs a permit is a staff decision”; the hold’s reason shows only on owner screens.',
       'The AI disclosure is the shell’s own sentence, which can’t be changed or turned off, where the board writes DisclosureLine’s shorter “Meridian Bay Permits answers with Claude, an AI.”; it takes a second line, so the page is 18 px longer.',
@@ -269,14 +269,30 @@ export const Board: Story = {
     // focus_order_is_logical: the bar, Ask for Permit Center staff, the suggestions, then the composer.
     await expectTabOrder(userEvent, [within(bar).getByRole('link', { name: 'Back to your Desk' }), askStaff, ...chipButtons, composer]);
 
-    // A vision page sends nothing: typed words stay after Send and after Enter, and the first Send says so.
+    // A vision page sends nothing, and each pictured control says so once, in its own line under it.
+    // Send: typed words stay after Send and after Enter.
     await userEvent.type(composer, 'Thanks');
     await userEvent.click(within(main).getByRole('button', { name: 'Send' }));
     await expect(composer).toHaveValue('Thanks');
-    await expect(within(main).getByText(VISION_INERT_LINE)).toBeVisible();
+    const sendLine = one(main, '.cd-composer > .cd-vision-inert-line');
+    await expect(sendLine).toHaveTextContent(VISION_INERT_LINE);
     await userEvent.click(composer);
     await userEvent.keyboard('{Enter}');
     await expect(composer).toHaveValue('Thanks');
+    // Ask for Permit Center staff asks for no one, and keeps the focus.
+    await userEvent.click(askStaff);
+    await expect(askStaff).toHaveFocus();
+    const askLine = one(main, '.cd-public-shell__chat-head + .cd-vision-inert-line');
+    await expect(askLine).toHaveAttribute('role', 'status');
+    await expect(askLine).toHaveTextContent(VISION_INERT_LINE);
+    // A suggestion picks nothing, and keeps the focus.
+    await userEvent.click(chipButtons[1] as HTMLElement);
+    await expect(chipButtons[1]).toHaveFocus();
+    const chipsLine = chips.nextElementSibling as HTMLElement;
+    await expect(chipsLine).toHaveClass('cd-vision-inert-line');
+    await expect(chipsLine).toHaveAttribute('role', 'status');
+    await expect(chipsLine).toHaveTextContent(VISION_INERT_LINE);
+    await expect(within(main).getAllByText(VISION_INERT_LINE)).toEqual([askLine, chipsLine, sendLine]);
   },
 };
 
