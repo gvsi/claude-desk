@@ -16,6 +16,7 @@ import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
+import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
@@ -688,6 +689,15 @@ describe('setup', () => {
     const desks = (await mockStore.dispatch('desks')) as { body: { name: string; owner_display_name: string; desks: { desk_id: string }[] }[] };
     const mine = desks.body.find((b) => b.desks.some((d) => d.desk_id === state.desk_id));
     expect([mine?.name, mine?.owner_display_name]).toEqual(['Acme Bakery', 'Lee']);
+    // Today greets its owner, and its payment links name it, never Rivera.
+    const greeted = (await mockStore.dispatch('today', { params: { desk_id: state.desk_id } })) as { body: { greeting_name: string } };
+    expect(greeted.body.greeting_name).toBe('Lee');
+    const desk = deskOf(state);
+    const token = mockStore.world.issueLink(mockStore.world.addSession(desk), { title: 'Sourdough loaf', amountCents: 900, language: 'en' });
+    const link = (await mockStore.dispatch('paymentLink', { params: { token } })) as { body: { business_name?: string } };
+    expect(link.body.business_name).toBe('Acme Bakery');
+    const rivera = (await mockStore.dispatch('today', { params: { desk_id: RIVERA.deskId } })) as { body: { greeting_name: string } };
+    expect(rivera.body.greeting_name).toBe('Maria');
 
     // Live, its public page says the same.
     await mockStore.dispatch('goLive', { params: { id: state.interview_id } });

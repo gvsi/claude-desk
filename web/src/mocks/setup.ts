@@ -10,6 +10,7 @@
 import type { Probe, ProbeResult, PublicDesk, RuleCard, ToolProfile } from '../api/contracts.ts';
 import type {
   BusinessOut,
+  PaymentLinkOut,
   PolicyVersionOut,
   QuestionKey,
   RulesDraft,
@@ -20,6 +21,7 @@ import type {
   SetupTools,
   Situation,
   SituationResult,
+  Today,
   ToolRow,
   WentLive,
 } from '../api/views.ts';
@@ -28,7 +30,7 @@ import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
 import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
-import type { DeskRecord, MockWorld } from './world.ts';
+import type { DeskRecord, LinkRecord, MockWorld } from './world.ts';
 
 /** Plan 02's limits on the business's description and on an answer. */
 const DESCRIPTION_MAX = 1500;
@@ -656,4 +658,18 @@ export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[])
     ];
   });
   return [...kept, ...theirs];
+}
+
+/** A setup Desk's Today greets its own owner, by the first word of their name, as the API does. */
+export function withSetupGreeting(world: MockWorld, desk: DeskRecord, today: Today): Today {
+  const interview = interviewForDesk(world, desk.summary.desk_id);
+  if (!interview) return today;
+  const owner = interview.ownerName ?? interview.business;
+  return { ...today, greeting_name: owner.split(' ')[0] ?? owner };
+}
+
+/** A setup Desk's payment link names its own business on the checkout. */
+export function withSetupBusinessName(world: MockWorld, link: LinkRecord, out: PaymentLinkOut): PaymentLinkOut {
+  const interview = interviewForDesk(world, link.deskId);
+  return interview ? { ...out, business_name: interview.business } : out;
 }

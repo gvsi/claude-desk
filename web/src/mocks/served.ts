@@ -40,7 +40,7 @@ import {
 } from './readModels.ts';
 import { AFTER_VERIFY, EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, turnEnd, type Language, type Step } from './script.ts';
 import { seedWorld, type MockSeed } from './seed.ts';
-import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses } from './setup.ts';
+import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupGreeting } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
 /** Plan 02's limit on a visitor's message and on the owner's words. */
@@ -338,7 +338,7 @@ const SERVED: ServedRoutes = {
   },
   today(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
-    return isFailure(desk) ? desk : ok(today(sv.world, desk));
+    return isFailure(desk) ? desk : ok(withSetupGreeting(sv.world, desk, today(sv.world, desk)));
   },
   briefing(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -600,7 +600,7 @@ const SERVED: ServedRoutes = {
   // The payment link's token is the only credential the checkout carries: no cookie is read.
   paymentLink(sv, req) {
     const link = sv.world.links.get(req.params.token ?? '');
-    return link ? ok(paymentLinkOut(link)) : NOT_FOUND;
+    return link ? ok(withSetupBusinessName(sv.world, link, paymentLinkOut(link))) : NOT_FOUND;
   },
   completePayment(sv, req) {
     const token = req.params.token ?? '';
