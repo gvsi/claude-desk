@@ -96,6 +96,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from desk.api.deps import ApiProblem, OwnerCtx
 from desk.api.idempotency import Admissions, body_sha256
 from desk.api.kernel_client import DEFAULT_TIMEOUT_S, KernelFailed, KernelUnavailable
+from desk.api.link_notices import tell_cancelled_links
 from desk.api.metrics import record_model_call
 from desk.api.model import (
     CONVERSATION_MODEL,
@@ -1566,7 +1567,9 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
     row = await owner.ro.one("policy_versions", desk_id=desk_id, version=interview.draft_version)
     if row is not None and row["status"] == "active":     # a Desk has one active version: this draft is in force
         await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))
-        return version_from_row(row)
+        active = version_from_row(row)
+        await tell_cancelled_links(owner, engine, desk_id, active)
+        return active
     if row is None or row["status"] != "proved":
         raise ApiProblem(409, "conflict")
     try:
@@ -1580,6 +1583,7 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
         await _drafted(engine, owner, interview_id, version.version, "rules")
         raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
     await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))
+    await tell_cancelled_links(owner, engine, desk_id, active)
     return active
 
 

@@ -39,7 +39,9 @@ contract test, before the task that first uses them.
   verdict) or cancelled by its token alone; anything but `issued` is 409 `conflict`. Tokens are kept in memory,
   never mirrored. `PaymentLinkView` serves the contract's fields: the Desk's business name, the verified customer
   by first name and last initial while the link is issued, and `cancel_reason` `rules_changed` for a link a rule
-  change cancelled. The fake has no reviewer, so the review-gated `rv-link` card allows a link outright.
+  change cancelled. Policy activation rechecks open auto-allowed links, and the owner's
+  `GET /policy/{version}/cancelled_links` lists that activation's cancellations with fresh `link_cancelled` verdicts
+  for open sessions. The fake has no reviewer, so the review-gated `rv-link` card allows a link outright.
 - Signed agents (Plan 01c; master "Agent sessions"): `POST /agents/demo` mints a demo agent for the owner or a
   visitor session of the Desk (an Ed25519 key, `agent_key_id` the first 16 hex of its public key's sha256, and a
   mandate the copy's demo wallet signs: $20 a charge, $100 in all, for an hour), ten per copy an hour, then 429
@@ -196,6 +198,7 @@ from desk.kernel_api import (
     KernelError,
     KnowledgeRequest,
     LedgerAppendRequest,
+    LinkCancelled,
     ModeRequest,
     OpenStatus,
     OwnerMessageRequest,
@@ -724,7 +727,7 @@ TEMPLATE_KINDS = {"quote": "quote", "booking_options": "slots", "booking_confirm
                   "payment_link": "payment_link", "document_link": "document", "hours": "charter", "policy": "charter",
                   "contact": "charter", "charges": "charge", "refund_issued": "refund", "charge_confirmed": "charge",
                   "callback_confirmed": "handoff"}
-KERNEL_ONLY_TEMPLATES = ("owner_said", "payment_confirmed")
+KERNEL_ONLY_TEMPLATES = ("owner_said", "payment_confirmed", "link_cancelled")
 FACTLESS_TEMPLATES = ("handoff", "verify_prompt")
 OTHER_LANGUAGE_WORDS = {"bonjour", "merci", "je", "vous", "nous", "olá", "obrigado", "você", "ciao", "grazie",
                         "danke"}
@@ -981,6 +984,7 @@ class PaymentLink:
     expires_at: datetime
     state: str = "issued"                       # issued, paid, expired or cancelled (no provider, so never unknown)
     cancel_reason: str | None = None            # rules_changed: a rule change cancelled it
+    cancelled_by_version: int | None = None
     customer_person_id: str | None = None       # the person a verified visitor's session was when the link was issued
 
     def ro_row(self) -> dict:
@@ -1329,15 +1333,7 @@ class FakeKernelState:
         desk.policy_version = self._next_version(desk)
         self._put_policy(desk, parent_version=parent)
         self.append(desk, "policy", {"version": desk.policy_version, "activated": True})
-        auto = {record.decision.action.action_id for record in self.decisions.values()
-                if record.decision.action is not None and record.decision.outcome == "allow"}
-        cancelled = []
-        for link in self.payment_links.values():
-            if (link.desk_id == desk_id and link.state == "issued" and link.action_id in auto
-                    and link.amount_cents > max_amount_cents):
-                link.cancel_reason = "rules_changed"
-                self._move_link(link, "cancelled", reason="rules_changed", version=desk.policy_version)
-                cancelled.append(link.link_id)
+        cancelled = self._cancel_disallowed_links(desk)
         self.flush()
         return cancelled
 
@@ -3110,7 +3106,61 @@ class FakeKernelState:
         self._put_version(desk, record)
         self.append(desk, "policy", {"version": record.version, "activated": True,
                                      "auto_money_cap_cents": record.auto_money_cap_cents})
+        self._cancel_disallowed_links(desk)
         return self._policy_version(desk, record)
+
+    def _cancel_disallowed_links(self, desk: Desk) -> list[str]:
+        """Activation rechecks auto-allowed links; single-use owner approvals survive a rule change."""
+        decisions = {record.decision.action.action_id: record for record in self.decisions.values()
+                     if record.decision.action is not None and record.decision.outcome == "allow"}
+        cancelled = []
+        for link in self.payment_links.values():
+            if link.desk_id != desk.desk_id or link.state != "issued" or link.action_id not in decisions:
+                continue
+            record = decisions[link.action_id]
+            action = record.decision.action
+            session = self.sessions[link.session_id]
+            who, subject_id = ("agent", session.agent_key_id) if session.kind == "agent" else (
+                ("person", session.person_id) if session.verified and session.person_id is not None
+                else ("verified" if session.verified else "anyone", None))
+            probe = Probe(actor="agent" if session.kind == "agent" else "visitor",
+                          who=who, subject_id=subject_id,
+                          call=ToolCall(call_id="activation", tool=action.tool, args=self._args[action.action_id]),
+                          amount_cents=action.amount_cents, resource_kind=action.resource.kind,
+                          starts_at=record.created_at,
+                          resource_owner="caller" if session.person_id == action.resource.owner_person_id
+                          and session.person_id is not None else "none",
+                          agent_mandate_remaining_cents=action.amount_cents if session.kind == "agent" else None)
+            # The fake has no reviewer: the link's stored allow already stands for a passing review.
+            cards = [card.model_copy(update={"review": False}) for card in desk.cards]
+            if (link.amount_cents > desk.auto_money_cap_cents
+                    or self._probe(desk, cards, probe).outcome != "allow"):
+                link.cancel_reason, link.cancelled_by_version = "rules_changed", desk.policy_version
+                self._move_link(link, "cancelled", reason="rules_changed", version=desk.policy_version)
+                cancelled.append(link.link_id)
+        return cancelled
+
+    def cancelled_links(self, request: Request, body: Any) -> list[LinkCancelled]:
+        """Re-reads list the same cancelled links with fresh verdicts at the open session's current generation."""
+        desk = self._owners_desk(request, request.query_params.get("desk_id", ""))
+        version = int(request.path_params["version"])
+        notices = []
+        for link in sorted(self.payment_links.values(), key=lambda link: link.link_id):
+            session = self.sessions[link.session_id]
+            if (link.desk_id != desk.desk_id or link.state != "cancelled" or link.cancel_reason != "rules_changed"
+                    or link.cancelled_by_version != version or session.closed_at is not None):
+                continue
+            language = session.last_language or "en"
+            reason = (f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "
+                      "Ask again if you still want to pay." if language == "en" else
+                      f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "
+                      "Pídelo de nuevo si todavía quieres pagar.")
+            title, lines = money(link.amount_cents), [link.title, reason]
+            block = RenderedBlock(kind="card", template="link_cancelled", text="\n".join([title, *lines]),
+                                  fact_id=f"payment_link:{link.link_id}", title=title, lines=lines)
+            verdict = self._verdict(session, desk, language, [block], [], [block.fact_id], author="desk")
+            notices.append(LinkCancelled(link_id=link.link_id, session_id=link.session_id, verdict=verdict))
+        return notices
 
     def policy_probe(self, request: Request, body: PolicyProbeRequest) -> list[ProbeResult]:
         """Each probe decided against the version's cards (a draft's or the active one's), one result per probe, with
@@ -3644,6 +3694,7 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /policy/draft": "policy_draft",
     "POST /policy/{version}/probe": "policy_probe",
     "POST /policy/confirm": "policy_confirm",
+    "GET /policy/{version}/cancelled_links?desk_id=": "cancelled_links",
     "POST /tools/connect": "tools_connect",
     "POST /knowledge": "knowledge",
     "POST /documents": "documents",
