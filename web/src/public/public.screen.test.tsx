@@ -815,9 +815,12 @@ describe('public chat page', () => {
       }
       expectDisclosureAndComposerUncovered(screen, `${where}, after four turns`);
 
+      // Each size is laid out before the next, so the shell's resize observer sees both changes.
       await page.viewport(VIEWPORTS.phone.width, VIEWPORTS.phone.height);
+      await frames();
       await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
       await page.viewport(width, height);
+      await frames();
       await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
       expectDisclosureAndComposerUncovered(screen, `${where}, short again`);
     }
