@@ -23,9 +23,11 @@ import httpx
 import psycopg
 import pytest
 from psycopg.rows import dict_row
+from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from desk.api.kernel_client import CredentialView, KernelHttp
-from desk.db.session import database_url, libpq_url
+from desk.db.session import API_CONNECT_OPTIONS, database_url, libpq_url
 from desk.contracts import CopyCreated, Decision, RuleCard
 from desk.kernel_api import ExecuteRequest, ModeRequest, PolicyConfirmRequest, PolicyDraftRequest
 from tests.kernel_contract.fake_kernel import IDLE_LIMIT, FakeKernelState, fake_kernel_app
@@ -56,6 +58,18 @@ def api_conn() -> Iterator[psycopg.Connection]:
     with _connect("API") as conn:
         conn.row_factory = dict_row
         yield conn
+
+
+@pytest.fixture
+async def api_ro_conn() -> AsyncIterator[AsyncConnection]:
+    """One connection as desk_api with the API process's engine settings, for reads through `desk.api.ro.KernelRO`
+    made as the API makes them."""
+    engine = create_async_engine(database_url("API"), connect_args={"options": API_CONNECT_OPTIONS}, poolclass=NullPool)
+    try:
+        async with engine.connect() as conn:
+            yield conn
+    finally:
+        await engine.dispose()
 
 
 @pytest.fixture
@@ -186,6 +200,15 @@ class Arrange:
                         for document in desk.documents.values())
         (found,) = self._admin.execute("SELECT canary FROM kernel.documents WHERE copy_id = %s ORDER BY document_id"
                                        " LIMIT 1", (copy_id,)).fetchall()
+        return found[0]
+
+    def recorded_policy_ids(self, decision_id: str) -> list[str]:
+        """The deciding policies the kernel recorded with a decision: the fake's own record, or for the real kernel read
+        as `desk_admin` from its table."""
+        if self._state is not None:
+            return list(self._state.decisions[decision_id].decision.policy_ids)
+        (found,) = self._admin.execute("SELECT policy_ids FROM kernel.decisions WHERE decision_id = %s",
+                                       (decision_id,)).fetchall()
         return found[0]
 
     def close_idle_sessions(self, session_id: str) -> None:

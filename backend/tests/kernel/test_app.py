@@ -103,7 +103,8 @@ def test_kernel_listens_on_loopback_only(monkeypatch):
 
 
 # Plan 01a's "Kernel columns this plan relies on", beyond the columns the kernel_ro views list, but for
-# quotes.created_at, which kernel_ro.quotes has shown since 0011 and stays pinned here.
+# quotes.created_at and decisions.policy_ids, which kernel_ro.quotes and kernel_ro.decisions have shown since
+# 0011_quote_created_at and kernel_ro_decision_policy_ids, and stay pinned here.
 KERNEL_COLUMNS = {
     "copies": {"copy_id", "created_at"},
     "desks": {"deleted_at"},
