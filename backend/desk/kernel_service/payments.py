@@ -411,9 +411,11 @@ async def _expire(ctx: KernelCtx, link: PaymentLink) -> None:
 
 
 async def _refused(ctx: KernelCtx, link: PaymentLink, refused: str) -> KernelFailure:
-    """A completion or cancel the link isn't in a state for: ledgered and committed; the answer is
-    409 `conflict`, the link unchanged."""
-    await _ledger(ctx, link, refused=refused)
+    """A completion or cancel the link isn't in a state for: ledgered and committed, as `payment`
+    `{link_id, refused: true, state, reason}` (the state the link stays in, and why it was refused,
+    `refused`), so no retry reads as a move, a paid link's least of all; the answer is 409
+    `conflict`, the link unchanged."""
+    await _ledger(ctx, link, refused=True, state=link.state, reason=refused)
     await ctx.db.commit()
     return KernelFailure(409, "conflict", f"payment_link_{refused}")
 

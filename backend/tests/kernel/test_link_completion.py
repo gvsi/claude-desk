@@ -92,6 +92,12 @@ async def payment_entries(app: FastAPI, copy: Rivera) -> list[dict]:
     return [entry.event.summary for entry in await ledger_rows(app, copy) if entry.event.kind == "payment"]
 
 
+def refusal(link: PaymentLink, state: str, reason: str) -> dict:
+    """A refused completion or cancel's `payment` entry: marked `refused`, so no retry reads as a move,
+    with the state the link stays in and why it was refused."""
+    return {"link_id": link.link_id, "refused": True, "state": state, "reason": reason}
+
+
 async def test_complete_pays_once(app, client, reviewer):
     copy = await rivera(app, client)
     visitor = await open_visitor(client, copy)
@@ -109,7 +115,7 @@ async def test_complete_pays_once(app, client, reviewer):
     # again: refused, ledgered, and nothing more is charged
     response = await post_complete(client, link.token)
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
-    assert (await payment_entries(app, copy))[-1] == {"link_id": link.link_id, "refused": "paid"}
+    assert (await payment_entries(app, copy))[-1] == refusal(link, "paid", "paid")
     assert len(charges(copy)) == 1
     assert (await link_row(app, copy, link.link_id)).state == "paid"
 
@@ -137,9 +143,9 @@ async def test_concurrent_completes_pay_once(app, client, reviewer):
     assert len(replies) == 1
     # the loser is refused, ledgered: while the winner completes it, or once it is paid
     entries = await payment_entries(app, copy)
-    assert [entry["state"] for entry in entries if "state" in entry] == ["issued", "paid"]
-    [refusal] = [entry for entry in entries if "refused" in entry]
-    assert refusal in ({"link_id": link.link_id, "refused": "completing"}, {"link_id": link.link_id, "refused": "paid"})
+    assert [entry["state"] for entry in entries if not entry.get("refused")] == ["issued", "paid"]
+    [refused] = [entry for entry in entries if "refused" in entry]
+    assert refused in (refusal(link, "issued", "completing"), refusal(link, "paid", "paid"))
 
 
 async def post_cancel(client: httpx.AsyncClient, token: str) -> httpx.Response:
@@ -160,7 +166,7 @@ async def test_cancel_during_completion_is_refused(app, client, reviewer, monkey
     [refused] = answers
     assert (refused.status_code, refused.json()) == (409, {"code": "conflict"})
     assert (await link_row(app, copy, link.link_id)).state == "paid" and len(charges(copy)) == 1
-    assert {"link_id": link.link_id, "refused": "completing"} in await payment_entries(app, copy)
+    assert refusal(link, "issued", "completing") in await payment_entries(app, copy)
 
 
 async def test_read_during_completion_leaves_it_alone(app, client, reviewer, mockpay, monkeypatch):
@@ -225,8 +231,7 @@ async def test_late_completion_is_refused(app, client, reviewer, frozen_clock):
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
     assert (await link_row(app, copy, link.link_id)).state == "expired" and charges(copy) == []
     assert (await payment_entries(app, copy))[1:] == [
-        {"link_id": link.link_id, "state": "expired", "reason": "expired"},
-        {"link_id": link.link_id, "refused": "expired"}]
+        {"link_id": link.link_id, "state": "expired", "reason": "expired"}, refusal(link, "expired", "expired")]
     # the link's fact went with it, and the link can't be cancelled either
     [fact] = await rows_of(app, copy.copy_id, select(FactRow).where(FactRow.fact_id == f"payment_link:{link.link_id}"))
     assert fact.status == "expired"
@@ -249,7 +254,7 @@ async def test_cancelled_link_cannot_be_paid(app, client, reviewer):
     assert (await view(client, link.token)).state == "cancelled"
     assert (await payment_entries(app, copy))[1:] == [
         {"link_id": link.link_id, "state": "cancelled", "reason": "cancelled"},
-        {"link_id": link.link_id, "refused": "cancelled"}, {"link_id": link.link_id, "refused": "cancelled"}]
+        refusal(link, "cancelled", "cancelled"), refusal(link, "cancelled", "cancelled")]
 
 
 async def charged(copy: Rivera, key: str, within: float = 6.0) -> None:
@@ -692,7 +697,7 @@ async def test_completion_and_activation_do_not_interleave(desk_prove, app, clie
         entries = await payment_entries(app, copy)
         assert entries[-2:] == [
             {"link_id": link.link_id, "state": "unknown", "reason": "rules_changed", "version": 2},
-            {"link_id": link.link_id, "refused": "moved"}]
+            refusal(link, "unknown", "moved")]
         # the next read settles it with the provider's atomic cancel: cancelled, for the rules
         seen = await view(client, link.token)
         assert (seen.state, seen.cancel_reason) == ("cancelled", "rules_changed")
