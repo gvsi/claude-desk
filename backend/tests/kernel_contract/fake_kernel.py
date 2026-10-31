@@ -3480,7 +3480,7 @@ class FakeKernelState:
         changes = []
         for profile in profiles:
             previous = desk.tools.get(profile.tool)
-            change = ("new" if previous is None else "kept"
+            change = ("new" if previous is None or previous.status == 'disabled' else "kept"
                       if previous.definition_sha256 == profile.definition_sha256
                       and profile_sha256(previous) == profile_sha256(profile) else "changed")
             if change != "kept":

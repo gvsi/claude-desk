@@ -153,7 +153,7 @@ async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) ->
         profile_hash = adapters.profile_sha256(profile)
         kept = (row is not None and row.definition_sha256 == profile.definition_sha256
                 and row.profile_sha256 == profile_hash)
-        change = "new" if row is None else "kept" if kept else "changed"
+        change = "new" if row is None or row.status == "disabled" else "kept" if kept else "changed"
         if change != "kept":
             if row is None:
                 row = Tool(copy_id=ctx.copy_id, desk_id=id, tool=tool.tool)
