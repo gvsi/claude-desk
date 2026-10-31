@@ -3,6 +3,7 @@ import { useRef } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { lineWords } from '../../test/lineWords.ts';
 import { Button } from '../Button/Button.tsx';
 import { PresetMenu } from '../PresetMenu/PresetMenu.tsx';
 import { PageHeader, type PageHeaderProps } from './PageHeader.tsx';
@@ -147,6 +148,73 @@ export const RulesOnALaptop: Story = {
     await expect(button.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     await expect(button.getBoundingClientRect().top).toBeLessThan(title.getBoundingClientRect().bottom);
     await expect(canvas.getByText(RULES_LINE)).toBeVisible();
+  },
+};
+
+const LONG_NAME = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland';
+
+/** Setup's live step with a long business name, the title composed as the live step composes it. */
+const longTitle = {
+  title: (
+    <>
+      <span data-copy="user">{LONG_NAME}</span> is live
+    </>
+  ),
+  subtitle: 'Customers and their agents can reach your Desk at this link, day or night.',
+};
+
+/** Setup's one column: 720 px, or the window less its gutters on a phone. */
+const setupColumn: NonNullable<Story['decorators']> = [
+  (Story) => (
+    <div style={{ width: 720, maxWidth: '100%' }}>
+      <Story />
+    </div>
+  ),
+];
+
+/**
+ * The title balances its lines: the browser evens them out rather than filling each in turn, so the
+ * last word ("live", the one the whole setup builds to) doesn't sit alone, and the title keeps the
+ * number of lines it would take anyway.
+ */
+async function expectBalancedTitle(title: HTMLElement, lines: number): Promise<void> {
+  expectComputed(title, { textWrapStyle: 'balance' });
+  const words = lineWords(title);
+  await expect(words.flat().join(' ')).toBe(`${LONG_NAME} is live`);
+  await expect(words, 'the title keeps its lines').toHaveLength(lines);
+  await expect(title.getBoundingClientRect().height).toBe(lines * 32);
+  await expect(words.at(-1)?.length ?? 0, `the last line holds more than one word: ${JSON.stringify(words)}`).toBeGreaterThan(1);
+}
+
+export const LongTitle: Story = {
+  globals: { viewport: { value: 'laptop', isRotated: false } },
+  args: longTitle,
+  decorators: setupColumn,
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No reference board draws a page title this long. The nearest is the approved board UXC-P1001-After: setup's live step with a long business name, its title balanced over two lines in setup's 720 px column.",
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(1512);
+    await expectBalancedTitle(canvas.getByRole('heading', { level: 1 }), 2);
+  },
+};
+
+export const LongTitleOnAPhone: Story = {
+  name: 'Long title on a phone',
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: longTitle,
+  decorators: setupColumn,
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "No reference board draws a page title this long on a phone. The nearest is the approved board UXC-P1001-After, setup's live step at a laptop's width; on a phone the title takes three lines, balanced too.",
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(390);
+    await expectBalancedTitle(canvas.getByRole('heading', { level: 1 }), 3);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };
 

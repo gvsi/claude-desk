@@ -25,6 +25,7 @@ import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
+import { lineWords } from '../ds/test/lineWords.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { retryAfterMs } from '../app/poll.ts';
 import { SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
@@ -1759,6 +1760,28 @@ describe('setup', () => {
       expect(el.scrollWidth, text).toBeLessThanOrEqual(el.clientWidth);
     }
     expectNoHorizontalScroll();
+  });
+
+  it('live_title_balances_a_long_name', async () => {
+    // A 61-character name. The mock names a business from its description cut at 60 characters (the
+    // API allows 80), so the Desk is given it directly.
+    const name = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland';
+    const state = await interviewAtPreview();
+    deskOf(state).summary.business_name = name;
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+
+    // The title balances its lines: "live", the word the whole setup builds to, doesn't sit alone.
+    // Two lines in setup's column on a laptop, three on a phone, as the title takes anyway.
+    for (const [viewport, lines] of [['desktop', 2], ['phone', 3]] as const) {
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      const title = screen.getByRole('heading', { level: 1, name: `${name} is live` });
+      await expect.element(title).toBeVisible();
+      expect(getComputedStyle(title.element()).textWrapStyle, viewport).toBe('balance');
+      const words = lineWords(title.element());
+      expect(words, viewport).toHaveLength(lines);
+      expect(words.at(-1)?.length ?? 0, `${viewport}: ${JSON.stringify(words)}`).toBeGreaterThan(1);
+      expectNoHorizontalScroll();
+    }
   });
 
   it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {
