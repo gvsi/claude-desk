@@ -1,9 +1,9 @@
 /**
- * The page for people's AI agents, `/d/:slug/agents`, in a real browser against the mock API: what
- * agents can do here (the kernel's Agent Card blocks), how they prove who they are, connecting your
- * own agent (the API's code-built address, signing rules and example request, and a demo key shown
- * once), and the built-in agent sent on a task, its signed requests titled by code and the Desk's
- * checked replies with their receipts. The agent's own words never reach the page.
+ * The page for people's AI agents, `/d/:slug/agents`, in a real browser against the mock API: the
+ * built-in agent sent on a task, its signed requests titled by code and the Desk's checked replies
+ * with their receipts; then what agents can do here (the kernel's Agent Card blocks), how they prove
+ * who they are, and connecting your own agent (the API's code-built address, signing rules and
+ * example request, and a demo key shown once). The agent's own words never reach the page.
  */
 import { http } from 'msw';
 import { StrictMode } from 'react';
@@ -178,6 +178,24 @@ describe('agents page', () => {
     await expect.element(phone.screen.getByRole('region', { name: 'Connect your own agent' })).toBeVisible();
     expectNoHorizontalScroll();
     await expectScreenBasics(phone.screen.container, { owner: false });
+  });
+
+  it('send_an_agent_leads_the_cards', async () => {
+    // The page's one live moment comes first, right under the title and the AI disclosure; the
+    // reference follows in its own order: what agents can do, how they prove who they are, then
+    // connecting your own agent and its demo key.
+    const { screen } = await renderRoute(PAGE);
+    await expect.element(screen.getByRole('region', { name: 'Send an agent' })).toBeVisible();
+    const cards = screen.container.querySelector('.cd-agents-page__cards');
+    expect([...(cards?.children ?? [])].map((card) => card.getAttribute('aria-label'))).toEqual([
+      'Send an agent',
+      'What agents can do here',
+      'How agents prove who they are',
+      'Connect your own agent',
+      'Try it with a demo key',
+    ]);
+    const disclosure = screen.getByText('Rivera Plumbing answers with Claude, an AI.', { exact: true }).element();
+    expect(follows(disclosure, screen.getByRole('region', { name: 'Send an agent' }).element())).toBe(true);
   });
 
   it('agent_card_discloses_ai', async () => {
@@ -450,9 +468,12 @@ describe('agents page', () => {
     await expect.element(acerca.getByRole('heading', { name: 'Para agentes de IA' })).toBeVisible();
     expect(acerca.getByRole('link').elements().map((link) => link.textContent)).toEqual(['Qué pueden hacer los agentes aquí', 'Enviar un agente']);
 
-    // The agents page's panel is the link's target.
+    // The agents page's panel is the link's target. It leads the page, so it is in view on arrival
+    // and the page doesn't move: the title and the AI disclosure above it stay on screen.
     const agents = await renderRoute(`/d/${RIVERA.slug}/agents#send`);
     await expect.element(agents.screen.getByRole('heading', { level: 2, name: 'Send an agent' })).toHaveAttribute('id', 'send');
+    expect(document.scrollingElement?.scrollTop).toBe(0);
+    await expect.element(agents.screen.getByText('Rivera Plumbing answers with Claude, an AI.', { exact: true })).toBeInViewport();
   });
 
   it('owner_sees_agent_conversation', async () => {
