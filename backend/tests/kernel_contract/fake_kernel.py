@@ -4060,14 +4060,8 @@ def _endpoint(state: FakeKernelState, key: str, handler: Callable[[Request, Any]
         if failure is not None:
             return _error(int(failure), FAILURE_CODES[failure])
         try:
+            body = _parse(request_model, raw)
             state._route = route_template(key)     # handlers don't await, so no other call answers meanwhile
-            try:
-                body = _parse(request_model, raw)
-            except Refusal:
-                if key == "PUT /desks/{id}/memory":
-                    desk = state._memory_desk(request)
-                    state.append(desk, "desk_data", {"part": "memory", "refused": "invalid"})
-                raise
             result = handler(request, body)
         except Refusal as refusal:
             result = refusal
