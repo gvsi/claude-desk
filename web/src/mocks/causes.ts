@@ -2,8 +2,8 @@
  * Why the kernel refused a request, as a closed code for Safety (`Attempt.cause`): the mock's copy
  * of the API core's `refusal_cause`, read from the same facts. Exact codes only, never the owner's
  * or a visitor's words: the `decide` entry's early `reason` first (an adapter's refusal by its
- * exact `check`), else the decision's deciding policies in a fixed precedence, else no rule covers
- * the tool. A code it can't place has no cause, never a guess.
+ * exact `check`), else the decision's deciding policies in a fixed precedence, else, with no policy
+ * and no card, no rule covers the tool. A code it can't place has no cause, never a guess.
  */
 import type { Decision } from '../api/contracts.ts';
 import type { Attempt } from '../api/views.ts';
@@ -34,18 +34,15 @@ const CHECKS: Readonly<Record<string, RefusalCause>> = {
   not_refundable: 'not_refundable',
   no_such_document: 'no_such_document',
   not_verified: 'not_verified',
-  no_mandate: 'agent_limit',
-  mandate_exhausted: 'agent_limit',
-  not_an_agent_with_a_mandate: 'agent_limit',
 };
 
 /**
  * The baseline's policies, first match wins, after an owner's never rule. `B.auto_money_cap` isn't
- * here: it decides only automatic approvals, never a refusal.
+ * here: it decides only automatic approvals, never a refusal. A private record refused to a
+ * verified person isn't theirs (`not_their_record`); to anyone else, they aren't verified yet.
  */
 const BASELINE: readonly (readonly [string, RefusalCause])[] = [
   ['B.same_copy', 'other_copy'],
-  // not_their_record once the API has it, for a verified person asking for someone else's record.
   ['B.private_data_record_owner', 'not_verified'],
   ['B.recipient_owner_or_verified_contact', 'recipient'],
   ['B.no_agent_pay_out', 'agent_pay_out'],
@@ -59,12 +56,14 @@ function lookUp(table: Readonly<Record<string, RefusalCause>>, key: unknown): Re
 }
 
 /**
- * A refused decision's cause, from its deciding policies and its `decide` entry (null when the
- * record doesn't hold the entry, as with no entry the API has nothing to read).
+ * A refused decision's cause, from its deciding policies and cards, its `decide` entry (null when
+ * the record doesn't hold the entry, as with no entry the API has nothing to read), and whether
+ * its session was verified.
  */
 export function refusalCause(
-  decision: Pick<Decision, 'policy_ids'>,
+  decision: Pick<Decision, 'policy_ids' | 'card_ids'>,
   entry: { event: { summary: Record<string, unknown> } } | null,
+  { verified }: { verified: boolean },
 ): RefusalCause | null {
   if (entry === null) return null;
   const { summary } = entry.event;
@@ -73,6 +72,9 @@ export function refusalCause(
   }
   const policies = decision.policy_ids;
   if (policies.some((policy) => policy.startsWith('F.never.'))) return 'owner_rule';
-  for (const [policy, cause] of BASELINE) if (policies.includes(policy)) return cause;
-  return policies.length > 0 ? null : 'no_rule';
+  for (const [policy, cause] of BASELINE) {
+    if (!policies.includes(policy)) continue;
+    return policy === 'B.private_data_record_owner' && verified ? 'not_their_record' : cause;
+  }
+  return policies.length > 0 || decision.card_ids.length > 0 ? null : 'no_rule';
 }

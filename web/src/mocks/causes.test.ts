@@ -10,9 +10,9 @@ import { refusalCause } from './causes.ts';
 
 type Cause = Attempt['cause'];
 
-/** A refused decision's deciding policies, and its `decide` entry's summary. */
-function cause(summary: Record<string, unknown>, policies: string[]): Cause {
-  return refusalCause({ policy_ids: policies }, { event: { summary } });
+/** A refused decision's deciding policies and cards, its `decide` entry's summary, and whether its session was verified. */
+function cause(summary: Record<string, unknown>, policies: string[], { cards = [], verified = false }: { cards?: string[]; verified?: boolean } = {}): Cause {
+  return refusalCause({ policy_ids: policies, card_ids: cards }, { event: { summary } }, { verified });
 }
 
 describe('refusalCause', () => {
@@ -37,9 +37,6 @@ describe('refusalCause', () => {
     [{ reason: 'adapter_refused', check: 'not_refundable' }, [], 'not_refundable'],
     [{ reason: 'adapter_refused', check: 'no_such_document' }, [], 'no_such_document'],
     [{ reason: 'adapter_refused', check: 'not_verified' }, [], 'not_verified'],
-    [{ reason: 'adapter_refused', check: 'no_mandate' }, [], 'agent_limit'],
-    [{ reason: 'adapter_refused', check: 'mandate_exhausted' }, [], 'agent_limit'],
-    [{ reason: 'adapter_refused', check: 'not_an_agent_with_a_mandate' }, [], 'agent_limit'],
     // Otherwise the deciding policies: an owner's never rule, then the baseline's.
     [{}, ['F.never.card'], 'owner_rule'],
     [{}, ['B.same_copy'], 'other_copy'],
@@ -64,11 +61,27 @@ describe('refusalCause', () => {
     [{}, ['B.new_policy'], null],
     [{}, ['B.auto_money_cap'], null],
     [{}, ['X.F.never.card'], null],
+    // Checks the kernel can't produce when it decides: an agent's limit is the baseline's policy.
+    [{ reason: 'adapter_refused', check: 'no_mandate' }, [], null],
+    [{ reason: 'adapter_refused', check: 'mandate_exhausted' }, [], null],
+    [{ reason: 'adapter_refused', check: 'not_an_agent_with_a_mandate' }, [], null],
   ])('%o with %o is %s', (summary, policies, expected) => {
     expect(cause(summary, policies)).toBe(expected);
   });
 
+  it('private_record_is_not_verified_or_not_theirs_by_the_session', () => {
+    // A verified person refused someone else's record: it isn't theirs. Unverified: not verified yet.
+    expect(cause({}, ['B.private_data_record_owner'], { verified: true })).toBe('not_their_record');
+    expect(cause({}, ['B.private_data_record_owner'], { verified: false })).toBe('not_verified');
+    expect(cause({}, ['B.same_copy', 'B.private_data_record_owner'], { verified: true })).toBe('other_copy');
+  });
+
+  it('no_rule_only_with_no_policy_and_no_card', () => {
+    expect(cause({}, [], { cards: [] })).toBe('no_rule');
+    expect(cause({}, [], { cards: ['rv-quote'] })).toBeNull();
+  });
+
   it('refusal_without_its_entry_has_no_cause', () => {
-    expect(refusalCause({ policy_ids: [] }, null)).toBeNull();
+    expect(refusalCause({ policy_ids: [], card_ids: [] }, null, { verified: false })).toBeNull();
   });
 });

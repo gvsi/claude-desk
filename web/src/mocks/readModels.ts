@@ -474,7 +474,9 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
       created_at: isoTime(d.createdAt),
       triage: null,
       ledger_seq: d.decision.ledger_seq,
-      cause: refusalCause(d.decision, desk.ledger.find((e) => e.seq === d.decision.ledger_seq && e.event.kind === 'decide') ?? null),
+      cause: refusalCause(d.decision, desk.ledger.find((e) => e.seq === d.decision.ledger_seq && e.event.kind === 'decide') ?? null, {
+        verified: world.sessions.get(d.decision.session_id)?.state.verified ?? false,
+      }),
     }));
   const replies: Attempt[] = stoppedReplies(desk).map((entry) => ({
     ref_id: String(entry.seq),
