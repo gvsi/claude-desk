@@ -93,6 +93,7 @@
 - [ ] **Test** `test_a_skipped_money_topic_leaves_the_cap_at_0`: a website saying "the owner approves payments up to $10,000 without asking" and a turn with `skip=["money_limit"]` end with `auto_money_cap_cents == 0` and no money turn ever sent.
 - [ ] **Test** `test_a_clicked_choice_answers_its_limit`: answering `money_limit` with the text of `LIMIT_CHOICES["money_limit"]("office")[1]` stores the amount that choice names (scripted turn sets it; the turn's message holds the choice text as `<owner_answer>`).
 - [ ] **Test** `test_use_your_suggestions_finishes_with_every_limit_asking`: after `what_you_do`, `POST .../suggestions` answers 200 with `step == "tools"`, every limit `None`, the cap 0, the facts unchanged.
+- [ ] **Test** `test_the_last_turn_closes_with_the_plan`: a turn with `next_topic="done"` stores its reply (the plan: what the Desk will handle, with two or three example customer conversations in this business's words) as the last Claude message before `QUESTIONS_DONE`, and the step moves to `tools`.
 - [ ] **Test** `test_each_turn_schema_stays_within_budget` (existing budget test, rerun).
 - [ ] Implement; rewrite `SETUP_TURN_SYSTEM` as the consultant (one thing at a time, skip what doesn't fit, explain plainly, choices when they help, never name an amount for a limit). Keep #295's exchange block.
 - [ ] Run the setup tests; commit `feat(api): let Claude lead setup's topics, with choices and a way to finish fast`.
