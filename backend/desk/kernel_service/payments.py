@@ -55,9 +55,9 @@ from desk.db.models import Fact as FactRow
 from desk.db.models import Mandate as MandateRow
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_api import LinkCancelled, PaymentLinkStateResult, PaymentLinkView
-from desk.kernel_service import (activation, agents, decide, execute, labels, ledger, mandates, render, reply_check,
-                                 repo)
-from desk.kernel_service.auth import SessionRow
+from desk.kernel_service import (activation, agents, auth, decide, execute, labels, ledger, mandates, render,
+                                 reply_check, repo)
+from desk.kernel_service.auth import Named, SessionRow
 from desk.kernel_service.decisions import Reviewed
 from desk.kernel_service.render.cards import DeskInfo
 from desk.kernel_service.repo import KernelCtx, KernelFailure, KernelRuntime, kernel_transaction
@@ -517,10 +517,15 @@ async def complete_link(ctx: KernelCtx, token: str) -> PaymentLinkStateResult:
       `conflict`, ledgered (an issued link past its expiry becomes `expired` first). Then the
       baseline (`recheck_link_baseline`): a failure cancels the link (its `cancel_reason`) and
       answers 409 `conflict`. Then it sets the link's completion marker and commits.
-    - C2 holds the session row `FOR SHARE` (so the verdict's generation holds), locks the link, and
-      needs it still `issued` with this completion's marker, else 409 `conflict` with no provider
-      call (an activation moved it); then the provider completes the checkout, and the link is
-      `paid`, with its `charge` fact and a signed `payment_confirmed` verdict, committed.
+    - C2 holds the session row `FOR SHARE` (so the verdict's generation holds, and nothing closes
+      the session until C2 commits), locks the link, and needs it still `issued` with this
+      completion's marker, else 409 `conflict` with no provider call (an activation moved it). Then,
+      under that session row and before the provider is asked, the link's session must still stand
+      (`_session_ended`, as an execution's T2 asks `auth.session_stands` before its adapter acts):
+      one that doesn't cancels the link, ledgered with why, and answers 409 `conflict`, with nothing
+      sent. Then the provider completes the checkout, and the link is `paid`, with its `charge`
+      fact and a signed `payment_confirmed` verdict, committed with a plain commit: it records what
+      the provider did, which nothing after may take back.
     - C3 settles an exception in C2, which rolled back, only while the link is still `issued` with
       the marker: a `ProviderError` (nothing reached the provider) returns it to `issued` without
       its marker, 502 `internal`; anything else leaves it `unknown`, marker kept, for
@@ -562,10 +567,35 @@ async def _pay(ctx: KernelCtx, link_id: str, session_id: str,
     link = await _locked(ctx, link_id)
     if link.state != "issued" or link.completion_started_at != marker:
         return await _refused(ctx, link, "moved")
+    if (ended := await _session_ended(ctx, link)) is not None:
+        # checked under the session row this step holds, so the session can't close before the
+        # provider is asked; nothing is sent, and the link can never be paid now
+        await _move(ctx, link, "cancelled", cancel_reason=ended if ended in CANCEL_REASONS else None)
+        await _ledger(ctx, link, state="cancelled", reason=ended)
+        await ctx.db.commit()
+        return KernelFailure(409, "conflict", f"payment_link_session:{ended}")
     completed = await provider(ctx).complete(link.provider_checkout_id)
     verdict = await record_paid(ctx, link, session_row, completed.charge_id, confirm=True)
-    await ctx.db.commit()
+    await ctx.db.commit()                                 # what the provider did, recorded: never taken back
     return PaymentLinkStateResult(state="paid", session_id=session_id, verdict=verdict)
+
+
+async def _session_ended(ctx: KernelCtx, link: PaymentLink) -> str | None:
+    """Why the link's session no longer stands (`auth.session_stands`, read afresh, for the person a
+    link made for one names): `desk_closed` when its Desk is deleted, `person_removed` when that
+    person is off the record, `session_closed` for any other close; None while it stands."""
+    person = link.customer_id.removeprefix(PERSON) if link.customer_id.startswith(PERSON) else None
+    named = Named(copy_id=link.copy_id, desk_id=link.desk_id, session_id=link.session_id)
+    if await auth.session_stands(ctx, named, person):
+        return None
+    deleted = (await ctx.db.execute(ctx.repo.scoped(select(Desk.deleted_at).where(
+        Desk.desk_id == link.desk_id)))).scalar_one_or_none()
+    if deleted is not None:
+        return "desk_closed"
+    if person is not None and (await ctx.db.execute(ctx.repo.scoped(select(Person.person_id).where(
+            Person.person_id == person, Person.removed_at.is_(None))))).first() is None:
+        return "person_removed"
+    return "session_closed"
 
 
 async def _settle(ctx: KernelCtx, link_id: str, session_id: str, marker: datetime,

@@ -208,7 +208,8 @@ NO_SESSION_ROUTES: dict[str, str] = {
     **dict.fromkeys(["GET /payment_links/{token}", "POST /payment_links/{token}/complete",
                      "POST /payment_links/{token}/cancel"],
                     "the payment link's own token, which pays once: a completion checks the link's baseline "
-                    "(`payments.recheck_link_baseline`) before the provider is asked"),
+                    "(`payments.recheck_link_baseline`), then its session under the row it holds, before the "
+                    "provider is asked"),
 }
 
 
@@ -268,8 +269,9 @@ PLAIN_COMMITS = {
     ("payments.py", "_refused"): "a completion or cancel refused: its record, then 409",
     ("payments.py", "complete_link"): "C1: a baseline refusal's record, then 409, or the completion's marker, "
                                       "before the provider is asked; C2 answers",
-    ("payments.py", "_pay"): "C2: what the provider did, recorded as C2 decided; the link's routes prove no "
-                             "session's token, and no recheck may take back a payment that happened",
+    ("payments.py", "_pay"): "C2: a refusal's record, or what the provider did, recorded as C2 decided; the "
+                             "link's session was checked before the provider was asked, under the row C2 holds "
+                             "through this commit, and no recheck may take back a payment that happened",
     ("payments.py", "_settle"): "C3: an exception in C2 settled, which holds nothing read",
     ("payments.py", "reconcile_links_at_startup"): "startup reconciliation, outside any request",
     ("repo.py", "kernel_transaction"): "runs them first whenever the transaction read anything",

@@ -38,7 +38,7 @@ from .fakes import FakeDecisions
 from .helpers import connections_of, draft_and_confirm, kernel_ctx, ledger_rows, rows_of, until_waiting
 from .test_adapters import Rivera, quote_args, rivera
 from .test_approvals import answered
-from .test_context import context_of
+from .test_context import context_of, get_context
 from .test_decide import Visitor, decided, open_visitor, set_session
 from .test_execute import executed
 from .test_money_cap import post_draft
@@ -484,6 +484,72 @@ async def test_completion_rechecks_the_baseline(app, client, reviewer, change):
     assert (seen.state, seen.cancel_reason, seen.customer_name) == ("cancelled", None, None)
 
 
+@pytest.mark.parametrize("change", ["session_closed", "person_removed"])
+async def test_completion_checks_its_session_before_the_provider_is_asked(app, client, reviewer, frozen_clock,
+                                                                          monkeypatch, change):
+    """C2 asks whether the link's session still stands (`auth.session_stands`), under the session row
+    it holds, before the provider is asked: Dana's session closed, or Dana taken off the record, after
+    C1 committed its marker pays nothing. The link is cancelled, ledgered with why, and the answer is
+    409, as a failed baseline in C1 is."""
+    copy = await rivera(app, client)
+    dana = await confirmed(client, copy, "dana@example.com")
+    link = await rv_link(app, client, reviewer, copy, dana)
+
+    async def session_ends() -> None:                               # the marker is committed, nothing sent yet
+        if change == "session_closed":
+            await set_session(app, copy, dana.session_id, closed_at=frozen_clock.now())
+        else:
+            response = await client.put(f"/desks/{copy.desk_id}/people", headers=copy.owner,
+                                        json={"upsert": [], "remove": ["dana"]})
+            assert response.status_code == 200, response.text
+
+    monkeypatch.setattr(payments, "_after_marker", session_ends)
+    response = await post_complete(client, link.token)
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert charges(copy) == [] and await charge_facts(app, copy) == []          # the provider was never asked
+    row = await link_row(app, copy, link.link_id)
+    assert (row.state, row.cancel_reason) == ("cancelled", "person_removed" if change == "person_removed" else None)
+    assert (await payment_entries(app, copy))[-1] == {"link_id": link.link_id, "state": "cancelled", "reason": change}
+    again = await post_complete(client, link.token)                         # and it never pays later
+    assert (again.status_code, again.json()) == (409, {"code": "conflict"})
+
+
+async def test_a_paid_link_stays_paid_whatever_happens_to_its_session(app, client, reviewer, monkeypatch):
+    """The provider has completed the checkout and C2 is about to commit when the owner removes Dana,
+    whose removal waits for the session row C2 holds: the payment is recorded as C2 decided (`paid`,
+    its charge fact, its verdict) and answered, never rolled back, and the removal then closes her
+    session."""
+    copy = await rivera(app, client)
+    dana = await confirmed(client, copy, "dana@example.com")
+    link = await rv_link(app, client, reviewer, copy, dana)
+    recorded, go_on = asyncio.Event(), asyncio.Event()
+    record = payments.record_paid
+
+    async def record_then_wait(*args, **kwargs):
+        verdict = await record(*args, **kwargs)
+        recorded.set()                                       # the provider has charged; C2 hasn't committed
+        await go_on.wait()
+        return verdict
+
+    monkeypatch.setattr(payments, "record_paid", record_then_wait)
+    paying = asyncio.create_task(post_complete(client, link.token))
+    await asyncio.wait_for(recorded.wait(), timeout=5)
+    with connections_of(app) as pids:
+        removing = asyncio.create_task(client.put(f"/desks/{copy.desk_id}/people", headers=copy.owner,
+                                                  json={"upsert": [], "remove": ["dana"]}))
+        await until_waiting(app, removing, pids)            # for Dana's session row, which C2 holds
+    go_on.set()
+    paid, removed = await asyncio.wait_for(asyncio.gather(paying, removing), timeout=5)
+    assert removed.status_code == 200, removed.text
+    assert paid.status_code == 200, paid.text
+    assert PaymentLinkStateResult.model_validate(paid.json()).state == "paid"
+    assert (await link_row(app, copy, link.link_id)).state == "paid"
+    assert len(charges(copy)) == 1 and len(await charge_facts(app, copy)) == 1
+    assert paid_entry(await payment_entries(app, copy))["link_id"] == link.link_id
+    after = await get_context(client, dana.session_id, dana.headers)
+    assert (after.status_code, after.json()) == (409, {"code": "closed"})
+
+
 @pytest.mark.parametrize("template", ["link_cancelled", "payment_confirmed"])
 async def test_claude_cannot_draft_link_cancelled(app, client, reviewer, template):
     """Only the kernel tells a visitor a link was cancelled or a payment landed. Claude drafting either
@@ -609,12 +675,12 @@ async def test_activation_cancels_open_links_it_no_longer_allows(desk_prove, app
         (verdict.ledger_seq, visitor.session_id, [f"payment_link:{over.link_id}"])
         for verdict in (line.verdict, again.verdict)]
     assert await cancelled_links(client, copy, 1) == []                 # the version it replaced cancelled nothing
-    await set_session(app, copy, visitor.session_id, closed_at=frozen_clock.now())
-    assert await cancelled_links(client, copy, 2) == []                 # nor is a closed chat sent a line
 
-    # the other two still pay
+    # the other two still pay, while their session stands
     for link in (under, approved):
         assert (await completed(client, link.token)).state == "paid", link.amount_cents
+    await set_session(app, copy, visitor.session_id, closed_at=frozen_clock.now())
+    assert await cancelled_links(client, copy, 2) == []                 # nor is a closed chat sent a line
 
 
 @pytest.mark.solver
