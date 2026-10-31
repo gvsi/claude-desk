@@ -470,6 +470,22 @@ describe('design system source guards', () => {
     expect(problems.filter((problem) => problem !== null)).toEqual([]);
   });
 
+  it('fact_card_only_on_the_vision_pages', () => {
+    // FactCard shows a vision page's sample facts. A real conversation's facts reach a visitor only as
+    // the kernel's rendered cards (ReplyCard), so nothing else in the design system may use it: only
+    // its own folder, the index that exports it, and the vision boards' page parts.
+    const uses = matches(/^\s*(?:import|export)\s[^;]*?\bFactCard\b[^;]*?from\s+['"][^'"]+['"]/m);
+    expect(uses("import { FactCard } from '../components/FactCard/FactCard.tsx';")).toHaveLength(1);
+    expect(uses("import { Card, FactCard, type CardProps } from '../../ds/index.ts';")).toHaveLength(1);
+    expect(uses("export { FactCard, type FactCardProps } from './components/FactCard/FactCard.tsx';")).toHaveLength(1);
+    expect(uses("import type { FactCardProps } from './FactCard.tsx';\nimport { Card } from './Card.tsx';")).toEqual([]);
+    const allowed = (file: string) => file.startsWith('components/FactCard/') || file === 'index.ts' || file === 'boards/vision.tsx';
+    const files = everyTextFile().filter(({ file }) => /\.tsx?$/.test(file) && file !== THIS_FILE);
+    expect(files.filter(({ file, text }) => !allowed(file) && uses(text).length > 0).map(({ file }) => file)).toEqual([]);
+    // It is used where it is meant to be, so the check can't pass by finding nothing.
+    expect(files.filter(({ file, text }) => file === 'boards/vision.tsx' && uses(text).length > 0)).toHaveLength(1);
+  });
+
   // Importing the index transforms every component on first use. When the whole suite runs, the
   // browser projects compete for the same CPU, so this import gets more than the default 5 s.
   it('index_exports_every_component', { timeout: 60_000 }, async () => {

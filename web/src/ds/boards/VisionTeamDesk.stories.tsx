@@ -7,13 +7,14 @@ import {
   expectConversationType,
   expectFooter,
   expectOwnerFrame,
+  expectNoFactsInProse,
   expectReceiptsUnderMessages,
   expectTabOrder,
   expectVisionBar,
   one,
   some,
 } from './spec.ts';
-import { LUIS_ACCESS, TEAMMATES, TEAM_TODAY, TeamDeskConversations, VISION_BACK_HREF } from './vision.tsx';
+import { LUIS_ACCESS, TEAMMATES, TEAM_REPLIES, TEAM_TODAY, TeamDeskConversations, VISION_BACK_HREF } from './vision.tsx';
 
 const meta = {
   title: 'Boards/Vision, team desk',
@@ -25,6 +26,7 @@ const meta = {
     canvasNote: [
       'Signed on 2026-10-30. Rivera Plumbing’s team asks its own Desk, the “Team” Desk in the sidebar’s Desk picker, with “Teammates” as its people’s word and the team’s Answering line.',
       'Luis’s messages are VisitorMessage bubbles and Claude’s words ClaudeMessage prose, each fact in a FactCard; his access is the AccessPanel.',
+      'Owner’s copy ruling, 2026-10-30, for invariant 2: the board’s “The gate code is on today’s job card.” and “I can show your own logged hours for last week if that helps.” put dates in Claude’s words. They read “The gate code is on her job card.” beside a Job card with the visit’s date and time, and “Here are your own logged hours.” beside an hours card with the week’s dates; the payroll receipt says “No pay was shared.” and a second receipt says the hours are Luis’s own. The page now runs past the window; the board is to be redrawn to match.',
       'Receipts sit 8 px under what they explain, the system’s spacing, where the board leaves 6 px; the transcript’s rows are 14 px apart, the Transcript’s gap, where the board leaves 12 px.',
     ].join(' '),
   },
@@ -68,16 +70,31 @@ export const Board: Story = {
     await expect(within(chat).getByText('Teammate')).toHaveClass('cd-pill');
     const log = within(chat).getByRole('log', { name: 'Conversation with Luis Ortega' });
     expectConversationType(log);
+    // Claude's words state no date, not even a relative one ("today", "last week"), and nothing else
+    // only a card may say; the cards carry the dates.
+    await expect(await expectNoFactsInProse(log)).toBe(3);
     await expect(await expectReceiptsUnderMessages(log)).toBe(3);
+    // Claude's words, as the owner ruled them: helpful, with every date in a card.
+    await expect(some(log, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual(TEAM_REPLIES);
     const facts = some(log, '.cd-fact-card');
-    await expect(facts.map((fact) => one(fact, '.cd-fact-card__label').textContent)).toEqual(['Customer history', 'Document, only for Luis']);
+    await expect(facts.map((fact) => one(fact, '.cd-fact-card__label').textContent)).toEqual([
+      'Customer history',
+      'Job card',
+      'Document, only for Luis',
+      'Your logged hours',
+    ]);
     await expect(within(log).getByText('Water heater replaced, March 2024; under warranty until 2030').closest('.cd-fact-card')).not.toBeNull();
-    // The payroll answer declines with no card, and its receipt says it was refused.
+    // The visit's date and time, and the week's dates, sit in their cards.
+    const [, jobCard, , hours] = facts as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
+    await expect(jobCard).toHaveTextContent(/Friday, October 30, 10:30 am/);
+    await expect(hours).toHaveTextContent(/Monday, October 19 to Friday, October 23/);
+    // The payroll request is refused; his own hours, from his time records, are shown.
     const receipts = some(log, '.cd-margin-line');
     await expect(receipts.map((receipt) => one(receipt, '.cd-status-dot').className.replace('cd-status-dot cd-status-dot--', ''))).toEqual([
       'handled',
       'handled',
       'refused',
+      'handled',
     ]);
 
     // Luis's access beside it: 260 px, 28 px to the conversation's right.
@@ -95,7 +112,9 @@ export const Board: Story = {
     await expectFooter(canvasElement);
     const footer = one(canvasElement, '[data-ds="concept-footer"]');
     await expect(Math.round(footer.getBoundingClientRect().top - today.getBoundingClientRect().bottom)).toBe(16);
-    await expect(Math.round(window.innerHeight - footer.getBoundingClientRect().bottom)).toBe(20);
+    // With the job and hours cards the page runs past the window; the footer ends it, 20 px from its foot.
+    const page = main.getBoundingClientRect();
+    await expect(Math.round(main.scrollHeight - (footer.getBoundingClientRect().bottom - page.top + main.scrollTop))).toBe(20);
 
     // focus_order_is_logical: the bar, the sidebar, the page's action, the teammates, the conversation's controls, then access.
     await expectTabOrder(userEvent, [

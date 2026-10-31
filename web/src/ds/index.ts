@@ -84,6 +84,8 @@ export {
   type PhoneTabBarProps,
 } from './components/PhoneFrame/PhoneFrame.tsx';
 export { AccessPanel, type AccessPanelProps } from './components/AccessPanel/AccessPanel.tsx';
+// FactCard is for the vision pages' sample facts only: a conversation's facts are the kernel's ReplyCards.
+export { FactCard, type FactCardProps } from './components/FactCard/FactCard.tsx';
 
 // Settings
 export { DetailList, type DetailItem, type DetailListProps } from './components/DetailList/DetailList.tsx';
@@ -162,7 +164,6 @@ export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
 export { CARD_CHROME, LINK_CANCELLED_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 export { LinkCancelledCard, type LinkCancelledCardProps } from './components/ReplyCard/LinkCancelledCard.tsx';
-export { FactCard, type FactCardProps } from './components/FactCard/FactCard.tsx';
 
 // Conversation
 export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';

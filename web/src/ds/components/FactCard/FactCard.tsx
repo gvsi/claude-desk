@@ -5,11 +5,11 @@ import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import './FactCard.css';
 
 export interface FactCardProps {
-  /** What kind of fact it is, on the top line: "Customer history", "Document, only for Luis", "Booked". */
+  /** What kind of fact it is, on the top line: "Customer history", "Job card", "Your logged hours". */
   label: string;
   /** The 14 px line icon beside the label: `document` for a record, `clock` for a time. */
   icon: IconName;
-  /** The fact itself, as its source wrote it: "Ana Ruiz, customer since 2023", "Tuesday, November 3". */
+  /** The fact itself, as its source wrote it: "Ana Ruiz, customer since 2023", "Friday, October 30, 10:30 am". */
   title: string;
   /** Any more lines of the fact, in order, each as its source wrote it. Empty lines are left out. */
   lines?: readonly string[];
@@ -19,8 +19,9 @@ export interface FactCardProps {
 
 /**
  * A typed card for one fact on a vision page: its label beside a small icon, then the fact and its
- * lines, each shown exactly as given. Prices, dates, statuses and bookings on a vision page sit here,
- * never in Claude's words. Nothing on the card is computed or formatted.
+ * lines, each shown exactly as given. Prices, dates and statuses on a vision page sit here, never in
+ * Claude's words; a booking is the kernel's booking card (`ReplyCard`). Nothing on the card is
+ * computed or formatted. Only the vision pages use it (`fact_card_only_on_the_vision_pages`).
  */
 export function FactCard({ label, icon, title, lines = [], language = 'en' }: FactCardProps) {
   const shown = lines.filter((line) => line.trim() !== '');

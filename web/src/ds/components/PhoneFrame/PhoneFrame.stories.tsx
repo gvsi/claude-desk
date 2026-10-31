@@ -7,7 +7,7 @@ import { PhoneFrame, PhoneTabBar, type PhoneTab } from './PhoneFrame.tsx';
 const HREFS = { today: '#today', chats: '#chats', rules: '#rules', safety: '#safety', more: '#more' } satisfies Record<PhoneTab, string>;
 
 /** A phone's screen as the owner's Today draws it: a page that scrolls, then the tab bar at its foot. */
-function OwnerPhone({ current = 'today' }: { current?: PhoneTab }) {
+function OwnerPhone({ current = 'today', label }: { current?: PhoneTab; label?: string }) {
   return (
     <PhoneFrame caption="Today, for the owner">
       <div style={{ flex: '1 1 auto', minHeight: 0, padding: '28px 20px 0' }}>
@@ -15,7 +15,7 @@ function OwnerPhone({ current = 'today' }: { current?: PhoneTab }) {
           Good morning, Maria
         </h2>
       </div>
-      <PhoneTabBar current={current} hrefs={HREFS} />
+      <PhoneTabBar current={current} hrefs={HREFS} label={label} />
     </PhoneFrame>
   );
 }
@@ -50,7 +50,8 @@ export const OwnerToday: Story = {
     await expect(Math.round(caption.getBoundingClientRect().top - screen.getBoundingClientRect().bottom)).toBe(12);
 
     // phone_tab_bar_has_five_tabs: Today, Chats, Rules, Safety and More, at the screen's foot.
-    const nav = within(screen).getByRole('navigation', { name: 'Main' });
+    // Named for what it is, so it doesn't claim to be the page's main navigation.
+    const nav = within(screen).getByRole('navigation', { name: "The owner app's tabs" });
     const tabs = within(nav).getAllByRole('link');
     await expect(tabs.map((tab) => tab.textContent)).toEqual(['Today', 'Chats', 'Rules', 'Safety', 'More']);
     await expect(tabs.map((tab) => tab.getAttribute('href'))).toEqual(['#today', '#chats', '#rules', '#safety', '#more']);
@@ -95,11 +96,20 @@ export const OwnerToday: Story = {
 export const OnSafety: Story = {
   args: { current: 'safety' },
   play: async ({ canvas }) => {
-    const nav = canvas.getByRole('navigation', { name: 'Main' });
+    const nav = canvas.getByRole('navigation', { name: "The owner app's tabs" });
     const current = within(nav)
       .getAllByRole('link')
       .filter((tab) => tab.getAttribute('aria-current') === 'page');
     await expect(current.map((tab) => tab.textContent)).toEqual(['Safety']);
+  },
+};
+
+/** A page with two phones of the same app names each bar for its phone. */
+export const OwnLabel: Story = {
+  args: { label: 'Tabs on Maria’s phone' },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('navigation', { name: 'Tabs on Maria’s phone' })).toBeVisible();
+    await expect(canvas.queryByRole('navigation', { name: "The owner app's tabs" })).toBeNull();
   },
 };
 

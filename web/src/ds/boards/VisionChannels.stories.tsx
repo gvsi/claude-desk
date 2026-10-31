@@ -3,7 +3,7 @@ import { expect, within } from 'storybook/test';
 
 import { VisionBar } from '../components/VisionBar/VisionBar.tsx';
 import { CHANNELS_LEAD, ChannelsSettings } from './parts.tsx';
-import { expectChannelsContent, expectFooter, expectFooterAtFoot, expectSettingsPage, expectTabOrder, expectVisionBar } from './spec.ts';
+import { expectChannelsContent, expectFooter, expectFooterAtFoot, expectNoFactsInProse, expectSettingsPage, expectTabOrder, expectVisionBar } from './spec.ts';
 import { VISION_BACK_HREF } from './vision.tsx';
 
 const meta = {
@@ -35,6 +35,8 @@ export const Board: Story = {
     const sidebar = canvas.getByRole('complementary', { name: 'Claude Desk' });
     await expect(sidebar.getBoundingClientRect().top).toBe(bar.getBoundingClientRect().bottom);
     await expectChannelsContent(content, CHANNELS_LEAD);
+    // A Settings page: Claude says nothing on it.
+    await expect(await expectNoFactsInProse(canvasElement)).toBe(0);
     await expectFooter(canvasElement);
     await expectFooterAtFoot(canvasElement);
 

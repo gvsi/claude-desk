@@ -112,20 +112,34 @@ export const LUIS_ACCESS = {
   cantOpen: ['Invoices', 'Payroll'],
 } as const;
 
+/**
+ * Claude's words to Luis, in order. Owner's copy ruling, 2026-10-30, for invariant 2: the board's
+ * "on today’s job card" and "your own logged hours for last week" put dates in Claude's words; the
+ * visit's date and the week's dates are now in a job card and an hours card, and the words stay as
+ * helpful.
+ */
+export const TEAM_REPLIES = [
+  'Here’s Ana’s history. The gate code is on her job card.',
+  'Here it is.',
+  'I can’t share pay. Payroll is open to Maria and Grace only. Here are your own logged hours.',
+] as const;
+
 /** The day's line under the page. */
 export const TEAM_TODAY = 'Today: 12 team conversations, 9 answered from job records, 3 documents shared, 1 payroll request declined.';
 
 /** A teammate's turn and Claude's answer with its card and receipt, as the board draws them. */
-function TeamTurn({ asked, reply, fact, receipt }: { asked: string; reply: string; fact?: FactCardProps; receipt: { source: ReceiptSource; plain: string } }) {
+function TeamTurn({ asked, reply, facts = [], receipts }: { asked: string; reply: string; facts?: readonly FactCardProps[]; receipts: readonly { source: ReceiptSource; plain: string }[] }) {
   return (
     <>
       <TranscriptRow>
         <VisitorMessage text={asked} />
       </TranscriptRow>
-      <TranscriptRow margin={<MarginReceipt source={receipt.source} plain={receipt.plain} ledgerSeq={0} />}>
+      <TranscriptRow margin={receipts.map((receipt) => <MarginReceipt key={receipt.plain} source={receipt.source} plain={receipt.plain} ledgerSeq={0} />)}>
         <div className="board-vision-reply">
           <Reply text={reply} />
-          {fact ? <FactCard {...fact} /> : null}
+          {facts.map((fact) => (
+            <FactCard key={fact.label} {...fact} />
+          ))}
         </div>
       </TranscriptRow>
     </>
@@ -205,29 +219,43 @@ export function TeamDeskConversations() {
             <Transcript label="Conversation with Luis Ortega">
               <TeamTurn
                 asked="Heading to Ana Ruiz in Eastshore. What’s the history there?"
-                reply="Here’s Ana’s history. The gate code is on today’s job card."
-                fact={{
-                  label: 'Customer history',
-                  icon: 'document',
-                  title: 'Ana Ruiz, customer since 2023',
-                  lines: ['Water heater replaced, March 2024; under warranty until 2030', 'Kitchen drain cleared, September 12; camera inspection declined'],
-                }}
-                receipt={{
-                  source: CHECKED,
-                  plain:
-                    'From job records and her customer file. Luis is assigned to her 10:30 am visit, so the address and gate code are open to him.',
-                }}
+                reply={TEAM_REPLIES[0]}
+                facts={[
+                  {
+                    label: 'Customer history',
+                    icon: 'document',
+                    title: 'Ana Ruiz, customer since 2023',
+                    lines: ['Water heater replaced, March 2024; under warranty until 2030', 'Kitchen drain cleared, September 12; camera inspection declined'],
+                  },
+                  {
+                    label: 'Job card',
+                    icon: 'calendar',
+                    title: 'Friday, October 30, 10:30 am',
+                    lines: ['Ana Ruiz, Eastshore: water heater check', 'Gate code 2580, at the side gate'],
+                  },
+                ]}
+                receipts={[
+                  {
+                    source: CHECKED,
+                    plain:
+                      'From job records and her customer file. Luis is assigned to her 10:30 am visit, so the address and gate code are open to him.',
+                  },
+                ]}
               />
               <TeamTurn
                 asked="Send me the warranty in case it’s the tank."
-                reply="Here it is."
-                fact={{ label: 'Document, only for Luis', icon: 'document', title: 'Water heater warranty, Ana Ruiz' }}
-                receipt={{ source: decided('executed'), plain: 'Warranty released to the assigned plumber. Logged on Ana’s file.' }}
+                reply={TEAM_REPLIES[1]}
+                facts={[{ label: 'Document, only for Luis', icon: 'document', title: 'Water heater warranty, Ana Ruiz' }]}
+                receipts={[{ source: decided('executed'), plain: 'Warranty released to the assigned plumber. Logged on Ana’s file.' }]}
               />
               <TeamTurn
                 asked="Also, what did Ben make on the Harbor Street job last week?"
-                reply="I can’t share pay. Payroll is open to Maria and Grace only. I can show your own logged hours for last week if that helps."
-                receipt={{ source: decided('refused'), plain: 'Declined by team access: payroll is owner and office manager only. Nothing shared.' }}
+                reply={TEAM_REPLIES[2]}
+                facts={[{ label: 'Your logged hours', icon: 'clock', title: 'Monday, October 19 to Friday, October 23', lines: ['38.5 hours over 5 days'] }]}
+                receipts={[
+                  { source: decided('refused'), plain: 'Declined by team access: payroll is owner and office manager only. No pay was shared.' },
+                  { source: CHECKED, plain: 'Luis’s own hours, from his time records.' },
+                ]}
               />
             </Transcript>
           </section>
@@ -251,20 +279,28 @@ export function TeamDeskConversations() {
 const CLAUDE_ACCOUNT_ABOUT = [rivera.blocks.hours.en, rivera.blocks.policy.en, rivera.blocks.contact.en];
 
 /**
- * Dana's visit as the board draws it. Owner decision, 2026-10-30: on a vision Desk a Claude account
- * counts as verified when its verified email matches the contact on record, with her consent asked
- * on each visit; the receipts say both.
+ * Dana's visit. Owner decision, 2026-10-30: on a vision Desk a Claude account counts as verified when
+ * its verified email matches the contact on record, with her consent asked on each visit; the
+ * receipts say both. Owner's copy ruling, 2026-10-30: her past visit is a booking card, not a
+ * sentence ("Last time we booked your drain clearing."), and Claude only asks how it went.
  */
 export const CLAUDE_ACCOUNT_TURNS = {
   ask: 'Your Claude account has a verified email. If it matches the contact Rivera Plumbing has on record for you, I can confirm it’s you without a code. Use it for this visit?',
   yes: 'Yes, use it',
-  matched: 'Thanks, it matches. Welcome back, Dana. Last time we booked your drain clearing. How did it go?',
+  matched: 'Welcome back, Dana. How did the drain clearing go?',
   matchedReceipt: 'Matched to Dana Whitfield: the Claude account’s verified email is her contact on record, and she agreed for this visit',
   invoice: 'All fixed, thanks. Can you send me the invoice?',
   sent: 'Glad to hear it. Here’s your invoice. You let me use your Claude account for this visit, so no code was needed.',
   releasedReceipt: 'Released to Dana Whitfield, matched by her Claude account with her consent for this visit',
   checked: 'Reply checked against Maria Rivera’s rules',
 } as const;
+
+/** Dana's last visit, as the kernel renders a booking card: its start, then the job, who and the booking. */
+export const DANA_LAST_VISIT = cardBlock('booking_confirmed', {
+  fact_id: 'booking:B-61',
+  title: 'Tuesday, October 20, 10:00 am',
+  lines: ['Drain clearing', 'With Maria Rivera', 'Booking B-61'],
+});
 
 /** Rivera Plumbing's public page, under the vision bar, for a returning visitor signed in with a Claude account. */
 export function ClaudeAccountChat() {
@@ -294,7 +330,7 @@ export function ClaudeAccountChat() {
             <MarginReceipt key="checked" source={CHECKED} plain={t.checked} ledgerSeq={42} />,
           ]}
         >
-          <ClaudeMessage blocks={[proseBlock(t.matched)]} language="en" ownerName={owner} />
+          <ClaudeMessage blocks={[proseBlock(t.matched), DANA_LAST_VISIT]} language="en" ownerName={owner} />
         </TranscriptRow>
         <TranscriptRow>
           <VisitorMessage text={t.invoice} />
@@ -323,6 +359,9 @@ export function ClaudeAccountChat() {
 // The phone (N-R2-Vision-Phone): the owner's Today and a visitor's chat, as phone apps.
 
 export const PHONE_HREFS = { today: '#today', chats: '#chats', rules: '#rules', safety: '#safety', more: '#more' } as const;
+
+/** Claude's words next to the visitor's booking card. */
+export const PHONE_REPLY = 'You’re all set. Here’s your visit.';
 
 /** Who is talking to the Desk, on the owner's phone: a person and another person's agent. */
 const PHONE_LIVE: readonly { name: string; kind: string; tone: StatusTone }[] = [
@@ -384,10 +423,9 @@ function VisitorPhone() {
             <VisitorMessage text="Can someone come Tuesday afternoon?" />
           </TranscriptRow>
           <TranscriptRow margin={<MarginReceipt source={decided('executed')} plain="Booked on Maria Rivera’s calendar" ledgerSeq={0} />}>
-            <div className="board-vision-reply">
-              <Reply text="Maria will text you when she’s on her way." />
-              <FactCard label="Booked" icon="clock" title="Tuesday, November 3" lines={['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera']} />
-            </div>
+            {/* Owner's copy ruling, 2026-10-30: the booking is the kernel's booking card, and Claude's
+                words promise nothing it doesn't back (the board's "Maria will text you when she’s on her way."). */}
+            <ClaudeMessage blocks={[proseBlock(PHONE_REPLY), rivera.blocks.booking_confirmed.en]} language="en" ownerName={rivera.business.ownerName} />
           </TranscriptRow>
         </Transcript>
       </div>

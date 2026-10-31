@@ -5,7 +5,7 @@ import { expectComputed } from '../../test/expectComputed.ts';
 import { FactCard } from './FactCard.tsx';
 
 const meta = {
-  title: 'Reply cards/FactCard',
+  title: 'Vision/FactCard',
   component: FactCard,
   args: {
     label: 'Customer history',
@@ -75,33 +75,36 @@ export const TitleOnly: Story = {
 /** In Spanish: the card says its language, so a screen reader reads it as Spanish. */
 export const Spanish: Story = {
   args: {
-    label: 'Reservado',
-    icon: 'clock',
-    title: 'martes 3 de noviembre',
-    lines: ['Llegada de 14:00 a 16:00', 'Con Maria Rivera'],
+    label: 'Historial del cliente',
+    icon: 'document',
+    title: 'Ana Ruiz, clienta desde 2023',
+    lines: ['Calentador de agua cambiado en marzo de 2024'],
     language: 'es',
   },
   parameters: {
     canvas: 'none',
-    canvasNote: 'The Booked card of N-R2-Vision-Phone in Spanish: no vision board draws a fact in Spanish yet.',
+    canvasNote: 'The Customer history card of N-R2-Vision-TeamDesk in Spanish: no vision board draws a fact in Spanish yet.',
   },
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByRole('article', { name: 'Reservado' })).toHaveTextContent('Llegada de 14:00 a 16:00');
+    await expect(canvas.getByRole('article', { name: 'Historial del cliente' })).toHaveTextContent('Calentador de agua cambiado en marzo de 2024');
     await expect(canvasElement.querySelector('.cd-fact-card')).toHaveAttribute('lang', 'es');
   },
 };
 
-/** On a phone's 358 px line the card takes the line's width, and long words wrap inside it. */
+/** On a phone's 358 px line the card takes the line's width, and long lines wrap inside it. */
 export const PhoneLine: Story = {
-  args: { label: 'Booked', icon: 'clock', title: 'Tuesday, November 3', lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'] },
+  args: { label: 'Job card', icon: 'calendar', title: 'Friday, October 30, 10:30 am', lines: ['Ana Ruiz, Eastshore: water heater check', 'Gate code 2580, at the side gate'] },
   render: (args) => (
     <div style={{ width: 358 }}>
       <FactCard {...args} />
     </div>
   ),
-  parameters: { canvas: 'N-R2-Vision-Phone' },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'The Job card of N-R2-Vision-TeamDesk on a phone’s line; no vision board draws a fact card on a phone, where a booking is the kernel’s booking card.',
+  },
   play: async ({ canvas }) => {
-    const card = canvas.getByRole('article', { name: 'Booked' });
+    const card = canvas.getByRole('article', { name: 'Job card' });
     await expect(card.getBoundingClientRect().width).toBe(358);
     await expect(card.scrollWidth).toBe(card.clientWidth);
   },

@@ -15,14 +15,14 @@
 
 ## PhoneTabBar
 
-- A `nav` named "Main" with five links, in this order: Today, Chats, Rules, Safety and More, each a 20 px icon over its name in `caption`. More uses the settings icon, as the board draws it, and holds the pages that don't get a tab: Connectors, Customers, Share and Settings. The board doesn't draw what More opens.
+- A `nav` named by `label`, "The owner app's tabs" by default (never "Main": it is a picture of an app's tabs on a page with its own navigation), with five links, in this order: Today, Chats, Rules, Safety and More, each a 20 px icon over its name in `caption`. More uses the settings icon, as the board draws it, and holds the pages that don't get a tab: Connectors, Customers, Share and Settings. The board doesn't draw what More opens.
 - The current tab is `aria-current="page"` in `text-primary`; the others are `text-secondary`. The icons are `aria-hidden`: the names say where each goes.
 - On `bg-panel` with a `line-hairline` over it, padded 10 px 8 px 22 px (the last for a phone's home bar), the tabs spaced around the width.
 
 ## What the consumer provides
 
 - `PhoneFrame`: `caption`, what the phone shows ("Today, for the owner", "The public chat, for a visitor"), and the screen's content as `children`.
-- `PhoneTabBar`: `current`, the tab the page is, and `hrefs`, where each tab goes.
+- `PhoneTabBar`: `current`, the tab the page is, `hrefs`, where each tab goes, and `label` when a page shows two of them.
 
 ## Props
 
@@ -39,3 +39,4 @@
 | --- | --- | --- |
 | `current` | `'today' \| 'chats' \| 'rules' \| 'safety' \| 'more'` | Required. Marked `aria-current="page"`. |
 | `hrefs` | `Record<PhoneTab, string>` | Required. Each tab's link. |
+| `label` | `string` | The bar's accessible name; "The owner app's tabs" by default. |

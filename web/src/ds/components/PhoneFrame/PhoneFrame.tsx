@@ -45,15 +45,20 @@ export interface PhoneTabBarProps {
   current: PhoneTab;
   /** Where each tab goes. More holds Connectors, Customers, Share and Settings. */
   hrefs: Record<PhoneTab, string>;
+  /**
+   * The bar's accessible name: "The owner app's tabs" by default. It is a picture of an app's tabs on
+   * a page with its own navigation, so it never claims to be the page's "Main".
+   */
+  label?: string;
 }
 
 /**
  * The owner app's tab bar on a phone, at the foot of the screen: Today, Chats, Rules, Safety and
  * More, each a 20 px icon over its name, the current one in primary ink.
  */
-export function PhoneTabBar({ current, hrefs }: PhoneTabBarProps) {
+export function PhoneTabBar({ current, hrefs, label = "The owner app's tabs" }: PhoneTabBarProps) {
   return (
-    <nav className="cd-phone-tab-bar" aria-label="Main">
+    <nav className="cd-phone-tab-bar" aria-label={label}>
       {TABS.map((tab) => (
         <a
           key={tab.key}
