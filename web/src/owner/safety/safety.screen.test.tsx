@@ -665,6 +665,53 @@ describe('Safety', () => {
     noOldWords();
   });
 
+  it('handoff_entries_say_which_they_are', async () => {
+    // A visitor asks for Maria, the handoff card hands her the chat, and she marks it done: the
+    // record names the two entries the checkpoint wrote for what they are. Any other change to the
+    // Desk's details reads as before.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
+    const [handoffId = ''] = mockStore.world.handoffs.keys();
+    await mockStore.dispatch('handoffDone', { params: { handoff_id: handoffId } });
+    const { entries } = await mockLedger();
+    const handoffs = entries.filter((e) => e.event.kind === 'desk_data' && e.event.summary.part === 'handoffs');
+    expect(handoffs.map((e) => e.event.summary)).toEqual([
+      { part: 'handoffs', refs: [handoffId], kind: 'card' },
+      { part: 'handoffs', refs: [handoffId] },
+    ]);
+    const [opened, done] = handoffs.map((e) => e.seq);
+    const hours = entries.length + 1;
+    injectLedger(ledgerPage([...entries, entry(hours, isoTime(Date.now()), { kind: 'desk_data', summary: { part: 'hours', refs: [] } })]));
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, opened ?? 0).getByText('Chat handed to you', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, done ?? 0).getByText('Chat marked done', { exact: true })).toBeVisible();
+    await expect.element(recordRow(screen, hours).getByText('Desk details changed', { exact: true })).toBeVisible();
+    expect(screen.getByText('Desk details changed').elements()).toHaveLength(1);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('handoff_closed_by_a_call_back_says_so', async () => {
+    // The handoff card hands Maria the chat, then the visitor asks for a call back, which closes
+    // the card's handoff and opens its own: the record calls that closing what it was, never the
+    // owner's Mark done.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I talk to Maria?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(1);
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    await expect.poll(() => mockStore.world.handoffs.size, { timeout: 5_000 }).toBe(2);
+    const { entries } = await mockLedger();
+    const closed = entries.find((e) => e.event.kind === 'desk_data' && e.event.summary.part === 'handoffs' && Object.hasOwn(e.event.summary, 'replaced_by'));
+    if (!closed) throw new Error('the call-back closed the card handoff');
+    injectLedger(ledgerPage(entries));
+
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
+    await expect.element(recordRow(screen, closed.seq).getByText('Chat moved to a call-back', { exact: true })).toBeVisible();
+    expect(screen.getByText('Chat marked done', { exact: true }).elements()).toHaveLength(0);
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('filters_start_with_all', async () => {
     injectLedger(ledgerPage(threeEntries()));
     const sorted = (summary: string, category: TriageCategory, n: number) =>

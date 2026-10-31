@@ -23,6 +23,7 @@ import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { CARD_REASON } from '../../mocks/world.ts';
 import { START_EXAMPLES } from '../../setup/copy.ts';
 import { expectLandedInPlace, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
@@ -89,6 +90,13 @@ async function heldItems(): Promise<NeedsYouItem[]> {
   const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
   if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Needs you');
   return (answer.body as NeedsYouItem[]).filter((item) => item.decision != null);
+}
+
+/** Everything the mock's Needs you holds for the main Desk now. */
+async function needsYouRead(): Promise<NeedsYouItem[]> {
+  const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Needs you');
+  return answer.body as NeedsYouItem[];
 }
 
 /** The seeded hold as the kernel has it now. */
@@ -1645,9 +1653,11 @@ describe('Today', () => {
     await expect.element(wants.first().getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
     expect(wants.first().getByText(CALLBACK_REASON).element().closest('[data-copy="user"]')).not.toBeNull();
     await expect.element(wants.first().getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true })).toBeVisible();
+    // A chat holds one open handoff, as the kernel keeps it: a second call-back closes the first and
+    // opens its own, so the owner keeps one item, which shows what is promised now.
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Please call me tonight' } });
-    await expect.poll(() => wants.elements().length, { timeout: 2_000 }).toBe(2);
-    await expect.element(wants.nth(1).getByText("You'll call back. No time was promised.", { exact: true })).toBeVisible();
+    await expect.element(wants.first().getByText("You'll call back. No time was promised.", { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(wants.elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Joining reads the chat, takes it over at the generation read, and opens it.
@@ -1722,6 +1732,98 @@ describe('Today', () => {
     await expect.poll(() => requests('handoffDone').length).toBe(2);
     await expect.poll(() => requests('needsYou').length).toBeGreaterThan(reads);
     expect(screen.getByRole('alert').elements()).toHaveLength(0);
+  });
+
+  it('card_handoff_draws_no_callback_line', async () => {
+    // The handoff card handed the chat to Maria: no call back was promised, so its card says the
+    // Desk's own reason and no call-back time, and joins and closes as a call-back request does.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can I talk to Maria?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants, { timeout: 2_000 }).toBeVisible();
+    await expect.element(wants.getByText(CARD_REASON, { exact: true })).toBeVisible();
+    expect(wants.element().textContent).not.toMatch(/call back/i);
+    await expect.element(wants.getByRole('button', { name: 'Join the chat' })).toBeVisible();
+    await expect.element(wants.getByRole('button', { name: 'Mark done' })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Once it's done, a call-back request in its place still says when.
+    await mockStore.dispatch('handoffDone', { params: { handoff_id: [...mockStore.world.handoffs.keys()][0] ?? '' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(wants.elements()).toHaveLength(1);
+  });
+
+  it('card_handoff_quotes_the_visitor', async () => {
+    // As a held request's card does: the visitor's last words, set off as theirs, under the Desk's
+    // reason. A call-back request's reason is already what they typed, so it quotes nothing more.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can I talk to Maria?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    const words = wants.getByText('Can I talk to Maria?', { exact: true });
+    await expect.element(words, { timeout: 2_000 }).toBeVisible();
+    expect(words.element().closest('[data-copy="user"]')).not.toBeNull();
+    expect(words.element().parentElement?.textContent).toBe('From the visitor: “Can I talk to Maria?”');
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Nothing to quote: no line.
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => ({ ...item, from_the_visitor: null })) });
+    const quiet = await renderRoute(TODAY);
+    await expect.element(quiet.screen.getByRole('article', { name: 'Wants you' }).getByText(CARD_REASON, { exact: true })).toBeVisible();
+    expect(quiet.screen.getByRole('article', { name: 'Wants you' }).element().textContent).not.toContain('From the visitor');
+
+    // A call-back request quotes nothing more.
+    const callback = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can you call me back?');
+    const asked = callback.screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(asked.getByText(CALLBACK_REASON, { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(asked.element().textContent).not.toContain('From the visitor');
+  });
+
+  it('callback_without_a_kind_keeps_its_line', async () => {
+    // An API that doesn't send `kind` yet: a handoff without one is a call-back request, and still
+    // says when Maria will call back.
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const withoutKind = (await needsYouRead()).map((item) => {
+      if (item.handoff == null) return item;
+      const handoff = { ...item.handoff };
+      delete handoff.kind;
+      return { ...item, handoff };
+    });
+    expect(withoutKind.filter((item) => item.handoff != null).map((item) => item.handoff && 'kind' in item.handoff)).toEqual([false]);
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: withoutKind });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants.getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
+    await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true })).toBeVisible();
+  });
+
+  it('unknown_handoff_kind_promises_no_call_back', async () => {
+    // Only a call-back request promises a call back: a handoff whose kind is null, or one this build
+    // doesn't know, says its reason and nothing about calling back.
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    const callback = items.find((item) => item.handoff != null);
+    if (callback?.handoff == null) throw new Error('the call-back request is in Needs you');
+    const as = (kind: unknown, id: string): NeedsYouItem => ({ ...callback, handoff: { ...callback.handoff, handoff_id: id, kind: kind as 'callback' } });
+    mockStore.inject({
+      route: 'needsYou',
+      status: 200,
+      times: 10_000,
+      body: [...items.filter((item) => item.handoff == null), as(null, 'handoff-null'), as('meeting', 'handoff-meeting')],
+    });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.poll(() => wants.elements().length).toBe(2);
+    for (const card of wants.elements()) {
+      expect(card.textContent).toContain(CALLBACK_REASON);
+      expect(card.textContent).not.toMatch(/call back/i);
+    }
   });
 
   it('allow_person_above_the_limit_says_so', async () => {

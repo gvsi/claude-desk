@@ -21,6 +21,7 @@ import type {
   OwnerTranscript,
   PeopleOut,
   PolicyVersionOut,
+  Reports,
   RuleChatOut,
   RulesDraft,
   RulesView,
@@ -35,6 +36,7 @@ import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
 import {
+  CALLBACK_WINDOW,
   DECISIONS,
   DEMO_CODE,
   EVENT_GAP_MS,
@@ -738,13 +740,15 @@ describe('the scripted Desk', () => {
     expect(mockStore.world.inbox.filter((record) => record.sessionId === session.session_id)).toEqual([]);
     expect([...mockStore.world.links.values()].filter((link) => link.sessionId === session.session_id)).toEqual([]);
 
-    // A callback still goes through, with its receipt and card.
-    const handoffs = mockStore.world.handoffs.size;
+    // A callback still goes through, with its receipt and card, and closes the handoff the card
+    // opened as it opens its own.
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
     const callback = await turn('Can you call me back?');
     expect(callback.map((ev) => ev.type)).toEqual(['writing', 'receipt', 'message', 'turn_end']);
     expect(shown(callback).map(([, template]) => template)).toEqual(['callback_confirmed']);
     expect(toolsDecided(session.session_id)).toEqual(['native.request_callback']);
-    expect(mockStore.world.handoffs.size).toBe(handoffs + 1);
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'done'], ['callback', 'open']]);
 
     // An agent sent from the chat gets the handoff too, and decides nothing.
     const sent = await call('sendAgent', { params: { slug }, body: { task: 'book_visit', idempotency_key: 'key-1' } });
@@ -872,6 +876,172 @@ describe('the scripted Desk', () => {
     // Its amount reads as render/cards.py `money` writes it: grouped dollars, then two cents digits.
     expect(linkCancelledBlock({ title: 'Leak repair', amount_cents: 123_456 }, 'en').title).toBe('$1,234.56');
     expect(linkCancelledBlock({ title: 'Leak repair', amount_cents: 5 }, 'es').title).toBe('$0.05');
+  });
+
+  it('handoff_card_opens_none_while_a_request_waits_for_the_owner', async () => {
+    // As the kernel's reply check does (plan 01b, the owner's decision of 2026-10-31): while the chat
+    // has a held request waiting for the owner, whose alert and item she already has, the card opens
+    // no handoff, so she sees one item and gets one alert. Once the hold is answered, it opens one.
+    const { session } = await openChat();
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    await send('Can I get 15% off if I pay cash?');
+    await drain();
+    const held = [...mockStore.world.decisions.values()].find((d) => d.decision.session_id === session.session_id && d.decision.state === 'held');
+    expect(held).toBeDefined();
+    const inbox = mockStore.world.inbox.length;
+
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toEqual([]);
+    expect(mockStore.world.inbox.slice(inbox).map(({ entry }) => entry.body)).not.toContain('A visitor is waiting in a conversation the Desk handed to you.');
+
+    expect((await call('answer', { params: { decision_id: held?.decision.decision_id ?? '' }, body: { answer: 'deny_once' } })).status).toBe(200);
+    await drain();
+    // Answering it may itself show the card (the mock's reply after a deny does), which now opens one.
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+  });
+
+  it('handoff_card_opens_an_owner_handoff_as_the_kernel_does', async () => {
+    // As the kernel's reply check does (plan 01b): a reply of Claude's that shows the handoff card
+    // opens an owner handoff of kind `card` for the chat, unless one of either kind is open there.
+    // It has the kernel's own reason and no call-back window, alerts the owner, and is recorded on
+    // the chat just before the reply. The seeded history's stopped reply opened none: the kernel's
+    // seed holds its request without checking a reply.
+    expect(mockStore.world.handoffs.size).toBe(0);
+    const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    const inbox = mockStore.world.inbox.length;
+
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toEqual([
+      { handoff_id: expect.any(String), session_id: session.session_id, reason: 'The Desk handed this to you.', callback_window: null, status: 'open', kind: 'card' },
+    ]);
+    const card = mine()[0]?.handoff_id;
+    const [opened, reply] = desk.ledger.slice(-2).map((entry) => entry.event);
+    expect(opened).toEqual({ kind: 'desk_data', origin: 'kernel', session_id: session.session_id, ref_id: null, summary: { part: 'handoffs', refs: [card], kind: 'card' } });
+    expect(reply).toMatchObject({ kind: 'reply', session_id: session.session_id });
+    expect(mockStore.world.inbox.slice(inbox).map(({ entry, sessionId }) => [entry.to, entry.kind, entry.body, entry.decision_id, sessionId])).toEqual([
+      ['owner', 'alert', 'A visitor is waiting in a conversation the Desk handed to you.', null, null],
+    ]);
+
+    // One at a time: the card shown again opens no second handoff while this one is open.
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toHaveLength(1);
+
+    // Once the owner marks it done, a call back opens one of its own kind, which the card waits on too.
+    expect((await call('handoffDone', { params: { handoff_id: card ?? '' } })).status).toBe(200);
+    await send('Can you call me back?');
+    await drain();
+    expect(mine().map((h) => [h.kind, h.status, h.callback_window])).toEqual([
+      ['card', 'done', null],
+      ['callback', 'open', CALLBACK_WINDOW],
+    ]);
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toHaveLength(2);
+  });
+
+  it('callback_closes_the_open_handoff_and_opens_its_own', async () => {
+    // As the kernel's `native.request_callback` does (plan 01b): a chat holds one open handoff, so a
+    // call back first closes the open one, the card's here, exactly as the owner's mark of done does
+    // (`done`, a `desk_data` entry naming it), then opens its own of kind `callback`. A row's kind
+    // never changes, so the owner keeps one item, the call-back's, and a stale Done on the card's is 409.
+    const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    await send('Can I talk to Maria?');
+    await drain();
+    const card = mine()[0]?.handoff_id ?? '';
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+
+    const ledgered = desk.ledger.length;
+    await send('Can you call me back?');
+    await drain();
+    expect(mine().map((h) => [h.handoff_id === card, h.kind, h.status, h.callback_window])).toEqual([
+      [true, 'card', 'done', null],
+      [false, 'callback', 'open', CALLBACK_WINDOW],
+    ]);
+    // Its closing entry names the call-back that replaced it, which the owner's own mark of done doesn't.
+    const callback = mine()[1]?.handoff_id;
+    const closed = desk.ledger.slice(ledgered).map((entry) => entry.event).filter((event) => event.kind === 'desk_data');
+    expect(closed).toEqual([
+      { kind: 'desk_data', origin: 'kernel', session_id: null, ref_id: null, summary: { part: 'handoffs', refs: [card], replaced_by: callback } },
+    ]);
+    const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(items.filter((item) => item.handoff?.session_id === session.session_id).map((item) => item.handoff?.kind)).toEqual(['callback']);
+    expect((await call('handoffDone', { params: { handoff_id: card } })).status).toBe(409);
+  });
+
+  it('open_handoff_quotes_its_visitors_latest_words', async () => {
+    // As the API reads Needs you (`last_texts`): an open handoff quotes what its visitor wrote last,
+    // on every read, not what they had written when it opened.
+    const { session } = await openChat();
+    const quoted = async () =>
+      ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
+        .filter((item) => item.handoff?.session_id === session.session_id)
+        .map((item) => [item.handoff?.kind, item.from_the_visitor]);
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'Can I talk to Maria?']]);
+    await send('It is about the leak under my sink.');
+    await drain();
+    expect(await quoted()).toEqual([['card', 'It is about the leak under my sink.']]);
+  });
+
+  it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
+    // As the API's turn in a chat the breaker paused: no model call and no "writing", only the
+    // kernel's handoff, which its check stops as paused (`session_paused`, no attempt anyone made)
+    // and which opens the owner's handoff the first time, as any reply showing the card does.
+    const { session, events } = await openChat();
+    const record = mockStore.world.sessions.get(session.session_id);
+    const desk = mockStore.world.desk(deskId);
+    if (!record || !desk) throw new Error('the chat and its Desk are in the copy');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    const attempts = async () => ((await call('safety', { params: { desk_id: deskId } })).body as unknown[]).length;
+    const stopped = await attempts();
+    mockStore.world.pause(record);
+
+    for (const text of ['Hello? Is anyone there?', 'Hello?']) {
+      const before = events.length;
+      await send(text);
+      await drain();
+      const shown = events.slice(before).map(([, ev]) => ev);
+      expect(shown.map((ev) => ev.type), text).toEqual(['message', 'turn_end']);
+      const [message] = shown;
+      expect(message?.type === 'message' && [message.author, message.handoff, message.blocks.map((b) => b.template)]).toEqual(['claude', true, ['handoff']]);
+      expect(desk.ledger.at(-1)?.event).toMatchObject({ kind: 'reply', summary: { ok: false, violations: ['session_paused'] } });
+    }
+    expect(mine().map((h) => [h.kind, h.status])).toEqual([['card', 'open']]);
+    expect(await attempts()).toBe(stopped);
+  });
+
+  it('handoff_done_is_recorded_as_the_kernel_does', async () => {
+    // The owner marking a handoff done, of either kind, is one `desk_data` entry naming it, on no
+    // chat and with no `kind` (plan 01b, `POST /handoffs/{id}/done`).
+    await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    for (const text of ['Can I talk to Maria?', 'Can you call me back?']) {
+      await send(text);
+      await drain();
+      const handoff = [...mockStore.world.handoffs.values()].at(-1)?.handoff;
+      if (handoff?.status !== 'open') throw new Error(`"${text}" opened a handoff`);
+      expect((await call('handoffDone', { params: { handoff_id: handoff.handoff_id } })).status).toBe(200);
+      expect(desk.ledger.at(-1)?.event, handoff.kind).toEqual({
+        kind: 'desk_data',
+        origin: 'kernel',
+        session_id: null,
+        ref_id: null,
+        summary: { part: 'handoffs', refs: [handoff.handoff_id] },
+      });
+    }
   });
 
   it('events_replay_after_seq', async () => {
@@ -1915,6 +2085,47 @@ describe("Today's windows", () => {
     // The quote at 7:00 pm answered a question: Claude replied with no booking, lead, hold or stop.
     expect(today.briefing.newest.lead_or_answer).toMatchObject({ kind: 'answer', line: null });
     expect(today.briefing.total).toBe(1);
+  });
+
+  it('reports_count_what_the_owner_stepped_into_in_their_days', async () => {
+    // As the API counts the reports: over the last `days` local dates, today included (30 unless
+    // asked), the conversations the owner stepped into needed her and Claude handled the rest, as
+    // Today's last 7 days count them. A request held for her, or a chat the handoff card handed to
+    // her, isn't one she stepped into until she answers, takes over, whispers or resumes it.
+    mockStore.reset('rivera');
+    const reports = async (days?: string) => {
+      const answer = await call('reports', { params: { desk_id: deskId }, query: days === undefined ? {} : { days } });
+      expect(answer.status, days).toBe(200);
+      return answer.body as Reports;
+    };
+    const split = (r: Reports) => [r.handled_by_claude, r.needed_you];
+
+    // The seeded copy as its last 7 days count it: Maria whispered in Dana's chat, and the held
+    // request she hasn't answered is still Claude's.
+    const week = (await read()).this_week;
+    expect([week.handled, week.stepped_in]).toEqual([2, 1]);
+    expect(split(await reports('7'))).toEqual([2, 1]);
+
+    // Three days ago Maria whispered in a chat: it needed her in the last 7 days, but not today.
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its Desk');
+    const at = NOW.getTime() - 3 * 24 * HOUR;
+    const earlier = mockStore.world.at(at, () => mockStore.world.addSession(desk));
+    mockStore.world.replay(earlier, at, [{ text: 'Is my water heater still covered?', whisper: 'Check the warranty first.', steps: [] }]);
+    expect(split(await reports('1'))).toEqual([2, 1]);
+    expect(split(await reports('7'))).toEqual([2, 2]);
+    expect(split(await reports())).toEqual([2, 2]);
+
+    // Today a visitor asks for her and the handoff card hands her the chat: Claude's, until she takes it over.
+    const { session } = await openChat();
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(split(await reports('1'))).toEqual([3, 1]);
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
+    expect(split(await reports('1'))).toEqual([2, 2]);
+
+    // A span the API refuses.
+    for (const days of ['0', '366', 'week']) expect((await call('reports', { params: { desk_id: deskId }, query: { days } })).status, days).toBe(422);
   });
 });
 
