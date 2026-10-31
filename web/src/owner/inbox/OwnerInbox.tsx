@@ -62,7 +62,7 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
     refetchOnWindowFocus: () => (openNow.current ? 'always' : false),
     refetchOnReconnect: () => (openNow.current ? 'always' : false),
   });
-  const failure = useReadFailure(inbox);
+  const failure = useReadFailure(inbox, { pausedRoute: 'ownerInbox' });
 
   // Read again as the sheet opens, so it shows what is there now.
   const { refetch } = inbox;

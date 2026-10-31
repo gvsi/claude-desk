@@ -1,4 +1,5 @@
 import { beforeAll, expect, it, onTestFinished, vi } from 'vitest';
+import { onlineManager, QueryClient } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { cleanup } from 'vitest-browser-react';
@@ -14,8 +15,9 @@ import { RIVERA } from '../mocks/seed.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectSkeletonLoad, expectSkeletonStill, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
 import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
-import { watchPages, watchTop } from '../test/watch.ts';
+import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
+import { needsYouKey, OWNER_INBOX_KEY, todayKey } from './useDesks.ts';
 
 beforeAll(loadWebFonts);
 
@@ -199,6 +201,68 @@ it.each(['desktop', 'phone'] as const)('deadline_hands_off_to_todays_skeleton at
     release: needsYou.release,
   });
   expect(gaps()).toBe(0);
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it('deadline_waits_for_the_demo_inbox', { timeout: 10_000 }, async () => {
+  const inbox = holdReads(ROUTES.ownerInbox.path);
+  const sawInboxLoader = watchFor('Opening your Demo inbox');
+  const gaps = watchSkeletonGaps('.cd-greeting__title');
+  const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+  await vi.waitFor(() => expect(document.querySelector('.cd-owner-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  await nextFrames();
+  await expectSkeletonLoad({
+    status: 'Opening your Desk', continues: true, anchors: TODAY_CONTENT_ANCHORS,
+    open: async () => {
+      await vi.waitFor(() => expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 5_000 });
+      expect(inbox.held()).toBe(1);
+      expect(document.querySelector('.cd-greeting__title')).toBeNull();
+    },
+    release: inbox.release,
+  });
+  await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+  expect(sawInboxLoader()).toBe(false);
+  expect(gaps()).toBe(0);
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  await expectScreenBasics(document.body, { owner: true });
+});
+
+it.each(['today', 'needsYou', 'ownerInbox'] as const)('paused_today_reads_land_their_own_errors before %s starts', async (route) => {
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
+  await expect.element(screen.getByRole('heading', { name: 'Needs you', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+  await router.navigate(`/app/${RIVERA.deskId}/conversations`);
+  await expect.element(screen.getByRole('heading', { name: 'Conversations', exact: true })).toBeVisible();
+  const key = route === 'today' ? todayKey(RIVERA.deskId) : route === 'needsYou' ? needsYouKey(RIVERA.deskId) : OWNER_INBOX_KEY;
+  queryClient.removeQueries({ queryKey: key });
+  const read = holdReads(ROUTES[route].path.replace('{desk_id}', RIVERA.deskId));
+  onTestFinished(read.release);
+  const sent = mockStore.requests.filter(({ key }) => key === route).length;
+  onlineManager.setOnline(false);
+  onTestFinished(() => onlineManager.setOnline(true));
+  await router.navigate(TODAY);
+  await vi.waitFor(() => expect(queryClient.getQueryState(key)?.fetchStatus).toBe('paused'));
+  const section = screen.getByRole('region', { name: route === 'today' ? 'Since last night' : route === 'needsYou' ? 'Needs you' : 'Demo inbox', exact: true });
+  const line = route === 'ownerInbox' ? `Couldn't open your Demo inbox. ${OWNER_ERROR_COPY.network}` : OWNER_ERROR_COPY.network;
+  await expect.element(section.getByRole('alert').getByText(line, { exact: true }), { timeout: 2_000 }).toBeVisible();
+  const retry = section.getByRole('button', { name: 'Try again', exact: true });
+  await expect.element(retry).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  expect(mockStore.requests.filter(({ key }) => key === route)).toHaveLength(sent);
+  expect(read.held()).toBe(0);
+  await retry.click();
+  await nextFrames();
+  expect(document.querySelector('[aria-busy="true"]')).toBeNull();
+  onlineManager.setOnline(true);
+  await vi.waitFor(() => expect(read.held()).toBe(1));
+  await expect.element(section.getByRole('alert').getByText(line, { exact: true })).toBeVisible();
+  read.release();
+  await expect.element(screen.getByText(line, { exact: true })).not.toBeInTheDocument();
+  expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
   await expectScreenBasics(document.body, { owner: true });
 });
 

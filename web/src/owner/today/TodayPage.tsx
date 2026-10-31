@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
-import { ownerErrorCopy } from '../../api/http.ts';
 import { Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
@@ -13,8 +12,9 @@ import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, heldOldestFirst, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
+import { useReadFailure } from '../useReadFailure.ts';
 import { LiveNow } from './LiveNow.tsx';
-import { NeedsYou, type CallbackItem, type ReadFailure } from './NeedsYou.tsx';
+import { NeedsYou, type CallbackItem } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
 import { requestInHash } from './requestLink.ts';
 import { SinceLastNight } from './SinceLastNight.tsx';
@@ -82,15 +82,7 @@ export function TodayPage() {
   // nothing needs the owner. It stays until a read works: React Query starts each read of a query
   // with nothing read yet as loading again and drops the error, so the section would blink out at
   // every poll, and while "Try again" reads.
-  const [failure, setFailure] = useState<{ at: number; error: unknown } | null>(null);
-  if (needsYou.error !== null && failure?.at !== needsYou.errorUpdatedAt) setFailure({ at: needsYou.errorUpdatedAt, error: needsYou.error });
-  const [retrying, setRetrying] = useState(false);
-  const retry = () => {
-    setRetrying(true);
-    void needsYou.refetch().finally(() => setRetrying(false));
-  };
-  const readFailure: ReadFailure | null =
-    failure !== null && needsYou.errorUpdatedAt > needsYou.dataUpdatedAt ? { line: ownerErrorCopy(failure.error), retrying, retry } : null;
+  const readFailure = useReadFailure(needsYou, { pausedRoute: 'needsYou' });
 
   const registerCard = useCallback((decisionId: string, el: HTMLElement | null) => {
     if (el) cards.current.set(decisionId, el);
@@ -117,7 +109,7 @@ export function TodayPage() {
   });
   if (visit.key !== location.key) setVisit({ key: location.key, spent: false, rereadAfter: null });
   const requested = visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
-  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt;
+  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused;
   const { cardFor: answeredCardFor } = answeredFocus;
   const { refetch: readNeedsYou } = needsYou;
   useEffect(() => {
@@ -136,7 +128,7 @@ export function TodayPage() {
   }, [opening, requested, inboxOpen, readWorked, readAt, visit.rereadAfter, location.key, answeredCardFor, readNeedsYou]);
   // While it waits because Needs you can't be read, the owner's first pointer or key press spends
   // it: a read that works later doesn't pull focus from what they're doing by then.
-  const readFailing = needsYou.errorUpdatedAt > needsYou.dataUpdatedAt;
+  const readFailing = needsYou.errorUpdatedAt > needsYou.dataUpdatedAt || needsYou.isPaused;
   const waitsOnFailure = requested !== null && readFailing;
   useEffect(() => {
     if (!waitsOnFailure) return undefined;

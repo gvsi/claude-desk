@@ -151,18 +151,28 @@ export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
 }
 
 /**
- * Whether a Desk's Today, just opened, is still reading what it first shows (its Today and Needs
- * you), so it keeps its sections back and they open together rather than one by one, each pushing
+ * Whether a Desk's Today, just opened, is still reading what it first shows (its Today, Needs you
+ * and Demo inbox), so its sections open together rather than one by one, each pushing
  * the next down, when the owner comes from another Desk or another page. A first visit's page and a
  * reload's loading page read them first (`readTodayAhead`, `useTodayReadAhead`). Reads already in,
- * or failed, open it at once; else its skeleton continues until both reads settle, even past the
- * frame's `READ_AHEAD_MS` deadline (plan 08c, decision 7). Once open, it stays open.
+ * or failed, open it at once; else its skeleton continues until all three reads settle, even past
+ * the frame's `READ_AHEAD_MS` deadline (plan 08c, decision 7). Offline reads paused before a send or
+ * retry also settle opening: their sections show the existing error UI. Once open, it stays open.
  */
 export function useTodayOpening(deskId: string): boolean {
   const queryClient = useQueryClient();
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
-  const read = (today.data !== undefined || today.isError) && (needsYou.data !== undefined || needsYou.isError);
+  const inbox = useQuery({
+    queryKey: OWNER_INBOX_KEY,
+    queryFn: () => request('ownerInbox'),
+    staleTime: FRESH_MS,
+    retryOnMount: false,
+    // The readiness observer stays mounted; only OwnerInbox's open sheet asks for these rereads.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const read = [today, needsYou, inbox].every((query) => query.data !== undefined || query.isError || query.isPaused);
   const [open, setOpen] = useState(read);
   if (read && !open) setOpen(true);
   // Taken once Today has it: the Desk's next Today is a later visit, with a wait of its own.
