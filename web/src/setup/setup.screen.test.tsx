@@ -12,12 +12,15 @@ import type { RenderResult } from 'vitest-browser-react';
 
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
+import type { RuleCard } from '../api/contracts.ts';
 import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
-import { OUTCOME_GROUP_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
+import { hubSections } from '../owner/rules/hub.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { worker } from '../mocks/browser.ts';
 import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextStart } from '../mocks/setup.ts';
+import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
@@ -136,6 +139,14 @@ function deskOf(state: SetupState): DeskRecord {
 
 /** Each tool's status in the mock, by name. */
 const statuses = (state: SetupState, tools: readonly string[]) => tools.map((tool) => deskOf(state).tools.find((t) => t.tool === tool)?.status);
+
+/** Each tool a connector's review lists, with the outcome it starts at, in the owner's words. */
+function reviewOutcomes(screen: RenderResult): [string, string][] {
+  return [...screen.container.querySelectorAll('.cd-connector-review__tool')].map((tool) => [
+    tool.querySelector('.cd-connector-review__name')?.textContent?.trim() ?? '',
+    tool.querySelector('.cd-outcome, .cd-outcome-menu__phrase')?.textContent?.trim() ?? '',
+  ]);
+}
 
 /** A row of the tools list, by its connector's name. */
 const connectorRow = (screen: RenderResult, name: string) => screen.getByRole('listitem').filter({ hasText: new RegExp(`^${name}`) });
@@ -709,6 +720,59 @@ describe('setup', () => {
     expect(requests('confirmRules', mark)).toHaveLength(1);
     expect(statuses(state, tools)).toEqual(['enabled', 'enabled']);
     await expect.element(connectorRow(screen, 'Payments').getByText('On', { exact: true })).toBeVisible();
+  });
+
+  it('tools_start_at_the_outcome_rules_shows', async () => {
+    // Each tool a review turns on starts at the outcome Rules shows for the same rules once it is on:
+    // the most that runs on its own for some visitor.
+    const state = await interviewAtTools();
+    const desk = deskOf(state);
+    const rule = (fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'who' | 'reason'> & Partial<RuleCard>): RuleCard => ({
+      mode: 'auto',
+      person_id: null,
+      agent_key_id: null,
+      max_amount_cents: null,
+      max_discount_bp: 0,
+      hours: null,
+      review: false,
+      is_default: false,
+      ...fields,
+    });
+    desk.policy.auto_money_cap_cents = 50_000;
+    desk.policy.cards = [
+      ...desk.policy.cards,
+      // Verified customers pay by link on their own, up to $500.
+      rule({ card_id: 'card-link-verified', applies_to: 'native.payment_link', who: 'verified', max_amount_cents: 50_000, reason: 'Verified customers pay by link up to $500.' }),
+      // Visiting agents pay a deposit on their own on weekdays.
+      rule({
+        card_id: 'card-deposit-weekdays',
+        applies_to: 'native.charge_mandate',
+        who: 'anyone',
+        max_amount_cents: 2_000,
+        hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' },
+        reason: 'Agents pay the deposit on weekdays.',
+      }),
+      // Customers get their own documents.
+      rule({ card_id: 'card-docs-owner', applies_to: 'native.release_document', who: 'record_owner', reason: 'Customers get their own documents.' }),
+    ];
+    const rules = rulesView(desk);
+    const onRules = hubSections({ ...rules, tools: rules.tools.map((tool) => ({ ...tool, status: 'enabled' as const, review_reason: null })) }, null).flatMap((section) => section.tools);
+    const asRules = (names: readonly string[]) => names.map((name) => [name, OUTCOME_WORDS[onRules.find((tool) => tool.name === name)?.mode ?? 'ask']]);
+
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Add Payments' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Payments/ })).toBeVisible();
+    expect(reviewOutcomes(screen)).toEqual([
+      ['Payment link', 'Automatic'],
+      ['Charge within a signed limit', 'Automatic'],
+    ]);
+    expect(reviewOutcomes(screen)).toEqual(asRules(['Payment link', 'Charge within a signed limit']));
+
+    await screen.getByRole('button', { name: 'Cancel' }).click();
+    await screen.getByRole('button', { name: 'Add Documents' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Documents/ })).toBeVisible();
+    expect(reviewOutcomes(screen)).toEqual([['Share a document', 'Automatic']]);
+    expect(reviewOutcomes(screen)).toEqual(asRules(['Share a document']));
   });
 
   it('tool_confirm_conflicts_fail_closed', async () => {

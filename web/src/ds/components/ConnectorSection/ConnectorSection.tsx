@@ -22,11 +22,12 @@ export interface ToolSummaryView {
   /** Its rule words: "Anyone · No discounts", "2 rules · 1 shared", "Always on". */
   summary: string;
   /**
-   * The outcome of the most general non-default rule that governs it (the default "Ask me first"
-   * only when no rule of the owner's does).
+   * The tool's outcome: the most that runs on its own for some visitor under the owner's rules, so
+   * the row never reads safer than what runs ("Ask me first" when no rule of the owner's covers
+   * it). The screen works it out.
    */
   mode: RuleMode;
-  /** That rule's formatted amount limit, for an auto card with `max_amount_cents` ("$300"). */
+  /** That outcome's formatted amount limit, for "Automatic" with one ("$300"). */
   limit?: string;
   /** Its profile's status: a tool that needs review or is off says so in place of its outcome. */
   status: ToolStatus;

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { PolicyVersionOut, RulesDraft, RulesPreset, Suggestion } from '../../api/views.ts';
@@ -21,19 +21,19 @@ import {
   SuggestionChips,
   TextLink,
   type NoticeTone,
-  type RulesLinkProps,
 } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
+import { deskPath } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
 import { hubSections, parseLimit } from './hub.ts';
 import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
-import { moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
+import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
 import './RulesPage.css';
 
@@ -46,20 +46,7 @@ const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up
 const COMPOSER_LABEL = 'Ask Claude to change a rule';
 const COMPOSER_HELPER = 'Claude shows you the change and example situations before anything applies.';
 
-/** The payment limit's field, when the API says the amount is above the platform's ceiling. */
-const ABOVE_CEILING = 'No single payment can be above $10,000.';
-
-const deskPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}`;
 const draftPath = (deskId: string, version: number) => `${deskPath(deskId)}/rules/drafts/${version}`;
-
-/** A section's or tool's link through the router, so the app stays loaded. */
-function RouterLink({ href, children, ...rest }: RulesLinkProps) {
-  return (
-    <Link to={href} {...rest}>
-      {children}
-    </Link>
-  );
-}
 
 /** The Desk's suggested rules, read with the rules. */
 function suggestionsQuery(deskId: string) {

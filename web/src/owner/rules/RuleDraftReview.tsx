@@ -1,6 +1,6 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
@@ -16,13 +16,12 @@ import {
   PageHeader,
   TextLink,
   ruleDiff,
-  type RulesLinkProps,
 } from '../../ds/index.ts';
 import { formatCents } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { cancelsLinksFor, changeRows } from './changeRows.ts';
 import { checkStatus } from './checkStatus.ts';
 import { draftFromAnswer, draftFromDiff, type RuleDraft } from './drafts.ts';
@@ -52,15 +51,6 @@ const NOT_CONFIRMED = "We couldn't confirm whether your change went through. Ope
 const NOT_OPEN = "This draft isn't open anymore. Ask for the change again from Rules.";
 
 const rulesPath = (deskId: string) => `/app/${encodeURIComponent(deskId)}/rules`;
-
-/** The breadcrumb's link through the router, so the app stays loaded. */
-function RouterLink({ href, children, ...rest }: RulesLinkProps) {
-  return (
-    <Link to={href} {...rest}>
-      {children}
-    </Link>
-  );
-}
 
 /** The draft changes the payment limit and no rule: nothing else to review. */
 function onlyTheLimit(draft: RuleDraft): boolean {

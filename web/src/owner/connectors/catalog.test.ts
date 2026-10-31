@@ -8,7 +8,8 @@ import type { ToolName } from '../../api/contracts.ts';
 import type { ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import type { ConnectorIconName } from '../../ds/index.ts';
-import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOf, connectorOn, toolState } from './catalog.ts';
+import { riveraTools } from '../../mocks/seed.ts';
+import { CONNECTORS, TOOL_NAMES, TOOL_RESOURCES, connectorByKey, connectorOf, connectorOn, hasRecordOwner, toolState } from './catalog.ts';
 
 /** Every tool the contracts name: a tool added to or dropped from them fails to compile here. */
 const EVERY_TOOL = {
@@ -113,6 +114,15 @@ describe('the connector catalog', () => {
     expect(TOOL_NAMES['native.fetch_website'].name).toBe('Website reading');
     expect(TOOL_NAMES['native.read_memory'].name).toBe('Memory reading');
     for (const tool of Object.keys(EVERY_TOOL) as ToolName[]) expect(TOOL_NAMES[tool].line, tool).toMatch(/^[A-Z].*\.$/);
+  });
+
+  it('record_owners_only_where_the_kernel_resolves_one', () => {
+    // What each tool acts on is its profile's, as the mock serves the kernel's profiles.
+    for (const profile of riveraTools()) expect(TOOL_RESOURCES[profile.tool], profile.tool).toBe(profile.resource_kind);
+    // Only a document or a charge has an owner, so only these tools' records do.
+    const owned = (Object.keys(EVERY_TOOL) as ToolName[]).filter((tool) => hasRecordOwner(tool));
+    expect(owned).toEqual(['native.release_document', 'payments.list_charges', 'payments.create_refund']);
+    expect(hasRecordOwner('payments.unknown')).toBe(false);
   });
 
   it('tool_states_follow_the_rows', () => {

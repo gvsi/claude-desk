@@ -18,6 +18,7 @@ import {
   SwitcherMenu,
   Wordmark,
   type NavKey,
+  type RulesLinkProps,
   type SidebarHrefs,
   type SidebarLinkProps,
   type SwitcherPick,
@@ -98,8 +99,11 @@ function hrefsFor(deskId: string): SidebarHrefs {
   return connectors === undefined ? hrefs : { ...hrefs, connectors };
 }
 
-/** The sidebar's rows (and a page's SubNav rows) as router links, so moving between pages keeps the app loaded. */
-export function RouterLink({ href, children, ...rest }: SidebarLinkProps) {
+/**
+ * A link the design system's pieces draw (the sidebar's rows, a page's SubNav, a breadcrumb, a
+ * rules or connector row) through the router, so moving between pages keeps the app loaded.
+ */
+export function RouterLink({ href, children, ...rest }: SidebarLinkProps | RulesLinkProps) {
   return (
     <Link to={href} {...rest}>
       {children}
