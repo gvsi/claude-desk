@@ -5,6 +5,7 @@
    the first section's head would, with the loading line or the empty state under it. On a phone
    the sections are 16 px apart. */
 
+/* No size token is the board's 760 px column (the content tokens are 960 and 640). */
 .cd-people {
   display: flex;
   flex-direction: column;
@@ -12,6 +13,16 @@
   max-width: 760px;
   min-width: 0;
   margin: 0 auto;
+}
+
+/* The concept footer under Customers sits in the page's column, as the board draws it. The frame
+   draws the footer; the page places it, as the design system's board does. */
+.cd-owner-layout:has(> .cd-people) > .cd-owner-layout__footer {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 760px;
+  margin-right: auto;
+  margin-left: auto;
 }
 
 .cd-people > .cd-notice,
@@ -62,6 +73,7 @@
   min-width: 0;
 }
 
+/* No size token is the board's 320 px contact column. */
 .cd-person__columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;

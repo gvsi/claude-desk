@@ -255,6 +255,17 @@ describe('customers', () => {
   });
 
   // Tab stops in the page: each person's row, then the recorded-history link, and no lead.
+  it('leads_newest_first', async () => {
+    // The list comes oldest first, as the mock keeps them; the page puts the newest first.
+    addLead({ name: 'Ana Reyes', note: JORDAN.note, minutesAgo: 60 * 24 * 4 });
+    addLead(JORDAN);
+    addLead(SAM);
+    const { screen } = await renderRoute(PEOPLE);
+    const leads = screen.getByRole('list', { name: 'Leads' });
+    await expect.element(leads.getByText('Ana Reyes', { exact: true })).toBeVisible();
+    expect(leads.getByRole('listitem').elements().map((row) => row.querySelector('.cd-lead-row__name')?.textContent)).toEqual([SAM.name, JORDAN.name, 'Ana Reyes']);
+  });
+
   it('lead_without_a_note_is_one_line', async () => {
     // A lead who left only their name: the name and the time, and no empty line under them.
     addLead({ name: 'Lee Park', note: null, minutesAgo: 5 });
@@ -285,6 +296,11 @@ describe('customers', () => {
     expect(Math.round((column?.getBoundingClientRect().left ?? 0) - (content?.getBoundingClientRect().left ?? 0))).toBe(
       Math.round((content?.getBoundingClientRect().right ?? 0) - (column?.getBoundingClientRect().right ?? 0)),
     );
+    // The concept footer in the same column, as the board draws it.
+    const footer = screen.container.querySelector('[data-ds="concept-footer"]')?.getBoundingClientRect();
+    expect(Math.round(footer?.left ?? 0)).toBe(Math.round(column?.getBoundingClientRect().left ?? -1));
+    expect(footer?.right ?? Infinity).toBeLessThanOrEqual(column?.getBoundingClientRect().right ?? 0);
+
     // Each section's head over a hairline; every row one height, tagged or not.
     for (const head of main.querySelectorAll('.cd-people__head')) {
       expect(getComputedStyle(head).borderBottomWidth).toBe('1px');
