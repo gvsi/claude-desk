@@ -966,7 +966,7 @@ class StatementsOn:
 def test_desk_memory_migration_goes_down_and_up_as_non_superuser(scratch, monkeypatch):
     script = ScriptDirectory.from_config(alembic_config())
     module = script.get_revision("desk_simulated_memory").module
-    assert module.down_revision == "kernel_ro_decision_policy_ids"
+    assert module.down_revision == "kernel_ro_knowledge_created_at"
     admin = scratch.conn
     assert "simulated_memory" in columns(admin, "kernel", "desks")
     assert "simulated_memory" not in columns(admin, "kernel_ro", "desks")
