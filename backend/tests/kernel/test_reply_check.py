@@ -1189,6 +1189,109 @@ def test_booking_claims_in_prose_are_blocked(prose, rule_id, span):
     assert reply_check.scan_prose(prose, booking_card=True) == []
 
 
+# Business appointment names need the same card boundary as a booking or a visit.
+BUSINESS_BOOKINGS_EN = [
+    ("booking", "bookings"), ("appointment", "appointments"), ("visit", "visits"),
+    ("reservation", "reservations"), ("slot", "slots"), ("spot", "spots"),
+    ("viewing", "viewings"), ("showing", "showings"), ("tour", "tours"),
+    ("class", "classes"), ("lesson", "lessons"), ("session", "sessions"),
+    ("table", "tables"), ("room", "rooms"), ("stay", "stays"),
+    ("consultation", "consultations"), ("consult", "consults"), ("fitting", "fittings"),
+    ("tasting", "tastings"), ("treatment", "treatments"), ("massage", "massages"),
+    ("haircut", "haircuts"), ("trial", "trials"), ("demo", "demos"), ("pickup", "pickups"),
+]
+
+
+@pytest.mark.parametrize("prose", [
+    "Your viewing is confirmed.", "Your class is confirmed.", "Your lesson is confirmed.",
+    "Your tour is set.", "Your spot is saved.", "We've reserved your table.",
+    "Your session is confirmed.", "Your table is confirmed.", "Your consultation is confirmed.",
+    "Your stay is confirmed.", "Your fitting is booked in.", "Your tasting is all set.",
+    "Your service call is confirmed.", "Your service call is set.",
+    *(f"The {noun} is confirmed." for noun, _ in BUSINESS_BOOKINGS_EN),
+    *(f"The {plural} are confirmed." for _, plural in BUSINESS_BOOKINGS_EN),
+    *(f"{noun}: confirmed." for pair in BUSINESS_BOOKINGS_EN for noun in pair),
+    *(f"Your {noun}: all set." for pair in BUSINESS_BOOKINGS_EN for noun in pair),
+    *(f"Your {noun} is saved." for noun, _ in BUSINESS_BOOKINGS_EN),
+    *(f"We've {verb} your {noun}." for pair in BUSINESS_BOOKINGS_EN for noun in pair
+      for verb in ("reserved", "booked", "confirmed", "scheduled")),
+])
+def test_business_booking_claims_en_need_a_card(prose):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == [
+        ("promise_word", "lex.en.booking")]
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+
+
+@pytest.mark.parametrize("prose", [
+    "Viewing times are below.", "Would you like to book a viewing?", "Pick a time for your class.",
+    "Your details are saved.", "Here are the open times for a tasting.",
+    "Is your table for the patio?", "Have you booked your lesson yet?",
+    "Once your tour is set, you'll get a card.",
+    *(f"Once your {noun} is confirmed, you'll get a card." for noun, _ in BUSINESS_BOOKINGS_EN),
+    *(f"Once your {plural} are saved, you'll get a card." for _, plural in BUSINESS_BOOKINGS_EN),
+    *(f"Have you booked your {noun} yet?" for pair in BUSINESS_BOOKINGS_EN for noun in pair),
+    *(f"All scheduled {plural} include a reminder." for _, plural in BUSINESS_BOOKINGS_EN),
+    *(f"Once we've reserved your {noun}, you'll get a card." for noun, _ in BUSINESS_BOOKINGS_EN),
+])
+def test_business_booking_words_en_without_a_claim_pass(prose):
+    assert reply_check.scan_prose(prose) == []
+
+
+BUSINESS_BOOKINGS_ES = [
+    ("cita", "citas", "a"), ("reserva", "reservas", "a"), ("visita", "visitas", "a"),
+    ("turno", "turnos", "o"), ("hora", "horas", "a"), ("plaza", "plazas", "a"),
+    ("visita guiada", "visitas guiadas", "a"), ("recorrido", "recorridos", "o"),
+    ("clase", "clases", "a"), ("lección", "lecciones", "a"), ("sesión", "sesiones", "a"),
+    ("mesa", "mesas", "a"), ("habitación", "habitaciones", "a"), ("estancia", "estancias", "a"),
+    ("estadía", "estadías", "a"), ("alojamiento", "alojamientos", "o"),
+    ("consulta", "consultas", "a"), ("prueba", "pruebas", "a"),
+    ("degustación", "degustaciones", "a"), ("tratamiento", "tratamientos", "o"),
+    ("masaje", "masajes", "o"), ("corte de pelo", "cortes de pelo", "o"),
+    ("demostración", "demostraciones", "a"), ("recogida", "recogidas", "a"),
+]
+
+
+@pytest.mark.parametrize("prose", [
+    "Tu visita está confirmada.", "Tu clase está confirmada.", "Tu lección está confirmada.",
+    "Tu visita guiada está lista.", "Tu plaza está guardada.", "Hemos reservado tu mesa.",
+    "Tu sesión está confirmada.", "Tu mesa está confirmada.", "Tu consulta está confirmada.",
+    "Tu estancia está confirmada.", "Tu prueba está agendada.", "Tu degustación está lista.",
+    *(f"Tu {noun} está confirmad{gender}." for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Tus {plural} están confirmad{gender}s." for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"{noun}: confirmad{gender}." for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"{plural}: confirmad{gender}s." for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Tu {noun} está guardad{gender}." for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Tus {plural} están list{gender}s." for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Hemos {verb} tu {noun}." for noun, _, _ in BUSINESS_BOOKINGS_ES
+      for verb in ("reservado", "agendado", "confirmado", "programado")),
+    *(f"He reservado tus {plural}." for _, plural, _ in BUSINESS_BOOKINGS_ES),
+])
+def test_business_booking_claims_es_need_a_card(prose):
+    assert [(v.kind, v.rule_id) for v in reply_check.scan_prose(prose)] == [
+        ("promise_word", "lex.es.booking")]
+    assert reply_check.scan_prose(prose, booking_card=True) == []
+
+
+@pytest.mark.parametrize("prose", [
+    "Los horarios de visita están abajo.", "¿Quieres reservar una visita?",
+    "Elige un horario para tu clase.", "Tus datos están guardados.",
+    "Aquí están los horarios disponibles para una degustación.", "¿Tu mesa es para el patio?",
+    "¿Ya has reservado tu lección?", "Cuando tu visita guiada esté lista, recibirás una tarjeta.",
+    *(f"Cuando tu {noun} está confirmad{gender}, recibirás una tarjeta."
+      for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Cuando tus {plural} están list{gender}s, recibirás una tarjeta."
+      for _, plural, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Cuando tu {noun} está guardad{gender}, recibirás una tarjeta."
+      for noun, _, gender in BUSINESS_BOOKINGS_ES),
+    *(f"Cuando hemos reservado tu {noun}, recibirás una tarjeta."
+      for noun, _, _ in BUSINESS_BOOKINGS_ES),
+    *(f"¿Has reservado tu {noun}?" for noun, _, _ in BUSINESS_BOOKINGS_ES),
+    *(f"No hemos reservado tu {noun}." for noun, _, _ in BUSINESS_BOOKINGS_ES),
+])
+def test_business_booking_words_es_without_a_claim_pass(prose):
+    assert reply_check.scan_prose(prose) == []
+
+
 def test_a_booking_card_lets_only_the_booking_claim_through():
     """The owner's decision of 2026-10-30 passes a booking claim beside its card, and nothing else
     the scan finds: a day, a digit or a promise word in the same prose still blocks."""

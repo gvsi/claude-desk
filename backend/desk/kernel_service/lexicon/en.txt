@@ -79,8 +79,10 @@ promise	(?<!count )(?<!counts )(?<!counted )(?<!counting )(?<!rely )(?<!relies )
 promise	no[\s-]+(?:[^\W\d_]+[\s-]+){0,2}fees?
 
 # Booking confirmations, which only a booking card makes, written from a claim's parts rather than
-# sample phrasings. A claim is a booking noun (booking, appointment, visit, reservation, slot,
-# spot) or a subject, a form of "be" ("is", "are", "was", "were", "has been", "have been",
+# sample phrasings. The same noun alternation in every line covers what different businesses
+# book: viewings, classes, tables, consultations, treatments and pickups as well as visits,
+# in the singular and plural (including "classes"). A claim is a booking noun or a subject,
+# a form of "be" ("is", "are", "was", "were", "has been", "have been",
 # "'s", "'re", "'s been", with an adverb before "been": "has already been"), up to two adverbs
 # (all, now, already, just, also, officially, successfully, finally), and a participle (booked,
 # confirmed, scheduled, reserved, set): "your reservation is confirmed", "the spot's been set",
@@ -91,11 +93,12 @@ promise	no[\s-]+(?:[^\W\d_]+[\s-]+){0,2}fees?
 # a conjunction standing alone, so a condition among them keeps its claim ("the day after your
 # visit is booked") and a phrase is no part of the noun ("the cost of visits is set"), while a
 # hyphenated one is ("your drop-in visit"). With no determiner, no word comes straight before the
-# noun, so "most visits are booked ahead" passes. Anything of yours booked, scheduled or reserved
-# is a claim too, up to three words after "your" but not past a condition ("your appointment with
-# Maria is booked", not "your reminder after it is booked").
-booking	(?:(?:your|the|this|that|my|our|[^\W\d_]+['’]s)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}|(?<![^\W_] ))(?:booking|appointment|visit|reservation|slot|spot)s?(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)?|['’]re|[\s-]+(?:is|are|was|were|ha(?:s|ve)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been))[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set)
-booking	your(?:[\s-]+(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as)\s))[^\W\d_]+){1,3}(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)?|['’]re|[\s-]+(?:is|are|was|were|ha(?:s|ve)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been))[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|scheduled|reserved)
+# noun, so "most visits are booked ahead" passes. "Saved" claims a place only after a booking
+# noun: "your spot is saved", while "your details are saved" passes. Anything of yours booked,
+# scheduled, reserved, confirmed or set is a claim too, up to three words after "your" but not past
+# a condition ("your appointment with Maria is booked", not "your reminder after it is booked").
+booking	(?:(?:your|the|this|that|my|our|[^\W\d_]+['’]s)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}|(?<![^\W_] ))(?:bookings?|appointments?|visits?|reservations?|slots?|spots?|viewings?|showings?|tours?|class(?:es)?|lessons?|sessions?|tables?|rooms?|stays?|consultations?|consults?|fittings?|tastings?|treatments?|massages?|haircuts?|trials?|demos?|pickups?)(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)?|['’]re|[\s-]+(?:is|are|was|were|ha(?:s|ve)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been))[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set|saved)
+booking	your(?:[\s-]+(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as)\s))[^\W\d_]+){1,3}(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)?|['’]re|[\s-]+(?:is|are|was|were|ha(?:s|ve)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been))[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|scheduled|reserved|confirmed|set)
 # The subjects are you, it, that and everything ("you were booked", "it's all booked",
 # "everything's been reserved"), and "we have you" ("we've got you booked", "I have you down for
 # that time"), with an adverb before "have" or "got" too ("we already have you booked", "we've
@@ -110,15 +113,15 @@ booking	(?:[il]|we)(?:[\s-]+(?:all|now|already|just|also|officially|successfully
 # where the object starts a clause of its own, and a booking noun not after "you", "who" or a
 # negation, where the booking is the visitor's own or none ("Have you booked your appointment
 # yet?", "Customers who booked a visit got a reminder.", "We haven't booked your visit yet.").
-booking	(?:[il]|we|she|he|they)(?:['’]ve|['’]s|[\s-]+ha(?:ve|s))?(?:[\s-]+(?:now|already|just|also|officially|successfully|finally))?[\s-]+(?:booked|scheduled|confirmed|reserved)[\s-]+(?:you|it(?!['’][^\W\d_])|(?:your|the|a)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}(?:booking|appointment|visit|reservation|slot|spot)s?)
+booking	(?:[il]|we|she|he|they)(?:['’]ve|['’]s|[\s-]+ha(?:ve|s))?(?:[\s-]+(?:now|already|just|also|officially|successfully|finally))?[\s-]+(?:booked|scheduled|confirmed|reserved)[\s-]+(?:you|it(?!['’][^\W\d_])|(?:your|the|a)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}(?:bookings?|appointments?|visits?|reservations?|slots?|spots?|viewings?|showings?|tours?|class(?:es)?|lessons?|sessions?|tables?|rooms?|stays?|consultations?|consults?|fittings?|tastings?|treatments?|massages?|haircuts?|trials?|demos?|pickups?))
 booking	(?:booked|scheduled|confirmed|reserved)[\s-]+you(?!['’][^\W\d_])
-booking	(?<!you )(?<!you['’]ve )(?<!you have )(?<!you already )(?<!you['’]ve already )(?<!you ever )(?<!you['’]ve ever )(?<!who )(?<!who['’]ve )(?<!n['’]t )(?<!not )(?<!never )(?:booked|scheduled|confirmed|reserved)[\s-]+(?:your|the|a)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}(?:booking|appointment|visit|reservation|slot|spot)s?
+booking	(?<!you )(?<!you['’]ve )(?<!you have )(?<!you already )(?<!you['’]ve already )(?<!you ever )(?<!you['’]ve ever )(?<!who )(?<!who['’]ve )(?<!n['’]t )(?<!not )(?<!never )(?:booked|scheduled|confirmed|reserved)[\s-]+(?:your|the|a)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}(?:bookings?|appointments?|visits?|reservations?|slots?|spots?|viewings?|showings?|tours?|class(?:es)?|lessons?|sessions?|tables?|rooms?|stays?|consultations?|consults?|fittings?|tastings?|treatments?|massages?|haircuts?|trials?|demos?|pickups?)
 # The headline, with the noun first and a blank or a colon before the participle ("Booking
 # confirmed.", "Visit: scheduled."), where no word comes straight before it, so "is your booking
 # confirmed?" passes; after a determiner, with a colon or a dash ("Your booking: confirmed.",
 # "Your appointment — confirmed."); or with "all" first ("All booked."), but not before a booking
 # noun ("all scheduled visits include a call ahead"), and not before "set", which says something
 # is done ("All set, I've passed your message on.").
-booking	(?<![^\W_] )(?:booking|appointment|visit|reservation|slot|spot)s?(?:[\s-]+|[\s-]*:[\s-]*)(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set)
-booking	(?:your|the|this|that|my|our|[^\W\d_]+['’]s)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}(?:booking|appointment|visit|reservation|slot|spot)s?[\s-]*[:-][\s-]*(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set)
-booking	(?<![^\W_] )all[\s-]+(?:booked|confirmed|scheduled|reserved)(?![\s-]+(?:[^\W\d_]+[\s-]+)?(?:booking|appointment|visit|reservation|slot|spot)s?(?!\w))
+booking	(?<![^\W_] )(?:bookings?|appointments?|visits?|reservations?|slots?|spots?|viewings?|showings?|tours?|class(?:es)?|lessons?|sessions?|tables?|rooms?|stays?|consultations?|consults?|fittings?|tastings?|treatments?|massages?|haircuts?|trials?|demos?|pickups?)(?:[\s-]+|[\s-]*:[\s-]*)(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set|saved)
+booking	(?:your|the|this|that|my|our|[^\W\d_]+['’]s)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}(?:bookings?|appointments?|visits?|reservations?|slots?|spots?|viewings?|showings?|tours?|class(?:es)?|lessons?|sessions?|tables?|rooms?|stays?|consultations?|consults?|fittings?|tastings?|treatments?|massages?|haircuts?|trials?|demos?|pickups?)[\s-]*[:-][\s-]*(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set|saved)
+booking	(?<![^\W_] )all[\s-]+(?:booked|confirmed|scheduled|reserved)(?![\s-]+(?:[^\W\d_]+[\s-]+)?(?:bookings?|appointments?|visits?|reservations?|slots?|spots?|viewings?|showings?|tours?|class(?:es)?|lessons?|sessions?|tables?|rooms?|stays?|consultations?|consults?|fittings?|tastings?|treatments?|massages?|haircuts?|trials?|demos?|pickups?)(?!\w))
