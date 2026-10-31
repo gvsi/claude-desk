@@ -893,6 +893,25 @@ def test_ai_denial_reads_the_bare_surname_after_this_is_or_its_only_after_a_titl
     assert owner_claims(neither) == {text: (False, False) for text in neither}
 
 
+def test_ai_denial_reads_no_owner_claim_in_a_cleft():
+    """"It's" or "it is" with the owner's name and then "who" or "that" is a cleft that says who does
+    something ("It's Maria who sets the rates."), not who the speaker is; "Es María quien" isn't read
+    either. The same introductions without the cleft still claim, and so does "this is"."""
+    neither = ["It's Maria who sets the rates.", "It is Maria Rivera who decides.", "It's Maria that handles refunds.",
+               "It's Maria who's in charge of that.", "Es María quien fija los precios.",
+               "Es María la que decide.", "Es María el que llama."]
+    assert owner_claims(neither) == {text: (False, False) for text in neither}
+    claims = ["It's Maria.", "This is Maria.", "It's Maria, who runs Rivera Plumbing.", "This is Maria who's speaking."]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+
+
+def test_ai_denial_reads_a_contraction_after_the_name_as_no_possessive():
+    """A contraction after the name ("here's", "let's") is no possessive, so a run-on claim still
+    counts."""
+    claims = ["I'm Maria here's your quote.", "I'm Maria let's get you booked.", "This is Maria what's up?"]
+    assert owner_claims(claims) == {text: (True, False) for text in claims}
+
+
 def test_ai_denial_reads_no_owner_claim_in_the_business_name():
     """A name that is part of one of the business's names, and goes on into it, is no claim ("We're
     Rivera Plumbing."), nor is one the whole business name follows; without the business's names the

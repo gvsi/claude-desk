@@ -102,9 +102,10 @@ def _claims_a_name(text: str, names: Sequence[tuple[str, ...]], firms: Sequence[
     folded, starts = _name_tokens(text)
     aliases, surnames = _aliases(names)
     for at in range(len(folded)):
-        for end, bare_surname in _subject_ends(folded, starts, at):
+        for end, bare_surname, cleft in _subject_ends(folded, starts, at):
             named = _name_after(folded, end, aliases, surnames, bare_surname)
-            if named is not None and not _names_another(folded, *named, firms):
+            if (named is not None and not (cleft and folded[named[1]:named[1] + 1] in _CLEFTS)
+                    and not _names_another(folded, *named, firms)):
                 return True
         named = _name_after(folded, at, aliases, surnames) if at in starts else None
         if (named is not None and folded[named[1]:named[1] + 1] in (["here"], ["speaking"])
@@ -113,8 +114,10 @@ def _claims_a_name(text: str, names: Sequence[tuple[str, ...]], firms: Sequence[
     return False
 
 
-def _subject_ends(folded: list[str], starts: set[int], at: int) -> Iterator[tuple[int, bool]]:
-    """Where each subject that starts at `at` ends, and whether the surname alone may follow it: one
+def _subject_ends(folded: list[str], starts: set[int], at: int) -> Iterator[tuple[int, bool, bool]]:
+    """Where each subject that starts at `at` ends, whether the surname alone may follow it, and
+    whether "who" or "that" after the name makes it a cleft that claims nothing ("It's Maria who sets
+    the rates.", after "it's" and "it is" only; "Es María quien" isn't read at all): one
     read anywhere (`_NAME_SUBJECTS`: "I'm", "I am", "we're", "soy", "my name is", "me llamo", "it's
     me,", "call me", "soy yo,", "le habla" and the like), "I" or "we" with intensifiers before "am"
     or "are" ("I really am"), or an introduction read only where a clause starts, alone or after one
@@ -128,13 +131,13 @@ def _subject_ends(folded: list[str], starts: set[int], at: int) -> Iterator[tupl
     opened = at in starts or (at - 1 in starts and folded[at - 1] in _OPENERS)
     for phrase in _NAME_SUBJECTS + (_CLAUSE_SUBJECTS if opened else ()):
         if tuple(folded[at:at + len(phrase)]) == phrase:
-            yield at + len(phrase), phrase not in _DEMONSTRATIVES
+            yield at + len(phrase), phrase not in _DEMONSTRATIVES, phrase in _DEMONSTRATIVES[1:]
     if folded[at] in ("i", "we"):
         end = at + 1
         while end < len(folded) and folded[end] in _NAME_INTENSIFIERS:
             end += 1
         if end > at + 1 and folded[end:end + 1] == ["am" if folded[at] == "i" else "are"]:
-            yield end + 1, True
+            yield end + 1, True, False
 
 
 def _name_after(folded: list[str], at: int, aliases: set[tuple[str, ...]], surnames: set[tuple[str, ...]],
@@ -185,13 +188,14 @@ def _title_length(folded: list[str], at: int) -> int:
 def _names_another(folded: list[str], begin: int, end: int, firms: Sequence[tuple[str, ...]]) -> bool:
     """Whether the words around the name from `begin` to `end` make it someone else's or part of
     another name: a possessive right after it ("Maria Smith's", "Rivera Plumbing's"), or after "and"
-    or "y" and one word ("Maria and José's"); or one of the business's names that the name is part
+    or "y" and one word ("Maria and José's"), a contraction such as "here's" being none; or one of
+    the business's names that the name is part
     of and that goes on past it ("We're Rivera Plumbing.", "Maria Rivera Plumbing"), or that follows
     it whole."""
     after = folded[end:end + 2]
-    if after and after[0].endswith("'s"):
+    if after and after[0].endswith("'s") and after[0] not in _CONTRACTIONS:
         return True
-    if after[:1] in (["and"], ["y"]) and after[1:] and after[1].endswith("'s"):
+    if after[:1] in (["and"], ["y"]) and after[1:] and after[1].endswith("'s") and after[1] not in _CONTRACTIONS:
         return True
     for firm in firms:
         for start in range(begin, end + 1):
@@ -304,6 +308,9 @@ _NAME_SUBJECTS = tuple(tuple(phrase.split()) for phrase in """
 _CLAUSE_SUBJECTS = tuple(tuple(phrase.split()) for phrase in "this is | it's | it is | name's | the name's | habla"
                          .split("|"))
 _DEMONSTRATIVES = _CLAUSE_SUBJECTS[:3]   # "this is", "it's", "it is": the surname alone needs a title after them
+# The words that make "it's <name>" a cleft, and the contractions that are no possessive after a name.
+_CLEFTS = (["who"], ["who's"], ["that"], ["that's"])
+_CONTRACTIONS = frozenset("let's here's there's that's what's who's it's he's she's where's how's".split())
 _OPENERS = frozenset("hi hello hey yes yeah yep ok okay no hola".split())
 # A negation right before a subject negates it, unless the subject starts with one of the pronouns.
 _NAME_NEGATIONS = frozenset("not never no nunca ni don't dont can't cannot won't".split())
