@@ -9,7 +9,7 @@ import { cdp, page, userEvent } from 'vitest/browser';
 import { cleanup } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
-import type { BusinessOut, RulesView, SetupState } from '../../api/views.ts';
+import type { RulesView, SetupState } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { copyResultLine } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
@@ -627,84 +627,24 @@ describe('share', () => {
     const later = screen.container.querySelector('.cd-share-kit__later')!.getBoundingClientRect();
     expect([link.top - header.bottom, card.top - link.bottom, heading.top - print.bottom, later.top - words.bottom].map(Math.round)).toEqual([16, 16, 16, 16]);
   });
-
-  it('share_kit_on_the_live_step', async () => {
-    const state = await setupAtPreview();
-    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await screen.getByRole('button', { name: 'Go live' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
-    const url = `${window.location.origin}/d/${state.slug}`;
-    // The new Desk's owner, as the copy's Desks name them: from the description's own words, "I'm Maria".
-    const desks = await mockStore.dispatch('desks');
-    if ('network' in desks || desks.status !== 200) throw new Error('the mock reads the Desks');
-    const owner = (desks.body as BusinessOut[]).find((b) => b.desks.some((d) => d.desk_id === state.desk_id))?.owner_display_name;
-    expect(owner).toBe('Maria');
-
-    // Under the link and Go to Today, the share kit as Share has it, with no second link card: the
-    // printable card with the QR code for the API's public link, the ready-made words, and the
-    // website embed coming later.
-    const heading = screen.getByRole('heading', { level: 2, name: 'Share it' });
-    await expect.element(heading).toBeVisible();
-    const card = screen.getByRole('figure', { name: 'Rivera Plumbing' });
-    await expect.element(card.getByRole('img', { name: `QR code for ${url}` })).toBeVisible();
-    await expect.element(card.getByText(displayLink(url), { exact: true })).toBeVisible();
-    await expect.element(card.getByText(`Answered by Claude, an AI. Ask for ${owner} any time.`, { exact: true })).toBeVisible();
-    expect(screen.getByRole('list', { name: 'Ready-made words' }).getByRole('listitem').elements()).toHaveLength(3);
-    await expect.element(screen.getByText('Coming later', { exact: true })).toBeVisible();
-    expect(screen.getByRole('region', { name: 'Your link' }).query()).toBeNull();
-    expect(screen.getByRole('button', { name: 'Copy link' }).elements()).toHaveLength(1);
-    const today = screen.getByRole('link', { name: 'Go to Today' }).element();
-    expect(today.compareDocumentPosition(heading.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-    // "Copy link" writes the API's public link.
-    const writeText = stubClipboard();
-    await screen.getByRole('button', { name: 'Copy link' }).click();
-    expect(writeText).toHaveBeenCalledWith(url);
-    await expectScreenBasics(screen.container, { owner: true });
-  });
 });
 
 describe("setup's live step", () => {
   it('live_step_shares_the_apis_public_link', async () => {
-    // The API names the public link on another address than this page's: the kit shares that one,
-    // not one built from the slug here.
+    // The API names the public link on another address than this page's: the link and the "Share it"
+    // card's QR code share that one, not one built from the slug here.
     const state = await setupAtPreview();
     const apiLink = `https://desk.example/d/${state.slug}`;
     mockStore.inject({ route: 'goLive', status: 200, afterCommit: true, body: { public_url: apiLink, slug: state.slug } });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Go live' }).click();
-    const card = screen.getByRole('figure', { name: 'Rivera Plumbing' });
+    const card = screen.getByRole('region', { name: 'Share it' });
     await expect.element(card.getByRole('img', { name: `QR code for ${apiLink}` })).toBeVisible();
-    await expect.element(card.getByText(`desk.example/d/${state.slug}`, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(apiLink, { exact: true })).toBeVisible();
     expect(screen.container.textContent).not.toContain(`${window.location.host}/d/${state.slug}`);
     const writeText = stubClipboard();
     await screen.getByRole('button', { name: 'Copy link' }).click();
     expect(writeText).toHaveBeenCalledWith(apiLink);
-  });
-
-  it('live_step_kit_waits_for_the_desks_and_tries_again', async () => {
-    const state = await setupAtPreview();
-    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
-
-    // While the copy's Desks are read: the loading line under "Share it".
-    const desks = held();
-    mockStore.inject({ route: 'desks', status: 200, until: desks.until, body: (await mockStore.dispatch('desks') as { body: unknown }).body });
-    const slow = (await renderRoute(`/app/setup/${state.interview_id}`, { pollScale: 100 })).screen;
-    const share = slow.getByRole('region', { name: 'Share it' });
-    await expect.element(share.getByRole('status').filter({ hasText: /^Loading the card and ready-made words$/ })).toBeVisible();
-    expect(share.getByRole('figure').query()).toBeNull();
-    desks.release();
-    await expect.element(share.getByRole('figure')).toBeVisible();
-
-    // When they can't be read (nor on the one retry): what went wrong and Try again, which brings the kit.
-    mockStore.inject({ route: 'desks', status: 503, times: 2 });
-    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { pollScale: 100, retryScale: 0 });
-    const region = screen.getByRole('region', { name: 'Share it' });
-    await expect.element(region.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
-    expect(region.getByRole('figure').query()).toBeNull();
-    await region.getByRole('button', { name: 'Try again' }).click();
-    await expect.element(region.getByRole('figure')).toBeVisible();
-    expect(region.getByText(UNAVAILABLE, { exact: true }).query()).toBeNull();
   });
 });
 

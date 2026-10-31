@@ -143,7 +143,8 @@ export const SETUP_COPY = {
     open: 'Open',
     goToToday: 'Go to Today',
     shareIt: 'Share it',
-    shareLoading: 'Loading the card and ready-made words',
-    tryAgain: 'Try again',
+    websiteEmbed: 'Website embed',
+    websiteEmbedLine: 'The same chat on your own site.',
+    comingLater: 'Coming later',
   },
 } as const;
