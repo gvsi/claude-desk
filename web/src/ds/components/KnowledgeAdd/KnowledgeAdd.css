@@ -1,7 +1,7 @@
 /* KnowledgeAdd: the form, its parts 12 px apart (the heading, the note's field with its hint, the
    two adds 8 px apart at a screen's main size, the line about files in secondary caption type, and
-   a failure's line), then 20 px under it the "Added" card: its line, and 12 px under that the
-   switch across the card. */
+   a failure's line), then 20 px under it the "Added" card: its line, 12 px under that the switch
+   across the card, and the screen's line, if any, 8 px under the switch, lined up with its words. */
 
 .cd-knowledge-add {
   display: flex;
@@ -30,4 +30,14 @@
 
 .cd-knowledge-add__switch {
   margin-top: var(--space-12);
+}
+
+.cd-knowledge-add__note {
+  padding: 0 var(--space-8);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-knowledge-add__note:not(:empty) {
+  margin-top: var(--space-8);
 }

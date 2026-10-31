@@ -95,6 +95,21 @@ export const WhatIKnowNow: Story = {
 };
 
 /**
+ * An item the owner keeps to themselves keeps its title: only an item the kernel forces to the owner
+ * arrives with its title withheld.
+ */
+export const KeptPrivateByTheOwner: Story = {
+  name: 'Kept private by the owner',
+  args: { items: [{ id: 'note-2d4f', title: 'Gate code for the back lot', detail: 'Added Oct 28', readers: ['owner'] }] },
+  parameters: { canvas: 'none', canvasNote: 'N-Run2-Settings-Knowledge’s rows with an item the owner kept private: its own title, and “Only you”.' },
+  play: async ({ canvas }) => {
+    const [row] = within(canvas.getByRole('list', { name: 'What I know now' })).getAllByRole('listitem');
+    await expect(rowWords(row as HTMLElement)).toEqual(['Gate code for the back lot', 'Added Oct 28', 'Only you']);
+    await expect((row as HTMLElement).querySelector('.cd-knowledge-list__title')).toHaveAttribute('data-copy', 'user');
+  },
+};
+
+/**
  * A withheld item is owner-only whatever its label says: the kernel withholds the title only of an
  * item it keeps to the owner, so the row never says customers can see it.
  */

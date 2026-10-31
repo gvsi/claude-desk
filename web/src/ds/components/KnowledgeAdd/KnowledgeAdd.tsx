@@ -1,4 +1,4 @@
-import { useId, useRef, type ChangeEvent } from 'react';
+import { useId, useRef, type ChangeEvent, type ReactNode } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
@@ -22,6 +22,12 @@ export interface KnowledgeAddedView {
    * readers the answer returns.
    */
   onPublicChange: (makePublic: boolean) => void;
+  /**
+   * A line from the screen under the switch, in its own words: why the kernel kept the item to the
+   * owner ("This note stays private: it includes a customer’s document."), or why a change didn't
+   * go through. The design system writes none of it.
+   */
+  note?: ReactNode;
 }
 
 export interface KnowledgeAddProps {
@@ -36,8 +42,11 @@ export interface KnowledgeAddProps {
    * Markdown, up to 100 KB), reads it and adds it for the owner only.
    */
   onAddFile: (file: File) => void;
-  /** The add in flight: its button spins and the other waits. */
-  busy?: 'note' | 'file';
+  /**
+   * What is in flight: an add (its button spins and the other waits), or the switch's change (the
+   * switch waits, and so do both adds).
+   */
+  busy?: 'note' | 'file' | 'switch';
   /** What went wrong, in the screen's plain words, never a code: "That file is too big. Add files up to 100 KB." */
   error?: string;
   /** The item just added: the "Added" card with its "Customers can see this" switch. */
@@ -96,7 +105,12 @@ export function KnowledgeAdd({ note, onNoteChange, onAddNote, onAddFile, busy, e
               description="Claude can quote it to visitors when it answers."
               checked={added.readers.includes('public')}
               onChange={(next) => added.onPublicChange(next)}
+              waiting={busy === 'switch'}
             />
+          </div>
+          {/* Always there, so the screen's line is read out when it comes. */}
+          <div className="cd-knowledge-add__note cd-type-meta" aria-live="polite">
+            {added.note}
           </div>
         </Card>
       ) : null}

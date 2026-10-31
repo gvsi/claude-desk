@@ -143,6 +143,61 @@ export const AddedPublic: Story = {
   },
 };
 
+/** Why the kernel kept it private, as the screen words it. */
+const KEPT_PRIVATE = 'This note stays private: it includes a customer’s document.';
+
+export const AddedWithANote: Story = {
+  name: 'Added, with the screen’s note',
+  args: { note: '', added: { readers: ['owner'], onPublicChange: fn(), note: KEPT_PRIVATE } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'N-Run2-Settings-Knowledge’s “Added” card with a line from the screen under the switch, here why the kernel kept the note private. The board draws none; the words are the screen’s.',
+  },
+  play: async ({ canvas }) => {
+    // added_note_is_the_screens: drawn under the switch, in the card, lined up with the switch's words.
+    const card = canvas.getByRole('region', { name: 'Added' });
+    const note = within(card).getByText(KEPT_PRIVATE);
+    const toggle = within(card).getByRole('switch', { name: 'Customers can see this' });
+    await expect(Math.round(note.getBoundingClientRect().top - toggle.getBoundingClientRect().bottom)).toBe(8);
+    const label = within(toggle).getByText('Customers can see this');
+    const noteStart = note.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(note).paddingLeft);
+    await expect(Math.round(noteStart)).toBe(Math.round(label.getBoundingClientRect().left));
+    expectComputed(note, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    // Read out when it comes: it sits in a polite live region that is there from the start.
+    await expect(note.closest('[aria-live="polite"]')).not.toBeNull();
+  },
+};
+
+export const ChangingWhoSeesIt: Story = {
+  name: 'Changing who sees it',
+  args: { note: NOTE, busy: 'switch', added: { readers: ['owner'], onPublicChange: fn() } },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'N-Run2-Settings-Knowledge’s form while the switch’s change is being saved: the switch waits, and so do both adds.',
+  },
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
+    // switch_waits_while_its_change_is_saved: no callback from the switch or either add, no picker.
+    const toggle = canvas.getByRole('switch', { name: 'Customers can see this' });
+    await expect(toggle).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(toggle);
+    await expect(args.added?.onPublicChange).not.toHaveBeenCalled();
+    for (const name of ['Add a note', 'Add a file']) {
+      const button = canvas.getByRole('button', { name });
+      await expect(button).toHaveAttribute('aria-disabled', 'true');
+      await expect(button).not.toHaveAttribute('aria-busy');
+    }
+    let opened = 0;
+    fileInput(canvasElement).addEventListener('click', (event) => {
+      event.preventDefault();
+      opened += 1;
+    });
+    await userEvent.click(canvas.getByRole('button', { name: 'Add a file' }));
+    await userEvent.click(canvas.getByRole('button', { name: 'Add a note' }));
+    await expect(opened).toBe(0);
+    await expect(args.onAddNote).not.toHaveBeenCalled();
+  },
+};
+
 export const AddingAFile: Story = {
   name: 'Adding a file',
   args: { note: '', busy: 'file' },

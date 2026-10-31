@@ -11,8 +11,9 @@ export interface KnowledgeRowView {
   /** The item's id (`KnowledgeItem.item_id`), the row's key. */
   id: string;
   /**
-   * The item's own title, or null when the kernel keeps the item to the owner and withholds its
-   * title and text: the row then reads "A note only you can see", and only "Only you".
+   * The item's own title, kept whether customers can see it or only the owner. Null only when the
+   * kernel forces the item owner-only and withholds its title and text: the row then reads "A note
+   * only you can see", and only "Only you".
    */
   title: string | null;
   /**
