@@ -1318,8 +1318,34 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     return answer
 
 
+@dataclass
+class _TurnReplies:
+    """Keep reply provenance for the whole answer, including any recursive planning calls."""
+
+    entries: list[tuple[Entry, bool]] = field(default_factory=list)
+
+    def track(self, reply: Entry, *, reads_untrusted: bool = True) -> None:
+        self.entries.append((reply, reads_untrusted))
+
+    def before(self, question: QuestionKey | None) -> None:
+        if question in LIMIT_CHOICES:
+            for reply, reads_untrusted in self.entries:
+                if reads_untrusted:
+                    # Keep coverage and hidden plan metadata; empty messages are omitted from the view.
+                    reply.text = ""
+
+
 async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
-                   source, reply: Entry, *, closing_call: bool = False) -> None:
+                   source, reply: Entry, *, closing_call: bool = False, replies: _TurnReplies | None = None) -> None:
+    """Choose the final ask before deciding which of this answer's replies can be stored beside it."""
+    replies = replies if replies is not None else _TurnReplies()
+    replies.track(reply)
+    await _advance_ask(owner, engine, model, interview, source, reply, replies, closing_call=closing_call)
+    replies.before(interview.question)
+
+
+async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
+                       source, reply: Entry, replies: _TurnReplies, *, closing_call: bool = False) -> None:
     """Append exactly one ask or close. Metadata lives on this turn's Claude entry, never on a card."""
     if source is not None:
         interview.cover(source.skip)
@@ -1336,9 +1362,6 @@ async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
             available.append(card)
     asked = _next_ask(interview, source, available)
     if isinstance(asked, str):
-        if asked in LIMIT_CHOICES:
-            # Every planner here reads untrusted facts or plan text. Only a limit turn's own reply is kept.
-            reply.text = ""  # retain coverage and hidden plan metadata, omit the empty message
         fitting = source is not None and source.next.kind == "topic" and source.next.topic == asked
         interview.transcript.append(_ask(interview, asked) if asked in LIMIT_CHOICES or not fitting else
                                     Entry(role="claude", text=source.question.strip() or
@@ -1355,7 +1378,8 @@ async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, int
             following = None if closing_call else await _next_step(owner, engine, model, interview)
             entry = Entry(role="claude", text=following.reply.strip() if following else "")
             interview.transcript.append(entry)
-            await _advance(owner, engine, model, interview, following, entry, closing_call=True)
+            replies.track(entry)
+            await _advance_ask(owner, engine, model, interview, following, entry, replies, closing_call=True)
             return
         await close_setup(owner, engine, model, interview)
 
@@ -1473,6 +1497,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         interview.transcript += entries
         if turn.step_done:
             interview.cover([key])
+            replies = _TurnReplies()
+            replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
             following = await _next_step(owner, engine, model, interview) if key in LIMIT_CHOICES else turn
             next_reply = reply
             if key in LIMIT_CHOICES:
@@ -1481,7 +1507,7 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             elif not any(entry is reply for entry in interview.transcript):
                 interview.transcript.append(reply)
             await _advance(owner, engine, model, interview, following, next_reply,
-                           closing_call=key in LIMIT_CHOICES)
+                           closing_call=key in LIMIT_CHOICES, replies=replies)
         elif key not in LIMIT_CHOICES:
             if not any(entry is reply for entry in interview.transcript):
                 interview.transcript.append(reply)

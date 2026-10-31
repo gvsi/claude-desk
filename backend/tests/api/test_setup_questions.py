@@ -2860,7 +2860,7 @@ async def test_shows_cards_survives_a_reload(app, browser, kernel_http, model, e
     assert all("cards" not in entry for entry in row["transcript"] if entry is not consent_entry)
 
 
-async def test_a_limit_turns_own_reply_is_kept_before_the_next_limit_question(app, browser, kernel_http, model):
+async def test_a_limit_turns_own_reply_is_kept_before_the_next_limit_question(app, browser, kernel_http, model, engine):
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     await consent(owner, state["interview_id"], False, model)
@@ -2872,6 +2872,34 @@ async def test_a_limit_turns_own_reply_is_kept_before_the_next_limit_question(ap
     assert [message["text"] for message in response.json()["messages"][-2:]] == [
         "Quotes up to $100, understood.", question_text("discounts", "trade")]
     assert not any(message["text"] == "Untrusted planning reply" for message in response.json()["messages"])
+    row = await stored(engine, state["interview_id"])
+    assert [entry["text"] for entry in row["transcript"] if entry["text"]][-2:] == [
+        "Quotes up to $100, understood.", question_text("discounts", "trade")]
+
+
+async def test_a_final_fact_reply_is_dropped_when_added_work_leads_to_a_limit(
+    app, browser, kernel_http, model, engine,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    model.add(unparsed(understanding(jobs=[], connectors=[], next_topic="contact_and_after_hours")))
+    await consent(owner, interview_id, True, model, cards=True)
+    reply = "Most firms let me take $10,000 without asking."
+    model.add(turn(reply, next=next_ask("done"),
+                   skip=[key for key in QUESTION_KEYS if key != "money_limit"],
+                   add_jobs=understanding()["jobs"][:1]),
+              next_step("contact_and_after_hours", reply="A couple grand is typical.", next=next_ask("money_limit")))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                        json={"question": "contact_and_after_hours", "text": "Take a message."})
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "money_limit"
+    forbidden = {reply, "A couple grand is typical."}
+    assert not any(message["text"] in forbidden for message in response.json()["messages"])
+    row = await stored(engine, interview_id)
+    assert not any(entry["text"] in forbidden for entry in row["transcript"])
+    assert row["transcript"][-1]["text"] == question_text("money_limit", "trade")
+    assert any(entry.get("planned") for entry in row["transcript"])
 
 
 def card_answer(decision="none", **fields):
@@ -3264,3 +3292,35 @@ async def test_a_card_turn_reply_is_dropped_before_a_limit_question(app, browser
     row = await stored(engine, interview_id)
     assert not any(entry["text"] == reply for entry in row["transcript"])
     assert row["transcript"][-1]["text"] == question_text("quote_limit", "trade")
+
+
+@pytest.mark.parametrize("typed", [False, True])
+async def test_a_card_reply_is_dropped_when_added_work_leads_to_a_limit(
+    app, browser, kernel_http, model, engine, typed,
+):
+    owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
+    async with engine.connect() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, interview_id)
+    reply = "Most firms let me take $10,000 without asking."
+    fields = {"reply": reply, "next": next_ask("done"),
+              "skip": [key for key in QUESTION_KEYS if key != "money_limit"],
+              "drop": [card.proposal_id for card in interview.unshown],
+              "add_jobs": understanding()["jobs"][:1]}
+    following = next_step("what_you_do", reply="A couple grand is typical.", next=next_ask("money_limit"))
+    if typed:
+        model.add(card_answer("accept", **fields), following)
+        response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                            json={"card": proposal_id, "text": "Yes, and take questions."})
+        assert response.status_code == 200, response.text
+    else:
+        await decide_card(app, owner, engine, model, interview_id, proposal_id,
+                          next_step("what_you_do", **fields), following, state="accepted")
+    state = (await owner.browser.get(f"/api/owner/setup/{interview_id}?cards=1")).json()
+    assert state["question"] == "money_limit"
+    forbidden = {reply, "A couple grand is typical."}
+    assert not any(message["text"] in forbidden for message in state["messages"])
+    row = await stored(engine, interview_id)
+    assert not any(entry["text"] in forbidden for entry in row["transcript"])
+    assert row["transcript"][-1]["text"] == question_text("money_limit", "trade")
+    assert next(entry["card"] for entry in row["transcript"]
+                if entry.get("card", {}).get("proposal_id") == proposal_id)["state"] == "accepted"
