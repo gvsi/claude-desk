@@ -82,6 +82,39 @@ const HELD_FOR_REVIEW: SituationRowProps = {
   matches: true,
 };
 
+export const Landing: Story = {
+  render: () => (
+    <ul aria-label="Real situations" style={{ maxWidth: 686, margin: 0, padding: 0, listStyle: 'none' }}>
+      {SITUATIONS.map((situation, index) => (
+        <li key={situation.title}>
+          <SituationRow {...situation} index={index} live />
+        </li>
+      ))}
+    </ul>
+  ),
+  parameters: {
+    canvasNote: 'Situations just tried, landing one by one in the order tried, as the safety check’s tricks do: each rises 4 px and fades in, its dot scaling in, motion-stagger after the one before it. Under reduced motion they are there at once.',
+  },
+  play: async ({ canvas }) => {
+    const rows = within(canvas.getByRole('list', { name: 'Real situations' })).getAllByRole('listitem').map((item) => item.firstElementChild as HTMLElement);
+
+    // situation_rows_land_one_by_one: each row lands motion-stagger after the one before it, the
+    // first at once, rising space-4 as it fades in over motion-base on the emphasis ease; its dot
+    // scales in on the same beat.
+    await expect(rows.map((row) => getComputedStyle(row).animationDelay)).toEqual(['0s', '0.15s', '0.3s', '0.45s', '0.6s']);
+    for (const row of rows) {
+      expectComputed(row, {
+        animationName: 'cd-situation-row-land',
+        animationDuration: '0.2s',
+        animationTimingFunction: 'cubic-bezier(0.165, 0.84, 0.44, 1)',
+        animationFillMode: 'backwards',
+      });
+      const dot = row.querySelector<HTMLElement>('.cd-status-dot')!;
+      expectComputed(dot, { animationName: 'cd-situation-row-dot', animationDelay: getComputedStyle(row).animationDelay, animationDuration: '0.2s' });
+    }
+  },
+};
+
 export const HeldForReview: Story = {
   render: () => (
     <ul aria-label="Real situations" style={{ maxWidth: 686, margin: 0, padding: 0, listStyle: 'none' }}>

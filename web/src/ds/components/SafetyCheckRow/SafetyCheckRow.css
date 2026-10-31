@@ -1,7 +1,7 @@
 /* SafetyCheckRow: laid out as a SituationRow is. A hairline over each row, padded 14 px top and
    bottom; the trick at the left, the outcome and its reason in a 300 px column at the right.
-   Narrow, the outcome drops under the trick. Each row is revealed motion-stagger after the one
-   before it. */
+   Narrow, the outcome drops under the trick. A live row lands motion-stagger after the one before
+   it. */
 
 .cd-safety-check-row {
   container: cd-safety-check-row / inline-size;
@@ -9,8 +9,6 @@
   min-width: 0;
   padding: var(--space-14) 0;
   border-top: 1px solid var(--line-hairline);
-  animation: cd-safety-check-reveal var(--motion-base) var(--motion-ease) both;
-  animation-delay: calc(var(--motion-stagger) * var(--cd-safety-check-index, 0));
 }
 
 .cd-safety-check-row p {
@@ -63,9 +61,30 @@
   flex: none;
 }
 
-@keyframes cd-safety-check-reveal {
+/* A row that came with results that just arrived (live): it rises space-4 and fades in, its dot
+   growing from half size with it, index × motion-stagger after the first row, which lands at once.
+   Each is held at its start until its turn and let go at its end, so nothing lingers once it has
+   landed. Visual only: the rows are in the page from the start, in order, for screen readers. */
+.cd-safety-check-row--live,
+.cd-safety-check-row--live .cd-safety-check-row__outcome > .cd-status-dot {
+  animation: cd-safety-check-row-land var(--motion-base) var(--motion-ease-emphasis) backwards;
+  animation-delay: calc(var(--motion-stagger) * var(--cd-safety-check-index, 0));
+}
+
+.cd-safety-check-row--live .cd-safety-check-row__outcome > .cd-status-dot {
+  animation-name: cd-safety-check-row-dot;
+}
+
+@keyframes cd-safety-check-row-land {
   from {
     opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+}
+
+@keyframes cd-safety-check-row-dot {
+  from {
+    transform: scale(0.5);
   }
 }
 
@@ -75,9 +94,10 @@
   }
 }
 
-/* Reduced motion: every row is there at once. */
+/* Reduced motion: every row is there at once, its dot whole. */
 @media (prefers-reduced-motion: reduce) {
-  .cd-safety-check-row {
+  .cd-safety-check-row--live,
+  .cd-safety-check-row--live .cd-safety-check-row__outcome > .cd-status-dot {
     animation: none;
   }
 }

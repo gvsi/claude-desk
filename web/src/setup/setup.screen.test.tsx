@@ -13,8 +13,9 @@ import type { RenderResult } from 'vitest-browser-react';
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RuleCard } from '../api/contracts.ts';
-import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
+import type { RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { reduceMotion } from '../ds/test/reducedMotion.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { hubSections } from '../owner/rules/hub.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
@@ -187,6 +188,97 @@ const keptAnswer = (screen: RenderResult) => screen.getByRole('group', { name: '
 
 /** Whether `el` is set in Claude's serif. */
 const inSerif = (el: Element) => /Source Serif 4/.test(getComputedStyle(el).fontFamily);
+
+/** A row of a list as it was drawn: its words, and how it moved then, if it did. */
+interface DrawnRow {
+  text: string;
+  /** The row's own animation: its name, its delay in ms, its duration in ms and its easing. */
+  animation: { name: string; delayMs: number; durationMs: number; easing: string };
+  /** The first and last frames of the row's own landing, as the browser runs it; none when it was drawn still. */
+  frames: Keyframe[];
+  /** Its status dot's animation name, and the dot's first frame. */
+  dot: { name: string; frames: Keyframe[] };
+}
+
+/** A computed duration ("0.15s", "200ms") in ms. */
+const ms = (duration: string) => Math.round(parseFloat(duration) * (duration.endsWith('ms') ? 1 : 1000));
+
+/** A design system token as the page computes it. */
+const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/** An easing (a token, as `var(--motion-ease-emphasis)`) as computed styles write it. */
+function easing(value: string): string {
+  const probe = document.createElement('div');
+  probe.style.animationTimingFunction = value;
+  document.body.append(probe);
+  const computed = getComputedStyle(probe).animationTimingFunction;
+  probe.remove();
+  return computed;
+}
+
+/**
+ * Each row of the list named `label`, as it is drawn from now until the test ends, in the order
+ * drawn: how it was set to move at that moment. A landing is spent once it has played, so a test
+ * can't tell afterwards whether a row landed.
+ */
+function watchRows(label: string): () => DrawnRow[] {
+  const drawn = new Map<Element, DrawnRow>();
+  const record = () => {
+    for (const row of document.querySelectorAll(`ul[aria-label="${label}"] > li > *`)) {
+      if (drawn.has(row)) continue;
+      const style = getComputedStyle(row);
+      const own = row.getAnimations().find((a): a is CSSAnimation => a instanceof CSSAnimation);
+      const dot = row.querySelector('.cd-status-dot');
+      const dotOwn = dot?.getAnimations().find((a): a is CSSAnimation => a instanceof CSSAnimation);
+      drawn.set(row, {
+        text: row.textContent ?? '',
+        animation: { name: style.animationName, delayMs: ms(style.animationDelay), durationMs: ms(style.animationDuration), easing: style.animationTimingFunction },
+        frames: own?.effect instanceof KeyframeEffect ? own.effect.getKeyframes() : [],
+        dot: { name: dot === null ? 'none' : getComputedStyle(dot).animationName, frames: dotOwn?.effect instanceof KeyframeEffect ? dotOwn.effect.getKeyframes() : [] },
+      });
+    }
+  };
+  const observer = new MutationObserver(record);
+  observer.observe(document.body, { childList: true, subtree: true });
+  onTestFinished(() => observer.disconnect());
+  return () => [...drawn.values()];
+}
+
+/**
+ * What `el` shows on screen (without its visually hidden words) and what a screen reader reads of
+ * it (without what is hidden from assistive tech).
+ */
+function textOf(el: Element): { shown: string; spoken: string } {
+  const without = (selector: string) => {
+    const copy = el.cloneNode(true) as Element;
+    for (const hidden of copy.querySelectorAll(selector)) hidden.remove();
+    return copy.textContent ?? '';
+  };
+  return { shown: without('.cd-sr-only'), spoken: without('[aria-hidden="true"]') };
+}
+
+/** The safety check's count, "6 of 6 blocked", by what it shows; null when it isn't drawn. */
+const countElement = () => [...document.querySelectorAll('main p')].find((p) => /^\d+ of \d+ blocked$/.test(textOf(p).shown)) ?? null;
+
+/**
+ * Every text the safety check's count shows from now until the test ends (or, with `spoken`, what a
+ * screen reader reads of it), in order, each change once.
+ */
+function watchCount(read: 'shown' | 'spoken' = 'shown'): () => string[] {
+  const seen: string[] = [];
+  const record = () => {
+    const count = countElement();
+    const text = count === null ? null : textOf(count)[read];
+    if (text !== null && seen.at(-1) !== text) seen.push(text);
+  };
+  const observer = new MutationObserver(record);
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => observer.disconnect());
+  return () => [...seen];
+}
+
+/** What still moves in `el`: its animations, and its children's, not yet done. */
+const moving = (el: Element) => el.getAnimations({ subtree: true }).filter((a) => a.playState !== 'finished');
 
 afterEach(() => {
   vi.useRealTimers();
@@ -1305,6 +1397,186 @@ describe('setup', () => {
     // Nothing was confirmed and nothing answers yet.
     expect(requests('setupConfirm', mark)).toHaveLength(0);
     expect(deskOf(state).summary.answering).toBe(false);
+  });
+
+  it('safety_check_lands_one_by_one', async () => {
+    // Come to from Real situations on this page: the check runs as the owner watches.
+    const { state } = await interviewAtRules();
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
+    const drawn = watchRows('Tricks tried');
+    const counts = watchCount();
+    const spoken = watchCount('spoken');
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+
+    // The rows are the check's real results, in the order tried, drawn as they arrive.
+    const answered = (await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } })) as { body: SafetyCheck };
+    const rows = drawn();
+    expect(rows.map((row) => row.text)).toEqual(answered.body.rows.map((row) => expect.stringContaining(`${row.label}“${row.tries}”`)));
+    // Each lands motion-stagger after the one before it, the first at once: it rises space-4 and
+    // fades in over motion-base on the emphasis ease, and its dot scales in with it.
+    const stagger = ms(token('--motion-stagger'));
+    expect(rows.map((row) => row.animation.delayMs)).toEqual(rows.map((_, index) => index * stagger));
+    for (const row of rows) {
+      expect(row.animation).toMatchObject({ durationMs: ms(token('--motion-base')), easing: easing('var(--motion-ease-emphasis)') });
+      expect(row.frames[0]).toMatchObject({ opacity: '0', transform: `translateY(${token('--space-4')})` });
+      expect(row.dot.frames[0]).toMatchObject({ transform: 'scale(0.5)' });
+    }
+
+    // The count ticks with the rows, from the first row's to the check's own count, and never back.
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
+    const ticks = counts().map((text) => Number(text.split(' ')[0]));
+    expect(ticks[0]).toBe(1);
+    expect(ticks.length).toBeGreaterThan(1);
+    expect(ticks.every((n, i) => i === 0 || n > (ticks[i - 1] ?? 0))).toBe(true);
+
+    // Once landed, nothing lingers: the rows are drawn still, and the count is the check's own.
+    await expect.poll(() => moving(list.element())).toEqual([]);
+    for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
+    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+
+    // A screen reader reads the check's own count from the first, never the ticks, all six rows
+    // being there from the start; and the count sits in no live region, so nothing announces it.
+    expect(spoken()).toEqual(['6 of 6 blocked']);
+    expect(countElement()?.closest('[aria-live],[role="status"],[role="log"],[role="alert"]')).toBeNull();
+  });
+
+  it('safety_check_shows_at_once_under_reduced_motion', async () => {
+    await reduceMotion(true);
+    onTestFinished(() => reduceMotion(false));
+    const { state } = await interviewAtRules();
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
+    const drawn = watchRows('Tricks tried');
+    const counts = watchCount();
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+
+    // Every row at once, nothing moving, and the check's own count from the first.
+    expect(drawn()).toHaveLength(6);
+    for (const row of drawn()) expect([row.animation.name, row.dot.name]).toEqual(['none', 'none']);
+    expect(moving(list.element())).toEqual([]);
+    expect(counts()).toEqual(['6 of 6 blocked']);
+  });
+
+  /** An interview at Real situations, opened on this page, with "Looks right" ready to press. */
+  async function openedAtSituations(): Promise<RenderResult> {
+    const { state } = await interviewAtRules();
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Looks right' })).toBeVisible();
+    return screen;
+  }
+
+  it('safety_check_landing_follows_only_its_own_motion', async () => {
+    // Something else moving in the rows (here, each trick's name, on a loop that starts at once)
+    // neither keeps the rows landing nor runs the count ahead of them.
+    const style = document.createElement('style');
+    style.textContent =
+      'ul[aria-label="Tricks tried"] .cd-safety-check-row__label { animation: test-other-motion 1s linear infinite; } @keyframes test-other-motion { to { opacity: 0.9; } }';
+    document.head.append(style);
+    onTestFinished(() => style.remove());
+    const screen = await openedAtSituations();
+    const counts = watchCount();
+    const at = new Map<string, number>();
+    const timer = new MutationObserver(() => {
+      const count = countElement();
+      if (count !== null && !at.has(textOf(count).shown)) at.set(textOf(count).shown, performance.now());
+    });
+    timer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    onTestFinished(() => timer.disconnect());
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+
+    // The count reaches the last row only when it lands, five beats after the first.
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
+    expect(counts()[0]).toBe('1 of 6 blocked');
+    const beats = ((at.get('6 of 6 blocked') ?? 0) - (at.get('1 of 6 blocked') ?? 0)) / ms(token('--motion-stagger'));
+    expect(beats).toBeGreaterThanOrEqual(4);
+    // And once the rows have landed they are drawn still, whatever else moves in them.
+    await expect.poll(() => [...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName)).toEqual(Array(6).fill('none'));
+  });
+
+  it('safety_check_shows_at_once_where_motion_cant_be_read', async () => {
+    // A browser that can't report what is moving (no `getAnimations`) shows the rows at once,
+    // with the check's own count, rather than failing.
+    const screen = await openedAtSituations();
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'getAnimations');
+    Object.defineProperty(Element.prototype, 'getAnimations', { configurable: true, writable: true, value: undefined });
+    onTestFinished(() => {
+      if (original) Object.defineProperty(Element.prototype, 'getAnimations', original);
+    });
+    const counts = watchCount();
+    await screen.getByRole('button', { name: 'Looks right' }).click();
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+    expect([...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName)).toEqual(Array(6).fill('none'));
+    expect(counts()).toEqual(['6 of 6 blocked']);
+  });
+
+  it('safety_check_opened_with_results_draws_them_still', async () => {
+    // Setup opened at the safety check (a reload, or resumed from Today): the owner didn't just run
+    // it, so its results are drawn at once, with no landing, and the check's own count.
+    const { state } = await interviewAtSafety();
+    const drawn = watchRows('Tricks tried');
+    const counts = watchCount();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const list = screen.getByRole('list', { name: 'Tricks tried' });
+    await expect.element(list).toBeInTheDocument();
+    expect(drawn()).toHaveLength(6);
+    for (const row of drawn()) expect([row.animation.name, row.dot.name]).toEqual(['none', 'none']);
+    expect(moving(list.element())).toEqual([]);
+    expect(counts()).toEqual(['6 of 6 blocked']);
+
+    // "Run again" runs the check again as the owner watches: its results land, the count with them.
+    await screen.getByRole('button', { name: 'Run again' }).click();
+    await expect.poll(() => drawn().length).toBe(12);
+    const again = drawn().slice(6);
+    expect(again.map((row) => row.animation.delayMs)).toEqual(again.map((_, index) => index * ms(token('--motion-stagger'))));
+    for (const row of again) expect([row.animation.name, row.dot.name]).not.toContain('none');
+    await expect.poll(() => counts().length).toBeGreaterThan(2);
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
+    expect(counts().slice(0, 2)).toEqual(['6 of 6 blocked', '1 of 6 blocked']);
+  });
+
+  it('real_situations_land_one_by_one', async () => {
+    // Come to from the rules on this page: the situations are tried as the owner watches, and land
+    // as the safety check's tricks do, in the order tried.
+    const { state } = await interviewAtRules();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    const drawn = watchRows('Real situations');
+    await screen.getByRole('button', { name: 'Check real situations' }).click();
+    const list = screen.getByRole('list', { name: 'Real situations' });
+    await expect.element(list).toBeInTheDocument();
+
+    const answered = (await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } })) as { body: SituationResult[] };
+    const rows = drawn();
+    expect(rows.map((row) => row.text)).toEqual(answered.body.map(({ situation }) => expect.stringContaining(situation.title)));
+    const stagger = ms(token('--motion-stagger'));
+    expect(rows.map((row) => row.animation.delayMs)).toEqual(rows.map((_, index) => index * stagger));
+    for (const row of rows) {
+      expect(row.animation).toMatchObject({ durationMs: ms(token('--motion-base')), easing: easing('var(--motion-ease-emphasis)') });
+      expect(row.frames[0]).toMatchObject({ opacity: '0', transform: `translateY(${token('--space-4')})` });
+      expect(row.dot.frames[0]).toMatchObject({ transform: 'scale(0.5)' });
+    }
+    await expect.poll(() => moving(list.element())).toEqual([]);
+    for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
+
+    // Setup opened at Real situations (a reload): the same results, drawn at once.
+    const reopened = watchRows('Real situations');
+    const again = (await renderRoute(`/app/setup/${state.interview_id}`)).screen;
+    const shown = again.getByRole('list', { name: 'Real situations' });
+    await expect.element(shown).toBeInTheDocument();
+    expect(reopened().map((row) => row.text)).toEqual(rows.map((row) => row.text));
+    for (const row of reopened()) expect([row.animation.name, row.dot.name]).toEqual(['none', 'none']);
+    expect(moving(shown.element())).toEqual([]);
   });
 
   it('confirm_then_preview_then_go_live', async () => {

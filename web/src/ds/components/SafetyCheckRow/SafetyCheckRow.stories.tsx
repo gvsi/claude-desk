@@ -15,19 +15,27 @@ const TRICKS: Omit<SafetyCheckRowProps, 'index'>[] = [
 const PRIMARY = 'rgba(250, 249, 245, 0.92)';
 const SECONDARY = 'rgba(250, 249, 245, 0.64)';
 
+/** The tricks in a list at the card's inner width, landing when `live`. */
+function TricksTried({ live = false }: { live?: boolean }) {
+  return (
+    <ul aria-label="Tricks tried" style={{ maxWidth: 686, margin: 0, padding: 0, listStyle: 'none' }}>
+      {TRICKS.map((trick, index) => (
+        <li key={trick.label}>
+          <SafetyCheckRow {...trick} index={index} live={live} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** The rows in `list`, one per item. */
+const rowsIn = (list: HTMLElement) => within(list).getAllByRole('listitem').map((item) => item.firstElementChild as HTMLElement);
+
 const meta = {
   title: 'Setup/SafetyCheckRow',
   component: SafetyCheckRow,
   args: { ...TRICKS[0]!, index: 0 },
-  render: () => (
-    <ul aria-label="Tricks tried" style={{ maxWidth: 686, margin: 0, padding: 0, listStyle: 'none' }}>
-      {TRICKS.map((trick, index) => (
-        <li key={trick.label}>
-          <SafetyCheckRow {...trick} index={index} />
-        </li>
-      ))}
-    </ul>
-  ),
+  render: () => <TricksTried />,
   parameters: { layout: 'padded', canvas: 'N-R2-Setup-11-Safety' },
 } satisfies Meta<typeof SafetyCheckRow>;
 
@@ -40,7 +48,7 @@ export const Tricks: Story = {
     canvasNote: 'The safety check’s rows at the card’s inner width, 686 px: three blocked, at the action and the reply checkpoints, and one that got through, which the board doesn’t draw.',
   },
   play: async ({ canvas }) => {
-    const rows = within(canvas.getByRole('list', { name: 'Tricks tried' })).getAllByRole('listitem').map((item) => item.firstElementChild as HTMLElement);
+    const rows = rowsIn(canvas.getByRole('list', { name: 'Tricks tried' }));
 
     // safety_row_says_blocked_or_not: the outcome in words beside its dot.
     const outcomes = rows.map((row) => row.querySelector('.cd-safety-check-row__outcome')?.textContent);
@@ -64,10 +72,37 @@ export const Tricks: Story = {
     expectComputed(first, { borderTopWidth: '1px', paddingTop: '14px', paddingBottom: '14px' });
     await expect(first.getBoundingClientRect().height).toBe(90);
 
-    // safety_rows_arrive_one_by_one: each row appears motion-stagger after the one before it, a
-    // reveal of motion-base, held still under reduced motion.
-    const delays = rows.map((row) => getComputedStyle(row).animationDelay);
-    await expect(delays).toEqual(['0s', '0.15s', '0.3s', '0.45s']);
-    expectComputed(first, { animationDuration: '0.2s', animationFillMode: 'both' });
+    // safety_rows_drawn_still: rows not live (results read again, as a reload reads them) are
+    // there at once, their dots whole.
+    for (const row of rows) {
+      expectComputed(row, { animationName: 'none' });
+      expectComputed(row.querySelector('.cd-status-dot')!, { animationName: 'none' });
+    }
+  },
+};
+
+export const Landing: Story = {
+  render: () => <TricksTried live />,
+  parameters: {
+    canvasNote: 'The rows of a check that just ran, landing one by one in the order tried: each rises 4 px and fades in, its dot scaling in, motion-stagger after the one before it. Under reduced motion they are there at once.',
+  },
+  play: async ({ canvas }) => {
+    const rows = rowsIn(canvas.getByRole('list', { name: 'Tricks tried' }));
+
+    // safety_rows_land_one_by_one: each row lands motion-stagger after the one before it, the first
+    // at once, rising space-4 as it fades in over motion-base on the emphasis ease; held at its
+    // start until its turn and let go at its end.
+    await expect(rows.map((row) => getComputedStyle(row).animationDelay)).toEqual(['0s', '0.15s', '0.3s', '0.45s']);
+    for (const row of rows) {
+      expectComputed(row, {
+        animationName: 'cd-safety-check-row-land',
+        animationDuration: '0.2s',
+        animationTimingFunction: 'cubic-bezier(0.165, 0.84, 0.44, 1)',
+        animationFillMode: 'backwards',
+      });
+      // Its dot scales in on the same beat.
+      const dot = row.querySelector<HTMLElement>('.cd-status-dot')!;
+      expectComputed(dot, { animationName: 'cd-safety-check-row-dot', animationDelay: getComputedStyle(row).animationDelay, animationDuration: '0.2s' });
+    }
   },
 };

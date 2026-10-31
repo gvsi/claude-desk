@@ -29,7 +29,7 @@ function SetupSafety() {
       <ul role="list" className="board-setup__rows" aria-label="Tricks tried">
         {TRICKS.map((trick, index) => (
           <li key={trick.label}>
-            <SafetyCheckRow {...trick} index={index} />
+            <SafetyCheckRow {...trick} index={index} live />
           </li>
         ))}
       </ul>
@@ -55,7 +55,7 @@ const meta = {
     canvas: 'N-R2-Setup-11-Safety',
     canvasNote: [
       'Built against the board in review; sign-off pending.',
-      'The setup interview’s safety check: each trick is a SafetyCheckRow, arriving one by one, motion-stagger apart; the count and the line under the title are the screen’s words from the check’s own counts.',
+      'The setup interview’s safety check as a check that just ran: each trick is a live SafetyCheckRow, landing one by one, motion-stagger apart; the count and the line under the title are the screen’s words from the check’s own counts, and on the screen the count ticks up with the rows.',
       'The step list in the bar is Steps, which comes with the Connectors and rules change, so the bar has a gap where it goes.',
     ].join(' '),
   },
@@ -77,7 +77,7 @@ export const Board: Story = {
     const rows = within(list).getAllByRole('listitem').map((item) => item.firstElementChild as HTMLElement);
     await expect(rows.map((row) => one(row, '.cd-safety-check-row__outcome').textContent)).toEqual(Array(6).fill('Blocked'));
     await expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([90]));
-    // safety_rows_arrive_one_by_one: each motion-stagger after the one before.
+    // safety_rows_land_one_by_one: each motion-stagger after the one before.
     await expect(rows.map((row) => getComputedStyle(row).animationDelay)).toEqual(['0s', '0.15s', '0.3s', '0.45s', '0.6s', '0.75s']);
 
     const confirm = canvas.getByRole('button', { name: 'Confirm rules' });
