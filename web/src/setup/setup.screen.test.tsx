@@ -655,7 +655,7 @@ describe('setup', () => {
 
   it('each_of_four_examples_fills_the_box_and_starts_nothing', async () => {
     // A chip puts its example in the box, the owner's first name in it as the hint asks, and gives
-    // the box focus with the caret at its start, where the business's name is to change. A word
+    // the box focus with the caret at its end, ready for more detail. A word
     // missing from the box is no longer asked for. Nothing is sent before "Start".
     const { screen, router } = await renderRoute('/app/setup');
     const box = screen.getByRole('textbox', { name: 'Your business' });
@@ -668,27 +668,52 @@ describe('setup', () => {
       expect(example?.description, chip).toMatch(/^I’m [A-Z][a-z]+ [A-Z][a-z]+\./);
       await expect.element(box).toHaveFocus();
       const field = box.element() as HTMLTextAreaElement;
-      expect([field.selectionStart, field.selectionEnd, field.scrollTop], chip).toEqual([0, 0, 0]);
+      expect([field.selectionStart, field.selectionEnd], chip).toEqual([field.value.length, field.value.length]);
     }
     expect(screen.getByText('Write a few sentences about your business first.').elements()).toHaveLength(0);
     expect(requests('startSetup')).toHaveLength(0);
     expect(router.state.location.pathname).toBe('/app/setup');
   });
 
+  it('a_picked_starters_end_is_visible_in_the_capped_box', async () => {
+    const supports = vi.spyOn(CSS, 'supports');
+    onTestFinished(() => supports.mockRestore());
+    for (const nativeSizing of [true, false]) {
+      supports.mockReturnValue(nativeSizing);
+      const { screen } = await renderRoute('/app/setup', { viewport: 'phone' });
+      const box = screen.getByRole('textbox', { name: 'Your business' });
+      const field = box.element() as HTMLTextAreaElement;
+      // Reach the ten-line cap without changing a starter's signed description.
+      field.style.width = '120px';
+      if (!nativeSizing) field.style.setProperty('field-sizing', 'fixed');
+      const salon = screen.getByRole('button', { name: 'A hair salon in Oakland' });
+      for (const pick of ['first', 'repeated']) {
+        field.setSelectionRange(0, 0);
+        field.scrollTop = 0;
+        await salon.click();
+        await expect.element(box).toHaveFocus();
+        expect([field.selectionStart, field.selectionEnd], pick).toEqual([field.value.length, field.value.length]);
+        expect(field.getBoundingClientRect().height, pick).toBe(parseFloat(getComputedStyle(field).maxHeight));
+        expect(field.scrollHeight, pick).toBeGreaterThan(field.clientHeight);
+        await expect.poll(() => field.scrollTop + field.clientHeight, { message: pick }).toBeGreaterThanOrEqual(field.scrollHeight - 1);
+      }
+    }
+  });
+
   it('an_example_is_the_owners_to_change_before_start', async () => {
-    // Once in the box, the example is the owner's to change: typed at the caret, at its start, and
+    // Once in the box, the example is the owner's to change: typed at the caret, at its end, and
     // what "Start" sends is the text as the owner left it.
     const { screen } = await renderRoute('/app/setup');
     const box = screen.getByRole('textbox', { name: 'Your business' });
     await screen.getByRole('button', { name: 'A plumber in Oakland' }).click();
     await expect.element(box).toHaveFocus();
-    await userEvent.keyboard('I run Sweet Rivera Plumbing. ');
-    const edited = `I run Sweet Rivera Plumbing. ${START_EXAMPLES.en.examples[1]?.description ?? ''}`;
+    await userEvent.keyboard(' Gas lines too.');
+    const edited = `${START_EXAMPLES.en.examples[1]?.description ?? ''} Gas lines too.`;
     await expect.element(box).toHaveValue(edited);
     await screen.getByRole('button', { name: 'Start' }).click();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     expect(requests('startSetup').map((r) => (r.body as { description: string }).description)).toEqual([edited]);
-    await expect.element(screen.getByText('Sweet Rivera Plumbing', { exact: true }).first()).toBeVisible();
+    await expect.element(screen.getByText('Rivera Plumbing', { exact: true }).first()).toBeVisible();
   });
 
   it('examples_wrap_at_phone_width', async () => {
@@ -893,7 +918,7 @@ describe('setup', () => {
 
   it('the_same_example_again_puts_it_back_focused', async () => {
     // An example's chip pressed again puts its words back exactly, after an edit or without one, and
-    // each press gives the box focus with the caret at its start, even when the words didn't change.
+    // each press gives the box focus with the caret at its end, even when the words didn't change.
     const { screen } = await renderRoute('/app/setup');
     const box = screen.getByRole('textbox', { name: 'Your business' });
     const field = () => box.element() as HTMLTextAreaElement;
@@ -901,18 +926,17 @@ describe('setup', () => {
     const example = START_EXAMPLES.en.examples[1]?.description ?? '';
     await plumber.click();
     await expect.element(box).toHaveFocus();
-    field().setSelectionRange(example.length, example.length);
     await userEvent.keyboard(' Gas lines too.');
     await expect.element(box).toHaveValue(`${example} Gas lines too.`);
     await plumber.click();
     await expect.element(box).toHaveValue(example);
     await expect.element(box).toHaveFocus();
-    expect([field().selectionStart, field().selectionEnd]).toEqual([0, 0]);
-    // The words as they are, the caret left at their end: the press still brings it back to the start.
-    field().setSelectionRange(example.length, example.length);
+    expect([field().selectionStart, field().selectionEnd]).toEqual([example.length, example.length]);
+    // The words as they are, the caret moved away: the press still brings it back to the end.
+    field().setSelectionRange(0, 0);
     await plumber.click();
     await expect.element(box).toHaveFocus();
-    expect([field().selectionStart, field().selectionEnd]).toEqual([0, 0]);
+    expect([field().selectionStart, field().selectionEnd]).toEqual([example.length, example.length]);
     expect(field().value).toBe(example);
     expect(requests('startSetup')).toHaveLength(0);
   });
@@ -926,9 +950,15 @@ describe('setup', () => {
     await box.click();
     await userEvent.keyboard(typed);
     await expect.element(box).toHaveValue(typed);
+    const command = vi.spyOn(document, 'execCommand');
+    onTestFinished(() => command.mockRestore());
     await screen.getByRole('button', { name: 'Apartments in Sacramento' }).click();
     await expect.element(box).toHaveValue(START_EXAMPLES.en.examples[2]?.description);
     await expect.element(box).toHaveFocus();
+    const field = box.element() as HTMLTextAreaElement;
+    expect(command).toHaveBeenCalledWith('insertText', false, field.value);
+    expect(command.mock.results[0]?.value).toBe(true);
+    expect([field.selectionStart, field.selectionEnd]).toEqual([field.value.length, field.value.length]);
     expect(document.execCommand('undo')).toBe(true);
     await expect.element(box).toHaveValue(typed);
     await screen.getByRole('button', { name: 'Start' }).click();

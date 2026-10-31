@@ -129,9 +129,9 @@ export function StartStep() {
     const box = boxRef.current;
     if (picks === 0 || box === null) return;
     box.focus();
-    // The caret at the start, where the business's name is to change, and the box scrolled to it.
-    box.setSelectionRange(0, 0);
-    box.scrollTop = 0;
+    // The caret at the end, ready for more detail, with that end in view even at the line cap.
+    box.setSelectionRange(box.value.length, box.value.length);
+    box.scrollTop = box.scrollHeight;
     // The words fade in with each press: the fill's animation (SetupPage.css) starts over.
     box.style.animation = 'none';
     void box.offsetWidth;
