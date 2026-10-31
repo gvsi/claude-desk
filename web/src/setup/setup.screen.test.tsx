@@ -205,6 +205,36 @@ describe('setup', () => {
     await expect.element(box).toHaveValue('');
   });
 
+  it('lost_answer_is_read_before_it_is_sent_again', async () => {
+    const { interview_id: id } = await startInterview();
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    const answer = 'Leaks, drains and water heaters, around Oakland.';
+    await box.fill(answer);
+    const mark = mockStore.requests.length;
+
+    // The API takes the answer but its reply is lost, and reading the interview fails too: the
+    // outcome is unknown, so the words stay, with "Try again".
+    mockStore.inject({ route: 'setupAnswer', status: 'network', afterCommit: true });
+    mockStore.inject({ route: 'setup', status: 503, times: 2 });
+    await screen.getByRole('button', { name: 'Send' }).click();
+    await expect.element(screen.getByText(FAILED_LINE, { exact: true })).toBeVisible();
+    await expect.element(box).toHaveValue(answer);
+    const failedReads = requests('setup', mark).length;
+    expect(failedReads).toBeGreaterThan(0);
+
+    // "Try again" reads first: the interview holds the answer, so it isn't sent again, and the
+    // page moves on to the next question.
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
+    expect(requests('setupAnswer', mark)).toHaveLength(1);
+    expect(requests('setup', mark).length).toBeGreaterThan(failedReads);
+    await expect.element(box).toHaveValue('');
+    expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
+    const said = (await mockStore.dispatch('setup', { params: { id } })) as { body: SetupState };
+    expect(said.body.messages.filter((m) => m.role === 'owner' && m.text === answer)).toHaveLength(1);
+  });
+
   it('stale_answer_is_refused_and_kept', async () => {
     const { interview_id: id } = await startInterview();
     const { screen } = await renderRoute(`/app/setup/${id}`);

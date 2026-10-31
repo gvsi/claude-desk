@@ -62,14 +62,26 @@ function Line({ message }: { message: SetupMessage }) {
  * stopgap: swap for the design system's failed-send state on `Composer` (the words kept in the box
  * with "Try again" inside it, N-R2-Setup-04-Answer-Failed) once it is on main.
  */
-function AnswerBox({ failed, sending, onSend, onRetry }: { failed: boolean; sending: boolean; onSend: (text: string) => void; onRetry: () => void }) {
+function AnswerBox({
+  failed,
+  sending,
+  retrying,
+  onSend,
+  onRetry,
+}: {
+  failed: boolean;
+  sending: boolean;
+  retrying: boolean;
+  onSend: (text: string) => void;
+  onRetry: () => void;
+}) {
   return (
     <>
       {failed ? (
         <Notice
           tone="error"
           action={
-            <Button variant="secondary" onClick={onRetry}>
+            <Button variant="secondary" busy={retrying} onClick={onRetry}>
               {copy.tryAgain}
             </Button>
           }
@@ -95,6 +107,8 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   const [sending, setSending] = useState<string | null>(null);
   /** The answer that didn't go through, or whose outcome is unknown, with the question it answers. */
   const [failed, setFailed] = useState<Answer | null>(null);
+  /** "Try again" is reading the interview. */
+  const [retrying, setRetrying] = useState(false);
   /** Words to put back in the composer once it takes text again. */
   const [refill, setRefill] = useState<{ text: string } | null>(null);
   const id = state.interview_id;
@@ -163,13 +177,31 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     setRefill(null);
   }, [refill, sending]);
 
-  /** "Try again": the words in the composer, still as the answer to the question they were written for. */
-  const retry = () => {
-    if (failed === null) return;
+  /**
+   * "Try again" reads the interview first, since the answer may have been taken. Taken: on to the
+   * next question, nothing sent. Moved past without it: the words stay for the question now asked.
+   * Still on that question: the composer's words are sent as the answer to it, never to another. A
+   * read that fails changes nothing, and the line stays.
+   */
+  const retry = async () => {
+    if (failed === null || retrying) return;
+    setRetrying(true);
+    const now = await reread();
+    setRetrying(false);
+    if (now === null) return;
     const box = composer.current?.querySelector('textarea');
+    if (holds(now, failed)) {
+      setFailed(null);
+      if (box) fillComposer(box, '');
+      return;
+    }
+    if (now.step !== 'questions' || now.question !== failed.question) {
+      setFailed(null);
+      return;
+    }
     const text = box?.value.trim() || failed.text;
     if (box) fillComposer(box, '');
-    void submit({ ...failed, text });
+    void submit({ question: failed.question, text, before: timesSaid(now, text) });
   };
 
   return (
@@ -196,7 +228,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
         </>
       ) : (
         <div ref={composer}>
-          <AnswerBox failed={failed !== null} sending={sending !== null} onSend={send} onRetry={retry} />
+          <AnswerBox failed={failed !== null} sending={sending !== null} retrying={retrying} onSend={send} onRetry={() => void retry()} />
         </div>
       )}
     </div>
