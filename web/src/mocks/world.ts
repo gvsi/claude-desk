@@ -173,6 +173,8 @@ export interface LeadRecord {
   /** What they want and how to reach them, as typed. Untrusted. */
   note: string;
   createdAt: number;
+  /** Replayed from the recorded history into this copy; a test adds such a lead. */
+  replayed?: boolean;
 }
 
 export interface InboxRecord {

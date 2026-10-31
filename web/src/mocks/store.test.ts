@@ -856,6 +856,20 @@ describe('rules and tools', () => {
     expect((await confirm(8)).status).toBe(401);
   });
 
+  it('people_mark_replayed_leads', async () => {
+    // A test adds leads as the kernel keeps them: one from the recorded history, one live.
+    const at = mockStore.world.now();
+    const lead = { deskId, sessionId: 'ses-lead', note: 'Wants a quote to replace a kitchen faucet.', createdAt: at };
+    mockStore.world.leads.push({ ...lead, leadId: 'lead-recorded', displayName: 'Jordan Pike', replayed: true });
+    mockStore.world.leads.push({ ...lead, leadId: 'lead-live', displayName: 'Sam Ortiz' });
+
+    const people = (await call('people', { params: { desk_id: deskId } })).body as PeopleOut;
+    const byId = new Map(people.leads.map((row) => [row.lead_id, row]));
+    // Only the replayed one says so; a live lead leaves the flag out, as the API does until it has one.
+    expect(byId.get('lead-recorded')).toMatchObject({ display_name: 'Jordan Pike', replayed: true });
+    expect(byId.get('lead-live')).toEqual({ lead_id: 'lead-live', display_name: 'Sam Ortiz', note: lead.note, created_at: expect.any(String) });
+  });
+
   it('confirm_tool_takes_the_batch_body', async () => {
     const stripe = ['payments.list_charges', 'payments.create_refund'];
     const entries = async () => Promise.all(stripe.map(async (tool) => ({ tool, definition_sha256: await hashOf(tool) })));
