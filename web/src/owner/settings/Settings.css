@@ -1,8 +1,8 @@
 /* Settings: the page fills the main area (AppShell `fill`) with an owner page's 24/40/20 padding and
-   centers the content column, as the Settings boards draw it. Under the title, SubNav (200 px) and
-   the section's page beside it, 40 px apart; the section's parts 20 px apart; the concept footer at
-   the window's foot. On a phone, 16 px gutters and one column: SubNav as one line across the page,
-   the parts 16 px apart, and the footer 16 px under them. */
+   centers the content column, as the Settings boards draw it. Under the title, SubNav at
+   size-sub-nav and the section's page beside it, 40 px apart; the section's parts 20 px apart; the
+   concept footer at the window's foot. On a phone, 16 px gutters and one column: SubNav as one line
+   across the page, the parts 16 px apart, and the footer 16 px under them. */
 
 .cd-settings {
   display: flex;
@@ -24,7 +24,7 @@
 
 .cd-settings__columns {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-columns: var(--size-sub-nav) minmax(0, 1fr);
   gap: var(--space-40);
   align-items: start;
   margin-top: var(--space-24);
