@@ -28,7 +28,7 @@ import { SETUP_COPY } from './copy.ts';
 const copy = SETUP_COPY.rules;
 
 /** Setup's rules draft: posted once on the way in, and read again by the same post (the API answers the same draft). */
-function setupRulesQuery(id: string) {
+export function setupRulesQuery(id: string) {
   return {
     queryKey: ['setupRules', id] as const,
     queryFn: () => request('setupRules', { params: { id } }),
@@ -110,7 +110,7 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
   const situations = useQuery({
     queryKey: ['setupSituations', id] as const,
     queryFn: () => request('setupSituations', { params: { id } }),
-    enabled: view === 'situations' && draft.data !== undefined,
+    enabled: view === 'situations' && draft.data !== undefined && checkStatus(draft.data.proof).status === 'checked',
     staleTime: Infinity,
     retry: false,
     refetchOnWindowFocus: false,
@@ -123,12 +123,15 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
       </Button>
     </div>
   );
+  const cantCheck = (
+    <>
+      <Notice tone="info">{copy.cantCheck}</Notice>
+      {saveAndExit}
+    </>
+  );
   const failure = (error: unknown, retry: () => void): ReactNode =>
     error instanceof ApiError && error.code === 'rules_cannot_be_checked' ? (
-      <>
-        <Notice tone="info">{ownerErrorCopy(error)}</Notice>
-        {saveAndExit}
-      </>
+      cantCheck
     ) : (
       <Notice
         tone="error"
@@ -142,7 +145,9 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
       </Notice>
     );
 
-  if (view === 'situations' && draft.data !== undefined) {
+  // The situations go on only from a draft whose check passed, however the stage was opened.
+  const checked = draft.data !== undefined && checkStatus(draft.data.proof).status === 'checked';
+  if (view === 'situations' && checked) {
     const s = SETUP_COPY.situations;
     let body: ReactNode;
     if (situations.data === undefined) {
@@ -194,7 +199,7 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
     // Only a draft whose check passed goes on; one that can't be checked, or failed, waits here.
     body = (
       <>
-        {check.status === 'unavailable' ? <Notice tone="info">{check.lines.join(' ')}</Notice> : null}
+        {check.status === 'checked' ? null : <Notice tone="info">{copy.cantCheck}</Notice>}
         <DraftRules draft={draft.data} people={people.data} check={check} />
         {check.status === 'checked' ? (
           <div className="cd-setup-step__actions">

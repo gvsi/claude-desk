@@ -7,7 +7,7 @@
  * with Answering still off; going live turns Answering on. The interviews are kept per copy beside
  * its world, so a start over leaves none behind.
  */
-import type { PolicyVersion, Probe, ProbeResult, RuleCard, ToolProfile } from '../api/contracts.ts';
+import type { Probe, ProbeResult, RuleCard, ToolProfile } from '../api/contracts.ts';
 import type {
   PolicyVersionOut,
   QuestionKey,
@@ -295,10 +295,20 @@ function interviewOf(sv: Server, req: Req): { interview: Interview; desk: DeskRe
 
 const isFailure = (value: object): value is Failure => 'status' in value;
 
-/** The interview's open rules draft, made again at the answered limit when the rules it was made from have changed. */
+/** A draft the kernel proved: a full check that passed every part, never a bounded or timed-out one. */
+function proved(draft: RulesDraft): boolean {
+  const { proof } = draft;
+  return proof.ok && proof.method === 'symcc' && proof.timed_out !== true && proof.checks.every((check) => check.ok);
+}
+
+/**
+ * The interview's rules draft: the one it made, while it is open (a re-post never drafts again, so
+ * one made from rules that changed since is refused only at its confirm), else a new one at the
+ * answered limit.
+ */
 function setupDraft(sv: Server, interview: Interview, desk: DeskRecord): RulesDraft {
   const open = interview.draftVersion === null ? undefined : desk.drafts.get(interview.draftVersion);
-  if (open && open.parent === desk.policy.version) return open.draft;
+  if (open) return open.draft;
   const drafted = sv.world.draftCards(desk, setupCards(), { cap: interview.capCents });
   const record = desk.drafts.get(drafted.version);
   if (!record) throw new Error(`setup draft ${drafted.version} was not stored`);
@@ -459,9 +469,11 @@ export const SETUP_ROUTES: ServedRoutes = {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
     const { interview, desk } = found;
-    // Confirmed already: the rules in force are the interview's.
-    if (atLeast(interview.state.step, 'preview')) return ok({ ...desk.policy } satisfies PolicyVersion);
-    if (interview.draftVersion === null) return CONFLICT;
+    // Only at the rules' stages, with a draft (past the safety check is 409, as a confirm sent twice finds it).
+    if (!atLeast(interview.state.step, 'rules') || atLeast(interview.state.step, 'preview') || interview.draftVersion === null) return CONFLICT;
+    // A draft that isn't proved is never activated.
+    const open = desk.drafts.get(interview.draftVersion);
+    if (open && !proved(open.draft)) return CONFLICT;
     const confirmed = sv.world.confirmDraft(desk, interview.draftVersion);
     if (confirmed === 'stale' || confirmed === 'not_found' || confirmed === 'conflict') {
       // The rules changed since the draft: the same cards, drafted again at the answered limit on the rules now in force.
@@ -476,7 +488,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
     const { interview, desk } = found;
-    if (interview.state.step !== 'preview' && interview.state.step !== 'live') return CONFLICT;
+    if (interview.state.step !== 'preview') return CONFLICT;
     desk.summary.answering = true;
     moveTo(interview, 'live');
     // The API's public origin is the app's own; the dev server's mock runs where there is no page, and says the path alone.

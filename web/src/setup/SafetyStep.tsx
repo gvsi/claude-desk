@@ -6,8 +6,10 @@ import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { PolicyVersionOut, RulesDraft, SetupState } from '../api/views.ts';
 import { Button, Card, EmptyState, LoadingLine, Notice, PageHeader, SafetyCheckRow } from '../ds/index.ts';
 import { capOf, draftFromDiff, draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
+import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { SETUP_COPY } from './copy.ts';
+import { setupRulesQuery } from './RulesStep.tsx';
 
 const copy = SETUP_COPY.safety;
 
@@ -43,9 +45,13 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
   const queryClient = useQueryClient();
   const id = state.interview_id;
   const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
+  // The draft first, however the step was opened: only one whose check passed is tried and confirmed.
+  const draft = useQuery(setupRulesQuery(id));
+  const checked = draft.data !== undefined && checkStatus(draft.data.proof).status === 'checked';
   const check = useQuery({
     queryKey: ['setupSafetyCheck', id] as const,
     queryFn: () => request('setupSafetyCheck', { params: { id } }),
+    enabled: checked,
     staleTime: Infinity,
     retry: false,
     refetchOnWindowFocus: false,
@@ -115,35 +121,43 @@ export function SafetyStep({ state, onConfirmed, reread }: SafetyStepProps) {
     );
   }
 
+  const cantCheck = (
+    <>
+      <Notice tone="info">{SETUP_COPY.rules.cantCheck}</Notice>
+      <div className="cd-setup-step__actions">
+        <Button variant="primary" size="main" href={exit}>
+          {SETUP_COPY.saveAndExit}
+        </Button>
+      </div>
+    </>
+  );
+  /** A read that failed: rules that can't be checked go no further; anything else can be tried again. */
+  const failure = (failed: unknown, retry: () => void): ReactNode =>
+    failed instanceof ApiError && failed.code === 'rules_cannot_be_checked' ? (
+      cantCheck
+    ) : (
+      <Notice
+        tone="error"
+        action={
+          <Button variant="secondary" onClick={retry}>
+            {SETUP_COPY.questions.tryAgain}
+          </Button>
+        }
+      >
+        {ownerErrorCopy(failed)}
+      </Notice>
+    );
+
   let body: ReactNode;
-  if (check.data === undefined) {
-    if (!check.isError) {
-      body = <LoadingLine>{copy.loading}</LoadingLine>;
-    } else if (check.error instanceof ApiError && check.error.code === 'rules_cannot_be_checked') {
-      body = (
-        <>
-          <Notice tone="info">{ownerErrorCopy(check.error)}</Notice>
-          <div className="cd-setup-step__actions">
-            <Button variant="primary" size="main" href={exit}>
-              {SETUP_COPY.saveAndExit}
-            </Button>
-          </div>
-        </>
-      );
-    } else {
-      body = (
-        <Notice
-          tone="error"
-          action={
-            <Button variant="secondary" onClick={() => void check.refetch()}>
-              {SETUP_COPY.questions.tryAgain}
-            </Button>
-          }
-        >
-          {ownerErrorCopy(check.error)}
-        </Notice>
-      );
-    }
+  if (draft.data === undefined) {
+    body = draft.isError ? failure(draft.error, () => void draft.refetch()) : <LoadingLine>{copy.loading}</LoadingLine>;
+  } else if (!checked) {
+    body = cantCheck;
+  } else if (check.isError) {
+    // The latest run failed: its rows, from an earlier run, no longer stand, and nothing confirms on them.
+    body = failure(check.error, () => void check.refetch());
+  } else if (check.data === undefined) {
+    body = <LoadingLine>{copy.loading}</LoadingLine>;
   } else {
     const { rows, blocked, total } = check.data;
     body = (

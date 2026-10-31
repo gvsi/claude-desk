@@ -86,6 +86,16 @@ const statuses = (state: SetupState, tools: readonly string[]) => tools.map((too
 /** A row of the tools list, by its connector's name. */
 const connectorRow = (screen: RenderResult, name: string) => screen.getByRole('listitem').filter({ hasText: new RegExp(`^${name}`) });
 
+/** The signed can't-check line (N-R2-Setup-10), setup's own words for rules that can't be checked. */
+const CANT_CHECK = "I can't check these rules right now, so they can't go live yet. Your answers are saved; come back from Today and I'll check them again.";
+
+/** A proof that isn't a full pass, by how it falls short. */
+const UNPROVED = {
+  bounded: { ok: true, method: 'bounded' as const, cases: 120, timed_out: false },
+  timed_out: { ok: false, method: 'symcc' as const, cases: null, timed_out: true },
+  failed: { ok: false, method: 'symcc' as const, cases: null, timed_out: false },
+};
+
 const FAILED_LINE = "I couldn't answer just now. Your answer is still here; try again.";
 
 /** Whether `el` is set in Claude's serif. */
@@ -412,7 +422,7 @@ describe('setup', () => {
     mockStore.inject({ route: 'setupRules', status: 409, body: { error: 'rules_cannot_be_checked' } });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Continue' }).click();
-    await expect.element(screen.getByText(RULES_UNAVAILABLE_COPY, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(CANT_CHECK, { exact: true })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Check real situations' }).elements()).toHaveLength(0);
     await expect.element(screen.getByRole('main').getByRole('link', { name: 'Save and exit' })).toHaveAttribute('href', `/app/${state.desk_id}/today`);
 
@@ -422,7 +432,7 @@ describe('setup', () => {
     if (!record) throw new Error('the mock keeps the setup draft');
     record.draft = { ...record.draft, proof: { ...record.draft.proof, method: 'bounded', cases: 120 } };
     const bounded = (await renderRoute(`/app/setup/${other.interview_id}`)).screen;
-    await expect.element(bounded.getByText(RULES_UNAVAILABLE_COPY, { exact: true })).toBeVisible();
+    await expect.element(bounded.getByText(CANT_CHECK, { exact: true })).toBeVisible();
     await expect.element(bounded.getByText(moneyLimitLine(50_000), { exact: true })).toBeVisible();
     expect(bounded.getByRole('button', { name: 'Check real situations' }).elements()).toHaveLength(0);
     expect(bounded.getByText(/didn't pass/).elements()).toHaveLength(0);
@@ -440,7 +450,7 @@ describe('setup', () => {
     const posts = () => requests('setupRules').filter((r) => r.path.includes(slow.interview_id));
     await expect.poll(() => posts().length).toBe(1);
     vi.setSystemTime(Date.now() + PROVING_GIVE_UP_MS + 1_000);
-    await expect.element(waiting.getByText(RULES_UNAVAILABLE_COPY, { exact: true })).toBeVisible();
+    await expect.element(waiting.getByText(CANT_CHECK, { exact: true })).toBeVisible();
     expect(waiting.getByRole('button', { name: 'Check real situations' }).elements()).toHaveLength(0);
     expect(posts()).toHaveLength(1);
 
@@ -478,6 +488,60 @@ describe('setup', () => {
 
     await screen.getByRole('button', { name: 'Looks right' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety check' })).toBeVisible();
+  });
+
+  it('resumed_setup_never_goes_on_with_unchecked_rules', async () => {
+    for (const [how, proof] of Object.entries(UNPROVED)) {
+      for (const at of ['situations', 'safety_check'] as const) {
+        // An interview left at that stage, its draft's check not a full pass, opened again.
+        const { state, draft } = await interviewAtRules();
+        await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+        if (at === 'safety_check') await mockStore.dispatch('setupSafetyCheck', { params: { id: state.interview_id } });
+        const record = deskOf(state).drafts.get(draft.version);
+        if (!record) throw new Error('the mock keeps the setup draft');
+        const checks = record.draft.proof.checks.map((check, i) => (how === 'failed' && i === 0 ? { ...check, ok: false } : check));
+        record.draft = { ...record.draft, proof: { ...record.draft.proof, ...proof, checks } };
+        const resumed = (await renderRoute(`/app/setup/${state.interview_id}`)).screen;
+        await expect.element(resumed.getByText(CANT_CHECK, { exact: true })).toBeVisible();
+        expect(resumed.getByRole('button', { name: 'Looks right' }).elements(), `${how} at ${at}`).toHaveLength(0);
+        expect(resumed.getByRole('button', { name: 'Confirm rules' }).elements(), `${how} at ${at}`).toHaveLength(0);
+        await expect.element(resumed.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
+
+        // The API refuses to confirm a draft that isn't proved: nothing is activated, nothing answers.
+        const version = deskOf(state).policy.version;
+        const refused = await mockStore.dispatch('setupConfirm', { params: { id: state.interview_id } });
+        expect('status' in refused ? refused.status : 0, `${how} at ${at}`).toBe(409);
+        expect(deskOf(state).policy.version).toBe(version);
+        expect(deskOf(state).summary.answering).toBe(false);
+        expect(resumed.getByRole('heading', { name: 'Try it as a customer before anyone else can' }).elements()).toHaveLength(0);
+      }
+    }
+  });
+
+  it('failed_safety_rerun_drops_the_old_result', async () => {
+    const { state } = await interviewAtSafety();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+
+    // A rerun that fails for another reason: its line with "Try again", and no confirm on the old rows.
+    mockStore.inject({ route: 'setupSafetyCheck', status: 503 });
+    await screen.getByRole('button', { name: 'Run again' }).click();
+    const unreachable = ownerErrorCopy(new ApiError('unavailable', { route: 'setupSafetyCheck', method: 'POST', status: 503, code: 'kernel_unavailable' }));
+    await expect.element(screen.getByText(unreachable, { exact: true })).toBeVisible();
+    expect(screen.getByText('6 of 6 blocked', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Confirm rules' }).elements()).toHaveLength(0);
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Confirm rules' })).toBeVisible();
+
+    // A rerun the rules can't be checked for: the can't-check line, and only "Save and exit".
+    mockStore.inject({ route: 'setupSafetyCheck', status: 409, body: { error: 'rules_cannot_be_checked' } });
+    await screen.getByRole('button', { name: 'Run again' }).click();
+    await expect.element(screen.getByText(CANT_CHECK, { exact: true })).toBeVisible();
+    expect(screen.getByText('6 of 6 blocked', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Confirm rules' }).elements()).toHaveLength(0);
+    await expect.element(screen.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
+    expect(requests('setupConfirm')).toHaveLength(0);
   });
 
   it('safety_check_lists_outcomes', async () => {

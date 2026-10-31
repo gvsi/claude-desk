@@ -80,6 +80,8 @@ export const SETUP_COPY = {
     empty: 'No rules yet',
     emptyBody: 'Until you add rules, Claude asks you before it does anything.',
     checkSituations: 'Check real situations',
+    /** The signed line for rules that can't be checked (N-R2-Setup-10), shown with only "Save and exit". */
+    cantCheck: "I can't check these rules right now, so they can't go live yet. Your answers are saved; come back from Today and I'll check them again.",
   },
 
   situations: {
