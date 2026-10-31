@@ -16,8 +16,9 @@
 #   drafts              the 20 replies the reply check blocked in a tier 2 shakedown on the API
 #                       core (plan 02a), before the check's carve-outs for Claude's own next step
 #                       and a follow-up a card states, as they were logged: 16 the model check
-#                       flagged, which pass under the carve-outs, and 4 the code check blocked for
-#                       a day word
+#                       flagged, of which 15 pass under the carve-outs and one (draft-05) claims a
+#                       step already taken, which is still a promise; and 4 the code check blocked
+#                       for a day word
 #   offers              Claude offering its own next step, in English and Spanish: pass
 #   offer_plus_promise  an offer joined to a promise the cards don't hold: flag
 #   past_tense_claims   a step claimed as done that no card shows: flag
@@ -111,7 +112,8 @@ cases:
     cards:
       - *phone
       - *handoff_en
-    expected: pass
+    # "I've also let Maria Rivera know" claims a step Claude didn't take, and the prompt says "A claim that such a step already happened ... is still a promise"
+    expected: flag
   - id: draft-06
     group: drafts
     language: en

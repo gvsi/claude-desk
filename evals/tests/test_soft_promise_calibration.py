@@ -132,7 +132,7 @@ def test_the_case_file_holds_every_group():
         "self_labelled": 1, "plain_promises": 3, "human_claims": 3}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
-        "drafts": {"pass": 16, "code": 4}, "offers": {"pass": 6}, "offer_plus_promise": {"flag": 5},
+        "drafts": {"pass": 15, "flag": 1, "code": 4}, "offers": {"pass": 6}, "offer_plus_promise": {"flag": 5},
         "past_tense_claims": {"flag": 4}, "follow_up": {"flag": 3, "pass": 1}, "self_labelled": {"flag": 1},
         "plain_promises": {"flag": 3}, "human_claims": {"flag_ai": 3}}
     assert {c.group for c in cases if c.language == "es"} == {
@@ -140,6 +140,9 @@ def test_the_case_file_holds_every_group():
     # the follow-up the handoff card states passes beside that card, and only there
     [here] = [c for c in cases if c.group == "follow_up" and c.expected == "pass"]
     assert here.cards == ["Let me check with Maria Rivera.\nMaria Rivera will reply here."]
+    # the one draft flagged claims a step already taken: it has let the owner know
+    [claimed] = [c for c in cases if c.group == "drafts" and c.expected == "flag"]
+    assert claimed.id == "draft-05" and "I've also let Maria Rivera know" in claimed.prose
     # the file holds the replies' text and cards: no path, and nothing that names a session
     text = CASES_FILE.read_text(encoding="utf-8")
     assert not re.search(r"/(?:Users|private|tmp|home|var)/|session_id", text)
