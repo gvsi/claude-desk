@@ -12,7 +12,7 @@ import { cleanup, type RenderResult } from 'vitest-browser-react';
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { newIdempotencyKey, observeRequests } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
-import type { BriefingItem, BriefingList, ConversationSummary, NeedsYouItem, SetupState, ThisWeek, Today } from '../../api/views.ts';
+import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, SetupState, ThisWeek, Today } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
@@ -1951,6 +1951,21 @@ describe("Today's unfinished setup", () => {
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
     expect(screen.getByRole('heading', { name: /^Finish setting up/ }).elements()).toHaveLength(0);
     expect(screen.getByRole('link', { name: 'Continue setup' }).elements()).toHaveLength(0);
+  });
+
+  it('a_desk_listed_without_its_setup_has_no_card', async () => {
+    // An API from before `setup` lists the Desk without it: Today opens as for a live Desk.
+    const read = await mockStore.dispatch('desks');
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the Desks');
+    const without = (read.body as BusinessOut[]).map((business) => ({
+      ...business,
+      desks: business.desks.map(({ setup: _setup, ...desk }) => desk),
+    }));
+    mockStore.inject({ route: 'desks', status: 200, times: 10_000, body: without });
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Things to try')).toBeVisible();
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
   });
 
   it('the_line_names_the_step_setup_stopped_at', async () => {
