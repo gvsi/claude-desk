@@ -972,6 +972,7 @@ export class MockWorld {
     const sessionId = session.state.session_id;
     const open = [...this.handoffs.values()].some((h) => h.handoff.session_id === sessionId && h.handoff.status === 'open');
     if (open) return;
+    // Pending in the kernel (the owner's decision): it will also open none while the chat has a held request; add that guard here when it lands.
     const desk = this.deskOf(session);
     const handoffId = this.id('handoff');
     this.handoffs.set(handoffId, {
