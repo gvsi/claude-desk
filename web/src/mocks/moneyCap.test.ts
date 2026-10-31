@@ -17,9 +17,14 @@ const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const MONEY_CAP_PY = readFileSync(path.join(BACKEND, 'money_cap.py'), 'utf8');
 const RULES_PY = readFileSync(path.join(BACKEND, 'api', 'rules.py'), 'utf8');
 
-/** A table of sentences by language as money_cap.py writes one. */
-const pythonTable = (name: string, table: Readonly<Record<Language, string>>) =>
-  [`${name}: Mapping[str, str] = MappingProxyType({`, ...Object.entries(table).map(([language, sentence]) => `    "${language}": "${sentence}",`), '})'].join('\n');
+/** The sentences, by language, in one of money_cap.py's tables, read by value so layout doesn't matter. */
+const pythonTable = (name: string): Record<string, string> => {
+  const block = new RegExp(`^${name}\\b[^=\\n]*=\\s*MappingProxyType\\(\\{([\\s\\S]*?)\\}\\)`, 'm').exec(MONEY_CAP_PY)?.[1] ?? '';
+  return Object.fromEntries([...block.matchAll(/["'](\w+)["']\s*:\s*"([^"]*)"/g)].map((m) => [m[1], m[2]]));
+};
+
+/** `source` with every run of whitespace made one space, to compare code without its layout. */
+const squash = (source: string) => source.replace(/\s+/g, ' ');
 
 describe('the reason of a card lowered to the payment limit', () => {
   it('is_one_of_the_apis_sentences', () => {
@@ -27,14 +32,14 @@ describe('the reason of a card lowered to the payment limit', () => {
     expect(LOWERED_REASONS).toEqual({ en: 'Up to {amount}, your payment limit.', es: 'Hasta {amount}, tu límite de pago.' });
     expect(ZERO_REASONS).toEqual({ en: 'Your payment limit is {amount}.', es: 'Tu límite de pago es {amount}.' });
     // as money_cap.py has them now, picked as it picks them.
-    expect(MONEY_CAP_PY).toContain(pythonTable('LOWERED_REASONS', LOWERED_REASONS));
-    expect(MONEY_CAP_PY).toContain(pythonTable('ZERO_REASONS', ZERO_REASONS));
-    expect(MONEY_CAP_PY).toContain('return (LOWERED_REASONS if cap else ZERO_REASONS)[language].format(amount=amount(cap))');
+    expect(pythonTable('LOWERED_REASONS')).toEqual(LOWERED_REASONS);
+    expect(pythonTable('ZERO_REASONS')).toEqual(ZERO_REASONS);
+    expect(squash(MONEY_CAP_PY)).toContain('(LOWERED_REASONS if cap else ZERO_REASONS)[language].format(amount=amount(cap))');
     // The API's money-limit route writes it in English, the language the owner app renders rules
     // copy in (`OWNER_LANGUAGE` in backend/desk/api/rules.py).
     expect(OWNER_LANGUAGE).toBe('en');
-    expect(RULES_PY).toContain(`OWNER_LANGUAGE: Language = "${OWNER_LANGUAGE}"`);
-    expect(RULES_PY).toContain('lower_to_cap(owned, active.cards, cap, OWNER_LANGUAGE)');
+    expect(/^OWNER_LANGUAGE\s*(?::[^=\n]*)?=\s*["'](\w+)["']/m.exec(RULES_PY)?.[1]).toBe(OWNER_LANGUAGE);
+    expect(RULES_PY).toMatch(/lower_to_cap\([^)]*\bOWNER_LANGUAGE\s*\)/);
   });
 
   it('states_the_new_limit_in_either_language', () => {
@@ -58,7 +63,7 @@ describe('the reason of a card lowered to the payment limit', () => {
     // money_cap.amount: "$1,500" for whole dollars, with thousands separators, and cents only when
     // there are some ("$100.50"), the same in both languages. The values are what its code, as
     // written there now, gives.
-    expect(MONEY_CAP_PY).toContain('    dollars, rest = divmod(cents, 100)\n    return f"${dollars:,}" + (f".{rest:02d}" if rest else "")');
+    expect(squash(MONEY_CAP_PY)).toContain('dollars, rest = divmod(cents, 100) return f"${dollars:,}" + (f".{rest:02d}" if rest else "")');
     const amounts: [number, string][] = [
       [150_000, '$1,500'],
       [10_050, '$100.50'],
