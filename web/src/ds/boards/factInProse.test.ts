@@ -120,4 +120,45 @@ describe('fact_in_prose', () => {
     expect(rules(PHONE_REPLY, true)).toEqual([]);
     expect(rules(PHONE_REPLY)).toEqual(['lex.en.booking']);
   });
+
+  it('keeps_booking_and_callback_receipts_independent', () => {
+    for (const text of ['Your appointment and call are booked.', 'Your table and call are confirmed.',
+      'Tu cita y tu llamada están confirmadas.', 'Ya están confirmadas tu llamada y tu cita.']) {
+      const language = text.startsWith('Your') ? 'en' : 'es';
+      for (const bookingCard of [false, true]) {
+        for (const callbackCard of [false, true]) {
+          const expected = [!bookingCard && `lex.${language}.booking`, !callbackCard && `lex.${language}.callback`].filter(Boolean);
+          expect([...new Set(factsInProse(text, { bookingCard, callbackCard }).map((hit) => hit.rule))].sort(), text).toEqual(expected.sort());
+        }
+      }
+    }
+    for (const text of ['Your call is confirmed.', 'Your call with Maria is confirmed.', 'Your callback request is confirmed.',
+      'Your follow-up-call is confirmed.', 'Tu llamada está confirmada.']) {
+      expect(factsInProse(text, { callbackCard: true }), text).toEqual([]);
+      expect(factsInProse(text, { bookingCard: true }).map((hit) => hit.rule), text).toEqual([
+        text.startsWith('Your') ? 'lex.en.callback' : 'lex.es.callback',
+      ]);
+    }
+    expect(factsInProse("We've booked your appointment—call us for details.", { callbackCard: true }).map((hit) => hit.rule)).toEqual(['lex.en.booking']);
+  });
+
+  it('preserves_honest_context_and_claim_group_spans', () => {
+    const honest = ['Your identity is confirmed.', 'Your IDENTITY is confirmed.', 'Your contact details are confirmed.', 'Your account is set up.',
+      'Your custom workspace is set to receive messages.', 'Have you previously booked a consultation with us?',
+      "You said you'd booked a consultation with us before.", 'If you have already booked a consultation, I can help with it.',
+      'Si te hemos reservado una mesa, puedo buscar la confirmación.', 'Si ya hemos reservado tu mesa, puedo buscar la confirmación.',
+      'Once your follow-up-call is confirmed, we can discuss access.'];
+    for (const text of honest) {
+      expect(factsInProse(text), text).toEqual([]);
+      expect(factsInProse(`${text} Your consultation is confirmed.`).map((hit) => hit.rule), text).toContain('lex.en.booking');
+    }
+    expect(factsInProse('Tu llamada está confirmada. Está confirmada.')).toEqual([
+      { rule: 'lex.es.callback', span: 'Tu llamada está confirmada' },
+      { rule: 'lex.es.booking', span: 'Está confirmada' },
+    ]);
+    expect(factsInProse('Your call WITH Maria is confirmed.', { callbackCard: true })).toEqual([]);
+    expect(rules('Your appointment with Maria is set up.')).toContain('lex.en.booking');
+    const regex = toJavaScript(String.raw`context|(?P<claim>booked)`);
+    expect([...('context booked'.matchAll(regex))].map((match) => match.groups?.claim)).toEqual([undefined, 'booked']);
+  });
 });
