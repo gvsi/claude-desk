@@ -5,7 +5,8 @@
 ## When to use
 
 - At the top of a connector's page ("Connectors / Payments"), a tool's page ("Connectors / Stripe / Refund") and the add-a-connector pages ("Connectors / Google Calendar"), as the Connectors tab boards draw them.
-- Not on the Connectors page itself, which is the top of the trail, and not on Rules or in Settings.
+- At the top of a review reached from Rules, naming the page by its title: "Rules / Ask me first" for a preset, "Rules / Change your payment limit" for the payment limit.
+- Not on the Connectors page or the Rules page themselves, which are the tops of their trails, and not in Settings.
 
 ## What it shows
 
