@@ -9,6 +9,7 @@ import { http } from 'msw';
 import { StrictMode } from 'react';
 import { createMemoryRouter } from 'react-router';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { cdp } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
 import type { EvReceipt, PublicDesk } from '../../api/contracts.ts';
@@ -69,6 +70,52 @@ const chipGroup = (screen: RenderResult) => screen.getByRole('region', { name: '
 /** The task chips the panel offers now, by name. */
 const chipsIn = (screen: RenderResult) =>
   screen.getByRole('region', { name: 'Send an agent' }).getByRole('button').elements().map((el) => el.textContent).filter((name) => TASKS.includes(name ?? ''));
+
+/** The run's rows the panel shows now, in order. */
+const runRows = (screen: RenderResult) => [...screen.getByRole('region', { name: 'Send an agent' }).element().querySelectorAll('.cd-transcript-row')];
+
+/** Resolves once the window has stopped scrolling: its place unchanged for 300 ms. */
+async function whenStill(): Promise<void> {
+  const start = performance.now();
+  let at = window.scrollY;
+  let since = start;
+  while (performance.now() - since < 300) {
+    await sleep(20);
+    if (window.scrollY !== at) {
+      at = window.scrollY;
+      since = performance.now();
+    }
+    if (performance.now() - start > 5_000) throw new Error('the window never stopped scrolling');
+  }
+}
+
+/**
+ * The agents page at phone width, from its top. A smooth scroll the page before it left going
+ * carries on into this one, so the window is put at the top once it has stopped.
+ */
+async function renderPhoneFromTheTop(): Promise<RenderResult> {
+  const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+  await expect.element(screen.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+  await whenStill();
+  document.documentElement.scrollTop = 0;
+  await whenStill();
+  expect(document.documentElement.scrollTop, 'the window is at the top').toBe(0);
+  return screen;
+}
+
+/** Whether any of `el` shows in the window. */
+const onScreen = (el: Element): boolean => {
+  const { top, bottom } = el.getBoundingClientRect();
+  return bottom > 0 && top < innerHeight;
+};
+
+/** Fails unless `el` lies wholly inside the window. */
+function expectInView(el: Element | undefined, what: string): void {
+  expect(el, what).toBeDefined();
+  const { top, bottom } = (el as Element).getBoundingClientRect();
+  expect(top, `${what}: its top is in the window`).toBeGreaterThanOrEqual(0);
+  expect(bottom, `${what}: its foot is in the window`).toBeLessThanOrEqual(innerHeight);
+}
 
 /** A run as the API reports it, for a test to plant. */
 function plantedRun(state: DemoAgentRun['state']): DemoAgentRun {
@@ -337,6 +384,149 @@ describe('agents page', () => {
     await phone.screen.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(phone.screen.getByText('The agent finished.', { exact: true })).toBeVisible();
     expectNoHorizontalScroll();
+  });
+
+  it('newest_step_follows_in_view', async () => {
+    // On a phone the run grows past the window's foot: as each of the agent's requests and the
+    // Desk's replies arrives, the newest stays in view, down to "The agent finished.".
+    const screen = await renderPhoneFromTheTop();
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    for (let n = 1; n <= 4; n += 1) {
+      await until(() => expect(runRows(screen).length).toBeGreaterThanOrEqual(n));
+      await until(() => expectInView(runRows(screen).at(-1), `the newest of ${runRows(screen).length} rows`));
+    }
+    const finished = panel.getByText('The agent finished.', { exact: true });
+    await expect.element(finished).toBeVisible();
+    await until(() => expectInView(finished.element(), '"The agent finished."'));
+    expectInView(runRows(screen).at(-1), 'the last row');
+    expect(document.scrollingElement?.scrollTop, 'the page followed the run down').toBeGreaterThan(0);
+  });
+
+  it('pressing_a_task_brings_its_run_into_view', async () => {
+    // A visitor at the end of a finished run presses another task under it: the run empties for
+    // the new one and the page grows much shorter, and the new run comes into view rather than
+    // leaving them at the cards below. It plays in view to its end.
+    const screen = await renderPhoneFromTheTop();
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    const finished = panel.getByText('The agent finished.', { exact: true });
+    await until(() => expectInView(finished.element(), '"The agent finished."'));
+    await until(() => expectInView(panel.getByRole('button', { name: 'Try to pay more than its limit' }).element(), 'the task under the run'));
+    const ranTo = document.scrollingElement?.scrollTop ?? 0;
+    expect(ranTo, 'the first run took the page down').toBeGreaterThan(0);
+
+    const working = () => panel.getByRole('status').elements().find((el) => el.textContent === 'Alex Kim’s assistant is at work');
+    const playsInView = async (task: string) => {
+      await until(() => expectInView(working() ?? runRows(screen).at(-1), `the run for "${task}"`));
+      await until(() => expect(panel.element().querySelector('.cd-agent-message__title')?.textContent).toBe(task));
+      await until(() => expectInView(finished.element(), `"The agent finished." after "${task}"`));
+      expectInView(runRows(screen).at(-1), `the last row of the run for "${task}"`);
+    };
+    await panel.getByRole('button', { name: 'Try to pay more than its limit' }).click();
+    await playsInView('Try to pay more than its limit');
+
+    // A visitor who has scrolled away to the foot of the page presses a task without the window
+    // moving to it, as a screen reader can: the new run still comes into view.
+    await whenStill();
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    await sleep(100);
+    expect(onScreen(finished.element()), 'the visitor scrolled away from the run').toBe(false);
+    (panel.getByRole('button', { name: 'Get a quote and pay the service call deposit' }).element() as HTMLElement).click();
+    await playsInView('Get a quote and pay the service call deposit');
+  });
+
+  it('a_visitor_who_scrolls_away_is_left_there', async () => {
+    // A run the test plays a turn at a time: the agent's request, then the Desk's reply with its card.
+    const reply = rivera.conversations.alexAgent.turns.find((turn) => turn.kind === 'event' && turn.event.type === 'message');
+    if (reply?.kind !== 'event' || reply.event.type !== 'message') throw new Error("the fixture's agent chat has a reply");
+    const { blocks } = reply.event;
+    const run: DemoAgentRun = { ...plantedRun('running'), turns: [] };
+    const exchange = () => {
+      run.turns.push({ author: 'agent', n: run.turns.length + 1, blocks: [], receipts: [] });
+      run.turns.push({ author: 'desk', n: run.turns.length + 1, blocks, receipts: [] });
+    };
+    const shown = async () => {
+      await until(() => expect(runRows(screen)).toHaveLength(run.turns.length));
+      await sleep(400);
+    };
+    mockStore.inject({ route: 'agentRun', status: 200, times: 1_000, body: run });
+    const screen = await renderPhoneFromTheTop();
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+
+    // The page follows the run down...
+    let exchanges = 0;
+    do {
+      exchange();
+      await shown();
+      exchanges += 1;
+    } while ((document.scrollingElement?.scrollTop ?? 0) === 0 && exchanges < 6);
+    expect(document.scrollingElement?.scrollTop, 'the page followed the run down').toBeGreaterThan(0);
+    expectInView(runRows(screen).at(-1), 'the newest row');
+
+    // ...until the visitor scrolls back up to read: then it leaves them there as the run goes on, to its end.
+    await whenStill();
+    window.scrollTo(0, 0);
+    await sleep(100);
+    exchange();
+    await shown();
+    exchange();
+    await shown();
+    expect(document.scrollingElement?.scrollTop, 'the page stayed where the visitor scrolled to').toBe(0);
+    run.state = 'done';
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeInTheDocument();
+    await sleep(400);
+    expect(document.scrollingElement?.scrollTop, 'the page stayed where the visitor scrolled to').toBe(0);
+    expect(onScreen(runRows(screen).at(-1) as Element), 'the newest row is out of view').toBe(false);
+
+    // Scrolling away past the run, to the page's foot, is the same: the run goes on out of view.
+    run.turns.length = 0;
+    run.state = 'running';
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    exchange();
+    await shown();
+    await whenStill();
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    await sleep(100);
+    const demoKey = screen.getByRole('region', { name: 'Try it with a demo key' }).element();
+    expect(onScreen(demoKey), 'the visitor is reading the demo key').toBe(true);
+    exchange();
+    await shown();
+    exchange();
+    await shown();
+    expect(onScreen(demoKey), 'the visitor is still reading the demo key').toBe(true);
+    expect(onScreen(runRows(screen).at(-1) as Element), 'the newest row is out of view').toBe(false);
+  });
+
+  it('the_run_scrolls_at_once_under_reduced_motion', async () => {
+    // How the page scrolled the window to the run, each time.
+    const scrollTo = vi.spyOn(window, 'scrollTo');
+    onTestFinished(() => scrollTo.mockRestore());
+    const behaviors = () =>
+      scrollTo.mock.calls.flatMap(([how]: [ScrollToOptions | number | undefined, number?]) => (typeof how === 'object' ? [how.behavior] : []));
+    const runToItsEnd = async () => {
+      const screen = await renderPhoneFromTheTop();
+      const panel = screen.getByRole('region', { name: 'Send an agent' });
+      await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+      await until(() => expectInView(panel.getByText('The agent finished.', { exact: true }).element(), '"The agent finished."'));
+    };
+
+    // Smoothly, as the visitor's system allows.
+    await runToItsEnd();
+    expect(behaviors().length).toBeGreaterThan(0);
+    expect(new Set(behaviors())).toEqual(new Set(['smooth']));
+
+    // At once for a visitor who asks for reduced motion.
+    await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    onTestFinished(async () => {
+      await cdp().send('Emulation.setEmulatedMedia', { features: [] });
+    });
+    expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+    scrollTo.mockClear();
+    await runToItsEnd();
+    expect(behaviors().length).toBeGreaterThan(0);
+    expect(new Set(behaviors())).toEqual(new Set(['instant']));
   });
 
   it('agent_turn_text_is_never_shown', async () => {
