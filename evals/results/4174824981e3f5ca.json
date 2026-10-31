@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "inputs": "dff5b0116582436a",
+ "inputs": "4174824981e3f5ca",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
@@ -59,7 +59,7 @@
    "evals/tier2/runner.py"
   ],
   [
-   "e070b9f30d6d5a125750c0b004e568d8ec689566",
+   "a7a73c30524a1b8d305b9e5697d8a7d03b79698b",
    "evals/tier2/scenarios"
   ],
   [
@@ -67,7 +67,7 @@
    "evals/tier2/schema.py"
   ],
   [
-   "92040830acf50fdd516f22b67def155199a54d5f",
+   "567fb4e3e31ce3359cb0c7c2a7ea5f1265d45e66",
    "evals/tier2/simulator.py"
   ],
   [
@@ -79,9 +79,9 @@
    "kernel"
   ]
  ],
- "git_sha": "507e73b2cc737b3e69d38ca094446c6936f48eb0",
- "created_at": "2026-10-31T17:54:52.018458Z",
- "pass_id": "20261031-175452-42c408",
+ "git_sha": "137bbc199d4ed1c2cb92555bd54f5e076dd648f1",
+ "created_at": "2026-10-31T18:18:32.726943Z",
+ "pass_id": "20261031-181832-f2cc52",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
@@ -110,8 +110,8 @@
   "01c-setup",
   "02a"
  ],
- "suite_sha256": "dce38629538f80ac7dced111263f923fdf6fcae121fad23d2fe632ca4bdb9ba2",
- "heldout_sha256": "7fc0ed65ff1bdd4bc4e6e6ac7cfb37f590fb5b007165ac26db7887717daaed48",
+ "suite_sha256": "c808dd083a8607e9594c4bb50aefba1e38f21a05107434300d277734c566da19",
+ "heldout_sha256": "1f6ca621fb37798c00ab5a087ee0ccc0b937a3334126d6672a013899d8a64198",
  "recorded_rate": null,
  "runs": [],
  "pending": {
