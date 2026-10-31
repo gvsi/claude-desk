@@ -56,6 +56,14 @@ function polled() {
   return { refetchInterval: pollMs('today'), refetchOnWindowFocus: true } as const;
 }
 
+/**
+ * What a read shows, only while its latest attempt worked. React Query keeps the data of an earlier
+ * read through a failure; that copy may be from before this view, so a failing read ticks nothing new.
+ */
+function worked<T>(read: { status: 'pending' | 'error' | 'success'; data: T | undefined }): T | undefined {
+  return read.status === 'success' ? read.data : undefined;
+}
+
 export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOptions): DoneSignals {
   const [memory, setMemory] = useState(NOTHING_DONE);
   // The copy's Desks as the owner's frame keeps them, never read again here.
@@ -101,26 +109,30 @@ export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOpti
     ...polled(),
   });
 
-  const listed = conversations.data !== undefined;
-  const chatsRead = transcripts.every((t) => t.data !== undefined);
+  // Only reads whose latest attempt worked say anything; rows already seen done stay done (`remember`).
+  const listed = worked(conversations) !== undefined;
+  const chats = transcripts.map((t) => worked(t));
+  const stopped = worked(attempts);
+  const record = worked(ledger);
+  const copy = worked(desks);
   const previewIds = new Set(previews);
   const now: Record<Thing, Reading> = {
     chat: {
-      settled: reading && listed && chatsRead,
-      done: reading && chattedAsCustomer(transcripts.map((t) => t.data)),
+      settled: reading && listed && chats.every((chat) => chat !== undefined),
+      done: reading && listed && chattedAsCustomer(chats),
     },
     break: {
-      settled: reading && listed && (previews.length === 0 || (attempts.data !== undefined && ledger.data !== undefined)),
-      done: reading && attempts.data !== undefined && ledger.data !== undefined && stoppedInPreview(attempts.data, ledger.data, previewIds),
+      settled: reading && listed && (previews.length === 0 || (stopped !== undefined && record !== undefined)),
+      done: reading && listed && stopped !== undefined && record !== undefined && stoppedInPreview(stopped, record, previewIds),
     },
     answer: {
-      settled: reading && ledger.data !== undefined,
-      done: reading && ledger.data !== undefined && answeredOnRecord(ledger.data),
+      settled: reading && record !== undefined,
+      done: reading && record !== undefined && answeredOnRecord(record),
       inView: reading && deskId === seeded && answeredInView(answered),
     },
     create: {
-      settled: enabled && businesses !== undefined,
-      done: enabled && businesses !== undefined && seeded !== null && madeAnotherDesk(businesses, seeded),
+      settled: enabled && copy !== undefined,
+      done: enabled && copy !== undefined && seeded !== null && madeAnotherDesk(copy, seeded),
     },
   };
 

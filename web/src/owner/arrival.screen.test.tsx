@@ -1215,6 +1215,32 @@ describe('Things to try ticks off', () => {
     expect(animated()).toEqual([]);
   });
 
+  it('a_failing_read_ticks_nothing_from_what_it_kept', async () => {
+    const { screen, router } = await renderRoute(SAFETY_ENTRIES, { retryScale: 0 });
+    await expect.poll(() => requests('ledger').length).toBeGreaterThan(0);
+    // The held request is answered elsewhere, and Safety reads the record with the answer in it.
+    const held = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === rivera.decisions.held.reason_plain)?.decision;
+    if (!held) throw new Error('the seed holds the 15% quote');
+    await mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } });
+    const answeredAt = requests('ledger').length;
+    await expect.poll(() => requests('ledger').length, { timeout: 5_000 }).toBeGreaterThan(answeredAt + 1);
+    // Then every read of the record fails, and the copy kept is the one with the answer.
+    mockStore.inject({ route: 'ledger', status: 503, times: 10_000 });
+    const failingFrom = requests('ledger').length;
+    await expect.poll(() => requests('ledger').length, { timeout: 5_000 }).toBeGreaterThan(failingFrom + 1);
+
+    // Today opens while the record can't be read: the copy kept from before ticks nothing new.
+    await router.navigate(TODAY);
+    const things = thingsToTry(screen);
+    await expect.element(things).toBeVisible();
+    const reads = { needsYou: requests('needsYou').length, ledger: requests('ledger').length };
+    await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(reads.needsYou + 6);
+    expect(things.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
+    await expect.element(things.getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
+    // The list kept trying to read the record meanwhile.
+    expect(requests('ledger').length).toBeGreaterThan(reads.ledger);
+  });
+
   it('a_ticked_row_shown_again_is_drawn_still', async () => {
     const { screen } = await renderRoute(TODAY);
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
