@@ -484,8 +484,20 @@ describe('ReaderPage', () => {
       const article = screen.container.querySelector('article');
       // The sentence that gave the hosted prototype's address reads as the page it is on, the repo link kept.
       const sentence = [...(article?.querySelectorAll('p') ?? [])].find((p) => p.textContent?.startsWith('You’re in it.'));
-      expect(flat(sentence?.textContent), where).toMatch(/^You’re in it\. The code is at owner: repo link\. Each visitor acts as Maria/);
-      expect(sentence?.querySelector('.cd-pill')?.textContent, where).toBe('owner: repo link');
+      expect(flat(sentence?.textContent), where).toMatch(
+        /^You’re in it\. The code is at github\.com\/gvsi\/claude-desk\. Each visitor acts as Maria/,
+      );
+      // The repository is the sentence's one link, a plain text link that opens in a new tab.
+      const links = [...(sentence?.querySelectorAll('a') ?? [])];
+      expect(links, where).toHaveLength(1);
+      const [repo] = links;
+      expect(repo?.textContent, where).toBe('github.com/gvsi/claude-desk');
+      expect(repo?.getAttribute('href'), where).toBe('https://github.com/gvsi/claude-desk');
+      expect(repo?.getAttribute('target'), where).toBe('_blank');
+      expect(repo?.getAttribute('rel'), where).toBe('noopener noreferrer');
+      expect(repo?.className, where).toBe('cd-text-link');
+      expect(repo?.querySelector('svg'), where).toBeNull();
+      expect(sentence?.querySelector('.cd-pill'), where).toBeNull();
       expect(article?.textContent, where).not.toContain('enforced core, is at');
       await screen.unmount();
     }
@@ -495,15 +507,14 @@ describe('ReaderPage', () => {
   });
 
   it('placeholders_show_as_pending', async () => {
-    // The proposal's placeholders as the document has them, until they are filled: five in the measures table
-    // and the two links in its last section.
+    // The proposal's placeholders as the document has them, until they are filled: five in the measures table.
+    // The one link in its last section still to give, the hosted address, is in the sentence the page replaces.
     const PENDING = [
       'measured: tier 2 pass, with its 95% upper bound',
       'measured: held-out rate with its 95% interval',
       'measured: false-hold rate',
       'measured: …',
       'measured: …',
-      'owner: repo link',
     ];
     for (const size of [DESKTOP, PHONE]) {
       const where = `proposal at ${size.width}`;

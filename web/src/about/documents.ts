@@ -13,19 +13,24 @@ export { documentText, inlineText, MarkdownError, readingMinutes } from './markd
 export type { Block, FigureName, Inline } from './markdown.ts';
 
 // The proposal's sentence that gives the hosted prototype's address, which reads oddly on the hosted page
-// itself. `$1` keeps the repository link, a placeholder until it is filled and a Markdown link after.
-const PROTOTYPE_SENTENCE = /The prototype, v1['’]s enforced core, is at .+?, with the code at (.+?)\./g;
+// itself. `$1` keeps the whole repository link: the placeholder until it is given, the Markdown link after.
+// It ends at the period that ends the sentence, one followed by whitespace or the end of the text, so a dot
+// inside the link (github.com) doesn't end it. Exported for the tests. A global pattern keeps a `lastIndex`
+// that an importer's `test` or `exec` moves, so `proposalForThePage` works on a fresh copy and never reads or
+// changes the exported one's.
+export const PROTOTYPE_SENTENCE = /The prototype, v1['’]s enforced core, is at .+?, with the code at (.+?)\.(?=\s|$)/g;
 const ON_THE_PAGE = 'You’re in it. The code is at $1.';
 
 /** The proposal's Markdown as its page shows it: the prototype sentence replaced, which must match exactly once. */
 export function proposalForThePage(markdown: string): string {
-  const found = [...markdown.matchAll(PROTOTYPE_SENTENCE)];
+  const sentence = new RegExp(PROTOTYPE_SENTENCE);
+  const found = [...markdown.matchAll(sentence)];
   if (found.length !== 1) {
     const second = found[1];
     const line = second ? markdown.slice(0, second.index).split('\n').length : null;
     throw new MarkdownError(line, `the sentence about where the prototype is matched ${found.length} times, not once`);
   }
-  return markdown.replace(PROTOTYPE_SENTENCE, ON_THE_PAGE);
+  return markdown.replace(sentence, ON_THE_PAGE);
 }
 
 export interface AboutDocument {
