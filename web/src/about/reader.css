@@ -912,8 +912,32 @@
   text-decoration: none;
 }
 
-.cd-about-contents__link:hover {
+/* Beside the article, the list marks the section being read (ReaderPage's SideContents): its words in
+   text-primary, the others' in text-secondary, and a 2 px bar in text-primary beside its words, in the gutter.
+   The bar is one element, moved to the current row; it slides there in motion-base, and moves at once under
+   reduced motion. The folded list on a phone marks nothing. */
+.cd-about-contents--side .cd-about-contents__link {
+  color: var(--text-secondary);
+}
+
+.cd-about-contents--side .cd-about-contents__link[aria-current='location'] {
+  color: var(--text-primary);
+}
+
+.cd-about-contents .cd-about-contents__link:hover {
   color: var(--accent-blue);
+}
+
+.cd-about-contents__bar {
+  position: absolute;
+  top: 0;
+  left: calc(var(--space-12) * -1);
+  width: var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--text-primary);
+  transition:
+    transform var(--motion-base) var(--motion-ease-emphasis),
+    height var(--motion-base) var(--motion-ease-emphasis);
 }
 
 .cd-about-page .cd-about-contents__number {
@@ -973,6 +997,11 @@
 
 .cd-about-article > h2:first-child {
   margin-top: 0;
+}
+
+/* Focus lands on a heading when the contents list's link to it is followed; it is not a control, so no ring. */
+.cd-about-article > h2:focus {
+  outline: none;
 }
 
 .cd-about-article strong {

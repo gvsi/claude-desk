@@ -268,6 +268,39 @@ test('going_back_returns_to_the_readers_place', async ({ page }) => {
   await expectBackAt(page, 4000, 'forward from the Desk');
 });
 
+test('back_from_a_contents_link_returns_to_the_readers_place', async ({ page }) => {
+  // Part way down the prediction, the reader follows "Limitations" in the contents list: the page moves there,
+  // gliding unless the reader asked for reduced motion, and the address names it. Back returns to where they were,
+  // and Forward to the section.
+  const atLimitations = () =>
+    page.evaluate(() => {
+      const section = document.getElementById('limitations');
+      if (!section) return false;
+      return Math.abs(section.getBoundingClientRect().top - parseFloat(getComputedStyle(section).scrollMarginTop)) <= 1;
+    });
+  for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+    await page.emulateMedia({ reducedMotion });
+    await page.goto('/about/prediction');
+    await expect(title(page, 'Capability prediction'), reducedMotion).toBeVisible(FIRST_DRAW);
+    await scrollWindow(page, 1800);
+    const before = await settledScrollY(page);
+
+    const contents = page.getByRole('navigation', { name: 'On this page' });
+    await contents.getByRole('link', { name: 'Limitations', exact: true }).click();
+    await page.waitForURL('**/about/prediction#limitations');
+    await expect.poll(atLimitations, `${reducedMotion}: followed`).toBe(true);
+    await expect(page.locator('#limitations'), `${reducedMotion}: focus on the section`).toBeFocused();
+    await expect(contents.getByRole('link', { name: 'Limitations', exact: true })).toHaveAttribute('aria-current', 'location');
+
+    await page.goBack();
+    await page.waitForURL((url) => url.pathname === '/about/prediction' && url.hash === '');
+    await expectBackAt(page, before, `${reducedMotion}: back`);
+    await page.goForward();
+    await page.waitForURL('**/about/prediction#limitations');
+    await expect.poll(atLimitations, `${reducedMotion}: forward`).toBe(true);
+  }
+});
+
 test('about_pages_print_without_the_pinned_bar', async ({ page }) => {
   // On screen the top bar stays while the page scrolls; on paper it is the page's first line.
   await page.goto('/about/proposal');

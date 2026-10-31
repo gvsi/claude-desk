@@ -7,8 +7,17 @@
  *
  * The page is static: it reads its document from `documents.ts`, which only it loads, and makes no request.
  */
-import { Fragment, useContext, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
-import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
+import {
+  Fragment,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type MouseEvent,
+  type RefObject,
+} from 'react';
+import { Link, UNSAFE_NavigationContext, useLocation, useNavigate, useNavigationType } from 'react-router';
 
 import { Card, ConceptFooter, Icon, Mark, MarkAppIcon, Wordmark } from '../ds/index.ts';
 import { inApp, useDocumentTitle } from '../lib/useDocumentTitle.ts';
@@ -21,6 +30,7 @@ import { Inlines } from './Inlines.tsx';
 import { DOCUMENT_LINKS, type AboutId } from './links.ts';
 import { MONTHS } from './months.ts';
 import { PrototypeLink } from './PrototypeLink.tsx';
+import { useCurrentSection } from './useCurrentSection.ts';
 import { useNoIndex } from './useNoIndex.ts';
 
 import './reader.css';
@@ -110,8 +120,9 @@ function keepSectionWhileTypeLoads(heading: HTMLElement): () => void {
  * Forward return to where the reader last was in that document: the browser's own restoring races the router's
  * drawing of the page, and loses when the page it leaves is shorter. The router counts the address a window
  * loads as a move back, so its first page opens as the address says. This runs only when a document draws, not
- * on every hash: the contents list's links move within the page by themselves. A section the address opened is kept
- * in place while the reading type loads, until the document goes.
+ * on every hash: the contents list's links move within the page by themselves. These moves are instant whatever
+ * the page's styles say, so a glide never passes, or records, a place on the way. A section the address opened is
+ * kept in place while the reading type loads, until the document goes.
  */
 function useReadingPlace(id: AboutId, hash: string) {
   // The router's navigator: one object for as long as the router lives.
@@ -133,15 +144,15 @@ function useReadingPlace(id: AboutId, hash: string) {
     if (opening.current?.id !== id) opening.current = { id, back: navigationType === 'POP' && reading.drawn };
     let stopKeeping = () => {};
     if (opening.current.back) {
-      window.scrollTo(0, reading.places[id] ?? 0);
+      window.scrollTo({ top: reading.places[id] ?? 0, behavior: 'instant' });
     } else {
       const anchor = sectionAnchor(hash);
       const section = anchor ? document.getElementById(anchor) : null;
       if (section) {
-        section.scrollIntoView();
+        section.scrollIntoView({ behavior: 'instant' });
         stopKeeping = keepSectionWhileTypeLoads(section);
       } else {
-        window.scrollTo(0, 0);
+        window.scrollTo({ top: 0, behavior: 'instant' });
       }
     }
     reading.drawn = true;
@@ -190,10 +201,12 @@ function ArticleBlock({ blocks, index, hero, compact }: ArticleBlockProps) {
   switch (block?.kind) {
     case 'heading':
       if (block.depth === 1) return null;
+      // Focusable from the contents list's links, not by Tab.
       return (
         <h2
           id={block.id}
           className={compact ? 'cd-type-article-heading-phone' : 'cd-type-article-heading'}
+          tabIndex={-1}
           {...docText(index)}
         >
           {block.text}
@@ -257,13 +270,57 @@ function Article({ document, compact }: { document: AboutDocument; compact: bool
   );
 }
 
-/** The numbered contents list: a column beside the article, or one row that opens on a phone. */
-function Contents({ sections, compact }: { sections: Heading[]; compact: boolean }) {
-  const list = (
+interface ContentsListProps {
+  sections: Heading[];
+  /** The section being read, which the list marks; null marks none. */
+  current: string | null;
+  /** Told of each link followed, as the jump to its section starts. */
+  onFollow?: (id: string) => void;
+}
+
+/** Whether the reader asked for reduced motion, or the browser can't say. */
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
+ * Follows a contents link within the page, in place of the browser's jump: the address names the section, the
+ * window scrolls to its heading, smoothly unless the reader asked for reduced motion, and focus moves to the
+ * heading, so the next Tab goes on from the section. A click that opens the link elsewhere (a new tab or window),
+ * or that something else has handled, is left to the browser.
+ */
+function useFollowSection(onFollow?: (id: string) => void): (event: MouseEvent<HTMLAnchorElement>, id: string) => void {
+  const navigate = useNavigate();
+  const { pathname, search, hash } = useLocation();
+  return (event, id) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const heading = document.getElementById(id);
+    if (!heading) return;
+    event.preventDefault();
+    onFollow?.(id);
+    // The address first, as the browser's own jump does: the entry being left keeps the reader's place for Back. A
+    // link to the section the address already names replaces it, as the browser's would.
+    navigate({ pathname, search, hash: `#${id}` }, { replace: hash === `#${id}` });
+    // Only this scroll glides: the page's own (opening a document, Back and Forward) stay instant. The heading's
+    // scroll margin keeps it clear of the pinned bar.
+    heading.scrollIntoView({ behavior: prefersReducedMotion() ? 'instant' : 'smooth', block: 'start' });
+    heading.focus({ preventScroll: true });
+  };
+}
+
+/** The numbered list of the document's sections. */
+function ContentsList({ sections, current, onFollow }: ContentsListProps) {
+  const follow = useFollowSection(onFollow);
+  return (
     <ol className="cd-about-contents__list">
       {sections.map((section, i) => (
         <li key={section.id}>
-          <a className="cd-about-contents__link cd-type-body" href={`#${section.id}`}>
+          <a
+            className="cd-about-contents__link cd-type-body"
+            href={`#${section.id}`}
+            aria-current={section.id === current ? 'location' : undefined}
+            onClick={(event) => follow(event, section.id)}
+          >
             {/* The list numbers its items for a screen reader; the page draws the number. */}
             <span className="cd-about-contents__number cd-type-caption" aria-hidden="true">
               {String(i + 1).padStart(2, '0')}
@@ -274,28 +331,85 @@ function Contents({ sections, compact }: { sections: Heading[]; compact: boolean
       ))}
     </ol>
   );
-  if (compact) {
-    return (
-      <nav className="cd-about-contents cd-about-contents--compact" aria-label="On this page">
-        <details className="cd-about-contents__fold">
-          <summary className="cd-about-contents__row cd-type-control">
-            On this page{' '}
-            <span className="cd-about-contents__count">
-              {`${sections.length} ${sections.length === 1 ? 'section' : 'sections'}`}
-            </span>
-            <Icon name="chevron-down" size={16} className="cd-about-contents__chevron" />
-          </summary>
-          {list}
-        </details>
-      </nav>
-    );
-  }
+}
+
+/** Where the bar beside the current row's words goes, from the top of the list's column. */
+interface BarPlace {
+  top: number;
+  height: number;
+}
+
+/**
+ * Where the bar goes for the section `current` names, measured from its row's words, which may wrap; measured
+ * again when the column changes size. Null when no section is current, so the bar isn't drawn. A bar drawn afresh
+ * starts on its row; one already drawn slides to the next (reader.css).
+ */
+function useBarPlace(column: RefObject<HTMLElement>, current: string | null): BarPlace | null {
+  const [place, setPlace] = useState<BarPlace | null>(null);
+  useLayoutEffect(() => {
+    const root = column.current;
+    if (!root || current === null) {
+      setPlace(null);
+      return;
+    }
+    const measure = () => {
+      const words = root.querySelector(`a[href="#${CSS.escape(current)}"] > span:last-child`);
+      if (!words) return setPlace(null);
+      const box = words.getBoundingClientRect();
+      const next = { top: box.top - root.getBoundingClientRect().top, height: box.height };
+      setPlace((was) => (was && was.top === next.top && was.height === next.height ? was : next));
+    };
+    measure();
+    if (typeof window.ResizeObserver !== 'function') return;
+    const resized = new ResizeObserver(measure);
+    resized.observe(root);
+    return () => resized.disconnect();
+  }, [column, current]);
+  return place;
+}
+
+/** The list as a column beside the article, which marks the section being read. */
+function SideContents({ sections }: { sections: Heading[] }) {
+  const [current, follow] = useCurrentSection(sections.map((section) => section.id));
+  const column = useRef<HTMLElement>(null);
+  const bar = useBarPlace(column, current);
   return (
-    <nav className="cd-about-contents" aria-label="On this page">
+    <nav ref={column} className="cd-about-contents cd-about-contents--side" aria-label="On this page">
       <p className="cd-about-side-label cd-type-caption">On this page</p>
-      {list}
+      <ContentsList sections={sections} current={current} onFollow={follow} />
+      {bar ? (
+        <span
+          className="cd-about-contents__bar"
+          data-contents-bar=""
+          aria-hidden="true"
+          style={{ height: `${bar.height}px`, transform: `translateY(${bar.top}px)` }}
+        />
+      ) : null}
     </nav>
   );
+}
+
+/** The list folded into one row that opens, on a phone. It marks nothing. */
+function FoldedContents({ sections }: { sections: Heading[] }) {
+  return (
+    <nav className="cd-about-contents cd-about-contents--compact" aria-label="On this page">
+      <details className="cd-about-contents__fold">
+        <summary className="cd-about-contents__row cd-type-control">
+          On this page{' '}
+          <span className="cd-about-contents__count">
+            {`${sections.length} ${sections.length === 1 ? 'section' : 'sections'}`}
+          </span>
+          <Icon name="chevron-down" size={16} className="cd-about-contents__chevron" />
+        </summary>
+        <ContentsList sections={sections} current={null} />
+      </details>
+    </nav>
+  );
+}
+
+/** The numbered contents list: a column beside the article, or one row that opens on a phone. */
+function Contents({ sections, compact }: { sections: Heading[]; compact: boolean }) {
+  return compact ? <FoldedContents sections={sections} /> : <SideContents sections={sections} />;
 }
 
 /** The author, the date, the reading time and the other document, beside the article. */

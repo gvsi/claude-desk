@@ -216,6 +216,22 @@ describe('About page source guards', () => {
   const all = sources();
   const about = Object.entries(all).filter(([file]) => file.startsWith('about/') && !isTest(file));
 
+  it('about_styles_set_no_scroll_behavior', () => {
+    // Only a contents link's jump glides, through its own handler. A scroll-behavior in a stylesheet would glide every
+    // scroll that names no behavior: a focused link brought into view, the end-to-end test's own scrolls.
+    const setsScrollBehavior = (css: string) => /(?<![\w-])scroll-behavior\s*:/.test(css.replace(/\/\*[\s\S]*?\*\//g, ''));
+    for (const css of ['html { scroll-behavior: smooth; }', '.cd-about-page{scroll-behavior:auto}', '@media screen { :root { scroll-behavior : smooth } }']) {
+      expect(setsScrollBehavior(css), css).toBe(true);
+    }
+    for (const css of ['.fold { overscroll-behavior: contain; }', '/* no scroll-behavior: smooth here */ .x { color: red; }']) {
+      expect(setsScrollBehavior(css), css).toBe(false);
+    }
+
+    const sheets = readdirSync(path.join(SRC, 'about'), { recursive: true, encoding: 'utf8' }).filter((file) => file.endsWith('.css'));
+    expect(sheets).toContain('reader.css');
+    expect(sheets.filter((file) => setsScrollBehavior(readFileSync(path.join(SRC, 'about', file), 'utf8')))).toEqual([]);
+  });
+
   it('about_has_no_fetching', () => {
     const bad = [
       "await fetch('/api/x')",
