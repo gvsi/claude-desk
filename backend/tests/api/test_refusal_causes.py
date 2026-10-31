@@ -1,0 +1,70 @@
+"""Safety causes use only the kernel's exact reason/check codes and deciding policy IDs."""
+
+from typing import get_args
+
+import pytest
+from pydantic import ValidationError
+
+from desk.api.owner_reads import refusal_cause
+from desk.api.schemas import Attempt, RefusalCause
+
+
+@pytest.mark.parametrize(("summary", "policies", "expected"), [
+    ({"reason": "paused"}, [], "paused"),
+    *[({"reason": code}, [], "tool_not_available") for code in ("unknown_tool", "not_given")],
+    ({"reason": "invalid_args"}, [], "incomplete_request"),
+    ({"reason": "no_active_version"}, [], "no_rules"),
+    *[({"reason": code}, [], "rules_unchecked")
+      for code in ("version_unloadable", "version_outdated", "evaluation_error")],
+    *[({"reason": "adapter_refused", "check": code}, [], cause) for code, cause in [
+        ("no_such_slot", "no_such_slot"), ("unknown_item", "unknown_item"), ("over_limit", "over_quote_ceiling"),
+        ("no_such_quote", "quote_unpayable"), ("quote_paid", "quote_unpayable"), ("quote_paying", "quote_unpayable"),
+        ("no_such_charge", "no_such_charge"), ("not_refundable", "not_refundable"),
+        ("no_such_document", "no_such_document"), ("not_verified", "not_verified"),
+        ("no_mandate", "agent_limit"), ("mandate_exhausted", "agent_limit"),
+        ("not_an_agent_with_a_mandate", "agent_limit"),
+    ]],
+    ({}, ["F.never.card"], "owner_rule"),
+    *[({}, [policy], cause) for policy, cause in [
+        ("B.same_copy", "other_copy"), ("B.private_data_record_owner", "not_verified"),
+        ("B.recipient_owner_or_verified_contact", "recipient"), ("B.no_agent_pay_out", "agent_pay_out"),
+        ("B.agent_charge_within_mandate", "agent_limit"), ("B.money_has_amount", "no_amount"),
+    ]],
+    ({}, [], "no_rule"),
+    ({"reason": "new_reason"}, ["F.never.card"], None),
+    ({"reason": "adapter_refused", "check": "new_check"}, ["F.never.card"], None),
+    ({"reason": "adapter_refused"}, [], None),
+    ({}, ["B.new_policy"], None),
+    ({}, ["B.auto_money_cap"], None),
+    ({}, ["B.money_has_amount", "B.same_copy", "F.never.card"], "owner_rule"),
+    ({}, ["B.money_has_amount", "B.same_copy"], "other_copy"),
+    ({}, ["B.agent_charge_within_mandate", "B.private_data_record_owner"], "not_verified"),
+    ({"reason": "paused"}, ["F.never.card"], "paused"),
+    ({"reason": "Paused"}, [], None),
+    ({"reason": "adapter_refused", "check": "no_such_slot extra"}, [], None),
+    ({}, ["X.F.never.card"], None),
+])
+def test_refusal_cause_uses_exact_kernel_codes(summary, policies, expected):
+    row = {"policy_ids": policies, "reason_plain": "Your rule says never", "card_ids": ["never-decoy"]}
+    entry = {"event": {"kind": "decide", "summary": summary}}
+
+    assert refusal_cause(row, entry) == expected
+
+
+def test_refusal_cause_is_closed_and_held_requests_have_no_cause():
+    expected = {
+        "owner_rule", "not_verified", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
+        "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
+        "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
+        "agent_limit", "other_copy", "no_rule",
+    }
+    assert set(get_args(RefusalCause)) == expected
+    held = Attempt(ref_id="decision", kind="held", reason_plain="Waiting for you", card_ids=[], origin="kernel",
+                   created_at="2026-10-31T00:00:00Z", triage=None, ledger_seq=1)
+    assert held.cause is None
+    with pytest.raises(ValidationError):
+        Attempt.model_validate({**held.model_dump(), "kind": "refused", "cause": "new_code"})
+
+
+def test_refusal_without_its_ledger_entry_has_no_cause():
+    assert refusal_cause({"policy_ids": []}, None) is None

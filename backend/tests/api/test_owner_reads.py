@@ -868,13 +868,51 @@ async def test_safety_lists_refusals_with_origin(scene, clock):
         {"ref_id": str(replayed_seq), "kind": "reply_blocked",
          "reason_plain": "A reply was stopped before it was shown, because it wrote a number outside a checked card.",
          "card_ids": [], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 20)), "triage": None,
-         "ledger_seq": replayed_seq},
+         "ledger_seq": replayed_seq, "cause": None},
         {"ref_id": refused.decision_id, "kind": "refused", "reason_plain": refused.reason_plain,
          "card_ids": ["never-native.find_slots"], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 19)),
-         "triage": None, "ledger_seq": refused.ledger_seq}]
+         "triage": None, "ledger_seq": refused.ledger_seq, "cause": "owner_rule"}]
     # the replayed entry is listed at the time it was recorded, in the briefing too, not when it was written
     newest = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]["newest"]["blocked"]
     assert (newest["ref_id"], newest["at"], newest["line"]) == (str(replayed_seq), stamp(local(2026, 10, 29, 20)), None)
+
+
+async def test_safety_cause_from_adapter_check(scene):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    refusal = await who.decide("native.book", {"slot_id": "S-20990101-0000"})
+    assert refusal.outcome == "refuse"
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] == "no_such_slot"
+
+
+@pytest.mark.parametrize(("source", "cause"), [
+    ("early_reason", "incomplete_request"), ("baseline", "not_verified"), ("plain_deny", "no_rule"),
+])
+async def test_safety_cause_from_decision_source(scene, monkeypatch, source, cause):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    tool, args = "native.book", {}
+    if source == "baseline":
+        scene.fake.verify(who.session_id, "dana")
+        desk = scene.fake.desks[scene.owner.desk_id]
+        person = scene.fake.sessions[who.session_id].person_id
+        document = next(doc for doc in desk.documents.values() if doc.record_owner_person_id != person)
+        tool, args = "native.release_document", {"document_id": document.document_id}
+    elif source == "plain_deny":
+        # An evaluated Cedar deny with no deciding policies (no permit covers this request).
+        monkeypatch.setattr(scene.fake, "_rule", lambda session, desk, action: ("refuse", [], None))
+        tool, args = "native.find_slots", {}
+    refusal = await who.decide(tool, args)
+    assert refusal.outcome == "refuse"
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] == cause
 
 
 STOPPED = "A reply was stopped before it was shown, because "

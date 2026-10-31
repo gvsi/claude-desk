@@ -2116,7 +2116,9 @@ class FakeKernelState:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="invalid_args")
         action = self._normalize(session, desk, call)
         if action is None:
-            return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused")
+            # The booking adapter's step-1 refusal carries its fixed check code in the decide entry.
+            check = "no_such_slot" if call.tool == "native.book" else None
+            return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused", check=check)
         outcome, card_ids, baseline = self._rule(session, desk, action)
         script = self._scripts.get(call.tool)
         scripted = script is not None and script.outcome is not None
@@ -2210,7 +2212,8 @@ class FakeKernelState:
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,
                       action: NormalizedAction | None, outcome: str, card_ids: list[str], *,
-                      why: str | None = None, scripted: bool = False, baseline: str | None = None) -> Decision:
+                      why: str | None = None, check: str | None = None, scripted: bool = False,
+                      baseline: str | None = None) -> Decision:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
@@ -2218,6 +2221,8 @@ class FakeKernelState:
                    "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version, "reviewed": False}
         if why is not None:
             summary["reason"] = why
+        if check is not None:
+            summary["check"] = check
         entry = self.append(desk, "decide", summary, session_id=session.session_id, ref_id=decision_id)
         expires_at = self.now + {"allow": ALLOW_FOR, "hold": HOLD_FOR, "refuse": timedelta(0)}[outcome]
         answers, inbox = [], []
