@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
+  type Ref,
   type RefObject,
 } from 'react';
 
@@ -122,10 +123,21 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
     if (inert || active === null || active === document.body) target.focus();
   }, [inert]);
 
+  // Keep the address intact: owner pages may use its fragment for their own state.
+  const mainId = useId();
+  const main = useRef<HTMLElement>(null);
+  const skipToContent = (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    main.current?.focus();
+  };
+
   // Only the navigation changes with the layout. The page stays in the same place in the tree, so
   // crossing the breakpoint (a resized window, a turned phone) keeps its drafts and other state.
   return (
     <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}`}>
+      <a className="cd-app-shell__skip cd-type-control" href={`#${mainId}`} onClick={skipToContent} {...inertWhen(inert)}>
+        Skip to content
+      </a>
       {banner ? (
         <div className="cd-app-shell__banner" {...inertWhen(inert)}>
           {banner}
@@ -138,7 +150,7 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
             {sidebar}
           </aside>
         )}
-        <Main fill={fill} inert={inert} contentRef={content}>
+        <Main id={mainId} mainRef={main} fill={fill} inert={inert} contentRef={content}>
           {children}
         </Main>
         {/* A panel beside the page slides in and out; a sheet, or any panel under reduced motion, comes and goes at once. */}
@@ -148,9 +160,18 @@ export function AppShell({ sidebar, business, banner, layout = 'auto', fill = fa
   );
 }
 
-function Main({ fill, inert, contentRef, children }: { fill: boolean; inert: boolean; contentRef: RefObject<HTMLDivElement>; children: ReactNode }) {
+interface MainProps {
+  id: string;
+  mainRef: Ref<HTMLElement>;
+  fill: boolean;
+  inert: boolean;
+  contentRef: RefObject<HTMLDivElement>;
+  children: ReactNode;
+}
+
+function Main({ id, mainRef, fill, inert, contentRef, children }: MainProps) {
   return (
-    <main className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`} {...inertWhen(inert)}>
+    <main ref={mainRef} id={id} tabIndex={-1} className={`cd-app-shell__main${fill ? ' cd-app-shell__main--fill' : ''}`} {...inertWhen(inert)}>
       <div ref={contentRef} className="cd-app-shell__content">
         {children}
       </div>
