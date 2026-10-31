@@ -460,6 +460,8 @@ describe('Safety', () => {
     const range = document.createRange();
     range.selectNodeContents(words);
     expect(Math.round(range.getBoundingClientRect().left - dot.getBoundingClientRect().right)).toBe(8);
+    // The button keeps its one line's height: size-control, 32 px.
+    expect(held.element().getBoundingClientRect().height).toBe(32);
   });
 
   it('mock_refusal_says_why', async () => {
