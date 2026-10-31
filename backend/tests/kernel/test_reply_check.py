@@ -1916,3 +1916,42 @@ def test_public_policy_maximum_size_scan_stays_below_one_second(monkeypatch, phr
     elapsed = perf_counter() - start
     assert len(scanned_lengths) == 41  # one per value and one combined, no growing-prefix scans
     assert elapsed < 0.75
+
+
+@pytest.mark.parametrize("text", [
+    "Nos prestations : la visite, la pose, la réparation sont offertes.",
+    "Une garantie pour la pose et la réparation.",
+    "Consultas sem custo para todos os clientes.",
+    "La consegna e la posa sono senza costi.",
+    "Beratung kostenlos für alle Kunden.",
+    "GRATUIT", "gratuites", "offerts", "sans frais", "remise", "rabais",
+    "garantis", "garanties", "remboursées", "remboursements",
+    "GRÁTIS", "gra\u0301tis", "sem custos", "sem taxa", "sem taxas",
+    "descontos", "garantidos", "garantidas", "senza costo", "sconti", "omaggi",
+    "garantiti", "garantite", "rimborsi", "umsonst", "Rabatte", "garantiert", "Erstattungen",
+    "ｇｒａｔｕｉｔ", "grátuit", "оffеrtеs", "sеm custo",
+])
+def test_public_policy_other_commitment_terms_ignore_language_vote(text, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert "language" in reply_check.scan_public_text(text)
+
+
+@pytest.mark.parametrize(("left", "right"), [
+    ("sans", "frais"), ("sem", "custo"), ("sem", "taxas"), ("senza", "costi"),
+])
+def test_public_policy_other_commitment_split_attribution(left, right, monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    values = {"policy:a": left, "policy:b": right, "policy:z": "Ask about our services."}
+    assert reply_check.scan_public_text(left) == reply_check.scan_public_text(right) == []
+    assert reply_check.scan_public_policies(values) == {
+        "policy:a": ["language"], "policy:b": ["language"]}
+
+
+def test_public_policy_other_commitments_do_not_scan_reply_prose_or_word_parts(monkeypatch):
+    monkeypatch.setattr(lang, "positive_other_language", lambda _: False)
+    assert reply_check.scan_public_text("gratuitous remiseness garage offerings") == []
+    assert "language" not in reply_check.scan_public_text("gratis")
+    assert "language" not in reply_check.scan_public_text("reembolso")
+    assert reply_check.scan_prose("Is it gratuit?") == []
+    assert reply_check.policy_card_violations("Is it gratuit?", [RenderedBlock(
+        kind="card", template="policy", fact_id="charter:policy:about", text="Ask about our services.")]) == []

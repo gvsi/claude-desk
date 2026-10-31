@@ -2263,6 +2263,7 @@ def quote_card(**limits) -> RuleCard:
     ("free consultation", ["lex.en.promise"]),
     ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
     ("Consultations gratuites pour tous les clients.", ["language"]),
+    ("Consultas sem custo para todos os clientes.", ["language"]),
     ("Services sans frais pour tous les clients.", ["language"]),
     ("Livraison offerte pour tous", ["language"]),
     ("Remise de 20% sans frais", ["digit", "language", "percent_sign"]),
@@ -2410,6 +2411,7 @@ async def test_reply_policy_order_refuses_reassembled_promises(kernel, ro_read, 
 @pytest.mark.kernel_plan("01b")
 @pytest.mark.parametrize("parts", [
     ("Portland Beaverton", "Cash card"),
+    ("Garage parking available", "Offering estimates by appointment"),
     ("Service area: Portland, Beaverton, Hillsboro, Tigard", "Cash, card, Venmo accepted",
      "Emergency service available"),
 ])
@@ -2433,13 +2435,14 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
 
 
 @pytest.mark.kernel_plan("01b")
-@pytest.mark.parametrize("stored", ["discount", "private", "expired"])
+@pytest.mark.parametrize("stored", ["discount", "other_commitment", "private", "expired"])
 async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read, arrange, stored):
     http, schema, _ = kernel
     copy = await new_copy(http)
     path = {"desk_slug": desk_slug(ro_read, schema, copy)}
-    if stored == "discount":
-        arrange.stored_policy(copy, "arrival", "20% off for first-time clients")
+    if stored in ("discount", "other_commitment"):
+        arrange.stored_policy(copy, "arrival", "20% off for first-time clients" if stored == "discount"
+                              else "Consultas sem custo para todos os clientes.")
     else:
         texts = {"arrival": "No", "first_visit": "Ask about our services.",
                  "service_area": "charge for consultations."}
@@ -2455,6 +2458,16 @@ async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read,
         page = await http.public().call("GET /public/{desk_slug}", path=path, query={"lang": language})
         assert all(block.template != "policy" for block in page.charter)
         assert {"hours", "contact"} <= {block.template for block in page.charter}
+    if stored == "other_commitment":
+        visitor = await new_visitor(http, path["desk_slug"])
+        draft = ReplyDraft(session_id=visitor.state.session_id, generation=visitor.state.generation, prose="",
+                           clauses=[Clause(template="policy", fact_id="charter:policy:arrival")])
+        verdict = await http.session(visitor.session_token).call("POST /check_reply", CheckReplyRequest(draft=draft))
+        assert not verdict.ok
+        assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
+            ("policy_combined", ["charter:policy:arrival"])]
+        assert len(verdict.blocks) == 1 and verdict.blocks[0].template == "handoff"
+        assert verdict.signature
 
 
 async def draft(owner: CredentialView, desk_id: str, cards: list[RuleCard], parent: int):

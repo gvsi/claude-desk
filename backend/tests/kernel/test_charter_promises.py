@@ -432,3 +432,62 @@ async def test_policy_limits_accept_the_exact_maximum(app, client, create):
     slug = response.json()["slug"] if create else copy.slug
     page = await client.get(f"/public/{slug}")
     assert len([block for block in page.json()["charter"] if block["template"] == "policy"]) == 40
+
+
+@pytest.mark.parametrize("text", [
+    "Nos prestations : la visite, la pose, la réparation sont offertes.",
+    "Une garantie pour la pose et la réparation.",
+    "Consultas sem custo para todos os clientes.",
+    "La consegna e la posa sono senza costi.",
+    "Beratung kostenlos für alle Kunden.",
+    "Consultations gratuites pour tous les clients.",
+    "Services sans frais pour tous les clients.",
+    "Livraison offerte pour tous",
+    "Remise de 20% sans frais",
+])
+async def test_other_commitment_policy_refused_on_write_public_read_and_reply(app, client, text):
+    copy = await rivera(app, client)
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:about", "kind": "text", "value": text}]})
+    assert response.status_code == 422
+    assert "language" in response.json()["detail"]["policy:about"]
+    # Directly store an older policy to exercise both public-read and reply guards.
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(FactRow).where(
+            FactRow.desk_id == copy.desk_id, FactRow.fact_id == "charter:policy:service_area")))).one()
+        row.claims = [Claim(key="policy:service_area", kind="text", value=text)]
+    for language in ("en", "es"):
+        page = await client.get(f"/public/{copy.slug}", params={"lang": language})
+        assert page.status_code == 200
+        assert all(block["template"] != "policy" for block in page.json()["charter"])
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:service_area")])
+    assert_handed_off(verdict)
+    assert [(v.rule_id, v.fact_ids) for v in verdict.violations] == [
+        ("policy_combined", ["charter:policy:service_area"])]
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("text", [
+    "Cash, card, Venmo accepted",
+    "Service area: Portland, Beaverton, Hillsboro, Tigard",
+    "Pour-over coffee available",
+    "Les ofrecemos envío a domicilio",
+    "Garage parking available",
+    "Offering estimates by appointment",
+])
+async def test_honest_policy_passes_other_commitment_guard_on_all_routes(app, client, text):
+    copy = await rivera(app, client)
+    response = await put_part(client, copy, "charter", {"charter": [
+        {"key": "policy:about", "kind": "text", "value": text}]})
+    assert response.status_code == 200, response.text
+    for language in ("en", "es"):
+        page = await client.get(f"/public/{copy.slug}", params={"lang": language})
+        assert page.status_code == 200
+        assert [b["text"] for b in page.json()["charter"] if b["template"] == "policy"] == [text]
+    visitor = await open_visitor(client, copy)
+    verdict = await checked(client, visitor, "", [clause("policy", "charter:policy:about")])
+    assert verdict.ok and verdict.violations == []
+    assert [block.text for block in verdict.blocks] == [text]
+    verify_verdict(await public_key(client), visitor.session_id, verdict)

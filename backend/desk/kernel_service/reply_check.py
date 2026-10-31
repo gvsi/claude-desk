@@ -225,13 +225,13 @@ def _plain(ch: str) -> str:
 
 
 def _fold(text: str, stroke: str = "l", strokes: frozenset[str] = STROKES,
-          acute: bool = False) -> tuple[str, list[int]]:
+          acute: bool = False, keep_accents: bool = False) -> tuple[str, list[int]]:
     """`text` for the lexicons: accents and other combining marks dropped, each letter that looks
     like an ASCII one read as it ("Tuеsday" with a Cyrillic е is Tuesday), each of `strokes` (by
     default the bare strokes) read as `stroke`, each dash and hyphen as "-", each apostrophe as
     "’", and each run of whitespace one space, but with `acute`, a whitespace character before a
     combining acute (how NFKC writes ´) as "’"; and the index in `text` each folded character
-    came from."""
+    came from. `keep_accents` preserves marks for accent-sensitive policy entries."""
     chars: list[str] = []
     origin: list[int] = []
     for i, ch in enumerate(text):
@@ -245,7 +245,7 @@ def _fold(text: str, stroke: str = "l", strokes: frozenset[str] = STROKES,
                 origin.append(i)
             continue
         for part in unicodedata.normalize("NFKD", _plain(ch)):
-            if unicodedata.category(part) not in ("Mn", "Me"):
+            if keep_accents or unicodedata.category(part) not in ("Mn", "Me"):
                 part = _plain(part)
                 chars.append(stroke if part in strokes else LOOKALIKES.get(part, part))
                 origin.append(i)
@@ -273,6 +273,36 @@ LEXICONS: dict[str, list[tuple[str, re.Pattern[str]]]] = {
     language: _load_lexicon(language) for language in ("en", "es")}
 BOOKING_LINES = [(f"lex.{language}.booking", pattern) for language, entries in LEXICONS.items()
                  for category, pattern in entries if category == "booking"]
+
+
+def _load_other_promises() -> dict[bool, list[re.Pattern[str]]]:
+    """Policy-only terms; accented entries preserve marks in both pattern and reading."""
+    path = LEXICON_DIR / "other_promises.txt"
+    entries: dict[bool, list[re.Pattern[str]]] = {False: [], True: []}
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        reading, tab, pattern = line.partition("\t")
+        if not tab or reading not in ("folded", "accented") or not pattern.strip():
+            raise ValueError(f"{path.name}:{number} is not a <reading>\\t<regex> line")
+        keep_accents = reading == "accented"
+        folded, _ = _fold(pattern, keep_accents=keep_accents)
+        entries[keep_accents].append(re.compile(rf"(?<!\w)(?:{folded})(?!\w)", re.IGNORECASE))
+    return entries
+
+
+OTHER_PROMISES = _load_other_promises()
+
+
+def _other_promise_spans(text: str) -> set[tuple[int, int]]:
+    """Whole commitment spans for policies, independent of the language detector."""
+    spans = set()
+    for keep_accents, patterns in OTHER_PROMISES.items():
+        for reading, origin in _readings(text, keep_accents=keep_accents).items():
+            for pattern in patterns:
+                for match in pattern.finditer(reading):
+                    spans.add((origin[match.start()], origin[match.end() - 1] + 1))
+    return spans
 
 
 def _named_reach(text: str, names: Iterable[str]) -> list[int]:
@@ -305,7 +335,7 @@ def _blank_canaries(text: str, canaries: Mapping[str, str]) -> tuple[str, list[s
     return "".join(chars), [document_id for document_id in canaries if document_id in found]
 
 
-def _readings(text: str) -> dict[str, list[int]]:
+def _readings(text: str, *, keep_accents: bool = False) -> dict[str, list[int]]:
     """The readings of `text` the lexicons take (`_fold`), each with the
     index in `text` each of its characters came from: a bare stroke as l, as I, and an ASCII
     capital I as l too ("doIIars"); where NFKC wrote an acute accent as a space and a combining
@@ -314,7 +344,7 @@ def _readings(text: str) -> dict[str, list[int]]:
     variants: list[dict] = [{}, {"stroke": "i"}, {"strokes": STROKES_AND_I}]
     if SPACED_ACUTE.search(text):
         variants += [variant | {"acute": True} for variant in variants]
-    return dict(_fold(text, **variant) for variant in variants)
+    return dict(_fold(text, keep_accents=keep_accents, **variant) for variant in variants)
 
 
 def _marked(text: str) -> bool:
@@ -477,16 +507,16 @@ def _allowed_public_hit(text: str, start: int, end: int, rule: str, allow_words:
 def scan_public_text(text: str, allow_words: frozenset[str] = frozenset()) -> list[str]:
     """Rule IDs for public text: the prose scan with no canaries, names or booking card.
 
-    Both lexicons run, whatever the text's language. Positive evidence of another language
-    is refused as in reply prose; short or undetermined text keeps passing. Format controls
-    are refused because
+    Both prose lexicons run, whatever the text's language. Positive language evidence or
+    a policy-only other-language commitment is refused; undetermined text keeps passing.
+    Format controls are refused because
     policy cards render the original text, whereas the prose scan reads normalized text.
     Pure: no reads or writes, and no matched text returned to callers that record a refusal.
     """
     normalized = shown(text)
     rules = {rule for start, end, rule, _ in _prose_hits(normalized)
              if not _allowed_public_hit(normalized, start, end, rule, allow_words)}
-    if lang.positive_other_language(normalized):
+    if lang.positive_other_language(normalized) or _other_promise_spans(normalized):
         rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
@@ -529,6 +559,12 @@ def _scan_public_parts(values: Sequence[tuple[str | None, str]],
     if lang.positive_other_language(combined):
         for key, low, high in ranges:
             if key is not None and low < high:
+                fields[key].add("language")
+    # Attribute lexical commitments only to intersecting policies. A term wholly inside
+    # reply prose stays with the existing prose rules, even beside a harmless policy card.
+    for start, end in _other_promise_spans(combined):
+        for key, low, high in ranges:
+            if key is not None and low < high and low < end and start < high:
                 fields[key].add("language")
     right_context: RightContext = {}
     hits = _prose_hits(combined, right_context=right_context)

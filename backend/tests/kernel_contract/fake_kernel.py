@@ -848,6 +848,10 @@ def money(cents: int) -> str:
 
 
 PUBLIC_POLICY_PATTERNS = (
+    ("language", r"\b(?:gratuite?s?|offerte?s?|sans\s+frais|remises?|rabais|garantie?s?|"
+     r"remboursee?s?|remboursements?|sem\s+(?:custos?|taxas?)|descontos?|garantid[oa]s?|"
+     r"senza\s+cost[oi]|scont[oi]|omaggi(?:o)?|garantit[oaie]|rimbors[oi]|"
+     r"kostenlos(?:e[nmrs]?)?|umsonst|rabatt(?:e|en|s)?|garantiert(?:e[nmrs]?)?|erstattung(?:en)?)\b"),
     ("lex.en.promise", r"\b(?:free|discounts?|refunds?|guarantees?|no\s+charge)\b"),
     ("lex.es.promise", r"\b(?:descuentos?|garantiz\w*|reembols\w*|sin\s+costo)\b"),
     ("lex.en.booking", r"\byour\s+appointment\s+is\s+confirmed\b"),
@@ -860,11 +864,18 @@ def unsupported_public_policy_language(text: str) -> bool:
     text = unicodedata.normalize("NFKC", text)
     letters = [char for char in text if char.isalpha()]
     non_latin = sum(not unicodedata.name(char, "").startswith("LATIN ") for char in letters)
-    words = set(re.findall(r"[^\W\d_]+", text.casefold()))
-    french_promises = {"sans", "frais", "gratuit", "gratuite", "gratuits", "gratuites", "offert", "offerte",
-                       "offerts", "offertes", "garanti", "garantie", "remboursé", "remboursés", "remise"}
-    return (non_latin > 0.3 * len(letters) or detect_language(text) == "other"
-            or bool(words & french_promises))
+    return non_latin > 0.3 * len(letters) or detect_language(text) == "other"
+
+
+def public_commitment_reading(text: str) -> tuple[str, list[int]]:
+    """Fold accents for the fake's examples, retaining original offsets for attribution."""
+    chars, origin = [], []
+    for index, char in enumerate(text):
+        for part in unicodedata.normalize("NFKD", char):
+            if unicodedata.category(part) not in ("Mn", "Me"):
+                chars.append(part)
+                origin.append(index)
+    return "".join(chars), origin
 
 
 def public_policy_rules(text: str) -> list[str]:
@@ -879,8 +890,10 @@ def public_policy_rules(text: str) -> list[str]:
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
     for rule, pattern in PUBLIC_POLICY_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
+        if re.search(pattern, public_commitment_reading(text)[0] if rule == "language" else text, re.IGNORECASE):
             rules.add(rule)
+    if re.search(r"\bgrátis\b", unicodedata.normalize("NFKC", text), re.IGNORECASE):
+        rules.add("language")
     return sorted(rules)
 
 
@@ -897,10 +910,13 @@ def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[
     if unsupported_public_policy_language(combined):
         for key in fields:
             fields[key].add("language")
-    for rule, pattern in PUBLIC_POLICY_PATTERNS:
-        for match in re.finditer(pattern, combined, re.IGNORECASE):
+    for rule, pattern in (*PUBLIC_POLICY_PATTERNS, ("language", r"\bgrátis\b")):
+        reading, origin = (public_commitment_reading(combined) if rule == "language" and "grátis" not in pattern
+                           else (combined, list(range(len(combined)))))
+        for match in re.finditer(pattern, reading, re.IGNORECASE):
+            start, end = origin[match.start()], origin[match.end() - 1] + 1
             for key, low, high in ranges:
-                if key is not None and low < match.end() and match.start() < high:
+                if key is not None and low < end and start < high:
                     fields[key].add(rule)
     return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
 
