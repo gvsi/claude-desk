@@ -203,7 +203,7 @@
   font-weight: 520;
 }
 
-.cd-setup-live__embed-line {
+.cd-setup-live__embed-text .cd-setup-live__embed-line {
   margin-top: var(--space-2);
   color: var(--text-secondary);
 }
