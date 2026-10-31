@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 
 import type { CardBlock, PublicDesk, RenderedBlock } from '../../../api/contracts.ts';
@@ -192,11 +192,6 @@ function verticalPadding(el: HTMLElement | null): number {
   if (!el) return 0;
   const style = getComputedStyle(el);
   return parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-}
-
-/** The chat head's "Ask for {owner}", while it is shown. */
-function askOf(shell: HTMLElement | null): HTMLElement | null {
-  return shell?.querySelector<HTMLElement>('.cd-public-shell__chat-head > .cd-button') ?? null;
 }
 
 /**
@@ -469,21 +464,19 @@ export function PublicShell({
     setAboutFocused(aboutRef.current !== null && document.activeElement === aboutRef.current);
   }, [aboutBeside]);
   const [inertAskPressed, setInertAskPressed] = useState(false);
-  // The owner joining takes "Ask for {owner}" out of the chat's head. Note, as that renders and while
-  // Ask is still on the page, whether it has focus; nothing drawn depends on it. After the swap, focus
-  // goes on (`focusAfterAsk`) only if Ask had it, so it doesn't drop to the page; focus anywhere
-  // else, or nowhere, stays where it is.
-  const askShown = useRef(!ownerInChat);
-  const askFocusAtSwap = useRef(false);
-  if (askShown.current === ownerInChat && typeof document !== 'undefined') {
-    const ask = askOf(shellRef.current);
-    askFocusAtSwap.current = ask !== null && ask === document.activeElement;
-  }
+  // The owner joining takes "Ask for {owner}" out of the chat's head. Its ref callback notes, as React
+  // lets go of it and while it is still on the page, whether it had focus. After the swap, focus goes
+  // on (`focusAfterAsk`) only if it had, so it doesn't drop to the page; focus anywhere else, or
+  // nowhere, stays where it is.
+  const ask = useRef<HTMLButtonElement | null>(null);
+  const askLeftWithFocus = useRef(false);
+  const askRef = useCallback((element: HTMLButtonElement | null) => {
+    if (element === null) askLeftWithFocus.current = ask.current !== null && ask.current === ask.current.ownerDocument.activeElement;
+    ask.current = element;
+  }, []);
   useLayoutEffect(() => {
-    if (askShown.current !== ownerInChat) return;
-    askShown.current = !ownerInChat;
-    const follow = askFocusAtSwap.current;
-    askFocusAtSwap.current = false;
+    const follow = ownerInChat && askLeftWithFocus.current;
+    askLeftWithFocus.current = false;
     if (follow && shellRef.current) focusAfterAsk(shellRef.current);
   }, [ownerInChat]);
   const name = <Name>{brand.name}</Name>;
@@ -571,7 +564,7 @@ export function PublicShell({
             {/* A vision page's Ask goes nowhere, and says so once, in the pinned head under its row.
                 While the owner is in the chat there is no Ask: the owner is already here. */}
             {ownerInChat ? null : (
-              <Button variant="secondary" onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
+              <Button variant="secondary" buttonRef={askRef} onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
                 {copy.askFor(owner)}
               </Button>
             )}

@@ -42,6 +42,7 @@
 | `describedBy` | `string` | The `id` of the words that tell it apart from buttons named alike (`aria-describedby`): each payment limit's "Change" points at its own line. |
 | `onClick` | `(event) => void` | Not called while disabled or busy. |
 | `onKeyDown` | `(event) => void` | Keys pressed on the button. Not on a link. |
+| `buttonRef` | `Ref<HTMLButtonElement>` | The `<button>`, for a screen that has to know about it. React lets go of it (a callback gets `null`) before the button leaves the page, so whether it had focus can still be read then, as `PublicShell` does for "Ask for {owner}". Not on a link. |
 | `children` | `ReactNode` | The label, in `.cd-type-control` (primary at weight 500), held as one run of text, so words around a name stay together and the gap only separates them from a menu button's chevron. |
 
 ## States
