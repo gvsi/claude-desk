@@ -4,6 +4,7 @@ import { expect, fn } from 'storybook/test';
 import type { Decision, SseEvent } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { settled } from '../../test/settled.ts';
 import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { Transcript } from '../Transcript/Transcript.tsx';
@@ -98,8 +99,14 @@ function leadIn(receipt: HTMLElement): HTMLElement {
   return lead;
 }
 
-/** The words lead in primary ink, in the line's caption size and weight; the rest stays secondary. */
-function expectLeadLook(receipt: HTMLElement): void {
+/**
+ * The words lead in primary ink, in the line's caption size and weight; the rest stays secondary,
+ * and brightens to primary only while the pointer is over the line. Read once the line's color
+ * transition has ended, so a hover that starts as the story renders isn't caught halfway.
+ */
+async function expectLeadLook(receipt: HTMLElement): Promise<void> {
+  await settled(receipt);
+  const rest = receipt.matches(':hover') ? TEXT_PRIMARY : TEXT_SECONDARY;
   const line = getComputedStyle(receipt);
   expectComputed(leadIn(receipt), {
     color: TEXT_PRIMARY,
@@ -110,8 +117,8 @@ function expectLeadLook(receipt: HTMLElement): void {
   });
   const text = receipt.querySelector('.cd-margin-line__text');
   if (!text) throw new Error('no line text');
-  expectComputed(receipt, { color: TEXT_SECONDARY });
-  expectComputed(text, { color: TEXT_SECONDARY });
+  expectComputed(receipt, { color: rest });
+  expectComputed(text, { color: rest });
 }
 
 const meta = {
@@ -316,7 +323,7 @@ export const OwnerReason: Story = {
       await expect(visibleText(receipt)).toBe(line);
       // The period after the words belongs to the lead.
       await expect(leadIn(receipt).textContent).toBe(`${words}.`);
-      expectLeadLook(receipt);
+      await expectLeadLook(receipt);
       const dot = receipt.querySelector('.cd-status-dot');
       await expect(dot).toHaveClass(`cd-status-dot--${tone}`);
       await expect(dot).toHaveAttribute('aria-hidden', 'true');
@@ -353,7 +360,7 @@ export const HeldWithCardBelow: Story = {
     const receipt = canvas.getByRole('button', { name: 'Held for you Open the full trace.' });
     await expect(visibleText(receipt)).toBe('Held for you');
     await expect(leadIn(receipt).textContent).toBe('Held for you');
-    expectLeadLook(receipt);
+    await expectLeadLook(receipt);
     const dots = receipt.querySelectorAll('.cd-status-dot');
     await expect(dots).toHaveLength(1);
     await expect(dots[0]).toHaveClass('cd-status-dot--held');

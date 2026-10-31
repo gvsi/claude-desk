@@ -2,11 +2,16 @@ import type { Preview } from '@storybook/react-vite';
 
 import { BOARD_VIEWPORTS, assertCanvasParameter } from '../src/ds/reference/boards.ts';
 import { assertCleanCopy } from '../src/ds/test/copy.ts';
+import { webFontsLoaded } from '../src/ds/test/fonts.ts';
 
 import '../src/ds/tokens.css';
 import '../src/ds/base.css';
 
 const preview: Preview = {
+  // Before every story renders: the web fonts are in, so no play measures text drawn in a fallback.
+  beforeEach: async () => {
+    await webFontsLoaded();
+  },
   // After every story renders (and its play runs): it names its canvas board, and its copy is clean.
   afterEach: ({ canvasElement, parameters }) => {
     assertCanvasParameter(parameters);
