@@ -5,6 +5,7 @@
  * going live. Nothing turns on, goes live or reads "On" before its confirming request succeeds.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { page } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, ownerErrorCopy } from '../api/http.ts';
@@ -1005,6 +1006,24 @@ describe('setup', () => {
         await expect.element(screen.getByRole('link', { name: 'Save and exit' })).toBeVisible();
         await expect.element(screen.getByText('Rivera Plumbing', { exact: true }).first()).toBeVisible();
       }
+    }
+
+    // "Save and exit" keeps one line at 390 and at 320 px, and a long business name gives way to it,
+    // cut with an ellipsis; nothing scrolls sideways.
+    const long = await startInterview(true, "Rivera Plumbing, Heating and Emergency Drain Services of the East Bay. I'm Maria.");
+    for (const width of [390, 320]) {
+      const screen = (await renderRoute(`/app/setup/${long.interview_id}`, { viewport: 'phone' })).screen;
+      await page.viewport(width, 844);
+      const exit = screen.getByRole('link', { name: 'Save and exit' });
+      await expect.element(exit).toBeVisible();
+      await expect.element(screen.getByText(/^Rivera Plumbing, Heating/).first()).toBeInTheDocument();
+      const box = exit.element().getBoundingClientRect();
+      expect(Math.round(box.height), `${width}`).toBeLessThanOrEqual(32);
+      expect(box.right, `${width}`).toBeLessThanOrEqual(width);
+      const business = screen.getByText(/^Rivera Plumbing, Heating/).first().element() as HTMLElement;
+      expect(business.scrollWidth, `${width}`).toBeGreaterThan(business.clientWidth);
+      expect(getComputedStyle(business).textOverflow).toBe('ellipsis');
+      expectNoHorizontalScroll();
     }
   });
 

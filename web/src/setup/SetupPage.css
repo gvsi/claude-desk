@@ -60,6 +60,9 @@
 .cd-setup__exit {
   grid-area: exit;
   justify-self: end;
+  /* "Save and exit" keeps one line at every width; a long business name gives way instead. */
+  flex: none;
+  white-space: nowrap;
 }
 
 .cd-setup__main {
