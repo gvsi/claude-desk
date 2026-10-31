@@ -240,8 +240,10 @@ class VisitorChat {
   private tracked = 0;
   /** The stream is open again since the chat last lost track of it: a read sent now can confirm the mode. */
   private following = false;
-  /** The `tracked` count the last confirming read was sent for: one goes out each time the chat loses track. */
+  /** The `tracked` count the last confirming read was sent for. */
   private confirming = -1;
+  /** The mode cursor that read was sent to confirm; a later replayed join needs another read. */
+  private confirmingAt = -1;
 
   constructor(
     private readonly slug: string,
@@ -478,6 +480,7 @@ class VisitorChat {
     // A join the chat follows live confirms her. One it replays while catching up may be older than
     // a hand-back still on its way, so only a read of the session sent now can confirm it.
     const confirm = ev.type === 'owner_joined' && state.catchingUp;
+    if (confirm) this.modeKnown = false;
     if (ev.type === 'owner_joined' && !state.catchingUp) this.modeKnown = true;
     this.set({ session: { ...session, mode } });
     if (confirm) void this.confirmMode(this.epoch);
@@ -523,13 +526,14 @@ class VisitorChat {
 
   /**
    * Reads the session to confirm the owner's mode, once the stream has reopened after the chat lost
-   * track of it, and once only each time. Until it answers (or if it never does), the head shows the
+   * track of it, and again if a replayed join advances beyond that read. Until it answers (or if it never does), the head shows the
    * AI disclosure. Sent after the stream reopened, with nothing lost since and no older than what the
    * stream has said of the mode, it is the session as it stands, as the opening read is.
    */
   private async confirmMode(epoch: number): Promise<void> {
-    if (this.confirming === this.tracked) return;
+    if (this.confirming === this.tracked && this.confirmingAt >= this.modeAt) return;
     this.confirming = this.tracked;
+    this.confirmingAt = this.modeAt;
     const since = this.tracked;
     try {
       const transcript = await request('visitorSession', { params: { slug: this.slug } });

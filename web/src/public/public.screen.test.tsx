@@ -1556,6 +1556,47 @@ describe('public chat page', () => {
     expect(chatHead()).toEqual(withClaude(HEAD.en));
   });
 
+  it('a_replayed_join_invalidates_an_earlier_reopen_confirmation', async () => {
+    const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    mockStore.world.handBack(chat);
+    const earlier = await request('visitorSession', { params: { slug: RIVERA.slug } });
+    mockStore.world.takeOver(chat);
+    chat.state = { ...chat.state, mode: 'ai', generation: chat.state.generation + 1 };
+    const later = await request('visitorSession', { params: { slug: RIVERA.slug } });
+    let release = () => {};
+    mockStore.inject({ route: 'visitorSession', status: 200, body: earlier });
+    mockStore.inject({ route: 'visitorSession', status: 200, body: later, until: new Promise<void>((resolve) => (release = resolve)) });
+    const replay = holdStreamEvents();
+    const reads = requests('visitorSession').length;
+    const texts = watchTexts();
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await settle();
+    replay.release();
+    await until(() => expect(systemLines()).toHaveLength(3));
+    await vi.advanceTimersByTimeAsync(CAUGHT_UP_AFTER_MS + MARGIN_MS);
+    await settle();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'a replay cannot keep the earlier confirmation').toBe(false);
+    expect(requests('visitorSession'), 'the advancing join gets a new confirming read').toHaveLength(reads + 2);
+    release();
+    vi.useRealTimers();
+    await settle();
+    mockStore.emit(RIVERA.slug, { type: 'owner_left' });
+    await vi.waitFor(() => expect(systemLines()).toHaveLength(4));
+    texts.stop();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'the owner line, however briefly').toBe(false);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+  });
+
   it('a_newer_read_keeps_an_older_replayed_join_from_bringing_the_owner_back', async () => {
     const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);
