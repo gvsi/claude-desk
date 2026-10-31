@@ -6,9 +6,9 @@ import json
 import pytest
 
 from desk.api.schemas import ToolRow
-from desk.contracts import BusinessTool
-from desk.kernel_api import BusinessToolsRequest
-from tests.kernel_contract.test_contract import desk_slug, new_copy, new_visitor, refused
+from desk.contracts import BusinessTool, RuleCard
+from desk.kernel_api import BusinessToolsRequest, PolicyConfirmRequest, PolicyDraftRequest, ToolPin, ToolsConfirmRequest
+from tests.kernel_contract.test_contract import decide, desk_slug, execute, new_copy, new_visitor, read_decision, refused
 
 
 @pytest.mark.kernel_plan("01c")
@@ -95,3 +95,45 @@ async def test_business_tools_invalid_batches_are_atomic_and_owner_only(kernel, 
                                        " WHERE desk_id = %s AND source = 'business'", (desk_id,))
     assert len(rows) == 1 and rows[0]["status"] == "needs_review"
     assert rows[0]["business"]["title"] == tool.title
+
+
+@pytest.mark.kernel_plan('01c')
+async def test_reviewed_intake_decides_executes_and_cannot_select_its_config(kernel, ro_read):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    owner = http.owner(copy.owner_token)
+    tool = BusinessTool(tool='desk.intake', title='New client intake', description='Take details.',
+                        config={'block': 'intake', 'questions': ['What do you need?', 'Where?']})
+    await owner.call('PUT /desks/{id}/business_tools', BusinessToolsRequest(tools=[tool]), path={'id': desk_id})
+    row = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.tools WHERE tool = %s', (tool.tool,))[0]
+    confirmed = await owner.call('POST /tools/confirm', ToolsConfirmRequest(
+        desk_id=desk_id, tools=[ToolPin(tool=tool.tool, definition_sha256=row['definition_sha256'])], enable=True))
+    assert confirmed.draft.status == 'proved'
+    active = await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=confirmed.draft.version))
+    auto = RuleCard(card_id='intake-auto', applies_to=tool.tool, mode='auto', who='anyone', reason='Take enquiries.')
+    draft = await owner.call('POST /policy/draft', PolicyDraftRequest(
+        desk_id=desk_id, expected_parent=active.version, cards=[auto]))
+    assert draft.status == 'proved'
+    await owner.call('POST /policy/confirm', PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+    visitor = await new_visitor(http, desk_slug(ro_read, schema, copy))
+    session = http.session(visitor.session_token)
+    seen = await session.call('GET /context/{session_id}?desk_id=', path={'session_id': visitor.state.session_id})
+    assert tool.tool in {profile.tool for profile in seen.tools}
+    assert tool.tool in {profile.tool for profile in seen.tools_declared}
+    args = {'name': 'Dana', 'answers': ['Tax help', 'Remote']}
+    allowed = await decide(session, visitor.state.session_id, visitor.state.generation, 'intake', tool.tool, args)
+    assert allowed.outcome == 'allow'
+    result = await execute(session, allowed, visitor.state.generation)
+    assert result.state == 'succeeded' and result.model_view == {'lead_id': result.model_view['lead_id'], 'saved': True}
+    assert result.facts == []
+    receipt = await read_decision(session, allowed.decision_id)
+    assert receipt.visitor_plain == '“New client intake”: details saved for Maria Rivera'
+    [fact] = ro_read(schema, copy.copy_id, 'SELECT * FROM {ro}.facts WHERE fact_id = %s',
+                     ('lead:' + result.model_view['lead_id'],))
+    assert fact['readers'] == ['owner']
+    assert {claim['key']: claim['value'] for claim in fact['claims']}['answer:1'] == 'Remote'
+    for index, extra in enumerate(({'block': 'purpose_payment'}, {'config': {'block': 'urgent'}}, {'answers': ['Only one']})):
+        blocked = await decide(session, visitor.state.session_id, visitor.state.generation,
+                               f'bad-intake-{index}', tool.tool, {**args, **extra})
+        assert blocked.outcome == 'refuse' and blocked.action is None
