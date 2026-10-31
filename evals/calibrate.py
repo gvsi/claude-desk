@@ -30,8 +30,8 @@ whole calibration split at its commit (`_partial`): one made with `--only` or a 
 uncommitted changes under the gated paths, or whose rows don't hold one judged run of every
 calibration scenario and repetition its commit doesn't leave pending, reconciled row by row with the
 suite at its commit (`results.selection_problems`). `write` refuses a rehearsal, an exploratory pass
-and such a partial pass before anything is written, with the reason. With `write`, when a row changes, it
-rewrites only the lines between the file's `# calibration: begin` and `# calibration: end` lines:
+and such a partial pass before anything is written, with the reason. With `write`, when a row
+changes, it rewrites only the lines between the file's `# calibration: begin` and `# calibration: end` lines:
 the new rows, `REVIEW_THRESHOLDS_VERSION` + 1 and `CALIBRATION` (version, pass id, split, date,
 report and the owner's approval). The rewrite is checked by executing it before it replaces the
 file. The report is staged beside its place first, then the thresholds are written, then the

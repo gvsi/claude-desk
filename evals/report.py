@@ -708,7 +708,7 @@ def _summary(p: PassSummary, g: GateSummary, n: dict[str, Any]) -> list[str]:
             f"{count} {kind.replace('_', ' ')}" for kind, count in n["errored_runs_by_kind"].items()) + ")"
             if n["errored_runs"] else "")),
         ("Pending scenarios", pending_text(n["pending_by_plan"])),
-        ("Budget","stopped by its budget before every run started" if p.stopped_by_budget else "within budget"),
+        ("Budget", "stopped by its budget before every run started" if p.stopped_by_budget else "within budget"),
         ("Held-out set", f"`{p.heldout_sha256[:12]}`"),
     ]))
     out.append(_table(("Part", "Provider"), [

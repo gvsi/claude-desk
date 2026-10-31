@@ -997,7 +997,8 @@ UNCHECKED = {
         True, _started(uncommitted=["M backend/desk/kernel_service/app.py"]),
         "its tree had uncommitted changes under the gated paths when it started: M backend/desk/kernel_service/app.py"),
     "no record of its start": (True, _started(), "it doesn't record what it checked before its runs"),
-    "no kernel build before its runs": (True, _started(kernel_built=False), "it didn't build the kernel before its runs"),
+    "no kernel build before its runs": (True, _started(kernel_built=False),
+                                        "it didn't build the kernel before its runs"),
     "a pass made without --results": (False, None, "wasn't made with --results, so nothing checked that its tree held "
                                                    "its commit's gated inputs, and nothing built the kernel from them"),
 }
