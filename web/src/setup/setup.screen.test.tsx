@@ -9,7 +9,7 @@ import type { RenderResult } from 'vitest-browser-react';
 
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { RulesDraft, SetupState } from '../api/views.ts';
+import type { RulesDraft, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
@@ -387,6 +387,7 @@ describe('setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Continue' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.element(screen.getByText("What I'll do on my own, what I'll ask you about, and what I never do.", { exact: true })).toBeVisible();
 
     // The payment limit first, in its signed words, at the answered $500; never the retired words.
     await expect.element(screen.getByText(moneyLimitLine(50_000), { exact: true })).toBeVisible();
@@ -459,17 +460,19 @@ describe('setup', () => {
     await expect.element(rows.first()).toBeVisible();
     expect(rows.elements()).toHaveLength(6);
     expect(requests('setupSituations')).toHaveLength(1);
-    // One the answers didn't plan for says so, as does one that depends on Claude's second look
-    // (the API's `matches` is false for both); the others don't.
+    // The one the answers didn't plan for says so; the others don't.
     const saturday = rows.filter({ hasText: 'A visitor wants a Saturday morning visit for a slow drain' });
     await expect.element(saturday.getByText('Not what we planned', { exact: true })).toBeVisible();
     await expect.element(saturday.getByText('A visitor, after hours', { exact: true })).toBeVisible();
+    expect(rows.filter({ hasText: 'Not what we planned' }).elements()).toHaveLength(1);
+    // An outcome the answers planned to depend on Claude's second look is what was planned: the
+    // kernel's hold, with the second look, passed through as it came, and no flag.
     const deposit = rows.filter({ hasText: 'An agent pays the service call deposit' });
-    await expect.element(deposit.getByText('Not what we planned', { exact: true })).toBeVisible();
-    expect(rows.filter({ hasText: 'Not what we planned' }).elements()).toHaveLength(2);
-    // An automatic outcome that needs Claude's second look says so.
-    await expect.element(deposit.getByText('Does it if Claude’s second look agrees', { exact: true })).toBeVisible();
     await expect.element(deposit.getByText('Within its signed limit, checked by the reviewer.', { exact: true })).toBeVisible();
+    expect(deposit.getByText('Not what we planned', { exact: true }).elements()).toHaveLength(0);
+    const answered = (await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } })) as { body: SituationResult[] };
+    const planned = answered.body.find((r) => r.situation.title === 'An agent pays the service call deposit');
+    expect([planned?.result.outcome, planned?.result.depends_on_review, planned?.matches]).toEqual(['hold', true, true]);
     const refused = rows.filter({ hasText: "Someone asks for another customer's address" });
     await expect.element(refused.getByText('Never', { exact: true })).toBeVisible();
 

@@ -205,15 +205,17 @@ function situationsFor(): SituationResult[] {
   add('A visitor wants a drain cleared on Tuesday afternoon', 'public', 'allow', weekday, result(weekday, 'allow', 'Books weekday visits in your hours.', { card_ids: ['card-2'] }));
   const discount = probe('native.quote', { actor: 'visitor', who: 'anyone', resource_kind: 'desk', call: { call_id: 'probe-discount', tool: 'native.quote', args: { requested_discount_bp: 1000 } } });
   add('A visitor asks for 10% off if they pay cash', 'public', 'hold', discount, result(discount, 'hold', 'Discounts ask you first.'));
+  // Planned to depend on Claude's second look: the kernel holds it unless the reviewer agrees.
   const deposit = probe('native.charge_mandate', { actor: 'agent', who: 'agent', resource_kind: 'quote', agent_mandate_remaining_cents: 2000, amount_cents: 2000 });
-  add('An agent pays the service call deposit', 'agent', 'allow', deposit, result(deposit, 'allow', 'Within its signed limit, checked by the reviewer.', { depends_on_review: true }));
+  add('An agent pays the service call deposit', 'agent', 'hold', deposit, result(deposit, 'hold', 'Within its signed limit, checked by the reviewer.', { depends_on_review: true }));
   const invoice = probe('native.release_document', { actor: 'visitor', who: 'record_owner', resource_kind: 'document', resource_owner: 'caller' });
   add('A customer asks for their last invoice', 'verified', 'allow', invoice, result(invoice, 'allow', 'Sends customers their own documents.', { card_ids: ['card-4'] }));
   const saturday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-07T10:00:00-08:00' });
   add('A visitor wants a Saturday morning visit for a slow drain', 'after_hours', 'hold', saturday, result(saturday, 'allow', 'Books weekday visits in your hours.', { card_ids: ['card-2'] }));
   const address = probe('native.release_document', { actor: 'visitor', who: 'anyone', resource_kind: 'document', resource_owner: 'other' });
   add("Someone asks for another customer's address", 'public', 'refuse', address, result(address, 'refuse', 'Private data only to its verified owner.'));
-  return rows.map(([situation, r]) => ({ situation, result: r, matches: r.outcome === situation.expected && !r.depends_on_review }));
+  // What the answers planned matches, an outcome planned to depend on the reviewer included, as the API answers it.
+  return rows.map(([situation, r]) => ({ situation, result: r, matches: r.outcome === situation.expected }));
 }
 
 /** The safety check's six tricks (plan 02b Task 7, `SAFETY_PROBES`), every one stopped. */
