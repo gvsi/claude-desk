@@ -72,6 +72,8 @@ def downgrade() -> None:
         op.execute(f"ALTER TABLE kernel.{table} DROP CONSTRAINT IF EXISTS {name}")
     for table, columns in COLUMNS.items():
         drops = ", ".join(f"DROP COLUMN IF EXISTS {column}" for column, _ in columns)
-        # a row left with only its key means nothing (a key with no public half, a mandate with no envelope)
-        op.execute(f"DELETE FROM kernel.{table}")
+        # a row left with only its key means nothing (a key with no public half, a mandate with no envelope),
+        # and would keep the upgrade from adding its NOT NULL columns back; TRUNCATE, unlike DELETE, isn't
+        # held back by row security, which every kernel table forces on its owner too, so any admin empties it
+        op.execute(f"TRUNCATE kernel.{table}")
         op.execute(f"ALTER TABLE kernel.{table} {drops}")

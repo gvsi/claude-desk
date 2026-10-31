@@ -59,7 +59,9 @@ def downgrade() -> None:
         op.execute(f"DROP INDEX IF EXISTS kernel.{name}")
     for name in CHECKS:
         op.execute(f"ALTER TABLE kernel.mandate_reservations DROP CONSTRAINT IF EXISTS {name}")
-    # a reservation left with only its key holds nothing
-    op.execute("DELETE FROM kernel.mandate_reservations")
+    # a reservation left with only its key holds nothing, and would keep the upgrade from adding its NOT
+    # NULL columns back; TRUNCATE, unlike DELETE, isn't held back by row security, which every kernel table
+    # forces on its owner too, so any admin empties it
+    op.execute("TRUNCATE kernel.mandate_reservations")
     drops = ", ".join(f"DROP COLUMN IF EXISTS {column}" for column, _ in COLUMNS)
     op.execute(f"ALTER TABLE kernel.mandate_reservations {drops}")

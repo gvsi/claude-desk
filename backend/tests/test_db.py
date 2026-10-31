@@ -9,6 +9,7 @@ next to the suite's and dropped afterwards (`new_scratch`, under the `scratch` a
 `scratch_database` fixtures); the suite's database is never downgraded.
 """
 
+import ast
 import hashlib
 import re
 import warnings
@@ -840,6 +841,89 @@ def test_a_downgrade_below_document_links_leaves_no_link_behind(scratch):
     for digest in ("A" * 64, "0" * 63, "token-upgraded"):
         with pytest.raises(psycopg.errors.CheckViolation):
             insert("link-upgraded", "token-upgraded", digest)
+
+
+def test_no_downgrade_deletes_from_a_kernel_table():
+    """Every kernel table forces row security, on its owner too: on a managed Postgres, whose
+    migration role neither is a superuser nor bypasses row security, a DELETE in a downgrade sees no
+    row, so the rows it meant to remove lose their columns and the next upgrade fails on them. A
+    downgrade that empties a kernel table does it with TRUNCATE, which row security doesn't hold
+    back."""
+    versions = Path(__file__).resolve().parents[1] / "alembic" / "versions"
+    found = []
+    for path in sorted(versions.glob("*.py")):
+        source = path.read_text()
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.FunctionDef) and node.name == "downgrade":
+                body = ast.get_source_segment(source, node) or ""
+                if re.search(r"DELETE\s+FROM\s+kernel\.", body, re.I):
+                    found.append(path.name)
+    assert found == []
+
+
+AGENTS_REVISION, RESERVATIONS_REVISION = "01c_1_agents", "01c_5_mandate_reservations"
+AGENT_TABLES = ("agent_keys", "agent_nonces", "demo_wallet_keys", "mandates", "mandate_reservations")
+
+
+class StatementsOn:
+    """The `op` a revision's own `upgrade` and `downgrade` see here: each statement sent on `conn`,
+    in its transaction and as its role. The two revisions this runs only ever call `op.execute`."""
+
+    def __init__(self, conn: psycopg.Connection):
+        self.conn = conn
+
+    def execute(self, statement: str) -> None:
+        self.conn.execute(statement)
+
+
+def test_agent_tables_go_down_and_up_under_an_owner_bound_by_row_security(scratch, monkeypatch):
+    """The agents and mandate reservations revisions go down and up again over populated tables
+    when their owner is bound by row security, as on a managed Postgres: the owner sees none of the
+    rows, yet each downgrade empties its tables (TRUNCATE), so no row is left without the NOT NULL
+    columns the upgrade adds back. It all runs in a transaction that is rolled back, the stand-in
+    owner included, so the scratch database stays at head."""
+    admin = scratch.conn
+    script = ScriptDirectory.from_config(alembic_config())
+    revisions = [script.get_revision(name).module for name in (RESERVATIONS_REVISION, AGENTS_REVISION)]
+    for module in revisions:
+        monkeypatch.setattr(module, "op", StatementsOn(admin))
+    digest = "a" * 64
+    with admin.transaction(force_rollback=True):
+        admin.execute("INSERT INTO kernel.agent_keys (copy_id, agent_key_id, desk_id, public_key_hex, source, minted_by,"
+                      " created_at) VALUES ('copy-agents', 'key-1', 'desk-agents', %s, 'demo', 'owner', now())",
+                      (digest,))
+        admin.execute("INSERT INTO kernel.agent_nonces (copy_id, agent_key_id, nonce, session_id, body_sha256,"
+                      " first_used_at) VALUES ('copy-agents', 'key-1', 'nonce-1', 'session-agents', %s, now())",
+                      (digest,))
+        admin.execute("INSERT INTO kernel.demo_wallet_keys (copy_id, key_id, public_key_hex, private_key_hex)"
+                      " VALUES ('copy-agents', 'wallet-1', %s, %s)", (digest, digest))
+        admin.execute("INSERT INTO kernel.mandates (mandate_id, copy_id, desk_id, agent_key_id, per_charge_cents,"
+                      " total_cents, reserved_cents, expires_at, session_id, issuer, nonce, envelope)"
+                      " VALUES ('mandate-1', 'copy-agents', 'desk-agents', 'key-1', 2000, 10000, 2000,"
+                      " '2026-11-01T00:00:00.000000Z', 'session-agents', 'wallet-1', 'mandate-nonce-1', '{}')")
+        admin.execute("INSERT INTO kernel.mandate_reservations (reservation_id, copy_id, mandate_id, action_id,"
+                      " amount_cents, state, created_at, updated_at)"
+                      " VALUES ('resv-1', 'copy-agents', 'mandate-1', 'act-1', 2000, 'reserved', now(), now())")
+        admin.execute("CREATE ROLE desk_test_migrator NOLOGIN NOSUPERUSER NOBYPASSRLS")
+        admin.execute("GRANT USAGE, CREATE ON SCHEMA kernel TO desk_test_migrator")
+        for table in AGENT_TABLES:
+            admin.execute(SQL("ALTER TABLE kernel.{} OWNER TO desk_test_migrator").format(Identifier(table)))
+        admin.execute("SET LOCAL ROLE desk_test_migrator")
+        assert admin.execute("SELECT count(*) FROM kernel.mandates").fetchone() == (0,)   # bound by row security
+        for module in revisions:
+            module.downgrade()
+        admin.execute("RESET ROLE")
+        counts = {table: admin.execute(SQL("SELECT count(*) FROM kernel.{}").format(Identifier(table))).fetchone()[0]
+                  for table in AGENT_TABLES}
+        assert counts == dict.fromkeys(AGENT_TABLES, 0)
+        assert columns(admin, "kernel", "mandate_reservations") == ["reservation_id", "copy_id"]
+        assert "envelope" not in columns(admin, "kernel", "mandates")
+        admin.execute("SET LOCAL ROLE desk_test_migrator")
+        for module in reversed(revisions):
+            module.upgrade()
+        admin.execute("RESET ROLE")
+        assert "envelope" in columns(admin, "kernel", "mandates")
+        assert "state" in columns(admin, "kernel", "mandate_reservations")
 
 
 def test_state_columns_admit_only_contract_values(admin):
