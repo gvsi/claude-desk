@@ -12,7 +12,7 @@ import { SPEC, expectFooter, expectFooterAtFoot, expectTabOrder } from './spec.t
 
 const { views } = rivera.connectors;
 
-/** Rivera Plumbing's tools step as the board draws it: four built in, two to add, Stripe to connect. */
+/** Rivera Plumbing's tools step as the board draws it: four built in, two to add, Stripe and its two tools to connect. */
 const BUILT_IN: SetupToolsRow[] = [
   { connector: views.quotes, state: 'on' },
   { connector: views.bookings, state: 'on' },
@@ -21,7 +21,7 @@ const BUILT_IN: SetupToolsRow[] = [
   { connector: views.documents, state: 'off', onChoose: fn() },
   { connector: views.payments, state: 'off', onChoose: fn() },
 ];
-const EXTERNAL: SetupToolsRow[] = [{ connector: views.stripe, state: 'off', tools: 3, onChoose: fn() }];
+const EXTERNAL: SetupToolsRow[] = [{ connector: views.stripe, state: 'off', tools: 2, onChoose: fn() }];
 
 function SetupTools() {
   const business = rivera.business.name;
@@ -56,6 +56,7 @@ const meta = {
       'The setup interview’s tools step: the two cards and their rows are SetupToolsList, each row’s status or button at its right.',
       'The board draws Quotes with a bookmark, Leads and callbacks with a phone and Documents with the page Quotes has on the Connectors boards; the rows use ConnectorIcon, the connectors’ icons on every other board.',
       'The connectors’ lines are the fixtures’, with straight apostrophes where the board sets curly ones.',
+      'The board draws 3 tools; Stripe has two, as on the Connectors boards.',
       'The subtitle sits 4 px under the title, as PageHeader sets it on every page, where the board draws 6 px, so what follows sits 2 px higher.',
       'The step list in the bar (“Questions, Tools, Rules, Safety check, Live”) is left out of the setup frame, as on the other setup board stories; the bar, the column and “Continue” are page layout the web app (plan 04) owns.',
     ].join(' '),
@@ -89,7 +90,8 @@ export const Board: Story = {
     await expect(ends(builtIn).map((end) => end?.querySelector('.cd-status-dot') !== null)).toEqual([true, true, true, true, false, false]);
     await expect(canvas.queryAllByRole('link')).toEqual([]);
     await expect(expectMockBesideExternalNames(yours)).toBe(1);
-    await expect(within(yours).getByText('3 tools')).toBeVisible();
+    // Stripe brings its two tools, as on the Connectors boards, where this board draws three.
+    await expect(within(yours).getByText('2 tools')).toBeVisible();
 
     // "Continue", the one primary, 20 px under the cards.
     const continueButton = canvas.getByRole('button', { name: 'Continue' });

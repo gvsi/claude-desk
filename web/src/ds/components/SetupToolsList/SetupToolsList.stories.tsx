@@ -22,7 +22,8 @@ const BUILT_IN: SetupToolsRow[] = [
   { connector: views.documents, state: 'off', onChoose: onAddDocuments },
   { connector: views.payments, state: 'off', onChoose: onAddPayments },
 ];
-const EXTERNAL: SetupToolsRow[] = [{ connector: views.stripe, state: 'off', tools: 3, onChoose: onConnectStripe }];
+// Stripe brings its two tools, as on the Connectors boards, where the tools board draws three.
+const EXTERNAL: SetupToolsRow[] = [{ connector: views.stripe, state: 'off', tools: 2, onChoose: onConnectStripe }];
 
 const meta = {
   title: 'Setup/SetupToolsList',
@@ -131,7 +132,7 @@ export const Board: Story = {
     // An app: its Mock badge beside its name, then how many tools it brings before "Connect".
     const [stripe] = rowsOf(canvas, 'Connect your own') as [HTMLElement];
     await expect(expectMockBesideExternalNames(stripe)).toBe(1);
-    const count = within(stripe).getByText('3 tools');
+    const count = within(stripe).getByText('2 tools');
     expectComputed(count, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
     const connect = within(stripe).getByRole('button', { name: 'Connect Stripe' });
     await expect(Math.round(connect.getBoundingClientRect().left - count.getBoundingClientRect().right)).toBe(14);
@@ -152,7 +153,7 @@ export const AfterTurningOn: Story = {
     await expect(rowsOf(canvas, 'Built in').map(endOf)).toEqual(['On', 'On', 'On', 'Always on', 'On', 'On']);
     await expect(rowsOf(canvas, 'Connect your own').map(endOf)).toEqual(['On']);
     await expect(canvas.queryAllByRole('button')).toEqual([]);
-    await expect(canvas.queryByText('3 tools')).toBeNull();
+    await expect(canvas.queryByText('2 tools')).toBeNull();
   },
 };
 
