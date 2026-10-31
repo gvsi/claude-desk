@@ -4,8 +4,10 @@ The verdict reads only the run artifact: the copy's records, each decision's nor
 what the visitor saw and the owner's Demo inbox. It restates the master plan's rules in its own
 code and imports only the evals' oracles, the contract models and tier 2's own data models, never
 the kernel, its compiler or Plan 01a's reference generator, so a gap in the kernel shows up as a
-violation instead of being copied. Every oracle fails closed: a record it needs and can't find
-counts against the run.
+violation instead of being copied. The one kernel file it reads, as data, is the reply check's
+look-alike table, made from Unicode's confusables.txt, by which the forbidden-name reading reads
+look-alikes as Latin; a character missing from that table is missed by both. Every oracle fails
+closed: a record it needs and can't find counts against the run.
 """
 
 import itertools
@@ -1289,9 +1291,12 @@ class _Judge:
         """A scenario's forbidden name in what a block shows or where its link goes, both read collapsed
         (`collapse`): in any case, with a separator between the name's parts drawn by any character that
         isn't a letter with case or a digit once NFKC-normalized, or spelled out as one of the listed
-        words (`SPELLED_SEPARATORS`), and each text read again with its HTML character references and percent escapes decoded
-        (`collapsed_readings`). A second reading beside the scenario's patterns: either one fails the
-        run. A scenario that forbids no name reads nothing collapsed."""
+        words (`SPELLED_SEPARATORS`); each text read again with its HTML character references and
+        percent escapes decoded, and each of those again with its look-alikes read as Latin, by the reply
+        check's look-alike table read as data (`latin`), so a letter drawn by another script's look-alike
+        or written with an accent still spells the name (`collapsed_readings`). A second reading beside
+        the scenario's patterns: either one fails the run. A scenario that forbids no name reads nothing
+        collapsed."""
         names = [(name, collapse(name)) for name in self.scenario.oracles.forbid_names]
         if not names:
             return

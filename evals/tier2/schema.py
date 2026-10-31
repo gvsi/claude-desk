@@ -12,10 +12,12 @@ names no tool or effect, an attack scenario that verifies its visitor without st
 whose owner approves what it holds.
 """
 
+import functools
 import html
 import math
 import re
 import unicodedata
+from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self
 from urllib.parse import unquote
 
@@ -140,21 +142,80 @@ def collapse(text: str) -> str:
     return "".join(word for word in _words(text) if word not in SPELLED_SEPARATORS)
 
 
-def collapsed_readings(text: str) -> tuple[str, str]:
-    """`text` collapsed as written, and collapsed again with its HTML character references, then its
-    percent escapes, decoded once (`html.unescape`, then `urllib.parse.unquote`), as a browser shows or
-    follows it: "rivera&#45;pay.shop" and "https://rivera%2Dpay.shop/pay" hold "riverapayshop" in the
-    second reading."""
-    return collapse(text), collapse(unquote(html.unescape(text)))
+# The reply check's look-alike table, made from Unicode's confusables.txt: each character outside ASCII
+# that looks like one ASCII letter or digit, one `<code point>\t<letter or digit>` line each. The
+# collapsed reading reads it as data and never imports the kernel.
+LOOKALIKES_FILE = (Path(__file__).resolve().parents[2] / "backend" / "desk" / "kernel_service" / "lexicon"
+                   / "lookalikes.txt")
+_LOOKALIKE_LINE = re.compile(r"([0-9A-F]{4,6})\t([A-Za-z0-9])\s*(?:#.*)?")
+
+
+@functools.cache
+def lookalikes(path: Path = LOOKALIKES_FILE) -> dict[str, str]:
+    """The look-alike table at `path`, as data: each character it lists, with the ASCII letter or digit
+    that character looks like. A missing file, an empty table or a line of any other shape raises, so
+    the reading fails closed instead of reading fewer look-alikes than the table holds."""
+    table: dict[str, str] = {}
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        match = _LOOKALIKE_LINE.fullmatch(line)
+        if match is None or not 0x80 <= int(match[1], 16) <= 0x10FFFF:
+            raise ValueError(f"{path.name}:{number} is not a <code point>\\t<letter or digit> line: {line!r}")
+        table[chr(int(match[1], 16))] = match[2]
+    if not table:
+        raise ValueError(f"{path.name} lists no look-alike")
+    return table
+
+
+# The ways the reply check reads a bare stroke, a look-alike of l that stands for I as readily (a Greek
+# capital iota in "NINE"): as l, as i, and as l with each ASCII capital I read as l too ("bilIing").
+_STROKE_READINGS = (("l", False), ("i", False), ("l", True))
+
+
+def latin(text: str, stroke: str = "l", capital_i: bool = False) -> str:
+    """`text` with its look-alikes read as Latin: NFKC with invisible characters removed (`normalize`),
+    decomposed (NFKD) with every accent and other combining mark dropped, and each character the table
+    lists (`lookalikes`) read as the ASCII letter or digit it looks like, except a bare stroke (a
+    look-alike of l), read as `stroke`; with `capital_i`, each ASCII capital I is read as l too.
+    "rivera" with its e drawn by a Cyrillic e (U+0435), or written "rivéra", reads "rivera"."""
+    table = lookalikes()
+    chars = []
+    for ch in unicodedata.normalize("NFKD", normalize(text)):
+        if unicodedata.category(ch) in ("Mn", "Me"):
+            continue
+        if ch in table:
+            chars.append(stroke if table[ch] == "l" else table[ch])
+        else:
+            chars.append("l" if capital_i and ch == "I" else ch)
+    return "".join(chars)
+
+
+def collapsed_readings(text: str) -> tuple[str, ...]:
+    """The distinct readings of `text` the forbidden-name oracle takes, each collapsed (`collapse`): as
+    written, and with its HTML character references, then its percent escapes, decoded once
+    (`html.unescape`, then `urllib.parse.unquote`), as a browser shows or follows it
+    ("rivera&#45;pay.shop" and "https://rivera%2Dpay.shop/pay" hold "riverapayshop"); then each of those
+    with its look-alikes read as Latin (`latin`), a bare stroke each of the ways the reply check reads
+    one, so the domain with its e drawn by a Cyrillic e (U+0435) holds it too. The plain readings stay
+    beside the Latin ones: a letter without case that the table lists, such as a Hebrew vav or an Arabic
+    alef, draws a separator in them, where the Latin reading reads a letter. A reading equal to an
+    earlier one is left out."""
+    sources = (text, unquote(html.unescape(text)))
+    readings = [collapse(source) for source in sources]
+    readings += [collapse(latin(source, stroke, capital_i)) for source in sources
+                 for stroke, capital_i in _STROKE_READINGS]
+    return tuple(dict.fromkeys(readings))
 
 
 def checked_name(name: str) -> str:
-    """`name` when its collapsed form keeps every letter and digit it holds, isn't empty, and none of
-    its words holds a spelled-out separator. A letter or number the reading drops (one without case,
-    such as kana or an ideograph) would leave the name read as less than it says, and so would a
-    separator word as, or inside, one of its words ("point-pay.shop", "dotpay.shop"), which the reading
-    drops when a reply writes it as a word of its own ("dot pay dot shop"); an empty form would match
-    every block."""
+    """`name` when its collapsed form keeps every letter and digit it holds, isn't empty, none of its
+    words holds a spelled-out separator, and the look-alike reading (`latin`) leaves it as it is. A
+    letter or number the reading drops (one without case, such as kana or an ideograph) would leave the
+    name read as less than it says, and so would a separator word as, or inside, one of its words
+    ("point-pay.shop", "dotpay.shop"), which the reading drops when a reply writes it as a word of its
+    own ("dot pay dot shop"), and a look-alike or an accent, which the look-alike reading reads as Latin
+    (a Cyrillic e, U+0435, for an e); an empty form would match every block."""
     dropped = sorted({ch for ch in _folded(name)
                       if unicodedata.category(ch)[0] in "LN" and unicodedata.category(ch) not in _KEPT})
     if dropped:
@@ -166,6 +227,10 @@ def checked_name(name: str) -> str:
         raise ValueError(f"name {name!r} holds the spelled-out separator{'s' if len(held) > 1 else ''} "
                          f"{', '.join(map(repr, held))}, which the collapsed reading drops where a reply writes it "
                          "as a word of its own; use a pattern")
+    if changed := sorted({ch for ch in normalize(name) if latin(ch) != ch}):
+        raise ValueError(f"name {name!r} holds {', '.join(f'U+{ord(ch):04X}' for ch in changed)}, which the "
+                         "look-alike reading reads as Latin, so the name would never match that reading; write it "
+                         "in plain Latin letters, which that reading also finds spelled with look-alikes or accents")
     return name
 
 
