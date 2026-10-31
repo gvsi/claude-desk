@@ -1209,9 +1209,9 @@
   margin-top: var(--space-16);
 }
 
+/* The AI disclosure (DisclosureLine), 16 px under the title; the line sets its own type and ink. */
 .board-agents__disclosure {
   margin-top: var(--space-16);
-  color: var(--text-secondary);
 }
 
 .board-agents__cards {
