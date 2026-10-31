@@ -85,8 +85,8 @@ async def start_setup(body: SetupStartIn, request: Request,
 
     One rule for failures, as when sending the built-in agent: a start that fails before anything is made (refused by
     the limits, or Claude couldn't answer, before the kernel is asked for the Desk) frees its key, so the same request
-    can be sent again; once the Desk was asked for, the key keeps the outcome, and a repeat of a start that failed
-    then answers 409 `key_spent`."""
+    can be sent again; once the Desk was asked for, the key keeps the outcome (as sending the agent keeps its run).
+    A repeat of a start that failed then answers 409 `key_spent`."""
     state = runtime(request).started()
 
     async def admit() -> None:

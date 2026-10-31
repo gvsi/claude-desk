@@ -129,5 +129,10 @@ def test_the_keyed_starts_document_their_answers():
     for operation in (start, send):
         assert "One rule for failures" in operation["description"]
     assert "a repeat that finds the key never counts" in send["description"]
+    # What the start shares with the send is when a key is freed or kept; only the start answers `key_spent`.
+    sentences = " ".join(start["description"].split()).split(". ")
+    (shared,) = [sentence for sentence in sentences if "as when sending the built-in agent" in sentence]
+    assert "key_spent" not in shared and "key_spent" not in send["description"]
+    assert any("key_spent" in sentence for sentence in sentences)
     described = " ".join(document["components"]["schemas"]["SetupState"]["description"].split())
     assert "start at Claude's consent question" in described and "isn't shown back" in described
