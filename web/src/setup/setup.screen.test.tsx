@@ -1499,7 +1499,8 @@ describe('setup', () => {
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
-    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
+    await expect.poll(reads, { timeout: 5000 }).toBeGreaterThan(0);
     await router.navigate('/');
     expect(router.state.location.pathname).toBe('/');
     expect(writing.elements(), 'setup stays mounted while the destination suspends').toHaveLength(1);
@@ -1532,7 +1533,7 @@ describe('setup', () => {
     vi.useRealTimers();
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
-    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
     await router.navigate('/');
     expect(router.state.location.pathname).toBe('/');
     const retry = screen.getByRole('button', { name: 'Try again' });
@@ -1560,7 +1561,7 @@ describe('setup', () => {
     const before = writing.element();
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
-    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
     await router.navigate('/');
     expect(router.state.location.pathname).toBe('/');
     const leftAt = reads();
@@ -1583,7 +1584,8 @@ describe('setup', () => {
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     const sends = vi.spyOn(window, 'fetch');
     onTestFinished(() => sends.mockRestore());
-    const reads = () => sends.mock.calls.filter(([input, init]) => String(input).endsWith(`/api/owner/setup/${state.interview_id}`) && init?.method === 'GET').length;
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
+    await expect.poll(reads, { timeout: 5000 }).toBeGreaterThan(0);
     await screen.getByRole('link', { name: 'Save and exit' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     const leftAt = reads();
@@ -1591,6 +1593,42 @@ describe('setup', () => {
     await new Promise<void>((resolve) => realSetTimeout(resolve, 2200));
     expect(reads()).toBe(leftAt);
     expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+  });
+
+  it.each(['answer', 'decision'] as const)('busy_%s_polling_stops_on_leave_and_resumes_on_back_before_the_destination_draws', async (action) => {
+    const state = await consultantAt('schedule');
+    const finish = action === 'answer' ? holdNextAnswer(mockStore.world, state.interview_id) : holdNextDecision(mockStore.world, state.interview_id);
+    const response = await mockStore.dispatch(action === 'answer' ? 'setupAnswer' : 'setupProposal', {
+      params: { id: state.interview_id, proposal_id: state.pending_card! }, query: { cards: '1' },
+      body: action === 'answer' ? { question: null, card: state.pending_card, text: 'Yes, please' } : { accept: true },
+    });
+    expect(response).toMatchObject({ status: 202, body: { busy: true, pending_card: state.pending_card } });
+    const firstVisit = holdFirstVisit();
+    onTestFinished(firstVisit.draw);
+    const path = `/app/setup/${state.interview_id}`;
+    const { screen, router } = await renderRoute(path, { routes: firstVisit.routes, strict: true });
+    const writing = screen.getByText('Claude is writing', { exact: true });
+    await expect.element(writing).toBeVisible();
+    const before = writing.element();
+    const sends = vi.spyOn(window, 'fetch');
+    onTestFinished(() => sends.mockRestore());
+    const reads = () => sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET').length;
+    await expect.poll(reads, { timeout: 5000 }).toBeGreaterThan(0);
+    await router.navigate('/');
+    expect(router.state.location.pathname).toBe('/');
+    const leftAt = reads();
+    await new Promise<void>((resolve) => realSetTimeout(resolve, 2200));
+    expect(reads()).toBe(leftAt);
+    expect(writing.element(), 'the same setup stays mounted while the destination suspends').toBe(before);
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe(path);
+    await expect.poll(reads, { timeout: 5000 }).toBeGreaterThan(leftAt);
+    const interviewGets = sends.mock.calls.filter(([input, init]) => new URL(String(input), window.location.origin).pathname === `/api/owner/setup/${state.interview_id}` && init?.method === 'GET');
+    expect(interviewGets.every(([input]) => new URL(String(input), window.location.origin).searchParams.get('cards') === '1')).toBe(true);
+    finish();
+    await expect.element(screen.getByRole('article', { name: 'Ask new clients three questions', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeEnabled();
+    expect(router.state.location.pathname).toBe(path);
   });
 
   it('lost_consent_is_read_before_it_is_sent_again', async () => {
