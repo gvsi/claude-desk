@@ -82,6 +82,8 @@ describe('fact_in_prose', () => {
     // A kernel line with `\w` inside a class, as in `(?![\w-])`, compiles in JavaScript and keeps its meaning.
     const regex = toJavaScript(String.raw`no[\s-]+(?!(?:matter|one|way|doubt)(?![\w-]))(?:[^\W\d_]+[\s-]+){0,2}(?:charges?|costs?)`);
     expect(regex.test('at no extra cost')).toBe(true);
+    // The regex is global, so its search would start after the last match; start each test at 0.
+    regex.lastIndex = 0;
     expect(regex.test('no matter the costs')).toBe(false);
   });
 
