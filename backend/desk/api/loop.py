@@ -36,6 +36,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
+from desk.api.deliver import run_lock
 from desk.api.jobs import defer_turn_annotations
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.metrics import RevealMetric, TurnMetric, over_daily_budget, record_model_call
@@ -229,8 +230,7 @@ class _Turn:
                 self.annotates = False
                 return await self._hand_off()
         if self.visitor:
-            await emit(conn, caller.ids, EvWriting(type="writing"))
-            await conn.commit()
+            await self._writing()
         try:
             context = await caller.kernel.call("GET /context/{session_id}?desk_id=",
                                                path={"session_id": caller.session_id})
@@ -250,6 +250,20 @@ class _Turn:
             outcome = await self._act(response)
             if outcome is not None:
                 return outcome
+
+    async def _writing(self) -> None:
+        """Show the visitor that Claude is writing, only while the session is still at the generation the turn read:
+        a take-over landing since showed `owner_joined`, and a `writing` after it would read as Claude having the chat
+        again. Checked under the run lock a take-over holds around its mode change and its event (`deliver.run_lock`),
+        with the generation read from `kernel_ro` after the lock, as `deliver()` reads it; the lock goes at the commit,
+        before any kernel call. A turn that skips it goes on, and the kernel fences what it does at the old
+        generation."""
+        conn, caller = self.conn, self.caller
+        await run_lock(conn, caller.session_id)
+        session = await KernelRO(conn, caller.copy_id, caller.ro_schema).session(caller.session_id)
+        if session is not None and session["generation"] == self.generation:
+            await emit(conn, caller.ids, EvWriting(type="writing"))
+        await conn.commit()
 
     async def _tell_waiting(self) -> TurnOutcome | None:
         """Tell the kernel the turn's language before anything is rendered in it (GitHub issue #121): the newest

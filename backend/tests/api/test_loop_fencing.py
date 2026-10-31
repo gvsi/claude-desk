@@ -19,10 +19,12 @@ from desk.api.kernel_client import KernelHttp
 from desk.api.loop import TURN_LOCK_POOL_SIZE, run_pending, turn_lock
 from desk.api.prompts import conversation_system
 from desk.api.runner import TurnRunner
+from desk.api.sse import emit
 from desk.api.store import append_assistant, has_pending, lock_key, prepare_model_input
 from desk.api.tools import Caller, send_reply
 from desk.contracts import ToolCall
 from desk.db.session import API_CONNECT_OPTIONS, database_url
+from desk.events import EvOwnerJoined
 from desk.kernel_api import DecideRequest, KernelError
 from tests.api.conftest import new_visitor
 from tests.api.fakes import ScriptedModel, gated, response, thinking, tool_use, unavailable
@@ -1244,3 +1246,26 @@ async def test_a_take_over_or_a_close_just_before_the_turn_starts_ends_it(api_co
         assert kernel.answered(turn_path(caller)) == [(409, "stale_generation" if change == "take_over" else "closed")]
         assert kernel.answered(context_path(caller)) == [] and model.requests == [], change
         assert [event.type for event in await events(api_conn, session_id)] == shown, change
+
+
+async def test_a_take_over_after_the_turn_read_the_session_shows_no_writing_after_it(api_conn, engine, caller,
+                                                                                     visitor, fake):
+    """The turn reads the session's mode, then shows `writing`. A take-over landing in between (here as the kernel
+    answers the turn's `/turn`) shows `owner_joined` first, and a `writing` after it would read as Claude having the
+    chat again, hiding the owner's line. So the turn shows `writing` only while the session is still at the
+    generation it read, checked under the run lock a take-over holds around its mode change and its event."""
+    async def take_over(request: httpx.Request) -> None:      # as the owner's take-over route does it
+        async with engine.connect() as conn:
+            await run_lock(conn, caller.session_id)
+            fake.set_mode(caller.session_id, "owner")
+            await emit(conn, caller.ids, EvOwnerJoined(type="owner_joined", name="Maria Rivera"))
+            await conn.commit()
+
+    await said(api_conn, caller, "Can someone come tomorrow?")
+    model = ScriptedModel([response(reply("Yes, we can come tomorrow."))])
+    kernel = Kernel(fake, after={turn_path(caller): take_over})
+    async with KernelHttp("http://fake-kernel", transport=kernel) as http:
+        outcome = await loop.run_turn(api_conn, replace(caller, kernel=http.session(visitor.token)), model)
+
+    assert outcome == "fenced"                                 # Claude's reply, at the old generation, is fenced too
+    assert [event.type for event in await events(api_conn, caller.session_id)] == ["owner_joined", "turn_end"]
