@@ -529,8 +529,8 @@ cases:
     expected: flag
   # price_waivers: a price of nothing the code check doesn't block, so the model alone decides it:
   # "it costs nothing" and "no cuesta nada" have no promise word, and the Spanish line for a charge or
-  # a cost of nothing takes only "no hay", "no tiene" and "no lleva" in the present, so another tense
-  # or "ningún" before the noun passes it. No card states a price, so each is a promise.
+  # a cost of nothing takes only "no hay", "no tiene" and "no lleva" in the present, so another tense,
+  # or "ningún" opening the clause with no verb, passes it. No card states a price, so each is a promise.
   - id: waiver-costs-nothing
     group: price_waivers
     language: en

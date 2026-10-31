@@ -59,7 +59,8 @@ describe('fact_in_prose', () => {
       ['That one is free.', 'lex.en.promise'],
       ['Te damos un descuento.', 'lex.es.promise'],
       ['It comes at no extra charge.', 'lex.en.promise'],
-      // "set", like "standard", "single", "fixed" and "exact", can start a waiver, so a charge, cost or fee after it blocks.
+      // Any word after "no" but "matter", "one", "way" or "doubt" can start a waiver or sit in one ("set", "standard",
+      // "worries"), so a charge, cost or fee after it blocks.
       ['There’s no set cost until Maria sees the leak.', 'lex.en.promise'],
       ['No standard fees will be charged.', 'lex.en.promise'],
       ['No worries about costs; you pay nothing.', 'lex.en.promise'],
