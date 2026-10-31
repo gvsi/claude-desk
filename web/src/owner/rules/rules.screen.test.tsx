@@ -431,9 +431,10 @@ describe('rules page', () => {
     await expect.element(screen.getByText('Was $500', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Your rules stay the same.', { exact: true })).toBeVisible();
     expect(screen.getByText(CANCELS_LINKS, { exact: true }).elements()).toHaveLength(0);
-    // Under "Rules" alone, as the board draws it.
+    // Under "Rules / Change your payment limit", the owner's choice over N-Conn-20's "Rules" alone.
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
-    expect(trail.element().textContent).toBe('Rules');
+    await expect.element(trail.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
+    expect(trail.element().textContent).toBe('Rules/Change your payment limit');
     expect(desk().policy.auto_money_cap_cents).toBe(50_000);
   });
 
