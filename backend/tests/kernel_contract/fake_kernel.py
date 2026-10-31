@@ -30,8 +30,12 @@ contract test, before the task that first uses them.
   awaiting the owner, or while it has an open handoff of either kind (one per session); otherwise it alerts the
   owner (event kind `handoff`, when the Desk's preferences alert it at once; no decision) with who is waiting, and
   ledgers it `desk_data` on the session. An owner's say opens none, nor does a replayed night's blocked draft. A
-  call-back request takes over the session's open handoff, the card's or an earlier call-back's, as kind
-  `callback` under the same id; `POST /handoffs/{id}/done` closes either kind. A reply entry records `final`.
+  non-final draft blocked only for rewritable kinds gets no blocks at all (still signed, its violations kept). A
+  call-back request first closes the session's open handoffs, the card's or an earlier call-back's, as the
+  owner's mark of done does (`done`, a call-back's fact expired, `desk_data` naming it with `replaced_by`, the
+  call-back's new id), then opens its own of kind `callback` under that id; a row's kind never changes, so a stale
+  mark of done on a closed one is 409.
+  `POST /handoffs/{id}/done` closes either kind. A reply entry records `final`.
 - The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
   asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
   every ledger entry it writes appended now and marked `summary.replayed` with its moment and the recording, and the
@@ -64,7 +68,8 @@ contract test, before the task that first uses them.
   minutes), the key must be the one bound to the session at creation, and a failure is 401, ledgered `agent_auth
   {route, reason, agent_key_id}` with the kernel's reason.
   A nonce is bound at its first use to one session and body hash and lasts one A2A turn: it is spent by a passing
-  verdict, an immediate-handoff violation, the second reply check or 5 minutes, after which the same request is 409
+  verdict, an immediate-handoff violation (any kind outside `desk.rewrites.REWRITABLE`), a blocked check sent with
+  `final: true`, the second reply check or 5 minutes, after which the same request is 409
   `replayed`; another body or session under it is 401. An opening `POST /sessions` whose nonce is bound or spent
   with the same body hash returns the bound session and creates nothing. An agent session is never given refunds,
   and gets `native.payment_link` and `native.charge_mandate` only with a verified mandate; a mandate charge is
@@ -871,7 +876,8 @@ SAFE_REF = re.compile(r"[A-Za-z0-9._:-]{1,64}")
 SIGNED_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
 AGENT_TS_SKEW = timedelta(minutes=5)    # an agent's `ts` is within this of the kernel's clock
 NONCE_TTL = timedelta(minutes=5)        # a nonce's turn ends this long after its first use at the latest
-IMMEDIATE_HANDOFF = frozenset({"canary", "unsupported_language", "session_paused"})
+# the violations that hand off at once: every kind but those a rewrite can fix, as the kernel's
+IMMEDIATE_HANDOFF = frozenset(get_args(Violation.model_fields["kind"].annotation)) - REWRITABLE
 DEMO_AGENTS_PER_COPY_PER_HOUR = 10
 DEMO_WALLET = "demo-wallet"
 DEMO_MANDATE = {"per_charge_cents": 2_000, "total_cents": 10_000}   # the master's "Agent demo" row
@@ -1804,12 +1810,13 @@ class FakeKernelState:
         request.state.agent_nonce = bound
         return session
 
-    def _end_agent_turn(self, request: Request, verdict: ReplyVerdict) -> None:
-        """A reply check ends its nonce's turn when it passes, hands off at once, or is the turn's second check."""
+    def _end_agent_turn(self, request: Request, verdict: ReplyVerdict, *, final: bool = False) -> None:
+        """A reply check ends its nonce's turn when it passes, hands off at once, was sent with `final: true` (so its
+        handoff is shown and nothing rewrites it), or is the turn's second check."""
         nonce: AgentNonce = request.state.agent_nonce
         nonce.check_replies += 1
         immediate = {violation.kind for violation in verdict.violations} & IMMEDIATE_HANDOFF
-        if verdict.ok or immediate or nonce.check_replies >= 2:
+        if verdict.ok or immediate or final or nonce.check_replies >= 2:
             nonce.spent_at = self.now
 
     def _check_mandate(self, desk: Desk, key: AgentKey, mandate: Mandate) -> None:
@@ -2599,8 +2606,9 @@ class FakeKernelState:
                                             "created_at": self.now})
             view = {"lead_id": lead_id, "saved": True}
         elif tool == "native.request_callback":
-            # one open handoff per session: a call-back takes over the open one, the card's or an earlier call-back's
-            handoff_id = self._open_handoff(session) or new_id("handoff")
+            # one open handoff per session: the open ones close first, the card's or an earlier call-back's
+            handoff_id = new_id("handoff")
+            self._close_open_handoffs(session, desk, replaced_by=handoff_id)
             self.handoffs[handoff_id] = {
                 "handoff_id": handoff_id, **ids, "session_id": session.session_id,
                 "reason": f"{args['name']} · {args['contact']} · {args['reason']}", "callback_window": None,
@@ -2757,7 +2765,7 @@ class FakeKernelState:
             raise Refusal(409, "mode_owner")
         verdict = self._check_draft(session, desk, draft, final=body.final)
         if session.kind == "agent":
-            self._end_agent_turn(request, verdict)
+            self._end_agent_turn(request, verdict, final=body.final and "final" in body.model_fields_set)
         return verdict
 
     def _check_draft(self, session: Session, desk: Desk, draft: ReplyDraft, *, final: bool = True) -> ReplyVerdict:
@@ -2877,7 +2885,8 @@ class FakeKernelState:
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
         handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
         the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
-        owner handoff (`_open_card_handoff`); the reply entry records `final`."""
+        owner handoff (`_open_card_handoff`); one the session won't see (the API rewrites it) has no blocks. The
+        reply entry records `final`."""
         ok = not violations
         if not ok and author == "owner":
             blocks = []
@@ -2885,6 +2894,8 @@ class FakeKernelState:
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
             blocks = [RenderedBlock(kind="card", template="handoff", text=text, title=text)]
         shown = ok or final or any(violation.kind not in REWRITABLE for violation in violations)
+        if author == "claude" and not shown:
+            blocks = []                     # the API rewrites it: no handoff card is signed that no handoff backs
         # a replayed night holds only finished things and no Demo inbox entry (Plan 01d): its blocked drafts open none
         if (author == "claude" and shown and self._replaying is None
                 and any(block.template == "handoff" for block in blocks)):
@@ -2934,6 +2945,21 @@ class FakeKernelState:
         self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "kind": "card"},
                     session_id=session.session_id)
         return handoff_id
+
+    def _close_open_handoffs(self, session: Session, desk: Desk, *, replaced_by: str) -> None:
+        """Close the session's open handoffs before a call-back opens its own (`replaced_by`), each as the owner's mark
+        of done closes one: `done`, its `handoff:<id>` fact (a call-back's) expired, ledgered `desk_data` naming it
+        and the call-back's handoff, so the owner's history reads it as replaced, not marked done. A row's kind
+        never changes, so the owner's stale mark of done on one is 409."""
+        for handoff_id, row in self.handoffs.items():
+            if row["session_id"] != session.session_id or row["status"] != "open":
+                continue
+            row["status"] = "done"
+            self._put("handoffs", (handoff_id,), dict(row))
+            fact = desk.facts.get(f"handoff:{handoff_id}")
+            if fact is not None:
+                self._put_fact(desk, fact.model_copy(update={"status": "expired"}))
+            self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "replaced_by": replaced_by})
 
     def _open_handoff(self, session: Session) -> str | None:
         """The ID of the session's open handoff, of either kind; a session holds at most one."""

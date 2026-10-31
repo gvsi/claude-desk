@@ -1329,16 +1329,19 @@ async def test_only_a_handoff_card_the_session_sees_opens_an_owner_handoff(kerne
     visitor = await new_visitor(http, slug)
     rewritable = await checked(http, visitor, BLOCKED_PROSE, final=False)
     assert not rewritable.ok and {violation.kind for violation in rewritable.violations} == {"number_in_prose"}
+    assert rewritable.blocks == []                          # never shown, so no handoff card is signed for it
     assert session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id) == []
     assert await handed_to_you() == 0 and await recorded_final(rewritable) is False
     shown = await checked(http, visitor, BLOCKED_PROSE, final=True)
     assert not shown.ok and await recorded_final(shown) is True
+    assert [block.template for block in shown.blocks] == ["handoff"]
     assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)] == ["card"]
     assert await handed_to_you() == 1
 
     stranger = await new_visitor(http, slug)
     french = await checked(http, stranger, OTHER_LANGUAGE, final=False)
     assert "unsupported_language" in {violation.kind for violation in french.violations}
+    assert [block.template for block in french.blocks] == ["handoff"]
     assert [kind for _, kind, _ in session_handoffs(ro_read, ro_schema, copy, stranger.state.session_id)] == ["card"]
     assert await handed_to_you() == 2
 
@@ -1356,10 +1359,13 @@ async def test_only_a_handoff_card_the_session_sees_opens_an_owner_handoff(kerne
 
 
 @pytest.mark.kernel_plan("01b")
-async def test_a_call_back_request_takes_over_the_sessions_card_handoff(kernel, ro_read):
-    """A session holds one open handoff: a call-back request after the handoff card makes the card's handoff the
-    call-back's, under the same ID, so the owner keeps one item for the conversation. The owner's own preview of the
-    Desk opens none."""
+async def test_a_call_back_request_closes_the_card_handoff_and_opens_its_own(kernel, ro_read):
+    """A session holds one open handoff: a call-back request after the handoff card closes the card's handoff, as
+    the owner's mark of done closes one, and opens its own of kind `callback` under a new ID, so the owner keeps one
+    open item for the conversation. The closing is ledgered `desk_data` naming the card's handoff and, as
+    `replaced_by`, the call-back's, so the owner's history reads it as replaced rather than marked done. A row's kind
+    never changes, so the owner's stale mark of done on the card answers 409 and leaves the call-back open. The
+    owner's own preview of the Desk opens none."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
@@ -1372,9 +1378,21 @@ async def test_a_call_back_request_takes_over_the_sessions_card_handoff(kernel, 
     callback = await decide(view, visitor.state.session_id, 0, "call-1", "native.request_callback",
                             {"name": "Dana Wells", "contact": "(503) 555-0142", "reason": "Leaking water heater"})
     assert callback.state == "allowed" and (await execute(view, callback, 0)).state == "succeeded"
-    assert session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id) == [(card_id, "callback", "open")]
-    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT reason FROM {ro}.handoffs WHERE handoff_id = %s", (card_id,))
+    handoffs = {handoff_id: (kind, status)
+                for handoff_id, kind, status in session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)}
+    (callback_id,) = set(handoffs) - {card_id}
+    assert handoffs == {card_id: ("card", "done"), callback_id: ("callback", "open")}
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT reason FROM {ro}.handoffs WHERE handoff_id = %s",
+                     (callback_id,))
     assert row["reason"] == "Dana Wells · (503) 555-0142 · Leaking water heater"
+    owner = http.owner(copy.owner_token)
+    closed = [entry.event.summary for entry in (await ledger_page(owner, copy.desk_ids[0])).entries
+              if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "handoffs"
+              and entry.event.summary.get("refs") == [card_id] and "kind" not in entry.event.summary]
+    assert closed == [{"part": "handoffs", "refs": [card_id], "replaced_by": callback_id}]   # replaced, not marked
+    assert await refused(owner.call("POST /handoffs/{id}/done", path={"id": card_id})) == (409, "conflict")
+    assert {handoff_id: (kind, status) for handoff_id, kind, status in session_handoffs(
+        ro_read, ro_schema, copy, visitor.state.session_id)} == handoffs           # the call-back is still open
 
     previewing = await http.owner(copy.owner_token).call(
         "POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor", preview=True))
@@ -1998,8 +2016,10 @@ async def test_refused_agent_signatures_are_ledgered(kernel, ro_read):
 
 @pytest.mark.kernel_plan("01c")
 async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
-    """A nonce's turn ends at a passing verdict, an immediate handoff or the second reply check; after that the same
-    request is 409 `replayed`, and any other reuse 401."""
+    """A nonce's turn ends at a passing verdict, an immediate handoff, a blocked check the API sent as final
+    (`CheckReplyRequest.final`) or the second reply check; after that the same request is 409 `replayed`, and any
+    other reuse 401. A first attempt sent with `final` false and blocked only for kinds a rewrite fixes leaves the
+    turn open for the rewrite."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
@@ -2021,6 +2041,9 @@ async def test_nonce_reuse_after_the_turn_is_replayed(kernel, ro_read):
         generation=0, text="When are you open?"), path={"session_id": session_id})) == (409, "replayed")
     handed_off = await turn("Parlez-vous français ?", "Bonjour, je peux vous aider.")   # unsupported_language
     assert await refused(handed_off.whoami(session_id)) == (409, "replayed")
+    final_block = await turn("What does it cost?")
+    await check_reply(final_block, session_id, 0, "It costs 40 dollars.", final=True)    # blocked, sent as final
+    assert await refused(final_block.whoami(session_id)) == (409, "replayed")
     twice = await turn("How much is it?", "It costs 50 dollars.")
     assert (await twice.whoami(session_id)).session.session_id == session_id      # one blocked check: still its turn
     await check_reply(twice, session_id, 0, "It costs 60 dollars.")
