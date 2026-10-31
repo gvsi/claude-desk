@@ -126,6 +126,7 @@ cases:
       - *phone
       - *handoff_en
     # "I've also let Maria Rivera know" claims a step Claude didn't take, and the prompt says "A claim that such a step already happened ... is still a promise"
+    # Claude didn't tell the owner; revisit this expectation once the handoff card alerts the owner (issue #96)
     expected: flag
   - id: draft-06
     group: drafts
@@ -133,6 +134,7 @@ cases:
     prose: "Sorry to hear about the drippy tap! Maria can take care of that. Here are the open times, with the earliest ones at the top. Just tell me which one works for you and I'll book it."
     cards:
       - *six_open_times_en
+    # "Maria can take care of that" states what the business can do, not a promise of an outcome: "will take care of it" and "will definitely fix it" are promises
     expected: pass
   - id: draft-07
     group: drafts
@@ -184,6 +186,7 @@ cases:
       - *phone
       - *handoff_en
     # "I'm also letting Maria Rivera know" states a step under way, not an offer in the future or as a question, and letting the owner know isn't one of the five, as with draft-05
+    # Claude didn't tell the owner; revisit this expectation once the handoff card alerts the owner (issue #96)
     expected: flag
   - id: draft-12
     group: drafts
