@@ -17,7 +17,8 @@ const meta = {
       'Signed on 2026-10-30. Meridian Bay Permits is a fictional city permits office; no real office is named.',
       'The vision bar is AppShell’s banner; the sidebar is the one Sidebar, with the city’s Answering line (answeringDescription), “Residents” and Nadia Price.',
       'Each fee, date and permit status is a FactCard; Claude’s words lead into it and state none of them.',
-      'Live now is a list of rows split by hairlines, not cards: the board draws each conversation as a card with its fact card inside, and a card never sits inside a card (Card throws on it).',
+      'Ruled departure (coordinator, 2026-10-30): Marcus Bell’s reply reads “Here’s where your kitchen remodel stands.” where the board writes “Your kitchen remodel passed plan check. Here’s where it stands.”, so the permit’s status stays in its card.',
+      'Ruled departure (coordinator, 2026-10-30): Live now is a list of rows split by hairlines, each fact card in its row, where the board draws each conversation as a card with its fact card inside; a card never sits inside a card (Card throws on it).',
       'The header is Today’s Greeting: the presence line in body type and the link in Greeting’s pill with its copy button, where the board draws a 13 px line and a plain 28 px chip.',
       'Receipts sit 8 px under what they explain, the system’s spacing, where the board leaves 14 px.',
     ].join(' '),
@@ -29,12 +30,19 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /**
- * Money, a date or a time, a permit's number or its recorded status: what only a card may say on a
- * Desk. The board's first reply, "Your kitchen remodel passed plan check.", names the outcome the
- * card under it backs; the plan asks for permit status in cards only, so that sentence is flagged
- * for the project owner rather than rewritten here.
+ * Money, a date or a time, a permit's number or its status: what only a card may say on a Desk.
+ * The board's first reply said "Your kitchen remodel passed plan check."; by the coordinator's
+ * ruling (2026-10-30) the status stays in the card and Claude's words only lead into it.
  */
-const FACT_IN_PROSE = /\$\s?\d|\d{1,2}:\d{2}|\b\d{1,2} de [a-z]+|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b|\bStatus\b|\bB-\d{4}-\d{4}\b|\bissued\b/i;
+const FACT_IN_PROSE = /\$\s?\d|\d{1,2}:\d{2}|\b\d{1,2} de [a-z]+|\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b|\bStatus\b|\bB-\d{4}-\d{4}\b|\bissued\b|\bpassed\b|\bapproved\b/i;
+
+/** Claude's words on each live conversation, as ruled: they lead into the card and state no fact. */
+const REPLIES = [
+  'Here’s where your kitchen remodel stands.',
+  'Esta es la fecha límite del programa.',
+  'Plans and applicant details go only to the applicant. Here’s what’s public.',
+  'Whether your garage conversion is exempt is a plan checker’s decision. I’ve asked one to join.',
+];
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
@@ -68,6 +76,7 @@ export const Board: Story = {
 
     // vision_facts_only_in_cards: every fee, date and status sits in a fact card, and none is in Claude's words.
     const prose = some(live, '.cd-claude-message__prose');
+    await expect(prose.map((line) => line.textContent)).toEqual(REPLIES);
     for (const line of prose) {
       expectComputed(line, SPEC.reply);
       await expect(line.textContent ?? '', 'Claude’s words state no fee, date or status').not.toMatch(FACT_IN_PROSE);

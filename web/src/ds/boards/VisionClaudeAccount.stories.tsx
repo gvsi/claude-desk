@@ -18,7 +18,7 @@ const meta = {
       'Signed on 2026-10-30. Dana returns to Rivera Plumbing’s public page signed in with her Claude account.',
       'Owner decision, 2026-10-30: a vision Claude account counts as verified when its verified email matches the contact on record, and her consent is asked on each visit; the receipts say both, word for word as the board writes them.',
       'The vision bar is PublicShell’s banner, so the page keeps the window’s height under it, as the board draws it.',
-      'The about column’s service-area card names real cities from Rivera’s charter, as the board draws it.',
+      'The about column’s service-area card keeps Rivera’s real service area, as the board draws it: the rule that no vision page names a real city office covers only the city office page (coordinator’s ruling, 2026-10-30).',
     ].join(' '),
   },
 } satisfies Meta;

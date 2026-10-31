@@ -4,7 +4,8 @@
 
 ## When to use
 
-- On Settings › Channels (N-Run2-Settings-Channels, and N-R2-Vision-Channels under the vision bar), under the line "Where visitors reach this Desk. Each place proves who someone is in its own way; your rules apply everywhere."
+- On Settings › Channels, as N-Run2-Settings-Channels draws it, under the line "Where visitors reach this Desk. Each place proves who someone is in its own way; your rules apply everywhere." That is the page the app builds, with no vision bar (story `Boards/Settings, channels`).
+- N-R2-Vision-Channels draws the same page under the `VisionBar`; it is a vision story only (`Boards/Vision, channels`), not the app's Channels page.
 - Only there. The rows are the owner's view of how the always-on baseline holds on each channel; the public link is the one the prototype runs.
 
 ## What it shows

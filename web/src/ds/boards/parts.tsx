@@ -14,6 +14,7 @@ import { Composer } from '../components/Composer/Composer.tsx';
 import { DetailList, type DetailItem } from '../components/DetailList/DetailList.tsx';
 import { SubNav, type SubNavItem } from '../components/SubNav/SubNav.tsx';
 import { Switch } from '../components/Switch/Switch.tsx';
+import { ChannelList } from '../components/ChannelList/ChannelList.tsx';
 import { ConnectorDirectory, type ConnectorDirectoryProps } from '../components/ConnectorDirectory/ConnectorDirectory.tsx';
 import { ConnectorList } from '../components/ConnectorList/ConnectorList.tsx';
 import { ConnectorSection, type ConnectorSectionProps } from '../components/ConnectorSection/ConnectorSection.tsx';
@@ -1177,6 +1178,23 @@ export function GeneralSettings({ answering, onDelete = fn() }: { answering: str
         </div>
       </section>
     </>
+  );
+}
+
+/** Settings › Channels' line over the channels, in the board's words. */
+export const CHANNELS_LEAD = 'Where visitors reach this Desk. Each place proves who someone is in its own way; your rules apply everywhere.';
+
+/**
+ * Settings › Channels as the web app builds it (N-Run2-Settings-Channels): the line on what a
+ * channel is, then the channels. With `banner`, the same page under a line across the app, as the
+ * vision story draws it under the vision bar (N-R2-Vision-Channels).
+ */
+export function ChannelsSettings({ banner }: { banner?: ReactNode }) {
+  return (
+    <SettingsPage current="channels" banner={banner}>
+      <p className="board-quiet cd-type-body">{CHANNELS_LEAD}</p>
+      <ChannelList publicLink={PUBLIC_LINK} />
+    </SettingsPage>
   );
 }
 

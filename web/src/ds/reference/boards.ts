@@ -92,7 +92,8 @@ export const REFERENCE_BOARDS = [
   'N-Run2-Settings-Notifications',
   'N-Run2-Settings-Billing',
   'N-Run2-Settings-Phone',
-  // Settings › Channels, signed on 2026-10-30, and the same page under the vision bar.
+  // Settings › Channels, signed on 2026-10-30: the page the app builds, with no vision bar; and the
+  // same page under the vision bar, a vision story only.
   'N-Run2-Settings-Channels',
   'N-R2-Vision-Channels',
   // The vision pages, signed on 2026-10-30, each under the vision bar: a city permits office's

@@ -119,7 +119,9 @@ export const CITY_LIVE: readonly CityLiveRow[] = [
     name: 'Marcus Bell',
     level: 'Verified',
     about: 'Permit status, 3 min',
-    reply: 'Your kitchen remodel passed plan check. Here’s where it stands.',
+    // Ruled departure from the board (coordinator, 2026-10-30): the board's "Your kitchen remodel
+    // passed plan check." stated the status; it stays in the card, and Claude's words lead into it.
+    reply: 'Here’s where your kitchen remodel stands.',
     language: 'en',
     fact: {
       label: 'Permit status',
@@ -181,7 +183,11 @@ const CITY_TODAY = [
   '0 determinations made without a person',
 ] as const;
 
-/** One live conversation on the city's Today: a row, not a card, so its fact card never sits in a card. */
+/**
+ * One live conversation on the city's Today: a row under a hairline, not a card, so its fact card
+ * never sits in a card. A ruled departure from the board, which draws each as a card (coordinator,
+ * 2026-10-30).
+ */
 function CityLiveItem({ row }: { row: CityLiveRow }) {
   return (
     <li className="board-vision-live__item">
