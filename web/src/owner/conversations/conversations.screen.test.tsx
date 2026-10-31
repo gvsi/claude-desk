@@ -513,15 +513,15 @@ describe('Conversations', () => {
       const { screen, router } = await renderRoute(LIST, { viewport });
       await page.viewport(width, height);
       await router.navigate(conversation(DANA_LIVE));
+      // The head names Dana once the list has read the chat, which can answer after the chat.
+      const head = screen.getByRole('heading', { level: 2, name: DANA });
+      await expect.element(head).toBeInTheDocument();
 
       // Without her scrolling, Dana's latest message sits over the owner's controls, where she would
       // write next, in the open conversation that scrolls as one with its head.
       await expect.element(log(screen).getByText(last, { exact: true })).toBeInViewport({ ratio: 1 });
       await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeInViewport({ ratio: 1 });
       await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toBeInViewport({ ratio: 1 });
-      // The head names Dana once the list has read the chat, which can answer after the chat.
-      const head = screen.getByRole('heading', { level: 2, name: DANA });
-      await expect.element(head).toBeInTheDocument();
       expect(scrollerOf(log(screen).element()).contains(head.element())).toBe(true);
       expectNoWindowScroll();
     });
