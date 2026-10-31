@@ -1,6 +1,6 @@
 # Claude Desk Prototype — Plan 08c: Skeleton loading screens
 
-> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill, in this plan's worktree (`.worktrees/08c-skeleton-loading`, branch `plan/08c-skeleton-loading`), with a fresh implementer and a task review per task, landing through two stacked design PRs after the review panel (see Landing). **Task 1 belongs to the design system owner**, who builds it in parallel with the other lanes in its own worktree (`.worktrees/08c-skeleton-loading-ds`, branch `plan/08c-skeleton-loading-ds`, branched from this plan's branch). It gets the same task review, and the coordinator merges it into `plan/08c-skeleton-loading` before Task 2 starts. A web implementer builds Tasks 2 to 7, one at a time. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** Execute with the repo's `executing-implementation-plans` skill, in this plan's worktree (`.worktrees/08c-skeleton-loading`, branch `plan/08c-skeleton-loading`), with a fresh implementer and a task review per task, landing through two stacked design PRs after the review panel (see Landing). **Task 1 belongs to the design system owner**, who builds it in parallel with the other lanes in its own worktree (`.worktrees/08c-skeleton-loading-ds`, branch `plan/08c-skeleton-loading-ds`, branched from this plan's branch). It gets the same task review, and the coordinator merges it into `plan/08c-skeleton-loading` before Task 2 starts. A web implementer builds the rest one at a time, in order of value: Tasks 2, 6 and 7 on `plan/08c-skeleton-loading` (the first PR), then Tasks 3, 4 and 5 on `plan/08c-skeleton-loading-pages` in `.worktrees/08c-skeleton-loading-pages`, branched from the first after Task 7 (the second PR, stacked with `gh stack`). Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Every main screen opens on its own shape instead of a line of text. While a page's first reads are out, it draws its own parts as quiet shapes, with one band of light sweeping across them. Then the real page fades in exactly where the shapes were. The project owner asked for this on 2026-10-31 and signed the drawn proposal the same day.
 
@@ -32,14 +32,14 @@
 7. **A page keeps its skeleton until every read that shapes its first view has settled** (data or error), secondary reads included: a read that only adds a name, a held request or a line to what the shapes cover still counts. Each task names its page's reads. Rejected: landing section by section, or letting a part with a fixed height land on its own, where later content still pushes or changes what the reader already sees.
 8. **In the full-page loader, a route with no skeleton of its own** (Share, Settings, a customer, All rules, a rule draft, the briefing) draws the frame's shapes over an empty page area. Rejected: a generic page shape, which would be the wrong shape and would jump.
 9. **No new canvas boards for the other screens.** The owner signed the rule for every screen it names, plus three boards, so each screen's look follows from its own page. The design PR's captures carry them to the owner's sign-off. Rejected: drawing about ten more boards first, a day of drawing for shapes the rule already fixes.
-10. **The band lines up across shapes on every browser, by each shape's measured offset,** not by `background-attachment: fixed`. iOS Safari ignores fixed backgrounds, and most visitors see the public chat on an iPhone, so a fixed background would break the one synced sweep the owner signed exactly there. Each `SkeletonScreen` measures its shapes' left edges in viewport coordinates once when they mount and again when the region resizes, and hands each shape its offset as a custom property; the sweep moves the band in viewport coordinates less that offset. Rejected: the fixed background the boards use, which works in Chromium only.
+10. **The band lines up across shapes on every browser, by each shape's measured offset,** not by `background-attachment: fixed`. iOS Safari ignores fixed backgrounds, and a phone is where most people will open a public chat link, so a fixed background would break the one synced sweep the owner signed exactly there. Each `SkeletonScreen` measures its shapes' left edges in viewport coordinates once when they mount and again when the region resizes, and hands each shape its offset as a custom property; the sweep moves the band in viewport coordinates less that offset. Rejected: the fixed background the boards use, which works in Chromium only.
 11. **The public chat's greeting and starter chips aren't built yet** (P1-02, accepted, not on `main`). The chat's skeleton draws what the chat draws when Task 6 runs. When the greeting and chips are on `main`, it draws them as the board does.
 12. **The agents page draws its AI disclosure as a shape,** as the signed public chat skeleton does. Nothing on a visitor's skeleton states anything, and the real disclosure arrives with the page before anything Claude says. Rejected: keeping today's loading disclosure, which would be the one line of words on the skeleton, sitting where the title goes.
 13. **There is no minimum time on screen.** A load that ends just after 200 ms shows the shapes briefly, and the 120 ms fade softens it. Rejected: holding the skeleton for a minimum time, which slows every load that ends just after 200 ms to hide a short flash.
 14. **The hidden status fills when the shapes show.** A fast load says nothing, as it shows nothing. Rejected: filling it at mount, which announces a loading line the reader never sees.
 15. **A skeleton draws a fresh copy's first view.** Parts of a page that come and go with the Desk's data (Today's Needs you, Live now and ticked Things to try rows; Rules' suggested rules; Conversations' recorded-history caption; the sidebar's Desk picker for a business with two Desks) are drawn as a fresh copy shows them, since that is the first view nearly every visitor to the demo gets. When the data differs, that part moves once as the page lands, and each task records that accepted behaviour in one test. Every "nothing jumps" acceptance line is scoped to a fresh copy at 1440×900 and 390×844, and the design PR says so. Rejected: a skeleton that guesses the Desk's data, which can't be known before the reads it waits for.
-16. **The band's ends are transparent.** The gradient runs `transparent`, `fill-secondary`, `transparent` over the shape's `fill-hover`. The boards' `fill-hover` end stops paint the translucent fill twice inside the band and once outside it, which draws a hard edge stronger than the light itself (measured on `bg-app`: 41, then 53 one pixel inside the band, against 41, 41 with transparent ends). The peak is unchanged. The design PR names this as the one correction to the signed boards, with a capture taken mid-sweep.
-17. **The full-page loader keeps a page's landmarks.** While loading, the owner's frame keeps a `main` with the visually hidden "Claude Desk" heading outside the hidden layer, as the frame's loading state does today. The public chat's status carries the visitor's language.
+16. **The band's ends are transparent.** The gradient runs `transparent`, `fill-secondary`, `transparent` over the shape's `fill-hover`. The boards' `fill-hover` end stops paint the translucent fill twice inside the band and once outside it, which draws a hard edge stronger than the light itself (measured on `bg-app`: 41, then 53 one pixel inside the band, against 41, 41 with transparent ends). The peak is unchanged. The design PR names this as the one correction to the signed boards, with a capture taken mid-sweep. Rejected: the boards' `fill-hover` ends, which draw the edge.
+17. **The full-page loader keeps a page's landmarks.** While loading, the owner's frame keeps a `main` with the visually hidden "Claude Desk" heading outside the hidden layer, as the frame's loading state does today. The public chat's status carries the visitor's language. Rejected: only the status while loading, which leaves no heading or landmark.
 
 ## Global Constraints
 
@@ -47,15 +47,15 @@ The master plan's Global Constraints apply as plan 04 copies them. Specific to t
 
 - **The signed look,** from the approved proposal, verbatim in substance:
   - Shapes are `fill-hover`. Lines are pills, at text heights. Cards keep their real border and fill.
-  - One band of light (`fill-secondary`) sweeps the whole screen in sync, left to right, on `motion-writing` (1.6 s, the writing indicator's existing loop, so no new motion token). The gradient is fixed to the viewport, so every shape shows the same band at the same moment.
+  - One band of light (`fill-secondary`) sweeps the whole screen in sync, left to right, on `motion-writing` (1.6 s, the writing indicator's existing loop, so no new motion token). The band lines up in viewport coordinates on every shape, so every shape shows the same band at the same moment (decision 10).
   - The skeleton waits 200 ms before it shows, so a fast load goes straight to the page.
   - The real page fades in over it on `motion-fast`.
   - Each page's skeleton is built from its own components' sizes, so content lands where the shapes were.
-  - The region is `aria-busy`, and the existing loading words stay as a visually hidden status.
+  - The region's body is `aria-busy`, and the existing loading words stay as a visually hidden status outside it.
   - Under reduced motion, the shapes are still.
   - On the public chat, the footer stays real and nothing on the skeleton states anything.
 - **No new words.** The hidden statuses are the existing loading words, in the reader's language:
-  - Owner app: "Opening your Desk", "Reading your conversations", "Opening the conversation", "Loading your customers", "Reading your rules", "Reading the attempts" and "Checking the record".
+  - Owner app: "Opening your Desk", "Reading your conversations", "Opening the conversation", "Loading your customers", "Reading your rules" and "Reading the attempts". "Checking the record" stays only as the entries view's existing visible line.
   - Setup: "Opening your setup", "Reading your tools", "Drafting your rules", "Trying real situations on your draft rules" and "Trying tricks people use on your draft rules".
   - Visitor pages: "Opening the chat" / "Abriendo el chat" and "Opening the page for AI agents" / "Abriendo la página para agentes de IA".
   - A skeleton draws no words of its own. The one text it draws is the real `ConceptFooter`, wherever the real page shows the footer.
@@ -64,7 +64,7 @@ The master plan's Global Constraints apply as plan 04 copies them. Specific to t
 - **Accessibility.**
   - The skeleton layer is `aria-hidden` and `inert`, and nothing in it can take focus.
   - The region's status line is in the DOM from mount, so its words are announced when they come.
-  - The region is `aria-busy="true"` only while loading.
+  - The region's body is `aria-busy="true"` only while loading.
   - A page that keeps its heading out of view while loading keeps a visually hidden `h1`, as Today's opening state does in #186.
   - After a load, axe and the screen basics pass as before (`expectScreenBasics`).
 - **Safety invariants.** Skeletons show no content: no prices, dates, names, messages or statuses. On visitor surfaces, the real AI disclosure is part of the page that fades in, before anything Claude says. Nothing here touches the kernel, the API, the reply check or what a visitor is sent.
@@ -80,7 +80,7 @@ The master plan's Global Constraints apply as plan 04 copies them. Specific to t
   - a customer's page;
   - All rules;
   - a rule draft and its change;
-  - the Demo inbox;
+  - the Demo inbox's open sheet (not the aside's button, which Today's skeleton draws);
   - the connector review inside setup's tools step;
   - setup's "Connecting Stripe";
   - the agents page's run panel, whose line is an action at work, not a page loading.
@@ -196,7 +196,7 @@ If `loading` turns true again, the region goes back to `waiting`.
 ### The frame's shapes (Task 2, in the design system)
 
 Each is built from its component's own classes and tokens, and each has a story that renders it beside the real component, checking that the parts sit within 2 px.
-- **`AppShellProps.skeleton?: boolean`:** the compact top bar draws the mark, the business and Menu as shapes. The column and main area are unchanged; they hold whatever `sidebar` and `children` the shell is given.
+- **`AppShellProps.skeleton?: boolean`:** the compact top bar draws the mark, the business and Menu as shapes. In this mode the column and main area render as `div`s with the same classes, not `aside` and `main`, so the page keeps one `main` (decision 17); the README and story say so. The column and main area are unchanged; they hold whatever `sidebar` and `children` the shell is given.
 - **`SidebarSkeleton({ rows, about }: { rows: number; about: number })`:** the lockup (the mark as a block, the wordmark as a line, the badge as a pill), the business row, `rows` page rows (an icon block and a label line, each `size-nav-row`), `about` rows under the About group's title line, and the foot (the Answering switch and its line, then the owner's avatar circle and two lines). The owner app passes the rows it draws (seven until the Connectors pages are built) and its About links' count.
 - **`ReviewerBarSkeleton()`:** the bar's ground and hairline, one line and the Start over button as a block. It is 36 px, two lines where the real bar wraps on a phone.
 - **`PageHeaderSkeleton({ subtitleLines = 1, actions = false, actionsBelowOnPhone = false, hideSubtitleOnPhone = false })`:** `subtitleLines` is `number | { wide: number; phone: number }`, the phone count applying under 640 px as `PageHeader`'s rules do, because a subtitle wraps differently at each width. It draws a `page-title` line, the subtitle's body lines and a `size-control` block for the actions, laid out by `PageHeader`'s own rules at each width.
@@ -270,7 +270,7 @@ Each lives beside its page, uses its page's own CSS classes for layout, and mark
 - `owner/conversations/ConversationsSkeleton.tsx`: `ConversationsSkeleton({ withHeader, open }: { withHeader: boolean; open: boolean })` and `ConversationSkeleton()`, the open conversation's pane.
 - `owner/people/PeopleSkeleton.tsx`, `owner/rules/RulesSkeleton.tsx` and `owner/safety/SafetySkeleton.tsx`: each `({ withHeader }: { withHeader: boolean })`. `withHeader` is true in the full-page loader (the header drawn as shapes) and false inside the app (under the real header).
 - `setup/StepSkeletons.tsx`: `ToolsListSkeleton()`, `DraftRulesSkeleton()`, `SituationsSkeleton()` and `SafetyCheckSkeleton()`.
-- In the design system's `PublicShell` folder: `PublicBrandHeaderSkeleton()` and `PublicShellSkeleton({ language, footer }: { language: CopyLanguage; footer: boolean })`.
+- In the design system's `PublicShell` folder: `PublicBrandHeaderSkeleton({ hours }: { hours: boolean })` and `PublicShellSkeleton({ language, footer }: { language: CopyLanguage; footer: boolean })`.
 - `public/agents/AgentsSkeleton.tsx`: `AgentsSkeleton()`.
 
 ## Review Focus
@@ -289,11 +289,12 @@ The five conditions most likely to bite a person, each with its test in the task
 ### Task 1: the Skeleton part and its synced sweep (design system owner)
 
 **Files:**
-- `web/src/ds/components/Skeleton/`: `Skeleton.tsx`, `SkeletonScreen.tsx`, `Skeleton.css`, `Skeleton.stories.tsx`, `Skeleton.browser.test.tsx` and `README.md`.
+- `web/src/ds/components/Skeleton/`: `Skeleton.tsx`, `SkeletonScreen.tsx`, `Skeleton.css`, `Skeleton.stories.tsx`, `Skeleton.browser.test.tsx`, `Skeleton.webkit.test.tsx` and `README.md`.
+- `web/vitest.config.ts`: a `ds-webkit` project (WebKit only, motion on) that runs `src/ds/components/Skeleton/*.webkit.test.tsx`; and the root `Makefile`, whose web-test target installs `webkit` beside `chromium`. The band's alignment across shapes and after a resize, and the edge pixel sample, are checked in `Skeleton.webkit.test.tsx` and the Chromium browser test, not in a story play.
 - `web/src/ds/index.ts`.
 - `web/src/ds/tokens.json`, with `tokens.css` regenerated (`npm run tokens`), for `size-skeleton-band`.
 - `web/src/ds/README.md` (the motion loops, the one gradient exception, how a page loads).
-- `web/src/ds/components/LoadingLine/README.md` ("When to use": the loaders it still covers, Global Constraints).
+- `web/src/ds/components/LoadingLine/README.md` ("When to use": the loaders it still covers, Global Constraints, including the pages Tasks 3 to 5 will move to skeletons; Task 3 takes those off in the second PR).
 
 **Interfaces:** produces the Skeleton part, exactly as "Interfaces" defines it. Consumes nothing new.
 
@@ -308,7 +309,7 @@ The five conditions most likely to bite a person, each with its test in the task
       - The computed sweep values listed in "Interfaces".
       - The gradient's ends are `transparent` and its centre is `fill-secondary` (decision 16); a capture sampled just outside and just inside the band's edge on `bg-app` shows no step.
       - A shape mounted 300 ms after another has a sweep whose `currentTime` is within 17 ms of the first's.
-      - Three shapes at different left edges (one in an indented card) show the band's centre at the same viewport x within 1 px, in Chromium and in WebKit (the repo's Playwright WebKit, or Safari on the owner's Mac when the pinned Playwright lacks it), including after the window resizes (decision 10).
+      - Three shapes at different left edges (one in an indented card) show the band's centre at the same viewport x within 1 px, in Chromium and in WebKit (the `ds-webkit` project), including after the window resizes (decision 10). These two checks live in the browser tests; the story shows the sweep.
     - `Waits`:
       - At mount the layer is `waiting` and invisible, but it already holds its height: a sibling under the region doesn't move when the layer shows. The status is empty and `aria-busy="true"`.
       - It turns `shown`, with the words in the status, no sooner than `SKELETON_DELAY_MS` after mount.
@@ -330,7 +331,7 @@ The five conditions most likely to bite a person, each with its test in the task
   - the states;
   - building a page's skeleton from its own components' classes;
   - accessibility;
-  - the iOS Safari fallback (decision 10).
+  - how the band lines up across shapes (decision 10).
 - [ ] Run:
   - `cd web && npx vitest run --project storybook src/ds/components/Skeleton`
   - `npx vitest run --project ds-browser src/ds/components/Skeleton`
@@ -363,6 +364,7 @@ The five conditions most likely to bite a person, each with its test in the task
   - New `web/src/owner/today/TodaySkeleton.tsx`, and `web/src/owner/today/Today.css`.
 - Tests:
   - New `web/src/test/holdReads.ts` and `web/src/test/skeleton.ts`.
+  - `web/src/test/screen.ts`: `expectScreenBasics` waits for skeleton layers to go and counts footers outside them (see "Screen-test helpers").
   - `web/src/test/watch.ts`: `pageNow` names the full-page skeleton's layer, in any state, `loading`; the error `OwnerState` stays `error`.
   - New `web/src/owner/loading.screen.test.tsx`.
   - `web/src/owner/today/today.screen.test.tsx`, which imports `holdReads` and updates the tests that read "Opening your Desk" as visible text.
@@ -375,7 +377,7 @@ The five conditions most likely to bite a person, each with its test in the task
 **What changes:**
 - **`DeskGate`.** Wherever it would have drawn the loading `OwnerState`, it now draws one `SkeletonScreen` (status "Opening your Desk", skeleton `OwnerFrameSkeleton` for the current address) around what it draws next: the frame, the error state or not found. The frame fades in over the shapes. While loading, it keeps a `main` labelled by the visually hidden "Claude Desk" heading outside the layer, as the loading `OwnerState` does today (decision 17).
   - Decision 15's accepted case for Today: after the held request is answered, a reload draws Needs you's shape and Today lands without it. `today_reload_after_the_held_request_is_answered` records that one move, so a later change to it is deliberate.
-  - Today's read ahead on a reload keeps the skeleton up exactly as long as it kept the loading page, so a reload of Today is one skeleton, then Today drawn.
+  - Today's read ahead on a reload keeps the skeleton up exactly as long as it kept the loading page, so a reload of Today is one skeleton, then Today drawn. The Demo inbox's first read (`ownerInbox`) joins Today's gate, prefetched beside Needs you within `READ_AHEAD_MS`, because the aside otherwise lands as "Opening your Demo inbox" and changes under the fade; its failure stays the inbox's own, as #186 does for the other reads.
   - The region around the frame must not change the frame's layout; the frame anchors catch it.
 - **`TodaySkeleton`** draws the seed's first view at both widths:
   - the greeting and its presence line;
@@ -388,6 +390,8 @@ The five conditions most likely to bite a person, each with its test in the task
 - **`pageSkeletonFor`** returns Today's skeleton on Today's address, and null elsewhere until Tasks 3 and 4.
 
 - [ ] Tests first, in `web/src/owner/loading.screen.test.tsx`, one at a time:
+  - `today_reload_after_the_held_request_is_answered` and `reload_with_two_desks_moves_once`: decision 15's accepted moves (Needs you absent; the sidebar's Desk picker present), each recorded as one move.
+  - `reload_waits_for_the_demo_inbox`: hold `ownerInbox` alone on a reload of Today; the skeleton stays, then Today lands without a jump.
   - `reload_opens_on_the_frames_shape` at 1440×900 and 390×844.
     - Hold the Desks, Today and Needs you reads, and render `/app/<desk>/today`.
     - Run `expectSkeletonLoad` with status "Opening your Desk".
@@ -440,6 +444,7 @@ The five conditions most likely to bite a person, each with its test in the task
   - The failure path keeps its `ReadFailed` notice and "Try again".
 
 - [ ] Tests first, one at a time:
+  - `conversations_without_recorded_history_moves_once`: decision 15's accepted move when a copy has no recorded history (the caption absent).
   - `conversations_load_in_place` and `customers_load_in_place`, at 1440×900 and 390×844: in-app loads through `expectSkeletonLoad`.
     - Conversations' anchors: the first day heading, the first and last rows in view (size), and with a conversation open, its header and first message.
     - Customers' anchors: the first section head, the first and last rows (size). `stays`: the frame's concept footer.
@@ -485,16 +490,18 @@ The five conditions most likely to bite a person, each with its test in the task
   - In the full-page loader, `withHeader` adds the header, the composer and the chips as shapes. On a phone, the header follows `PageHeader`'s phone rules, with the actions below and no subtitle.
 - **Safety.**
   - The header stays real inside the app.
-  - In the attempts view, one `SkeletonScreen` ("Reading the attempts") holds the headline, the bar and the attempts until the attempts read, Today's read (the headline's week) and the record (ledger) read settle. The ledger counts because the open attempt's detail draws from it (`AttemptDetail.tsx`: its replay label and conversation link) and the record's check line can wrap at 390. The headline is the one `cd-type-summary` paragraph `.cd-safety__headline` (`SafetyPage.tsx`), drawn as summary lines at its responsive line count; there is no separate figure. The bar draws the segmented control and the check line's place.
+  - In the attempts view, one `SkeletonScreen` ("Reading the attempts") holds the headline, the bar and the attempts until the attempts read, Today's read (the headline's week), the record (ledger) read and the health read settle. The health read counts because the check line adds its development-key paragraph from it (`ChainStatus`), and a fresh copy's mock reports that key. The ledger counts because the open attempt's detail draws from it (`AttemptDetail.tsx`: its replay label and conversation link) and the record's check line can wrap at 390. The headline is the one `cd-type-summary` paragraph `.cd-safety__headline` (`SafetyPage.tsx`), drawn as summary lines at its responsive line count; there is no separate figure. The bar draws the segmented control and the check line's place.
   - The check line has no region of its own (decision 7).
-  - The entries view (`?view=entries`) keeps today's loading as it is: its region condition is `view === 'attempts'`, and the bar with its segmented control stays outside any region in that view. In the full-page loader, `pageSkeletonFor` returns no page shapes for it. A test reloads `/safety?view=entries` and checks no attempt shapes draw.
+  - The entries view (`?view=entries`) keeps today's loading as it is. The region stays at the same place in the tree in both views, with `loading={view === 'attempts' && !ready}`, so a view switch never remounts the bar or drops the segmented control's focus; the attempts read stays mounted in the entries view, so switching back doesn't bring the skeleton back. In the full-page loader, `pageSkeletonFor` returns no page shapes for the entries view. A test reloads `/safety?view=entries` and checks no attempt shapes draw.
 
 - [ ] Tests first, one at a time:
+  - `rules_after_a_suggestion_is_taken_moves_once`: decision 15's accepted move (one suggested rule card fewer).
+  - `safety_view_switch_keeps_focus`: arrow from Attempts to Entries and back; focus stays on the segmented control's chosen option, and switching back draws no skeleton.
   - `rules_load_in_place` and `safety_load_in_place`, at 1440×900 and 390×844, through `expectSkeletonLoad`.
     - Rules' anchors: the first suggested rule card (size), the first connector section's head, its first tool row, "See all rules", and the always-on rules' heading.
     - Safety's anchors: the headline paragraph (`.cd-safety__headline`), the segmented control (size), the first and last attempt rows in view (size), and at 1440 the open attempt's title.
     - With only the ledger held at 390, a recorded attempt whose detail shows the replay label keeps the skeleton until the ledger settles, then lands without a jump.
-  - `safety_record_check_lands_on_its_own`: hold only the ledger read. The attempts land, while the check line's shape stays (one line, the same height) and nothing under it moves. Release it, and the check lands in that line.
+  - `safety_waits_for_the_record_and_health`: at 390, hold only the ledger read, then only the health read. Each time the whole region keeps its skeleton until that read settles, then lands without a jump, the check line with its development-key paragraph included. When either read fails for good, the page lands on its own error for that part, with no `aria-busy` left.
   - `rules_still_under_reduced_motion` and `safety_still_under_reduced_motion`: `expectSkeletonStill` at 1440.
   - `rules_reload_hands_off` and `safety_reload_hands_off`, at 1440: as in Task 3, with `watchSkeletonGaps` at 0.
   - Update the Rules and Safety tests that read the loading words as visible text.
@@ -506,7 +513,7 @@ The five conditions most likely to bite a person, each with its test in the task
 
 **Acceptance:**
 - Both pages load as the Global Constraints say, inside the app and from a reload.
-- Safety's record check lands on its own without moving anything.
+- Safety lands once every read its first view draws from has settled, the record and health included, without moving anything.
 - No real content moves more than 2 px.
 
 **Design evidence:**
@@ -569,7 +576,7 @@ The five conditions most likely to bite a person, each with its test in the task
 - Produces `PublicShellSkeleton`, `PublicBrandHeaderSkeleton` and `AgentsSkeleton`. `PublicChat` passes its `language` to `SkeletonScreen`'s `lang`, so setup's preview reads a Spanish status as Spanish.
 
 **What changes:**
-- **`PublicBrandHeaderSkeleton`:** the header at `size-brand-header` on `bg-panel`, since the business's colours aren't known yet, with the 40 px monogram as a block and the name and tagline as lines. It also draws the opening-hours status: on the name's row above 640 px, and on its own row below, as `PublicShell.css` places it, so the phone header has the real header's height. A fresh copy's Desk has opening hours, so the skeleton draws the open status as one caption line (decision 15). Tests cover the open, closed and no-hours headers in English and Spanish at 390: open matches within 2 px; closed and no-hours record the accepted one-line difference.
+- **`PublicBrandHeaderSkeleton`:** the header at `size-brand-header` on `bg-panel`, since the business's colours aren't known yet, with the 40 px monogram as a block and the name and tagline as lines. With `hours`, it also draws the opening-hours status: on the name's row above 640 px, and on its own row below, as `PublicShell.css` places it, so the phone header has the real header's height. A fresh copy's Desk has opening hours, so the skeleton draws the open status as one caption line (decision 15). Tests cover the open, closed and no-hours headers in English and Spanish at 390: open matches within 2 px; closed and no-hours record the accepted one-line difference.
 - **`PublicShellSkeleton`:** built from `PublicShell`'s own classes and measurements, so each part sits where the shell puts it at every width, short windows included. It draws:
   - the brand header's shape;
   - the chat head (the title, the disclosure and "Ask for", as shapes);
@@ -579,14 +586,13 @@ The five conditions most likely to bite a person, each with its test in the task
   - with `footer`, the real `ConceptFooter` (`poweredBy`) where the shell draws it.
   When the greeting and starter chips (P1-02) are on `main`, it draws them where P1-02 places them, as the board does; until then it leaves them out (decision 11).
 - **The public chat.** `PublicChat` shows the skeleton in a `SkeletonScreen` (`copy.opening`, in the browser's language) while the chat opens. Embedded in setup's preview step, it draws with `footer` false inside the preview column.
-- **The agents page.** `AgentsSkeleton` draws the brand header's shape, the back link, the title, the disclosure, the "Send an agent" card with its limit panel and chips, and the cards after it, in `size-agents-column`, with the real `ConceptFooter`.
+- **The agents page.** `AgentsSkeleton` draws the brand header's shape with `hours={false}`, since the agents page's header never shows opening hours (`AgentCardPage` passes no `openStatus`); the chat passes `hours`. It then draws the back link, the title, the disclosure, the "Send an agent" card with its limit panel and chips, and the cards after it, in `size-agents-column`, with the real `ConceptFooter`.
   - The "Try again" focus rule is unchanged in what the reader gets: the new "Try again" takes focus back after a second failure. Its "had focus" flag moves from `AgentsState` to `AgentCardPage`'s `retry`, because `AgentsState` unmounts while the skeleton shows and would forget it.
 - Nothing on either skeleton states anything (decision 12). The real AI disclosure is part of the page that fades in.
 
 - [ ] Tests first, one at a time:
   - `public_chat_opens_in_place` at 1440×900 and 390×844: hold the chat's opening reads and run `expectSkeletonLoad` with "Opening the chat".
-    - Anchors: the brand header (size), the chat head's title and disclosure, the composer (size), and at 1440 the about column's heading.
-    - `stays`: the concept footer.
+    - Anchors: the brand header (size), the chat head's title and disclosure, the composer (size), the concept footer (size), and at 1440 the about column's heading.
     - The layer's only text is the footer's.
   - `public_chat_opens_in_spanish` (Review Focus 5): at 390 with `language: 'es-MX'`, the status reads "Abriendo el chat" and the layer draws no words but the footer's.
   - `setup_preview_opens_in_place`, at 1440: setup's preview step with the chat's opening held. The skeleton sits inside the preview column with no footer of its own, then the chat lands.
@@ -622,7 +628,7 @@ This task lands in the first design PR (see Landing).
 
 **Files:**
 - `web/src/owner/today/TodayPage.tsx`: #186's `opening` branch.
-- `web/src/owner/OwnerLayout.tsx` and `web/src/owner/useDesks.ts`, only as the rebase needs.
+- `web/src/owner/useDesks.ts`, only if Today's opening needs it.
 - `web/src/test/watch.ts`: `pageNow` names Today's own skeleton.
 - `web/src/owner/loading.screen.test.tsx` and `web/src/owner/today/today.screen.test.tsx` (#186's tests).
 
@@ -674,3 +680,15 @@ Two stacked design PRs, in order of value, so the signed boards ship first:
 - **`pageSkeletonFor` takes the search string,** always returns `fill` and `centered`, and matches exact pathnames. Safety's entries view draws no attempt shapes.
 - **Smaller fixes:** the screen basics helper waits for layers to go and runs after the skeleton checks; the leaving layer rests at opacity 0 and its removal ignores bubbled sweep events; `inert` is set by attribute; `subtitleLines` takes a wide and a phone count; Conversations' region starts under the title, caption included; whole-page footers are sized anchors; `LoadingLine`'s stories move off the Customers board; the public header draws its opening-hours row; the agents page's "Try again" focus flag moves to `AgentCardPage`; Safety's headline anchor is its summary paragraph.
 - **Landing:** two stacked design PRs, the signed boards first (Tasks 1, 2, 6 and 7), then Tasks 3 to 5, with a cut line. #186 is on `main`, so Task 7 has no precondition.
+
+**Plan review, round 2.** Round 1's P1 is resolved: the band lines up by measured offsets, checked in Chromium and WebKit. Fixed from round 2:
+- Safety's old early-landing test is replaced by one that waits for the record and health reads, since both shape the check line. A fresh copy's mock reports the development key, so health counts.
+- `PublicBrandHeaderSkeleton` takes `hours`: the chat draws the opening-hours row, and the agents page, whose header never shows it, doesn't.
+- The public chat's footer is a sized anchor, not a `stays`.
+- Today's gate also reads the Demo inbox, so the aside doesn't land as a loading line after the fade; the Demo inbox's open sheet keeps `LoadingLine`.
+- Safety's region keeps one place in the tree in both views, so switching views keeps the segmented control's focus.
+- The WebKit alignment check runs in a new `ds-webkit` project, and CI installs WebKit.
+- The build order follows the landing: Tasks 2, 6 and 7 first, then 3 to 5 on a stacked branch.
+- Decision 15's accepted moves each have a test; `AppShell`'s skeleton mode draws no second `main`; leftover wording from the fixed background and the old `aria-busy` placement is gone; decisions 16 and 17 name what they turn down.
+
+Round 2 raised no P1, so the plan review ends here (round cap); these fixes weren't re-reviewed.
