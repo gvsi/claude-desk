@@ -819,8 +819,11 @@ describe('rules and tools', () => {
     expect(before.tools.map((row) => row.tool)).toContain('payments.create_refund');
     expect(before.tools.every((row) => row.status === 'enabled')).toBe(true);
     expect(Object.keys(before.tools[0] ?? {}).sort()).toEqual(
-      ['definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'source', 'status', 'tool'],
+      ['cards', 'definition_sha256', 'description_confirmed', 'effects', 'pending_definition_text', 'pending_sha256', 'reversible', 'source', 'status', 'tool'],
     );
+    // Each row lists the active cards that cover its tool, in card order, a shared one marked so (plan 02b Task 9).
+    const quote = rivera.ruleCards['rv-quote'];
+    expect(before.tools.find((row) => row.tool === 'native.quote')?.cards).toEqual([{ card_id: quote.card_id, mode: quote.mode, reason: quote.reason, shared: false }]);
 
     // A draft reads back by its version until it is confirmed; nothing applies before then.
     const quoteAsks = { ...rivera.ruleCards['rv-quote'], mode: 'ask' as const };
@@ -854,6 +857,36 @@ describe('rules and tools', () => {
     for (const key of ['rules', 'people'] as const) expect((await call(key, { params: { desk_id: deskId } })).status).toBe(401);
     expect((await draftOf(8)).status).toBe(401);
     expect((await confirm(8)).status).toBe(401);
+  });
+
+  it('people_mark_replayed_leads', async () => {
+    // A test adds leads as the kernel keeps them: one from the recorded history, one live.
+    const at = mockStore.world.now();
+    const lead = { deskId, sessionId: 'ses-lead', note: 'Wants a quote to replace a kitchen faucet.', createdAt: at };
+    mockStore.world.leads.push({ ...lead, leadId: 'lead-recorded', displayName: 'Jordan Pike', replayed: true });
+    mockStore.world.leads.push({ ...lead, leadId: 'lead-live', displayName: 'Sam Ortiz' });
+
+    const people = (await call('people', { params: { desk_id: deskId } })).body as PeopleOut;
+    const byId = new Map(people.leads.map((row) => [row.lead_id, row]));
+    // Only the replayed one says so; a live lead leaves the flag out, as the API does until it has one.
+    expect(byId.get('lead-recorded')).toMatchObject({ display_name: 'Jordan Pike', replayed: true });
+    expect(byId.get('lead-live')).toEqual({ lead_id: 'lead-live', display_name: 'Sam Ortiz', note: lead.note, created_at: expect.any(String) });
+  });
+
+  it('draft_rules_hold_only_money_rules_to_the_payment_limit', async () => {
+    const draft = (card: unknown) => call('draftRules', { params: { desk_id: deskId }, body: { add: [card] } });
+    // A $600 limit on an automatic quote rule moves no money, so Rivera's $500 payment limit doesn't hold it back.
+    const quote600 = { ...rivera.ruleCards['rv-quote'], max_amount_cents: 60_000 };
+    const quoted = await draft(quote600);
+    expect(quoted.status).toBe(200);
+    expect(quoted.body as RulesDraft).toMatchObject({ version: 8, diff: { changed: [[rivera.ruleCards['rv-quote'], quote600]] } });
+
+    // An automatic payment link above it is refused with the limit, and nothing is drafted.
+    const link600 = { ...rivera.ruleCards['rv-link'], max_amount_cents: 60_000 };
+    expect(await draft(link600)).toEqual({ status: 422, body: { error: 'above_money_cap', cap_cents: 50_000 } });
+    // Asking first above it takes no money on its own, so it drafts.
+    expect((await draft({ ...link600, mode: 'ask' })).status).toBe(200);
+    expect((await rules()).active.version).toBe(7);
   });
 
   it('confirm_tool_takes_the_batch_body', async () => {
@@ -1102,6 +1135,32 @@ describe('deleting a Desk', () => {
 
 describe('planted faults', () => {
   const answering = async () => ((await call('me')).body as CopyOut).desks[0]?.answering;
+
+  it('held_answer_waits_for_its_release', async () => {
+    // A test holds a request in flight and lets it land when it chooses, with no clock involved.
+    let release = () => {};
+    const until = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockStore.inject({ route: 'people', status: 200, until, body: { people: [], leads: [] } });
+    let landed = false;
+    const answer = call('people', { params: { desk_id: deskId } }).then((a) => {
+      landed = true;
+      return a;
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(landed).toBe(false);
+    release();
+    expect(await answer).toEqual({ status: 200, body: { people: [], leads: [] } });
+
+    // One held past the end of its epoch changes nothing and is dropped.
+    let late = () => {};
+    mockStore.inject({ route: 'people', status: 200, until: new Promise<void>((resolve) => (late = resolve)), body: { people: [], leads: [] } });
+    const dropped = mockStore.dispatch('people', { params: { desk_id: deskId }, epoch: mockStore.epoch });
+    mockStore.nextEpoch();
+    late();
+    expect(await dropped).toEqual({ network: true });
+  });
 
   it('injected_fault_applies_once', async () => {
     // A fault answers in the route's place, once, and changes nothing.

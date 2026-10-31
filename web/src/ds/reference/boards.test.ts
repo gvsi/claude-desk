@@ -11,21 +11,15 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { isExportStory } from 'storybook/internal/csf';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { BOARD_VIEWPORTS, REFERENCE_BOARDS, boardViewport, capturedAtFullHeight, isReferenceBoard, type ReferenceBoard } from './boards.ts';
-
-/**
- * The problem with a render's size, or null when it is the size its board is drawn at: its window's
- * size, or for a board captured at its full height, its window's width and at least its height.
- */
-function sizeProblem(board: ReferenceBoard, size: { width: number; height: number }): string | null {
-  const want = BOARD_VIEWPORTS[boardViewport(board)];
-  if (capturedAtFullHeight(board)) {
-    return size.width === want.width && size.height >= want.height
-      ? null
-      : `${board}: ${size.width}×${size.height}, not ${want.width} wide and at least ${want.height} tall`;
-  }
-  return size.width === want.width && size.height === want.height ? null : `${board}: ${size.width}×${size.height}, not ${want.width}×${want.height}`;
-}
+import {
+  BOARD_VIEWPORTS,
+  REFERENCE_BOARDS,
+  boardViewport,
+  isReferenceBoard,
+  renderSize,
+  renderSizeProblem,
+  type ReferenceBoard,
+} from './boards.ts';
 
 /** A PNG's width and height, read from its IHDR chunk, or null when the bytes aren't a PNG. */
 function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
@@ -99,10 +93,30 @@ describe('reference boards', () => {
       if (!existsSync(file)) return [`${board}: no ${board}.png`];
       const size = pngSize(readFileSync(file));
       if (!size) return [`${board}: ${board}.png is not a PNG`];
-      const problem = sizeProblem(board, size);
+      const problem = renderSizeProblem(board, size);
       return problem === null ? [] : [problem];
     });
     expect(problems).toEqual([]);
+  });
+
+  it('render_size_apart_from_story_window', () => {
+    // A board whose story measures its page at another height than the canvas drew it keeps the two
+    // apart: the render is checked at the canvas's size, the story runs at the page's own.
+    const cases = [
+      ['N-R2-Vision-TeamDesk', 1022, 'laptop-1061'],
+      ['N-R2-Vision-ClaudeAccount', 1013, 'laptop-994'],
+    ] as const;
+    for (const [board, height, story] of cases) {
+      expect(renderSize(board)).toEqual({ width: 1512, height });
+      expect(boardViewport(board)).toBe(story);
+      expect(renderSizeProblem(board, { width: 1512, height })).toBeNull();
+      expect(renderSizeProblem(board, BOARD_VIEWPORTS[story])).toBe(`${board}: 1512×${BOARD_VIEWPORTS[story].height}, not 1512×${height}`);
+    }
+    // Every other board's render is its story's window, and a connectors board still at least its height.
+    expect(renderSize('N-R2-Vision-Phone')).toEqual({ width: 1512, height: 982 });
+    expect(renderSizeProblem('N-R2-Vision-Phone', { width: 1512, height: 982 })).toBeNull();
+    expect(renderSizeProblem('N-Conn-02-Payments', { width: 1512, height: 1400 })).toBeNull();
+    expect(renderSizeProblem('N-Conn-02-Payments', { width: 1512, height: 900 })).toMatch(/at least 982 tall/);
   });
 
   it('board_stories_name_reference_boards', () => {

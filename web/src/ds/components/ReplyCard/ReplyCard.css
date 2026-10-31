@@ -92,3 +92,8 @@
     stroke-dashoffset: 0;
   }
 }
+
+/* On a vision page, the line an inert Download shows, 8 px under the button's row. */
+.cd-reply-card__action + .cd-vision-inert-line {
+  margin-top: var(--space-8);
+}

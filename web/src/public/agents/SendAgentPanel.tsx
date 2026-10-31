@@ -45,6 +45,7 @@ import {
 import type { AgentSession } from './agentSession.ts';
 import { AgentsCardContent } from './AgentsCard.tsx';
 import { AGENTS_COPY, DEMO_TASKS, DEMO_TASK_COPY, type DemoTask } from './copy.ts';
+import { useRunInView } from './runInView.ts';
 
 /** The panel's title's id, which the public page's "Send an agent" link names (`#send`). */
 export const SEND_ID = 'send';
@@ -173,6 +174,9 @@ export interface SendAgentPanelProps {
 export function SendAgentPanel({ slug, business, ownerName, session, language }: SendAgentPanelProps) {
   const copy = AGENTS_COPY[language];
   const [state, setState] = useState<PanelState>(IDLE);
+  // The run the visitor sends plays in view: it comes into view when they press a task, and its
+  // newest step stays there while they are at its end.
+  const runInView = useRunInView();
   // The current run's reads; aborted by a new run, a new chat and the page going away, which ends
   // its waits and stops it applying anything.
   const reading = useRef<AbortController | null>(null);
@@ -234,7 +238,9 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
 
   const pick = (label: string) => {
     const task = DEMO_TASKS.find((t) => DEMO_TASK_COPY[language][t] === label);
-    if (task !== undefined) void send(task);
+    if (task === undefined) return;
+    runInView.follow();
+    void send(task);
   };
 
   const newChat = () => {
@@ -306,6 +312,8 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
         {notice}
         {chipsAtEnd ? chips : null}
       </AgentsCardContent>
+      {/* The run's end, which the page keeps in view while the run plays. */}
+      <div ref={runInView.end} className="cd-agents-card__run-end" aria-hidden="true" />
     </Card>
   );
 }

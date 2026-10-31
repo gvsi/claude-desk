@@ -4,6 +4,7 @@ import { expect } from 'storybook/test';
 import type { CardBlock } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { ReplyCard } from './ReplyCard.tsx';
 
 const { blocks } = rivera;
@@ -119,6 +120,8 @@ export const DocumentLink: Story = {
     await expect(canvas.getByRole('article', { name: 'Document, only for you' })).toBeVisible();
     await expectOneLink(canvasElement, 'Download', '/api/d/9fK2mQ');
     await expect(canvas.getByRole('link')).toHaveClass('cd-button--primary');
+    // A real document card has no vision line.
+    await expect(canvasElement.querySelector('.cd-vision-inert-line')).toBeNull();
   },
 };
 
@@ -325,6 +328,81 @@ export const UnsafeHref: Story = {
     await expect(canvas.queryByRole('button')).toBeNull();
     await expect(canvas.getByText('Service call deposit, $20')).toBeVisible();
     await expect(canvas.getByText(TEST_PAYMENT.en)).toBeVisible();
+  },
+};
+
+/** A vision page's document card: no destination at all, so its data carries no href. */
+const visionDocument = { ...blocks.document_link.en, href: null } satisfies CardBlock;
+
+export const DocumentInertDownload: Story = {
+  args: { block: visionDocument, inertDownload: true },
+  parameters: {
+    canvas: 'N-R2-Vision-ClaudeAccount',
+    canvasNote: 'A vision page makes no requests: Download is drawn as on the board, as a plain button with nowhere to go.',
+  },
+  play: async ({ canvas, canvasElement, userEvent }) => {
+    // inert_download_makes_no_request: Download looks the same, but is a button with no destination.
+    const card = canvas.getByRole('article', { name: 'Document, only for you' });
+    const download = canvas.getByRole('button', { name: 'Download' });
+    await expect(download.tagName).toBe('BUTTON');
+    await expect(download).toHaveAttribute('type', 'button');
+    await expect(download).toHaveClass('cd-button--primary');
+    await expect(canvasElement.querySelectorAll('a, [href]')).toHaveLength(0);
+    await expect(card.textContent).toBe('Document, only for youInvoice, drain clearingDownload');
+    // Pressing it goes nowhere: the page stays where it is.
+    const before = window.location.href;
+    await userEvent.click(download);
+    await expect(window.location.href).toBe(before);
+    // vision_inert_line_on_first_press: the line shows in a polite live region, a secondary caption
+    // 8 px under the button's row, and a second press changes nothing.
+    const line = canvas.getByText(VISION_INERT_LINE);
+    await expect(line).toHaveAttribute('role', 'status');
+    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    const row = canvasElement.querySelector<HTMLElement>('.cd-reply-card__action')!;
+    await expect(Math.round(line.getBoundingClientRect().top - row.getBoundingClientRect().bottom)).toBe(8);
+    await userEvent.click(download);
+    await expect(canvas.getAllByText(VISION_INERT_LINE)).toHaveLength(1);
+    await expect(window.location.href).toBe(before);
+  },
+};
+
+export const InertDownloadIgnoresAnHref: Story = {
+  args: { block: blocks.document_link.en, inertDownload: true },
+  parameters: {
+    canvas: 'N-R2-Vision-ClaudeAccount',
+    canvasNote: 'Even a proxied path is not followed on a vision page: the card draws the button, and the path is neither linked nor shown.',
+  },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole('button', { name: 'Download' })).toBeVisible();
+    await expect(canvasElement.querySelectorAll('a, [href]')).toHaveLength(0);
+    await expect(canvasElement.textContent).not.toContain('/api/d/');
+  },
+};
+
+export const DocumentWithoutItsPath: Story = {
+  args: { block: visionDocument },
+  parameters: {
+    canvas: 'N-Public-Verify-Run1',
+    canvasNote: "A real document card whose block has no proxied path: it keeps its words and draws no Download, so only the kernel's /api/d/ path gives a real card its button.",
+  },
+  play: async ({ canvas, canvasElement }) => {
+    // real_document_card_needs_its_path
+    await expect(canvas.getByRole('article', { name: 'Document, only for you' })).toHaveTextContent('Invoice, drain clearing');
+    await expect(canvas.queryByRole('button')).toBeNull();
+    await expect(canvas.queryByRole('link')).toBeNull();
+    await expect(canvasElement.querySelectorAll('[href]')).toHaveLength(0);
+  },
+};
+
+export const DocumentWithAnotherPath: Story = {
+  args: { block: { ...blocks.document_link.en, href: '/pay/k7Hq2vX9' } },
+  parameters: {
+    canvas: 'N-Public-Verify-Run1',
+    canvasNote: "A real document card with a path that isn't /api/d/: no link and no button, as before.",
+  },
+  play: async ({ canvas }) => {
+    await expect(canvas.queryByRole('link')).toBeNull();
+    await expect(canvas.queryByRole('button')).toBeNull();
   },
 };
 

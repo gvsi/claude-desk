@@ -1,0 +1,53 @@
+/* CopyLink: the link in its field with "Copy link" (and any other buttons) 8 px after it on one
+   line, as N-R2-Setup-14-Live draws it, and the line after a copy under them. As text (N-Run2-Share),
+   the link as people type it with the buttons 12 px apart at its right, 12 px past it. Under 480 px
+   of its own width the link takes its own line and the buttons go together under it. */
+
+.cd-copy-link {
+  container: cd-copy-link / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-copy-link__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-copy-link__field {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.cd-copy-link--text .cd-copy-link__row {
+  gap: var(--space-12);
+}
+
+.cd-copy-link__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0 var(--space-12) 0 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.cd-copy-link__result {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-copy-link__result:empty {
+  display: none;
+}
+
+@container cd-copy-link (max-width: 479.98px) {
+  .cd-copy-link__field,
+  .cd-copy-link__text {
+    flex-basis: 100%;
+  }
+}

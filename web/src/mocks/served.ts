@@ -14,6 +14,9 @@ import type {
   CancelAccepted,
   CancelReason,
   MessageAccepted,
+  RuleChatOut,
+  RulesDraft,
+  RulesPreset,
   ToolConfirmEntry,
   VerifyChecked,
   VisitorSession,
@@ -37,8 +40,9 @@ import {
   today,
   visitorTranscript,
 } from './readModels.ts';
-import { AFTER_VERIFY, EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, turnEnd, type Language, type Step } from './script.ts';
-import { seedWorld, type MockSeed } from './seed.ts';
+import { AFTER_VERIFY, EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, ruleChatReply, turnEnd, type Language, type Step } from './script.ts';
+import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
+import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupGreeting } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
 /** Plan 02's limit on a visitor's message and on the owner's words. */
@@ -99,6 +103,8 @@ export interface ErrorBody {
   state?: PaymentLinkState;
   /** With that state: `rules_changed` when a change to the business's rules cancelled the link. */
   cancel_reason?: CancelReason | null;
+  /** A setup confirm's 409: the same rules, drafted again on the rules now in force. */
+  draft?: RulesDraft;
 }
 
 /** A route's refusal: a 4xx or 5xx with an `{error}` body. */
@@ -117,7 +123,7 @@ export type Served<T> = ([T] extends [never] ? { status: 200; body?: undefined }
 export type AnyServed = { status: number; body?: unknown };
 
 /** The routes the mock answers from a copy, each one's answer checked against its route's model. */
-type ServedRoutes = { [K in RouteKey]?: (sv: Server, req: Req) => Served<RouteResponse<K>> };
+export type ServedRoutes = { [K in RouteKey]?: (sv: Server, req: Req) => Served<RouteResponse<K>> };
 
 /** The routes that answer without a copy. */
 type UnscopedRoutes = { [K in RouteKey]?: (req: Req) => Served<RouteResponse<K>> };
@@ -140,6 +146,48 @@ const ANSWERS: ReadonlySet<string> = new Set<ApprovalAnswer>(['allow_once', 'den
 
 const CARD_MODES: ReadonlySet<unknown> = new Set<RuleCard['mode']>(['auto', 'ask', 'never']);
 const CARD_WHO: ReadonlySet<unknown> = new Set<RuleCard['who']>(['anyone', 'verified', 'record_owner', 'person', 'agent']);
+
+/** The platform ceiling on the payment limit, $10,000 (master "Money cap"): no limit is drafted above it. */
+const PLATFORM_CEILING_CENTS = 1_000_000;
+
+/** The effects that move money. */
+const MONEY_EFFECTS: ReadonlySet<string> = new Set(['charge', 'pay_out']);
+
+/** Whether `card` is a rule that moves money: on a tool that charges or pays out, or on every tool that does. */
+function movesMoney(desk: DeskRecord, card: RuleCard): boolean {
+  return card.applies_to.startsWith('effect:')
+    ? MONEY_EFFECTS.has(card.applies_to.slice('effect:'.length))
+    : (desk.tools.find((tool) => tool.tool === card.applies_to)?.effects ?? []).some((effect) => MONEY_EFFECTS.has(effect));
+}
+
+/** Whether `card` takes money on its own above `cap`: an automatic money rule whose own limit is over it. */
+const autoMoneyAbove = (desk: DeskRecord, card: RuleCard, cap: number) => card.mode === 'auto' && movesMoney(desk, card) && (card.max_amount_cents ?? 0) > cap;
+
+/**
+ * The kernel's refusal to draft an automatic rule that moves money above the active version's
+ * payment limit, with the limit it went over; null when every card fits.
+ */
+function aboveMoneyCap(desk: DeskRecord, cards: readonly RuleCard[]): Failure | null {
+  const cap = desk.policy.auto_money_cap_cents ?? 0;
+  return cards.some((card) => autoMoneyAbove(desk, card, cap)) ? failWith(422, 'above_money_cap', { cap_cents: cap }) : null;
+}
+
+/**
+ * `cards` with each active automatic money rule above `cap` brought down to it, as plan 01b's
+ * `desk.money_cap.lower_to_cap` drafts a lower limit: its own limit becomes `cap`, or at 0 it asks
+ * first, with what only an automatic rule has dropped. A card no active card has, and every other
+ * card, is unchanged, so the draft shows each one the new limit changes.
+ */
+function lowerToCap(desk: DeskRecord, cards: readonly RuleCard[], cap: number): RuleCard[] {
+  const carried = new Set(desk.policy.cards.map((card) => card.card_id));
+  return cards.map((card) => {
+    if (!carried.has(card.card_id) || !autoMoneyAbove(desk, card, cap)) return card;
+    if (cap > 0) return { ...card, max_amount_cents: cap };
+    return { ...card, mode: 'ask', max_amount_cents: null, hours: null, max_discount_bp: 0, review: false };
+  });
+}
+
+const isPreset = (value: unknown): value is RulesPreset => typeof value === 'string' && Object.hasOwn(PRESETS, value);
 
 /** A rule card as a draft takes one: its id, tool, mode, who and reason, and a limit that is a whole number of cents or none. */
 function isRuleCard(value: unknown): value is RuleCard {
@@ -315,6 +363,8 @@ function linkClosed(link: LinkRecord): Failure {
 
 /** Every route the mock answers from a copy. Unserved ones fall through to the catch-all, which records them. */
 const SERVED: ServedRoutes = {
+  // The setup interview (setup.ts).
+  ...SETUP_ROUTES,
   copies(sv, req) {
     const passcode = isRecord(req.body) ? req.body.passcode : undefined;
     if (req.malformed || typeof passcode !== 'string' || passcode === '') return INVALID;
@@ -332,7 +382,7 @@ const SERVED: ServedRoutes = {
     return req.cookies.owner ? ok(copyOut(sv.world)) : NO_OWNER;
   },
   desks(sv, req) {
-    return req.cookies.owner ? ok([businessOut(sv.world)]) : NO_OWNER;
+    return req.cookies.owner ? ok(withSetupBusinesses(sv.world, [businessOut(sv.world)])) : NO_OWNER;
   },
   setAnswering(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -361,7 +411,7 @@ const SERVED: ServedRoutes = {
   },
   today(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
-    return isFailure(desk) ? desk : ok(today(sv.world, desk));
+    return isFailure(desk) ? desk : ok(withSetupGreeting(sv.world, desk, today(sv.world, desk)));
   },
   briefing(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -489,15 +539,52 @@ const SERVED: ServedRoutes = {
     const add = isRecord(req.body) ? req.body.add : undefined;
     if (req.malformed || !Array.isArray(add) || add.length === 0 || !add.every(isRuleCard)) return INVALID;
     // The kernel won't draft a card that takes more money on its own than the active version's limit allows.
-    const cap = desk.policy.auto_money_cap_cents ?? 0;
-    if (add.some((card) => card.mode === 'auto' && (card.max_amount_cents ?? 0) > cap)) {
-      return failWith(422, 'above_money_cap', { cap_cents: cap });
-    }
-    return ok(sv.world.draft(desk, add));
+    return aboveMoneyCap(desk, add) ?? ok(sv.world.draft(desk, add));
   },
   rules(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
     return isFailure(desk) ? desk : ok(rulesView(desk));
+  },
+  ruleChat(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const text = isRecord(req.body) ? req.body.text : undefined;
+    if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > MESSAGE_MAX) return INVALID;
+    // Claude's answer, and the change it drafts when the owner asked for one, merged into the active rules.
+    const reply = ruleChatReply(text, desk.policy.cards);
+    if (reply.add.length === 0) return ok({ answer: reply.answer, draft: null } satisfies RuleChatOut);
+    return aboveMoneyCap(desk, reply.add) ?? ok({ answer: reply.answer, draft: sv.world.draft(desk, reply.add) } satisfies RuleChatOut);
+  },
+  suggestions(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    return isFailure(desk) ? desk : ok(desk.suggestions.map((suggestion) => ({ ...suggestion, card: { ...suggestion.card } })));
+  },
+  draftSuggestion(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const suggestion = desk.suggestions.find((s) => s.tool === req.params.tool);
+    if (!suggestion) return NOT_FOUND;
+    return aboveMoneyCap(desk, [suggestion.card]) ?? ok(sv.world.draft(desk, [suggestion.card]));
+  },
+  draftPreset(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const preset = isRecord(req.body) ? req.body.preset : undefined;
+    if (req.malformed || !isPreset(preset)) return INVALID;
+    // The preset's cards in place of every owner card, personal ones included: its diff lists each one it removes.
+    return ok(sv.world.draftCards(desk, PRESETS[preset]));
+  },
+  draftMoneyCap(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const cap = isRecord(req.body) ? req.body.auto_money_cap_cents : undefined;
+    if (req.malformed || typeof cap !== 'number' || !Number.isSafeInteger(cap) || cap < 0) return INVALID;
+    if (cap > PLATFORM_CEILING_CENTS) return failWith(422, 'above_platform_ceiling');
+    // The active rules at the new limit. A lower one first brings each automatic money rule above it
+    // down to it, so the draft holds together on its own and its diff shows each one; a higher one
+    // keeps the rules as they are. Nothing changes until the owner confirms the draft.
+    const lower = cap < (desk.policy.auto_money_cap_cents ?? 0);
+    return ok(sv.world.draftCards(desk, lower ? lowerToCap(desk, desk.policy.cards, cap) : desk.policy.cards, { cap }));
   },
   ruleDraft(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -537,7 +624,8 @@ const SERVED: ServedRoutes = {
   publicDesk(sv, req) {
     const desk = sv.world.deskBySlug(req.params.slug);
     if (!desk) return NOT_FOUND;
-    return ok(publicDesk(desk, req.query.get('lang') === 'es' ? 'es' : 'en'));
+    const language = req.query.get('lang') === 'es' ? 'es' : 'en';
+    return ok(setupPublicDesk(sv.world, desk, language) ?? publicDesk(desk, language));
   },
   openSession(sv, req) {
     const slug = req.params.slug ?? '';
@@ -632,7 +720,7 @@ const SERVED: ServedRoutes = {
   // The payment link's token is the only credential the checkout carries: no cookie is read.
   paymentLink(sv, req) {
     const link = sv.world.links.get(req.params.token ?? '');
-    return link ? ok(paymentLinkOut(link)) : NOT_FOUND;
+    return link ? ok(withSetupBusinessName(sv.world, link, paymentLinkOut(link))) : NOT_FOUND;
   },
   completePayment(sv, req) {
     const token = req.params.token ?? '';

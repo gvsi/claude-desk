@@ -12,8 +12,6 @@ joins work already running counts once) and, on a route that calls the model, an
 production once today's model budget is spent. What each step does is in `desk.api.setup`.
 """
 
-import hashlib
-import json
 from collections.abc import Awaitable, Callable
 from time import monotonic
 from typing import Annotated, Any
@@ -24,6 +22,7 @@ from pydantic import BaseModel
 
 from desk.api import proving, setup
 from desk.api.deps import OwnerCtx, Runtime, owner_ctx, public_origin, require_model_budget, runtime
+from desk.api.idempotency import body_sha256
 from desk.api.schemas import (
     ApiError,
     ProvingPending,
@@ -61,15 +60,36 @@ async def _moving_on(request: Request, ctx: OwnerCtx, *, model: bool = True) -> 
     return state
 
 
-@router.post("", status_code=201, response_model=SetupState, responses=error_responses(401, 422, 429, 503))
+@router.post("", status_code=201, response_model=SetupState,
+             responses=error_responses(401, 404, 409, 422, 429, 503))
 async def start_setup(body: SetupStartIn, request: Request,
                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SetupState:
     """Start setting up a new Desk from the owner's own words: Claude reads them, the kernel makes the Desk with
     Answering off, and Claude asks whether it may read the owner's Claude memory and website. A name the owner gives
     here is the one customers see, and one the kernel wouldn't take is 422. 503 `model_unavailable` when Claude
-    couldn't answer, with nothing made."""
-    state = await _moving_on(request, ctx)
-    return await setup.start(ctx, state.database(), state.model, body)
+    couldn't answer, with nothing made.
+
+    With an `idempotency_key` (one per click), a repeat in the copy answers the interview the first made, as it stands
+    now, and makes nothing: no model call, no Desk, no count on the limits. A repeat with another body is 409
+    `conflict`, and one sent while the first is still starting answers 409 `in_progress` at once, to be sent again
+    after `retry_after`. A first that stopped before the kernel was asked for the Desk (its process did, say) frees
+    the key once it is older than the longest a start can take; one that stopped after asking, with no answer kept,
+    may have made the Desk, so it answers 409 `in_progress` for good, and only a new key starts again. A start is
+    admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent meanwhile waits
+    for that admission and is never counted; another process admits on its own, so during a deploy's overlap a repeat
+    routed to the other task can be counted twice.
+
+    One rule for failures, as when sending the built-in agent: a start that fails before anything is made (refused by
+    the limits, or Claude couldn't answer, before the kernel is asked for the Desk) frees its key, so the same request
+    can be sent again; once the Desk was asked for, the key keeps the outcome, and a repeat of a start that failed
+    then answers its failure again (a new click sends a new key). Without a key, each start makes its own interview
+    and Desk."""
+    state = runtime(request).started()
+
+    async def admit() -> None:
+        await _moving_on(request, ctx)
+
+    return await setup.start(ctx, state.database(), state.model, body, admit=admit)
 
 
 @router.get("/{id}", response_model=SetupState, responses=error_responses(401, 404, 422, 503))
@@ -124,15 +144,6 @@ async def setup_connect_tools(interview_id: InterviewId, request: Request,
 Work = Callable[[OwnerCtx, Runtime], Awaitable[Any]]
 PROVING_RESPONSES: dict[int | str, dict[str, Any]] = {202: {"model": ProvingPending},
                                                       **error_responses(401, 404, 409, 422, 429, 503)}
-NO_BODY = hashlib.sha256(b"").hexdigest()
-
-
-def body_sha256(body: dict[str, Any] | None) -> str:
-    """The sha256 of a request body's canonical JSON (keys sorted, no spaces), or of no body."""
-    if body is None:
-        return NO_BODY
-    return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-                          ).hexdigest()
 
 
 async def proving_answer(request: Request, ctx: OwnerCtx, desk_id: str, work: Work, *, started: float,

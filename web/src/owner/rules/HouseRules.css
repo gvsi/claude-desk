@@ -1,0 +1,30 @@
+/* HouseRules: the trail over the page's title, then each connector's name over a card per tool,
+   12 px apart, the connectors 32 px apart, and the always-on rules at the end, in the content
+   column. On a phone the parts are 24 px apart. */
+
+.cd-house-rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-32);
+  min-width: 0;
+}
+
+.cd-house-rules__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-house-rules__connector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+@media (max-width: 639.98px) {
+  .cd-house-rules {
+    gap: var(--space-24);
+  }
+}

@@ -3,6 +3,7 @@ import { useId, useLayoutEffect, useRef, useState, type ChangeEvent, type Keyboa
 import { Button } from '../Button/Button.tsx';
 import { IconButton } from '../IconButton/IconButton.tsx';
 import { Notice } from '../Notice/Notice.tsx';
+import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 
 import './Composer.css';
 
@@ -37,6 +38,12 @@ export interface ComposerProps {
    * `text`, the words as sent, beside "Try again" (`onRetry`). Nothing can be typed until it clears.
    */
   failed?: ComposerFailed;
+  /**
+   * Vision pages only, which make no requests: typing works and Send keeps its look, but Send and
+   * Enter do nothing. `onSend` is never called and the text stays. While `failed` is set, the failed
+   * box shows instead and no vision line is drawn.
+   */
+  inertSend?: boolean;
 }
 
 /** A send that failed, kept in the composer until the screen tries again. */
@@ -85,12 +92,15 @@ export function Composer({
   onAttach,
   onSpeak,
   failed,
+  inertSend = false,
 }: ComposerProps) {
   const id = useId();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const failedBoxRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const [value, setValue] = useState('');
+  // On a vision page: whether Send has been pressed, so its line shows from then on.
+  const [inertPressed, setInertPressed] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const isFailed = failed !== undefined;
   const shownFailed = useRef(isFailed);
@@ -133,6 +143,11 @@ export function Composer({
 
   const send = () => {
     if (!canSend) return;
+    // A vision page's composer: the words go nowhere, so they stay, and the line says why.
+    if (inertSend) {
+      setInertPressed(true);
+      return;
+    }
     onSend(text);
     setValue('');
   };
@@ -181,6 +196,8 @@ export function Composer({
       disabled={!canSend}
       onClick={() => {
         send();
+        // On a vision page nothing was sent, so Send keeps the focus.
+        if (inertSend) return;
         // The button is disabled once the text clears, so the next message starts in the text box.
         inputRef.current?.focus();
       }}
@@ -196,6 +213,7 @@ export function Composer({
       {value.length} / {maxLength}
     </span>
   ) : null;
+  const inertLine = inertSend ? <VisionInertLine shown={inertPressed} /> : null;
   const labelElement = (
     <label htmlFor={inputId} className="cd-sr-only">
       {label}
@@ -233,6 +251,7 @@ export function Composer({
             {sendButton}
           </div>
         </div>
+        {inertLine}
       </div>
     );
   }
@@ -252,6 +271,7 @@ export function Composer({
           {counter}
         </div>
       ) : null}
+      {inertLine}
     </div>
   );
 }

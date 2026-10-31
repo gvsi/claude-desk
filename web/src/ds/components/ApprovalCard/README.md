@@ -49,6 +49,7 @@
 - `pending` shows "Sending your answer" in a status line under the answers. The side whose answer was chosen here shows the busy spinner in place of its words (and its chevron), as a busy `Button`; the other steps to its busy colors without one (`Button`'s `waiting`), its words still shown. Neither is dimmed: Allow's label or spinner turn `text-secondary` on its fill, and the red Deny takes its hover fill under its red words or spinner, each a listed pair in the card. When the screen reports `pending` for an answer given elsewhere, no side was chosen here, so both wait without a spinner.
 - `error` shows "We couldn't confirm your answer. Try again, or reload to see where it stands." (`true`), or the screen's own line (a string), as an alert, and the answers can be tried again. A retry is safe: the kernel resolves a request once, and on `conflict` the screen re-reads the decision.
 - When the answers go while one of them has focus, focus moves to the status line. If an answer starts to be sent while a menu is open, from this card or from elsewhere, the menu closes and focus waits on its button.
+- `inertAnswers` is for the vision pages only (the phone vision page's held quote), which make no requests: the answers keep their look, focus and tab order, a menu still opens, and choosing an answer does nothing. The card never locks or shows a spinner, and `onAnswer` is never called. Never on an owner screen. The first press shows `VISION_INERT_LINE`, "This is a vision page, so nothing is sent.", once, in a secondary caption 8 px under the answers' row, in a polite live region (`role="status"`) that is there from the start and takes no room until then; later presses change nothing and announce nothing.
 
 ## Final lines
 
@@ -89,5 +90,6 @@ After an answer or an event, the final line takes the place of "Waiting for your
 | `onAnswer` | `(answer: ApprovalAnswer) => void \| Promise<unknown>` | Required. A rejected promise lets the owner answer again. |
 | `pending` | `boolean` | "Sending your answer". |
 | `error` | `boolean \| string` | `true` for the card's line, or the screen's line. |
+| `inertAnswers` | `boolean` | Vision pages only: the answers do nothing. `false` by default. |
 
 The answers are `size-control-main` buttons, `space-8` apart. The canvas board is N-Answers-TwoButtons, option 2 ("Menu buttons"), signed off by the project owner on 2026-10-29; it replaces N-Answers-Final and N-Answers-Verified.

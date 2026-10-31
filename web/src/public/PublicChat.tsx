@@ -171,11 +171,16 @@ function ChatRowView({ row, ownerName, language, onResend, after = [] }: RowProp
       ) : (
         <SystemLine text={copy.claudeIsBack} />
       );
-    return <TranscriptRow margin={receipts}>{line}</TranscriptRow>;
+    return (
+      <TranscriptRow margin={receipts} live={row.live}>
+        {line}
+      </TranscriptRow>
+    );
   }
   const { ev } = item;
+  // A reply that arrived on the stream lands, its receipts one by one.
   return (
-    <TranscriptRow margin={receipts}>
+    <TranscriptRow margin={receipts} live={row.live}>
       {ev.author === 'owner' ? (
         <PersonMessage name={ownerName} blocks={ev.blocks} language={ev.language} />
       ) : (
@@ -419,6 +424,14 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (document.activeElement !== null && document.activeElement !== document.body) return;
     composerRef.current?.querySelector('textarea')?.focus();
   }, [chat.cancelling, chat.cancelFailed, chat.state.openHolds]);
+
+  // A row that arrived live lands as it is first drawn. Once the transcript has drawn it, the chat
+  // stops calling it live, so a remount (the visitor leaving the page and coming back) draws it still.
+  const drawn = chat.status !== 'not_found' && desk !== null;
+  const { shown } = chat;
+  useEffect(() => {
+    if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
+  }, [drawn, chat.state.rows, shown]);
 
   // Words that didn't send when the chat ended wait in the new chat's composer once it can be used.
   const carried = useRef<string | null>(null);

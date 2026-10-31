@@ -1,0 +1,53 @@
+/* AccessPanel: a Card padded 16 px, as N-R2-Vision-TeamDesk draws it. Its parts stack 12 px apart;
+   the second heading sits 4 px further down, 16 px under the chips above it. Each chip is 28 px tall
+   in a thin line-control outline, fully rounded, in meta and primary ink: a word, never a control,
+   so it has no hover and no fill. Chips wrap 6 px apart. */
+
+.cd-access-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-access-panel__heading {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.cd-access-panel__heading:not(:first-child) {
+  margin-top: var(--space-4);
+}
+
+.cd-access-panel__none {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.cd-access-panel__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-access-panel__chip {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  max-width: 100%;
+  height: var(--space-28);
+  padding: 0 var(--space-10);
+  border: 1px solid var(--line-control);
+  border-radius: var(--radius-full);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cd-access-panel__action {
+  display: flex;
+}

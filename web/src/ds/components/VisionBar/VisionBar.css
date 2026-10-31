@@ -1,0 +1,48 @@
+/* VisionBar: a 40 px line across the top of a vision page, on the panel with a hairline under it,
+   as every vision board draws it: the Vision pill, its line 12 px after it in secondary meta, and
+   "Back to your Desk" at the right, 24 px in. On a phone the gutters are 16 px and the line wraps,
+   the link dropping under it; the bar grows with them. */
+
+.cd-vision-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-12);
+  row-gap: var(--space-4);
+  box-sizing: border-box;
+  min-height: var(--size-control-main);
+  padding: var(--space-8) var(--space-24);
+  border-bottom: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.cd-vision-bar__line {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-vision-bar__back {
+  flex: none;
+  margin-left: auto;
+}
+
+@media (max-width: 639.98px) {
+  .cd-vision-bar {
+    padding-right: var(--space-16);
+    padding-left: var(--space-16);
+  }
+
+  /* The line takes what the pill leaves; the link goes under it, at the left. */
+  .cd-vision-bar__line {
+    flex: 1 1 0;
+  }
+
+  .cd-vision-bar__back {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}

@@ -44,6 +44,7 @@ import type {
   HealthOut,
   KnowledgeBody,
   MessageAccepted,
+  MoneyCapBody,
   NeedsYouItem,
   OwnerMessageBody,
   OwnerTranscript,
@@ -57,6 +58,7 @@ import type {
   RulesDraft,
   RulesView,
   SafetyCheck,
+  SetupAnswerBody,
   SetupState,
   SetupTools,
   SituationResult,
@@ -131,6 +133,7 @@ export const ROUTES = {
   draftRules: { method: 'POST', path: '/api/owner/policy/{desk_id}/draft', owner: true, proving: true },
   draftPreset: { method: 'POST', path: '/api/owner/policy/{desk_id}/preset', owner: true, proving: true },
   draftSuggestion: { method: 'POST', path: '/api/owner/policy/{desk_id}/suggestions/{tool}', owner: true, proving: true },
+  draftMoneyCap: { method: 'POST', path: '/api/owner/policy/{desk_id}/money_cap', owner: true, proving: true },
   confirmRules: { method: 'POST', path: '/api/owner/policy/{desk_id}/confirm', owner: true, proving: true },
   confirmTool: { method: 'POST', path: '/api/owner/policy/{desk_id}/tools/confirm', owner: true, proving: true },
   setupRules: { method: 'POST', path: '/api/owner/policy/setup/{id}/rules', owner: true, proving: true },
@@ -212,6 +215,7 @@ interface RouteShapes {
   draftRules: { body: DraftAddBody; response: RulesDraft };
   draftPreset: { body: PresetBody; response: RulesDraft };
   draftSuggestion: { body: undefined; response: RulesDraft };
+  draftMoneyCap: { body: MoneyCapBody; response: RulesDraft };
   confirmRules: { body: ConfirmRulesBody; response: PolicyVersionOut };
   confirmTool: { body: ConfirmToolBody; response: ToolConfirmedOut };
   setupRules: { body: undefined; response: RulesDraft };
@@ -223,7 +227,7 @@ interface RouteShapes {
   startSetup: { body: StartSetupBody; response: SetupState };
   setup: { body: undefined; response: SetupState };
   setupConsent: { body: ConsentBody; response: SetupState };
-  setupAnswer: { body: TextBody; response: SetupState };
+  setupAnswer: { body: SetupAnswerBody; response: SetupState };
   setupTools: { body: undefined; response: SetupTools };
   setupConnect: { body: ConnectBody; response: ToolRow[] };
 

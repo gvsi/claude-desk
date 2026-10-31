@@ -18,6 +18,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
+import { watchLandings } from '../../test/landings.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics, focusIsOn } from '../../test/screen.ts';
 
@@ -127,6 +128,16 @@ function danasChatWithThreeDecisions() {
   const refunded = world.answer(record, 'allow_once');
   world.emit(chat, statusOf('resolved', refunded));
   return { chat, refund, refunded, quote: quote as Decision, booking: booking as Decision };
+}
+
+/** Dana asks `question` in her chat, and Claude answers it with a quote: each event at once. */
+function priceTurn(chat: SessionRecord, question: string): void {
+  const world = mockStore.world;
+  const price = SCRIPT.find((rule) => rule.name === 'price');
+  if (!price) throw new Error('the script has its price row');
+  world.visitorText(chat, question);
+  const turn = world.context(chat, 'en', question);
+  for (const step of [...price.steps, turnEnd]) world.emit(chat, step(turn));
 }
 
 /** The owner's reads of the Desk's conversations, of one chat and of Needs you, as the mock answers them now. */
@@ -745,6 +756,142 @@ describe('Conversations', () => {
     expect(rowOf(verifyCard)?.contains(started.element())).toBe(true);
     await expectScreenBasics(screen.container, { owner: true });
   });
+  it('a_reply_that_arrives_while_open_lands', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const landed = watchLandings();
+    const { screen, router } = await renderRoute(conversation(DANA_LIVE));
+    const quotes = () => log(screen).getByRole('article', { name: 'Quote' }).elements();
+    const rowOf = (el: Element | undefined) => el?.closest('.cd-transcript-row') ?? null;
+
+    // Opening a chat reads what happened so far: every row draws still, through the reads that follow.
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    const before = quotes().length;
+    await readsMore('conversation', 2);
+    expect(landed.rows()).toEqual([]);
+
+    // Dana asks while the owner watches, and Claude answers: her words show as they come, and
+    // Claude's reply lands, with its receipts.
+    const world = mockStore.world;
+    const price = SCRIPT.find((rule) => rule.name === 'price');
+    if (!price) throw new Error('the script has its price row');
+    const question = 'How much is drain clearing?';
+    world.visitorText(chat, question);
+    const turn = world.context(chat, 'en', question);
+    for (const step of [...price.steps, turnEnd]) world.emit(chat, step(turn));
+    await expect.poll(() => quotes().length).toBe(before + 1);
+    const reply = rowOf(quotes().at(-1));
+    expect(landed.rows()).toEqual([reply]);
+    expect(reply?.querySelectorAll('.cd-margin-receipt')).toHaveLength(2);
+
+    // It lands once: coming back to the chat draws it still.
+    await router.navigate(LIST);
+    await expect.element(screen.getByText('Choose a conversation to read it.', { exact: true })).toBeVisible();
+    expect(log(screen).elements()).toHaveLength(0);
+    await router.navigate(conversation(DANA_LIVE));
+    await expect.poll(() => quotes().length).toBe(before + 1);
+    await readsMore('conversation', 2);
+    expect(landed.rows()).toHaveLength(1);
+  });
+
+  it('a_reply_that_came_while_away_draws_still', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const landed = watchLandings();
+    const { screen, router } = await renderRoute(conversation(DANA_LIVE));
+    const quotes = () => log(screen).getByRole('article', { name: 'Quote' }).elements();
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    const before = quotes().length;
+
+    // The owner goes back to the list, and Dana asks and gets her answer meanwhile. Back on the
+    // chat, the page shows the read it had first, then the reply where it belongs, drawn still: it
+    // came while the owner was away.
+    await router.navigate(LIST);
+    await expect.element(screen.getByText('Choose a conversation to read it.', { exact: true })).toBeVisible();
+    priceTurn(chat, 'How much is drain clearing?');
+    await router.navigate(conversation(DANA_LIVE));
+    await expect.poll(() => quotes().length).toBe(before + 1);
+    await readsMore('conversation', 1);
+    expect(landed.rows()).toEqual([]);
+
+    // A reply that arrives while the owner reads lands.
+    priceTurn(chat, 'And for two drains?');
+    await expect.poll(() => quotes().length).toBe(before + 2);
+    expect(landed.rows()).toEqual([quotes().at(-1)?.closest('.cd-transcript-row')]);
+  });
+
+  it('a_receipt_shown_before_its_reply_doesnt_land_again', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const landed = watchLandings();
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const quotes = () => log(screen).getByRole('article', { name: 'Quote' }).elements();
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    const before = quotes().length;
+
+    // Dana asks, and Claude runs the quote. A read before the reply shows its receipt under her question.
+    const world = mockStore.world;
+    const price = SCRIPT.find((rule) => rule.name === 'price');
+    if (!price) throw new Error('the script has its price row');
+    const question = 'How much is drain clearing?';
+    world.visitorText(chat, question);
+    const turn = world.context(chat, 'en', question);
+    const [quoted, ...rest] = price.steps;
+    if (!quoted) throw new Error('the price row runs the quote first');
+    world.emit(chat, quoted(turn));
+    const asked = () => log(screen).getByText(question, { exact: true }).element().closest('.cd-transcript-row');
+    await expect.poll(() => asked()?.querySelectorAll('.cd-margin-receipt').length ?? 0).toBe(1);
+    const read = asked()?.querySelector('.cd-margin-receipt')?.textContent;
+
+    // The reply comes, and the receipt moves under it, after the reply's own check. The reply and its
+    // check land; the receipt the owner has already read shows at once.
+    for (const step of [...rest, turnEnd]) world.emit(chat, step(turn));
+    await expect.poll(() => quotes().length).toBe(before + 1);
+    const reply = quotes().at(-1)?.closest('.cd-transcript-row');
+    if (!reply) throw new Error('the reply has its row');
+    expect(landed.rows()).toEqual([reply]);
+    const lines = [...reply.querySelectorAll('.cd-margin-receipt')];
+    expect(lines).toHaveLength(2);
+    expect(lines[1]?.textContent).toBe(read);
+    expect(landed.lines(reply)).toEqual([lines[0]]);
+  });
+
+  it('the_owners_own_words_never_land', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const landed = watchLandings();
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 1);
+
+    // The owner takes over and writes: her words show in her own view as she sent them, still.
+    const words = 'I can come by at four today.';
+    mockStore.world.takeOver(chat);
+    mockStore.world.say(chat, words);
+    await expect.element(log(screen).getByText(words, { exact: true })).toBeVisible();
+    expect(landed.rows()).toEqual([]);
+  });
+
+  it('a_recorded_chat_never_lands', async () => {
+    // The seeded visitor's chat, replayed from the recorded history, whose next read has one more reply.
+    const read = await served<OwnerTranscript>('conversation', { session_id: SEEDED_HOLD });
+    const delivered = read.items.findLast((item) => item.kind === 'delivered' && item.event?.type === 'message');
+    if (delivered?.event?.type !== 'message') throw new Error("the seeded visitor's chat has a reply");
+    const n = Math.max(...read.items.map((item) => item.n)) + 1;
+    const later = { ...delivered, n, event: { ...delivered.event, message_id: 'msg-recorded-later' } };
+    mockStore.inject({ route: 'conversation', status: 200, times: 1, body: { ...read, replayed: true } });
+    mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, replayed: true, items: [...read.items, later] } });
+
+    const landed = watchLandings();
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const rows = () => log(screen).element().querySelectorAll('.cd-transcript-row:not(.cd-transcript-header)');
+    await expect.element(screen.getByText('Recorded history, replayed into your copy. It happened before you arrived.', { exact: true })).toBeVisible();
+    const shownFirst = rows().length;
+    // The reply the next read adds shows where it belongs, and draws still: nothing in a recorded chat arrives live.
+    await expect.poll(() => rows().length).toBe(shownFirst + 1);
+    expect(landed.rows()).toEqual([]);
+  });
+
   it('answer_row_follows_the_decided_look', async () => {
     // The seeded 15% hold, from a visitor not on record, held by a limit: two plain answers.
     const seeded = await renderRoute(conversation(SEEDED_HOLD));

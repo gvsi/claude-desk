@@ -72,6 +72,7 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 - `openStatus`, `PublicDesk.open_status` passed through as served, `null` included. The screen keeps it current by refetching the Desk, once after the kernel's `refresh_at` minus its `as_of` and again when the tab becomes visible; the shell only draws what it's given.
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
 - `composer`, a visitor `Composer` in the page's language, and `children`, the conversation.
+- `banner`, a full-width line above the brand header, such as the `VisionBar` on the Claude account vision page (N-R2-Vision-ClaudeAccount). It sits inside the shell, so the page stays the window's height and the composer and footer stay at its foot.
 
 ## Props
 
@@ -86,6 +87,7 @@ The shell is an inline-size container, so it lays out by its own width, not the 
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
 | `footer` | `boolean` | `true` by default; `false` when embedded. |
 | `composer` | `ReactNode` | Required. |
+| `banner` | `ReactNode` | Above the brand header, inside the window's height. |
 | `children` | `ReactNode` | Required. |
 
 `PublicBrand` and `PublicOpenStatus` are exported with the component. `PublicOpenStatus` is `PublicDesk['open_status']`, the generated `OpenStatus` or `null`.

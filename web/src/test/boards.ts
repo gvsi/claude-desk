@@ -6,7 +6,9 @@
 import { userEvent } from 'vitest/browser';
 
 import {
+  CONNECTORS_SPEC,
   SPEC,
+  expectConnectorSections,
   expectConversationType,
   expectFooter,
   expectOwnerFrame,
@@ -22,6 +24,8 @@ export interface OwnerBoardOptions {
   fill?: boolean;
   /** The page shows a conversation: its type, and receipts under at least one message. */
   transcript?: boolean;
+  /** The board draws no card (the Customers list): the page has none. With cards, each is in the card look. */
+  cards?: boolean;
   /** Elements Tab reaches in this order from the top of the page. */
   tabStops?: HTMLElement[];
   /** Presses Tab; the browser's own by default. */
@@ -30,6 +34,9 @@ export interface OwnerBoardOptions {
 
 /** Where a conversation's reply cards sit: in Claude's messages. */
 const IN_A_MESSAGE = '.cd-claude-message';
+
+/** A connector's section on Rules: a card of rows that pad themselves, in the section look. */
+const CONNECTOR_SECTION = '.cd-connector-section';
 
 /** Where a rules change's cards sit: in the change review, which draws its two cards compact. */
 const IN_A_CHANGE_REVIEW = '.cd-change-review';
@@ -45,16 +52,20 @@ const ROWS_CARD = { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' } as con
 
 /**
  * An owner page as its signed board draws it: the frame with `current` as the current page, the
- * concept footer, every card in the card look, a conversation's type and receipts, and the order
- * Tab takes through `tabStops`.
+ * concept footer, every card in the card look (or, with `cards: false`, no card at all), a
+ * conversation's type and receipts, and the order Tab takes through `tabStops`.
  *
  * In a conversation, the cards in Claude's messages are the chat's reply cards, in their own look
  * (`ReplyCard`, as the design system's conversation boards draw and check them), so the card look
  * is checked on every other card there, such as a held request's. On a rules change's review, the
- * change review's own two cards are checked at the compact padding `ChangeReview` gives them. A card
- * of rows has the card look with no padding of its own, since each of its rows pads itself.
+ * change review's own two cards are checked at the compact padding `ChangeReview` gives them; on
+ * the Rules page, each connector's section in the section look the connectors boards give it. A
+ * card of rows has the card look with no padding of its own, since each of its rows pads itself.
  */
-export async function expectOwnerBoard(root: HTMLElement, { current, fill = false, transcript = false, tabStops, user }: OwnerBoardOptions): Promise<void> {
+export async function expectOwnerBoard(
+  root: HTMLElement,
+  { current, fill = false, transcript = false, cards = true, tabStops, user }: OwnerBoardOptions,
+): Promise<void> {
   await expectOwnerFrame(root, current, { fill });
   await expectFooter(root);
   if (transcript) {
@@ -64,11 +75,22 @@ export async function expectOwnerBoard(root: HTMLElement, { current, fill = fals
     expectConversationType(root);
     const rows = await expectReceiptsUnderMessages(root);
     if (rows < 1) throw new Error('expected receipts under at least one message');
+  } else if (!cards) {
+    const found = root.querySelectorAll('.cd-card').length;
+    if (found > 0) throw new Error(`expected no card on the page, found ${found}`);
   } else if (root.querySelector(IN_A_CHANGE_REVIEW) !== null) {
     // A rules change's review (N-Conn-10, N-Conn-18, N-Conn-20): its "Changes" and checks cards are
     // compact, as `ChangeReview` draws them; every other card is in the card look.
     for (const card of root.querySelectorAll<HTMLElement>('.cd-card')) {
       expectComputed(card, card.closest(IN_A_CHANGE_REVIEW) === null ? SPEC.card : CHANGE_REVIEW_CARD);
+    }
+  } else if (root.querySelector(CONNECTOR_SECTION) !== null) {
+    // The Rules page (N-Conn-17): each connector's section is a card with no padding of its own,
+    // in the section look, its header and rows as the board draws them; every other card is in
+    // the card look.
+    expectConnectorSections(root);
+    for (const card of root.querySelectorAll<HTMLElement>('.cd-card')) {
+      expectComputed(card, card.querySelector(CONNECTOR_SECTION) === null ? SPEC.card : CONNECTORS_SPEC.section);
     }
   } else {
     const cards = [...root.querySelectorAll<HTMLElement>('.cd-card')];

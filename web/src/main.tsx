@@ -1,12 +1,14 @@
+// The design system's tokens and base styles come first, as in its stories, so each component's
+// own styles follow them and win where both set a property (a tool's name in its weight on Rules).
+import './ds/tokens.css';
+import './ds/base.css';
+
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter } from 'react-router';
 
 import { App } from './app/App.tsx';
 import { routes } from './app/routes.tsx';
-
-import './ds/tokens.css';
-import './ds/base.css';
 
 /**
  * The app. It starts no mock: under `npm run dev:mock` the dev server answers `/api/` itself, once

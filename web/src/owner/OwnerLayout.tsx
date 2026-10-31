@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { Link, Outlet, useLocation, useNavigate, useOutletContext, useParams } from 'react-router';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { Link, Outlet, useLocation, useMatches, useNavigate, useNavigationType, useOutletContext, useParams } from 'react-router';
 
 import { ABOUT_LINKS } from '../about/links.ts';
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
@@ -23,7 +23,8 @@ import {
   type SwitcherPick,
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
-import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday } from './useDesks.ts';
+import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
+import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead } from './useDesks.ts';
 
 import './OwnerLayout.css';
 
@@ -73,6 +74,12 @@ function currentNav(pathname: string): NavKey {
   return NAV_KEYS.find((key) => key === segment) ?? 'today';
 }
 
+/** Whether the page at `pathname` is the Desk's Today, which the Desk's own address opens too. */
+function opensToday(pathname: string): boolean {
+  const [page = '', ...rest] = pathname.split('/').slice(3);
+  return (page === '' || page === 'today') && rest.every((segment) => segment === '');
+}
+
 /** No Connectors href yet: the Connectors page comes with run 2, so its row stays hidden. */
 function hrefsFor(deskId: string): SidebarHrefs {
   const base = `/app/${encodeURIComponent(deskId)}`;
@@ -111,18 +118,66 @@ export function OwnerLayout() {
  * One Desk's frame, mounted afresh for each Desk, so the copy's Desks are read again whenever the
  * owner lands on a Desk they don't list (a new copy's, a Desk just made). Only that fresh read can
  * say the Desk isn't the owner's, unless a page holds the Desk (`holdDesk`) while it settles a
- * delete: then the frame stays up as it last was, and the page moves on once it knows.
+ * delete: then the frame stays up as it last was, and the page moves on once it knows. Opened onto
+ * Today with the loading page up (a reload, a Desk not listed yet), the loading page stays while
+ * Today is read ahead too, as on a first visit, so Today opens drawn; a Desk already listed (a
+ * switch between Desks) opens at once.
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
+  const location = useLocation();
   const found = desks.data ? findDesk(desks.data, deskId) : null;
   const [held, setHeld] = useState<ShownDesk | null>(null);
   const shown = found ?? held;
+  const readingAhead = useTodayReadAhead(deskId, found === null && opensToday(location.pathname));
 
-  if (shown) return <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />;
+  if (shown) {
+    if (readingAhead) return <OwnerState />;
+    return <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />;
+  }
   if (desks.isError) return <OwnerState error={desks.error} onRetry={() => void desks.refetch()} />;
   if (desks.data && !desks.isFetching) return <NotFound />;
   return <OwnerState />;
+}
+
+/**
+ * Opens each new page at its top, and Back and Forward at the owner's place on the page they
+ * return to. The shell's main area scrolls on its own and would keep the last page's place, so
+ * "See all rules" at the end of Rules would open All rules near its end; and neither the browser
+ * nor the router restores an area's place, so "Keep my rules" on a review, which goes back, would
+ * land on Rules' top. Each place is remembered by its history entry as the owner scrolls, since by
+ * the time a page has gone its area already holds the next one. A page is its route on this Desk;
+ * moving within one page (an attempt or a conversation beside its list) keeps the page's place, as
+ * those routes are made to.
+ */
+function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string): void {
+  const matches = useMatches();
+  const page = matches[matches.length - 1]?.id;
+  const { key } = useLocation();
+  const navigationType = useNavigationType();
+  // The main area's place in each history entry, and the entry it is showing.
+  const places = useRef(new Map<string, number>());
+  const entry = useRef(key);
+
+  // Set before the page's place below, so the scroll that place makes is heard as this entry's.
+  useLayoutEffect(() => {
+    entry.current = key;
+  }, [key]);
+
+  useLayoutEffect(() => {
+    const main = inside.current?.closest('main');
+    if (!main) return undefined;
+    const remember = () => places.current.set(entry.current, main.scrollTop);
+    main.addEventListener('scroll', remember, { passive: true });
+    return () => main.removeEventListener('scroll', remember);
+  }, [inside]);
+
+  useLayoutEffect(() => {
+    const main = inside.current?.closest('main');
+    if (!main) return;
+    // `key` and `navigationType` are read only when the page changes: within a page, its place stays.
+    main.scrollTop = navigationType === 'POP' ? (places.current.get(key) ?? 0) : 0;
+  }, [inside, deskId, page]);
 }
 
 interface DeskFrameProps extends ShownDesk {
@@ -137,6 +192,10 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const location = useLocation();
   const queryClient = useQueryClient();
   const today = useToday(deskId);
+  // Ask Claude, beside the page that opened it (the Rules page, a tool's page).
+  const askClaude = useAskClaudeHost(deskId, business.owner_display_name);
+  const layout = useRef<HTMLDivElement>(null);
+  useOpenPagesAtTop(layout, deskId);
   const [switching, setSwitching] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -252,14 +311,17 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={() => setConfirming(true)} />}
       sidebar={sidebar}
       fill={fill}
+      panel={askClaude.panel}
     >
-      <div className={layoutClass}>
+      <div ref={layout} className={layoutClass}>
         {notice !== null ? (
           <div className="cd-owner-layout__notice">
             <Notice tone="error">{notice}</Notice>
           </div>
         ) : null}
-        <Outlet context={{ business, desk, setAnswering, holdDesk } satisfies OwnerDeskContext} />
+        <AskClaudeProvider value={askClaude.value}>
+          <Outlet context={{ business, desk, setAnswering, holdDesk } satisfies OwnerDeskContext} />
+        </AskClaudeProvider>
         {fill ? null : (
           <footer className="cd-owner-layout__footer">
             <ConceptFooter />

@@ -23,9 +23,10 @@ secrets redacted). In order, before any run:
    kernel's checks use it on every provider), on `bedrock` without `BEDROCK_BEARER_TOKEN`, and
    without list prices for every model it calls on its provider (`evals.pricing.PRICES`).
 7. Budgets. The estimate is $0.40 a run until spend rows measure this provider's cost per run
-   (`estimate_usd`); over `--max-usd` it refuses. The month's Claude API spend in the shared spend
-   file plus the estimate's Claude API share must stay within `monthly_limit_usd − demo_reserve_usd`
-   (`evals/budget.toml`), or it refuses and says what remains. The spend file is
+   (`estimate_usd`; a calibration's rows, whose runs are single model calls, measure none); over
+   `--max-usd` it refuses. The month's Claude API spend in the shared spend file, a calibration's
+   included, plus the estimate's Claude API share must stay within `monthly_limit_usd −
+   demo_reserve_usd` (`evals/budget.toml`), or it refuses and says what remains. The spend file is
    `<git common dir>/desk-eval-spend.csv`, shared by every worktree and never committed.
 
 Then, with `--results` and runs to make, `make kernel` (recorded as `StartChecks.kernel_built`, so
@@ -101,6 +102,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PER_RUN_USD = 0.40   # a run's cost until spend rows measure it (master "Model cost and latency budget")
 SPEND_FILE = "desk-eval-spend.csv"
 SPEND_COLUMNS = ("pass_id", "date", "provider", "runs", "desk_usd", "simulator_usd", "claude_api_usd", "total_usd")
+# A calibration's spend rows (`evals/calibration`) start their pass_id with this. Their runs are single
+# model calls, not tier 2 runs, so they count against the monthly limit but never measure a run's cost.
+CALIBRATION_PREFIX = "calibration-"
 SUITES: tuple[Literal["attack", "legit"], ...] = ("attack", "legit")
 # The model each route of a pass sends (API_ROUTES, KERNEL_ROUTES, SIMULATOR_ROUTES) is set in `evals.results`,
 # beside the rule that a gating pass recorded exactly those models.
@@ -387,10 +391,11 @@ def write_month_spend(destination: Path, *, root: Path = REPO_ROOT, now: datetim
 
 
 def measured_per_run(rows: list[dict[str, str]], provider: str, column: str = "total_usd") -> float | None:
-    """This provider's spend per run in `column` over every spend row, or None before any run was measured."""
+    """This provider's spend per run in `column` over every tier 2 spend row (a calibration's rows aside,
+    `CALIBRATION_PREFIX`), or None before any run was measured."""
     runs = spent = 0.0
     for row in rows:
-        if row.get("provider") == provider:
+        if row.get("provider") == provider and not (row.get("pass_id") or "").startswith(CALIBRATION_PREFIX):
             runs += float(row.get("runs") or 0)
             spent += float(row.get(column) or 0)
     return spent / runs if runs else None
@@ -1005,8 +1010,8 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
 
 
 __all__ = [
-    "DEFAULT_PER_RUN_USD", "EstimatedSpend", "PassConfig", "PassDeps", "PassProviders", "PassRefused", "PassResult",
-    "Spend", "Stack", "StartChecks",
+    "CALIBRATION_PREFIX", "DEFAULT_PER_RUN_USD", "EstimatedSpend", "PassConfig", "PassDeps", "PassProviders",
+    "PassRefused", "PassResult", "Spend", "Stack", "StartChecks",
     "append_spend", "estimate_usd", "load_pass", "measured_per_run", "month_rows", "pass_model_ids",
     "pass_providers", "read_spend", "record_rate", "run_pass", "shared_spend_file", "write_month_spend",
 ]

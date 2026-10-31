@@ -1,0 +1,58 @@
+/* PhoneFrame: a phone drawn on a page, as N-R2-Vision-Phone draws it. The screen is 390 by 780 px
+   on the app's ground, a line-card outline with a phone's 44 px corners, its content clipped to
+   them; the caption sits 12 px under it in secondary meta. In a window narrower than the phone the
+   screen narrows to fit, so nothing scrolls sideways.
+
+   PhoneTabBar: the owner's five tabs at the screen's foot, on the panel with a hairline over them,
+   padded 10 px 8 px 22 px (the room a phone's home bar takes), spaced around the width. */
+
+.cd-phone-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-12);
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+}
+
+.cd-phone-frame__screen {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 390px;
+  max-width: 100%;
+  height: 780px;
+  border: 1px solid var(--line-card);
+  border-radius: 44px;
+  background: var(--bg-app);
+  overflow: hidden;
+}
+
+.cd-phone-frame__caption {
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.cd-phone-tab-bar {
+  display: flex;
+  flex: none;
+  justify-content: space-around;
+  padding: var(--space-10) var(--space-8) calc(var(--space-20) + var(--space-2));
+  border-top: 1px solid var(--line-hairline);
+  background: var(--bg-panel);
+}
+
+.cd-phone-tab-bar__tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  border-radius: var(--radius-control);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.cd-phone-tab-bar__tab[aria-current='page'] {
+  color: var(--text-primary);
+}

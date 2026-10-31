@@ -15,6 +15,8 @@ export interface MarginLineProps {
   check?: boolean;
   /** Makes the line a button that opens the full trace. */
   onOpen?: () => void;
+  /** The line was on screen before its row arrived: under a row that lands, it shows at once. */
+  shownBefore?: boolean;
 }
 
 /**
@@ -22,8 +24,8 @@ export interface MarginLineProps {
  * primary ink when given. With `onOpen` (owner screens) it is a button named "{lead} {text} Open
  * the full trace."; without it, plain text. Shared by `MarginReceipt` and `MarginNote`.
  */
-export function MarginLine({ kind, tone, text, lead, check = false, onOpen }: MarginLineProps) {
-  const className = `cd-margin-line cd-margin-${kind} cd-type-caption`;
+export function MarginLine({ kind, tone, text, lead, check = false, onOpen, shownBefore = false }: MarginLineProps) {
+  const className = `cd-margin-line cd-margin-${kind} cd-type-caption${shownBefore ? ' cd-margin-line--shown' : ''}`;
   const hasLead = lead !== undefined && lead !== '';
   const content = (
     <>

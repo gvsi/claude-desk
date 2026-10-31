@@ -4,6 +4,7 @@ import { expect, fireEvent, fn } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
+import { VISION_INERT_LINE } from '../VisionBar/visionInert.tsx';
 import { Composer } from './Composer.tsx';
 
 /** The composer's raised box: the element that holds the text box. */
@@ -123,7 +124,7 @@ export const Visitor: Story = {
   parameters: {
     canvasNote: "The board's composer is the same single row; the footer beside it is the public shell's.",
   },
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
     const send = canvas.getByRole('button', { name: 'Send' });
     const box = boxOf(input);
@@ -154,6 +155,49 @@ export const Visitor: Story = {
     await expect(args.onSend).toHaveBeenCalledWith('How much to clear a clogged drain?');
     await expect(input).toHaveValue('');
     await expect(input).toHaveFocus();
+    // A real composer has no vision line, before or after a send.
+    await expect(canvasElement.querySelector('.cd-vision-inert-line')).toBeNull();
+  },
+};
+
+/** On a vision page, which makes no requests: typing works, and Send sends nothing and keeps the text. */
+export const InertSend: Story = {
+  args: { inertSend: true },
+  parameters: {
+    canvas: 'N-R2-Vision-Phone',
+    canvasNote: 'The visitor’s composer on the phone and Claude account vision pages: the words stay where they were typed.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    // inert_send_keeps_the_text: Send keeps its look, empty and not, but neither it nor Enter sends.
+    const input = canvas.getByRole('textbox', { name: 'Message Rivera Plumbing' });
+    const send = canvas.getByRole('button', { name: 'Send' });
+    // A polite live region waits under the composer, empty and taking no room until the first press.
+    const status = canvas.getByRole('status');
+    await expect(status).toHaveTextContent(/^$/);
+    await expect(status.getBoundingClientRect().height).toBeLessThanOrEqual(1);
+    await expect(send).toBeDisabled();
+    await userEvent.click(input);
+    await userEvent.keyboard('Thanks');
+    await expect(send).toBeEnabled();
+    await userEvent.keyboard('{Enter}');
+    await expect(input).toHaveValue('Thanks');
+    // vision_inert_line_on_first_press: the first press fills it with the one line, in a secondary
+    // caption 8 px under the composer's box.
+    await expect(status).toHaveTextContent(VISION_INERT_LINE);
+    expectComputed(status, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    const box = input.closest('.cd-composer__box') as HTMLElement;
+    await expect(Math.round(status.getBoundingClientRect().top - box.getBoundingClientRect().bottom)).toBe(8);
+    await userEvent.click(send);
+    await expect(input).toHaveValue('Thanks');
+    await expect(send).toBeEnabled();
+    await expect(send).toHaveFocus();
+    await expect(args.onSend).not.toHaveBeenCalled();
+    // A second press changes nothing: still the one line, in the one region.
+    await expect(canvas.getAllByRole('status')).toEqual([status]);
+    await expect(canvas.getAllByText(VISION_INERT_LINE)).toHaveLength(1);
+    // Clearing the words disables Send again, as on a real page.
+    await userEvent.clear(input);
+    await expect(send).toBeDisabled();
   },
 };
 

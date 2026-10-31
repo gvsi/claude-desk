@@ -7,6 +7,8 @@ import { expect, within } from 'storybook/test';
 
 import { expectComputed, type ComputedExpectation } from '../test/expectComputed.ts';
 
+import { factsInProse } from './factInProse.ts';
+
 const SERIF = /^"Source Serif 4"/;
 const SANS = /^"Hanken Grotesk"/;
 
@@ -382,7 +384,8 @@ export async function expectSettingsPage(root: HTMLElement, current: (typeof SET
   const titleBox = title.getBoundingClientRect();
   const navBox = nav.getBoundingClientRect();
   const contentBox = content.getBoundingClientRect();
-  await expect(Math.round(titleBox.top), 'the title at the top of the page').toBe(24);
+  // From the top of the main area, so a banner over the app (the vision bar) moves it down with the page.
+  await expect(Math.round(titleBox.top - main.getBoundingClientRect().top), 'the title at the top of the page').toBe(24);
   await expect(Math.round(navBox.top - titleBox.bottom), 'SubNav under the title').toBe(24);
   await expect(Math.round(navBox.width)).toBe(200);
   await expect(Math.round(contentBox.left - navBox.right), 'the content beside SubNav').toBe(40);
@@ -402,4 +405,83 @@ export async function expectAgentsDisclosure(root: HTMLElement): Promise<void> {
   expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
   const title = within(root).getByRole('heading', { level: 1 });
   await expect(Math.round(line.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(16);
+}
+
+/** The vision bar's line, word for word, as every vision board writes it. */
+export const VISION_BAR_LINE = 'Vision, not in the prototype. Nothing here is live.';
+
+/**
+ * vision_page_is_labelled: the vision bar first on the page, across the window's width at its top,
+ * 40 px tall on the panel, with the "Vision" pill, its line, and "Back to your Desk" to `backHref`.
+ */
+export async function expectVisionBar(root: HTMLElement, backHref: string): Promise<HTMLElement> {
+  const bar = within(root).getByRole('note', { name: 'Vision' });
+  const box = bar.getBoundingClientRect();
+  await expect([box.top, box.left, box.width]).toEqual([0, 0, document.documentElement.clientWidth]);
+  expectComputed(bar, { height: '40px', backgroundColor: 'rgb(34, 34, 32)', borderBottomColor: 'rgba(250, 249, 245, 0.12)' });
+  await expect(bar).toHaveTextContent(`Vision${VISION_BAR_LINE}Back to your Desk`);
+  await expect(within(bar).getByRole('link', { name: 'Back to your Desk' })).toHaveAttribute('href', backHref);
+  // Nothing on the page comes before it: it is the first thing a screen reader and the keyboard reach.
+  const first = root.querySelector('[role="note"], a[href], button, h1, h2, main, nav, aside, header');
+  await expect(bar.contains(first)).toBe(true);
+  return bar;
+}
+
+/**
+ * Settings › Channels' content (N-Run2-Settings-Channels), the same under the vision bar: the lead
+ * in secondary body type, the channels 20 px under it in the 720 px column, in the board's order and
+ * row heights, with nothing to press.
+ */
+export async function expectChannelsContent(content: HTMLElement, lead: string): Promise<void> {
+  const line = within(content).getByText(lead);
+  expectComputed(line, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.64)' });
+  const channels = within(content).getByRole('region', { name: 'Channels' });
+  await expect(Math.round(channels.getBoundingClientRect().top - line.getBoundingClientRect().bottom)).toBe(20);
+  await expect(Math.round(channels.getBoundingClientRect().width)).toBe(720);
+  const rows = within(channels).getAllByRole('listitem');
+  await expect(rows.map((row) => one(row, '.cd-channel-list__name').textContent)).toEqual([
+    'Public link',
+    'Email',
+    'Website embed',
+    'WhatsApp and iMessage',
+    'Slack',
+    'Voice',
+  ]);
+  await expect(within(rows[0] as HTMLElement).getByText('On')).toBeVisible();
+  await expect(within(channels).getAllByText('Coming later')).toHaveLength(5);
+  // The board's rows: 68 px for one line under the name, 86 px where it wraps (Email, WhatsApp), and
+  // a 1 px hairline over every row but the first.
+  await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([68, 87, 69, 87, 69, 69]);
+  await expect(within(content).queryByRole('button')).toBeNull();
+  await expect(within(content).queryByRole('switch')).toBeNull();
+}
+
+export { factsInProse } from './factInProse.ts';
+
+/** A booking card (the kernel's `booking_confirmed`, labelled "Booked" or "Reservado") inside `root`. */
+function carriesBookingCard(root: Element | null): boolean {
+  return root?.querySelector('.cd-reply-card [aria-label="Booked"], .cd-reply-card [aria-label="Reservado"]') != null;
+}
+
+/**
+ * vision_prose_states_no_facts: Claude's words under `root` pass the kernel's prose check as
+ * `factsInProse` mirrors it, and so does every receipt line under them. The kernel scans only a
+ * reply's prose, since a real receipt is its own fixed line; a vision page's receipts are free text,
+ * so the vision pages hold them to the same check themselves. A booking claim passes in a message that
+ * carries its booking card, as the kernel decides; a receipt goes with its message's card. Returns
+ * how many lines of Claude's words and how many receipt lines it checked.
+ */
+export async function expectNoFactsInProse(root: HTMLElement): Promise<{ prose: number; receipts: number }> {
+  const check = async (lines: HTMLElement[], what: string, message: (line: HTMLElement) => Element | null) => {
+    for (const line of lines) {
+      const text = line.textContent ?? '';
+      const hits = factsInProse(text, { bookingCard: carriesBookingCard(message(line)) });
+      await expect(hits, `${what} the kernel would block: "${text}"`).toEqual([]);
+    }
+  };
+  const prose = [...root.querySelectorAll<HTMLElement>('.cd-claude-message__prose')];
+  await check(prose, 'Claude’s words state something', (line) => line.closest('.cd-claude-message'));
+  const receipts = [...root.querySelectorAll<HTMLElement>('.cd-margin-line')];
+  await check(receipts, 'A receipt states something', (line) => line.closest('.cd-transcript-row'));
+  return { prose: prose.length, receipts: receipts.length };
 }

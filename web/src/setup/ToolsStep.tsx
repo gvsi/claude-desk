@@ -1,0 +1,289 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+
+import type { RuleCard, ToolName } from '../api/contracts.ts';
+import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
+import type { ConfirmToolBody, SetupState, ToolRow } from '../api/views.ts';
+import {
+  Button,
+  ConnectorReview,
+  EmptyState,
+  LoadingLine,
+  Notice,
+  PageHeader,
+  SetupToolsList,
+  describeEffects,
+  rulesForTool,
+  type ReviewToolView,
+  type RuleMode,
+  type SetupToolsRow,
+} from '../ds/index.ts';
+import { CONNECTORS, TOOL_NAMES, connectorByKey, connectorOn, toolState, type CatalogConnector, type ConnectorKey } from '../owner/connectors/catalog.ts';
+import { draftFromVersion, type RuleDraft } from '../owner/rules/drafts.ts';
+import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
+import { SETUP_COPY } from './copy.ts';
+import { aroundBusiness } from './shared.ts';
+
+const copy = SETUP_COPY.tools;
+
+export interface ToolsStepProps {
+  state: SetupState;
+  /** The business's name, once known. */
+  business: string;
+  /** "Continue": on to the rules. */
+  onContinue: () => void;
+}
+
+/** What the step shows: the list, one connector's review, or the change that turns it on. */
+type View =
+  | { kind: 'list' }
+  | { kind: 'review'; key: ConnectorKey }
+  | { kind: 'confirm'; key: ConnectorKey; draft: RuleDraft; batch: ConfirmToolBody; rows: ToolRow[]; changed: boolean };
+
+/** The mock payments server, the one connection setup can add. */
+const MOCK_PAYMENTS: ConnectorKey = 'stripe';
+
+/**
+ * The connector's tools the owner can turn on here: those it lists that aren't on, at the hash each
+ * was listed at. A tool whose definition changed waits for its own review on its page, so it is left out.
+ */
+function toolsToTurnOn(connector: CatalogConnector, rows: readonly ToolRow[]): ToolRow[] {
+  return rows.filter((row) => {
+    if (!connector.tools.includes(row.tool) || row.definition_sha256 === null) return false;
+    const state = toolState(row);
+    return state === 'not_on' || state === 'off';
+  });
+}
+
+/**
+ * The outcome a tool starts at: the rule that decides it for anyone at any time, as the change
+ * review's turned-on row reads it (a never rule wins; else at the most specific level present an
+ * ask, else an automatic rule, a shared one only where every effect of the tool has one), else Ask
+ * me first.
+ */
+function startingMode(row: ToolRow, cards: readonly RuleCard[]): RuleMode {
+  const isShared = (card: RuleCard) => card.applies_to.startsWith('effect:');
+  const forAnyone = rulesForTool({ tool: row.tool, effects: row.effects }, cards).filter((card) => card.who === 'anyone' && card.hours == null && card.is_default !== true);
+  if (forAnyone.some((card) => card.mode === 'never')) return 'never';
+  const [first] = forAnyone;
+  if (first === undefined) return 'ask';
+  const level = forAnyone.filter((card) => isShared(card) === isShared(first));
+  if (level.some((card) => card.mode === 'ask')) return 'ask';
+  const auto = level.filter((card) => card.mode === 'auto');
+  if (auto.length === 0) return 'ask';
+  if (!isShared(first)) return 'auto';
+  return row.effects.every((effect) => auto.some((card) => card.applies_to === `effect:${effect}`)) ? 'auto' : 'ask';
+}
+
+/** A tool as its review shows it: its name, what it does and touches, its outcome and the rules of yours that cover it. */
+function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewToolView {
+  const words = TOOL_NAMES[row.tool as ToolName];
+  const covering = rulesForTool({ tool: row.tool, effects: row.effects }, cards).filter((card) => card.is_default !== true);
+  return {
+    key: row.tool,
+    name: words.name,
+    description: `${words.line} ${describeEffects(row.effects, row.reversible)}`,
+    mode: startingMode(row, cards),
+    coveredBy: covering.map((card) => ({ text: card.reason, mode: card.mode })),
+  };
+}
+
+/**
+ * The new Desk's connectors as the design system's setup tools list draws them (N-R2-Setup-05),
+ * each row read through `toolState`: Verification "Always on"; a connector with a tool on, or
+ * changed, "On"; one whose listed tools are none of them on, "Add" (built in) or, for Stripe once
+ * it can be connected, its tool count and "Connect". A built-in connector with no tools listed, and
+ * Google Calendar, which has none, aren't shown.
+ */
+function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (key: ConnectorKey) => void) {
+  const builtIn: SetupToolsRow[] = [];
+  const external: SetupToolsRow[] = [];
+  for (const connector of CONNECTORS) {
+    const outside = connector.view.source.kind === 'external';
+    const listed = rows.some((row) => connector.tools.includes(row.tool));
+    let row: SetupToolsRow | null = null;
+    if (connector.key === 'verification' && listed) row = { connector: connector.view, state: 'always_on' };
+    else if (connectorOn(connector, rows)) row = { connector: connector.view, state: 'on' };
+    else if (listed || (connector.key === MOCK_PAYMENTS && connectable)) {
+      row = { connector: connector.view, state: 'off', onChoose: () => onChoose(connector.key), ...(outside ? { tools: connector.tools.length } : {}) };
+    }
+    if (row !== null) (outside ? external : builtIn).push(row);
+  }
+  return { builtIn, external };
+}
+
+/**
+ * "What Claude can use": the new Desk's connectors from `setupTools`, grouped by the catalog. A
+ * built-in connector that isn't on, or the mock payments server (connected first), opens its review
+ * (`ConnectorReview`); "Turn it on" sends one `confirmTool` for its tools, each at the hash it was
+ * listed at, and its draft shows inline; "Confirm and turn on" confirms it, and only then, read
+ * again, do the tools read "On". "Continue" goes on to the rules.
+ */
+export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
+  const queryClient = useQueryClient();
+  const id = state.interview_id;
+  const deskId = state.desk_id;
+  const toolsKey = ['setupTools', id] as const;
+  const tools = useQuery({ queryKey: toolsKey, queryFn: () => request('setupTools', { params: { id } }), refetchOnWindowFocus: false });
+  const rules = useQuery({ ...rulesQuery(deskId), refetchOnWindowFocus: false });
+  const [view, setView] = useState<View>({ kind: 'list' });
+  const [connecting, setConnecting] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [turningOn, setTurningOn] = useState(false);
+  const [reviewError, setReviewError] = useState<string | undefined>(undefined);
+
+  const rows = tools.data?.tools ?? [];
+
+  const choose = async (key: ConnectorKey) => {
+    setListError(null);
+    setReviewError(undefined);
+    // The mock payments server is connected first: its tools are then listed, and none is on.
+    if (key === MOCK_PAYMENTS && tools.data?.connectable.includes('mock_payments')) {
+      setConnecting(true);
+      try {
+        await request('setupConnect', { params: { id }, body: { server: 'mock_payments' } });
+        await queryClient.fetchQuery({ queryKey: toolsKey, queryFn: () => request('setupTools', { params: { id } }), staleTime: 0 });
+      } catch (err) {
+        if (!(err instanceof ApiError && err.kind === 'unauthorized')) setListError(ownerErrorCopy(err));
+        return;
+      } finally {
+        setConnecting(false);
+      }
+    }
+    setView({ kind: 'review', key });
+  };
+
+  /** The tools' change as a draft to review, against the rules in force now. */
+  const draftFor = async (batch: ConfirmToolBody, turnedOn: ToolRow[]): Promise<RuleDraft | null> => {
+    const confirmed = await request('confirmTool', { params: { desk_id: deskId }, body: batch });
+    if (confirmed.draft === null) return null;
+    const active = (await queryClient.fetchQuery({ ...rulesQuery(deskId), staleTime: 0 })).active;
+    return draftFromVersion(active, confirmed.draft, turnedOn);
+  };
+
+  const backToList = async () => {
+    setView({ kind: 'list' });
+    await queryClient.invalidateQueries({ queryKey: toolsKey });
+  };
+
+  const turnOn = async (key: ConnectorKey, turnedOn: ToolRow[]) => {
+    const batch: ConfirmToolBody = {
+      tools: turnedOn.map((row) => ({ tool: row.tool, definition_sha256: row.definition_sha256 ?? '' })),
+      enable: true,
+    };
+    setTurningOn(true);
+    setReviewError(undefined);
+    try {
+      const draft = await draftFor(batch, turnedOn);
+      // Nothing left to turn on: the list, read again, says so.
+      if (draft === null) await backToList();
+      else setView({ kind: 'confirm', key, draft, batch, rows: turnedOn, changed: false });
+    } catch (err) {
+      if (!(err instanceof ApiError && err.kind === 'unauthorized')) setReviewError(ownerErrorCopy(err));
+    } finally {
+      setTurningOn(false);
+    }
+  };
+
+  if (view.kind === 'confirm') {
+    const connector = connectorByKey(view.key);
+    const name = connector?.view.name ?? '';
+    // The change applies with `confirmRules`; when the rules changed since it was drafted, the
+    // tools are asked for once more, and the new draft is shown to confirm.
+    const confirm = async () => {
+      try {
+        await request('confirmRules', { params: { desk_id: deskId }, body: { version: view.draft.version } });
+      } catch (err) {
+        if (!view.changed && err instanceof ApiError && err.code === 'rules_changed_since_draft') {
+          const draft = await draftFor(view.batch, view.rows);
+          if (draft !== null) setView({ ...view, draft, changed: true });
+        }
+        throw err;
+      }
+    };
+    return (
+      <div className="cd-setup-step">
+        <PageHeader title={copy.turnOnTitle(name)} subtitle={copy.turnOnSubtitle} />
+        {view.changed ? <Notice tone="info">{copy.changedSince}</Notice> : null}
+        <RuleDraftReview
+          key={view.draft.version}
+          deskId={deskId}
+          draft={view.draft}
+          inline
+          confirm={confirm}
+          onDone={() => void backToList()}
+        />
+      </div>
+    );
+  }
+
+  if (view.kind === 'review') {
+    const connector = connectorByKey(view.key);
+    const cards = rules.data?.active.cards;
+    if (connector === null) return null;
+    if (cards === undefined || tools.data === undefined) {
+      const failed = rules.isError ? rules.error : tools.isError ? tools.error : null;
+      return failed === null ? (
+        <LoadingLine>{copy.loading}</LoadingLine>
+      ) : (
+        <Notice
+          tone="error"
+          action={
+            <Button variant="secondary" onClick={() => void (rules.isError ? rules.refetch() : tools.refetch())}>
+              {SETUP_COPY.questions.tryAgain}
+            </Button>
+          }
+        >
+          {ownerErrorCopy(failed)}
+        </Notice>
+      );
+    }
+    const turnedOn = toolsToTurnOn(connector, rows);
+    return (
+      <ConnectorReview
+        connector={connector.view}
+        tools={turnedOn.map((row) => reviewTool(row, cards))}
+        onTurnOn={() => void turnOn(view.key, turnedOn)}
+        onCancel={() => setView({ kind: 'list' })}
+        pending={turningOn}
+        {...(reviewError === undefined ? {} : { error: reviewError })}
+      />
+    );
+  }
+
+  let list;
+  if (tools.data === undefined) {
+    list = tools.isError ? (
+      <Notice
+        tone="error"
+        action={
+          <Button variant="secondary" onClick={() => void tools.refetch()}>
+            {SETUP_COPY.questions.tryAgain}
+          </Button>
+        }
+      >
+        {ownerErrorCopy(tools.error)}
+      </Notice>
+    ) : (
+      <LoadingLine>{copy.loading}</LoadingLine>
+    );
+  } else if (rows.length === 0 && tools.data.connectable.length === 0) {
+    list = <EmptyState title={copy.empty} body={copy.emptyBody} />;
+  } else {
+    list = <SetupToolsList {...setupRows(rows, tools.data.connectable.includes('mock_payments'), (key) => void choose(key))} />;
+  }
+
+  return (
+    <div className="cd-setup-step">
+      <PageHeader title={copy.title} subtitle={aroundBusiness(copy.subtitle, business)} />
+      {list}
+      {connecting ? <LoadingLine>{copy.connecting}</LoadingLine> : null}
+      {listError === null ? null : <Notice tone="error">{listError}</Notice>}
+      <div className="cd-setup-step__actions">
+        <Button variant="primary" size="main" waiting={connecting} onClick={onContinue}>
+          {copy.continue}
+        </Button>
+      </div>
+    </div>
+  );
+}

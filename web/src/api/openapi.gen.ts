@@ -74,7 +74,8 @@ export interface AnsweringIn {
 }
 /**
  * Every error answer: `error` names what went wrong; `code` is the kernel's, when `error` is "kernel";
- * `retry_after` is the seconds to wait, on a 429. Fields that don't apply are left out.
+ * `retry_after` is the seconds to wait before sending again: on a 429, and on a 409 `in_progress` that names one.
+ * Fields that don't apply are left out.
  */
 export interface ApiError {
   error: string;
@@ -598,6 +599,7 @@ export interface SafetyRow {
 }
 export interface SendAgentIn {
   task: "book_visit" | "quote_and_deposit" | "push_the_limit";
+  idempotency_key?: string | null;
 }
 /**
  * `POST /api/owner/setup/{id}/answer`: the owner's answer, and the question it answers
@@ -632,17 +634,20 @@ export interface SetupMessage {
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
  * and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
  * the owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,
- * spaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked.
+ * spaces, apostrophes and hyphens, up to 40), else 422 before Claude is asked. An optional `idempotency_key`, one
+ * per click, makes a repeat answer the interview the first made instead of making another.
  */
 export interface SetupStartIn {
   description: string;
   timezone: string;
   owner_display_name?: string | null;
+  idempotency_key?: string | null;
 }
 /**
  * A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the
  * owner let Claude read their memory and website (None until asked), the question waiting for an answer (None
- * before consent and after the last one) and the conversation so far.
+ * before consent and after the last one) and the conversation so far. Its messages start at Claude's consent
+ * question: the owner's opening description isn't shown back to them.
  */
 export interface SetupState {
   interview_id: string;
