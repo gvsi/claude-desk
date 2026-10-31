@@ -1080,6 +1080,12 @@ describe("Today's Demo inbox", () => {
     return () => count;
   }
 
+  /** A whole poll of the Demo inbox's, then two frames: a sheet still polling would have read by then. */
+  async function aPollPasses(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, pollMs('inbox')));
+    await nextFrames();
+  }
+
   /** Settles once the app has an answer to its next Demo inbox read and has taken it in. */
   function nextInboxAnswer(): Promise<void> {
     const answered = new Promise<void>((resolve) => {
@@ -1179,17 +1185,17 @@ describe("Today's Demo inbox", () => {
     await expectScreenBasics(screen.container, { owner: true });
 
     // Following it closes the sheet and lands on the held request's card, in view.
+    const closedReads = closedInboxReads(sheet);
     await link.click();
     await expect.element(sheet).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(TODAY);
     expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
     expectInView(card.element());
-    // Focus stays there, and the closed sheet reads no more.
-    const reads = requests('ownerInbox').length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Focus stays there, and the closed sheet reads no more, a whole poll on.
+    await aPollPasses();
     expect(focusIsOn(card.element())).toBe(true);
-    expect(requests('ownerInbox')).toHaveLength(reads);
+    expect(closedReads()).toBe(0);
   });
 
   it('inbox_alert_links_to_its_own_desk', async () => {
@@ -1474,14 +1480,15 @@ describe("Today's Demo inbox", () => {
     const { screen } = await renderRoute(TODAY);
     const open = inboxButton(screen);
     await expect.element(open).toBeVisible();
+    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
+    const closedReads = closedInboxReads(sheet);
     // Read once as Today opens, and not again while the sheet is closed.
     expect(requests('ownerInbox')).toHaveLength(1);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(requests('ownerInbox')).toHaveLength(1);
+    await aPollPasses();
+    expect(closedReads()).toBe(0);
 
     // Read as it opens, and every few seconds while it is open.
     await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
     await expect.element(sheet).toBeVisible();
     await readsMore('ownerInbox', 3);
 
@@ -1489,9 +1496,8 @@ describe("Today's Demo inbox", () => {
     await sheet.getByRole('button', { name: 'Close' }).click();
     await expect.element(sheet).not.toBeInTheDocument();
     await expect.element(open).toHaveFocus();
-    let reads = requests('ownerInbox').length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(requests('ownerInbox')).toHaveLength(reads);
+    await aPollPasses();
+    expect(closedReads()).toBe(0);
 
     // Opened again, it reads again at once, and stops again once Escape closes it.
     await open.click();
@@ -1499,9 +1505,8 @@ describe("Today's Demo inbox", () => {
     await readsMore('ownerInbox', 2);
     await userEvent.keyboard('{Escape}');
     await expect.element(sheet).not.toBeInTheDocument();
-    reads = requests('ownerInbox').length;
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    expect(requests('ownerInbox')).toHaveLength(reads);
+    await aPollPasses();
+    expect(closedReads()).toBe(0);
   });
 
   it('inbox_reads_nothing_from_the_moment_it_closes', async () => {
