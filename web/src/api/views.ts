@@ -36,7 +36,7 @@ import type {
   ToolName,
   ToolProfile,
 } from './contracts.ts';
-import type { DeskSetup, DeskSummary } from './openapi.gen.ts';
+import type { Attempt as ApiAttempt, DeskSetup, DeskSummary } from './openapi.gen.ts';
 
 // Copy and Desks
 
@@ -287,6 +287,12 @@ export interface Triage {
   category: TriageCategory;
 }
 
+/**
+ * Why the kernel refused a request: a closed code from the API's own document, which the web holds
+ * the words for. A value the document adds is a compile error until the words are written.
+ */
+export type RefusalCause = NonNullable<ApiAttempt['cause']>;
+
 export interface Attempt {
   ref_id: string;
   kind: 'refused' | 'held' | 'reply_blocked';
@@ -297,6 +303,11 @@ export interface Attempt {
   /** Null until the API owner plan's triage task (plan 02b) writes one; screens check its shape before using it. */
   triage: Triage | null;
   ledger_seq: number;
+  /**
+   * Why a refused request was refused, or null: for a held request, a stopped draft, and a
+   * refusal the API can't place. Read it as `cause ?? null`.
+   */
+  cause: RefusalCause | null;
 }
 
 /** `GET /api/health`. */

@@ -275,6 +275,11 @@ export interface DecisionSpec {
   /** For an `allow`: the action ran, so the decision is `executed`. */
   executed: boolean;
   cardIds: string[];
+  /**
+   * The policies that decided it, as the kernel names them, when they aren't the cards' own (a
+   * baseline refusal): Safety's cause is read from them, as the API reads it.
+   */
+  policyIds?: string[];
   reasonPlain: string;
   /** A refusal with the kernel's more specific visitor status line. */
   visitorStatus?: 'refused_over_mandate';

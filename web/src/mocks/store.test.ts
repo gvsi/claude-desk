@@ -12,6 +12,7 @@ import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from 
 import type { RouteKey } from '../api/routes.ts';
 import type {
   ApprovalAnswerOut,
+  Attempt,
   BriefingList,
   ConversationSummary,
   CopyOut,
@@ -1879,8 +1880,15 @@ describe("Today's windows", () => {
     expect(today.this_week.days.map((d) => d.stopped)).toEqual([0, 0, 0, 0, 0, 0, 1]);
     expect(today.briefing.blocked).toBe(2);
     expect((await list()).items.filter((item) => item.kind === 'blocked')).toHaveLength(2);
-    const attempts = (await call('safety', { params: { desk_id: deskId } })).body as { kind: string }[];
+    const attempts = (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
     expect(attempts.map((a) => a.kind).sort()).toEqual(['refused', 'reply_blocked']);
+
+    // Each refused entry carries the cause the API would give it, from the same facts: here the
+    // baseline's signed-limit policy decided the refusal. A stopped draft has none.
+    const refused = [...mockStore.world.decisions.values()].find((d) => d.decision.state === 'refused')?.decision;
+    expect(refused?.policy_ids).toEqual(['B.agent_charge_within_mandate']);
+    expect(attempts.find((a) => a.kind === 'refused')).toMatchObject({ ref_id: refused?.decision_id, cause: 'agent_limit' });
+    expect(attempts.find((a) => a.kind === 'reply_blocked')?.cause).toBeNull();
   });
 
   it('windows_follow_the_business_clock', async () => {

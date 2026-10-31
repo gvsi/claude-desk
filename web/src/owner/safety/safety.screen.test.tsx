@@ -89,6 +89,7 @@ async function listSeededHold(): Promise<void> {
     created_at: isoTime(record.createdAt),
     triage: null,
     ledger_seq: decision.ledger_seq,
+    cause: null,
   };
   injectAttempts([...(await mockAttempts()), attempt].sort((a, b) => b.created_at.localeCompare(a.created_at)));
 }
@@ -161,6 +162,7 @@ function attempt(fields: Partial<Attempt> = {}): Attempt {
     created_at: '2026-10-20T16:51:00.000000Z',
     triage: null,
     ledger_seq: 2,
+    cause: null,
     ...fields,
   };
 }

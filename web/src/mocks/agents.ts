@@ -128,6 +128,7 @@ const AGENT_DECISIONS = {
     executed: false,
     visitorStatus: 'refused_over_mandate',
     cardIds: [],
+    policyIds: ['B.agent_charge_within_mandate'],
     reasonPlain: `${AGENT} tried to charge $250.00 in one go, over its signed limit of $20 a charge.`,
     amountCents: 25000,
   },

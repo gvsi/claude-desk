@@ -55,6 +55,7 @@ function attempt(ledgerSeq: number): Attempt {
     created_at: '2026-10-30T16:52:00.000000Z',
     triage: null,
     ledger_seq: ledgerSeq,
+    cause: null,
   };
 }
 
