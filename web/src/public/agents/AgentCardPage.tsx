@@ -7,7 +7,7 @@
  * own agent with a demo key (`ConnectYourOwn`) follow. No model text is shown here but the Desk's
  * checked replies to the built-in agent; the agent's own words never are.
  */
-import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useParams } from 'react-router';
 
 import type { PublicDesk } from '../../api/contracts.ts';
@@ -149,10 +149,38 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
   );
 }
 
-/** The page before the Desk shows: opening, a Desk that isn't there, or one that couldn't be read. */
+/**
+ * The page before the Desk shows: opening, a Desk that isn't there, or one that couldn't be read.
+ * "Try again" goes with its notice while the page is read again, so its focus falls to the page; if
+ * that read fails too, the new "Try again" takes the focus back.
+ */
 function AgentsState({ load, language, onRetry }: { load: Exclude<Load, { kind: 'ready' }>; language: CopyLanguage; onRetry: () => void }) {
   const copy = AGENTS_COPY[language];
   const page = PUBLIC_COPY[language];
+  // Around "Try again", which goes with its notice while the page is read again.
+  const tryAgainRef = useRef<HTMLDivElement>(null);
+  // Whether "Try again" had focus when pressed (by a key, or by a click in a browser that focuses
+  // what is clicked), so a read that fails again knows to hand it back.
+  const hadFocus = useRef(false);
+
+  const tryAgain = () => {
+    hadFocus.current = tryAgainRef.current?.contains(document.activeElement) ?? false;
+    onRetry();
+  };
+
+  // The read "Try again" started has ended. If it failed again, the new "Try again" takes the focus
+  // the old one had, which fell to the page when it went, so the next Enter tries once more; the
+  // notice is still an alert, and its words are read out as it comes. A visitor who has put focus
+  // somewhere else keeps their place. A read that works draws the whole page instead, with focus at
+  // its start. The focus doesn't scroll the page.
+  useLayoutEffect(() => {
+    if (load.kind === 'loading') return;
+    const refocus = hadFocus.current;
+    hadFocus.current = false;
+    const fell = document.activeElement === null || document.activeElement === document.body;
+    if (refocus && fell) tryAgainRef.current?.querySelector('button')?.focus({ preventScroll: true });
+  }, [load]);
+
   let body: ReactNode;
   if (load.kind === 'not_found') body = <EmptyState title={page.deskUnavailableTitle} body={page.deskUnavailableBody} />;
   else if (load.kind === 'unavailable') {
@@ -160,9 +188,11 @@ function AgentsState({ load, language, onRetry }: { load: Exclude<Load, { kind: 
       <Notice
         tone="error"
         action={
-          <Button variant="secondary" onClick={onRetry}>
-            {page.tryAgain}
-          </Button>
+          <div ref={tryAgainRef}>
+            <Button variant="secondary" onClick={tryAgain}>
+              {page.tryAgain}
+            </Button>
+          </div>
         }
       >
         {UNREACHABLE_COPY[language]}
