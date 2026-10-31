@@ -20,7 +20,7 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import select
 
-from desk.contracts import DemoInboxEntry
+from desk.contracts import DemoInboxEntry, ReplyVerdict
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Fact, Handoff, LedgerEntry
 from desk.kernel_service import ledger
@@ -32,7 +32,7 @@ from .test_decide import open_visitor, set_mode, set_session
 from .test_lead_tools import callback, handoff_done
 from .test_owner_messages import sent
 from .test_release_document import DANA, confirmed
-from .test_reply_check import assert_handed_off, checked, clause, post_check
+from .test_reply_check import assert_handed_off, checked, clause, post_check, reply_entries
 from .test_verification import api_rows
 
 CARD_REASON = "The Desk handed this to you."
@@ -310,5 +310,88 @@ async def test_a_paused_conversations_card_opens_one(app, client, frozen_clock):
     for _ in range(2):
         verdict = await checked(client, visitor, CLEAN)
         assert [violation.kind for violation in verdict.violations] == ["session_paused"]
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
+    assert len(await handoff_alerts(app, copy)) == 1
+
+
+# ---- A draft the API will rewrite (`CheckReplyRequest.final`) -----------------------------------------
+
+FRENCH = "Je peux vous aider avec ça."                           # another language: no rewrite fixes it
+
+
+async def checked_as(client, visitor, prose: str, clauses=(), *, final: bool | None = None):
+    """`POST /check_reply` with `final` as given, or without it (absent means final)."""
+    body = {"draft": {"session_id": visitor.session_id, "generation": 0, "prose": prose, "clauses": list(clauses)}}
+    if final is not None:
+        body["final"] = final
+    response = await client.post("/check_reply", headers=visitor.headers, json=body)
+    assert response.status_code == 200, response.text
+    return ReplyVerdict.model_validate(response.json())
+
+
+@pytest.mark.parametrize(("prose", "soft_answer", "kind"), [
+    (BLOCKED, None, "number_in_prose"),
+    (CLEAN, FLAGGED, "soft_promise"),
+], ids=["code-check", "model-check"])
+async def test_a_draft_the_api_will_rewrite_opens_no_handoff(app, client, reviewer, prose, soft_answer, kind):
+    """A first attempt (`final: false`) blocked only for what a rewrite can fix (`desk.rewrites`) is
+    never shown: the API sends Claude the violations and checks the rewrite. So the kernel opens no
+    handoff for it, alerts no one, and leaves nothing to back a later reply."""
+    copy, visitor = await visitor_of(app, client)
+    if soft_answer is not None:
+        reviewer.soft_answer = soft_answer
+    verdict = await checked_as(client, visitor, prose, final=False)
+    assert_handed_off(verdict)                                    # the kernel's verdict is as ever
+    assert {violation.kind for violation in verdict.violations} == {kind}
+    assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
+    assert handoff_entries(await ledger_rows(app, copy)) == []
+    [entry] = await reply_entries(app, copy)
+    assert (entry.seq, entry.event.summary["final"]) == (verdict.ledger_seq, False)
+    reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
+    assert (await checked_as(client, visitor, "Maria Rivera will reply here.")).ok
+    assert reviewer.soft_inputs[-1].cards == []                   # no handoff backs it
+
+
+async def test_a_rewritten_draft_leaves_no_phantom_handoff(app, client, reviewer):
+    """The API's own flow: a first draft blocked for a number, which the visitor never sees, then
+    Claude's clean rewrite, which passes. No handoff is opened, no alert sent, and the rewrite's
+    check is shown no handoff card."""
+    copy, visitor = await visitor_of(app, client)
+    assert not (await checked_as(client, visitor, BLOCKED, final=False)).ok
+    rewrite = await checked_as(client, visitor, CLEAN, final=True)
+    assert rewrite.ok and [(block.kind, block.text) for block in rewrite.blocks] == [("prose", CLEAN)]
+    assert reviewer.soft_inputs[-1].cards == []
+    assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
+    assert [entry.event.summary["final"] for entry in await reply_entries(app, copy)] == [False, True]
+
+
+@pytest.mark.parametrize("prose", [FRENCH, f"{BLOCKED} {FRENCH}"], ids=["french", "number-and-french"])
+async def test_a_draft_no_rewrite_can_fix_opens_one_even_on_a_first_attempt(app, client, prose):
+    """A violation outside the rewritable kinds hands off at once, first attempt or not: the
+    visitor sees that card, so it opens the owner's handoff."""
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked_as(client, visitor, prose, final=False)
+    assert "unsupported_language" in {violation.kind for violation in verdict.violations}
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
+    assert len(await handoff_alerts(app, copy)) == 1
+
+
+@pytest.mark.parametrize("final", [True, None], ids=["final", "absent"])
+async def test_a_final_draft_or_one_that_says_nothing_opens_one(app, client, final):
+    copy, visitor = await visitor_of(app, client)
+    assert not (await checked_as(client, visitor, BLOCKED, final=final)).ok
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
+    assert len(await handoff_alerts(app, copy)) == 1
+    [entry] = await reply_entries(app, copy)
+    assert entry.event.summary["final"] is True
+
+
+@pytest.mark.parametrize("final", [False, True, None], ids=["first-attempt", "final", "absent"])
+async def test_a_reply_citing_the_handoff_clause_always_opens_one(app, client, final):
+    """A reply that passes with the handoff card is shown, whatever the attempt: the API's own
+    handoff is such a reply."""
+    copy, visitor = await visitor_of(app, client)
+    verdict = await checked_as(client, visitor, "", [clause("handoff")], final=final)
+    assert verdict.ok and [block.template for block in verdict.blocks] == ["handoff"]
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
     assert len(await handoff_alerts(app, copy)) == 1

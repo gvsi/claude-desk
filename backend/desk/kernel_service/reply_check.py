@@ -88,6 +88,7 @@ from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template, storable
 from desk.kernel_service.sessions import verified
+from desk.rewrites import REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
@@ -545,8 +546,11 @@ def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
     return render.render_clause(Clause(template="handoff"), None, language, desk)
 
 
-async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft) -> ReplyVerdict:
-    """Steps 1 to 7 for a draft from Claude in an authenticated session ("Reply check")."""
+async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft, *,
+                      final: bool = True) -> ReplyVerdict:
+    """Steps 1 to 7 for a draft from Claude in an authenticated session ("Reply check"). `final` is
+    `CheckReplyRequest.final`: false for a first attempt the API rewrites when every violation is
+    rewritable."""
     desk_id = session_row.desk_id
     desk = await _desk_info(ctx, desk_id)
     fallback = render.language(session_row.last_language)
@@ -555,7 +559,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     if session_row.mode == "paused":
         return await finalize(ctx, session_row, blocks=[handoff(fallback, desk)], language=fallback, author="claude",
                               violations=[Violation(kind="session_paused", span="", rule_id="session_paused")],
-                              fact_ids=fact_ids, seen=True, canaries=canaries)
+                              fact_ids=fact_ids, seen=True, canaries=canaries, final=final)
     prose = shown(draft.prose)
     detected = lang.detect(prose)
     language: render.Language = detected if detected in ("en", "es") else fallback
@@ -584,7 +588,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
                           author="claude", fact_ids=fact_ids, soft_promise=usage, seen=True,
                           detected=detected if detected in ("en", "es") else None, canaries=canaries,
-                          handoff_backed=handoff_backed)
+                          handoff_backed=handoff_backed, final=final)
 
 
 async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
@@ -622,9 +626,9 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                    fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None, seen: bool = False,
                    detected: render.Language | None = None, visitor_plain_key: str | None = None,
                    message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES,
-                   handoff_backed: bool = False) -> ReplyVerdict:
+                   handoff_backed: bool = False, final: bool = True) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
-    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise}`, the reply
+    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, final}`, the reply
     receipt and the signature, at the session's generation as the request read it. `ok` is no
     violations. The receipt is the status line `visitor_plain_key`, or without one `reply_checked`
     when ok and `reply_handed_off` otherwise. The owner's say ends here too, with its own receipts
@@ -648,10 +652,13 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     (`soft.handoff_closed`) and the handoff card in the prose's place, which then opens a new
     handoff.
 
-    When the verdict of Claude's draft shows the handoff card, in place of a draft the checks
-    blocked or because the draft cited it, the session's owner handoff is opened next, before the
-    ledger head (`open_card_handoff`), and ledgered just before the verdict. An owner's message
-    never opens one."""
+    When the verdict of Claude's draft shows the handoff card and the visitor will see it, the
+    session's owner handoff is opened next, before the ledger head (`open_card_handoff`), and
+    ledgered just before the verdict: a reply that passed citing the handoff clause always; a
+    blocked draft when it is `final`, or when one of its violations is outside the kinds a rewrite
+    can fix (`desk.rewrites.REWRITABLE`), since the API then hands off at once. A first attempt
+    (`final` false) blocked only for rewritable kinds is never shown, since the API asks Claude
+    for a rewrite, so it opens none. An owner's message never opens one."""
     if seen:
         session_row.last_seen_at = ctx.clock.now()
         if detected is not None:
@@ -661,7 +668,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
         prose = next((block.text for block in blocks if block.kind == "prose"), "")
         violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
         blocks = [handoff(language, await _desk_info(ctx, session_row.desk_id))]
-    if author == "claude" and any(block.template == "handoff" for block in blocks):
+    shown = not violations or final or any(violation.kind not in REWRITABLE for violation in violations)
+    if author == "claude" and shown and any(block.template == "handoff" for block in blocks):
         await open_card_handoff(ctx, session_row)
     ok = not violations
     message_id = message_id if message_id is not None else new_id("msg")
@@ -670,7 +678,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                "rule_ids": [violation.rule_id for violation in violations],
                "fact_ids": [ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries)
                             else ledger.safe_ref(fact_id) for fact_id in fact_ids],
-               "soft_promise": soft_promise.model_dump(mode="json") if soft_promise is not None else None}
+               "soft_promise": soft_promise.model_dump(mode="json") if soft_promise is not None else None,
+               "final": final}
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
     owner = (await _desk_info(ctx, session_row.desk_id)).owner_display_name
@@ -857,7 +866,7 @@ async def post_check_reply(body: CheckReplyRequest, ctx: Ctx, request: Request) 
     if row.mode == "owner":
         raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),
                         named=Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id))
-    verdict = await check_draft(ctx, row, draft)
+    verdict = await check_draft(ctx, row, draft, final=body.final)
     if row.kind == "agent":
         await agents.end_turn(ctx, request, verdict)
     return verdict
