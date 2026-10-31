@@ -563,7 +563,7 @@ export class MockWorld {
       card_ids: [...spec.cardIds],
       review: null,
       reason_plain: spec.reasonPlain,
-      visitor_plain: statusLine(language, spec.visitorStatus ?? state, spec.tool),
+      visitor_plain: statusLine(language, state === 'refused' && spec.visitorStatus !== undefined ? spec.visitorStatus : state, spec.tool),
       answers: hold ? answersFor(spec, session.person !== null) : [],
       expires_at: isoTime(this.now() + DAY),
       inbox,
