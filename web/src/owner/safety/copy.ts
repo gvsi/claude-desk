@@ -8,7 +8,7 @@ import type { Attempt, ThisWeek, Triage, TriageCategory } from '../../api/views.
 import type { Checkpoint } from '../../ds/index.ts';
 import { localDate } from '../../lib/format.ts';
 
-/** Each kind of record entry, as a row of the record names it. A kind missing here is a compile error. */
+/** Known record entries, as a row names them; newer kinds keep the generic fallback below. */
 export const LEDGER_KIND_COPY = {
   session: 'Chat started',
   auth: 'Credential check',

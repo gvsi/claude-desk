@@ -590,6 +590,19 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
             return await _fenced(ctx, target, execution, "stale_generation")
         if session.mode != "ai":
             return await _fenced(ctx, target, execution, f"mode_{session.mode}")
+    from desk.contracts import is_business_tool
+    if is_business_tool(target.action.tool):
+        # T1 committed before the owner could replace this configuration. Re-read the row and
+        # hold it through the side effect, so a replacement either wins first or waits for T2.
+        current = (await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
+            Tool.desk_id == target.action.desk_id, Tool.tool == target.action.tool)
+            .with_for_update(read=True).execution_options(populate_existing=True)))).one_or_none()
+        if (current is None or current.status != "enabled"
+                or current.profile_sha256 != target.action.profile_sha256):
+            return await _refused_in_t2(ctx, target, execution, "profile", path)
+        target.adapter = await adapters.resolve(ctx, target.action.desk_id, target.action.tool)
+        if target.adapter is None:
+            return await _refused_in_t2(ctx, target, execution, "profile", path)
     adapter = target.adapter
     if adapter is None:
         raise AdapterFailure("no_adapter")
@@ -817,6 +830,11 @@ async def session_ended(ctx: KernelCtx, decision: DecisionRow) -> str | None:
     is off the record, `contact_changed` when it was closed with its person still on record (only a
     new contact closes a session so), `session_closed` for any other close; None while it stands, or
     when its Desk is deleted, which the Desk's own checks refuse first."""
+    from desk.contracts import is_business_tool
+    if is_business_tool(decision.tool):
+        adapter = await adapters.resolve(ctx, decision.desk_id, decision.tool)
+        if adapter is not None and not adapter.releases_private_data:
+            return None
     named = Named(copy_id=decision.copy_id, desk_id=decision.desk_id, session_id=decision.session_id)
     if await auth.session_stands(ctx, named, None):
         return None

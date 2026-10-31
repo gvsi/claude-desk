@@ -59,7 +59,7 @@ async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
     if not is_business_tool(tool):
         return ADAPTERS.get(tool)
     row = (await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
-        Tool.desk_id == desk_id, Tool.tool == tool)))).one_or_none()
+        Tool.desk_id == desk_id, Tool.tool == tool).execution_options(populate_existing=True)))).one_or_none()
     if row is None or row.source != "business" or row.profile is None or row.profile.business is None:
         return None
     try:
@@ -76,7 +76,8 @@ async def resolve(ctx, desk_id: str, tool: str) -> Adapter | None:
         adapter = blocks.BlockAdapter(expected)
         _check(adapter)
         return adapter
-    except (ValueError, TypeError, KeyError):
+    except Exception:
+        # A broken trusted factory is not a reason to fall back to the base native action.
         return None
 
 

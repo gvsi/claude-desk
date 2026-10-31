@@ -1,8 +1,8 @@
 """Owner-only whole replacement of a Desk's trusted block configurations."""
 
-from functools import partial
 import re
 from collections.abc import Mapping
+from functools import partial
 
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
@@ -45,12 +45,14 @@ def public_promise_fields(values: Mapping[str, str]) -> list[str]:
     """The temporary B7 shim's pure check. No structured amount is passed here."""
     from desk.kernel_service import reply_check
 
-    currency_or_percent = re.compile(r"[$€£¥₹₽₩]\s*\d|\d[\d.,\s]*[%٪‰‱]")
+    currency_or_percent = re.compile(
+        r"[$€£¥₹₽₩]\s*\d|(?:usd|eur|gbp|cad|aud|mxn|jpy|inr)\s*\d"
+        r"|\d[\d.,\s]*(?:[%٪‰‱]|usd|eur|gbp|cad|aud|mxn|jpy|inr)", re.IGNORECASE)
     patterns = [pattern for entries in reply_check.LEXICONS.values() for category, pattern in entries
-                if category in ("promise", "money", "percent")]
+                if category in ("promise", "booking", "money", "percent")]
     return [field for field, text in values.items()
             if any(currency_or_percent.search(reading) or any(pattern.search(reading) for pattern in patterns)
-                   for reading in reply_check._readings(reply_check.shown(text))) ]
+                   for reading in reply_check._readings(reply_check.shown(text)))]
 
 
 async def refuse_public_promises(ctx: KernelCtx, *, part: str, values: Mapping[str, str], desk_id: str) -> None:
