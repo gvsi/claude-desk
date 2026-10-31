@@ -1,9 +1,10 @@
 /**
  * What every screen test checks on a screen's default state: one concept footer word for word,
- * clean copy, zero axe violations at WCAG 2.2 AA, and on owner screens no technical words.
+ * clean copy, zero axe violations at WCAG 2.2 AA, and on owner screens no technical words. From
+ * that check on, the screen stays at rest until the test ends: nothing animates or transitions.
  */
 import axe from 'axe-core';
-import { expect } from 'vitest';
+import { expect, onTestFinished } from 'vitest';
 
 import { CONCEPT_FOOTER_TEXT, assertCleanCopy } from '../ds/test/copy.ts';
 
@@ -74,21 +75,32 @@ async function animationsSettled(root: HTMLElement): Promise<void> {
   await Promise.all(ending.map((animation) => animation.finished.catch(() => undefined)));
 }
 
+/** The id of the style that holds the screen at rest. */
+const AT_REST_ID = 'screen-test-at-rest';
+
 /**
- * Runs `check` on the screen at rest: nothing animates or transitions while it runs, as under
- * reduced motion, so axe reads each line as it settles, never halfway through fading in, even a
- * reply that lands while axe is reading. Motion comes back afterwards; anything that had already
- * moved plays once more.
+ * Puts the screen at rest for axe and keeps it there until the test ends: whatever is moving (a
+ * reply landing, a line fading in) finishes at once, and nothing starts moving after, as under
+ * reduced motion, so axe reads each line as it settles, even a reply that lands while axe is
+ * reading. Lifting the hold would play every animation again and could catch a row at its first
+ * frame, so it stays; screen tests don't check motion after their basics.
  */
-async function atRest<T>(check: () => Promise<T>): Promise<T> {
+function holdAtRest(): void {
+  for (const animation of document.getAnimations()) {
+    try {
+      animation.finish();
+    } catch {
+      // One that never ends (a writing line's dots) can't finish: the hold below stops it.
+    }
+  }
+  if (document.getElementById(AT_REST_ID) !== null) return;
   const still = document.createElement('style');
+  still.id = AT_REST_ID;
   still.textContent = '*, *::before, *::after { animation: none !important; transition: none !important; }';
   document.head.append(still);
-  try {
-    return await check();
-  } finally {
+  onTestFinished(() => {
     still.remove();
-  }
+  });
 }
 
 export async function expectScreenBasics(root: HTMLElement, { owner }: ScreenBasicsOptions): Promise<void> {
@@ -97,7 +109,8 @@ export async function expectScreenBasics(root: HTMLElement, { owner }: ScreenBas
   expect(footers, 'one concept footer').toHaveLength(1);
   expect(footers[0]?.textContent?.replace(/\s+/g, ' ').trim()).toBe(CONCEPT_FOOTER_TEXT);
   assertCleanCopy(root);
-  const violations = await atRest(() => axeViolations(root));
+  holdAtRest();
+  const violations = await axeViolations(root);
   if (violations.length > 0) throw new Error(`axe found ${violations.length} violations:\n${violations.map((v) => `- ${v}`).join('\n')}`);
   if (owner) assertNoJargon(root);
 }

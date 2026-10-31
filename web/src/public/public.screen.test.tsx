@@ -794,6 +794,23 @@ describe('public chat page', () => {
     expect(live()).toEqual([]);
   });
 
+  it('axe_check_leaves_a_landed_reply_still', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'How much is drain clearing?');
+    const reply = rowOf(screen.getByRole('article', { name: 'Quote' }).element());
+    const moving = () => reply.getAnimations({ subtree: true }).map((a) => (a instanceof CSSAnimation ? a.animationName : 'other'));
+    await expect.poll(moving).toEqual([]);
+
+    // The screen's checks read it at rest and leave it so: nothing in the reply moves again, and it
+    // shows whole for whatever the test checks next.
+    await expectScreenBasics(screen.container, { owner: false });
+    expect(moving()).toEqual([]);
+    const main = reply.querySelector('.cd-transcript-row__main');
+    if (!main) throw new Error('the reply has its message');
+    expect(getComputedStyle(main).opacity).toBe('1');
+  });
+
   it('callback_card_shows_the_kernel_title', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);
