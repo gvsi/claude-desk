@@ -381,21 +381,22 @@ const DEFAULT_DISCOUNT_BP = DECISIONS.heldQuote.discountBp;
 
 /**
  * A percentage the visitor wrote: "10% off", "20 %", "12.5 %", "10 por ciento", "10 percent". The
- * number stands on its own (not the tail of a longer one), with at most two decimals.
+ * number stands on its own, not the tail of a longer one.
  */
-const PERCENT = /(?<![\p{L}\p{N}.,])(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:%|por\s*ciento(?![\p{L}\p{N}])|percent(?![\p{L}\p{N}]))/giu;
+const PERCENT = /(?<![\p{L}\p{N}.,])(\d+(?:[.,]\d+)?)\s*(?:%|por\s*ciento(?![\p{L}\p{N}])|percent(?![\p{L}\p{N}]))/iu;
+
+/** The most a discount can take off: all of it. */
+const WHOLE_PRICE_BP = 10_000;
 
 /**
- * The discount the visitor asked for, in basis points: the first percentage in their words above
- * 0 and up to 100, else the fixtures' 15%. Untrusted text, read only for a number, as the kernel
- * takes a requested discount (master plan, "Discounts").
+ * The discount the visitor asked for, in basis points: the first percentage in their words, as
+ * they wrote it (0% and over 100% included, which `matchRule` sends elsewhere), and the fixtures'
+ * 15% only when they wrote none. Untrusted text, read only for a number, as the kernel takes a
+ * requested discount (master plan, "Discounts").
  */
 export function askedDiscountBp(text: string): number {
-  for (const match of text.matchAll(PERCENT)) {
-    const bp = Math.round(Number((match[1] ?? '').replace(',', '.')) * 100);
-    if (bp > 0 && bp <= 10_000) return bp;
-  }
-  return DEFAULT_DISCOUNT_BP;
+  const match = PERCENT.exec(text);
+  return match === null ? DEFAULT_DISCOUNT_BP : Math.round(Number((match[1] ?? '').replace(',', '.')) * 100);
 }
 
 /**
@@ -407,6 +408,7 @@ export function askedDiscountBp(text: string): number {
 export function heldDiscount(text: string, person: { name: string } | null): DecisionSpec {
   const { listCents } = DECISIONS.heldQuote;
   const discountBp = askedDiscountBp(text);
+  if (discountBp <= 0 || discountBp > WHOLE_PRICE_BP) throw new Error(`a held discount is above 0% and up to 100%, not ${discountBp} bp`);
   const amountCents = discountedCents(listCents, discountBp);
   const who = person === null ? 'A visitor not on record' : `${person.name}, verified with a code,`;
   return {
@@ -694,12 +696,26 @@ function hasWord(lower: string, word: string): boolean {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(lower);
 }
 
-/** The first rule with one of its words, whole, in the lowercased text, else the last rule. */
+/** The script's rule named `name`. */
+function ruleNamed(name: RuleName): ScriptRule {
+  const rule = SCRIPT.find((r) => r.name === name);
+  if (!rule) throw new Error(`the script has no ${name} rule`);
+  return rule;
+}
+
+/**
+ * The first rule with one of its words, whole, in the lowercased text, else the last rule. A
+ * discount asked at 0% is a question about the list price (the price rule), and one over 100% is
+ * no discount anyone can give (the last rule's plain answer).
+ */
 export function matchRule(text: string): ScriptRule {
   const lower = text.toLowerCase();
   const rule = SCRIPT.find((r) => r.words.some((word) => hasWord(lower, word))) ?? SCRIPT[SCRIPT.length - 1];
   if (!rule) throw new Error('the script has no rules');
-  return rule;
+  if (rule.name !== 'discount') return rule;
+  const asked = askedDiscountBp(text);
+  if (asked === 0) return ruleNamed('price');
+  return asked > WHOLE_PRICE_BP ? ruleNamed('other') : rule;
 }
 
 /**

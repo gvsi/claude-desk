@@ -399,17 +399,44 @@ describe('the scripted Desk', () => {
       [fixtureQuote?.title, fixtureQuote?.lines],
     ]);
 
-    // Only a percentage standing on its own, from above 0 up to 100, counts; anything else is 15%.
+    // The first percentage standing on its own is the one asked for, whatever it is; 15% only when
+    // the words name none.
     const read: [text: string, bp: number][] = [
       ['20 % off?', 2000],
       ['¿Un 10 por ciento de descuento?', 1000],
       ['12,5 % de descuento', 1250],
       ['10 percent off', 1000],
-      ['1000% off', 1500],
-      ['0% off', 1500],
+      ['1000% off', 100_000],
+      ['0% off', 0],
       ['Any discount?', 1500],
     ];
     for (const [text, bp] of read) expect(askedDiscountBp(text), text).toBe(bp);
+  });
+
+  it('discount_at_none_or_over_all_is_not_held', async () => {
+    // 0% off is a question about the list price: the list-price quote, with nothing held. Over 100%
+    // is no discount anyone can give: Claude's plain answer, with nothing decided.
+    expect(matchRule('Can I get 0% off?').name).toBe('price');
+    expect(matchRule('Can I get 1000% off?').name).toBe('other');
+    const { session, events } = await openChat();
+    const decided = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.session_id === session.session_id).map((d) => d.decision);
+
+    await send('Can I get 0% off?');
+    await drain();
+    const listPrice = events.flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks.map((b) => [b.template, b.title]) : []));
+    expect(listPrice).toEqual([
+      [null, null],
+      ['quote', rivera.blocks.quote.en.title],
+    ]);
+    expect(decided().map((d) => [d.outcome, d.state, d.reason_plain])).toEqual([['allow', 'executed', DECISIONS.quote.reasonPlain]]);
+
+    const before = events.length;
+    await send('Can I get 1000% off?');
+    await drain();
+    expect(typesOf(events.slice(before))).toEqual(['writing', 'message', 'turn_end']);
+    const help = events.slice(before).flatMap(([, ev]) => (ev.type === 'message' ? ev.blocks.map((b) => b.text) : []));
+    expect(help).toEqual(['Maria can tell you once she sees it. You can ask for her here anytime.']);
+    expect(decided()).toHaveLength(1);
   });
 
   it('verified_discount_names_the_person_and_drafts_its_percent', async () => {
