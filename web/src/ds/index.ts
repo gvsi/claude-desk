@@ -126,6 +126,7 @@ export { DemoInboxSheet, type DemoInboxSheetProps } from './components/DemoInbox
 // Setup
 export { SituationRow, type SituationRowProps } from './components/SituationRow/SituationRow.tsx';
 export { SafetyCheckRow, type SafetyCheckRowProps } from './components/SafetyCheckRow/SafetyCheckRow.tsx';
+export { SetupToolsList, type SetupToolsListProps, type SetupToolsRow } from './components/SetupToolsList/SetupToolsList.tsx';
 
 // Agents
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
