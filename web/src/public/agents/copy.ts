@@ -9,6 +9,8 @@
  * seed's demo mandate ($20 a charge, $100 in total, for one hour), and `copy.test.ts` ties the
  * amounts to it.
  */
+import { Fragment, createElement, type ReactNode } from 'react';
+
 import type { CopyLanguage } from '../../ds/index.ts';
 
 /** The built-in agent's tasks, as the API names them (`send_agent {task}`). */
@@ -71,15 +73,19 @@ export interface AgentsCopy {
   shownOnce: string;
 
   sendTitle: string;
-  /** The panel's lead before a run: who the agent visits, and for whom. The chosen task replaces it. */
-  sendLead: (business: string) => string;
+  /**
+   * The panel's lead before a run: who the agent visits, and for whom. The chosen task replaces it.
+   * `business` is the business's name, marked as its own words by the caller.
+   */
+  sendLead: (business: ReactNode) => ReactNode;
   /** The agent's signed spending limit. Static: the only line on the page with amounts. */
   limitLine: string;
   tasksLabel: string;
   agentName: string;
   signedRequest: string;
   request: (n: number) => string;
-  conversation: (business: string) => string;
+  /** The run's name for screen readers. */
+  conversation: string;
   working: string;
   finished: string;
   stopped: string;
@@ -131,13 +137,13 @@ export const AGENTS_COPY: Readonly<Record<CopyLanguage, AgentsCopy>> = {
     shownOnce: 'Shown once. It’s a demo key for this Desk, not a business credential.',
 
     sendTitle: 'Send an agent',
-    sendLead: (business) => `A built-in agent visits ${business} for Alex Kim. It’s simulated.`,
+    sendLead: (business) => createElement(Fragment, null, 'A built-in agent visits ', business, ' for Alex Kim. It’s simulated.'),
     limitLine: 'Its spending limit, signed by Alex Kim’s demo wallet: $20 per charge and $100 in total, for one hour.',
     tasksLabel: 'Tasks for the agent',
     agentName: 'Alex Kim’s assistant',
     signedRequest: 'Signed request',
     request: (n) => `Request ${n}`,
-    conversation: (business) => `Alex Kim’s assistant with ${business}`,
+    conversation: 'Alex Kim’s assistant’s visit',
     working: 'Alex Kim’s assistant is at work',
     finished: 'The agent finished.',
     stopped: 'The agent stopped before finishing. Try again.',
@@ -187,13 +193,13 @@ export const AGENTS_COPY: Readonly<Record<CopyLanguage, AgentsCopy>> = {
     shownOnce: 'Se muestra una sola vez. Es una clave de demostración para este Desk, no una credencial del negocio.',
 
     sendTitle: 'Enviar un agente',
-    sendLead: (business) => `Un agente integrado visita ${business} en nombre de Alex Kim. Es simulado.`,
+    sendLead: (business) => createElement(Fragment, null, 'Un agente integrado visita ', business, ' en nombre de Alex Kim. Es simulado.'),
     limitLine: 'Su límite de gasto, firmado por la billetera de demostración de Alex Kim: $20 por cobro y $100 en total, durante una hora.',
     tasksLabel: 'Tareas para el agente',
     agentName: 'Asistente de Alex Kim',
     signedRequest: 'Solicitud firmada',
     request: (n) => `Solicitud ${n}`,
-    conversation: (business) => `Asistente de Alex Kim con ${business}`,
+    conversation: 'La visita del asistente de Alex Kim',
     working: 'El asistente de Alex Kim está trabajando',
     finished: 'El agente terminó.',
     stopped: 'El agente se detuvo antes de terminar. Inténtalo de nuevo.',

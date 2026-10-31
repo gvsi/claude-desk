@@ -45,7 +45,10 @@ const RUN_LANGUAGE: CopyLanguage = 'en';
 /** Cards that report something done: their executed receipt draws the check. */
 const DONE_CARDS: ReadonlySet<string> = new Set(['booking_confirmed', 'payment_confirmed', 'charge_confirmed']);
 
-/** How many reads at the poll's pace before the panel slows down, and by how much: a minute, then every five seconds. */
+/**
+ * A run is read at the poll's pace for its first minute (sixty reads' worth of time, so it scales
+ * with the poll), then five times slower.
+ */
 const BACK_OFF_AFTER = 60;
 const BACK_OFF_FACTOR = 5;
 
@@ -57,7 +60,7 @@ const MAX_MISSES = 5;
  * - `idle`: nothing sent yet;
  * - `sending`, `running`: the agent is on its way or at work, and its run is read until it ends;
  * - `done`: it finished;
- * - `stopped`: the run failed, or the API no longer has it (404);
+ * - `stopped`: the run failed, or the API no longer has it (404) or refuses to show it for good;
  * - `busy`: the API refused to start it (429);
  * - `not_sent`: it clearly didn't start (the session couldn't open, or another refusal);
  * - `lost`: the start's answer was lost (no answer, a timeout or a 5xx), so the agent may be on its
@@ -70,19 +73,18 @@ interface PanelState {
   status: Status;
   /** The task last chosen. */
   task: DemoTask | null;
+  /** The run's id once the API started it, or null. */
+  runId: string | null;
   /** The run as last read. */
   run: DemoAgentRun | null;
   /** The run's reads keep failing; it is still read. */
   readsFailing: boolean;
 }
 
-const IDLE: PanelState = { status: 'idle', task: null, run: null, readsFailing: false };
+const IDLE: PanelState = { status: 'idle', task: null, runId: null, run: null, readsFailing: false };
 
 /** The states that offer the tasks: before a run, and after one that clearly didn't go ahead. */
 const OFFERS_TASKS: ReadonlySet<Status> = new Set<Status>(['idle', 'stopped', 'busy', 'not_sent']);
-
-/** The states with no run to speak of, which keep the panel's own lead. */
-const NO_RUN: ReadonlySet<Status> = new Set<Status>(['idle', 'busy', 'not_sent']);
 
 /** What a failed start means for the panel. */
 function sendFailure(err: unknown): Status {
@@ -94,20 +96,45 @@ function sendFailure(err: unknown): Status {
   return 'not_sent';
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * What a failed read of the run means: the chat ended (401), the run is over as far as this page can
+ * tell (404, or another refusal that won't change: 403, 409, 422), or null to read again (no
+ * answer, a 5xx or a 429).
+ */
+function readFailure(err: unknown): 'ended' | 'stopped' | null {
+  if (!(err instanceof ApiError)) return null;
+  if (err.kind === 'unauthorized') return 'ended';
+  if (err.kind === 'not_found' || err.kind === 'conflict' || err.kind === 'unprocessable') return 'stopped';
+  return null;
 }
 
-/** Resolves once the tab is in view: reads pause while it is hidden, as the app's polling does. */
-function whenVisible(): Promise<void> {
-  if (document.visibilityState !== 'hidden') return Promise.resolve();
+/** Resolves after `ms`, or at once when `signal` aborts. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    const onChange = () => {
-      if (document.visibilityState === 'hidden') return;
-      document.removeEventListener('visibilitychange', onChange);
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
       resolve();
     };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done);
+  });
+}
+
+/** Resolves once the tab is in view, or at once when `signal` aborts: reads pause while it is hidden. */
+function whenVisible(signal: AbortSignal): Promise<void> {
+  if (document.visibilityState !== 'hidden' || signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      document.removeEventListener('visibilitychange', onChange);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const onChange = () => {
+      if (document.visibilityState !== 'hidden') done();
+    };
     document.addEventListener('visibilitychange', onChange);
+    signal.addEventListener('abort', done);
   });
 }
 
@@ -126,55 +153,61 @@ export interface SendAgentPanelProps {
 export function SendAgentPanel({ slug, business, ownerName, session, language }: SendAgentPanelProps) {
   const copy = AGENTS_COPY[language];
   const [state, setState] = useState<PanelState>(IDLE);
-  // Bumped by each new run and when the page goes away, so an older run's reads stop applying.
-  const runNo = useRef(0);
+  // The current run's reads; aborted by a new run, a new chat and the page going away, which ends
+  // its waits and stops it applying anything.
+  const reading = useRef<AbortController | null>(null);
   useEffect(
     () => () => {
-      runNo.current += 1;
+      reading.current?.abort();
     },
     [],
   );
 
   const send = async (task: DemoTask) => {
-    runNo.current += 1;
-    const mine = runNo.current;
-    const current = () => mine === runNo.current;
-    setState({ status: 'sending', task, run: null, readsFailing: false });
+    reading.current?.abort();
+    const controller = new AbortController();
+    reading.current = controller;
+    const { signal } = controller;
+    setState({ status: 'sending', task, runId: null, run: null, readsFailing: false });
     let runId: string;
     try {
       const started = await session.call(() => request('sendAgent', { params: { slug }, body: { task } }));
       if (typeof started?.run_id !== 'string') throw new ApiError('unavailable', { route: 'sendAgent', method: 'POST', status: 202 });
       runId = started.run_id;
     } catch (err) {
-      if (current()) setState({ status: sendFailure(err), task, run: null, readsFailing: false });
+      if (!signal.aborted) setState({ status: sendFailure(err), task, runId: null, run: null, readsFailing: false });
       return;
     }
-    // The run is read until it ends: done, failed, or gone (404). There is no deadline, since the
-    // agent goes on whatever the page does; a slow run is read less often after a minute.
+    if (signal.aborted) return;
+    setState({ status: 'running', task, runId, run: null, readsFailing: false });
+    // The run is read until it ends: done, failed, or gone. There is no deadline, since the agent
+    // goes on whatever the page does.
+    const startedAt = Date.now();
     let misses = 0;
-    for (let reads = 0; ; reads += 1) {
-      await sleep(reads < BACK_OFF_AFTER ? agentRunPollMs() : agentRunPollMs() * BACK_OFF_FACTOR);
-      await whenVisible();
-      if (!current()) return;
+    for (;;) {
+      const pace = agentRunPollMs();
+      await sleep(Date.now() - startedAt < pace * BACK_OFF_AFTER ? pace : pace * BACK_OFF_FACTOR, signal);
+      await whenVisible(signal);
+      if (signal.aborted) return;
       try {
         const run = await request('agentRun', { params: { slug, run_id: runId } });
-        if (!current()) return;
+        if (signal.aborted) return;
         misses = 0;
         if (run.state === 'done' || run.state === 'failed') {
-          setState({ status: run.state === 'done' ? 'done' : 'stopped', task, run, readsFailing: false });
+          setState({ status: run.state === 'done' ? 'done' : 'stopped', task, runId, run, readsFailing: false });
           return;
         }
         // Running, or a state this build doesn't know, which isn't an end: read on.
-        setState({ status: 'running', task, run, readsFailing: false });
+        setState({ status: 'running', task, runId, run, readsFailing: false });
       } catch (err) {
-        if (!current()) return;
-        if (err instanceof ApiError && (err.kind === 'not_found' || err.kind === 'unauthorized')) {
-          const status = err.kind === 'not_found' ? 'stopped' : 'ended';
-          setState((prev) => ({ ...prev, status, readsFailing: false }));
+        if (signal.aborted) return;
+        const ended = readFailure(err);
+        if (ended !== null) {
+          setState((prev) => ({ ...prev, status: ended, readsFailing: false }));
           return;
         }
         misses += 1;
-        if (misses >= MAX_MISSES) setState((prev) => ({ ...prev, status: 'running', readsFailing: true }));
+        if (misses >= MAX_MISSES) setState((prev) => ({ ...prev, readsFailing: true }));
       }
     }
   };
@@ -185,12 +218,12 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   };
 
   const newChat = () => {
-    runNo.current += 1;
+    reading.current?.abort();
     setState(IDLE);
     void session.reopen().catch(() => setState({ ...IDLE, status: 'not_sent' }));
   };
 
-  const { status, task, run, readsFailing } = state;
+  const { status, task, runId, run, readsFailing } = state;
   const working = status === 'sending' || status === 'running';
   let notice: ReactNode = null;
   if (status === 'stopped') notice = <Notice tone="error">{copy.stopped}</Notice>;
@@ -210,17 +243,21 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
       </Notice>
     );
   }
-  // During and after a run, the chosen task takes the lead's place (boards 04 and 05).
-  const lead = task !== null && !NO_RUN.has(status) ? DEMO_TASK_COPY[language][task] : copy.sendLead(business);
+  // While a run is starting or exists (or may, after a lost start), the chosen task takes the lead's
+  // place (boards 04 and 05). A start that never ran keeps the lead.
+  const ran = status === 'sending' || status === 'lost' || runId !== null;
+  const lead =
+    task !== null && ran ? DEMO_TASK_COPY[language][task] : copy.sendLead(<span data-copy="user">{business}</span>);
 
   return (
     <AgentsCard title={copy.sendTitle} lead={lead} id={SEND_ID} holdsCards>
+      {/* The signed limit shows in every state, as board 05 draws it during a run. */}
       <p className="cd-agents-page__quiet cd-type-meta">{copy.limitLine}</p>
       {OFFERS_TASKS.has(status) ? (
         <SuggestionChips label={copy.tasksLabel} suggestions={DEMO_TASKS.map((t) => DEMO_TASK_COPY[language][t])} onPick={pick} />
       ) : null}
       {run !== null && task !== null && run.turns.length > 0 ? (
-        <Transcript label={copy.conversation(business)}>
+        <Transcript label={copy.conversation}>
           <RunRows turns={run.turns} task={task} ownerName={ownerName} language={language} />
         </Transcript>
       ) : null}

@@ -2,10 +2,19 @@
  * The agents page's own words. The send panel states the built-in agent's spending limit as static
  * copy, never formatted from a number, so this test ties its amounts to the Rivera seed's mandate.
  */
+import { isValidElement, type ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import { rivera } from '../../ds/fixtures/index.ts';
 import { AGENTS_COPY } from './copy.ts';
+
+/** The words a node reads as, its elements' children included. */
+function textOf(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join('');
+  if (isValidElement<{ children?: ReactNode }>(node)) return textOf(node.props.children);
+  return '';
+}
 
 /** The dollar amounts a line states, in cents, in the order it states them. */
 function centsIn(line: string): number[] {
@@ -21,7 +30,7 @@ describe('agents page copy', () => {
       expect(centsIn(copy.limitLine), language).toEqual([mandate.per_charge_cents, mandate.total_cents]);
       expect(copy.limitLine, language).toContain(mandate.on_behalf_of ?? '');
       // The lead names the business and who the agent visits for, and states no amount.
-      const lead = copy.sendLead('Rivera Plumbing');
+      const lead = textOf(copy.sendLead('Rivera Plumbing'));
       expect(lead, language).toContain('Rivera Plumbing');
       expect(lead, language).toContain(mandate.on_behalf_of ?? '');
       expect(centsIn(lead), language).toEqual([]);

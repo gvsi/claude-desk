@@ -10,7 +10,7 @@ import type { DemoAgentIssued, RenderedBlock } from '../api/contracts.ts';
 import type { AgentCardOut, AgentTurn, DemoAgentRun } from '../api/views.ts';
 import { placeholderHex, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { DECISIONS, type DecisionSpec, type Language } from './script.ts';
-import type { DeskRecord, MockWorld, SessionRecord } from './world.ts';
+import { isoTime, type DeskRecord, type MockWorld, type SessionRecord } from './world.ts';
 
 /** The mock's `PUBLIC_ORIGIN`: the API builds the address agents use from it, never from a request's host. */
 export const MOCK_PUBLIC_ORIGIN = 'https://desk.example';
@@ -281,7 +281,7 @@ export function demoAgentIssued(world: MockWorld, desk: DeskRecord): DemoAgentIs
       agent_key_id: keyId,
       desk_id: desk.summary.desk_id,
       allowed_effects: [...mandate.allowed_effects],
-      expires_at: new Date(world.now() + HOUR_MS).toISOString(),
+      expires_at: isoTime(world.now() + HOUR_MS),
       nonce: placeholderHex(`mandate-nonce:${keyId}`, 16),
       sig: placeholderHex(`mandate-sig:${keyId}`, 64),
     },

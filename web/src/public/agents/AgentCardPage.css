@@ -54,10 +54,14 @@
 /* stopgap: swap for the design system's card-holding frame (design/knowledge-and-limit). The send
    panel's card, which holds the Desk's reply cards, drawn on the card tokens. */
 .cd-agents-card--frame {
+  display: block;
+  box-sizing: border-box;
+  min-width: 0;
   padding: var(--space-16);
   border: 1px solid var(--line-card);
   border-radius: var(--radius-card);
   background: var(--fill-card);
+  overflow-wrap: anywhere;
 }
 
 .cd-agents-card__title {

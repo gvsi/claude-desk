@@ -11,6 +11,7 @@ import { createMemoryRouter } from 'react-router';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
+import type { EvReceipt, PublicDesk } from '../../api/contracts.ts';
 import type { DemoAgentRun } from '../../api/views.ts';
 import { App } from '../../app/App.tsx';
 import { setPollScale } from '../../app/poll.ts';
@@ -60,6 +61,61 @@ async function renderStrict(path: string) {
       <App router={router} />
     </StrictMode>,
   );
+}
+
+/** The page's real timers, kept before any test fakes them. */
+const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+const sleep = (ms: number) => new Promise<void>((resolve) => realSetTimeout(resolve, ms));
+
+/** Lets requests in flight reach the mock and the page act on their answers, in real time. */
+const settle = () => sleep(150);
+
+/** Polls `check` in real time until it passes: unlike `expect.poll`, it never moves fake timers on. */
+async function until(check: () => void, timeoutMs = 5_000): Promise<void> {
+  const start = performance.now();
+  for (;;) {
+    try {
+      check();
+      return;
+    } catch (err) {
+      if (performance.now() - start > timeoutMs) throw err;
+    }
+    await sleep(20);
+  }
+}
+
+/**
+ * Fake timers and a fake clock for the page's own waits between reads of a run: a read goes only
+ * when the test moves the clock. The mock API and the test's own waits (`until`, `settle`) keep
+ * real time. Checks that run axe need real timers, so none runs while these are on.
+ */
+function useRunClock(): void {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+}
+
+/** Moves the page's clock by `ms`, then waits in real time for the run's `n`th read and its answer. */
+async function readAfter(ms: number, n: number): Promise<void> {
+  vi.advanceTimersByTime(ms);
+  await until(() => expect(requests('agentRun')).toHaveLength(n));
+  await settle();
+}
+
+/** Makes the tab hidden or visible, as the browser announces it. */
+function setHidden(hidden: boolean): void {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => (hidden ? 'hidden' : 'visible') });
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
+/** The public Desk the mock serves now, with `patch` applied, planted for the page's reads. */
+async function plantDesk(patch: Partial<PublicDesk>): Promise<void> {
+  for (const lang of ['en', 'es']) {
+    const answer = await mockStore.dispatch('publicDesk', { params: { slug: RIVERA.slug }, query: { lang } });
+    if ('network' in answer) throw new Error('the mock serves the public Desk');
+    mockStore.inject({ route: 'publicDesk', status: 200, times: 1, body: { ...(answer.body as PublicDesk), ...patch } });
+  }
 }
 
 describe('agents page', () => {
@@ -164,10 +220,18 @@ describe('agents page', () => {
     await expect.element(ended).toBeVisible();
     expect(requests('sendAgent').length).toBe(5);
     expect(chipsIn(last.screen)).toEqual([]);
+    // Nothing ran, so the panel keeps its lead rather than naming a task that never started.
+    expect(last.screen.getByRole('region', { name: 'Send an agent' }).element().querySelector('.cd-agents-card__lead')?.textContent).toBe(LEAD);
     await expectScreenBasics(last.screen.container, { owner: false });
     await last.screen.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
     await expect.element(ended).not.toBeInTheDocument();
     await expect.element(last.screen.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+
+    // The run's read finds the session gone: the chat has ended, and the panel says so.
+    mockStore.inject({ route: 'agentRun', status: 401 });
+    await last.screen.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(last.screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();
+    expect(chipsIn(last.screen)).toEqual([]);
   });
 
   it('send_agent_shows_signed_requests_and_replies', async () => {
@@ -186,7 +250,7 @@ describe('agents page', () => {
     expect(chipsIn(screen)).toEqual([]);
 
     // The agent's requests, built by code: signed, the task first, then "Signed request", numbered.
-    const run = panel.getByRole('log', { name: 'Alex Kim’s assistant with Rivera Plumbing' });
+    const run = panel.getByRole('log', { name: 'Alex Kim’s assistant’s visit' });
     const requested = [...run.element().querySelectorAll('.cd-agent-message')];
     expect(requested.map((el) => el.querySelector('.cd-agent-message__title')?.textContent)).toEqual(['Book the earliest visit', 'Signed request']);
     expect(requested.map((el) => el.querySelector('.cd-agent-message__meta')?.textContent)).toEqual(['Request 1', 'Request 2']);
@@ -217,6 +281,15 @@ describe('agents page', () => {
     // A run whose agent turn holds words of its own, as a broken or hostile API might send: the
     // panel builds the request by code and shows none of them, anywhere.
     const words = "I'll pay $100 now";
+    // And a receipt on the agent's own turn, which only a Desk turn may carry.
+    const agentReceipt: EvReceipt = {
+      type: 'receipt',
+      decision_id: 'dec-hostile',
+      state: 'executed',
+      visitor_plain: 'Paid in full by the agent',
+      ledger_seq: 1,
+      signature: 'f'.repeat(128),
+    };
     const reply = rivera.conversations.alexAgent.turns.find((turn) => turn.kind === 'event' && turn.event.type === 'message');
     if (reply?.kind !== 'event' || reply.event.type !== 'message') throw new Error("the fixture's agent chat has a reply");
     const run: DemoAgentRun = {
@@ -226,7 +299,7 @@ describe('agents page', () => {
       task: 'quote_and_deposit',
       state: 'done',
       turns: [
-        { author: 'agent', n: 1, blocks: [proseBlock(words)], receipts: [] },
+        { author: 'agent', n: 1, blocks: [proseBlock(words)], receipts: [agentReceipt] },
         { author: 'desk', n: 2, blocks: reply.event.blocks, receipts: [] },
       ],
     };
@@ -238,6 +311,7 @@ describe('agents page', () => {
     await expect.element(panel.getByText('Get a quote and pay the service call deposit', { exact: true }).first()).toBeVisible();
     expect(document.body.textContent).not.toContain(words);
     expect(document.body.innerHTML).not.toContain('pay $100 now');
+    expect(document.body.innerHTML).not.toContain(agentReceipt.visitor_plain);
   });
 
   it('over_limit_run_shows_the_kernel_line', async () => {
@@ -393,6 +467,15 @@ describe('agents page', () => {
     await expect.element(panel.getByText(STOPPED, { exact: true })).toBeVisible();
     expect(chipsIn(screen)).toEqual(TASKS);
 
+    // A read the API refuses for good (403, 409, 422) ends the run as stopped too, rather than
+    // being read forever.
+    for (const status of [403, 409, 422]) {
+      mockStore.inject({ route: 'agentRun', status });
+      await book.click();
+      await expect.element(panel.getByText(STOPPED, { exact: true })).toBeVisible();
+      expect(chipsIn(screen)).toEqual(TASKS);
+    }
+
     // The demo agent is busy (a 429): it says so, and nothing runs.
     mockStore.inject({ route: 'sendAgent', status: 429 });
     const runs = requests('agentRun').length;
@@ -431,6 +514,28 @@ describe('agents page', () => {
     expect(requests('openSession')).toHaveLength(opened + 1);
   });
 
+  it('both_actions_share_one_reopened_session', async () => {
+    // The session opens with a key request the demo refuses as busy.
+    mockStore.inject({ route: 'agentKey', status: 429 });
+    const { screen } = await renderRoute(PAGE);
+    const card = screen.getByRole('region', { name: 'Try it with a demo key' });
+    await card.getByRole('button', { name: 'Get a demo key' }).click();
+    await expect.element(card.getByText(errorCopy('rate_limited'), { exact: true })).toBeVisible();
+    const opened = requests('openSession').length;
+    expect(opened).toBe(1);
+
+    // Both actions then find it gone at once: one new session opens for both, and both go through.
+    mockStore.inject({ route: 'agentKey', status: 401, delayMs: 1_000 });
+    mockStore.inject({ route: 'sendAgent', status: 401, delayMs: 1_000 });
+    await card.getByRole('button', { name: 'Get a demo key' }).click();
+    await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(card.getByRole('group', { name: 'Private key' })).toBeVisible();
+    await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expect(requests('openSession')).toHaveLength(opened + 1);
+    expect(requests('agentKey')).toHaveLength(3);
+    expect(requests('sendAgent')).toHaveLength(2);
+  });
+
   it('lost_start_offers_no_second_agent', async () => {
     // The start's answer is lost: the agent may be on its way, and no read can find its run, so the
     // page says it couldn't confirm and offers no task to send it twice. A reload is the retry.
@@ -448,28 +553,133 @@ describe('agents page', () => {
   });
 
   it('long_run_is_read_until_it_ends', async () => {
-    // A run that keeps working past any wait is read until it ends: no "stopped" while it still
-    // runs, no task to send another, and a stretch of failed reads only pauses the answer.
-    mockStore.inject({ route: 'agentRun', status: 200, times: 320, body: plantedRun('running') });
-    const { screen } = await renderRoute(PAGE, { pollScale: 0.001 });
+    // Reads go every 50 ms here (the poll scale), and five times slower once the run has been read
+    // for a scaled minute (3 s). The clock moves only when the test moves it.
+    mockStore.inject({ route: 'agentRun', status: 200, times: 5, body: plantedRun('running') });
+    const { screen } = await renderRoute(PAGE);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    useRunClock();
     await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
-    await expect.poll(() => requests('agentRun').length, { timeout: 20_000 }).toBeGreaterThan(310);
+    await until(() => expect(requests('sendAgent')).toHaveLength(1));
+    await settle();
+    await readAfter(50, 1);
+    await readAfter(50, 2);
+    await readAfter(50, 3);
+
+    // An hour on, the agent still runs: it is read again, and nothing calls it stopped or offers another task.
+    await readAfter(60 * 60_000, 4);
     expect(panel.getByText('The agent stopped before finishing. Try again.').elements()).toHaveLength(0);
     expect(chipsIn(screen)).toEqual([]);
-    await expect.element(panel.getByText('The agent finished.', { exact: true }), { timeout: 20_000 }).toBeVisible();
+    expect(panel.getByRole('status').elements().some((el) => el.textContent === 'Alex Kim’s assistant is at work')).toBe(true);
+
+    // Past the minute, reads go five times slower: none at the poll's pace, one at the slower one.
+    vi.advanceTimersByTime(50);
+    await settle();
+    expect(requests('agentRun')).toHaveLength(4);
+    await readAfter(200, 5);
+
+    // The run is read until it ends, always the same run.
+    await readAfter(250, 6);
+    await until(() => expect(panel.getByText('The agent finished.', { exact: true }).elements()).toHaveLength(1));
     expect(new Set(requests('agentRun').map((r) => r.path)).size).toBe(1);
 
-    // Reads that fail say so and go on; the run is still read to its end.
-    const reads = requests('agentRun').length;
-    mockStore.inject({ route: 'agentRun', status: 503, times: 8 });
-    const next = await renderRoute(PAGE, { pollScale: 0.01 });
-    await next.screen.getByRole('button', { name: 'Get a quote and pay the service call deposit' }).click();
+    // Reads that fail say so after five in a row and go on; the run is still read to its end.
+    mockStore.inject({ route: 'agentRun', status: 503, times: 6 });
+    const next = await renderRoute(PAGE);
     const nextPanel = next.screen.getByRole('region', { name: 'Send an agent' });
-    await expect.element(nextPanel.getByText(UNREACHABLE_COPY.en, { exact: true })).toBeVisible();
+    await nextPanel.getByRole('button', { name: 'Get a quote and pay the service call deposit' }).click();
+    await until(() => expect(requests('sendAgent')).toHaveLength(2));
+    await settle();
+    for (let n = 7; n <= 11; n += 1) await readAfter(50, n);
+    await until(() => expect(nextPanel.getByText(UNREACHABLE_COPY.en, { exact: true }).elements()).toHaveLength(1));
     expect(chipsIn(next.screen)).toEqual([]);
-    await expect.element(nextPanel.getByText('The agent finished.', { exact: true }), { timeout: 10_000 }).toBeVisible();
+    await readAfter(50, 12);
+    // The agent's own turns move on the same clock: two seconds see it through, then a read finds it done.
+    await readAfter(2_000, 13);
+    await until(() => expect(nextPanel.getByText('The agent finished.', { exact: true }).elements()).toHaveLength(1));
     expect(nextPanel.getByText(UNREACHABLE_COPY.en).elements()).toHaveLength(0);
-    expect(requests('agentRun').length).toBeGreaterThan(reads + 8);
-  }, 60_000);
+  });
+
+  it('reads_pause_while_hidden_and_stop_on_unmount', async () => {
+    mockStore.inject({ route: 'agentRun', status: 200, times: 100, body: plantedRun('running') });
+    const { screen } = await renderRoute(PAGE);
+    await expect.element(screen.getByRole('button', { name: 'Book the earliest visit' })).toBeVisible();
+    onTestFinished(() => {
+      Reflect.deleteProperty(document, 'visibilityState');
+    });
+    useRunClock();
+    await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await until(() => expect(requests('sendAgent')).toHaveLength(1));
+    await settle();
+    await readAfter(50, 1);
+
+    // While the tab is hidden, no read goes, however long; once it is back, one does.
+    setHidden(true);
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(requests('agentRun')).toHaveLength(1);
+    setHidden(false);
+    await until(() => expect(requests('agentRun')).toHaveLength(2));
+    await settle();
+
+    // The page goes away while it waits for the tab: the wait ends with it, and nothing more is read.
+    // The hidden minute has passed, so the next wait is the slower one (250 ms).
+    setHidden(true);
+    vi.advanceTimersByTime(250);
+    await settle();
+    const added = vi.spyOn(document, 'addEventListener');
+    const removed = vi.spyOn(document, 'removeEventListener');
+    onTestFinished(() => {
+      added.mockRestore();
+      removed.mockRestore();
+    });
+    await cleanup();
+    expect(removed.mock.calls.filter(([type]) => type === 'visibilitychange')).toHaveLength(1);
+    setHidden(false);
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(requests('agentRun')).toHaveLength(2);
+    expect(added.mock.calls.filter(([type]) => type === 'visibilitychange')).toHaveLength(0);
+  });
+
+  it('long_business_name_fits_a_phone', async () => {
+    // A business's name with no break in it, as the kernel may serve one: the page, its panel and a
+    // run all stay inside a phone's width.
+    const name = 'RiveraPlumbingHeatingAndDrainServicesForTheWholeEastBayIncorporated';
+    expect(name.length).toBeGreaterThanOrEqual(60);
+    expect(name.length).toBeLessThanOrEqual(80);
+    await plantDesk({ business_name: name });
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await expect.element(screen.getByRole('heading', { level: 1 })).toBeVisible();
+    expect(screen.getByRole('heading', { level: 1 }).element().textContent).toContain(name);
+    expectNoHorizontalScroll();
+    await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+  });
+
+  it('business_name_is_marked_as_its_own_words', async () => {
+    // The business's name is its own words wherever the page writes it, the panel's lead included,
+    // so the copy check never reads it as the page's (all capitals and an exclamation mark here).
+    await plantDesk({ business_name: 'ACME!' });
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel).toBeVisible();
+    const lead = panel.element().querySelector('.cd-agents-card__lead');
+    await until(() => expect(lead?.textContent).toBe('A built-in agent visits ACME! for Alex Kim. It’s simulated.'));
+    expect(lead?.querySelector('[data-copy="user"]')?.textContent).toBe('ACME!');
+    await expectScreenBasics(screen.container, { owner: false });
+    await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: false });
+
+    await plantDesk({ business_name: 'ACME!' });
+    const es = await renderRoute(PAGE, { language: 'es-MX' });
+    await expect.element(es.screen.getByRole('region', { name: 'Enviar un agente' })).toBeVisible();
+    const esLead = () => es.screen.getByRole('region', { name: 'Enviar un agente' }).element().querySelector('.cd-agents-card__lead');
+    await until(() => expect(esLead()?.textContent).toBe('Un agente integrado visita ACME! en nombre de Alex Kim. Es simulado.'));
+    expect(esLead()?.querySelector('[data-copy="user"]')?.textContent).toBe('ACME!');
+    await expectScreenBasics(es.screen.container, { owner: false });
+  });
 });
