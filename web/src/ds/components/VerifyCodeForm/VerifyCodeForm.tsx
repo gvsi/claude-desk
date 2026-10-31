@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
@@ -14,15 +14,24 @@ const CODE_LENGTH = 6;
 const WHOLE_CODE = /^[0-9]{6}$/;
 
 /**
- * The digits in some text, at most six: letters, spaces and dashes are dropped, and full-width
- * digits, which some keyboards type, count as the digits they are. This is the field's only limit:
- * a `maxlength` would let the browser cut a code at six characters before its spaces or dash are
- * dropped, so "48 29 13" brought in by a keyboard's clipboard suggestion or a drop would keep
- * four digits.
+ * The digits in some text, all of them: letters, spaces and dashes are dropped, and full-width
+ * digits, which some keyboards type, count as the digits they are.
+ */
+function allDigits(text: string): string {
+  return text.normalize('NFKC').replace(/[^0-9]/g, '');
+}
+
+/**
+ * The digits in some text, at most six. This is the field's only limit: a `maxlength` would let the
+ * browser cut a code at six characters before its spaces or dash are dropped, so "48 29 13"
+ * brought in by a keyboard's clipboard suggestion or a drop would keep four digits.
  */
 function digitsOf(text: string): string {
-  return text.normalize('NFKC').replace(/[^0-9]/g, '').slice(0, CODE_LENGTH);
+  return allDigits(text).slice(0, CODE_LENGTH);
 }
+
+/** What an input method's composition puts in the field: it can't be cancelled before it lands. */
+const COMPOSING: ReadonlySet<string> = new Set(['insertCompositionText', 'insertFromComposition']);
 
 /** `idle` waiting for a code, `checking` while one is checked, `failed` after one didn't work. */
 export type VerifyCodeState = 'idle' | 'checking' | 'failed';
@@ -51,6 +60,9 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: Ver
   // Set by a submit and cleared when the screen's state moves on or the code changes, so a second
   // Enter before the screen says it is checking can't spend another try on the same code.
   const sent = useRef(false);
+  // The field's selection just before its last change, so a composition the form undoes can put
+  // the caret back where it was.
+  const selectionBefore = useRef({ start: 0, end: 0 });
 
   const checking = state === 'checking';
   const failed = state === 'failed';
@@ -80,13 +92,14 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: Ver
   // - Text that brings six digits or more of its own is a whole new code: its first six digits
   //   are the code, whatever the field held, so a visitor who pastes the newest code after a failed
   //   one sends that code, never the old one again.
-  // - Typing into a whole code, with nothing selected, is refused, so the six digits and the caret
-  //   stay as they were, as a length limit would keep them. Typing or pasting over a selection
-  //   replaces it as usual.
+  // - Anything else put into a whole code with nothing selected, typed, pasted or dropped, is
+  //   refused, so the six digits and the caret stay as they were, as a length limit would keep
+  //   them. Typing or pasting over a selection replaces it as usual.
   useEffect(() => {
     const field = fieldRef.current;
     if (!field) return undefined;
     const beforeInput = (event: InputEvent) => {
+      selectionBefore.current = { start: field.selectionStart ?? 0, end: field.selectionEnd ?? 0 };
       if (!event.cancelable || !event.inputType.startsWith('insert')) return;
       const inserted = digitsOf(event.data ?? event.dataTransfer?.getData('text/plain') ?? '');
       if (inserted.length === CODE_LENGTH) {
@@ -96,15 +109,25 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: Ver
         return;
       }
       const collapsed = field.selectionStart === field.selectionEnd;
-      if (event.inputType === 'insertText' && collapsed && WHOLE_CODE.test(field.value)) event.preventDefault();
+      if (collapsed && WHOLE_CODE.test(field.value)) event.preventDefault();
     };
     field.addEventListener('beforeinput', beforeInput);
     return () => field.removeEventListener('beforeinput', beforeInput);
   }, []);
 
-  const change = (next: string) => {
+  const change = (event: ChangeEvent<HTMLInputElement>) => {
+    const field = event.target;
+    // A composition (CJK input methods, some Android keyboards) can't be refused before it lands,
+    // so one that grew a whole code past six digits is undone here: the code and the caret go back
+    // as they were, as if it had been refused.
+    const { inputType = '' } = event.nativeEvent as Partial<InputEvent>;
+    if (COMPOSING.has(inputType) && whole && allDigits(field.value).length > CODE_LENGTH) {
+      field.value = code;
+      field.setSelectionRange(selectionBefore.current.start, selectionBefore.current.end);
+      return;
+    }
     sent.current = false;
-    setCode(digitsOf(next));
+    setCode(digitsOf(field.value));
   };
 
   return (
@@ -124,7 +147,7 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: Ver
             value={code}
             aria-invalid={failed || undefined}
             aria-describedby={failed ? failedId : undefined}
-            onChange={(event) => change(event.target.value)}
+            onChange={change}
           />
           {/* Busy keeps the words and the focus: the button stays focusable but inert. */}
           <Button variant="primary" size="main" type="submit" disabled={!whole && !checking} busy={checking}>

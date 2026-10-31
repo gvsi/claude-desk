@@ -177,6 +177,13 @@ export const Idle: Story = {
     await expect(field.selectionStart).toBe(3);
     await userEvent.type(field, '7');
     await expect(field).toHaveValue('482913');
+    // Nor does a short paste with nothing selected: "7" at the start, "77" in the middle.
+    field.setSelectionRange(0, 0);
+    await userEvent.paste('7');
+    await expect(field).toHaveValue('482913');
+    field.setSelectionRange(3, 3);
+    await userEvent.paste('77');
+    await expect(field).toHaveValue('482913');
     // What goes over a selection replaces it, and the digits around it stay: "77" over the 9.
     field.setSelectionRange(3, 4);
     await userEvent.paste('77');
