@@ -25,14 +25,17 @@ part of what a proof covers (`invariants_sha256` renders the auto invariants at 
 is proved at its own cap and a report proved at another is never reused.
 
 Versions an earlier kernel stored. A version proved under another baseline than the one this
-kernel enforces (`outdated`) never loads and decides nothing. At startup, before serving, the
-kernel rebuilds each such active version in place (`rebuild_at_startup`): its own cards at its own
-cap, checked, compiled and loaded as a draft is, and written only with a proof of all seven
-obligations, from the cache (a shipped report) in either mode or proved live in `symcc` mode. One
-it can't rebuild stays as stored, refusing every call (`version_outdated`), and each attempt is
-ledgered and alerts the owner. First, startup gives every Desk the native tools the kernel
-registers that it has no row for (one created before they were), so a version is rebuilt over the
-tools a Desk made now has, and a seed's from its shipped report.
+kernel enforces (`outdated`) never loads and decides nothing. The kernel rebuilds each such active
+version in place: its own cards at its own cap, checked, compiled and loaded as a draft is, and
+written only with a proof of all seven obligations, from the cache (a shipped report) in either
+mode or proved live in `symcc` mode. One it can't rebuild stays as stored, refusing every call
+(`version_outdated`), and each attempt is ledgered and alerts the owner. First, every Desk is given
+the native tools the kernel registers that it has no row for (one created before they were), so a
+version is rebuilt over the tools a Desk made now has, and a seed's from its shipped report. Before
+serving, startup does this from cached reports only, within `STARTUP_REBUILD_S`
+(`rebuild_at_startup`); the Desks it leaves, and every version that needs a live proof, are
+rebuilt one at a time in the background while the kernel serves (`rebuild_in_background`), and
+refuse until then.
 
 Loaded versions. A stored version loads into the policy engine on its first use
 (`LoadedVersions`), bounded to `MAX_LOADED_VERSIONS` per engine, least recently used out first,
@@ -64,6 +67,7 @@ from dataclasses import dataclass
 from functools import partial
 from datetime import datetime, time
 from pathlib import Path
+from time import monotonic
 from typing import Any, Literal, NamedTuple
 
 import desk_kernel
@@ -686,17 +690,24 @@ async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | Non
 # `baseline_approvable` read `B`), so one stored by an earlier kernel, under another baseline, isn't
 # proved for this one, and may not even load: the kernel core's versions have a schema without
 # `context.auto_money_cap_cents`, which this baseline reads, so strict validation refuses the whole
-# version. At startup, before it serves anything, the kernel rebuilds each active version stored
-# under another baseline (`rebuild_at_startup`): from its own cards, at the money cap it keeps
-# (the money cap revision gave the kernel core's versions their $500), over the Desk's enabled
-# profiles, checked as a draft is, compiled, and written in place of the stored one only with a
-# proof of all seven obligations. The version keeps its number, status and cap, so nothing the
-# owner chose changes. Before that, each Desk without a native tool the kernel registers is given
-# it (`desks.add_native_tools`), so the profiles a version is rebuilt over are those a Desk made
-# now has.
+# version. The kernel rebuilds each active version stored under another baseline: from its own
+# cards, at the money cap it keeps (the money cap revision gave the kernel core's versions their
+# $500), over the Desk's enabled profiles, checked as a draft is, compiled, and written in place of
+# the stored one only with a proof of all seven obligations. The version keeps its number, status
+# and cap, so nothing the owner chose changes. Before that, each Desk without a native tool the
+# kernel registers is given it (`desks.add_native_tools`), so the profiles a version is rebuilt
+# over are those a Desk made now has. Startup does what it can from cached reports within its
+# budget before the kernel serves (`rebuild_at_startup`); the rest, live proofs included, goes on in
+# the background (`rebuild_in_background`), and a version not yet rebuilt refuses meanwhile.
 
 # What a rebuild rewrites: the compiled sets, what they were proved against and the proof.
 _REBUILT_COLUMNS = ("cards", "cedar", "schema_json", *VersionHashes._fields, "proof")
+# How long startup starts bringing Desks up to date before the kernel serves (`rebuild_at_startup`).
+# It proves nothing live, so it ends within this and one Desk's compile: with the selftest's 30 s
+# backstop, inside the kernel container's 60 s health check start period.
+STARTUP_REBUILD_S = 15.0
+# A rebuild startup leaves to the background, since only a live proof would answer it.
+NEEDS_PROOF = "needs_proof"
 # The owner's alert when a version can't be rebuilt (owner-only, in English, like every alert).
 REBUILD_ALERT = ("After an update, Claude couldn't check your rules again, so it won't act on any request until "
                  "they're checked. Confirm your rules again to turn them back on.")
@@ -707,33 +718,92 @@ def outdated(row: PolicyVersionRow) -> bool:
     return row.baseline_sha256 != compiler.baseline_sha256()
 
 
-async def rebuild_at_startup(runtime: KernelRuntime) -> dict[tuple[str, int], str | None]:
-    """Gives every Desk the registered native tools it has no row for (`desks.add_native_tools`),
-    then rebuilds every copy's active versions stored under another baseline (`rebuild_version`),
-    each Desk's tools and each version in a transaction of its own, and returns what became of each
-    `(desk_id, version)`: None when rebuilt, else why not. A failure is logged and the next is
-    tried; a Desk left without a tool can't be called on it, and a version left as stored decides
-    nothing."""
+Rebuilt = dict[tuple[str, int], str | None]   # (desk_id, version): None when rebuilt, else why not
+
+
+@dataclass(frozen=True)
+class StartupRebuild:
+    """What startup did before the kernel served (`rebuild_at_startup`)."""
+
+    results: Rebuilt                   # each outdated version it rebuilt, or refused to
+    left: list[tuple[str, str]]        # the Desks, `(copy_id, desk_id)`, left for `rebuild_in_background`
+
+
+async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
+    """Brings the Desks that need it up to date before the kernel serves, in `(copy_id, desk_id)`
+    order (`_bring_up`): each Desk without a native tool the kernel registers, and each whose
+    active version an earlier kernel stored under another baseline. It starts a Desk only within
+    `STARTUP_REBUILD_S` of its own start and rebuilds a version only from a cached report, leaving
+    one that needs a live proof (`NEEDS_PROOF`), so the kernel serves within the budget and one
+    Desk's compile however many Desks there are. The Desks it doesn't finish are left, in order,
+    for `rebuild_in_background`; until then a version left as stored refuses every call
+    (`version_outdated`)."""
     native = [profile.tool for profile in adapters.registered_profiles(source="native")]
-    for copy_id, desk_id in await desks_missing_tools(runtime, native):
-        try:
-            async with kernel_transaction(runtime) as ctx:
-                ctx.bind(copy_id)
-                await desks.add_native_tools(ctx, desk_id)
-        except Exception as exc:
-            log_error(log, exc, "native_tools_failed copy_id=%s desk_id=%s", copy_id, desk_id)
-    results: dict[tuple[str, int], str | None] = {}
-    for copy_id, desk_id, version in await outdated_versions(runtime, compiler.baseline_sha256()):
-        try:
-            async with kernel_transaction(runtime) as ctx:
-                ctx.bind(copy_id)
-                results[(desk_id, version)] = await rebuild_version(ctx, desk_id, version)
-        except Exception:
-            log.exception("version_rebuild_failed copy_id=%s desk_id=%s version=%s", copy_id, desk_id, version)
+    work = sorted({*await desks_missing_tools(runtime, native),
+                   *((copy_id, desk_id) for copy_id, desk_id, _ in
+                     await outdated_versions(runtime, compiler.baseline_sha256()))})
+    started = monotonic()
+    results: Rebuilt = {}
+    left: list[tuple[str, str]] = []
+    for n, (copy_id, desk_id) in enumerate(work):
+        if monotonic() - started >= STARTUP_REBUILD_S:
+            left += work[n:]
+            break
+        done = await _bring_up(runtime, copy_id, desk_id, prove=False)
+        if done is not None and done[1] == NEEDS_PROOF:
+            left.append((copy_id, desk_id))
+        elif done is not None:
+            results[(desk_id, done[0])] = done[1]
+    if left:
+        log.info("startup_rebuild_left desks=%s", len(left))
+    return StartupRebuild(results=results, left=left)
+
+
+async def rebuild_in_background(runtime: KernelRuntime, left: Sequence[tuple[str, str]]) -> Rebuilt:
+    """Brings up the Desks startup left (`StartupRebuild.left`), one at a time while the kernel
+    serves, proving live in `symcc` mode, and returns what became of each outdated version. As at
+    startup, a version it can't rebuild is ledgered and alerts the owner, and one it hasn't reached
+    yet keeps refusing. The app cancels it at shutdown: the Desk in hand rolls back, its prover is
+    killed, and the next start takes it up again."""
+    results: Rebuilt = {}
+    for copy_id, desk_id in left:
+        done = await _bring_up(runtime, copy_id, desk_id, prove=True)
+        if done is not None:
+            results[(desk_id, done[0])] = done[1]
+    log.info("background_rebuild_done desks=%s", len(left))
     return results
 
 
-async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int) -> str | None:
+async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *,
+                    prove: bool) -> tuple[int, str | None] | None:
+    """Gives the Desk the native tools it has no row for (`desks.add_native_tools`), then rebuilds
+    its active version if it is outdated (`rebuild_version`, proving live only when `prove`), each
+    in a transaction of its own. Returns the outdated version and what became of it, or None when
+    the Desk's version is current or the rebuild failed. A failure is logged and the Desk is left
+    as it was: without a tool, it can't be called on it; with a version left as stored, it decides
+    nothing."""
+    try:
+        async with kernel_transaction(runtime) as ctx:
+            ctx.bind(copy_id)
+            await desks.add_native_tools(ctx, desk_id)
+    except Exception as exc:
+        log_error(log, exc, "native_tools_failed copy_id=%s desk_id=%s", copy_id, desk_id)
+    version = None
+    try:
+        async with kernel_transaction(runtime) as ctx:
+            ctx.bind(copy_id)
+            row = await active_version(ctx, desk_id)
+            if row is None or not outdated(row):
+                return None
+            version = row.version
+            done = version, await rebuild_version(ctx, desk_id, version, prove=prove)
+        return done
+    except Exception as exc:
+        log_error(log, exc, "version_rebuild_failed copy_id=%s desk_id=%s version=%s", copy_id, desk_id, version)
+        return None
+
+
+async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int, *, prove: bool = True) -> str | None:
     """Rebuilds the Desk's active version `version`, stored under another baseline, in the
     caller's transaction, under the Desk's `versions` lock with the row `FOR UPDATE`, as a confirm
     takes them. Returns None when it is rebuilt, or when it is no longer active or outdated;
@@ -741,14 +811,17 @@ async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int) -> str | N
     rebuilt: true, auto_money_cap_cents, cedar_sha256, from_cedar_sha256}`. One that can't be is
     left as stored, so it keeps refusing; the attempt is ledgered `policy` `{version, rebuilt:
     false, refused: <why>}` and alerts the owner in the Demo inbox whatever their notification
-    defaults, since the Desk acts on nothing until it is fixed."""
+    defaults, since the Desk acts on nothing until it is fixed. Without `prove`, a version only a
+    live proof would answer in `symcc` mode is `NEEDS_PROOF`, with nothing written."""
     await _lock(ctx, "versions", desk_id)
     row = (await ctx.db.scalars(ctx.repo.scoped(select(PolicyVersionRow).where(
         PolicyVersionRow.desk_id == desk_id, PolicyVersionRow.version == version,
         PolicyVersionRow.status == "active").with_for_update()))).one_or_none()
     if row is None or not outdated(row):
         return None
-    rebuilt = await _rebuilt(ctx, row)
+    rebuilt = await _rebuilt(ctx, row, prove=prove)
+    if rebuilt == NEEDS_PROOF:            # nothing written: the background proves it
+        return NEEDS_PROOF
     if isinstance(rebuilt, str):
         log.warning("version_not_rebuilt desk_id=%s version=%s reason=%s", desk_id, version, rebuilt)
         await demo_inbox.deliver(ctx, copy_id=ctx.copy_id, desk_id=desk_id, to="owner", person_id=None, kind="alert",
@@ -768,9 +841,10 @@ async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int) -> str | N
     return None
 
 
-async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow) -> PolicyVersionRow | str:
+async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow, *, prove: bool) -> PolicyVersionRow | str:
     """`row` compiled again as a draft of its own cards would be, at its own cap, over the Desk's
-    enabled profiles, with a proof of all seven obligations; or why it can't be."""
+    enabled profiles, with a proof of all seven obligations; or why it can't be (`NEEDS_PROOF`
+    when only a live proof would answer and `prove` is false)."""
     desk_id, cap = row.desk_id, row.auto_money_cap_cents
     if type(cap) is not int or not 0 <= cap <= AUTO_MONEY_HARD_CAP_CENTS:
         return "invalid_money_cap"
@@ -792,6 +866,8 @@ async def _rebuilt(ctx: KernelCtx, row: PolicyVersionRow) -> PolicyVersionRow | 
         return "unloadable"
     report = ctx.policies.cache.get(hashes)               # a shipped report, or one this process proved
     if report is None and proof_mode() == "symcc":
+        if not prove:
+            return NEEDS_PROOF
         report = await prove_or_check(ctx.policies.engine, owned, profiles, key_prefix=f"rebuild:{desk_id}",
                                       auto_money_cap_cents=cap)
         ctx.policies.cache.put(hashes, report)

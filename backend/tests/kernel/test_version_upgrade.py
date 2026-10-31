@@ -6,7 +6,9 @@ the context, which this kernel's baseline reads, so such a version doesn't even 
 the kernel rebuilds each active version stored under another baseline from its own cards, at the
 money cap the money cap revision kept for it, and puts the rebuild in its place only with a proof
 of all seven obligations; a version it can't rebuild and prove refuses every call, and the owner
-is alerted.
+is alerted. Startup does this from cached reports within a budget before the kernel serves, and
+leaves the rest, live proofs included, to a background rebuild while the kernel serves; a version
+not yet rebuilt refuses meanwhile.
 
 `fixtures/kernel_core_version.json` is a version exactly as the kernel core stored it, with the
 tools it was compiled over: Rivera's cards plus an auto payment link card up to $100, over the
@@ -15,6 +17,7 @@ proved by `desk-prove` on the kernel core's inputs. It is frozen: made again wit
 it would test nothing.
 """
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -72,12 +75,24 @@ async def with_kernel_core_version(app: FastAPI, copy: Rivera) -> None:
 
 
 @asynccontextmanager
-async def upgraded_kernel(clock: FrozenClock, reviewer: FakeDecisions) -> AsyncIterator[httpx.AsyncClient]:
-    """A client of a kernel started on the same database, as the upgrade starts it."""
+async def started_kernel(clock: FrozenClock, reviewer: FakeDecisions) -> AsyncIterator[tuple[FastAPI,
+                                                                                         httpx.AsyncClient]]:
+    """A kernel started on the same database, as the upgrade starts it, and a client of it, as soon
+    as it serves."""
     kernel = create_app(clock=clock, decisions=reviewer)
     async with kernel.router.lifespan_context(kernel):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(kernel), base_url="http://kernel") as http:
-            yield http
+            yield kernel, http
+
+
+@asynccontextmanager
+async def upgraded_kernel(clock: FrozenClock, reviewer: FakeDecisions) -> AsyncIterator[httpx.AsyncClient]:
+    """A client of a kernel started on the same database, once the Desks its startup left to the
+    background are brought up too."""
+    async with started_kernel(clock, reviewer) as (kernel, http):
+        if kernel.state.rebuilding is not None:
+            await kernel.state.rebuilding
+        yield http
 
 
 async def stored_version(app: FastAPI, copy: Rivera, version: int) -> PolicyVersion:
@@ -242,6 +257,95 @@ async def test_a_desk_from_before_new_native_tools_gets_them_at_startup(app, cli
         Tool.desk_id == copy.desk_id))), await entries_of(client, copy, "desk_data"),
         await entries_of(client, copy, "policy")) for copy in (current, upgraded)}
     assert after == before
+
+
+async def test_startup_starts_no_desk_past_its_budget(app, client, monkeypatch):
+    # two seeds from an earlier kernel, each rebuilt from its shipped report; the first rebuild takes the whole budget
+    first, second = sorted([await rivera(app, client), await rivera(app, client)],
+                           key=lambda copy: (copy.copy_id, copy.desk_id))
+    for copy in (first, second):
+        await seed_from_an_earlier_kernel(app, copy)
+    elapsed = [0.0]
+    rebuild = activation.rebuild_version
+
+    async def taking_the_budget(*args, **kwargs):
+        try:
+            return await rebuild(*args, **kwargs)
+        finally:
+            elapsed[0] += activation.STARTUP_REBUILD_S
+
+    monkeypatch.setattr(activation, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(activation, "rebuild_version", taking_the_budget)
+    startup = await activation.rebuild_at_startup(app.state.kernel)
+    assert startup == activation.StartupRebuild(results={(first.desk_id, 1): None},
+                                                left=[(second.copy_id, second.desk_id)])
+    # the Desk left refuses until the background rebuilds it, with nothing ledgered or alerted for it before
+    visitor = await open_visitor(client, second)
+    refused = await decided(client, visitor, "native.find_slots", call_id="slots")
+    assert (refused.outcome, refused.policy_version) == ("refuse", 1) and REFUSED in refused.reason_plain
+    assert all("rebuilt" not in entry for entry in await entries_of(client, second, "policy"))
+    assert activation.REBUILD_ALERT not in [alert.body for alert in await owner_alerts(app, second)]
+    assert await activation.rebuild_in_background(app.state.kernel, startup.left) == {(second.desk_id, 1): None}
+    allowed = await decided(client, visitor, "native.find_slots", call_id="slots-rebuilt")
+    assert (allowed.outcome, allowed.policy_version) == ("allow", 1)
+    assert (await entries_of(client, second, "policy"))[-1]["rebuilt"] is True
+
+
+async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
+    # in symcc mode no shipped report covers the kernel core's tools, so only a live proof answers its version
+    copy = await rivera(app, client)
+    adapters.register(payment_link(5_000), replace=True)
+    await with_kernel_core_version(app, copy)
+    monkeypatch.setattr(activation, "_proof_mode", "symcc")
+    proved = []
+
+    async def prover_away(inputs):        # no desk-prove here: a live proof times out, as with none installed
+        proved.append(inputs)
+        return activation._timed_out()
+
+    monkeypatch.setattr(activation, "prove", prover_away)
+    startup = await activation.rebuild_at_startup(app.state.kernel)
+    assert (startup.results, startup.left, proved) == ({}, [(copy.copy_id, copy.desk_id)], [])
+    assert all("rebuilt" not in entry for entry in await entries_of(client, copy, "policy"))
+    visitor = await open_visitor(client, copy)
+    refused = await decided(client, visitor, "native.find_slots", call_id="slots")
+    assert (refused.outcome, refused.policy_version) == ("refuse", 2) and REFUSED in refused.reason_plain
+    # the background proves it, and refuses and alerts as startup did before it had a budget
+    assert await activation.rebuild_in_background(app.state.kernel, startup.left) == {(copy.desk_id, 2): "not_proved"}
+    assert len(proved) == 1
+    assert (await entries_of(client, copy, "policy"))[-1] == {"version": 2, "rebuilt": False, "refused": "not_proved"}
+    assert [alert.body for alert in await owner_alerts(app, copy)][-1:] == [activation.REBUILD_ALERT]
+
+
+async def test_the_kernel_serves_while_its_background_rebuild_runs(app, client, frozen_clock, reviewer, monkeypatch):
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    monkeypatch.setattr(activation, "STARTUP_REBUILD_S", 0.0)          # startup leaves every Desk to the background
+    go_on = asyncio.Event()
+    rebuild = activation.rebuild_version
+
+    async def waiting(*args, **kwargs):
+        await go_on.wait()
+        return await rebuild(*args, **kwargs)
+
+    monkeypatch.setattr(activation, "rebuild_version", waiting)
+    # a kernel stopped before its background rebuild ends cancels it: nothing was written, and the next start
+    # takes the Desk up again
+    async with started_kernel(frozen_clock, reviewer) as (kernel, _):
+        stopped = kernel.state.rebuilding
+        assert stopped is not None and not stopped.done()
+    assert stopped.cancelled()
+    assert all("rebuilt" not in entry for entry in await entries_of(client, copy, "policy"))
+    async with started_kernel(frozen_clock, reviewer) as (kernel, http):
+        visitor = await open_visitor(http, copy)
+        refused = await decided(http, visitor, "native.find_slots", call_id="slots")
+        assert (refused.outcome, refused.policy_version) == ("refuse", 1) and REFUSED in refused.reason_plain
+        assert not kernel.state.rebuilding.done()
+        go_on.set()
+        assert await kernel.state.rebuilding == {(copy.desk_id, 1): None}
+        allowed = await decided(http, visitor, "native.find_slots", call_id="slots-rebuilt")
+        assert (allowed.outcome, allowed.policy_version) == ("allow", 1)
+    assert (await entries_of(client, copy, "policy"))[-1]["rebuilt"] is True
 
 
 async def test_cards_this_kernel_refuses_are_never_rebuilt(app, client, frozen_clock, reviewer):

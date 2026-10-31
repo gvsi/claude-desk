@@ -81,12 +81,13 @@ Activation (`activation.confirm`) holds no session, decision or execution row an
 4: the Desk's `versions` advisory lock, then its `policy_versions` rows `FOR UPDATE`, then the
 payment links its `ON_ACTIVATE` hooks lock and move (Plan 01c; a hook appends nothing), then the
 ledger head: its own `policy` entry first, then the hooks' `payment` events. A draft takes its
-key's advisory lock before the `versions` lock. The startup rebuild of a version an earlier kernel
-stored (`activation.rebuild_version`) takes the same `versions` lock and active row `FOR UPDATE`,
-then the ledger head; the owner alert it writes when it can't rebuild is an insert under a fresh
-key. Before it, in a transaction of its own, startup gives a Desk the native tools it has no row
-for (`desks.add_native_tools`) under the Desk row `FOR UPDATE`, as an owner's write holds it: the
-rows are inserts under fresh keys, and its `desk_data` entry takes the ledger head. An owner write
+key's advisory lock before the `versions` lock. The rebuild of a version an earlier kernel stored
+(`activation.rebuild_version`), at startup or in the background while the kernel serves, takes the
+same `versions` lock and active row `FOR UPDATE`, then the ledger head; the owner alert it writes
+when it can't rebuild is an insert under a fresh key. Before it, in a transaction of its own,
+startup gives a Desk the native tools it has no row for (`desks.add_native_tools`) under the Desk
+row `FOR UPDATE`, as an owner's write holds it: the rows are inserts under fresh keys, and its
+`desk_data` entry takes the ledger head. An owner write
 refused for a document canary (`desks.refuse_public_canaries`) appends in its
 `persist` alone, holding nothing else, to each Desk it names in ID order, and one refused past a
 Desk's cap of documents or knowledge items (`labels.refuse_past_cap`, counted without a lock under
