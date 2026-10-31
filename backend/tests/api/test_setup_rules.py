@@ -20,6 +20,7 @@ import re
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, time, timedelta
 from time import monotonic
+from typing import get_args
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -38,6 +39,7 @@ from desk.api.prompts import (
     DRAFT_RETRY,
     QUESTION_KEYS,
     SITUATIONS_SYSTEM,
+    SITUATION_TOOLS_BY_WHO,
     DraftedRules,
     DraftedSituations,
     HoursAnswer,
@@ -45,12 +47,16 @@ from desk.api.prompts import (
     RuleCardDraft,
     SetupAnswers,
     SituationDraft,
+    SituationTool,
 )
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow
-from desk.api.setup import after_hours_start, calendar_slots, price_items, safety_probes
+from desk.api.setup import after_hours_start, calendar_slots, price_items, safety_probes, situation
 from desk.api.setup_templates import SAFETY_PROBES, template_cards
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, ITEM_ID_PATTERN, SLOT_ID_PATTERN, HoursWindow, PolicyVersion, RuleCard
+from desk.db.models import Desk
 from desk.kernel_api import PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest
+from desk.kernel_service.activation import _probe_principal
+from desk.kernel_service.decide import tools_given
 from desk.presets import PRESETS
 from tests.api.fakes import ScriptedModel, gated, response
 from tests.api.fakes import text as text_block
@@ -714,7 +720,7 @@ async def test_an_error_after_a_202_reaches_the_next_retry(app, browser, fake, k
 
     # Heard once: the re-post after that runs the work again.
     model.add(structured(DraftedSituations(situations=SITUATIONS)))
-    reply = await owner.browser.post(path)
+    reply = await settled(owner, path)
     assert (reply.status_code, asked()) == (200, 3), reply.text
 
     # The kernel's proof outlasts the wait and then gets no answer in time: the retry hears "Rules can't be checked
@@ -920,6 +926,68 @@ async def test_situation_mismatch_is_flagged(app, browser, fake, kernel_http, mo
     assert '"leak-repair": 25000' in sent and "card-1" not in sent
     assert (await stored(engine, state["interview_id"]))["step"] == "situations"
     assert (await usage_routes(engine)).count("situations") == 1
+
+
+async def test_an_agent_payment_without_a_price_is_redrafted(app, browser, fake, kernel_http, model, clock):
+    owner, state = await ready(app, browser, kernel_http, model, business_type="office", price_items=None)
+    await drafted_rules(owner, model, state)
+    payment = SituationDraft(title="A client's AI agent asks for a $400 payment link for bookkeeping fees",
+                             who="agent", tool="native.payment_link", own_record=False, expected="allow")
+    # Reproduce the live-run refusal: no price means no amount, hence no stand-in signed mandate. The real
+    # kernel withholds payment links from that caller before evaluating the drafted rules.
+    probe = situation(1, payment, {}, [], TIMEZONE, clock()).probe
+    principal, session = _probe_principal("copy", "desk", probe)
+    assert probe.amount_cents is None and principal.mandate_id is None
+    assert "native.payment_link" not in tools_given(principal, session, Desk(answering=True),
+                                                    ["native.payment_link"])
+    priced = situation(1, payment.model_copy(update={"item_id": "bookkeeping-fees"}),
+                       {"bookkeeping-fees": 40_000}, [], TIMEZONE, clock()).probe
+    principal, session = _probe_principal("copy", "desk", priced)
+    assert priced.amount_cents == priced.agent_mandate_remaining_cents == 40_000
+    assert "native.payment_link" in tools_given(principal, session, Desk(answering=True),
+                                                ["native.payment_link"])
+    alternatives = [SituationDraft(title="A client leaves contact details", who=who, tool="native.capture_lead",
+                                  own_record=False, expected="allow")
+                    for who in ("public", "verified", "after_hours", "public", "agent", "verified")]
+    model.add(structured(DraftedSituations(situations=[payment, *alternatives[:5]])),
+              structured(DraftedSituations(situations=alternatives)))
+    reply = await owner.browser.post(policy(state, "situations"))
+    assert reply.status_code == 200, reply.text
+    calls = [request for request in model.requests if request.route == "situations"]
+    assert len(calls) == 2
+    results = [SituationResult.model_validate(each) for each in reply.json()]
+    assert all(each.matches and each.result.outcome == "allow" for each in results)
+    (posted,) = fake.called("POST /policy/{version}/probe")
+    assert all(probe["call"]["tool"] == "native.capture_lead" for probe in posted.body["probes"])
+
+
+async def test_an_unavailable_caller_tool_is_redrafted(app, browser, fake, kernel_http, model):
+    owner, state = await ready(app, browser, kernel_http, model)
+    await drafted_rules(owner, model, state)
+    refund = SituationDraft(title="A client's AI agent asks for a refund", who="agent",
+                            tool="payments.create_refund", item_id="service-call-deposit", own_record=False,
+                            expected="hold")
+    alternatives = [SituationDraft(title="A client leaves contact details", who=who, tool="native.capture_lead",
+                                  own_record=False, expected="allow")
+                    for who in ("public", "verified", "after_hours", "public", "agent", "verified")]
+    model.add(structured(DraftedSituations(situations=[refund, *alternatives[:5]])),
+              structured(DraftedSituations(situations=alternatives)))
+    reply = await owner.browser.post(policy(state, "situations"))
+    assert reply.status_code == 200, reply.text
+    calls = [request for request in model.requests if request.route == "situations"]
+    assert len(calls) == 2
+    assert all(each["matches"] for each in reply.json())
+    assert "<tools>" in calls[0].messages[0]["content"][0]["text"]
+
+
+def test_situation_caller_tools_match_the_kernel():
+    enabled = get_args(SituationTool)
+    for who, planned in SITUATION_TOOLS_BY_WHO.items():
+        draft = SituationDraft(title="A client asks for a payment link", who=who, tool="native.payment_link",
+                               item_id="fees", own_record=False, expected="allow")
+        probe = situation(1, draft, {"fees": 40_000}, [], TIMEZONE, datetime(2026, 10, 31, tzinfo=UTC)).probe
+        principal, session = _probe_principal("copy", "desk", probe)
+        assert planned == tools_given(principal, session, Desk(answering=True), enabled), who
 
 
 async def test_a_planned_second_look_matches_a_reviewed_rule(app, browser, fake, kernel_http, model, engine):

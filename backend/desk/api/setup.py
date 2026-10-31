@@ -142,6 +142,9 @@ from desk.api.prompts import (
     SETUP_TURNS,
     SITUATIONS_HEAD,
     SITUATIONS_SYSTEM,
+    SITUATION_CALLER_TOOL_REQUIRED,
+    SITUATION_PRICE_REQUIRED,
+    SITUATION_TOOLS_BY_WHO,
     TOOLS_TAG,
     BusinessType,
     DraftedRules,
@@ -1621,14 +1624,26 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
     cards = [card for card in drafted_cards if not card.is_default]
     prices = await _prices(owner, desk_id)
     timezone = (await _business(owner, desk_id))["timezone"]
+    enabled = {row["tool"] for row in await owner.ro.rows("tools", desk_id=desk_id, status="enabled")}
+    tools = {who: sorted(given & enabled) for who, given in SITUATION_TOOLS_BY_WHO.items()}
     rules_text = json.dumps([card.model_dump(mode="json", exclude={"card_id", "person_id", "agent_key_id",
                                                                    "is_default"}) for card in cards])
     message = _user("\n\n".join([SITUATIONS_HEAD.format(business_type=interview.business_type),
                                  wrap(RULES_TAG, rules_text), wrap(PRICES_TAG, json.dumps(prices)),
+                                 wrap(TOOLS_TAG, json.dumps(tools)),
                                  wrap(ANSWERS_TAG, interview.answers.model_dump_json(exclude_defaults=True))]))
+
+    def usable(drafted: DraftedSituations) -> str | None:
+        if any((draft.tool == "native.quote" or draft.tool in MONEY_TOOLS) and draft.item_id not in prices
+               for draft in drafted.situations):
+            return SITUATION_PRICE_REQUIRED
+        if any(draft.expected != "refuse" and draft.tool not in tools[draft.who] for draft in drafted.situations):
+            return SITUATION_CALLER_TOOL_REQUIRED
+        return None
+
     drafted = await ask_model(model, recorder(engine, owner, SITUATIONS_ROUTE), SITUATIONS_SYSTEM, [message],
                               DraftedSituations, max_tokens=SITUATIONS_MAX_TOKENS, route=SITUATIONS_ROUTE,
-                              effort="medium")
+                              effort="medium", check=usable)
     if drafted is None:
         raise ApiProblem(503, "model_unavailable")
     built = [situation(number, draft, prices, interview.answers.hours, timezone, now)
