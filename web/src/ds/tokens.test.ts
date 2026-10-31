@@ -172,12 +172,12 @@ describe('design tokens', () => {
   });
 
   test('badge_caps_is_the_one_all_caps_style', () => {
-    // The lockup's "Preview" badge: the product's one all-caps label (owner, 2026-10-30), small and
-    // slightly spaced (0.06em at 11 px), its capitals drawn by its type style over a word written in
-    // sentence case. "Beta" is gone.
+    // The lockup's "Preview" badge: the product's one all-caps label (owner, 2026-10-30), small,
+    // weight 520 and slightly spaced (0.06em at 11 px), as N-Explore-Mark-Lockup-Inline draws it, its
+    // capitals drawn by its type style over a word written in sentence case. "Beta" is gone.
     const ui = tokens.type.groups.find((group) => group.name === 'Interface');
     const badge = ui?.styles.find((style) => style.name === 'badge-caps');
-    expect(badge).toMatchObject({ fontSize: '11px', lineHeight: '14px', fontWeight: 460, letterSpacing: '0.66px', textTransform: 'uppercase' });
+    expect(badge).toMatchObject({ fontSize: '11px', lineHeight: '14px', fontWeight: 520, letterSpacing: '0.66px', textTransform: 'uppercase' });
     expect(ui?.styles.find((style) => style.name === 'beta')).toBeUndefined();
     // No other style draws capitals.
     const allStyles = tokens.type.groups.flatMap((group) => group.styles as TypeStyle[]);

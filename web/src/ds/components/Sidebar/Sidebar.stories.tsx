@@ -202,7 +202,10 @@ export const Lockup: Story = {
       borderTopWidth: '1px',
       borderTopColor: 'rgba(250, 249, 245, 0.22)',
       backgroundColor: 'rgba(0, 0, 0, 0)',
+      color: 'rgba(250, 249, 245, 0.92)',
       fontSize: '11px',
+      lineHeight: '14px',
+      fontWeight: '520',
       letterSpacing: '0.66px',
       textTransform: 'uppercase',
     });
