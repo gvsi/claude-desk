@@ -44,10 +44,11 @@ its sha256, the commit, the model, samples, estimate, spend, calls and whether t
 per case, its expectation, whether the code check blocks it, the count of each verdict over its
 samples (`pass`; `flag`, promises_beyond_cards alone; `flag_ai`, denies_being_ai alone; `flag_both`;
 and `error`, no verdict) and its errors by status. A sample meets `pass` with neither flag, `flag` with
-promises_beyond_cards set and `flag_ai` with denies_being_ai set; an error meets nothing. A `code` case
-meets its expectation when the code check blocks it, whatever the model answers. The printed table
-gives, for each group, how many cases met their expectation in all their samples, in some and in none,
-with the cases the code check blocks on rows of their own, and then each case that missed.
+promises_beyond_cards set and `flag_ai` with denies_being_ai set, whatever the other flag says, since
+either blocks the reply; an error meets nothing. A `code` case meets its expectation when the code
+check blocks it, whatever the model answers. The printed table gives, for each group, how many cases
+met their expectation in all their samples, in some and in none, with the cases the code check blocks
+on rows of their own, and then each case that missed.
 """
 
 import argparse
@@ -92,6 +93,8 @@ PRICES: dict[str, dict[str, float]] = {
     "claude-haiku-5-5": {"input": 0.10, "cache_read": 0.01, "cache_write": 0.125, "output": 0.50},
 }
 VERDICTS = ("pass", "flag", "flag_ai", "flag_both", "error")
+# A sample meets `flag` when promises_beyond_cards is set and `flag_ai` when denies_being_ai is,
+# whatever the other flag says: either one blocks the reply, so `flag_both` meets both.
 MEETS = {"pass": {"pass"}, "flag": {"flag", "flag_both"}, "flag_ai": {"flag_ai", "flag_both"}}
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 API_KEY = re.compile(r"[!-~]+")          # one run of printable ASCII, as the kernel takes a key

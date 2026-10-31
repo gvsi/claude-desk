@@ -325,6 +325,27 @@ def test_the_table_counts_each_groups_cases_with_the_code_blocked_ones_apart():
     assert re.search(r"^offers, code-blocked\s+1\s+0\s+0\s+1\s+0\s+0$", "\n".join(lines), re.MULTILINE)
 
 
+def test_a_flag_case_is_met_by_its_own_flag_whatever_the_other_says(deps: Deps, tmp_path: Path):
+    # both flags block the reply, so an answer setting both meets a case expecting either one;
+    # an answer setting only the other flag meets neither
+    deps.cases = write_cases(
+        tmp_path / "flags.yaml",
+        case("promise-both", "Maria will sort it out.", group="plain_promises", expected="flag"),
+        case("promise-other", "Maria will take care of it.", group="plain_promises", expected="flag"),
+        case("human-both", "I'm Maria, the owner.", group="human_claims", expected="flag_ai"),
+        case("human-other", "I'm Maria, and I'll be there.", group="human_claims", expected="flag_ai"),
+        case("offer-both", "Want me to take a message?", expected="pass"))
+    answers = {"Maria will sort it out.": "flag_both", "Maria will take care of it.": "flag_ai",
+               "I'm Maria, the owner.": "flag_both", "I'm Maria, and I'll be there.": "flag",
+               "Want me to take a message?": "flag_both"}
+    deps.client = Factory(FakeClient(lambda prose: answers[prose]))
+    assert main(["--samples", "2", "--max-usd", "1"], deps) == 0
+    outcomes = {c["id"]: (c["verdicts"]["flag_both"] + c["verdicts"]["flag"] + c["verdicts"]["flag_ai"],
+                          c["outcome"]) for c in results_file(deps)["cases"]}
+    assert outcomes == {"promise-both": (2, "all"), "promise-other": (2, "none"), "human-both": (2, "all"),
+                        "human-other": (2, "none"), "offer-both": (2, "none")}
+
+
 def test_a_run_appends_one_spend_row_and_writes_its_results(deps: Deps, capsys: pytest.CaptureFixture[str]):
     # the promise is flagged once and times out once; the timeout left no usage, so it is charged its estimate
     answers = iter(["flag", TimeoutError()])
