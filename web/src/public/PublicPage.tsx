@@ -74,11 +74,13 @@ export function PublicPage() {
     if (arrival.idea !== null) setArrival((now) => ({ ...now, idea: null }));
   }, [arrival.read, arrival.idea]);
 
-  // Once: the token leaves the address, which the browser's history replaces rather than adds to.
-  const taken = useRef(false);
+  // Each arrival that brings `try` or `draft` loses them, once: the browser's history replaces
+  // the address rather than adds to it. The guard is the navigation being handled, by its key, so a
+  // later arrival is cleaned as well, and a render that runs the effect twice cleans once.
+  const cleaned = useRef<string | null>(null);
   useEffect(() => {
-    if (taken.current || (!params.has(TRY) && !params.has(DRAFT))) return;
-    taken.current = true;
+    if (cleaned.current === location.key || (!params.has(TRY) && !params.has(DRAFT))) return;
+    cleaned.current = location.key;
     void navigate(
       { pathname: location.pathname, search: withoutTry(location.search), hash: location.hash },
       { replace: true, state: location.state, preventScrollReset: true },

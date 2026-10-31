@@ -1568,6 +1568,24 @@ describe('public chat page', () => {
     await vi.waitFor(() => expect(`${alone.router.state.location.pathname}${alone.router.state.location.search}`).toBe(PAGE));
   });
 
+  it('every_arrival_leaves_the_address', async () => {
+    // Not only the page's first address: each navigation that brings `try` or `draft` loses them.
+    const { screen, router } = await renderRoute(`${PAGE}?try=${handOff()}`, { seed: 'rivera_two_desks' });
+    await expect.element(chatBox(screen)).toHaveValue(IDEA);
+    await vi.waitFor(() => expect(router.state.location.search).toBe(''));
+
+    for (const path of [`${PAGE}?try=customer-list&draft=hello&from=today#about`, `/d/${RIVERA.emergenciesSlug}?draft=hello&try=${crypto.randomUUID()}&from=today#about`]) {
+      await router.navigate(path);
+      await vi.waitFor(() => expect(router.state.location.search, path).toBe('?from=today'));
+      expect(router.state.location.hash).toBe('#about');
+      expect(router.state.historyAction).toBe('REPLACE');
+    }
+    await ready(screen);
+    await frames(10);
+    expect(document.querySelector<HTMLTextAreaElement>('.cd-public-shell__composer textarea')?.value).toBe('');
+    expect(requests('sendMessage')).toEqual([]);
+  });
+
   it('break_it_idea_waits_for_send', async () => {
     const { screen } = await renderRoute(`${PAGE}?try=${handOff()}`);
     const box = chatBox(screen);
