@@ -2024,6 +2024,26 @@ def test_fake_whisper_spares_only_feel_free_and_youre_free_to_a_verb():
                     "Feel free to all of our services.", "Feel free to any flush.", "Feel free to your flush.",
                     "Feel free to new customers.", "Feel free to members.", "Feel free - to all customers."):
         assert "commitment.pattern" in replies(whisper, promise), promise
+    # The reply check reads the words after "free" folded: accents and other marks dropped, each
+    # look-alike letter as the Latin one, an ASCII capital I as l, any dash as a hyphen and any run of
+    # whitespace as one space, so it blocks each of these. The spared word is plain ASCII letters with
+    # no other letter straight after it, and so is the word after "first", so an accented or look-alike
+    # word fires, a verb too (it fails closed). The audiences are read with a capital I for an l, and
+    # with any run of whitespace, dashes and minus signs between "free", "to" and the audience, or
+    # "first" and "time".
+    for promise in ("You're free to \u00e0ll our services.", "You're free to \u0430ll our services.",
+                    "You're free to cust\u00f3mers.", "You're free to ev\u0435ryone.",
+                    "You're free to n\u0435w customers.", "You're free to everyo\u0335ne.",
+                    "You're free to \u00e1sk.",
+                    "You're free to aII customers.", "You're free to famiIy.", "You're free to IocaIs.",
+                    "You're free to cIients.", "You're free to reguIar callers.", "You're free to unIimited flushes.",
+                    "You're free to first\u2013time callers.", "You're free to first\u2010time callers.",
+                    "You're free to first t\u0456me callers.", "You're free to first-tim\u00e9 callers.",
+                    "You're free to first  time callers.",
+                    "Feel free to aII customers.", "Feel free\u2013to\u2013all customers.",
+                    "Feel free \u2014 to all customers.", "Feel free to\u2010all customers.",
+                    "Feel free\u2212to\u2212all customers.", "Feel free to first\u2014time callers."):
+        assert "commitment.pattern" in replies(whisper, promise), ascii(promise)
 
 
 def test_confirm_in_words_spares_only_a_condition():
