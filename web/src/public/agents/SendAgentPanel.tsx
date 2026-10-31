@@ -2,9 +2,9 @@
  * "Send an agent": the built-in agent, Alex Kim's assistant, visits the Desk on a task the visitor
  * picks, under its signed spending limit (`SignedLimitPanel`, from the page's static words). The
  * panel sends it (`sendAgent`) and reads its run each second (`agentRun`) until the run is done,
- * failed or gone. The tasks are offered before a run and again after one ends; while a run is
- * unresolved, and after a start whose answer was lost, none is, so the agent is never sent twice by
- * mistake.
+ * failed or gone. The tasks are offered before a run, under the limit, and again at the end of one
+ * that ended; while a run is unresolved, and after a start whose answer was lost, none is, so the
+ * agent is never sent twice by mistake.
  *
  * The panel's card holds the run and so the Desk's reply cards: it is the one `Card` that
  * `holdsCards`, which only this file may use.
@@ -278,6 +278,12 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
       </Notice>
     );
   }
+  const chips = OFFERS_TASKS.has(status) ? (
+    <SuggestionChips label={copy.tasksLabel} suggestions={DEMO_TASKS.map((t) => DEMO_TASK_COPY[language][t])} onPick={pick} />
+  ) : null;
+  // After a run that finished, failed or is gone, the tasks come at its end, under its last line
+  // (boards 04 and 05); otherwise they sit under the signed limit (board 03).
+  const chipsAtEnd = status === 'done' || status === 'stopped';
   // While a run is starting or exists (or may, after a lost start), the chosen task takes the lead's
   // place (boards 04 and 05). A start that never ran keeps the lead.
   const ran = status === 'sending' || status === 'lost' || runId !== null;
@@ -289,9 +295,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
       <AgentsCardContent title={copy.sendTitle} lead={lead} id={SEND_ID}>
         {/* The signed limit shows in every state, as board 05 draws it during a run. */}
         <SignedLimitPanel {...copy.limit} language={language} />
-        {OFFERS_TASKS.has(status) ? (
-          <SuggestionChips label={copy.tasksLabel} suggestions={DEMO_TASKS.map((t) => DEMO_TASK_COPY[language][t])} onPick={pick} />
-        ) : null}
+        {chipsAtEnd ? null : chips}
         {run !== null && task !== null && run.turns.length > 0 ? (
           <Transcript label={copy.conversation}>
             <RunRows turns={run.turns} task={task} ownerName={ownerName} language={language} />
@@ -300,6 +304,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
         {working ? <LoadingLine>{copy.working}</LoadingLine> : null}
         {status === 'done' ? <SystemLine text={copy.finished} /> : null}
         {notice}
+        {chipsAtEnd ? chips : null}
       </AgentsCardContent>
     </Card>
   );

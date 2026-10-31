@@ -59,6 +59,13 @@ function limitIn(screen: RenderResult, panelName = 'Send an agent', regionName =
   return { values: [...el.querySelectorAll('dd')].map((dd) => dd.textContent), source: el.querySelector('p')?.textContent };
 }
 
+/** Whether `later` comes after `earlier` in the page's order. */
+const follows = (earlier: Element | null | undefined, later: Element | null | undefined): boolean =>
+  earlier != null && later != null && (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+/** The panel's group of task chips. */
+const chipGroup = (screen: RenderResult) => screen.getByRole('region', { name: 'Send an agent' }).getByRole('group', { name: 'Tasks for the agent' }).element();
+
 /** The task chips the panel offers now, by name. */
 const chipsIn = (screen: RenderResult) =>
   screen.getByRole('region', { name: 'Send an agent' }).getByRole('button').elements().map((el) => el.textContent).filter((name) => TASKS.includes(name ?? ''));
@@ -267,6 +274,9 @@ describe('agents page', () => {
     await expect.element(panel.getByText(LEAD, { exact: true })).toBeVisible();
     expect(limitIn(screen)).toEqual({ values: LIMIT_VALUES, source: LIMIT_SOURCE });
     expect(chipsIn(screen)).toEqual(TASKS);
+    // Before a run, the tasks sit under the signed limit.
+    const limitRegion = panel.getByRole('region', { name: 'Signed limit' }).element();
+    expect(follows(limitRegion, chipGroup(screen))).toBe(true);
     await panel.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
 
@@ -276,6 +286,12 @@ describe('agents page', () => {
     expect(panel.element().querySelector('.cd-agents-card__lead')?.textContent).toBe('Book the earliest visit');
     expect(limitIn(screen)).toEqual({ values: LIMIT_VALUES, source: LIMIT_SOURCE });
     expect(chipsIn(screen)).toEqual(TASKS);
+    // In the order boards 04 and 05 draw: the limit, the run, "The agent finished.", then the tasks.
+    const finished = panel.getByText('The agent finished.', { exact: true }).element();
+    const transcript = panel.getByRole('log').element();
+    expect(follows(panel.getByRole('region', { name: 'Signed limit' }).element(), transcript)).toBe(true);
+    expect(follows(transcript, finished)).toBe(true);
+    expect(follows(finished, chipGroup(screen))).toBe(true);
 
     // The agent's requests, built by code: signed, the task first, then "Signed request", numbered.
     const run = panel.getByRole('log', { name: 'Alex Kim’s assistant’s visit' });
@@ -487,6 +503,8 @@ describe('agents page', () => {
     expect(panel.getByText('The agent finished.').elements()).toHaveLength(0);
     await expect.element(book).toBeVisible();
     expect(chipsIn(screen)).toEqual(TASKS);
+    // The tasks come after the stopped line, at the end of the run.
+    expect(follows(panel.getByText(STOPPED, { exact: true }).element(), chipGroup(screen))).toBe(true);
 
     // The run isn't there any more (a 404): the same.
     mockStore.reset('rivera', {});
@@ -494,6 +512,7 @@ describe('agents page', () => {
     await book.click();
     await expect.element(panel.getByText(STOPPED, { exact: true })).toBeVisible();
     expect(chipsIn(screen)).toEqual(TASKS);
+    expect(follows(panel.getByText(STOPPED, { exact: true }).element(), chipGroup(screen))).toBe(true);
 
     // A read the API refuses for good (403, 409, 422) ends the run as stopped too, rather than
     // being read forever.
