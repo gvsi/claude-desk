@@ -272,3 +272,15 @@ evals-key:
 
 evals-results-check:
 	@$(EVALS) python -m evals.run results-check --base $(BASE)
+
+# The soft-promise check measured on the real model. It spends money: every case in
+# evals/calibration/soft_promise.yaml is sent SAMPLES times to the kernel's check, one Haiku 5.5 call
+# on the Claude API each (estimated at $0.0005), for at most MAX_USD dollars, which it needs on the
+# command line or in the environment (the tier 2 default doesn't count). The prompt is this tree's,
+# decisions.py's at PROMPT_REF or PROMPT_FILE's text; LABEL names the run. ANTHROPIC_API_KEY comes from
+# the environment. It writes evals/out/soft-promise/<label>-<time>.json and a row in the shared spend file.
+.PHONY: evals-soft-promise
+SAMPLES ?= 5
+evals-soft-promise:
+	$(if $(filter file undefined,$(origin MAX_USD)),$(error evals-soft-promise spends money: give MAX_USD=<dollars>, the most it may spend))
+	$(EVALS) python -m evals.calibration.soft_promise --samples $(SAMPLES) --max-usd $(MAX_USD)$(if $(PROMPT_REF), --prompt-ref $(PROMPT_REF))$(if $(PROMPT_FILE), --prompt-file $(PROMPT_FILE))$(if $(LABEL), --label $(LABEL))
