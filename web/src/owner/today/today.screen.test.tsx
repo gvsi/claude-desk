@@ -1733,6 +1733,20 @@ describe("Today's unfinished setup", () => {
     expect(performance.now() - startedAt, 'the card read the new step within the Desks\' fresh window').toBeLessThan(5_000);
   });
 
+  it('with_answering_on_the_line_says_nothing_of_answering', async () => {
+    // The Answering switch is separate from setup: Daniel turned Answering on before finishing his
+    // setup, so the card names where he picks up, and says nothing of Answering staying off.
+    const state = await deskAtRules();
+    await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: true } });
+    const { screen } = await renderRoute(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Okafor Plumbing');
+    await expect
+      .element(card.getByText("Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.", { exact: true }))
+      .toBeVisible();
+    expect(card.element().textContent).not.toMatch(/Answering/);
+    await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('unfinished_setup_fits_a_laptop_and_a_phone', async () => {
     // On a laptop "Continue setup" sits at the words' right, level with their top. On a phone the
     // card still comes first, and the button drops under the words, from their left edge, as Today's

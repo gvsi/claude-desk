@@ -48,20 +48,21 @@ export interface DeskSummary {
   answering: boolean;
   /**
    * The Desk's setup interview while it hasn't gone live, so Today can lead back into it; null once
-   * the Desk is live, and for a Desk made without setup. Pending the API's `DeskSummary.setup`
-   * (issue 233): typed here, and optional, until the regenerated client has it. A Desk without it
-   * has no unfinished setup.
+   * the Desk is live, and for a Desk made without setup. Answering is separate: an owner can turn it
+   * on before setup finishes, and the Desk still names its setup. Pending the API's
+   * `DeskSummary.setup` (issue 233): typed here, and optional, until the regenerated client has it.
+   * A Desk without it has no unfinished setup.
    */
   setup?: DeskSetup | null;
 }
 
 /**
  * A Desk's setup interview that hasn't gone live (`DeskSummary.setup`, pending with it): its id,
- * which `/app/setup/{interview_id}` reopens at its step, and the step it stopped at.
+ * which `/app/setup/{interview_id}` reopens at its step, and the step it stopped at, never `live`.
  */
 export interface DeskSetup {
   interview_id: string;
-  step: SetupStep;
+  step: UnfinishedSetupStep;
 }
 
 /** The demo copy this browser's owner cookie names (copies, `me`, `start_over`). */
@@ -436,6 +437,9 @@ export interface RuleChatOut {
 // Setup
 
 export type SetupStep = 'questions' | 'tools' | 'rules' | 'situations' | 'safety_check' | 'preview' | 'live';
+
+/** The steps a setup that hasn't gone live can be at: every step but `live` (`DeskSetup.step`). */
+export type UnfinishedSetupStep = Exclude<SetupStep, 'live'>;
 
 /** The setup interview's seven questions (plan 02b Task 6, `QUESTION_KEYS`). */
 export type QuestionKey =

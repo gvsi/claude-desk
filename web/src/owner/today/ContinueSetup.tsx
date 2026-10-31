@@ -1,9 +1,9 @@
 import { useId } from 'react';
 
-import type { SetupStep } from '../../api/views.ts';
+import type { UnfinishedSetupStep } from '../../api/views.ts';
 import { Button, Card, StatusLabel, Steps } from '../../ds/index.ts';
 import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
-import { CONTINUE_SETUP_COPY, CONTINUE_SETUP_LINES } from './copy.ts';
+import { CONTINUE_SETUP_COPY, continueSetupLine } from './copy.ts';
 
 export interface ContinueSetupProps {
   /** The business's name: the owner's own words. */
@@ -11,16 +11,18 @@ export interface ContinueSetupProps {
   /** The Desk's setup interview, which `/app/setup/{id}` reopens at its step. */
   interviewId: string;
   /** The step it stopped at; a Desk that is live has no card. */
-  step: Exclude<SetupStep, 'live'>;
+  step: UnfinishedSetupStep;
+  /** Whether the Desk answers the public: the owner can turn it on before setup finishes. */
+  answering: boolean;
 }
 
 /**
  * Today's card for a Desk whose setup isn't finished, at the top of the page's column: "Not live
- * yet", whose setup it is, where the owner picks up and that Answering stays off until then,
- * "Continue setup" back into the interview, and the setup steps at the one it stopped at. The
- * button sits at the words' right, and under them on a phone.
+ * yet", whose setup it is, where the owner picks up and, while Answering is off, that it stays off
+ * until then, "Continue setup" back into the interview, and the setup steps at the one it stopped
+ * at. The button sits at the words' right, and under them on a phone.
  */
-export function ContinueSetup({ business, interviewId, step }: ContinueSetupProps) {
+export function ContinueSetup({ business, interviewId, step, answering }: ContinueSetupProps) {
   const titleId = useId();
   return (
     <section className="cd-continue-setup" aria-labelledby={titleId}>
@@ -35,7 +37,7 @@ export function ContinueSetup({ business, interviewId, step }: ContinueSetupProp
                 {CONTINUE_SETUP_COPY.title}
                 <span data-copy="user">{business}</span>
               </h2>
-              <p className="cd-continue-setup__line cd-type-body">{CONTINUE_SETUP_LINES[step]}</p>
+              <p className="cd-continue-setup__line cd-type-body">{continueSetupLine(step, answering)}</p>
             </div>
             <div className="cd-continue-setup__action">
               <Button variant="primary" href={`/app/setup/${encodeURIComponent(interviewId)}`}>

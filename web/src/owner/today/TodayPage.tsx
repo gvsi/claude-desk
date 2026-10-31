@@ -219,8 +219,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
             {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
           </p>
         </div>
-        {setup !== null && setup.step !== 'live' ? (
-          <ContinueSetup business={desk.business_name} interviewId={setup.interview_id} step={setup.step} />
+        {setup !== null ? (
+          <ContinueSetup business={desk.business_name} interviewId={setup.interview_id} step={setup.step} answering={desk.answering} />
         ) : null}
         <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
         {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
