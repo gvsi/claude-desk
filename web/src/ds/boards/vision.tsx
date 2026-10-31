@@ -38,8 +38,8 @@ import { MAIN_LINE, OWNER_HREFS, brandOf } from './parts.tsx';
 
 import './vision.css';
 
-/** Where every vision page's "Back to your Desk" goes in the stories: the owner's Today. */
-export const VISION_BACK_HREF = '#today';
+/** Where every vision page's "Back to Vision" goes in the stories: the Vision article. */
+export const VISION_BACK_HREF = '#vision';
 
 /** The receipts' sources, by what each reports: a checked reply, or an action in its state. */
 const CHECKED: ReceiptSource = { kind: 'reply', handoff: false };

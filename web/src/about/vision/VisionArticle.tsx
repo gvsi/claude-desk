@@ -5,18 +5,24 @@
  * prototype.
  *
  * The phone screens are pictures made of live text: each is read by its label, with its caption under it. The
- * cover band under the headline peeks at the same four screens and is decoration only. The page is static: its
- * words come from `text.ts`, nothing on it moves, and it makes no request.
+ * cover band under the headline peeks at the same four screens and is decoration only, as are their tops on the
+ * picture cards that end the article, each a link to its idea's vision page. As one of the About set, it carries
+ * the reading pages' switch and their way into the prototype in its own bar, and "Read next" at its end. The page
+ * is static: its words come from `text.ts`, nothing on it moves, and it makes no request.
  */
-import { Fragment } from 'react';
+import { Fragment, useId, useSyncExternalStore } from 'react';
 import { Link } from 'react-router';
 
 import { ConceptFooter } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { prototypeHref } from '../prototypeHref.ts';
+import { AboutSwitch } from '../AboutSwitch.tsx';
+import { readNext } from '../links.ts';
+import { PrototypeLink } from '../PrototypeLink.tsx';
 import { useNoIndex } from '../useNoIndex.ts';
+import { usePagePlace } from '../usePagePlace.ts';
 import {
   ARTICLE,
+  PICTURE_CARDS,
   READ_MINUTES,
   SCREENS,
   SECTIONS,
@@ -29,6 +35,19 @@ import {
 } from './text.ts';
 
 import './VisionArticle.css';
+
+/** The article's phone layout (VisionArticle.css): the switch leaves the bar for a row under it. */
+const NARROW = '(max-width: 720px)';
+
+function subscribeNarrow(onChange: () => void): () => void {
+  const query = window.matchMedia(NARROW);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+function isNarrow(): boolean {
+  return window.matchMedia(NARROW).matches;
+}
 
 /** What happened, under the message it belongs to, with a dot in its tone. */
 function Receipt({ tone, text }: { tone: 'done' | 'held' | 'declined'; text: string }) {
@@ -154,8 +173,8 @@ function Owner({ screen }: { screen: OwnerScreen }) {
 }
 
 /**
- * A phone holding a screen. In the article it is a picture, read by its label; in the cover band, which is
- * hidden from screen readers, it is decoration with no label of its own.
+ * A phone holding a screen. In the article it is a picture, read by its label; in the cover band and at the top
+ * of a picture card, both hidden from screen readers, it is decoration with no label of its own.
  */
 function Phone({ screen, decorative = false }: { screen: Screen; decorative?: boolean }) {
   const picture = decorative ? {} : { role: 'img', 'aria-label': screen.label };
@@ -198,24 +217,71 @@ function SectionText({ heading, passages }: Pick<Section, 'heading' | 'passages'
   );
 }
 
+/**
+ * "See each one up close": a card for each idea, two by two at every width. Each card is one link to the idea's
+ * vision page, named by the idea and its line; the top of the idea's phone above them is decoration.
+ */
+function PictureCards() {
+  const headingId = useId();
+  const { heading, lead, cards } = PICTURE_CARDS;
+  return (
+    <section className="va-body va-cards" aria-labelledby={headingId}>
+      <h2 className="va-h2" id={headingId}>
+        {heading}
+      </h2>
+      <p className="va-cards__lead">{lead}</p>
+      <ul className="va-cards__grid">
+        {cards.map(({ screen, name, line, href }) => (
+          <li key={href} className="va-cards__item">
+            <Link className="va-card" to={href}>
+              <div className="va-card__top" aria-hidden="true">
+                <Phone screen={screen} decorative />
+              </div>
+              <span className="va-card__words">
+                <span className="va-card__name">{name}</span> <span className="va-card__line">{line}</span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** "Read next" at the end: the next page in the About set, its title and summary, the whole card one link. */
+function ReadNext() {
+  const next = readNext('vision');
+  return (
+    <div className="va-next">
+      <p className="va-next__label" data-next-label="">
+        Read next
+      </p>
+      <Link className="va-next__link" to={next.route}>
+        {next.title}
+      </Link>
+      <p className="va-next__summary">{next.summary}</p>
+    </div>
+  );
+}
+
 export function VisionArticle() {
   // The tab names the page while it is open; search engines are asked not to list it, as the other About pages.
   useDocumentTitle(inApp(ARTICLE.kicker));
   useNoIndex();
-  // Where the reading pages' way back goes: the last Desk this browser opened, or the prototype's start.
-  const back = prototypeHref();
+  usePagePlace('vision');
+  const compact = useSyncExternalStore(subscribeNarrow, isNarrow, () => false);
+  // The About set's switch, the article marked as the page on show: in the bar, or under it on a phone, where it
+  // scrolls away with the page as the reading pages' does.
+  const about = <AboutSwitch current="vision" className="va-switch" linkClassName="va-switch__link" />;
 
   return (
     <div className="vision-article">
       <header className="va-bar">
         <span className="va-bar__brand">Claude Desk</span>
-        <span className="va-bar__here" aria-current="page">
-          {ARTICLE.kicker}
-        </span>
-        <Link className="va-bar__back" to={back}>
-          {ARTICLE.back}
-        </Link>
+        {compact ? null : about}
+        <PrototypeLink />
       </header>
+      {compact ? about : null}
       <main>
         <article>
           <header className="va-hero">
@@ -248,14 +314,13 @@ export function VisionArticle() {
               {figure ? <ArticleFigure figure={figure} /> : null}
             </Fragment>
           ))}
+          <PictureCards />
         </article>
       </main>
       <footer className="va-end">
         <hr className="va-end__rule" />
         <p>{ARTICLE.end}</p>
-        <p>
-          <Link to={back}>{ARTICLE.back}</Link>
-        </p>
+        <ReadNext />
         <ConceptFooter />
       </footer>
     </div>
