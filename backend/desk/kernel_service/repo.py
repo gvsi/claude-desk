@@ -90,7 +90,15 @@ during C2 waits for it to commit, up to the provider's deadline (`payments.PROVI
 2 s), and then runs its own normalize and review. A completion that arrives during a decision
 waits for the decision's normalize (a refund's charge read at most `payments.READ_DEADLINE_S`,
 1 s; other normalize steps only read rows) and review (4 s), then has up to 2 s at the provider:
-about 7 s in all, past the API client's 6 s (`desk.api.kernel_client.DEFAULT_TIMEOUT_S`). The
+about 7 s. A decision isn't the only request that holds the row across a slow call: any session
+request that proves its token writes the row's `last_seen_at`, which holds it until that
+request's transaction commits, and an execution's T1 does so through its re-list of a connected
+tool (`mcp_client.MCP_DEADLINE_S`, 2 s) and its re-normalize (a refund's charge read, 1 s). A
+decision's `FOR UPDATE` waiting behind such a T1 is queued ahead of a completion's `FOR SHARE`, so
+the completion can wait about 3 s more: about 10 s in the worst case, past the API client's 6 s
+(`desk.api.kernel_client.DEFAULT_TIMEOUT_S`). C2 also holds the link's quote across its provider
+call, as a mandate charge's T2 holds its own (step 7), so a completion and a charge of one quote
+take turns as well, the second waiting about the first's 2 s at the provider. The
 API can then give up on a completion that goes on to finish. Every path still fails closed: C1
 commits the completion's marker before anything is sent, so the link is paid at most once, and a
 completion nobody saw finish is settled from that marker at the provider by the next read or by
