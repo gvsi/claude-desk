@@ -113,30 +113,38 @@ const CONFLICT = fail(409, 'conflict');
  * 3 vans" name nothing.
  */
 const RUNS = /\b(?:I|[Ww]e)\s+(?:run|own)\s+([A-ZÀ-Ý][^,]*)/;
+/** The same in Spanish: "Tengo la Panadería Ana", "Tenemos Óptica Inés". */
+const TENGO = /\b[Tt]en(?:go|emos)\s+(?:(?:la|el|las|los|una?)\s+)?([A-ZÀ-Ý][^,]*)/;
 /** The words for a business in "my shop is X" and "X is my shop". */
 const SHOP = String.raw`(?:business|shop|store|company|bakery|caf[eé]|restaurant|salon|studio|firm|practice|clinic)`;
+/** The same in Spanish, for "X es mi negocio". */
+const TIENDA = String.raw`(?:negocio|tienda|panader[ií]a|empresa)`;
 /** "a bakery called X" or "named X". */
 const CALLED = /\b(?:called|named)\s+([A-ZÀ-Ý0-9][^,]*)/;
 /** "My shop is X" or "Our business is called X". */
 const MY_SHOP_IS = new RegExp(String.raw`\b(?:[Mm]y|[Oo]ur)\s+${SHOP}\s+is\s+(?:(?:called|named)\s+)?([A-ZÀ-Ý0-9][^,]*)`);
-/** A sentence that starts "X is my shop" (or "our business", "my café", …). */
-const IS_MY = new RegExp(String.raw`^([A-ZÀ-Ý0-9].*?)\s+is\s+(?:my|our)\s+${SHOP}(?![A-Za-zÀ-ÿ])`);
+/** A sentence that starts "X is my shop" (or "our business", "my café", "es mi negocio", …). */
+const IS_MY = new RegExp(String.raw`^([A-ZÀ-Ý0-9].*?)\s+(?:is\s+(?:my|our)\s+${SHOP}|es\s+(?:mi|nuestr[oa])\s+${TIENDA})(?![A-Za-zÀ-ÿ])`);
 
-/** A greeting that can open an introduction ("Hi, I'm Ana"). */
-const GREETING = String.raw`(?:[Hh]i|[Hh]ello|[Hh]ey)\b[\s,]*`;
-/** The words the owner introduces themselves with: "I'm", "I am", "My name is". */
-const INTRODUCING = String.raw`(?:I(?:'|’)?m|I\s+am|[Mm]y\s+name\s+is)`;
+/** A greeting that can open an introduction ("Hi, I'm Ana", "Hola, soy Ana"). */
+const GREETING = String.raw`(?:[Hh]i|[Hh]ello|[Hh]ey|[Hh]ola)\b[\s,]*`;
+/**
+ * The words the owner introduces themselves with: "I'm", "I am", "My name is", and in Spanish "Soy",
+ * "Me llamo", "Mi nombre es". A business whose name starts with the English word "Soy" ("Soy
+ * Candle Co.") reads as a Spanish introduction; the mock leaves that limit.
+ */
+const INTRODUCING = String.raw`(?:I(?:'|’)?m|I\s+am|[Mm]y\s+name\s+is|[Ss]oy|[Mm]e\s+llamo|[Mm]i\s+nombre\s+es)`;
 /** A sentence of the owner introducing themselves ("I'm Ana", "My name is Ana", "Hi, I'm Ana"), or a greeting alone. */
 const INTRODUCTION = new RegExp(String.raw`^(?:${GREETING})?(?:${INTRODUCING}\b|$)`);
 /** The owner's first name where they introduce themselves. */
 const OWNER = new RegExp(String.raw`\b${INTRODUCING}\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]{0,39})`);
-/** A sentence about the owner or the work, not a name: it starts "I", "We", "My", "Our", "This" or "It". */
-const FIRST_PERSON = /^(?:I|We|My|Our|This|It)\b/;
+/** A sentence about the owner or the work, not a name: it starts "I", "We", "My", "Our", "This" or "It" (or "Tengo", "Mi", …). */
+const FIRST_PERSON = /^(?:I|We|My|Our|This|It|Yo|Mi|Nuestr[oa]|Tengo|Tenemos|Esto|Este|Esta)\b/;
 
 /** What follows an introduction in its sentence: "Hi, I'm Ana and Ana's Bakery is my shop" → "Ana's Bakery is my shop". */
-const AFTER_INTRODUCTION = /(?:,\s*|\s+)and\s+(.*)$/;
+const AFTER_INTRODUCTION = /(?:,\s*|\s+)(?:and|y)\s+(.*)$/;
 /** A word that points at the business without naming it ("This is my bakery"). */
-const PRONOUN = /^(?:This|That|It|Here|There)\b/;
+const PRONOUN = /^(?:This|That|It|Here|There|Esto|Eso|Este|Esta)\b/;
 /** A day of the week, in full or short ("Monday", "Sundays", "Mon", "Thurs"). */
 const DAY = String.raw`(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)days?|Mon|Tues?|Wed|Thu(?:rs?)?|Fri|Sat|Sun)`;
 /**
@@ -152,11 +160,19 @@ const SCHEDULE = new RegExp(
  * that starts a new clause ("and we bake …"); an "and" inside the name stays ("Rivera Plumbing and Heating").
  */
 const NAME_END = /\s(?:in|on|at|near|with|for|since|from|out\s+of)\s|,?\s+and\s+(?:I|[Ww]e|[Mm]y|[Oo]ur)\b/;
-const nameEnd = (name: string): string => name.split(NAME_END)[0] ?? name;
+/** The same in Spanish: before " en ", " con ", " desde ", " para " or " cerca ". */
+const FIN_DEL_NOMBRE = /\s(?:en|con|desde|para|cerca)\s/;
+/** The phrases naming the business, each with where its name ends. */
+const PHRASES: readonly [phrase: RegExp, end: RegExp][] = [
+  [RUNS, NAME_END],
+  [TENGO, FIN_DEL_NOMBRE],
+  [CALLED, NAME_END],
+  [MY_SHOP_IS, NAME_END],
+];
 
 /** The name a sentence gives the business with a phrase naming it, or null. */
 function namedIn(sentence: string): string | null {
-  const names = [...[RUNS, CALLED, MY_SHOP_IS].map((phrase) => phrase.exec(sentence)?.[1]).map((name) => name && nameEnd(name)), IS_MY.exec(sentence)?.[1]];
+  const names = [...PHRASES.map(([phrase, end]) => phrase.exec(sentence)?.[1]?.split(end)[0]), IS_MY.exec(sentence)?.[1]];
   return names.find((name): name is string => name !== undefined && !PRONOUN.test(name) && !SCHEDULE.test(name)) ?? null;
 }
 
@@ -194,7 +210,7 @@ function naming(sentences: readonly string[]): { at: number; name: string } | nu
   return null;
 }
 
-/** The owner's first name, from "I'm Maria", "I am Maria" or "My name is Maria" in the description; null when it gives none. */
+/** The owner's first name, from "I'm Maria", "My name is Maria", "Soy Maria" and the like in the description; null when it gives none. */
 function ownerNameOf(description: string): string | null {
   return OWNER.exec(description)?.[1] ?? null;
 }

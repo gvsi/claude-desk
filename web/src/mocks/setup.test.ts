@@ -193,3 +193,29 @@ describe('the owner and the line about the business, from the description', () =
     for (const [description, about] of cases) expect((await started(description)).about, description).toBe(about);
   });
 });
+
+describe('a description in Spanish', () => {
+  it('spanish_introductions_and_phrases_are_read', async () => {
+    const cases: [string, string, string][] = [
+      ['Soy Ana. Tengo la Panadería Ana en Oakland. Pan de masa madre.', 'Panadería Ana', 'Thanks, Ana.'],
+      ['Me llamo Ana. Panadería Ana es mi negocio.', 'Panadería Ana', 'Thanks, Ana.'],
+      ['Hola, soy Ana. Panadería Ana. Pan y pasteles por encargo.', 'Panadería Ana', 'Thanks, Ana.'],
+      ['Mi nombre es Inés. Tenemos Óptica Inés con dos tiendas.', 'Óptica Inés', 'Thanks, Inés.'],
+      ['Soy Inés y Café Inés es nuestra tienda.', 'Café Inés', 'Thanks, Inés.'],
+      ['Hola, soy Ana. Tengo una panadería en Oakland.', 'Your business', 'Thanks, Ana.'],
+      // The UI tester's case: the name has accents and a "y" of its own, and the owner is still Inés.
+      [
+        "I'm Inés, and I run Panadería Inés y Compañía de Repostería Artesanal in Oakland.",
+        'Panadería Inés y Compañía de Repostería Artesanal',
+        'Thanks, Inés.',
+      ],
+      // Still cut to 60 characters.
+      ['Soy Inés. Tengo Panadería Inés y Compañía de Repostería Artesanal de la Bahía de San Francisco.', 'Panadería Inés y Compañía de Repostería Artesanal de la Bahí', 'Thanks, Inés.'],
+    ];
+    for (const [description, business, greeting] of cases) {
+      const { business: named, first } = await started(description);
+      expect(named, description).toBe(business);
+      expect(first?.slice(0, greeting.length), description).toBe(greeting);
+    }
+  });
+});
