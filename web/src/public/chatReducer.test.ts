@@ -301,7 +301,76 @@ describe('chatReducer', () => {
     expect(liveOf(run(events([ownerJoined], 5), read))).toEqual([false, true]);
   });
 
-  it('receipt_outcomes_replace_unknown_live_and_after_reload', () => {
+  it('approved_replaces_waiting_then_the_outcome_joins_below_it_live', () => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const approved: StatusEvent = { ...held, type: 'receipt', state: 'approved', visitor_plain: rivera.decisions.approved.visitor_plain, ledger_seq: 20 };
+    const executed: StatusEvent = { ...held, type: 'resolved', state: 'executed', visitor_plain: rivera.decisions.executed.visitor_plain, ledger_seq: 21 };
+    const waiting = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events([held, handoff, { type: 'turn_end' }])]);
+    const allowed = run(events([approved], 4), waiting);
+    expect(allowed.rows[1]?.receipts).toEqual([receiptFromEvent(handoff), receiptFromEvent(approved)]);
+    // Even after another message, both receipts stay under the original reply.
+    const finished = run(events([quoteMessage, executed], 5), allowed);
+    expect(finished.rows.map((row) => row.receipts)).toEqual([
+      [], [receiptFromEvent(handoff), receiptFromEvent(approved), receiptFromEvent(executed)], [receiptFromEvent(quoteMessage)],
+    ]);
+    expect(finished.openHolds).toEqual([]);
+    // The same placement works before a reply and before any row exists.
+    expect(run(events([held, approved, executed])).leading).toEqual([receiptFromEvent(approved), receiptFromEvent(executed)]);
+    const pending = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events([held, approved, executed])]);
+    expect(pending.pending).toEqual([receiptFromEvent(approved), receiptFromEvent(executed)]);
+  });
+
+  it('approved_then_executed_stay_under_the_same_message_after_reload', () => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const approved: StatusEvent = { ...held, type: 'receipt', state: 'approved', visitor_plain: rivera.decisions.approved.visitor_plain, ledger_seq: 20 };
+    const executed: StatusEvent = { ...held, type: 'resolved', state: 'executed', visitor_plain: rivera.decisions.executed.visitor_plain, ledger_seq: 21 };
+    const evs: SseEvent[] = [held, handoff, { type: 'turn_end' }, approved, executed, { type: 'writing' }, quoteMessage, { type: 'turn_end' }];
+    const live = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events(evs)]);
+    const reloaded = run([{ type: 'history', transcript: transcript(8, [
+      visitorText(1, 'Can I get 10% off?'), { ...item(2, 'status'), event: held }, { ...item(3, 'delivered'), event: handoff },
+      { ...item(4, 'status'), event: approved }, { ...item(5, 'status'), event: executed }, { ...item(6, 'delivered'), event: quoteMessage },
+    ]) }]);
+    const expected = [[], [receiptFromEvent(handoff), receiptFromEvent(approved), receiptFromEvent(executed)], [receiptFromEvent(quoteMessage)]];
+    expect(live.rows.map((row) => row.receipts)).toEqual(expected);
+    expect(reloaded.rows.map((row) => row.receipts)).toEqual(expected);
+    expect(reloaded.openHolds).toEqual([]);
+    expect(run(events(evs), reloaded)).toEqual(reloaded);
+    // A replay with newer stream seqs is also matched by the decision and ledger identities.
+    expect(run(events([held, approved, executed], 9), reloaded).rows).toEqual(reloaded.rows);
+  });
+
+  it('reload_holding_approved_attaches_the_stream_outcome_below_it', () => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const approved: StatusEvent = { ...held, type: 'receipt', state: 'approved', visitor_plain: rivera.decisions.approved.visitor_plain, ledger_seq: 20 };
+    const unknown: StatusEvent = { ...held, type: 'resolved', state: 'unknown', visitor_plain: rivera.decisions.unknown.visitor_plain, ledger_seq: 21 };
+    const executed: StatusEvent = { ...held, type: 'resolved', state: 'executed', visitor_plain: rivera.decisions.executed.visitor_plain, ledger_seq: 22 };
+    const reloaded = run([{ type: 'history', transcript: transcript(4, [
+      visitorText(1, 'Can I get 10% off?'), { ...item(2, 'status'), event: held }, { ...item(3, 'delivered'), event: handoff },
+      { ...item(4, 'status'), event: approved },
+    ]) }]);
+    const finished = run(events([executed], 5), reloaded);
+    const expected = [[], [receiptFromEvent(handoff), receiptFromEvent(approved), receiptFromEvent(executed)]];
+    expect(finished.rows.map((row) => row.receipts)).toEqual(expected);
+    expect(finished.openHolds).toEqual([]);
+    // An uncertain execution can still become final without losing approval or keeping unknown.
+    const confirmed = run(events([unknown, executed], 5), reloaded);
+    expect(confirmed.rows.map((row) => row.receipts)).toEqual(expected);
+    expect(confirmed.openHolds).toEqual([]);
+  });
+
+  it('duplicate_approved_and_replayed_statuses_add_nothing', () => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const approved: StatusEvent = { ...held, type: 'receipt', state: 'approved', visitor_plain: 'La autorización llegó', ledger_seq: 20 };
+    const executed: StatusEvent = { ...held, type: 'resolved', state: 'executed', visitor_plain: rivera.decisions.executed.visitor_plain, ledger_seq: 21 };
+    const allowed = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events([held, handoff, approved])]);
+    expect(run(events([approved], 4), allowed).rows).toEqual(allowed.rows);
+    const finished = run(events([executed], 5), allowed);
+    expect(finished.rows[1]?.receipts).toEqual([receiptFromEvent(handoff), receiptFromEvent(approved), receiptFromEvent(executed)]);
+    expect(run(events([held, approved, executed], 6), finished).rows).toEqual(finished.rows);
+    expect(run(events([held, handoff, approved, approved, executed]), finished)).toEqual(finished);
+  });
+
+  it('unknown_is_replaced_by_executed_live_and_after_reload', () => {
     const unknown: StatusEvent = {
       ...quoteReceipt,
       type: 'receipt',
@@ -343,7 +412,7 @@ describe('chatReducer', () => {
     expect(receipts(run(events([unknown, executed], 6), finished))).toEqual(expected);
   });
 
-  it('later_statuses_replace_their_hold', () => {
+  it('cancelled_replaces_waiting_live_and_after_reload', () => {
     const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
     const cancelled: StatusEvent = { ...held, type: 'resolved', state: 'cancelled', visitor_plain: 'Cancelled', ledger_seq: 9 };
     const r = receiptFromEvent;
@@ -385,7 +454,7 @@ describe('chatReducer', () => {
     expect(reloaded.openHolds).toEqual([]);
   });
 
-  it('replaces_a_hold_that_resolves_twice_live_and_after_reload', () => {
+  it('unknown_then_executed_each_replace_waiting_without_approval', () => {
     const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
     const unknown: StatusEvent = {
       ...held, type: 'resolved', state: 'unknown', visitor_plain: rivera.decisions.unknown.visitor_plain, ledger_seq: 20,
@@ -424,7 +493,7 @@ describe('chatReducer', () => {
     expect(reloaded.openHolds).toEqual([]);
   });
 
-  it.each(['executed', 'denied', 'expired'] as const)('replaces_a_hold_with_its_%s_outcome_live_and_after_reload', (state) => {
+  it.each(['executed', 'denied', 'expired'] as const)('without_approval_%s_replaces_waiting_live_and_after_reload', (state) => {
     const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
     const decision = rivera.decisions[state];
     const resolved: StatusEvent = {
