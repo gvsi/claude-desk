@@ -3,9 +3,11 @@
     uv run python -m scripts.prove_presets          # make proofs: prove each set and write its report
     uv run python -m scripts.prove_presets --check  # make check-presets: prove each set again and compare
 
-Each set is compiled over the profiles a new Desk enables (the registered native adapters) and the
-Desk schema, at the money cap it ships at (`activation.SHIPPED_CAPS`: the Rivera seed at its $500,
-the presets at 0), twice, to show its hashes are deterministic, then proved with `desk-prove`
+Each set is compiled over the profiles a Desk made from it enables (`activation.shipped_profiles`:
+the registered native adapters, and for the Rivera seed also both mock payments tools pinned at the
+hashes of the server's default definitions, so no server runs) and that Desk's schema, at the money
+cap it ships at (`activation.SHIPPED_CAPS`: the Rivera seed at its $500, the presets at 0), twice,
+to show its hashes are deterministic, then proved with `desk-prove`
 (`DESK_PROVE`, else `desk-prove` on PATH; cvc5 through `CVC5` or PATH). A report is written only
 when all seven obligations hold. `--check` writes nothing and exits 1 unless every fresh report
 holds and equals the shipped file exactly, so a missing, stale, failing or hand-edited report fails.
@@ -49,11 +51,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true",
                         help="prove again and compare with the shipped reports, writing nothing")
     args = parser.parse_args(argv)
-    profiles = activation.shipped_profiles()
     ok = True
     for preset, cards in activation.SHIPPED_PRESETS.items():
         path = activation.PROOFS_DIR / f"{preset}.json"
-        report = asyncio.run(prove_set(preset, cards, profiles, activation.SHIPPED_CAPS[preset]))
+        report = asyncio.run(prove_set(preset, cards, activation.shipped_profiles(preset),
+                                       activation.SHIPPED_CAPS[preset]))
         if not activation.proved(report.proof):           # the kernel's own activation test
             print(f"{preset}: not proved ({failing_checks(report)})", file=sys.stderr)
             ok = False

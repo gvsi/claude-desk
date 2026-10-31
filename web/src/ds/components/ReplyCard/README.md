@@ -29,6 +29,7 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 | Template | Fields the card reads |
 | --- | --- |
 | `quote`, `charges` | `title`, `lines` |
+| `link_cancelled` | `title` (the kernel's one line, from the owner's display name; no lines and no fact) |
 | `booking_options` | `title`, then one line and one option per open time |
 | `booking_confirmed` | `title` (the date), `lines` ("Arriving {start} to {end}", "With {owner}"; no booking ID) |
 | `hours` | `title` (the first window), `lines` (any more windows) |
@@ -42,6 +43,7 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 
 - Every card about money moving always says "Test payment, no money moves" / "Pago de prueba, no se mueve dinero". `MONEY_TEMPLATES` lists them: `payment_link`, `payment_confirmed`, `charge_confirmed` and `refund_issued`. `chrome.test.ts` fails if one of them lacks the note in either language, or if a template outside the list carries it, so a new money card goes in the list.
 - `payment_link` ends with a secondary "Open payment page" button. `document_link` ends with a primary "Download" button. Both go to the proxied path, and the path is never shown as text.
+- `link_cancelled` has no chrome in `CARD_CHROME` yet, so `ReplyCard` shows its block as a template this build doesn't know. The public chat draws it as `LinkCancelledCard` (below), with `LINK_CANCELLED_CHROME`.
 
 ## A vision page's Download (`inertDownload`)
 
@@ -63,7 +65,7 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 - `language`: the event's language, or the public page's `?lang=`.
 - Its chrome is `LINK_CANCELLED_CHROME`: "Payment link cancelled" / "Enlace de pago cancelado", with the payment link's `card` icon. It has no test-payment note, since no money moved, and no link or button, since the link is gone.
 - The line is the card's headline, in `section` type, as `ReplyCard` shows a block's `title`.
-- It takes the line, not a `CardBlock`, because `link_cancelled` isn't a `ClauseTemplate` in the generated contract yet. When the kernel payments contract (plan 01c) adds it, the chrome moves into `CARD_CHROME` and `ReplyCard` shows the block itself.
+- It takes the line, not a `CardBlock`: the kernel's `link_cancelled` block is that one line as its `title`, with no lines and no fact. When the cancelled-link card's own change gives the template its chrome, it moves into `CARD_CHROME` and `ReplyCard` shows the block itself.
 
 ## Why there's no date tile or price column
 

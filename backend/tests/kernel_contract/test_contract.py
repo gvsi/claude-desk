@@ -1461,15 +1461,24 @@ LINK_ROUTES = ("GET /payment_links/{token}", "POST /payment_links/{token}/comple
                "POST /payment_links/{token}/cancel")
 
 
-async def issue_payment_link(view: CredentialView, session_id: str, item: str, n: int) -> tuple[str, ExecResult]:
-    """A payment link for the session's own quote of one `item`, under the Rivera seed's `rv-link` card: the token in
-    its card's `href`, and the link's execution."""
+async def issue_payment_link(view: CredentialView, session_id: str, item: str, n: int, *,
+                             owner: CredentialView | None = None) -> tuple[str, ExecResult]:
+    """A payment link for the session's own quote of one `item`, under the Rivera seed's `rv-link` card, which allows
+    a link only with the reviewer's pass: the token in its card's `href`, and the link's execution. The fake kernel
+    has no reviewer and allows it. A kernel whose reviewer gives no review (the real kernel's offline reviewer, as
+    `make kernel-contract` runs it) holds it instead, and `owner`, given for that kernel, approves it once, so the
+    approved execution issues the link."""
     quoted = await execute(view, await decide(view, session_id, 0, f"call-quote-{n}", "native.quote",
                                               quote_args(item)), 0)
     linked = await decide(view, session_id, 0, f"call-link-{n}", "native.payment_link",
                           {"quote_id": quoted.model_view["quote_id"]})
-    assert linked.state == "allowed" and linked.action.amount_cents == 2000
-    issued = await execute(view, linked, 0)
+    assert linked.state == ("held" if owner is not None else "allowed") and linked.action.amount_cents == 2000
+    if owner is not None:
+        approved = await answer(owner, linked.decision_id, "allow_once")
+        assert approved.decision.state == "executed" and approved.execution is not None
+        issued = approved.execution
+    else:
+        issued = await execute(view, linked, 0)
     (fact,) = issued.facts
     assert fact.kind == "payment_link" and set(issued.model_view) == {"fact_id", "title", "amount_cents"}
     verdict = await cite(view, session_id, 0, "Here is your payment link.", "payment_link", fact.fact_id)
@@ -1489,17 +1498,21 @@ async def test_payment_link_completes_once(kernel, ro_read):
     and answers with the `payment_confirmed` verdict for the link's session, signed at its current generation; once
     paid, completing or cancelling it again is 409 `conflict` and it reads `paid`. A link cancelled at checkout pays
     nothing and has no verdict. A token that names no link is 404 `not_found` on every route."""
-    http, ro_schema, _ = kernel
+    http, ro_schema, state = kernel
     copy = await new_copy(http)
     created = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
     view, session_id = http.session(created.session_token), created.state.session_id
     deposit = item_id(ro_read, ro_schema, copy, "Service call deposit")
-    (paying, issued), (cancelling, _) = [await issue_payment_link(view, session_id, deposit, n) for n in (1, 2)]
+    owner = http.owner(copy.owner_token) if state is None else None      # the real kernel holds it for the owner
+    (paying, issued), (cancelling, _) = [await issue_payment_link(view, session_id, deposit, n, owner=owner)
+                                         for n in (1, 2)]
     get, complete, cancel = LINK_ROUTES
 
     shown = await checkout(http, get, paying)
     assert (shown.state, shown.amount_cents, shown.language) == ("issued", 2000, "en")
     assert shown.title == issued.model_view["title"]
+    # the business as its public page names it; a stranger's link names no customer and was cancelled by nothing
+    assert (shown.business_name, shown.customer_name, shown.cancel_reason) == ("Rivera Plumbing", None, None)
     paid = await checkout(http, complete, paying)
     assert (paid.state, paid.session_id) == ("paid", session_id)
     assert paid.verdict is not None and paid.verdict.ok and paid.verdict.generation == created.state.generation
@@ -1512,9 +1525,11 @@ async def test_payment_link_completes_once(kernel, ro_read):
     assert (cancelled.state, cancelled.session_id, cancelled.verdict) == ("cancelled", session_id, None)
     assert await refused(checkout(http, complete, cancelling)) == (409, "conflict")
     assert (await checkout(http, get, cancelling)).state == "cancelled"
-    links = ro_read(ro_schema, copy.copy_id, "SELECT state, amount_cents FROM {ro}.payment_links WHERE session_id = %s"
-                                             " ORDER BY state DESC", (session_id,))
-    assert links == [{"state": "paid", "amount_cents": 2000}, {"state": "cancelled", "amount_cents": 2000}]
+    links = ro_read(ro_schema, copy.copy_id, "SELECT state, amount_cents, action_id FROM {ro}.payment_links"
+                                             " WHERE session_id = %s ORDER BY state DESC", (session_id,))
+    assert [{key: link[key] for key in ("state", "amount_cents")} for link in links] == [
+        {"state": "paid", "amount_cents": 2000}, {"state": "cancelled", "amount_cents": 2000}]
+    assert links[0]["action_id"] == issued.action_id      # the execution that issued the link
 
     for route in LINK_ROUTES:
         assert await refused(checkout(http, route, "no-such-link-" + paying[:8])) == (404, "not_found")
@@ -1528,11 +1543,13 @@ async def test_paid_link_is_ledgered_paid_once(kernel, ro_read):
     """The owner's reports time a link's payment by its ledger entries: completing a link writes one `payment` entry
     `{link_id, state: "paid"}` for it, and each refused retry after that (completing or cancelling the paid link again)
     is ledgered `payment` for the link marked `refused: true`, so no retry reads as another move to `paid`."""
-    http, ro_schema, _ = kernel
+    http, ro_schema, state = kernel
     copy = await new_copy(http)
     created = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
     view, session_id = http.session(created.session_token), created.state.session_id
-    token, _ = await issue_payment_link(view, session_id, item_id(ro_read, ro_schema, copy, "Service call deposit"), 1)
+    owner = http.owner(copy.owner_token) if state is None else None      # the real kernel holds it for the owner
+    token, _ = await issue_payment_link(view, session_id, item_id(ro_read, ro_schema, copy, "Service call deposit"), 1,
+                                        owner=owner)
     _, complete, cancel = LINK_ROUTES
     assert (await checkout(http, complete, token)).state == "paid"
     for again in (complete, cancel):
@@ -2582,11 +2599,12 @@ async def test_connecting_payments_pins_its_tools_for_review(kernel, ro_read):
                                                                            server="mock_payments"))
     assert {profile.tool for profile in profiles} == {"payments.list_charges", "payments.create_refund"}
     assert all(isinstance(profile, ToolProfile) and profile.source == "mcp" and profile.status == "needs_review"
+               and profile.review_reason == "new"
                and re.fullmatch(r"[0-9a-f]{64}", profile.definition_sha256 or "") for profile in profiles)
-    rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s"
+    rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status, review_reason FROM {ro}.tools WHERE desk_id = %s"
                                             " AND source = 'mcp'", (created.desk_id,))
-    assert {row["tool"]: row["status"] for row in rows} == {"payments.list_charges": "needs_review",
-                                                            "payments.create_refund": "needs_review"}
+    assert {row["tool"]: (row["status"], row["review_reason"]) for row in rows} == {
+        "payments.list_charges": ("needs_review", "new"), "payments.create_refund": ("needs_review", "new")}
     visitor = await new_visitor(http, created.slug)
     given, declared = tools(await context(http.session(visitor.session_token), visitor.state.session_id))
     assert not {"payments.list_charges", "payments.create_refund"} & given
@@ -2705,7 +2723,7 @@ async def test_simulated_change_needs_review(kernel, ro_read):
     changed = await owner.call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
         desk_id=desk_id, tool="payments.create_refund"))
     assert isinstance(changed, ToolProfile) and changed.tool == "payments.create_refund"
-    assert changed.status == "needs_review" and changed.pending_definition_text
+    assert changed.status == "needs_review" and changed.review_reason == "changed" and changed.pending_definition_text
     assert re.fullmatch(r"[0-9a-f]{64}", changed.pending_sha256 or "")
     assert changed.pending_sha256 != changed.definition_sha256
     assert changed.definition_sha256 == before["payments.create_refund"]["definition_sha256"]

@@ -1304,12 +1304,16 @@ describe('rules and tools', () => {
     expect((await confirmTools({ tools: [charges, charges], enable: false })).status).toBe(422);
     expect((await confirmTools({ tools: [{ tool: 'calendar.free_busy', definition_sha256: 'x' }], enable: false })).status).toBe(404);
 
-    // Turning a connector off applies at once, with no draft.
+    // Turning a connector off applies at once, with no draft. The answer lists every tool of the
+    // batch as it stands now, in the request's order.
     const listed = await entries();
-    const off = await confirmTools({ tools: listed, enable: false });
+    const off = await confirmTools({ tools: [...listed].reverse(), enable: false });
     expect(off.status).toBe(200);
     expect((off.body as ToolConfirmedOut).draft).toBeNull();
-    expect((off.body as ToolConfirmedOut).profile).toMatchObject({ tool: 'payments.list_charges', status: 'disabled' });
+    expect((off.body as ToolConfirmedOut).profiles).toMatchObject([
+      { tool: 'payments.create_refund', status: 'disabled' },
+      { tool: 'payments.list_charges', status: 'disabled' },
+    ]);
     for (const tool of stripe) expect(await statusOf(tool)).toBe('disabled');
     expect((await rules()).active.version).toBe(7);
 
@@ -1323,6 +1327,11 @@ describe('rules and tools', () => {
     expect((await confirmTools({ tools: [{ ...listed[0], definition_sha256: 'f'.repeat(64) }], enable: true })).status).toBe(409);
     const on = await confirmTools({ tools: listed, enable: true });
     expect(on.status).toBe(200);
+    // Still off: the draft hasn't been confirmed.
+    expect((on.body as ToolConfirmedOut).profiles.map(({ tool, status }) => ({ tool, status }))).toEqual([
+      { tool: 'payments.list_charges', status: 'disabled' },
+      { tool: 'payments.create_refund', status: 'disabled' },
+    ]);
     const draft = (on.body as ToolConfirmedOut).draft;
     expect(draft).toMatchObject({ version: 8, parent_version: 7, status: 'proved', auto_money_cap_cents: 50_000, proof: { ok: true, method: 'symcc' } });
     expect(draft?.cards).toEqual((await rules()).active.cards);
@@ -1334,6 +1343,7 @@ describe('rules and tools', () => {
     const again = await confirmTools({ tools: [verify], enable: true });
     expect(again.status).toBe(200);
     expect((again.body as ToolConfirmedOut).draft).toBeNull();
+    expect((again.body as ToolConfirmedOut).profiles).toMatchObject([{ tool: 'native.start_verification', status: 'enabled' }]);
   });
 
   /** The connector changes `tool`'s definition to one hashed `sha`: it waits for the owner's review, and says why. */

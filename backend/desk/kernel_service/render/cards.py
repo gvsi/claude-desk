@@ -84,7 +84,8 @@ def text_claim(fact: Fact) -> str:
 
 
 def title_claim(fact: Fact | None) -> str:
-    """A document link's `title` claim: the document's title, as the owner wrote it."""
+    """A link's `title` claim: a document's title, as the owner wrote it, or what a payment link is
+    for, from the quote's items."""
     title = claims(fact)["title"]
     if not isinstance(title, str):
         raise TypeError("a document's title is text")

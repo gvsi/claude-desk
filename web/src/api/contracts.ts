@@ -61,6 +61,7 @@ const clauseTemplates = {
   charge_confirmed: true,
   callback_confirmed: true,
   payment_confirmed: true,
+  link_cancelled: true,
 } as const satisfies Record<ClauseTemplate, true>;
 
 const decisionStates = {

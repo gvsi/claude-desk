@@ -650,7 +650,7 @@ async def test_injected_charge_text_is_never_a_fact(k: KernelHarness, records):
 
 KEEP = object()   # `corrupt_first_charge` leaves the amount as the server sent it
 BAD_AMOUNTS = ("18000", 18000.0, True)   # a string, a float and a bool where the schema says integer cents
-MCP_CLIENT = "desk.kernel_service.mcp_client"   # Plan 01c's MCP client; adapters call `call_tool` through it
+MCP_CLIENT = "desk.kernel_service.mcp_client"   # Plan 01c's MCP client; adapters call `McpClient.call_tool`
 
 
 def corrupt_first_charge(value: Any, amount: Any) -> tuple[Any, int]:
@@ -686,7 +686,7 @@ def corrupt_first_charge(value: Any, amount: Any) -> tuple[Any, int]:
 
 
 def answered_tool(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
-    """The MCP tool a `call_tool(copy_id, name, arguments)` call names."""
+    """The MCP tool a `McpClient.call_tool(self, copy_id, name, arguments)` call names."""
     return next((value for value in (*args, *kwargs.values()) if value in ("list_charges", "create_refund")), None)
 
 
@@ -694,12 +694,13 @@ def answered_tool(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str | None:
 @pytest.mark.white_box
 async def test_invalid_mcp_output_fails_closed(k: KernelHarness, records, monkeypatch: pytest.MonkeyPatch):
     """A payment server answer that breaks the tool's schema runs nothing and gives Claude nothing:
-    with the MCP client's `call_tool` answering Dana's listing with the server's real answer but its
-    first charge's `amount_cents` as "18000", 18000.0 or true, each listing fails, with no facts and
-    an empty `model_view`, and the Desk's charge facts are as they were. The same patched client
-    passing the amount on as sent succeeds first, so the failures come from the amounts alone."""
+    with the MCP client's `McpClient.call_tool` answering Dana's listing with the server's real
+    answer but its first charge's `amount_cents` as "18000", 18000.0 or true, each listing fails,
+    with no facts and an empty `model_view`, and the Desk's charge facts are as they were. The same
+    patched client passing the amount on as sent succeeds first, so the failures come from the
+    amounts alone."""
     mcp_client = importlib.import_module(MCP_CLIENT)   # Plan 01c
-    original = mcp_client.call_tool
+    original = mcp_client.McpClient.call_tool   # the adapters' one call to the server's tools
     amount: list[Any] = [KEEP]
     calls: list[tuple[str | None, int]] = []   # (the tool named, the charges lists found in its answer)
 
@@ -716,7 +717,7 @@ async def test_invalid_mcp_output_fails_closed(k: KernelHarness, records, monkey
 
     desk = await golden_desk(k)
     dana = await open_caller(k, desk, "dana")
-    monkeypatch.setattr(mcp_client, "call_tool", call_tool)   # from the listing on
+    monkeypatch.setattr(mcp_client.McpClient, "call_tool", call_tool)   # from the listing on
     _, control = await list_charges(k, dana)
     assert [name for name, _ in calls] == ["list_charges"], f"the listing reached call_tool as {calls}"
     assert calls[0][1] >= 1, "the server's answer holds no charges list to corrupt"

@@ -29,6 +29,9 @@ const TEMPLATE_ICONS = {
   charge_confirmed: 'card',
   callback_confirmed: 'calendar',
   payment_confirmed: 'outcome',
+  // The icon shows only beside a label, and link_cancelled has no CARD_CHROME yet, so ReplyCard
+  // draws it with no label and no icon; the entry is here because the record covers every template.
+  link_cancelled: 'card',
 } as const satisfies Record<ClauseTemplate, IconName | 'outcome'>;
 
 /**

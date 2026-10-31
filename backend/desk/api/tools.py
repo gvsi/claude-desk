@@ -529,7 +529,8 @@ class _ReplyInput(BaseModel):
 
 def _draft(tool_input: Any) -> tuple[str, list[Clause]] | list[dict]:
     """The reply Claude drafted, or what is wrong with it: input that doesn't fit the tool, a clause only the kernel
-    issues (`owner_said`, `payment_confirmed`), or nothing to show. None of these reaches the kernel."""
+    issues (`owner_said`, `payment_confirmed`, `link_cancelled`), or nothing to show. None of these reaches the
+    kernel."""
     try:
         reply = _ReplyInput.model_validate(tool_input)
     except ValidationError as error:

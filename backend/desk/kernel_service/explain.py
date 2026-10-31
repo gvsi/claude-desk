@@ -6,13 +6,14 @@ what, and why that is wrong ("Dana could get a $500 refund without asking you.")
 
 A sentence holds only fixed phrases, amounts the kernel formats, and the display names of the
 Desk's own people. A counterexample the kernel can't read gets a fixed sentence instead, never
-any text from the request.
+any text from the request. The same phrases tell the owner what a decision or a setup probe was
+asked for (`asked`).
 """
 
 from collections.abc import Mapping
 from typing import Any
 
-from desk.contracts import ProofReport
+from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, ProofReport
 
 # What each tool lets someone do: the phrase alone, and with the request's amount where the
 # action has one.
@@ -126,3 +127,26 @@ def money(cents: int) -> str:
     """`$500`, or `$12.50`, with thousands separators."""
     dollars, rest = divmod(cents, 100)
     return f"${dollars:,}" + (f".{rest:02d}" if rest else "")
+
+
+def percent(bp: int) -> str:
+    """`50%`, or `12.5%`, from basis points."""
+    return f"{bp // 100}%" if bp % 100 == 0 else f"{bp / 100:g}%"
+
+
+def asked(subject: str, verb: str, tool: str, amount_cents: int | None, discount_bp: int | None) -> str:
+    """"<subject> <verb> to <what>." in the owner's words, `verb` being "asked" for a decision and
+    "asks" for a setup probe: what the tool lets someone do, with the amount the kernel worked out
+    where the tool has one (shown only from $0 to `AUTO_MONEY_HARD_CAP_CENTS`) and the discount
+    asked for. A name that is no tool is never repeated."""
+    phrases = PHRASES.get(tool)
+    if phrases is None:
+        return f"{subject} {verb} for something this Desk can't do."
+    plain, with_amount = phrases
+    if with_amount is not None and amount_cents is not None and 0 <= amount_cents <= AUTO_MONEY_HARD_CAP_CENTS:
+        what = with_amount.format(amount=money(amount_cents))
+    else:
+        what = plain
+    if discount_bp:
+        what += f" with {percent(discount_bp)} off"
+    return f"{subject} {verb} to {what}."

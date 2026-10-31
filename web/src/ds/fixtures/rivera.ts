@@ -325,6 +325,18 @@ const cards = {
     en: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
     es: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
   },
+  // The Desk's own card for a payment link a confirmed rule change cancelled: the kernel's one line,
+  // rendered from the owner's display name, with no fact.
+  link_cancelled: {
+    en: cardBlock('link_cancelled', {
+      fact_id: null,
+      title: "This payment link was cancelled because Maria Rivera's rules changed. Ask again if you still want to pay.",
+    }),
+    es: cardBlock('link_cancelled', {
+      fact_id: null,
+      title: 'Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera. Pídelo de nuevo si todavía quieres pagar.',
+    }),
+  },
 } satisfies Record<ClauseTemplate, Bilingual<CardBlock>>;
 
 // Claude's checked prose: no digits, amounts, dates or promise words, and no claim that something
@@ -1780,6 +1792,7 @@ const listChargesProfile = {
   pending_definition_text: null,
   pending_sha256: null,
   status: 'enabled',
+  review_reason: null,
 } satisfies ToolProfile;
 
 const createRefundProfile = {
@@ -1800,6 +1813,7 @@ const createRefundProfile = {
   pending_definition_text: null,
   pending_sha256: null,
   status: 'enabled',
+  review_reason: null,
 } satisfies ToolProfile;
 
 // The server's changed tools/list entry, shown to the owner only as quoted, untrusted text. It
@@ -1828,6 +1842,7 @@ const toolProfiles = {
     pending_definition_text: driftedRefundDefinition,
     pending_sha256: sha256('definition:create_refund:drifted'),
     status: 'needs_review',
+    review_reason: 'changed',
   },
 } satisfies Record<string, ToolProfile>;
 
@@ -1956,8 +1971,17 @@ const verifyStarted = {
   },
 } satisfies Bilingual<VerifyStarted>;
 
+/** The deposit link a visitor who hasn't confirmed who they are opens, so no customer's name, in each state. */
 function paymentLink(state: PaymentLinkState): PaymentLinkView {
-  return { title: 'Service call deposit', amount_cents: 2000, state, language: 'en' };
+  return {
+    title: 'Service call deposit',
+    amount_cents: 2000,
+    state,
+    language: 'en',
+    business_name: business.name,
+    customer_name: null,
+    cancel_reason: null,
+  };
 }
 
 const paymentLinks = {

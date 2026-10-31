@@ -1,10 +1,13 @@
 """The registry of adapters, one per tool. Each adapter module registers itself at import; the
-native adapters (quote, open times, booking, lead capture, callbacks, verification and document
-release) are imported at the end of this module.
+native adapters (quote, open times, booking, lead capture, callbacks, verification, document
+release, payment links and mandate charges), the owner's setup tools (website fetch and memory
+reads) and the pinned MCP tools' (`payments_mcp`) are imported at the end of this module.
 
 `register` refuses an adapter whose args model isn't strict and closed, or whose profile's
 `input_schema` isn't exactly that model's JSON Schema, so the schema Claude sees is the one the
-kernel enforces.
+kernel enforces. It also refuses one whose `releases_private_data` disagrees with its profile: the
+declaration is True exactly when the profile has the `private_data` effect, which the rules decide
+the tool by, so the execution's checks and the rules never read the tool differently.
 """
 
 import hashlib
@@ -18,8 +21,8 @@ from desk.kernel_service.adapters.base import Adapter
 
 ADAPTERS: dict[ToolName, Adapter] = {}
 
-# Fields that a tools row's status or a pending drift changes; a profile's hash leaves them out.
-UNHASHED_PROFILE_FIELDS = frozenset({"status", "pending_definition_text", "pending_sha256"})
+# Fields that a tools row's status, review or a pending drift changes; a profile's hash leaves them out.
+UNHASHED_PROFILE_FIELDS = frozenset({"status", "pending_definition_text", "pending_sha256", "review_reason"})
 
 
 def register(adapter: Adapter, *, replace: bool = False) -> Adapter:
@@ -61,9 +64,15 @@ def _check(adapter: Adapter) -> None:
         raise ValueError(f"{profile.tool}: model_view_keys is a frozenset")
     if not isinstance(getattr(adapter, "releases_private_data", None), bool):
         raise ValueError(f"{profile.tool}: an adapter declares releases_private_data, True or False")
+    if adapter.releases_private_data != ("private_data" in profile.effects):
+        raise ValueError(f"{profile.tool}: releases_private_data is True exactly when the profile has the "
+                         "private_data effect")
 
 
 # The native adapters register themselves when imported, so importing this package gives the kernel
 # all of them; they import `register` above, which is why they come last.
-from desk.kernel_service.adapters import (book, capture_lead, find_slots, quote,  # noqa: E402, F401
-                                         release_document, request_callback, start_verification)
+from desk.kernel_service.adapters import (book, capture_lead, charge_mandate, find_slots,  # noqa: E402, F401
+                                         payment_link, payments_mcp, quote, release_document,
+                                         request_callback, start_verification)
+# The owner's setup tools: reading the business's website and the owner's (simulated) memory.
+from desk.kernel_service.adapters import fetch_website, read_memory  # noqa: E402, F401
