@@ -127,11 +127,18 @@ describe('Settings', () => {
     expect(business.getByRole('button').elements()).toEqual([]);
     expect(business.getByRole('link').elements()).toEqual([]);
 
-    // Another Desk's details are its own: its name and its hours.
+    // Another Desk's details are its own: its name and its hours. Its window is all day, which no
+    // board draws, so it reads as Rules writes one, with the comma.
     const emergencies = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/settings/general`, { seed: 'rivera_two_desks' });
     const other = main(emergencies.screen).getByRole('region', { name: 'Your business' });
     await expect.element(other.getByText('Emergencies', { exact: true })).toBeVisible();
-    await expect.element(other.getByText('Every day all day', { exact: true })).toBeVisible();
+    expect(other.getByRole('definition').elements().map((value) => value.textContent)).toEqual([
+      'Rivera Plumbing',
+      'Emergencies',
+      'Maria Rivera',
+      'Pacific Time (Los Angeles)',
+      'Every day, all day',
+    ]);
   });
 
   it('answering_is_one_switch', async () => {

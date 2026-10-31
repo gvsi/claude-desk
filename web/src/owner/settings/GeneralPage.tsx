@@ -12,6 +12,17 @@ import { desksQuery, findDesk, invalidateCopy, todayPath } from '../useDesks.ts'
 /** What Answering on means, under its switch: the short line, on a laptop as on a phone (owner decision, 2026-10-30). */
 const ANSWERING_LINE = 'Claude answers under your rules.';
 
+/** `hoursParts`' times for a window from midnight to midnight, which `format.ts` doesn't export. */
+const ALL_DAY = 'all day';
+
+/**
+ * A Desk's hours window in the signed board's words, "Weekdays 8:00 am to 6:00 pm". No board draws
+ * an all-day window, so one reads as Rules writes it, with the comma: "Every day, all day".
+ */
+function hoursWords({ days, times }: { days: string; times: string }): string {
+  return times === ALL_DAY ? `${days}, ${times}` : `${days} ${times}`;
+}
+
 /** What deleting a Desk does, beside its button and in the dialog that asks first. */
 const DELETE_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
 
@@ -58,7 +69,7 @@ export function GeneralPage() {
     { label: 'Time zone', value: timeZoneWords(business.timezone) },
   ];
   // In the signed board's words: "Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm".
-  const hours = desk.hours.map(hoursParts).map(({ days, times }) => `${days} ${times}`);
+  const hours = desk.hours.map((window) => hoursWords(hoursParts(window)));
   if (hours.length > 0) details.push({ label: 'Hours', value: hours.join(', ') });
 
   /** The Desk is gone: the business's next Desk's Today, or setup for a new one; then the copy is read again. */
