@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { LEXICON, factsInProse, type LexiconEntry } from './factInProse.ts';
-import { CLAUDE_ACCOUNT_TURNS, PHONE_REPLY, TEAM_REPLIES } from './vision.tsx';
+import { CITY_TURNS, CLAUDE_ACCOUNT_TURNS, PHONE_REPLY, TEAM_REPLIES } from './vision.tsx';
 
 const LEXICON_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../backend/desk/kernel_service/lexicon');
 
@@ -84,8 +84,18 @@ describe('fact_in_prose', () => {
   });
 
   it('passes_every_signed_vision_line', () => {
-    // Claude's words on the team Desk and the Claude account pages, as the owner signed them.
-    const signed = [...TEAM_REPLIES, CLAUDE_ACCOUNT_TURNS.ask, CLAUDE_ACCOUNT_TURNS.matched, CLAUDE_ACCOUNT_TURNS.sent];
+    // Claude's words on the team Desk, the Claude account and the city office pages, as the owner signed them.
+    const signed = [
+      ...TEAM_REPLIES,
+      CLAUDE_ACCOUNT_TURNS.ask,
+      CLAUDE_ACCOUNT_TURNS.matched,
+      CLAUDE_ACCOUNT_TURNS.sent,
+      CITY_TURNS.verifyFirst,
+      CITY_TURNS.stands,
+      CITY_TURNS.next,
+      CITY_TURNS.times,
+      CITY_TURNS.staffDecides,
+    ];
     expect(signed.filter((line) => rules(line).length > 0)).toEqual([]);
     // The phone's line claims the booking, so it passes only beside its booking card.
     expect(rules(PHONE_REPLY, true)).toEqual([]);

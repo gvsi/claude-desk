@@ -520,10 +520,13 @@ describe('design system source guards', () => {
       file === 'ds/boards/vision.tsx';
     const files = webSources().filter(({ file }) => file !== `ds/${THIS_FILE}`);
     expect(files.filter(({ file, text }) => !allowed(file) && named(text).length > 0).map(({ file }) => file)).toEqual([]);
-    // They are used where they are meant to be, so the check can't pass by finding nothing.
+    // They are used where they are meant to be, so the check can't pass by finding nothing: the
+    // phone's held quote and composer, the Claude account's invoice and composer, and the city
+    // office's composer.
     expect(named(files.find(({ file }) => file === 'ds/boards/vision.tsx')?.text ?? '').sort()).toEqual([
       'inertAnswers',
       'inertDownload',
+      'inertSend',
       'inertSend',
       'inertSend',
     ]);

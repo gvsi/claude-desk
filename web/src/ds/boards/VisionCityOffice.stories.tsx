@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
+import { VISION_INERT_LINE } from '../components/VisionBar/visionInert.tsx';
 import { expectComputed } from '../test/expectComputed.ts';
 import {
-  FACT_IN_PROSE,
   SPEC,
   expectConversationType,
   expectFooter,
@@ -11,6 +11,7 @@ import {
   expectReceiptsUnderMessages,
   expectTabOrder,
   expectVisionBar,
+  factsInProse,
   one,
   some,
 } from './spec.ts';
@@ -187,7 +188,7 @@ export const Board: Story = {
     // The conversation: Marcus's messages, and Claude's words, which state no status, fee, date or time.
     const log = within(main).getByRole('log', { name: 'Conversation with Meridian Bay Permits' });
     expectConversationType(log);
-    await expect(await expectNoFactsInProse(log)).toBe(CLAUDE_LINES.length);
+    await expect(await expectNoFactsInProse(log)).toEqual({ prose: CLAUDE_LINES.length, receipts: RECEIPTS.length });
     await expect(some(log, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual(CLAUDE_LINES);
     await expect(some(log, '.cd-visitor-message__bubble').map((bubble) => bubble.textContent)).toEqual(MARCUS_LINES);
 
@@ -228,9 +229,9 @@ export const Board: Story = {
     const money = linesWith(canvasElement, '$');
     await expect(money).toEqual(['Fee due before issue: $1,286']);
     await expect(within(cards[1] as HTMLElement).getByText('Fee due before issue: $1,286')).toBeVisible();
-    // Outside the cards, nothing in the conversation states a status, fee, date or time.
+    // Outside the cards, nothing in the conversation says what the kernel's prose check would block.
     for (const line of linesOutsideCards(log)) {
-      await expect(line, `outside a card: "${line}"`).not.toMatch(FACT_IN_PROSE);
+      await expect(factsInProse(line), `outside a card: "${line}"`).toEqual([]);
     }
 
     // The receipts under each answer, in order: the reply's check, then what ran or what waits for a person.
@@ -267,10 +268,11 @@ export const Board: Story = {
     // focus_order_is_logical: the bar, Ask for Permit Center staff, the suggestions, then the composer.
     await expectTabOrder(userEvent, [within(bar).getByRole('link', { name: 'Back to your Desk' }), askStaff, ...chipButtons, composer]);
 
-    // A vision page sends nothing: typed words stay after Send and after Enter.
+    // A vision page sends nothing: typed words stay after Send and after Enter, and the first Send says so.
     await userEvent.type(composer, 'Thanks');
     await userEvent.click(within(main).getByRole('button', { name: 'Send' }));
     await expect(composer).toHaveValue('Thanks');
+    await expect(within(main).getByText(VISION_INERT_LINE)).toBeVisible();
     await userEvent.click(composer);
     await userEvent.keyboard('{Enter}');
     await expect(composer).toHaveValue('Thanks');

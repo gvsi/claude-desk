@@ -3,9 +3,9 @@
  * Desk ·" pages that the project owner signed off, and run 2's boards while they are in review,
  * each listed once. Each is rebuilt by one `Boards/*` story and compared by eye with its render at
  * the board's own size: 1280×820, a 14-inch laptop's 1512×982 or a phone's 390×844, a tall
- * connectors board or the city office's resident page at its full height (`reference/README.md`). A story names its board in
- * `parameters.canvas`, or says `'none'` and explains in `parameters.canvasNote` (usually naming the
- * nearest board).
+ * connectors board or the city office's resident page at its full height (`reference/README.md`).
+ * A story names its board in `parameters.canvas`, or says `'none'` and explains in
+ * `parameters.canvasNote` (usually naming the nearest board).
  */
 export const REFERENCE_BOARDS = [
   // The owner app: Today, the conversations and the decisions made in them.
