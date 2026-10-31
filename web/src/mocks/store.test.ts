@@ -544,7 +544,7 @@ describe('the scripted Desk', () => {
         'es',
         [
           ['prose', null, []],
-          ['card', 'martes 3 de noviembre, 14:00', ['120 minutos', 'Reserva B-77']],
+          ['card', 'martes 3 de noviembre', ['Llegada de 14:00 a 16:00', 'Con Maria Rivera']],
         ],
       ],
     ]);
