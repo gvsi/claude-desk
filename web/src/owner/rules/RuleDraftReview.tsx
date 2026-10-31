@@ -65,13 +65,13 @@ function onlyTheLimit(draft: RuleDraft): boolean {
 }
 
 /**
- * An uncertain confirm with `rules_cannot_be_checked` is the request layer giving up a minute in,
- * while the API was still checking (the API's own 409 is a clear answer, so it is never uncertain).
- * The change may still apply after the rules were read, so the line that says it can't be applied
- * would be wrong.
+ * An uncertain failure (`isUncertain`) that says the rules can't be checked: the request layer
+ * giving up a minute after the first send while the API was still checking, or a 5xx with that
+ * code. Either way the change may still apply after the rules were read, so `ownerErrorCopy`'s line
+ * that it can't be applied would be wrong. Only the API's own 409 is a clear answer that may say so.
  */
-function stoppedWaiting(err: unknown): boolean {
-  return err instanceof ApiError && err.code === 'rules_cannot_be_checked';
+function mayStillApply(err: unknown): boolean {
+  return isUncertain(err) && err instanceof ApiError && err.code === 'rules_cannot_be_checked';
 }
 
 /** "Was $500", or what a limit of 0 meant. */
@@ -155,7 +155,7 @@ export function RuleDraftReview({ deskId, draft, title, inline = false, onDone, 
         // A caller's own confirm (setup's) applies the draft's version too, so they settle it as well.
         const now = await queryClient.fetchQuery({ ...rulesQuery(deskId), staleTime: 0 }).catch(() => null);
         if (now?.active.version === draft.version) applied();
-        else setError(now === null || stoppedWaiting(err) ? NOT_CONFIRMED : ownerErrorCopy(err));
+        else setError(now === null || mayStillApply(err) ? NOT_CONFIRMED : ownerErrorCopy(err));
       } else {
         setError(ownerErrorCopy(err));
       }
