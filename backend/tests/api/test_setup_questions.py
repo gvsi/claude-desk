@@ -431,8 +431,8 @@ async def test_done_waits_for_unshown_planned_items_or_their_drop(
     state = response.json()
     if drop:
         assert state["step"] == "tools" and state["pending_card"] is None
-        assert [message["text"] for message in state["messages"][-2:]] == [
-            "The closing plan.", desk_setup.QUESTIONS_DONE]
+        assert state["messages"][-1]["text"] == "The closing plan."
+        assert not any(message["text"] == desk_setup.QUESTIONS_DONE for message in state["messages"])
     else:
         assert state["step"] == "questions" and state["question"] is None
         assert state["pending_card"] == proposal_id
@@ -700,11 +700,9 @@ async def test_a_final_card_decision_closes_with_a_plan_or_without_one_when_unav
                                                   reply="Repair requests it is.", plan="Your Desk will take details.")
     interview = await decide_card(app, owner, engine, model, interview_id, proposal_id, item, item, state="accepted")
     assert interview.step == "tools" and interview.question is None and interview.pending_card is None
-    assert interview.transcript[-1].text == desk_setup.QUESTIONS_DONE
-    if not failed:
-        assert interview.transcript[-2].text == "Your Desk will take details."
+    assert interview.transcript[-1].text == (desk_setup.QUESTIONS_DONE if failed else "Your Desk will take details.")
     assert len(model.requests) == before + 2
-    assert sum(entry.text == desk_setup.QUESTIONS_DONE for entry in interview.transcript) == 1
+    assert sum(entry.text == desk_setup.QUESTIONS_DONE for entry in interview.transcript) == int(failed)
 
 
 async def test_the_understanding_never_reaches_a_limit_turn(app, browser, fake, kernel_http, model):
@@ -2680,8 +2678,8 @@ async def test_setup_can_finish_right_after_each_limit_topic(app, browser, kerne
     reply = await answer(owner, model, state["interview_id"], "Always ask.", turn(), next_step(key, next={"kind": "done"}))
     assert reply.status_code == 200, reply.text
     assert reply.json()["step"] == "tools"
-    assert [message["text"] for message in reply.json()["messages"][-2:]] == [
-        "Your Desk will take customer requests.", desk_setup.QUESTIONS_DONE]
+    assert reply.json()["messages"][-1]["text"] == "Your Desk will take customer requests."
+    assert not any(message["text"] == desk_setup.QUESTIONS_DONE for message in reply.json()["messages"])
     from desk.api.prompts import SetupNextStep, SETUP_NEXT_SYSTEM
     request = model.requests[-1]
     assert request.output_schema is SetupNextStep
@@ -2722,7 +2720,8 @@ async def test_the_closing_plan_comes_from_the_plan_field(app, browser, kernel_h
                             next_step("what_you_do", next={"kind": "done"}, plan=plan))
     assert response.status_code == 200, response.text
     assert response.json()["step"] == "tools"
-    assert [message["text"] for message in response.json()["messages"][-2:]] == [plan, desk_setup.QUESTIONS_DONE]
+    assert response.json()["messages"][-1]["text"] == plan
+    assert not any(message["text"] == desk_setup.QUESTIONS_DONE for message in response.json()["messages"])
     assert finished == [state["interview_id"]]
     assert sum(request.output_schema is SetupNextStep for request in model.requests) == 1
 
@@ -2823,7 +2822,8 @@ def test_limit_choices_set_only_their_own_topics_limits():
             "Always ask me first", "Up to $100", "Up to $250", "Up to $500"]
 
 
-async def test_a_failed_closing_next_step_still_finishes_once(app, browser, kernel_http, model):
+async def test_without_a_plan_the_fixed_line_ends_the_questions(app, browser, kernel_http, model):
+    """A failed closing call still finishes once, ending with the fixed transition line."""
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     await consent(owner, state["interview_id"], False, model)
@@ -3308,8 +3308,10 @@ async def test_an_unplanned_catalog_connector_is_minted_and_asked(app, browser, 
                for item in entry.get("planned", []))
 
 
-@pytest.mark.parametrize("failed", [False, True])
-async def test_close_setup_ends_with_the_plan_then_questions_done(app, browser, kernel_http, model, engine, monkeypatch, failed):
+async def test_a_closing_plan_ends_the_questions_without_the_fixed_line(
+    app, browser, kernel_http, model, engine, monkeypatch,
+):
+    """Settle before the closing plan; the plan itself is the last Claude message."""
     from desk.api.deps import owner_context
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
@@ -3320,16 +3322,15 @@ async def test_close_setup_ends_with_the_plan_then_questions_done(app, browser, 
         interview.transcript.append(desk_setup.Entry(role="claude", text="Settled card placeholder"))
     monkeypatch.setattr(desk_setup, "settle_plan", settle)
     plan = "Your Desk will take repair requests."
-    model.add(unavailable() if failed else next_step("what_you_do", next=next_ask("hours_and_area"), plan=plan,
-                                                     skip=list(QUESTION_KEYS), add_jobs=understanding()["jobs"]))
+    model.add(next_step("what_you_do", next=next_ask("hours_and_area"), plan=plan,
+                        skip=list(QUESTION_KEYS), add_jobs=understanding()["jobs"]))
     before = await stored(engine, state["interview_id"])
     async with owner_context(app.state.runtime, owner.token) as ctx:
         interview = await desk_setup._read(engine, ctx, state["interview_id"])
         await desk_setup.close_setup(ctx, engine, model, interview)
     assert settled == [interview.interview_id] and interview.step == "tools"
-    assert interview.transcript[-1].text == desk_setup.QUESTIONS_DONE
-    assert [entry.text for entry in interview.transcript[-(2 if failed else 3):-1]] == (
-        ["Settled card placeholder"] if failed else ["Settled card placeholder", plan])
+    assert [entry.text for entry in interview.transcript[-2:]] == ["Settled card placeholder", plan]
+    assert not any(entry.text == desk_setup.QUESTIONS_DONE for entry in interview.transcript)
     assert not interview.planned  # Closing output cannot add jobs or otherwise plan another ask.
     assert await stored(engine, state["interview_id"]) == before  # Caller owns persistence.
     text = model.requests[-1].messages[0]["content"][0]["text"]
@@ -3349,7 +3350,8 @@ async def test_an_empty_closing_plan_gets_one_retry(app, browser, kernel_http, m
         interview = await desk_setup._read(engine, ctx, state["interview_id"])
         await desk_setup.close_setup(ctx, engine, model, interview)
     assert len(model.requests) == before + 2 and interview.step == "tools"
-    assert interview.transcript[-1].text == desk_setup.QUESTIONS_DONE
+    assert interview.transcript[-1].text == (second_plan or desk_setup.QUESTIONS_DONE)
+    assert sum(entry.text == desk_setup.QUESTIONS_DONE for entry in interview.transcript) == int(not second_plan)
     assert sum(entry.text == second_plan for entry in interview.transcript) == bool(second_plan)
 
 

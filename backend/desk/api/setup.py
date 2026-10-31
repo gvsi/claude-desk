@@ -40,7 +40,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   item of each title or adds it, never removing one. A fact question clears the hours or the prices only by its
   flag, since an empty list leaves them as they are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
-  step `tools`.
+  step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
+  after its retry gets the fixed transition line instead.
 
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
@@ -1624,8 +1625,12 @@ def settle_plan(interview: Interview) -> None:
 
 
 async def close_setup(owner, engine, model, interview: Interview) -> None:
-    """Settle cards before the closing plan. The caller owns persistence and after_finish."""
+    """Settle cards, end with the closing plan (or a fixed line without one), then finish.
+
+    The caller owns persistence and after_finish.
+    """
     settle_plan(interview)
+    plan = ""
     for attempt in range(2):
         closing = await _next_step(owner, engine, model, interview, closing=True)
         if closing is None:
@@ -1637,7 +1642,8 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
             if plan:
                 interview.transcript.append(Entry(role="claude", text=plan))
             break
-    interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
+    if not plan:
+        interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
     finish(interview)
 
 
