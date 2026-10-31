@@ -519,8 +519,10 @@ describe('Conversations', () => {
       await expect.element(log(screen).getByText(last, { exact: true })).toBeInViewport({ ratio: 1 });
       await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeInViewport({ ratio: 1 });
       await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toBeInViewport({ ratio: 1 });
-      const head = screen.getByRole('heading', { level: 2, name: DANA }).element();
-      expect(scrollerOf(log(screen).element()).contains(head)).toBe(true);
+      // The head names Dana once the list has read the chat, which can answer after the chat.
+      const head = screen.getByRole('heading', { level: 2, name: DANA });
+      await expect.element(head).toBeInTheDocument();
+      expect(scrollerOf(log(screen).element()).contains(head.element())).toBe(true);
       expectNoWindowScroll();
     });
 
@@ -533,7 +535,12 @@ describe('Conversations', () => {
       await router.navigate(conversation(held.session_id));
       const head = screen.getByRole('heading', { level: 2, name: DANA });
       const latest = log(screen).getByText(last, { exact: true });
+      const heldHere = heldCard(screen, REFUND_REASON);
       await expect.element(latest).toBeInViewport({ ratio: 1 });
+      // The head names Dana once the list has read the chat, and the held request's card comes with
+      // Needs you: either can answer after the chat.
+      await expect.element(head).toBeInTheDocument();
+      await expect.element(heldHere).toBeInTheDocument();
       await screen.getByRole('button', { name: 'Take over' }).click();
 
       // Without her scrolling, the composer and Hand back come into view at the conversation's end,
@@ -555,8 +562,8 @@ describe('Conversations', () => {
       expectNoWindowScroll();
 
       // Scrolled back to it, the held request, further up the chat, shows whole.
-      heldCard(screen, REFUND_REASON).element().scrollIntoView({ block: 'start' });
-      await expect.element(heldCard(screen, REFUND_REASON)).toBeInViewport({ ratio: 1 });
+      heldHere.element().scrollIntoView({ block: 'start' });
+      await expect.element(heldHere).toBeInViewport({ ratio: 1 });
       expectNoWindowScroll();
     });
   }
@@ -568,9 +575,11 @@ describe('Conversations', () => {
     const latest = log(screen).getByText(last, { exact: true });
     const takeOver = screen.getByRole('button', { name: 'Take over' });
     await expect.element(latest).toBeInViewport({ ratio: 1 });
-    const head = screen.getByRole('heading', { level: 2, name: DANA }).element();
-    const scrollsWithTheHead = () => scrollerOf(log(screen).element()).contains(head);
-    expect(scrollsWithTheHead()).toBe(false);
+    // The head names Dana once the list has read the chat, which can answer after the chat.
+    const head = screen.getByRole('heading', { level: 2, name: DANA });
+    await expect.element(head).toBeInTheDocument();
+    const scrollsWithTheHead = () => scrollerOf(log(screen).element()).contains(head.element());
+    await expect.poll(scrollsWithTheHead).toBe(false);
 
     // Made short, the open conversation scrolls as one, and Dana's latest message is still in view
     // over the owner's controls.
@@ -638,11 +647,14 @@ describe('Conversations', () => {
     await page.viewport(1440, 560);
     await router.navigate(conversation(first.session_id));
     await expect.poll(() => heldCard(screen, REFUND_REASON).elements().length).toBe(2);
+    // The head names Dana once the list has read the chat, which can answer after the chat.
+    const head = screen.getByRole('heading', { level: 2, name: DANA });
+    await expect.element(head).toBeInTheDocument();
     const lastReceipt = log(screen).getByRole('button', { name: /Open the full trace\.$/ }).last();
     await expect.element(lastReceipt).toBeInViewport({ ratio: 1 });
     (lastReceipt.element() as HTMLElement).focus({ preventScroll: true });
     const column = scrollerOf(log(screen).element());
-    expect(column.contains(screen.getByRole('heading', { level: 2, name: DANA }).element())).toBe(true);
+    expect(column.contains(head.element())).toBe(true);
     const at = column.scrollTop;
 
     // A message arrives while focus is in the transcript: nothing moves under her.
