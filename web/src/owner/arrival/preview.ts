@@ -39,6 +39,13 @@ const SEEDED = {
   danaLast: 38_200,
 } as const;
 
+/**
+ * How long after a new copy opens its Today is read and drawn, at the least: Today waits for its
+ * reads. The preview draws the copy as Today will, that long after it opened, so a time counted back
+ * reads the same: the hold, 11 min 59.85 s before the copy opened, is "12 min ago" on both.
+ */
+export const READ_AFTER_OPENING_MS = 1_000;
+
 /** The booking Dana made in her chat, in the kernel's words for the owner. */
 const DANA_BOOKED = 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.';
 
@@ -67,11 +74,13 @@ function addDays(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 }
 
-/** Rivera's Today, Needs you and Demo inbox as a new copy opened at `now` reads them. */
+/** Rivera's Today, Needs you and Demo inbox as Today reads them at `now`, a moment after a new copy opened. */
 export function stillToday(now: Date): StillToday {
   const at = now.getTime();
-  const iso = (msAgo: number) => new Date(at - msAgo).toISOString();
-  const dateOf = (msAgo: number) => localDate(at - msAgo);
+  // The seed is dated back from when the copy opened, a moment before Today reads it at `now`.
+  const opened = at - READ_AFTER_OPENING_MS;
+  const iso = (msAgo: number) => new Date(opened - msAgo).toISOString();
+  const dateOf = (msAgo: number) => localDate(opened - msAgo);
   const held = rivera.decisions.held;
   const heldAt = iso(SEEDED.held);
   const visitorTurn = rivera.conversations.visitor.turns.find((t) => t.kind === 'visitor');

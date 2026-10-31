@@ -11,12 +11,12 @@ import { needsYou, today } from '../../mocks/readModels.ts';
 import { seedWorld } from '../../mocks/seed.ts';
 import { MockWorld } from '../../mocks/world.ts';
 import { needsYouKey, OWNER_INBOX_KEY, todayKey } from '../useDesks.ts';
-import { stillToday } from './preview.ts';
+import { READ_AFTER_OPENING_MS, stillToday } from './preview.ts';
 
-/** What a new copy of the mock's Rivera seed reads when it is opened at `ms`. */
+/** What a new copy of the mock's Rivera seed reads at `ms`, opened as Today is, a moment before it is read. */
 function mockCopyAt(ms: number): { today: Today; needsYou: NeedsYouItem[]; inbox: DemoInboxEntry[] } {
   const world = new MockWorld('rivera', 1, () => 'k7Hq2vX9');
-  world.at(ms, () => seedWorld(world));
+  world.at(ms - READ_AFTER_OPENING_MS, () => seedWorld(world));
   const desk = world.desk(world.ids.deskId);
   if (!desk) throw new Error('the seed has its main Desk');
   return world.at(ms, () => ({ today: today(world, desk), needsYou: needsYou(world, desk), inbox: world.inbox.map((r) => r.entry) }));
@@ -69,7 +69,7 @@ describe('The preview behind the intro dialog', () => {
     ["with Alex Kim's assistant's chat across midnight", '2026-10-31T00:39:20-07:00'],
     ['just after midnight, with all of it yesterday', '2026-10-31T00:00:30-07:00'],
     ["with Dana's chat across midnight", '2026-10-31T00:03:00-07:00'],
-    ['with the held message just before midnight and the reply the check stopped just after', '2026-10-31T00:11:59.800-07:00'],
+    ['with the held message just before midnight and the reply the check stopped just after', '2026-10-31T00:12:00.800-07:00'],
   ])('preview_reads_as_a_new_copy_does: %s', (_when, at) => {
     const ms = Date.parse(at);
     expect(drawn(previewAt(ms))).toEqual(drawn(mockCopyAt(ms)));
