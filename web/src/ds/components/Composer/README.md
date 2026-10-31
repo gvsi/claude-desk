@@ -29,9 +29,9 @@
 `failed` (N-R2-Setup-04-Answer-Failed) keeps what was sent in the composer until the screen tries again:
 
 - `line`, the screen's own words for what happened and what to do ("I couldn't answer just now. Your answer is still here; try again."), as an error `Notice`: a refused dot, read out at once. It sits 20 px over the box.
-- The box keeps the composer's surface, radius and shadow, without its hairline, as the board draws it, padded 12 px 14 px. In it, `text`, the words as `onSend` got them, in `.cd-type-body` marked `data-copy="user"`, keeping their line breaks, then 12 px after them a primary "Try again", both on the box's bottom line: 56 px high around one line. The box is a group named by `label`.
-- Nothing can be typed while it shows, and the helper, the counter and the other buttons are left out. "Try again" calls `onRetry()`; the screen sends `text` again and clears `failed`, and the text box comes back empty.
-- The switch moves focus only when it would otherwise be lost: when the text box had focus as the failure arrived, "Try again" takes it, and after "Try again" the text box does. Focus the owner moved elsewhere stays there, and a composer that opens failed takes no focus.
+- The box keeps the composer's surface, radius and shadow, without its hairline, as the board draws it, padded 12 px 14 px. In it, `text`, the words as `onSend` got them, in `.cd-type-body` marked `data-copy="user"`, keeping their line breaks, then 12 px after them a primary "Try again" (`retryLabel`, for a screen in another language: "Intentar de nuevo"), both on the box's bottom line: 56 px high around one line. The box is a group named by `label`.
+- Nothing can be typed while it shows, and the helper, the counter and the other buttons are left out. "Try again" calls `onRetry()`: the screen sends `text` again and passes `disabled` while that send is in flight, so the button waits (`aria-disabled`, focus kept) and a second press calls nothing. It clears `failed` once the send goes through, and the text box comes back empty.
+- Focus follows only from the composer's own control: when the text box had focus as the failure arrived, "Try again" takes it, and when "Try again" had it, the text box takes it back. Focus the owner left elsewhere, on another control or on the page itself, stays there, and a composer that opens failed takes no focus.
 
 ## Props
 
@@ -42,11 +42,11 @@
 | `placeholder` | `string` | Required. |
 | `helper` | `string` | In the controls row (`owner`) or under the box (`visitor`, `whisper`). |
 | `sendLabel` | `string` | "Send" (`owner`, `visitor`) or "Send whisper" (`whisper`) by default. |
-| `disabled` | `boolean` | Nothing can be typed or sent. |
+| `disabled` | `boolean` | Nothing can be typed or sent; with `failed`, "Try again" waits. |
 | `maxLength` | `number` | Caps the text; a counter from 90% of it. |
 | `onSend` | `(text: string) => void` | Required. |
 | `onAttach` | `() => void` | Adds "Add a photo or file". |
 | `onSpeak` | `() => void` | Adds "Speak instead". |
-| `failed` | `{ text: string; line: string; onRetry: () => void }` | A send that failed: `line` over the box, which keeps `text` beside "Try again". |
+| `failed` | `{ text: string; line: string; retryLabel?: string; onRetry: () => void }` | A send that failed: `line` over the box, which keeps `text` beside "Try again" (`retryLabel`). Pass `disabled` while the send is in flight again. |
 
 `bg-surface`, `radius-composer`, an inset `line-hairline` and `shadow-composer`. The text is `.cd-type-message`. While the text box has focus the whole composer shows the focus ring (`ring-composer`, 2 px at a 2 px offset), because the canvas's 55% ring is 2.9:1. A button inside it (attach, speak, send) shows its own ring instead, so there is only ever one. The single-row composer is 52 px high with one line of text.

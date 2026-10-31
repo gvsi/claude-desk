@@ -45,9 +45,17 @@ export interface ComposerFailed {
   text: string;
   /** What happened and what to do, in the screen's words: "I couldn't answer just now. Your answer is still here; try again." */
   line: string;
-  /** "Try again": the screen sends `text` again and clears `failed`. */
+  /** The button's words, "Try again" by default; a screen in another language passes its own ("Intentar de nuevo"). */
+  retryLabel?: string;
+  /**
+   * The button: the screen sends `text` again, passing `disabled` while that send is in flight,
+   * and clears `failed` once it goes through.
+   */
   onRetry: () => void;
 }
+
+/** The failed state's button, unless the screen names it. */
+const RETRY_LABEL = 'Try again';
 
 const SEND_LABEL = {
   owner: 'Send',
@@ -83,8 +91,16 @@ export function Composer({
   const failedBoxRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
   const [value, setValue] = useState('');
+  const rootRef = useRef<HTMLDivElement>(null);
   const isFailed = failed !== undefined;
   const shownFailed = useRef(isFailed);
+  const ownFocusAtSwap = useRef(false);
+  // A failed send takes the text box's place, and trying again gives it back, removing the control
+  // that had focus. Note, as the swap renders and while the old control is still on the page,
+  // whether one of the composer's own controls has focus; nothing drawn depends on it.
+  if (shownFailed.current !== isFailed && typeof document !== 'undefined') {
+    ownFocusAtSwap.current = rootRef.current?.contains(document.activeElement) ?? false;
+  }
 
   const text = value.trim();
   const canSend = !disabled && text !== '';
@@ -100,16 +116,17 @@ export function Composer({
     if (!input) return;
     input.style.height = 'auto';
     input.style.height = `${input.scrollHeight}px`;
-  }, [value]);
+  }, [value, isFailed]);
 
-  // A failed send takes the text box's place, and trying again gives it back. Each switch removes
-  // the control that had focus; when focus fell to the page with it, it moves on to the control in
-  // its place ("Try again", or the text box), and focus the owner moved elsewhere stays there.
+  // After the swap, focus follows to the control in the removed one's place ("Try again", or the
+  // text box) only when the composer's own control had it. Focus the owner left elsewhere, on
+  // another control or on the page itself, stays there, and a composer that opens failed takes none.
   useLayoutEffect(() => {
     if (shownFailed.current === isFailed) return;
     shownFailed.current = isFailed;
-    const active = document.activeElement;
-    if (active !== null && active !== document.body) return;
+    const follow = ownFocusAtSwap.current;
+    ownFocusAtSwap.current = false;
+    if (!follow) return;
     if (isFailed) failedBoxRef.current?.querySelector<HTMLElement>('button')?.focus();
     else inputRef.current?.focus();
   }, [isFailed]);
@@ -187,14 +204,15 @@ export function Composer({
 
   if (failed) {
     return (
-      <div className="cd-composer cd-composer--failed">
+      <div ref={rootRef} className="cd-composer cd-composer--failed">
         <Notice tone="error">{failed.line}</Notice>
         <div ref={failedBoxRef} role="group" aria-label={label} className="cd-composer__box cd-composer__box--failed">
           <span className="cd-composer__kept cd-type-body" data-copy="user">
             {failed.text}
           </span>
-          <Button variant="primary" onClick={() => failed.onRetry()}>
-            Try again
+          {/* While the screen sends again (`disabled`), it waits: focus stays, and nothing is called. */}
+          <Button variant="primary" waiting={disabled} onClick={() => failed.onRetry()}>
+            {failed.retryLabel ?? RETRY_LABEL}
           </Button>
         </div>
       </div>
@@ -203,7 +221,7 @@ export function Composer({
 
   if (variant === 'owner') {
     return (
-      <div className="cd-composer cd-composer--owner">
+      <div ref={rootRef} className="cd-composer cd-composer--owner">
         <div className="cd-composer__box cd-composer__box--stacked">
           {labelElement}
           {input}
@@ -220,7 +238,7 @@ export function Composer({
   }
 
   return (
-    <div className={`cd-composer cd-composer--${variant}`}>
+    <div ref={rootRef} className={`cd-composer cd-composer--${variant}`}>
       <div className="cd-composer__box cd-composer__box--inline">
         {labelElement}
         {attach}

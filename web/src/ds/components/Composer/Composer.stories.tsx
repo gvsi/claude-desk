@@ -266,6 +266,45 @@ export const Failed: Story = {
   },
 };
 
+export const FailedWhileSending: Story = {
+  args: { ...Failed.args, disabled: true, failed: { text: KEPT_ANSWER, line: FAILED_LINE, onRetry: fn() } },
+  parameters: { canvas: 'N-R2-Setup-04-Answer-Failed', canvasNote: 'The board draws "Try again" ready; here the answer is being sent again, so it waits.' },
+  play: async ({ args, canvas, userEvent }) => {
+    // failed_retry_waits_while_sending: while the screen sends again, "Try again" waits, keeps its
+    // focus and calls nothing, however often it is pressed.
+    const tryAgain = canvas.getByRole('button', { name: 'Try again' });
+    await expect(tryAgain).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(tryAgain);
+    await userEvent.click(tryAgain);
+    await expect(tryAgain).toHaveFocus();
+    await userEvent.keyboard('{Enter}');
+    await expect(args.failed?.onRetry).not.toHaveBeenCalled();
+    await expect(canvas.getByText(KEPT_ANSWER)).toBeVisible();
+  },
+};
+
+export const FailedInSpanish: Story = {
+  args: {
+    label: 'Escribe a Rivera Plumbing',
+    placeholder: 'Escribe a Rivera Plumbing',
+    sendLabel: 'Enviar',
+    failed: {
+      text: '¿Cuánto cuesta destapar un desagüe?',
+      line: 'No se pudo enviar. Tu mensaje sigue aquí; inténtalo de nuevo.',
+      retryLabel: 'Intentar de nuevo',
+      onRetry: fn(),
+    },
+  },
+  parameters: { canvas: 'N-R2-Setup-04-Answer-Failed', canvasNote: 'The board draws the owner’s English; here a Spanish screen names the button in its own words.' },
+  play: async ({ args, canvas, userEvent }) => {
+    // failed_retry_label_is_the_screens: a screen in another language names the button itself.
+    const retry = canvas.getByRole('button', { name: 'Intentar de nuevo' });
+    await expect(canvas.queryByRole('button', { name: 'Try again' })).toBeNull();
+    await userEvent.click(retry);
+    await expect(args.failed?.onRetry).toHaveBeenCalledTimes(1);
+  },
+};
+
 /**
  * A screen whose answers fail until it tries again: "Fail the send" stands in for the request
  * coming back failed, clicked without moving focus, as a response arrives.
@@ -313,7 +352,7 @@ export const FailedThenTryAgain: Story = {
     canvas: 'N-R2-Setup-04-Answer-Failed',
     canvasNote: 'The board draws the failed state alone; here the answer is sent, fails, and is tried again, with two buttons standing in for the screen.',
   },
-  play: async ({ args, canvas, userEvent }) => {
+  play: async ({ args, canvas, canvasElement, userEvent }) => {
     retried.mockClear();
     const failSend = canvas.getByRole('button', { name: 'Fail the send' });
 
@@ -342,6 +381,17 @@ export const FailedThenTryAgain: Story = {
     fireEvent.click(failSend);
     await canvas.findByRole('button', { name: 'Try again' });
     await expect(elsewhere).toHaveFocus();
+
+    // failed_send_leaves_the_page_focused_alone: focus the owner left on the page itself, by
+    // clicking away from the composer, stays there too; only the composer's own control hands on.
+    await userEvent.click(canvas.getByRole('button', { name: 'Try again' }));
+    await expect(canvas.getByRole('textbox', { name: 'Answer in your own words' })).toHaveFocus();
+    await userEvent.keyboard('Ask me about anything over $500.{Enter}');
+    await userEvent.click(canvasElement);
+    await expect(document.activeElement).toBe(document.body);
+    fireEvent.click(failSend);
+    await canvas.findByRole('button', { name: 'Try again' });
+    await expect(document.activeElement).toBe(document.body);
   },
 };
 
