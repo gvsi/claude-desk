@@ -220,6 +220,25 @@ it('agents_page_opens_in_place_phone', async () => {
   await expectScreenBasics(document.body, { owner: false });
 });
 
+it.each(['phone', 'desktop'] as const)('agents_page_opens_in_spanish_%s', async (viewport) => {
+  const read = holdReads(CHAT_READ);
+  await expectSkeletonLoad({
+    status: 'Abriendo la página para agentes de IA',
+    anchors: [
+      ...AGENTS_ANCHORS.map((anchor) => anchor.name === 'page-title' ? { ...anchor, dimensions: ['height'] as const } : anchor),
+      { name: 'can-do-card', page: '.cd-agents-page__cards > section:nth-child(2)', size: true },
+      { name: 'prove-card', page: '.cd-agents-page__cards > section:nth-child(3)', size: true },
+      { name: 'connect-card', page: '.cd-agents-page__cards > section:nth-child(4)', size: true },
+      { name: 'key-card', page: '.cd-agents-page__cards > section:nth-child(5)', size: true },
+      { name: 'agents-footer', page: '.cd-agents-page__main > .cd-concept-footer', size: true },
+      ...[0, 1, 2].map((i) => ({ name: `task-chip-${i}`, page: `.cd-suggestion-chips > button:nth-child(${i + 1})`, size: true })),
+    ],
+    open: async () => { await renderRoute(AGENTS, { viewport, language: 'es-MX', pollScale: 100 }); },
+    release: read.release,
+  });
+  await expectScreenBasics(document.body, { owner: false });
+});
+
 it('public_chat_still_under_reduced_motion_phone', async () => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonStill({

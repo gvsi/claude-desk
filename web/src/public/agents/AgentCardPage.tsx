@@ -94,7 +94,7 @@ export function AgentCardPage() {
   return (
     <>
       {load.kind === 'loading' ? <main className="cd-sr-only"><h1>Claude Desk</h1></main> : null}
-      <SkeletonScreen loading={load.kind === 'loading'} status={AGENTS_COPY[language].opening} lang={language} skeleton={<AgentsSkeleton />}>
+      <SkeletonScreen loading={load.kind === 'loading'} status={AGENTS_COPY[language].opening} lang={language} skeleton={<AgentsSkeleton language={language} />}>
         {load.kind === 'ready' ? <AgentsPage slug={slug} desk={load.desk} card={load.card} language={language} /> :
           load.kind === 'loading' ? null : <AgentsState load={load} language={language} onRetry={retry} tryAgainRef={tryAgainRef} />}
       </SkeletonScreen>
