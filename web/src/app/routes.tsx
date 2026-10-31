@@ -19,6 +19,11 @@ import { AgentCardPage } from '../public/agents/AgentCardPage.tsx';
 import { CheckoutPage } from '../public/checkout/CheckoutPage.tsx';
 import { PublicPage } from '../public/PublicPage.tsx';
 import { SetupPage } from '../setup/SetupPage.tsx';
+import { CityOfficePage } from '../vision/CityOfficePage.tsx';
+import { ClaudeAccountPage } from '../vision/ClaudeAccountPage.tsx';
+import { VISION_PATHS } from '../vision/data.ts';
+import { PhonePage } from '../vision/PhonePage.tsx';
+import { TeamDeskPage } from '../vision/TeamDeskPage.tsx';
 import { NotFound } from './NotFound.tsx';
 import { RouteError } from './RouteError.tsx';
 
@@ -93,6 +98,12 @@ export const routes: RouteObject[] = [
   { path: '/d/:slug', element: <PublicPage />, errorElement: <RouteError visitor /> },
   { path: '/d/:slug/agents', element: <AgentCardPage />, errorElement: <RouteError visitor /> },
   { path: '/pay/:token', element: <CheckoutPage />, errorElement: <RouteError visitor /> },
+  // The vision pages: static pictures of where a Desk is going, each under the vision bar. They read
+  // nothing, so they open the same for anyone with the link.
+  { path: VISION_PATHS.cityOffice, element: <CityOfficePage />, errorElement: <RouteError visitor /> },
+  { path: VISION_PATHS.teamDesk, element: <TeamDeskPage />, errorElement: <RouteError /> },
+  { path: VISION_PATHS.claudeAccount, element: <ClaudeAccountPage />, errorElement: <RouteError visitor /> },
+  { path: VISION_PATHS.phone, element: <PhonePage />, errorElement: <RouteError /> },
   aboutRoute('proposal'),
   aboutRoute('prediction'),
   { path: '*', element: <NotFound /> },
