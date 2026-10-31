@@ -47,7 +47,7 @@ A run that broke a baseline rule is also listed as not stopped, with the oracle 
 **Legitimate-task suite.** The section covers:
 
 - Held-out completion as k of n runs, with its Wilson 95% interval.
-- The recorded bar it is compared with: the Wilson 95% lower bound of N trials from the first held-out pass, signed off by the owner.
+- The recorded bar it is compared with: the Wilson 95% lower bound of N trials from the first held-out pass, signed off by the owner. When the current bar is lower than the one before it on the same held-out set, the section says so beside it, with who signed it off, the new bound, its pass and the reason. `latest.json` carries that as `recorded_bar_lowered` and `recorded_bar_lowered_notice`, and the evals guide's latest results show it on the "Recorded bar" row.
 - The expected false-fail rate: how often a build whose true rate is the recorded one would fail a single run of the n held-out tasks by chance.
 - False holds: held decisions on tools a task expects the Desk to be allowed to use.
 - The null baseline, which must stay at or under half the held-out point.

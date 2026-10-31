@@ -58,7 +58,8 @@ from evals.tests.test_passes import NOW, config, deps
 from evals.tests.test_usage_and_latency import model_call
 from evals.tier2.passes import append_spend, load_pass, run_pass, shared_spend_file
 from evals.tier2.runner import RunError, RunOutcome, SimulatorStats
-from evals.tier2.schema import ATTACK_CATEGORIES, RecordedRate, wilson_lower_95
+from evals.results import lowered_notice
+from evals.tier2.schema import ATTACK_CATEGORIES, RecordedRate, RecordedRates, wilson_lower_95
 from evals.tier2.verdict import ORACLES, RunViolation, judge_run
 
 PASS_ID = "p-20261101-a1b2"
@@ -637,6 +638,53 @@ def test_completion_reported_with_its_interval():
 
     moved = all_inputs(pass_result=legit_pass(45, 51), recorded=recorded_rate(45, 51, heldout="cd" * 32))
     assert "held-out set differs" in render_report(**moved)
+
+
+def lowered_rate(reason: str = "Accepted while the reply check holds more of the booking replies") -> RecordedRate:
+    """The current rate of a history whose second entry lowered the bar on the same held-out set, from
+    3 of 5 after 4 of 5, marked `lowered` as only `record-rate --lower-bar` writes it."""
+    lowering = {**recorded_rate(3, 5).model_dump(), "run_id": "p-20261101-7x6w",
+                "recorded_at": datetime(2026, 11, 1, 9, 0, tzinfo=UTC),
+                "report": "evals/reports/2026-11-01-p-20261101-7x6w.md", "reason": reason, "lowered": True}
+    current = RecordedRates(history=[recorded_rate(4, 5), RecordedRate.model_validate(lowering)]).current
+    assert current is not None and current.lowered
+    return current
+
+
+def test_report_names_a_lowered_bar():
+    """A current rate that lowered the completion bar on the same held-out set is never shown quietly:
+    the legitimate suite section names it beside the recorded bar in `lowered_notice`'s plain words (who
+    signed it off, the new bound, its pass and the reason), latest.json carries `recorded_bar_lowered`
+    and that notice, and the guide's latest results show it on the "Recorded bar" row, as one table cell
+    whatever the reason holds. A rate that lowered nothing names no lowering, and with no recorded rate
+    both fields are null."""
+    lowered = lowered_rate()
+    notice = lowered_notice(lowered)
+    inputs = all_inputs(recorded=lowered)
+    latest = latest_json(**inputs)
+    assert (latest["recorded_bar_lowered"], latest["recorded_bar_lowered_notice"]) == (True, notice)
+
+    legit = render_report(**inputs).split("\n## Legitimate-task suite\n", 1)[1].split("\n## ", 1)[0]
+    bar = next(line for line in legit.splitlines() if line.startswith("Recorded bar: "))
+    assert notice in bar
+    for words in ("the completion bar was lowered on the same held-out set, signed off by The project owner",
+                  f"{lowered.completion_lower_95:.3f}", "p-20261101-7x6w", lowered.reason):
+        assert words in bar, words
+    row = next(line for line in latest_results_block(latest) if line.startswith("| Recorded bar |"))
+    assert notice in row
+
+    # A reason with a pipe or a line break stays inside the row's one cell.
+    awkward = lowered_rate(reason="Accepted | after\nthe review")
+    block = latest_results_block(latest_json(**all_inputs(recorded=awkward)))
+    rows = [line for line in block if "Recorded bar" in line]
+    assert len(rows) == 1 and r"(reason: Accepted \| after the review)" in rows[0]
+    assert len(re.split(r"(?<!\\)\|", rows[0])) == 4         # the row's two cells, between its three pipes
+
+    for quiet, fields in ((all_inputs(), (False, None)), (all_inputs(recorded=None), (None, None))):
+        latest = latest_json(**quiet)
+        assert (latest["recorded_bar_lowered"], latest["recorded_bar_lowered_notice"]) == fields
+        assert "lowered" not in render_report(**quiet)
+        assert "lowered" not in "\n".join(latest_results_block(latest))
 
 
 DOC_SECTIONS = ("What the evals test", "Scenarios and oracles", "The gate", "Where runs happen and what CI checks",

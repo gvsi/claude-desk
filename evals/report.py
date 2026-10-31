@@ -17,9 +17,11 @@ The inputs are the report's own models, built from what the pass runner, the usa
 measurements and the calibration leave. The report judges nothing: whether the pass passed comes
 from the gate's result (any object with its `passed` and `reasons`), and the counts, intervals and
 bounds here only describe the runs. Only ids, categories, oracle names, the fixed names of skipped
-checks, kernel enums and numbers reach the report, never what a visitor saw or typed, so no code,
+checks, kernel enums, numbers and the recorded rate's sign-off (its signer and, for a bar it lowered,
+the reason `record-rate` recorded) reach the report, never what a visitor saw or typed, so no code,
 contact, key or link token can. A check a run skipped while a plan hadn't landed is named, scenario
-by scenario, and never counted as passed.
+by scenario, and never counted as passed; a recorded bar lowered on the same held-out set is named
+beside it (`results.lowered_notice`).
 """
 
 import csv
@@ -38,7 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 
 from desk.contracts import Effect, Violation
 from evals.gate import skipped_summary
-from evals.results import gating_refusal
+from evals.results import gating_refusal, lowered_notice
 from evals.tier2.artifact import RunArtifact
 from evals.tier2.schema import (
     DEMO_INBOX_ASSUMPTION,
@@ -565,6 +567,10 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "legit_completion_interval_95": [_round(x) for x in interval] if interval else None,
         "recorded_lower_95": recorded.completion_lower_95 if recorded else None,
         "recorded_trials": recorded.trials if recorded else None,
+        # Whether the current rate lowered the bar on the same held-out set, and `lowered_notice`'s plain words
+        # for it (who signed it off, the bound, its pass and the reason), so a lowered bar is never quiet.
+        "recorded_bar_lowered": recorded.lowered if recorded else None,
+        "recorded_bar_lowered_notice": lowered_notice(recorded) if recorded else None,
         "gated_trials": len(gated) or None,
         "false_hold_rate": _round(sum(r.false_holds for r in legit) / expected) if expected else None,
         "expected_allow_decisions": expected if legit else None,
@@ -726,6 +732,11 @@ def render_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics |
     return "\n\n".join(parts) + "\n"
 
 
+def _cell(text: str) -> str:
+    """Free text, such as the reason a bar was lowered, as one table cell: on one line, its pipes escaped."""
+    return " ".join(text.split()).replace("|", r"\|")
+
+
 def _table(header: Sequence[str], rows: Iterable[Sequence[Any]]) -> str:
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     lines += ["| " + " | ".join(str(cell) for cell in row) + " |" for row in rows]
@@ -877,7 +888,10 @@ def _legit(p: PassSummary, n: dict[str, Any], recorded: RecordedRate | None,
     if recorded is not None:
         line = (f"Recorded bar: {percent(recorded.completion_lower_95)}, the Wilson 95% lower bound of "
                 f"{recorded.trials} held-out runs on pass `{recorded.run_id}` (provider {recorded.provider}), "
-                f"signed off by {recorded.signed_off_by}. A gated pass's held-out point must be at or above it.")
+                f"signed off by {recorded.signed_off_by}")
+        if n["recorded_bar_lowered_notice"]:
+            line += f"; {n['recorded_bar_lowered_notice']}"
+        line += ". A gated pass's held-out point must be at or above it."
         if recorded.heldout_sha256 != p.heldout_sha256:
             line += (" This pass's held-out set differs from the one the bar was recorded on, so the gate can't "
                      "compare them until a new rate is recorded with sign-off.")
@@ -1130,7 +1144,8 @@ def latest_results_block(latest: dict[str, Any]) -> list[str]:
         f"{percent(lower)}, recorded from N = {latest['recorded_trials']} held-out runs; "
         + ("this pass ran no held-out legitimate task to compare" if latest["gated_trials"] is None else
            f"a gated pass compares n = {latest['gated_trials']}")
-        + ("" if latest["recorded_heldout_matches"] else ", but on another held-out set, so not compared")),
+        + ("" if latest["recorded_heldout_matches"] else ", but on another held-out set, so not compared")
+        + (f"; {_cell(latest['recorded_bar_lowered_notice'])}" if latest["recorded_bar_lowered_notice"] else "")),
         "the recorded bar, after the owner's sign-off")
     rows = [
         ("Gate", "passed" if latest["gate_passed"] else "failed"),
