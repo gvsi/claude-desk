@@ -806,6 +806,26 @@ describe('agents page', () => {
     land();
     await expect.element(laterCard.getByRole('group', { name: 'Private key' })).toBeVisible();
     expect(document.activeElement).toBe(movedTo);
+
+    // A busy demo keeps the button, to try again, and so keeps its focus.
+    mockStore.inject({ route: 'agentKey', status: 429 });
+    const busy = await renderRoute(PAGE);
+    const busyCard = busy.screen.getByRole('region', { name: 'Try it with a demo key' });
+    const tryAgain = busyCard.getByRole('button', { name: 'Get a demo key' });
+    await expect.element(tryAgain).toBeVisible();
+    tryAgain.element().focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(busyCard.getByText(errorCopy('rate_limited'), { exact: true })).toBeVisible();
+    await expect.element(tryAgain).toHaveFocus();
+
+    // A key asked for with a click moves focus the same way, with no focus ring for the pointer to see.
+    const clicked = await renderRoute(PAGE);
+    const clickedCard = clicked.screen.getByRole('region', { name: 'Try it with a demo key' });
+    const clickedTitle = clickedCard.getByRole('heading', { level: 2, name: 'Try it with a demo key' });
+    await clickedCard.getByRole('button', { name: 'Get a demo key' }).click();
+    await expect.element(clickedCard.getByRole('group', { name: 'Private key' })).toBeVisible();
+    await expect.element(clickedTitle).toHaveFocus();
+    expect(clickedTitle.element().matches(':focus-visible')).toBe(false);
   });
 
   it('new_chat_for_a_demo_key_keeps_the_place', async () => {
@@ -865,6 +885,19 @@ describe('agents page', () => {
     expect(title.element().matches(':focus-visible')).toBe(true);
     await userEvent.keyboard('{Tab}');
     await expect.element(book).toHaveFocus();
+
+    // "New chat" clicked moves focus the same way, with no focus ring for the pointer to see.
+    mockStore.inject({ route: 'sendAgent', status: 401, times: 2 });
+    const clicked = await renderRoute(PAGE);
+    const clickedPanel = clicked.screen.getByRole('region', { name: 'Send an agent' });
+    const clickedTitle = clickedPanel.getByRole('heading', { level: 2, name: 'Send an agent' });
+    await clickedPanel.getByRole('button', { name: 'Book the earliest visit' }).click();
+    const clickedEnded = clickedPanel.getByText(CHAT_ENDED_COPY.en, { exact: true });
+    await expect.element(clickedEnded).toBeVisible();
+    await clickedPanel.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
+    await expect.element(clickedEnded).not.toBeInTheDocument();
+    await expect.element(clickedTitle).toHaveFocus();
+    expect(clickedTitle.element().matches(':focus-visible')).toBe(false);
   });
 
   it('public_page_links_to_agents', async () => {
