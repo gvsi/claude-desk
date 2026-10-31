@@ -215,13 +215,22 @@ export class Server {
     this.agents.stop();
   }
 
-  /** Deletes `desk` from the copy: its chats close, and a turn one of them has in progress says nothing more. */
+  /**
+   * Deletes `desk` from the copy. Each of its chats ends as a closed session ends a visitor's turn
+   * (master "Fail-closed behavior"): `error{code: "session"}` on its stream, then `turn_end` when a
+   * turn was in progress, which says nothing more. Then the stream is done with it.
+   */
   deleteDesk(desk: DeskRecord): void {
     for (const session of this.world.sessionsOf(desk.summary.desk_id)) {
       const sessionId = session.state.session_id;
-      const timer = this.turns.get(sessionId)?.timer;
-      if (timer != null) clearTimeout(timer);
+      const turn = this.turns.get(sessionId);
+      // A step is waiting, or more are queued (the Desk went while one of them was being sent).
+      const running = turn !== undefined && (turn.timer !== null || turn.queue.length > 0);
+      if (turn?.timer != null) clearTimeout(turn.timer);
       this.turns.delete(sessionId);
+      this.world.emit(session, { type: 'error', code: 'session' });
+      if (running) this.world.emit(session, { type: 'turn_end' });
+      session.listeners.clear();
     }
     this.world.deleteDesk(desk);
   }

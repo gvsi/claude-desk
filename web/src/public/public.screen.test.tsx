@@ -315,6 +315,30 @@ describe('public chat page', () => {
     await expect.element(screen.getByText(UNREACHABLE_COPY.en, { exact: true })).not.toBeInTheDocument();
   });
 
+  it('deleted_desk_ends_the_chat', async () => {
+    // The owner deletes the Desk the moment Claude starts writing a reply.
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const deleted: Promise<unknown>[] = [];
+    const stop = mockStore.listen(RIVERA.slug, chatEvents().length, (_seq, ev) => {
+      if (ev.type === 'writing' && deleted.length === 0) deleted.push(mockStore.dispatch('deleteDesk', { params: { desk_id: RIVERA.deskId } }));
+    });
+    onTestFinished(stop);
+    await type(screen, 'How much is drain clearing?');
+    await vi.waitFor(() => expect(deleted).toHaveLength(1));
+    expect(await deleted[0]).toMatchObject({ status: 204 });
+
+    // The chat ends, and stops showing Claude writing: no reply is coming.
+    await expect.element(screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Claude is writing')).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element()).toBeDisabled();
+    expect(messagesOf(chatEvents())).toEqual([]);
+
+    // A new chat finds the Desk gone.
+    await screen.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+  });
+
   it('session_error_offers_a_new_chat', async () => {
     const newChat = async (screen: RenderResult) => {
       await expect.element(screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();

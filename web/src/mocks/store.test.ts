@@ -23,6 +23,7 @@ import type {
 } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
+import { chatReducer, initialChatState } from '../public/chatReducer.ts';
 import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
@@ -950,12 +951,14 @@ describe('rules and tools', () => {
 
 describe('deleting a Desk', () => {
   it('delete_desk_closes_its_page_and_chats', async () => {
-    // Rivera's main Desk, with a chat whose turn is still running when the Desk goes.
+    // Rivera's main Desk, with a chat Claude is writing in when the Desk goes, and the seeded chats idle.
     mockStore.reset('rivera_two_desks');
     const { events } = await openChat();
     await send('How much is drain clearing?');
-    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS);
-    const before = events.length;
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 2);
+    expect(typesOf(events)).toEqual(['receipt', 'writing']);
+    const seeded = mockStore.world.sessionsOf(deskId).filter((s) => s !== mockStore.visitorSession(slug));
+    expect(seeded.length).toBeGreaterThan(0);
 
     // Answered 204, with nothing to say.
     expect(await call('deleteDesk', { params: { desk_id: deskId } })).toEqual({ status: 204, body: undefined });
@@ -964,11 +967,18 @@ describe('deleting a Desk', () => {
     const desks = async () => ((await call('me')).body as CopyOut).desks.map((d) => d.desk_id);
     expect(await desks()).toEqual([RIVERA.emergenciesDeskId]);
     expect((await call('today', { params: { desk_id: deskId } })).status).toBe(404);
-    // Its public link stops working, its chats close, and the turn in flight says nothing more.
+    // Each of its chats hears that its session ended, as a closed session ends a visitor's turn; the
+    // turn in flight ends there and says nothing more, so the chat no longer shows Claude writing.
+    expect(typesOf(events)).toEqual(['receipt', 'writing', 'error', 'turn_end']);
+    expect(events[2]?.[1]).toEqual({ type: 'error', code: 'session' });
+    const chat = events.reduce((state, [seq, ev]) => chatReducer(state, { type: 'event', seq, ev }), initialChatState());
+    expect(chat).toMatchObject({ writing: false, error: 'session' });
+    for (const session of seeded) expect(session.events.at(-1)?.ev).toEqual({ type: 'error', code: 'session' });
+    // Its public link stops working, and so do its chats.
     expect((await call('publicDesk', { params: { slug } })).status).toBe(404);
     expect((await call('sendMessage', { params: { slug }, body: { text: 'Hello?' } })).status).toBe(404);
     await drain();
-    expect(events).toHaveLength(before);
+    expect(typesOf(events)).toEqual(['receipt', 'writing', 'error', 'turn_end']);
     expect((await call('publicDesk', { params: { slug: RIVERA.emergenciesSlug } })).status).toBe(200);
 
     // Deleting it again, or a Desk outside the copy, is not found; without the owner cookie, refused.
