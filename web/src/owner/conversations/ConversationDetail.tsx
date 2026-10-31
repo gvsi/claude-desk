@@ -299,6 +299,7 @@ export function ConversationDetail({ sessionId, summary, notice }: ConversationD
           deskId={deskId}
           heldIds={heldIds}
           renderHeld={renderHeld}
+          recorded={read.replayed === true}
         />
         {typing && state.kind !== 'agent' ? (
           <TranscriptRow>

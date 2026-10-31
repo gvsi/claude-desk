@@ -745,6 +745,64 @@ describe('Conversations', () => {
     expect(rowOf(verifyCard)?.contains(started.element())).toBe(true);
     await expectScreenBasics(screen.container, { owner: true });
   });
+  it('a_reply_that_arrives_while_open_lands', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const { screen, router } = await renderRoute(conversation(DANA_LIVE));
+    const live = () => [...log(screen).element().querySelectorAll('.cd-transcript-row--live')];
+    const quotes = () => log(screen).getByRole('article', { name: 'Quote' }).elements();
+    const rowOf = (el: Element | undefined) => el?.closest('.cd-transcript-row') ?? null;
+
+    // Opening a chat reads what happened so far: every row draws still, through the reads that follow.
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    const before = quotes().length;
+    await readsMore('conversation', 2);
+    expect(live()).toEqual([]);
+
+    // Dana asks while the owner watches, and Claude answers: her words show as they come, and
+    // Claude's reply lands, with its receipts.
+    const world = mockStore.world;
+    const price = SCRIPT.find((rule) => rule.name === 'price');
+    if (!price) throw new Error('the script has its price row');
+    const question = 'How much is drain clearing?';
+    world.visitorText(chat, question);
+    const turn = world.context(chat, 'en', question);
+    for (const step of [...price.steps, turnEnd]) world.emit(chat, step(turn));
+    await expect.poll(() => quotes().length).toBe(before + 1);
+    const reply = rowOf(quotes().at(-1));
+    expect(live()).toEqual([reply]);
+    expect(reply?.querySelectorAll('.cd-margin-receipt')).toHaveLength(2);
+    expect(rowOf(log(screen).getByText(question, { exact: true }).element())?.classList.contains('cd-transcript-row--live')).toBe(false);
+
+    // It lands once: coming back to the chat draws it still.
+    await router.navigate(LIST);
+    await expect.element(screen.getByText('Choose a conversation to read it.', { exact: true })).toBeVisible();
+    expect(log(screen).elements()).toHaveLength(0);
+    await router.navigate(conversation(DANA_LIVE));
+    await expect.poll(() => quotes().length).toBe(before + 1);
+    await readsMore('conversation', 2);
+    expect(live()).toEqual([]);
+  });
+
+  it('a_recorded_chat_never_lands', async () => {
+    // The seeded visitor's chat, replayed from the recorded history, whose next read has one more reply.
+    const read = await served<OwnerTranscript>('conversation', { session_id: SEEDED_HOLD });
+    const delivered = read.items.findLast((item) => item.kind === 'delivered' && item.event?.type === 'message');
+    if (delivered?.event?.type !== 'message') throw new Error("the seeded visitor's chat has a reply");
+    const n = Math.max(...read.items.map((item) => item.n)) + 1;
+    const later = { ...delivered, n, event: { ...delivered.event, message_id: 'msg-recorded-later' } };
+    mockStore.inject({ route: 'conversation', status: 200, times: 1, body: { ...read, replayed: true } });
+    mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, replayed: true, items: [...read.items, later] } });
+
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const rows = () => log(screen).element().querySelectorAll('.cd-transcript-row:not(.cd-transcript-header)');
+    await expect.element(screen.getByText('Recorded history, replayed into your copy. It happened before you arrived.', { exact: true })).toBeVisible();
+    const shownFirst = rows().length;
+    // The reply the next read adds shows where it belongs, and draws still: nothing in a recorded chat arrives live.
+    await expect.poll(() => rows().length).toBe(shownFirst + 1);
+    expect(log(screen).element().querySelectorAll('.cd-transcript-row--live')).toHaveLength(0);
+  });
+
   it('answer_row_follows_the_decided_look', async () => {
     // The seeded 15% hold, from a visitor not on record, held by a limit: two plain answers.
     const seeded = await renderRoute(conversation(SEEDED_HOLD));
