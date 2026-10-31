@@ -339,9 +339,10 @@ class Handoff(BaseModel):
       fixes). `reason` is the kernel's own template ("The Desk handed this to you."), and `callback_window` is None:
       no call back was promised.
 
-    A null window alone can't tell them apart; `kind` does. None opens in the owner's preview, while a held request
-    awaits the owner, or while the session has an open handoff; a call-back request takes over an open card handoff
-    under the same ID, as kind `callback`."""
+    A null window alone can't tell them apart; `kind` does, and a row's kind never changes. A card handoff opens
+    none in the owner's preview, while a held request awaits the owner, or while the session has an open handoff. A
+    call-back request closes the session's open card handoff (it reads `done` from then on) and opens its own
+    `callback` row with a new ID."""
 
     handoff_id: str
     session_id: str
