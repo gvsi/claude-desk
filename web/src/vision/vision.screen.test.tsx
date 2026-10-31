@@ -424,7 +424,7 @@ describe('Vision pages against their boards', () => {
     expect(tabs.map((tab) => tab.getAttribute('aria-current'))).toEqual(['page', null, null, null, null]);
     // The tab bar at the foot of the owner's screen.
     const tabBar = one(owner.element(), '.cd-phone-tab-bar');
-    expect(round(ownerScreen.getBoundingClientRect().bottom - tabBar.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs(ownerScreen.getBoundingClientRect().bottom - tabBar.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
 
     // The visitor's phone: the business's header with the disclosure, the booking next to its card, the composer.
     await expect.element(visitor.getByText('Claude, an AI, answers for Maria Rivera', { exact: true })).toBeVisible();
