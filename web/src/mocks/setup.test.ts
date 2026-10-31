@@ -220,7 +220,22 @@ describe('setup consultant run and decisions', () => {
     expect((response.body as RulesDraft).cards.filter(({ applies_to }) => ['effect:charge', 'effect:pay_out', 'native.payment_link', 'native.charge_mandate'].includes(applies_to)).every(({ mode }) => mode === 'ask')).toBe(true);
   });
 
-  it('preserves_atomic_validation_amount_requirements_and_replaceable_decisions', async () => {
+  it.each(['accepted', 'declined', 'changed'] as const)('refuses_decisions_on_%s_history_without_changing_anything', async (decision) => {
+    let state = await cpaAt('schedule');
+    const id = state.interview_id;
+    const proposal_id = state.pending_card!;
+    state = decision === 'changed'
+      ? await setupState('setupAnswer', id, { question: null, card: proposal_id, text: 'Make it 15 minutes.' })
+      : await setupState('setupProposal', id, { accept: decision === 'accepted' }, proposal_id);
+    expect(state.messages.find(({ card }) => card?.proposal_id === proposal_id)?.card?.state).toBe(decision);
+    const before = structuredClone(state);
+    const tools = structuredClone(mockStore.world.desk(state.desk_id)!.tools);
+    expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id }, query: { cards: '1' }, body: { accept: decision !== 'accepted' } })).toMatchObject({ status: 409 });
+    expect(await setupState('setup', id)).toEqual(before);
+    expect(mockStore.world.desk(state.desk_id)!.tools).toEqual(tools);
+  });
+
+  it('preserves_atomic_validation_and_payment_amount_requirements', async () => {
     let state = await cpaAt('payment');
     const id = state.interview_id;
     const proposal_id = state.pending_card!;
@@ -231,17 +246,16 @@ describe('setup consultant run and decisions', () => {
     }
     expect(await mockStore.dispatch('setupProposal', { params, body: { accept: true } })).toMatchObject({ status: 422, body: { error: 'amount_required' } });
     for (const amount_cents of [0, 1000000]) {
-      state = await setupState('setupProposal', id, { accept: true, title: 'Updated retainer', autonomy: 'ask', amount_cents }, proposal_id);
-      expect(state.messages.find(({ card }) => card?.proposal_id === proposal_id)?.card).toMatchObject({ state: 'accepted', job: { title: 'Updated retainer', autonomy: 'ask', config: { amount_cents } } });
+      const fresh = await cpaAt('payment');
+      const accepted = await setupState('setupProposal', fresh.interview_id, { accept: true, title: 'Updated retainer', autonomy: 'ask', amount_cents }, fresh.pending_card!);
+      expect(accepted.messages.find(({ card }) => card?.proposal_id === fresh.pending_card)?.card).toMatchObject({ state: 'accepted', job: { title: 'Updated retainer', autonomy: 'ask', config: { amount_cents } } });
     }
-    state = await setupState('setupProposal', id, { accept: false }, proposal_id);
-    expect(state.messages.find(({ card }) => card?.proposal_id === proposal_id)?.card?.state).toBe('declined');
     const connectorState = await cpaAt('stripe');
     for (const body of [{ accept: true, title: 'Renamed' }, { accept: true, amount_cents: 0 }, { accept: true, autonomy: 'auto' }]) {
       expect(await mockStore.dispatch('setupProposal', { params: { id: connectorState.interview_id, proposal_id: connectorState.pending_card! }, body })).toMatchObject({ status: 422 });
     }
-    const schedule = state.messages.find(({ card }) => card?.job?.job === 'schedule')!.card!;
-    expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id: schedule.proposal_id }, body: { accept: true, amount_cents: 0 } })).toMatchObject({ status: 422 });
+    const scheduleState = await cpaAt('schedule');
+    expect(await mockStore.dispatch('setupProposal', { params: { id: scheduleState.interview_id, proposal_id: scheduleState.pending_card! }, body: { accept: true, amount_cents: 0 } })).toMatchObject({ status: 422 });
     expect(await mockStore.dispatch('setupProposal', { params: { id, proposal_id: 'missing' }, body: { accept: true } })).toMatchObject({ status: 404 });
     await setupState('setupSuggestions', id, {});
     expect(await mockStore.dispatch('setupProposal', { params, body: { accept: true } })).toMatchObject({ status: 409 });

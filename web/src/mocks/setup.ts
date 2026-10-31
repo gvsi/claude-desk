@@ -1112,6 +1112,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     const proposal = interview.state.messages.find((message) => message.card?.proposal_id === req.params.proposal_id)?.card;
     if (!proposal) return NOT_FOUND;
     if (interview.state.step !== 'questions' || interview.state.busy || interview.running !== null) return CONFLICT;
+    if (proposal.proposal_id !== interview.state.pending_card || proposal.state !== 'proposed') return CONFLICT;
     const body = isRecord(req.body) ? req.body : {};
     if (req.malformed || typeof body.accept !== 'boolean') return INVALID;
     if (Object.keys(body).some((key) => !['accept', 'title', 'amount_cents', 'autonomy'].includes(key))) return INVALID;
