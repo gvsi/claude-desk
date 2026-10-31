@@ -591,3 +591,28 @@ async def test_a_hold_that_cant_be_read_opens_the_handoff_as_usual(app, client, 
     assert_handed_off(await checked(client, visitor, BLOCKED))
     assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == [("card", "open")]
     assert len(await handoff_alerts(app, copy)) == 1
+
+
+@pytest.mark.parametrize("session", ["call-back open", "hold awaiting", "preview"])
+async def test_a_first_attempt_no_rewrite_can_fix_shows_the_handoff_where_none_opens(app, client, session):
+    """A first attempt holding a violation no rewrite can fix is shown at once, so its verdict keeps
+    the handoff clause even where the card opens no handoff: a session whose call-back is already
+    open, one with a request awaiting the owner, and the owner's own preview. Only a first attempt
+    blocked for rewritable kinds alone carries no blocks; whether a handoff opened doesn't decide it,
+    or the visitor would be shown nothing."""
+    copy, visitor = await visitor_of(app, client)
+    if session == "call-back open":
+        await callback(client, visitor)
+    elif session == "hold awaiting":
+        await held_quote(client, visitor)
+    else:
+        response = await client.post("/sessions", headers=copy.owner, json={
+            "desk_slug": copy.slug, "kind": "visitor", "preview": True})
+        assert response.status_code == 200, response.text
+        created = SessionCreated.model_validate(response.json())
+        visitor = Visitor(session_id=created.state.session_id, token=created.session_token)
+    before = [(row.kind, row.status) for row in await handoffs_of(app, copy)]
+    verdict = await checked_as(client, visitor, FRENCH, [clause("quote", "catalog")], final=False)
+    assert "unsupported_language" in {violation.kind for violation in verdict.violations}
+    assert_handed_off(verdict)
+    assert [(row.kind, row.status) for row in await handoffs_of(app, copy)] == before   # no second one
