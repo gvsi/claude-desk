@@ -146,6 +146,24 @@ describe('Vision pages', () => {
     expect(textOutsideFactCards(page)).not.toMatch(FACT_OUTSIDE_A_CARD);
   });
 
+  it('vision_pages_carry_no_api_address', async () => {
+    // Nothing on a vision page can reach the API, even through the browser's own menu ("Open link
+    // in new tab"): no link, source or form on it names a path under /api/.
+    for (const path of VISION_ROUTES) {
+      const { screen } = await renderRoute(path);
+      await expect.element(screen.getByRole('main')).toBeVisible();
+      const addresses = [...screen.container.querySelectorAll<HTMLElement>('[href], [src], [action], [formaction], [poster]')].flatMap((el) =>
+        ['href', 'src', 'action', 'formaction', 'poster'].map((name) => el.getAttribute(name)).filter((value): value is string => value !== null),
+      );
+      expect(addresses.length, path).toBeGreaterThan(0);
+      const toTheApi = addresses.filter((value) => {
+        const url = new URL(value, window.location.href);
+        return url.origin === window.location.origin && /^\/api(?:\/|$)/.test(url.pathname);
+      });
+      expect(toTheApi, path).toEqual([]);
+    }
+  });
+
   it('things_to_try_links_where_this_is_going', async () => {
     // Today's "Things to try" leads to the vision pages, starting with the city office.
     const { screen, router } = await renderRoute(TODAY);
@@ -461,11 +479,14 @@ describe('Vision pages against their boards', () => {
       main(screen).getByRole('textbox', { name: 'Message Rivera Plumbing' }).element() as HTMLElement,
     ]);
 
-    // Nothing here is live: the download goes nowhere, not even to a page of the app, and nothing
-    // is asked of the API.
+    // Nothing here is live: the download keeps its look but points nowhere, its click goes nowhere,
+    // not even to a page of the app or a place on this one, and nothing is asked of the API.
+    expect(download.element().getAttribute('href')).toBe('#');
+    const here = window.location.href;
     await download.click();
     await wait(300);
     expect(router.state.location.pathname).toBe(CLAUDE_ACCOUNT);
+    expect(window.location.href).toBe(here);
     await expect.element(log).toBeVisible();
     expect(mockStore.requests).toEqual([]);
     expect(mockStore.unhandled).toEqual([]);
