@@ -5,6 +5,8 @@
  */
 import { QueryClient } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
+import { useLayoutEffect } from 'react';
+import { useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, type RenderResult } from 'vitest-browser-react';
@@ -14,6 +16,7 @@ import { newIdempotencyKey, observeRequests } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, SetupState, ThisWeek, Today } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
+import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
@@ -38,7 +41,7 @@ import {
 } from '../../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
 import { needsYouKey } from '../useDesks.ts';
-import { COPIED_FOR_MS } from './TodayPage.tsx';
+import { COPIED_FOR_MS, TodayPage } from './TodayPage.tsx';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 const DESK = `/app/${RIVERA.deskId}`;
@@ -2362,6 +2365,42 @@ describe("Today's Demo inbox", () => {
     again.stop();
     await readsMore('needsYou', 2);
     expect(document.activeElement).toBe(focused);
+    expect(focusIsOn(card.element())).toBe(false);
+  });
+
+  it('request_link_spent_by_input_as_the_address_commits', async () => {
+    // Input can arrive after the new address commits, before passive effects run. A parent's
+    // layout effect supplies that ordering without depending on the browser's frame timing.
+    let pressAtCommit = () => {};
+    function TodayWithInput() {
+      const { key } = useLocation();
+      useLayoutEffect(() => pressAtCommit(), [key]);
+      return <TodayPage />;
+    }
+    const withInput = routes.map((route) =>
+      route.path === '/app/:deskId' && route.index !== true
+        ? { ...route, children: route.children?.map((child) => (child.path === 'today' ? { ...child, element: <TodayWithInput /> } : child)) }
+        : route,
+    );
+    const { screen, router } = await renderRoute(TODAY, { routes: withInput });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const failing = failReads(needsYouPath);
+    const refund = mockStore.world.addHeldRefund();
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Try again' }), { timeout: 4_000 }).toBeVisible();
+    const link = region(screen, 'Things to try').getByRole('link', { name: 'Open your public page', exact: true }).element() as HTMLElement;
+    link.focus();
+    let pressed = false;
+    pressAtCommit = () => {
+      pressed = true;
+      link.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    };
+    await router.navigate(requestLink(refund.decision_id));
+    await vi.waitFor(() => expect(pressed).toBe(true));
+    failing.stop();
+    const card = heldCard(screen, REFUND_REASON);
+    await expect.element(card, { timeout: 4_000 }).toBeInTheDocument();
+    await readsMore('needsYou', 2);
+    expect(document.activeElement).toBe(link);
     expect(focusIsOn(card.element())).toBe(false);
   });
 

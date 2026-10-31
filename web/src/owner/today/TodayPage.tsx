@@ -155,10 +155,11 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     card?.focus();
   }, [opening, requested, inboxOpen, readWorked, readAt, visit.rereadAfter, location.key, answeredCardFor, readNeedsYou]);
   // While it waits because Needs you can't be read, the owner's first pointer or key press spends
-  // it: a read that works later doesn't pull focus from what they're doing by then.
+  // it: a read that works later doesn't pull focus from what they're doing by then. Listen in
+  // the commit, before paint, so input on the new address cannot slip ahead of a passive effect.
   const readFailing = needsYou.errorUpdatedAt > needsYou.dataUpdatedAt || needsYou.isPaused;
   const waitsOnFailure = requested !== null && readFailing;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!waitsOnFailure) return undefined;
     const key = location.key;
     const spend = () => setVisit((now) => (now.key === key ? { ...now, spent: true } : now));
