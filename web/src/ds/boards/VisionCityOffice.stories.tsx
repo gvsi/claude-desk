@@ -114,6 +114,20 @@ function slotStart(slotId: string): string | null {
   return `${weekday}, ${MONTHS[month - 1]} ${day}, ${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour < 12 ? 'am' : 'pm'}`;
 }
 
+/**
+ * `line` is fully inside `scroller`'s visible box, and nothing covers it: the topmost element at its
+ * center is the line itself.
+ */
+async function expectInView(line: HTMLElement, scroller: HTMLElement): Promise<void> {
+  const box = line.getBoundingClientRect();
+  const view = scroller.getBoundingClientRect();
+  await expect(box.height, 'the line has its height').toBeGreaterThan(1);
+  await expect(box.top, 'the line starts inside the scroll region').toBeGreaterThanOrEqual(view.top);
+  await expect(box.bottom, 'the line ends inside the scroll region').toBeLessThanOrEqual(view.bottom);
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  await expect(hit !== null && line.contains(hit), 'nothing covers the line').toBe(true);
+}
+
 /** Each line of text a person reads under `root`, one text node at a time, outside any card. */
 function linesOutsideCards(root: HTMLElement): string[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -288,13 +302,17 @@ export const Board: Story = {
     const askLine = one(main, '.cd-public-shell__chat-head > .cd-vision-inert-line');
     await expect(askLine).toHaveAttribute('role', 'status');
     await expect(askLine).toHaveTextContent(VISION_INERT_LINE);
-    // A suggestion picks nothing, and keeps the focus.
+    // A suggestion picks nothing, and keeps the focus. The chips end the conversation's scroll region,
+    // so with the conversation scrolled to its end, the line their first pick shows is brought into
+    // the region's view, fully inside it and under nothing (the composer is just below).
+    scroller.scrollTop = scroller.scrollHeight;
     await userEvent.click(chipButtons[1] as HTMLElement);
     await expect(chipButtons[1]).toHaveFocus();
     const chipsLine = chips.nextElementSibling as HTMLElement;
     await expect(chipsLine).toHaveClass('cd-vision-inert-line');
     await expect(chipsLine).toHaveAttribute('role', 'status');
     await expect(chipsLine).toHaveTextContent(VISION_INERT_LINE);
+    await expectInView(chipsLine, scroller);
     await expect(within(main).getAllByText(VISION_INERT_LINE)).toEqual([askLine, chipsLine, sendLine]);
   },
 };
