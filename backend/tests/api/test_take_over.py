@@ -24,6 +24,7 @@ from sqlalchemy import text
 
 from desk.api.main import create_app
 from desk.api.prompts import NOTES
+from desk.api.routes import public
 from desk.kernel_api import CreateCopyRequest, DeskBusinessRequest
 from tests.api.fakes import ScriptedModel, response
 from tests.api.test_approvals import answer, held_request, resolved
@@ -38,6 +39,7 @@ from tests.api.test_public_chat import (
     rows,
     stored_events,
     types,
+    visitor_cookie,
 )
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA
 
@@ -648,3 +650,90 @@ async def test_visitor_reload_shows_where_the_owner_joined_and_left(app, browser
     # The owner's transcript keeps the same events.
     owner_items = (await chat.owner.get(chat.path())).json()["items"]
     assert [item["event"] for item in owner_items] == live
+
+
+async def test_visitor_reload_reads_the_mode_with_its_cursor(app, browser, fake, kernel_http, model, engine, kernel):
+    """A reload's mode and cursor are one moment's. The owner hands the chat back and Claude answers after the kernel
+    named the visitor's session for the request but before the transcript was read: the answer says Claude has the
+    chat with the cursor past the owner leaving, or the owner has it with the cursor before, so the stream the page
+    opens next sends the leaving. Never the owner's mode with the leaving behind the cursor, which the stream would
+    never send again: the page would say the owner has the chat while Claude answers."""
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    model.add(response(reply("Happy to help with that.")))
+    landed: list[bool] = []
+
+    async def hand_back_and_reply(request: httpx.Request) -> None:
+        if landed or request.headers.get(VISITOR) != chat.token:
+            return
+        landed.append(True)
+        assert (await mode_change(chat, "handback", 1)).status_code == 200
+        sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Thanks, Maria"})
+        assert sent.status_code == 202, sent.text
+        await app.state.runtime.runner.drain()
+
+    kernel.after["/whoami"] = hand_back_and_reply
+    read = await chat.visitor.get(f"/api/public/desks/{chat.slug}/session")
+
+    assert landed and read.status_code == 200, read.text
+    stored = [event.type for event in await stored_events(engine, chat.session_id)]
+    assert stored == ["owner_joined", "owner_left", "writing", "message", "turn_end"]
+    left = stored.index("owner_left") + 1                         # its seq: a session's seqs run from 1, gapless
+    reloaded = read.json()
+    state, last_seq = reloaded["state"], reloaded["last_seq"]
+    assert (state["mode"], last_seq >= left) in {("ai", True), ("owner", False)}, (state, last_seq)
+    assert state["generation"] == {"owner": 1, "ai": 2}[state["mode"]]
+    assert ("owner_left" in [item["kind"] for item in reloaded["items"]]) == (last_seq >= left)
+
+
+async def test_visitor_reload_of_a_session_closed_meanwhile_is_gone(app, browser, fake, kernel_http, kernel):
+    """A session the kernel closes after it named it for the request but before the transcript was read is gone:
+    401 `no_session`, which clears the cookie, never a state the kernel no longer holds."""
+    chat = await new_chat(app, browser, kernel_http, fake)
+    cleared = ["HttpOnly", "Max-Age=0", f"Path=/api/public/desks/{chat.slug}", "SameSite=Strict", "Secure"]
+
+    async def close(request: httpx.Request) -> None:
+        session = fake.sessions[chat.session_id]
+        session.closed_at = fake.now
+        fake._put_session(session)
+        fake.flush()
+
+    kernel.after["/whoami"] = close
+    read = await chat.visitor.get(f"/api/public/desks/{chat.slug}/session")
+
+    assert (read.status_code, read.json()) == (401, {"error": "no_session"})
+    assert visitor_cookie(read) == ("", cleared)
+
+
+async def test_a_hand_back_during_a_reload_comes_on_the_stream(app, browser, fake, kernel_http, model, engine,
+                                                              monkeypatch):
+    """A hand-back and Claude's answer landing while a reload reads its snapshot are past it: the answer says the
+    owner has the chat with the cursor before the owner leaving, and the stream the page opens after that cursor
+    sends the leaving and Claude's answer, so the page ends where the conversation is."""
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    model.add(response(reply("Happy to help with that.")))
+    read_transcript = public.transcript
+    landed: list[bool] = []
+
+    async def then_hand_back_and_reply(conn, ids, audience, after=0):
+        items = await read_transcript(conn, ids, audience, after)
+        if not landed:
+            landed.append(True)
+            assert (await mode_change(chat, "handback", 1)).status_code == 200
+            sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Thanks, Maria"})
+            assert sent.status_code == 202, sent.text
+            await app.state.runtime.runner.drain()
+        return items
+
+    monkeypatch.setattr(public, "transcript", then_hand_back_and_reply)
+    read = await chat.visitor.get(f"/api/public/desks/{chat.slug}/session")
+
+    assert landed and read.status_code == 200, read.text
+    reloaded = read.json()
+    assert (reloaded["state"]["mode"], reloaded["state"]["generation"], reloaded["last_seq"]) == ("owner", 1, 1)
+    assert [item["kind"] for item in reloaded["items"]] == ["owner_joined"]
+    async with Stream(app, events_path(chat.slug, f"after={reloaded['last_seq']}"),
+                      headers=[cookie(chat.token)]) as stream:
+        events = await stream.until(lambda events: "turn_end" in types(events))
+    assert types(events) == ["owner_left", "writing", "message", "turn_end"]
