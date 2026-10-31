@@ -1056,7 +1056,8 @@ export function SetupFrame({ business, children }: { business: string; children:
           <Mark size={20} />
           <Wordmark preview={!compact} />
         </span>
-        <span className="board-setup__business cd-type-control" data-copy="user">
+        {/* A name the phone's bar cuts with an ellipsis; its title holds it in full, as on the screen. */}
+        <span className="board-setup__business cd-type-control" data-copy="user" title={business}>
           {business}
         </span>
         <span className="board-setup__end">

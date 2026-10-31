@@ -73,8 +73,9 @@ function SetupShell({ business, step, exitTo, wide = false, children }: SetupShe
             <Mark size={20} />
             <Wordmark preview={!compact} />
           </span>
+          {/* A name too long for the bar is cut with an ellipsis; its title holds it in full. */}
           {business ? (
-            <span className="cd-setup__business cd-type-control" data-copy="user">
+            <span className="cd-setup__business cd-type-control" data-copy="user" title={business}>
               {business}
             </span>
           ) : null}
