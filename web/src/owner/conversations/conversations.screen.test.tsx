@@ -829,16 +829,23 @@ describe('Conversations', () => {
     await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
     const before = quotes().length;
 
-    // Dana asks, and Claude runs the quote. A read before the reply shows its receipt under her question.
+    // Dana asks, and Claude's turn starts as the API's do: it writes, then runs the quote. A read
+    // before the reply shows the quote's receipt under her question.
     const world = mockStore.world;
     const price = SCRIPT.find((rule) => rule.name === 'price');
     if (!price) throw new Error('the script has its price row');
     const question = 'How much is drain clearing?';
     world.visitorText(chat, question);
     const turn = world.context(chat, 'en', question);
-    const [quoted, ...rest] = price.steps;
-    if (!quoted) throw new Error('the price row runs the quote first');
-    world.emit(chat, quoted(turn));
+    const rest = [...price.steps];
+    let quoted = false;
+    while (!quoted) {
+      const step = rest.shift();
+      if (!step) throw new Error('the price row runs the quote before its reply');
+      const ev = step(turn);
+      world.emit(chat, ev);
+      quoted = ev.type === 'receipt';
+    }
     const asked = () => log(screen).getByText(question, { exact: true }).element().closest('.cd-transcript-row');
     await expect.poll(() => asked()?.querySelectorAll('.cd-margin-receipt').length ?? 0).toBe(1);
     const read = asked()?.querySelector('.cd-margin-receipt')?.textContent;
