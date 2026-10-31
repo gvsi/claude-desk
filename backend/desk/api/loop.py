@@ -83,16 +83,13 @@ from desk.api.tools import (
 from desk.api.triage import Stopped
 from desk.contracts import SessionState
 from desk.events import EvError, EvTurnEnd, EvWriting
-from desk.kernel_api import SessionContext, TurnRequest
+from desk.kernel_api import TURN_TEXT_CHARS, SessionContext, TurnRequest
 
 TurnOutcome = Literal["done", "fenced", "session_ended", "kernel_unavailable", "handoff", "turn_over", "not_ai",
                       "internal"]
 logger = logging.getLogger(__name__)
 # The model calls one turn may make before it hands off.
 MAX_MODEL_CALLS = 6
-# The most of a turn's newest visitor or agent message the kernel takes (master plan, `POST /sessions/{session_id}/turn`,
-# 422 above it); the rest is cut before it is sent.
-TURN_TEXT_MAX = 2000
 THINKING = frozenset({"thinking", "redacted_thinking"})
 # The static error a visitor sees when a turn fails ("Fail-closed behavior"); other ends are silent.
 ERROR_CODES = {"session_ended": "session", "kernel_unavailable": "kernel_unavailable", "internal": "internal"}
@@ -248,10 +245,10 @@ class _Turn:
 
     async def _start(self) -> TurnOutcome | None:
         """Tell the kernel the turn's language before any tool runs (GitHub issue #121): the newest visitor or agent
-        message reaching Claude this turn (`store.latest_said`), whether or not it woke the turn, cut to
-        `TURN_TEXT_MAX`, goes to `POST /sessions/{session_id}/turn`, and the kernel keeps the language it detects as
-        the session's, which the turn's receipts and the reply check's fallback then speak. A turn with no such
-        message sends nothing. The text is untrusted and goes only to the kernel's detector: nothing here logs or
+        message reaching Claude this turn (`store.latest_said`), whether or not it woke the turn, cut to the
+        contract's `TURN_TEXT_CHARS`, goes to `POST /sessions/{session_id}/turn`, and the kernel keeps the language
+        it detects as the session's, which the turn's receipts and the reply check's fallback then speak. A turn with
+        no such message sends nothing. The text is untrusted and goes only to the kernel's detector: nothing here logs or
         keeps it. How the turn ends when the kernel refuses, as it would on `/context` (`_failed`), else None."""
         conn, caller = self.conn, self.caller
         said = await latest_said(conn, caller.session_id)
@@ -260,7 +257,7 @@ class _Turn:
             return None
         try:
             await caller.kernel.call("POST /sessions/{session_id}/turn",
-                                     TurnRequest(generation=self.generation, text=said[:TURN_TEXT_MAX]),
+                                     TurnRequest(generation=self.generation, text=said[:TURN_TEXT_CHARS]),
                                      path={"session_id": caller.session_id})
         except KernelFailed as failure:
             return _failed(failure)

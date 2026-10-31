@@ -177,6 +177,7 @@ from desk.contracts import (
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
+    TURN_TEXT_CHARS,
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
@@ -764,7 +765,6 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "owner_said": "Escrito por {owner}",
                      "owner_say_blocked": "No se envió: incluía texto de un documento privado"}}
 OWNER_TEXT_MAX = 2000                   # an owner's say or whisper, in characters (Plan 01b)
-TURN_TEXT_MAX = 2000                    # a turn's newest visitor or agent message, in characters (GitHub issue #121)
 NUMBER_RULES = (("digit", re.compile(r"\d")), ("currency", re.compile(r"[$€£¥¢]")), ("percent", re.compile(r"%")))
 
 
@@ -2077,9 +2077,9 @@ class FakeKernelState:
         """A turn starts (GitHub issue #121): the language `detect_language` finds in its newest visitor or agent
         message becomes the session's, or the one on record stays when it finds neither English nor Spanish (English
         for a session with none). The text is read for that alone, never kept, mirrored or ledgered, and a repeat
-        detects again and changes nothing else. Over `TURN_TEXT_MAX` characters is 422 `invalid`, then the session
-        checks: 401, 404, 409 `closed`, a stale generation 409 `stale_generation`."""
-        if len(body.text) > TURN_TEXT_MAX:
+        detects again and changes nothing else. Over the contract's `TURN_TEXT_CHARS` is 422 `invalid`, then the
+        session checks: 401, 404, 409 `closed`, a stale generation 409 `stale_generation`."""
+        if len(body.text) > TURN_TEXT_CHARS:
             raise Refusal(422, "invalid")
         session, _ = self.session_call(request, request.path_params["session_id"], body.desk_id)
         self._check_generation(session, body.generation)
