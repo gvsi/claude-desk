@@ -133,6 +133,8 @@ const NO_OWNER = failWith(401, 'no_owner_session');
 const NO_SESSION = failWith(401, 'no_session');
 const NOT_FOUND = failWith(404, 'not_found');
 const INVALID = failWith(422, 'invalid');
+/** A deleted Desk's chat, decision or callback request, as the kernel refuses one once its Desk is gone (plan 01b). */
+const CLOSED = failWith(409, 'kernel', { code: 'closed' });
 
 const ANSWERS: ReadonlySet<string> = new Set<ApprovalAnswer>(['allow_once', 'deny_once', 'allow_person', 'deny_always']);
 
@@ -215,6 +217,26 @@ export class Server {
     this.agents.stop();
   }
 
+  /**
+   * Deletes `desk` from the copy. Each of its chats ends as a closed session ends a visitor's turn
+   * (master "Fail-closed behavior"): `error{code: "session"}` on its stream, then `turn_end` when a
+   * turn was in progress, which says nothing more. Then the stream is done with it.
+   */
+  deleteDesk(desk: DeskRecord): void {
+    for (const session of this.world.sessionsOf(desk.summary.desk_id)) {
+      const sessionId = session.state.session_id;
+      const turn = this.turns.get(sessionId);
+      // A step is waiting, or more are queued (the Desk went while one of them was being sent).
+      const running = turn !== undefined && (turn.timer !== null || turn.queue.length > 0);
+      if (turn?.timer != null) clearTimeout(turn.timer);
+      this.turns.delete(sessionId);
+      this.world.emit(session, { type: 'error', code: 'session' });
+      if (running) this.world.emit(session, { type: 'turn_end' });
+      session.listeners.clear();
+    }
+    this.world.deleteDesk(desk);
+  }
+
   /** The session the request's visitor cookie names for `slug`, or why there is none. */
   visitor(slug: string | undefined, cookies: Cookies): { desk: DeskRecord; session: SessionRecord } | Failure {
     const desk = this.world.deskBySlug(slug);
@@ -276,6 +298,7 @@ function ownerSession(sv: Server, req: Req): SessionRecord | Failure {
   if (!req.cookies.owner) return NO_OWNER;
   const session = sv.world.sessions.get(req.params.session_id ?? '');
   if (!session) return NOT_FOUND;
+  if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
   const generation = isRecord(req.body) ? req.body.generation : undefined;
   if (req.malformed || !Number.isSafeInteger(generation)) return INVALID;
   if (generation !== session.state.generation) return failWith(409, 'kernel', { code: 'stale_generation' });
@@ -319,6 +342,12 @@ const SERVED: ServedRoutes = {
     desk.summary.answering = on;
     return ok({ desk_id: desk.summary.desk_id, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
   },
+  deleteDesk(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    sv.deleteDesk(desk);
+    return NO_CONTENT;
+  },
   openPreview(sv, req) {
     // Always a new preview chat, as the API's is (plan 02b): its owner-path request never carries
     // the visitor cookie, which is scoped to the Desk's public path, so the page reads the chat it
@@ -355,6 +384,11 @@ const SERVED: ServedRoutes = {
     if (record.decision.state !== 'held') return failWith(409, 'already_resolved', { decision: record.decision });
     const given = answer as ApprovalAnswer;
     if (!(record.decision.answers ?? []).includes(given)) return failWith(422, 'kernel', { code: 'invalid' });
+    // Its Desk is gone: refused at execution, or denied, and no follow-up, since its chat is closed.
+    // No card is drafted for a Desk that's gone.
+    if (sv.world.deletedDesks.has(record.deskId)) {
+      return ok({ decision: sv.world.answerClosed(record, given), execution_state: null, card_diff: null } satisfies ApprovalAnswerOut);
+    }
     const session = sv.world.sessions.get(record.decision.session_id);
     const decision = sv.world.answer(record, given);
     if (session) sv.runTurn(session, afterAnswer(given, decision), session.language, '');
@@ -369,6 +403,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const record = sv.world.handoffs.get(req.params.handoff_id ?? '');
     if (!record) return NOT_FOUND;
+    if (sv.world.deletedDesks.has(record.deskId)) return CLOSED;
     if (record.handoff.status !== 'open') return failWith(409, 'kernel', { code: 'conflict' });
     sv.world.closeHandoff(record);
     return ok({ desk_id: record.deskId, updated_at: isoTime(sv.world.now()) } satisfies DeskUpdated);
@@ -383,6 +418,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const session = sv.world.sessions.get(req.params.session_id ?? '');
     if (!session) return NOT_FOUND;
+    if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
     const after = Number(req.query.get('after') ?? '0');
     return ok(ownerTranscript(session, Number.isSafeInteger(after) ? after : 0, sv.world.now()));
   },
@@ -408,6 +444,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const session = sv.world.sessions.get(req.params.session_id ?? '');
     if (!session) return NOT_FOUND;
+    if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
     const text = isRecord(req.body) ? req.body.text : undefined;
     const kind = isRecord(req.body) ? req.body.kind : undefined;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > MESSAGE_MAX || !OWNER_KINDS.has(kind)) return INVALID;
@@ -420,6 +457,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const session = sv.world.sessions.get(req.params.session_id ?? '');
     if (!session) return NOT_FOUND;
+    if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
     const generation = isRecord(req.body) ? req.body.generation : undefined;
     if (req.malformed || !Number.isSafeInteger(generation)) return INVALID;
     if (session.state.mode !== 'owner') return failWith(409, 'take_over_first');
@@ -430,7 +468,8 @@ const SERVED: ServedRoutes = {
   decision(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
     const record = sv.world.decisions.get(req.params.decision_id ?? '');
-    return record ? ok(record.decision) : NOT_FOUND;
+    if (!record) return NOT_FOUND;
+    return sv.world.deletedDesks.has(record.deskId) ? CLOSED : ok(record.decision);
   },
   ownerInbox(sv, req) {
     // Everything the copy's Demo inbox holds, as the kernel's owner form answers.

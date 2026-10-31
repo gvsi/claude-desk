@@ -213,6 +213,11 @@ export class MockWorld {
   readonly leads: LeadRecord[] = [];
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
+  /**
+   * The Desks deleted from this copy, by id. Their chats, decisions and callback requests stay in
+   * the copy, closed: the routes that name one answer 409 `closed` (served.ts), as the kernel does.
+   */
+  readonly deletedDesks = new Set<string>();
   /** Each session's open demo code, by session id: the code and who it confirms. Spent once it works. */
   readonly challenges = new Map<string, { code: string; person: { personId: string; name: string } }>();
   private counter = 0;
@@ -286,6 +291,21 @@ export class MockWorld {
     };
     this.desks.push(desk);
     return desk;
+  }
+
+  /**
+   * Takes `desk` out of the copy, as deleting a Desk does: its public link and its owner pages
+   * answer not found from now on, and so do its chats, which reach it by its slug. Its id is kept
+   * in `deletedDesks`, so what names one of its chats is refused as closed. Its open payment links
+   * are cancelled first, as the kernel cancels them in the delete, so none can be paid after it.
+   */
+  deleteDesk(desk: DeskRecord): void {
+    for (const [token, link] of this.links) {
+      if (link.deskId === desk.summary.desk_id && link.view.state === 'issued') this.cancelLink(token, link, 'desk_deleted');
+    }
+    const index = this.desks.indexOf(desk);
+    if (index !== -1) this.desks.splice(index, 1);
+    this.deletedDesks.add(desk.summary.desk_id);
   }
 
   /** A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's, by the name it gave. */
@@ -640,6 +660,24 @@ export class MockWorld {
     return record.decision;
   }
 
+  /**
+   * The owner's answer to a held request of a deleted Desk, as the kernel takes it: an allow is
+   * re-checked at execution and refused there (`refused_at_execution`), so nothing runs, and a deny
+   * is `denied`. The Desk's chat is closed, so it hears nothing, and its ledger went with the Desk.
+   */
+  answerClosed(record: DecisionRecord, answer: ApprovalAnswer): Decision {
+    const state: DecisionState = allows(answer) ? 'refused_at_execution' : 'denied';
+    const language = this.sessions.get(record.decision.session_id)?.language ?? 'en';
+    record.decision = {
+      ...record.decision,
+      state,
+      visitor_plain: statusLine(language, state, record.decision.action?.tool ?? null),
+      inbox: [],
+      signature: sign(`${record.decision.decision_id}:${state}`),
+    };
+    return record.decision;
+  }
+
   /** The visitor cancels their held request, as the kernel records it: no answer can run it now. */
   cancel(record: DecisionRecord): Decision {
     const desk = this.desk(record.deskId);
@@ -750,12 +788,13 @@ export class MockWorld {
   }
 
   /**
-   * The link is cancelled: by the visitor on the checkout, which the chat isn't told of, or by a
-   * change to the business's rules, as the kernel cancels an open link the new rules no longer
-   * allow when the owner confirms them. That one says why on the checkout (`cancel_reason`), and
-   * its chat gets the kernel's `link_cancelled` line, author `desk`.
+   * The link is cancelled: by the visitor on the checkout, which the chat isn't told of; by its
+   * Desk's delete, whose chat is closed; or by a change to the business's rules, as the kernel
+   * cancels an open link the new rules no longer allow when the owner confirms them. That one says
+   * why on the checkout (`cancel_reason`), and its chat gets the kernel's `link_cancelled` line,
+   * author `desk`.
    */
-  cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'rules_changed'): void {
+  cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'desk_deleted' | 'rules_changed'): void {
     const session = this.sessions.get(link.sessionId);
     if (!session) throw new Error(`payment link ${token} has no session`);
     link.view = { ...link.view, state: 'cancelled' };

@@ -23,6 +23,7 @@ import type {
 } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
+import { chatReducer, initialChatState } from '../public/chatReducer.ts';
 import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
@@ -945,6 +946,155 @@ describe('rules and tools', () => {
     drift(charges, 'b'.repeat(64));
     expect(await confirm((back.body as ToolConfirmedOut).draft?.version)).toEqual({ status: 409, body: { error: 'rules_changed_since_draft' } });
     expect(await rowOf(charges)).toMatchObject({ status: 'needs_review', pending_sha256: 'b'.repeat(64) });
+  });
+});
+
+describe('deleting a Desk', () => {
+  it('delete_desk_closes_its_page_and_chats', async () => {
+    // Rivera's main Desk, with a chat Claude is writing in when the Desk goes, and the seeded chats idle.
+    mockStore.reset('rivera_two_desks');
+    const { events } = await openChat();
+    await send('How much is drain clearing?');
+    await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 2);
+    expect(typesOf(events)).toEqual(['receipt', 'writing']);
+    const seeded = mockStore.world.sessionsOf(deskId).filter((s) => s !== mockStore.visitorSession(slug));
+    expect(seeded.length).toBeGreaterThan(0);
+
+    // Answered 204, with nothing to say.
+    expect(await call('deleteDesk', { params: { desk_id: deskId } })).toEqual({ status: 204, body: undefined });
+
+    // The copy's other Desk stays; this one is gone from the owner's Desks and its pages.
+    const desks = async () => ((await call('me')).body as CopyOut).desks.map((d) => d.desk_id);
+    expect(await desks()).toEqual([RIVERA.emergenciesDeskId]);
+    expect((await call('today', { params: { desk_id: deskId } })).status).toBe(404);
+    // Each of its chats hears that its session ended, as a closed session ends a visitor's turn; the
+    // turn in flight ends there and says nothing more, so the chat no longer shows Claude writing.
+    expect(typesOf(events)).toEqual(['receipt', 'writing', 'error', 'turn_end']);
+    expect(events[2]?.[1]).toEqual({ type: 'error', code: 'session' });
+    const chat = events.reduce((state, [seq, ev]) => chatReducer(state, { type: 'event', seq, ev }), initialChatState());
+    expect(chat).toMatchObject({ writing: false, error: 'session' });
+    for (const session of seeded) expect(session.events.at(-1)?.ev).toEqual({ type: 'error', code: 'session' });
+    // Its public link stops working, and so do its chats.
+    expect((await call('publicDesk', { params: { slug } })).status).toBe(404);
+    expect((await call('sendMessage', { params: { slug }, body: { text: 'Hello?' } })).status).toBe(404);
+    await drain();
+    expect(typesOf(events)).toEqual(['receipt', 'writing', 'error', 'turn_end']);
+    expect((await call('publicDesk', { params: { slug: RIVERA.emergenciesSlug } })).status).toBe(200);
+
+    // Deleting it again, or a Desk outside the copy, is not found; without the owner cookie, refused.
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(404);
+    expect((await call('deleteDesk', { params: { desk_id: 'desk-elsewhere' } })).status).toBe(404);
+    mockStore.reset('rivera_two_desks', { signedIn: false });
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(401);
+    mockStore.reset('rivera_two_desks');
+    expect(await desks()).toEqual([deskId, RIVERA.emergenciesDeskId]);
+  });
+
+  it('deleted_desk_chats_answer_closed', async () => {
+    // A chat on the main Desk with a callback request in it, and the seeded hold, when the Desk goes.
+    mockStore.reset('rivera_two_desks');
+    const { session } = await openChat();
+    await send('Can you call me back?');
+    await drain();
+    const handoff = [...mockStore.world.handoffs.values()].find((record) => record.handoff.session_id === session.session_id);
+    const held = [...mockStore.world.decisions.values()].find((record) => record.deskId === deskId && record.decision.state === 'held');
+    if (!handoff || !held) throw new Error('the chat has a callback request and the Desk a hold');
+    const record = mockStore.visitorSession(slug);
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(204);
+
+    // Whatever an owner tab still open on it sends about its chats, a decision or a callback request
+    // in them is refused as the kernel refuses a deleted Desk's: 409 `closed`, and nothing changes.
+    const closed = { status: 409, body: { error: 'kernel', code: 'closed' } };
+    const params = { session_id: session.session_id };
+    const at = { params, body: { generation: session.generation } };
+    for (const key of ['takeover', 'handback', 'resume', 'ownerTyping'] as const) expect(await call(key, at), key).toEqual(closed);
+    for (const kind of ['whisper', 'say']) expect(await call('ownerMessage', { params, body: { text: 'Still there?', kind } }), kind).toEqual(closed);
+    expect(await call('conversation', { params })).toEqual(closed);
+    expect(await call('decision', { params: { decision_id: held.decision.decision_id } })).toEqual(closed);
+    expect(await call('handoffDone', { params: { handoff_id: handoff.handoff.handoff_id } })).toEqual(closed);
+    expect(record?.state).toEqual(session);
+    expect(record?.items.map((item) => item.kind)).not.toContain('whisper');
+    expect(handoff.handoff.status).toBe('open');
+    expect(held.decision.state).toBe('held');
+
+    // The copy's other Desk's chats still take them.
+    const emergencies = mockStore.world.desk(RIVERA.emergenciesDeskId);
+    if (!emergencies) throw new Error('the copy has its other Desk');
+    const other = mockStore.world.addSession(emergencies);
+    const otherAt = { params: { session_id: other.state.session_id }, body: { generation: other.state.generation } };
+    expect((await call('takeover', otherAt)).status).toBe(200);
+  });
+
+  it('deleted_desk_holds_are_refused_at_execution', async () => {
+    // Dana's refund and the seeded 15% quote are held for Maria when the Desk goes.
+    mockStore.reset('rivera_two_desks');
+    const refund = mockStore.world.addHeldRefund();
+    const quote = [...mockStore.world.decisions.values()].find(
+      (record) => record.deskId === deskId && record.decision.state === 'held' && record.decision.decision_id !== refund.decision_id,
+    );
+    const chat = mockStore.world.sessions.get(refund.session_id);
+    if (!quote || !chat) throw new Error('the Desk has two holds, and the refund a chat');
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(204);
+    const heard = chat.events.length;
+
+    // Allowed now, the refund doesn't run: the kernel's check at execution refuses a deleted Desk's
+    // action. No card is drafted for a Desk that's gone.
+    const allowed = await call('answer', { params: { decision_id: refund.decision_id }, body: { answer: 'allow_once' } });
+    expect(allowed).toEqual({
+      status: 200,
+      body: {
+        decision: expect.objectContaining({
+          decision_id: refund.decision_id,
+          state: 'refused_at_execution',
+          visitor_plain: VISITOR_PLAIN.en.refused_at_execution,
+          inbox: [],
+        }) as unknown,
+        execution_state: null,
+        card_diff: null,
+      },
+    });
+    // Denied, the quote is denied: there is nothing to run.
+    const denied = await call('answer', { params: { decision_id: quote.decision.decision_id }, body: { answer: 'deny_once' } });
+    expect(denied).toMatchObject({ status: 200, body: { decision: { state: 'denied' }, execution_state: null, card_diff: null } });
+    // Each is answered once; another answer is refused as it always is, with the decision as it stands.
+    const again = await call('answer', { params: { decision_id: refund.decision_id }, body: { answer: 'allow_once' } });
+    expect(again).toMatchObject({ status: 409, body: { error: 'already_resolved', decision: { state: 'refused_at_execution' } } });
+
+    // The closed chat hears nothing more, and no follow-up turn runs.
+    await drain();
+    expect(chat.events).toHaveLength(heard);
+  });
+
+  it('deleted_desk_payment_links_are_cancelled', async () => {
+    // The visitor asked for the deposit link on the main Desk, and has it open, when the Desk goes.
+    // A link on the copy's other Desk is open too.
+    mockStore.reset('rivera_two_desks');
+    await openChat();
+    await send('Can I pay the deposit?');
+    await drain();
+    const [token, link] = [...mockStore.world.links].find(([, l]) => l.deskId === deskId) ?? [];
+    const emergencies = mockStore.world.desk(RIVERA.emergenciesDeskId);
+    if (token === undefined || !link || !emergencies) throw new Error('the main Desk issued a link, and the copy has its other Desk');
+    const elsewhere = mockStore.world.issueLink(mockStore.world.addSession(emergencies), { title: 'Call-out', amountCents: 5000, language: 'en' });
+    expect(link.view.state).toBe('issued');
+    expect((await call('deleteDesk', { params: { desk_id: deskId } })).status).toBe(204);
+
+    // Its open link goes with it, as the kernel cancels a deleted Desk's open links: the checkout
+    // reads it cancelled, with no reason to give and no customer's name.
+    expect(link.view.state).toBe('cancelled');
+    expect(await call('paymentLink', { params: { token } })).toMatchObject({
+      status: 200,
+      body: { state: 'cancelled', cancel_reason: null, customer_name: null },
+    });
+    // Paying it now, or cancelling it, is refused with the state it's in, and changes nothing.
+    const refused = { status: 409, body: { error: 'kernel', code: 'conflict', state: 'cancelled', cancel_reason: null } };
+    expect(await call('completePayment', { params: { token } })).toEqual(refused);
+    expect(await call('cancelPayment', { params: { token } })).toEqual(refused);
+    expect(link.view.state).toBe('cancelled');
+
+    // The other Desk's link is still open, and can be paid.
+    expect(mockStore.world.links.get(elsewhere)?.view.state).toBe('issued');
+    expect(await call('completePayment', { params: { token: elsewhere } })).toMatchObject({ status: 200, body: { state: 'paid' } });
   });
 });
 
