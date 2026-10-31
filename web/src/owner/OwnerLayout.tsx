@@ -23,6 +23,7 @@ import {
   type SwitcherPick,
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
+import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead } from './useDesks.ts';
 
@@ -80,10 +81,15 @@ function opensToday(pathname: string): boolean {
   return (page === '' || page === 'today') && rest.every((segment) => segment === '');
 }
 
-/** No Connectors href yet: the Connectors page comes with run 2, so its row stays hidden. */
+/**
+ * The sidebar's rows under the Desk. Connectors only once its pages are built (`connectorPageHref`):
+ * until then it has no href, so its row stays hidden.
+ */
 function hrefsFor(deskId: string): SidebarHrefs {
   const base = `/app/${encodeURIComponent(deskId)}`;
-  return Object.fromEntries(NAV_KEYS.map((key) => [key, `${base}/${key}`])) as SidebarHrefs;
+  const hrefs = Object.fromEntries(NAV_KEYS.map((key) => [key, `${base}/${key}`])) as SidebarHrefs;
+  const connectors = connectorPageHref(deskId, 'connectors');
+  return connectors === undefined ? hrefs : { ...hrefs, connectors };
 }
 
 /** The sidebar's rows (and a page's SubNav rows) as router links, so moving between pages keeps the app loaded. */

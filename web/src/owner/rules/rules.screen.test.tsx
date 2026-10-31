@@ -12,7 +12,7 @@ import { rivera } from '../../ds/fixtures/index.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { EXTRA_RULES, type DeskRecord } from '../../mocks/world.ts';
-import { expectOwnerBoard } from '../../test/boards.ts';
+import { expectOwnerBoard, expectTabOrderFromTop } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 
@@ -93,6 +93,27 @@ const CANCELS_LINKS = "Open payment links I made on my own that the new rules do
 /** The connector sections, in order, by their names. */
 const SECTIONS = ['Quotes', 'Bookings', 'Leads and callbacks', 'Verification', 'Documents', 'Payments', 'Stripe'] as const;
 
+/** Each section's connector, in the same order: its page is `connectors/{key}`. */
+const SECTION_KEYS = ['quotes', 'bookings', 'leads', 'verification', 'documents', 'payments', 'stripe'] as const;
+
+/** A tool's row on Rules in the owner's words: "{name}: {rule words}, {outcome}". */
+function toolRowWords(row: Element): string {
+  const part = (selector: string) => row.querySelector(selector)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+  return `${part('.cd-connector-section__tool-name')}: ${part('.cd-connector-section__tool-summary')}, ${part('.cd-connector-section__tool-outcome')}`;
+}
+
+/**
+ * The tool row on Rules whose words (`toolRowWords`) match `words`, once it shows, linked to its
+ * page or not.
+ */
+async function expectToolRow(root: HTMLElement, words: RegExp): Promise<HTMLElement> {
+  const find = () => [...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].find((row) => words.test(toolRowWords(row)));
+  await expect.poll(() => find() !== undefined, { message: `a tool row reading ${words}` }).toBe(true);
+  const row = find() as HTMLElement;
+  await expect(row).toBeVisible();
+  return row;
+}
+
 describe('rules page', () => {
   it('rules_page_groups_outcomes_by_connector', async () => {
     // Refund's definition changed and waits for review.
@@ -106,23 +127,26 @@ describe('rules page', () => {
     await expect.element(list).toBeVisible();
     const sections = [...list.element().querySelectorAll<HTMLElement>(':scope > li > section')];
     expect(sections.map((section) => section.getAttribute('aria-label'))).toEqual([...SECTIONS]);
-    const keys = ['quotes', 'bookings', 'leads', 'verification', 'documents', 'payments', 'stripe'];
+    // Each header names its connector without a link: the connectors' pages aren't built yet.
     sections.forEach((section, i) => {
-      const header = section.querySelector('a.cd-connector-section__header');
-      expect(header?.getAttribute('href'), SECTIONS[i]).toBe(`${DESK}/connectors/${keys[i]}`);
+      const header = section.querySelector('.cd-connector-section__header');
+      expect(header?.tagName, SECTIONS[i]).toBe('DIV');
+      expect(header?.textContent, SECTIONS[i]).toContain(SECTIONS[i]);
     });
 
-    // Each tool links to its page, naming its outcome in words.
-    const quote = screen.getByRole('link', { name: /^Quote: Anyone · No discounts, Automatic\. Open$/ });
-    await expect.element(quote).toHaveAttribute('href', `${DESK}/connectors/quotes/native.quote`);
-    await expect.element(screen.getByRole('link', { name: /^Payment link: Anyone · Up to \$300 · Checked by the reviewer, Automatic up to \$300; over \$300, ask me first\. Open$/ })).toHaveAttribute(
-      'href',
-      `${DESK}/connectors/payments/native.payment_link`,
-    );
-    await expect.element(screen.getByRole('link', { name: /^See charges: .*, Automatic\. Open$/ })).toBeVisible();
-    // A changed tool needs the owner's review before its outcome counts.
-    await expect.element(screen.getByRole('link', { name: /^Refund: .*, Needs your review\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/stripe/payments.create_refund`);
-    await expect.element(screen.getByRole('link', { name: /^Book a visit: 2 rules, Automatic\. Open$/ })).toBeVisible();
+    // Each tool names its outcome in words, without a link.
+    const root = screen.container;
+    for (const words of [
+      /^Quote: Anyone · No discounts, Automatic$/,
+      /^Payment link: Anyone · Up to \$300 · Checked by the reviewer, Automatic up to \$300; over \$300, ask me first$/,
+      /^See charges: .*, Automatic$/,
+      // A changed tool needs the owner's review before its outcome counts.
+      /^Refund: .*, Needs your review$/,
+      /^Book a visit: 2 rules, Automatic$/,
+    ]) {
+      const row = await expectToolRow(root, words);
+      expect(row.querySelector('a'), String(words)).toBeNull();
+    }
 
     // No "Built in", "Integrations", "Custom" or mode switch anywhere; the always-on rules close the page.
     const text = screen.container.querySelector('main')?.textContent ?? '';
@@ -132,6 +156,65 @@ describe('rules page', () => {
     await expect.element(screen.getByText('No money moves without your rule or a signed limit', { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     expect(requests('rules').length).toBeGreaterThan(0);
+  });
+
+  it('connector_rows_have_no_links_until_their_pages_are_built', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const list = screen.getByRole('list', { name: 'Connectors' });
+    const sections = list.element();
+
+    // No connector header or tool row is a link, has a chevron, or links anywhere under Connectors.
+    expect(sections.querySelectorAll('.cd-connector-section__header')).toHaveLength(SECTIONS.length);
+    expect(sections.querySelectorAll('.cd-connector-section__tool')).toHaveLength(11);
+    expect(list.getByRole('link').elements()).toEqual([]);
+    expect(sections.querySelectorAll('a, .cd-connector-section__chevron')).toHaveLength(0);
+    expect(screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
+    // Nor has the sidebar a Connectors row; "See all rules" still links to every rule.
+    expect(screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Connectors' }).elements()).toEqual([]);
+    const all = screen.getByRole('link', { name: 'See all rules' });
+    await expect.element(all).toHaveAttribute('href', `${DESK}/rules/all`);
+
+    // Tab passes them by: in the connectors it stops only on the payment limit's two "Change".
+    const changes = [...sections.querySelectorAll<HTMLElement>('.cd-money-limit button')];
+    expect(changes.map((button) => button.textContent)).toEqual(['Change', 'Change']);
+    const reached = await expectTabOrderFromTop([...changes, all.element() as HTMLElement]);
+    expect(reached.filter((el) => sections.contains(el))).toEqual(changes);
+
+    // All rules draws each tool's name and line without a link too.
+    const house = await renderRoute(`${DESK}/rules/all`);
+    await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
+    const main = house.screen.getByRole('main').element();
+    expect(main.querySelectorAll('.cd-tool-rules__tool')).toHaveLength(11);
+    expect(main.querySelectorAll('a.cd-tool-rules__tool, .cd-tool-rules__chevron')).toHaveLength(0);
+    expect(house.screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
+    await expect.element(house.screen.getByRole('region', { name: 'Payment link' }).getByText('Payment link', { exact: true })).toBeVisible();
+  });
+
+  it('connector_rows_link_to_their_pages_once_built', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { connectorPages: true });
+    const list = screen.getByRole('list', { name: 'Connectors' });
+    await expect.element(list).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+
+    // Each header links to its connector's page, and each tool to its own, naming its outcome.
+    const sections = [...list.element().querySelectorAll<HTMLElement>(':scope > li > section')];
+    expect(sections.map((section) => section.querySelector('a.cd-connector-section__header')?.getAttribute('href'))).toEqual(
+      SECTION_KEYS.map((key) => `${DESK}/connectors/${key}`),
+    );
+    expect(list.element().querySelectorAll('a.cd-connector-section__tool-link')).toHaveLength(11);
+    await expect.element(screen.getByRole('link', { name: /^Quote: Anyone · No discounts, Automatic\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/quotes/native.quote`);
+    await expect.element(screen.getByRole('link', { name: /^Payment link: .*\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/payments/native.payment_link`);
+    await expect.element(screen.getByRole('link', { name: /^Refund: .*\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/stripe/payments.create_refund`);
+    // The sidebar's Connectors row comes with them.
+    await expect.element(screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Connectors' })).toHaveAttribute('href', `${DESK}/connectors`);
+
+    // All rules links each tool's name and line to its page.
+    const house = await renderRoute(`${DESK}/rules/all`, { connectorPages: true });
+    await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
+    const link = house.screen.getByRole('region', { name: 'Payment link' }).element().querySelector('a.cd-tool-rules__tool');
+    expect(link?.getAttribute('href')).toBe(`${DESK}/connectors/payments/native.payment_link`);
+    expect(house.screen.getByRole('main').element().querySelectorAll('a.cd-tool-rules__tool')).toHaveLength(11);
   });
 
   it('preset_menu_drafts_a_preset', async () => {
@@ -166,7 +249,7 @@ describe('rules page', () => {
     expect(screen.container.textContent).not.toMatch(/\bCustom\b/);
     // Back on Rules, quotes are still automatic.
     await screen.getByRole('link', { name: 'See your rules' }).click();
-    await expect.element(screen.getByRole('link', { name: /^Quote: Anyone · No discounts, Automatic\. Open$/ })).toBeVisible();
+    await expectToolRow(screen.container, /^Quote: Anyone · No discounts, Automatic$/);
   });
 
   it('preset_review_lists_every_removed_rule', async () => {
@@ -199,7 +282,7 @@ describe('rules page', () => {
     expect(requests('confirmRules')).toEqual([]);
     expect(desk().policy.version).toBe(7);
     expect(desk().policy.cards.map((card) => card.card_id)).toContain(EXTRA_RULES.danaBooking.card_id);
-    await expect.element(screen.getByRole('link', { name: /^Book a visit: 3 rules, Automatic\. Open$/ })).toBeVisible();
+    await expectToolRow(screen.container, /^Book a visit: 3 rules, Automatic$/);
   });
 
   it('rule_chat_shows_the_draft_inline', async () => {
@@ -528,7 +611,7 @@ describe('rules page', () => {
     const limit100 = 'No payment over $100 goes through without asking you, whatever the rules below say.';
     for (const name of ['Payments', 'Stripe']) await expect.element(screen.getByRole('region', { name }).getByText(limit100, { exact: true })).toBeVisible();
     // No rule beside it still takes more on its own.
-    await expect.element(screen.getByRole('link', { name: /^Payment link: .*, Automatic up to \$100; over \$100, ask me first\. Open$/ })).toBeVisible();
+    await expectToolRow(screen.container, /^Payment link: .*, Automatic up to \$100; over \$100, ask me first$/);
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$300');
 
     // At 0, every payment asks, and no "$0" anywhere.
@@ -547,8 +630,8 @@ describe('rules page', () => {
     for (const name of ['Payments', 'Stripe']) {
       await expect.element(screen.getByRole('region', { name }).getByText('Every payment asks you first.', { exact: true })).toBeVisible();
     }
-    await expect.element(screen.getByRole('link', { name: /^Payment link: .*, Ask me first\. Open$/ })).toBeVisible();
-    await expect.element(screen.getByRole('link', { name: /^Charge within a signed limit: .*, Ask me first\. Open$/ })).toBeVisible();
+    await expectToolRow(screen.container, /^Payment link: .*, Ask me first$/);
+    await expectToolRow(screen.container, /^Charge within a signed limit: .*, Ask me first$/);
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
   });
 
@@ -598,12 +681,13 @@ describe('rules page', () => {
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).element() as HTMLElement;
     const chips = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button').elements() as HTMLElement[];
     expect(chips.map((chip) => chip.textContent)).toEqual(['Stop quoting on weekends', 'Quote water heater installs up to $600', "Why was Dana's refund held?"]);
-    // Each section's header, its payment limit's "Change", then its tools, in order.
-    const sections = [...main.querySelectorAll<HTMLElement>('.cd-connector-section')].flatMap((section) => [
-      ...section.querySelectorAll<HTMLElement>('.cd-connector-section__header, .cd-money-limit button, .cd-connector-section__tool-link'),
-    ]);
-    expect(sections).toHaveLength(7 + 2 + 11);
-    await expectOwnerBoard(screen.container, { current: 'Rules', tabStops: [menu, composer, ...chips, ...sections] });
+    // Then each payment limit's "Change", in order, and nothing else in the connectors: their
+    // headers and tools aren't links until their pages are built.
+    const changes = [...main.querySelectorAll<HTMLElement>('.cd-connector-section .cd-money-limit button')];
+    expect(changes).toHaveLength(2);
+    await expectOwnerBoard(screen.container, { current: 'Rules' });
+    const reached = await expectTabOrderFromTop([menu, composer, ...chips, ...changes]);
+    expect(reached.filter((el) => el.closest('.cd-connector-section') !== null)).toEqual(changes);
 
     // As the board spaces them: the composer 20 px under the header, its suggestions 10 px under
     // it, the connectors' summary 20 px under them; the menu at the right of the title's line.
@@ -625,7 +709,7 @@ describe('rules page', () => {
     mockStore.world.addActiveRules(desk(), [EXTRA_RULES.agentCharges, EXTRA_RULES.danaBooking]);
     desk().suggestions.push(DANA_REFUNDS);
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('link', { name: /^Payment link: 2 rules · 1 shared, Automatic up to \$300; over \$300, ask me first\. Open$/ })).toBeVisible();
+    await expectToolRow(screen.container, /^Payment link: 2 rules · 1 shared, Automatic up to \$300; over \$300, ask me first$/);
     await expectScreenBasics(screen.container, { owner: true });
 
     // With the panel open and a change drafted in it.
