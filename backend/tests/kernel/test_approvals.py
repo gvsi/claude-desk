@@ -113,6 +113,31 @@ async def test_allow_once_executes_inside_the_answer(app, client, frozen_clock):
     assert response.json() == decision.model_dump(mode="json")
 
 
+@pytest.mark.parametrize("answer,refused", [("allow_once", False), ("deny_once", False), ("allow_once", True)])
+async def test_answer_preserves_the_signed_approval_before_the_outcome(app, client, answer, refused):
+    copy, held = await seeded_hold(app, client)
+    if refused:
+        await activate(app, copy, [c for c in RIVERA_CARDS if c.card_id != "rv-quote"]
+                       + [card("no-quotes", "native.quote", mode="never")])
+    result = await answered(client, copy.owner, held.decision_id, answer)
+    approved = result.approved
+    if refused or answer == "deny_once":
+        assert approved is None
+        assert result.decision.state == ("refused_at_execution" if refused else "denied")
+        assert result.execution is None
+        return
+
+    assert approved is not None
+    assert (approved.decision_id, approved.state, approved.visitor_plain, approved.answers) == (
+        held.decision_id, "approved", "Maria Rivera approved this", [])
+    verify_signature(await public_key(client), approved)
+    assert result.decision.state == "executed" and result.execution.state == "succeeded"
+    assert approved.ledger_seq < result.decision.ledger_seq
+    [entry] = [e for e in await ledger_rows(app, copy) if e.seq == approved.ledger_seq]
+    assert entry.event.kind == "approval" and entry.event.summary["state"] == "approved"
+    verify_signature(await public_key(client), result.decision)
+
+
 async def held_on(client: httpx.AsyncClient, rows: CopyRows, tool: str = "native.quote", args: dict | None = None,
                   *, visitor: Visitor | None = None, call_id: str = "call-1") -> tuple[Visitor, Decision]:
     """A visitor of `rows`' Desk (a new one unless given) and a call of theirs the Desk holds."""
