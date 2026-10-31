@@ -229,7 +229,9 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     if (sending !== null || retrying || !returnFocus.current) return;
     returnFocus.current = false;
     // A failed answer replaces the field with "Try again" until it can be settled.
-    composer.current?.querySelector<HTMLElement>('textarea:not(:disabled), button:not(:disabled)')?.focus({ preventScroll: true });
+    const target = composer.current?.querySelector<HTMLElement>('textarea:not(:disabled), button:not(:disabled)');
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   }, [sending, retrying, failed]);
 
   return (

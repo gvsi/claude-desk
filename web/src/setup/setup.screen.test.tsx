@@ -817,6 +817,55 @@ describe('setup', () => {
     await expect.element(box).toHaveFocus();
   });
 
+  it.each(['phone', 'desktop'] as const)('keyboard_answers_keep_the_focused_textarea_in_the_%s_viewport', async (viewport) => {
+    const { interview_id: id } = await startInterview(null);
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport });
+    await screen.getByRole('button', { name: "No, I'll type it" }).click();
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    for (let answer = 1; answer <= 6; answer += 1) {
+      await userEvent.keyboard('Yes, that works.{Enter}');
+      await expect.element(screen.getByText(`Question ${answer + 1} of 7`, { exact: true })).toBeVisible();
+      await expect.element(box).toHaveFocus();
+      await expect.poll(() => {
+        const rect = box.element().getBoundingClientRect();
+        return rect.top >= 0 && rect.bottom <= window.innerHeight;
+      }, { message: `Question ${answer + 1}'s focused textarea fits in the viewport` }).toBe(true);
+    }
+  });
+
+  it.each([false, true])('keyboard_failure_and_retry_stay_in_the_phone_viewport_with_reduced_motion_%s', async (reduced) => {
+    await reduceMotion(reduced);
+    onTestFinished(async () => {
+      await cdp().send('Emulation.setEmulatedMedia', { features: [] });
+    });
+    const { interview_id: id } = await startInterview(null);
+    const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: 'phone' });
+    await screen.getByRole('button', { name: "No, I'll type it" }).click();
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await box.click();
+    for (let answer = 1; answer <= 4; answer += 1) {
+      await userEvent.keyboard('Yes, that works.{Enter}');
+      await expect.element(screen.getByText(`Question ${answer + 1} of 7`, { exact: true })).toBeVisible();
+      await expect.element(box).toHaveFocus();
+    }
+    mockStore.inject({ route: 'setupAnswer', status: 503 });
+    await userEvent.keyboard('Yes, that works.{Enter}');
+    const retry = screen.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toHaveFocus();
+    await expect.poll(() => {
+      const rect = retry.element().getBoundingClientRect();
+      return rect.top >= 0 && rect.bottom <= window.innerHeight;
+    }, { message: 'The focused retry button fits in the viewport' }).toBe(true);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(screen.getByText('Question 6 of 7', { exact: true })).toBeVisible();
+    await expect.element(box).toHaveFocus();
+    await expect.poll(() => {
+      const rect = box.element().getBoundingClientRect();
+      return rect.top >= 0 && rect.bottom <= window.innerHeight;
+    }, { message: 'The textarea returned after retry fits in the viewport' }).toBe(true);
+  });
+
   it('keyboard_answer_keeps_focus_through_failure_and_retry', async () => {
     const { interview_id: id } = await startInterview();
     const { screen } = await renderRoute(`/app/setup/${id}`);
