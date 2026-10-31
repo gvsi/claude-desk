@@ -33,8 +33,6 @@ const CLAUDE_ACCOUNT = '/vision/claude-account';
 const PHONE = '/vision/phone';
 const VISION_ROUTES = [CITY_OFFICE, TEAM_DESK, CLAUDE_ACCOUNT, PHONE] as const;
 
-/** Rivera's Today, in the copy each test starts with. */
-const TODAY = `/app/${RIVERA.deskId}/today`;
 
 /** Where "Back to your Desk" goes: the app's entry, which opens a returning owner's Today. */
 const BACK_HREF = '/';
@@ -162,20 +160,6 @@ describe('Vision pages', () => {
       });
       expect(toTheApi, path).toEqual([]);
     }
-  });
-
-  it('things_to_try_links_where_this_is_going', async () => {
-    // Today's "Things to try" leads to the vision pages, starting with the city office.
-    const { screen, router } = await renderRoute(TODAY);
-    const things = screen.getByRole('region', { name: 'Things to try' });
-    const link = things.getByRole('link', { name: 'Where this is going: channels, a city office and a team Desk' });
-    await expect.element(link).toHaveAttribute('href', CITY_OFFICE);
-    // The same tab, through the router: the app stays loaded.
-    expect(link.element().getAttribute('target')).toBeNull();
-    await link.click();
-    await expect.poll(() => router.state.location.pathname).toBe(CITY_OFFICE);
-    await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
-    await expect.element(main(screen).getByRole('heading', { level: 1, name: 'Good morning, Nadia' })).toBeVisible();
   });
 
   it('vision_pages_pass_the_screen_checks', async () => {

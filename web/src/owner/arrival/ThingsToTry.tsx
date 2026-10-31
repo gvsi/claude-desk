@@ -2,9 +2,8 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, t
 import { useNavigate } from 'react-router';
 
 import type { NeedsYouItem } from '../../api/views.ts';
-import { Button, Card, Icon, Notice, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
+import { Button, Card, Icon, Notice, StatusDot, SuggestionChips, type IconName } from '../../ds/index.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
-import { VISION_PATHS } from '../../vision/data.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, useToday } from '../useDesks.ts';
@@ -49,9 +48,8 @@ function routerClick(go: () => void) {
 }
 
 /**
- * Today's "Things to try": four ways into the demo, each with its next step, then a link to where
- * this is going, the labelled vision pages. The public page always opens in a new tab, never on
- * Today. "Hide this list" is remembered in this browser when it can be.
+ * Today's "Things to try": four ways into the demo, each with its next step. The public page always
+ * opens in a new tab, never on Today. "Hide this list" is remembered in this browser when it can be.
  */
 export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
   const { business, desk } = useOwnerDesk();
@@ -123,9 +121,6 @@ export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
           </Thing>
         </ul>
       </Card>
-      <p className="cd-things__vision cd-type-meta">
-        <TextLink href={VISION_PATHS.cityOffice}>Where this is going: channels, a city office and a team Desk</TextLink>
-      </p>
     </section>
   );
 }
