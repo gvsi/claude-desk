@@ -4,9 +4,9 @@
  * in a new tab through this browser's own storage: a record of the Desk's slug and the idea's key,
  * under a one-time random token, which is all the new tab's link carries (`?try=<token>`). The
  * public page types the idea in only when the token matches the record this browser holds, for its
- * own Desk, under ten minutes old, and drops the record as it reads it. So only the owner's own
- * Today, in this browser, can type one of these three lines, once; a link alone, written by anyone
- * else, types nothing.
+ * own Desk, under ten minutes old, and drops the record as it reads it. What that guarantees: only
+ * the owner's own Today, in this browser, can type one of these three lines, once for each pick; a
+ * link on its own, from anyone, types nothing.
  */
 import { readLocal, writeLocal } from './storage.ts';
 

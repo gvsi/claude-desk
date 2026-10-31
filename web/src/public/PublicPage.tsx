@@ -9,7 +9,8 @@
  * equal to the token of the hand-off this browser holds for this Desk, under ten minutes old. The
  * page drops the hand-off as it reads it, whether or not it matched. Anything else types nothing:
  * an idea's key or words in the address, an unknown or used token, another Desk's hand-off, an old
- * one, or storage that can't be read. A link alone, written by anyone else, never types a line.
+ * one, or storage that can't be read. So only the owner's own Today, in this browser, can type one
+ * of the three fixed lines, once for each pick; a link on its own, from anyone, types nothing.
  * A `draft` (an older link's words) is ignored and removed: its words are never typed in, alone or
  * beside a `try`, and a valid `try` beside it still types the handed-off idea. `try` and `draft`
  * leave the address in place as the page opens, every other query and the hash kept, so a reload
