@@ -4,11 +4,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { EvMessage, EvOwnerJoined, EvOwnerTyping, SseEvent, StatusEvent } from '../api/contracts.ts';
+import { EV_ERROR_CODES, type EvMessage, type EvOwnerJoined, type EvOwnerTyping, type SessionState, type SseEvent, type StatusEvent } from '../api/contracts.ts';
 import type { TranscriptItem, VisitorTranscript } from '../api/views.ts';
 import { receiptFromEvent } from '../ds/index.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { chatReducer, initialChatState, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
+import { chatReducer, initialChatState, ownerInChat, ownerTypingDelayMs, type ChatAction, type ChatState } from './chatReducer.ts';
 
 /** The fixtures' quote turn: the action's receipt, writing, the checked reply, the turn's end. */
 const [quoteReceipt, , quoteMessage] = rivera.events.quoteTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
@@ -509,6 +509,80 @@ describe('chatReducer', () => {
     expect(lines(reloaded)).toEqual([['n2', 'owner_left']]);
     expect(shown(reloaded)).toEqual(shown(live));
     expect(flags(reloaded)).toEqual(flags(live));
+  });
+
+  it('the_owner_is_in_the_chat_from_her_join_to_her_leave', () => {
+    // A new chat: nobody but Claude.
+    expect(ownerInChat(initialChatState())).toBe(false);
+
+    // Maria joins. Her typing, her words, a turn's end and a status don't change that.
+    const joined = run(events([ownerJoined]));
+    expect(ownerInChat(joined)).toBe(true);
+    const on = run(events([ownerTyping, ownerSaid, { type: 'turn_end' }, quoteReceipt], 2), joined);
+    expect(ownerInChat(on)).toBe(true);
+
+    // She hands the chat back, and takes it over again.
+    const left = run(events([{ type: 'owner_left' }], 6), on);
+    expect(ownerInChat(left)).toBe(false);
+    expect(ownerInChat(run(events([ownerJoined], 7), left))).toBe(true);
+    // A replay of the join the chat has already passed changes nothing.
+    expect(ownerInChat(run(events([ownerJoined], 1), left))).toBe(false);
+  });
+
+  it('owner_in_chat_fails_safe_to_false', () => {
+    const joined = run(events([ownerJoined]));
+    // Claude writing: it isn't paused, whatever the chat last heard.
+    expect(ownerInChat(run(events([{ type: 'writing' }], 2), joined))).toBe(false);
+    // Any error on the stream, the chat ending included.
+    for (const code of EV_ERROR_CODES) expect(ownerInChat(run(events([{ type: 'error', code }], 2), joined)), code).toBe(false);
+    // A send that found the chat ended (a 401), and a new chat.
+    expect(ownerInChat(run([{ type: 'ended' }], joined))).toBe(false);
+    expect(ownerInChat(run([{ type: 'reset' }], joined))).toBe(false);
+
+    // The stream drops or closes: until it has caught up again, the chat can't know she's still there.
+    const dropped = run([{ type: 'connection', connection: 'reconnecting' }], joined);
+    expect(ownerInChat(dropped)).toBe(false);
+    expect(ownerInChat(run([{ type: 'connection', connection: 'closed' }], joined))).toBe(false);
+    const reopened = run([{ type: 'connection', connection: 'open' }], dropped);
+    expect(ownerInChat(reopened)).toBe(false);
+    // Caught up with nothing about her: she is still there. Caught up on her leave: she isn't.
+    expect(ownerInChat(run([{ type: 'caught_up' }], reopened))).toBe(true);
+    expect(ownerInChat(run([...events([{ type: 'owner_left' }], 2), { type: 'caught_up' }], reopened))).toBe(false);
+    // The page coming back to the chat catches up the same way.
+    const back = run([{ type: 'catching_up' }], joined);
+    expect(ownerInChat(back)).toBe(false);
+    expect(ownerInChat(run([{ type: 'caught_up' }], back))).toBe(true);
+  });
+
+  it('owner_in_chat_from_the_stored_conversation', () => {
+    const inOwnersHands: SessionState = { ...rivera.sessions.public, mode: 'owner' };
+    const read = (items: TranscriptItem[], state: SessionState = inOwnersHands) =>
+      run([{ type: 'history', transcript: { state, items, last_seq: 9 } }]);
+    const left = (n: number): TranscriptItem => ({ ...item(n, 'owner_left'), event: { type: 'owner_left' } });
+    const joinedAt = (n: number): TranscriptItem => ({ ...item(n, 'owner_joined'), event: ownerJoined });
+
+    // Reloaded during the take-over: her join is the latest of her joins and leaves.
+    expect(ownerInChat(read(STORED_TAKEN_OVER))).toBe(true);
+    expect(ownerInChat(read([joinedAt(1), left(2), joinedAt(3)]))).toBe(true);
+    // After a hand-back, her leave is.
+    expect(ownerInChat(read([...STORED_TAKEN_OVER, left(5)], rivera.sessions.public))).toBe(false);
+    expect(ownerInChat(read([joinedAt(1), left(2)]))).toBe(false);
+    // The latest by `n`, in whatever order the items come.
+    expect(ownerInChat(read([left(5), ...STORED_TAKEN_OVER]))).toBe(false);
+
+    // Nothing about her, or an item that says it is a join and holds something else.
+    expect(ownerInChat(read([]))).toBe(false);
+    expect(ownerInChat(read([visitorText(1, ASK)]))).toBe(false);
+    expect(ownerInChat(read([{ ...item(1, 'owner_joined'), event: null }]))).toBe(false);
+    expect(ownerInChat(read([{ ...item(1, 'owner_joined'), event: { type: 'owner_left' } }]))).toBe(false);
+
+    // Her join is the latest, but the session isn't in her hands: a hand-back whose leave the API
+    // never kept, or a chat the breaker paused.
+    expect(ownerInChat(read(STORED_TAKEN_OVER, rivera.sessions.public))).toBe(false);
+    expect(ownerInChat(read(STORED_TAKEN_OVER, { ...inOwnersHands, mode: 'paused' }))).toBe(false);
+
+    // The stream follows on from the read: her hand-back after it.
+    expect(ownerInChat(run(events([{ type: 'owner_left' }], 10), read(STORED_TAKEN_OVER)))).toBe(false);
   });
 });
 

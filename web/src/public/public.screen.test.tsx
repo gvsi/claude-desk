@@ -1326,6 +1326,145 @@ describe('public chat page', () => {
     expect(chatView()).toEqual(open);
   });
 
+  it('the_head_says_when_the_owner_is_in_the_chat', async () => {
+    // Dana's chat in English, in Spanish on a phone, and the owner's own preview of it: Maria takes
+    // it over while the page is open, writes, then hands it back.
+    for (const { path, language, viewport, head } of [
+      { path: PAGE, language: undefined, viewport: 'desktop', head: HEAD.en },
+      { path: PAGE, language: 'es-MX', viewport: 'phone', head: HEAD.es },
+      { path: `${PAGE}?preview=${RIVERA.deskId}`, language: undefined, viewport: 'desktop', head: HEAD.en },
+    ] as const) {
+      const where = `${path} ${language ?? 'en'} ${viewport}`;
+      const { screen } = await renderRoute(path, { seed: 'rivera', language, viewport });
+      await ready(screen);
+      const chat = mockStore.visitorSession(RIVERA.slug);
+      if (!chat) throw new Error('this browser has a chat');
+      expect(chatHead(), where).toEqual(withClaude(head));
+
+      // Ask has focus as she joins: the head says she is in the chat and that Claude, an AI, is
+      // paused, Ask goes, and focus moves on to the composer instead of dropping to the page.
+      (screen.getByRole('button', { name: head.ask }).element() as HTMLElement).focus();
+      mockStore.world.takeOver(chat);
+      await vi.waitFor(() => expect(chatHead(), where).toEqual(withOwner(head)));
+      await expect.element(screen.getByRole('textbox', { name: /^(?:Message|Mensaje para) / })).toHaveFocus();
+      expect(systemLines(), where).toHaveLength(1);
+      if (viewport === 'phone') {
+        expectNoHorizontalScroll();
+        await expectScreenBasics(screen.container, { owner: false });
+      }
+
+      // Her words keep it so. Her hand-back brings the disclosure and Ask back.
+      mockStore.world.say(chat, 'Hi, it is Maria. I can come at 4 today.');
+      await expect.element(screen.getByText('Hi, it is Maria. I can come at 4 today.', { exact: true })).toBeVisible();
+      expect(chatHead(), where).toEqual(withOwner(head));
+      mockStore.world.handBack(chat);
+      await vi.waitFor(() => expect(chatHead(), where).toEqual(withClaude(head)));
+      expect(systemLines(), where).toHaveLength(2);
+    }
+  });
+
+  it('reload_during_a_take_over_keeps_the_owner_in_the_head', async () => {
+    for (const { language, head } of [
+      { language: undefined, head: HEAD.en },
+      { language: 'es-MX', head: HEAD.es },
+    ] as const) {
+      const where = language ?? 'en';
+      // Maria takes the chat over and writes while the page is open.
+      const first = await renderRoute(PAGE, { seed: 'rivera', language });
+      await ready(first.screen);
+      const chat = mockStore.visitorSession(RIVERA.slug);
+      if (!chat) throw new Error('this browser has a chat');
+      mockStore.world.takeOver(chat);
+      mockStore.world.say(chat, 'Hi, it is Maria. I can come at 4 today.');
+      await vi.waitFor(() => expect(chatHead(), where).toEqual(withOwner(head)));
+
+      // A new page load: the stored conversation says she is in the chat as soon as the chat can be
+      // written in, and the stream picks up after her join rather than sending it again.
+      const lastSeq = chatEvents().length;
+      const second = await renderRoute(PAGE, { language });
+      await ready(second.screen);
+      expect(chatHead(), where).toEqual(withOwner(head));
+      await vi.waitFor(() => expect(requests('events').at(-1)?.path).toMatch(new RegExp(`after=${lastSeq}$`)));
+      expect(chatHead(), where).toEqual(withOwner(head));
+
+      // She hands back, and the page loads again: the disclosure and Ask, from the stored conversation.
+      mockStore.world.handBack(chat);
+      await vi.waitFor(() => expect(chatHead(), where).toEqual(withClaude(head)));
+      const third = await renderRoute(PAGE, { language });
+      await ready(third.screen);
+      expect(chatHead(), where).toEqual(withClaude(head));
+    }
+  });
+
+  it('the_head_goes_back_to_claude_when_the_chat_ends', async () => {
+    const takenOver = async () => {
+      const chat = mockStore.visitorSession(RIVERA.slug);
+      if (!chat) throw new Error('this browser has a chat');
+      mockStore.world.takeOver(chat);
+      await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    };
+
+    // The stream says the chat ended while Maria was in it: the head no longer says she is.
+    const first = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(first.screen);
+    await takenOver();
+    mockStore.emit(RIVERA.slug, { type: 'error', code: 'session' });
+    await expect.element(first.screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    // Its session is gone, as the API's is once it says so, so the new chat is a new session, and
+    // it starts with Claude.
+    mockStore.dropVisitorCookie(RIVERA.slug);
+    const opened = requests('openSession').length;
+    await first.screen.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
+    await vi.waitFor(() => expect(requests('openSession')).toHaveLength(opened + 1));
+    await ready(first.screen);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+
+    // A send that answers 401 while Maria is in the chat ends it the same way.
+    const second = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(second.screen);
+    await takenOver();
+    mockStore.inject({ route: 'sendMessage', status: 401 });
+    await type(second.screen, 'Are you still there?');
+    await expect.element(second.screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+  });
+
+  it('the_head_says_the_owner_is_in_the_chat_only_once_it_has_caught_up', async () => {
+    const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+
+    // The visitor leaves the page for another, and Maria hands the chat back meanwhile. Back on the
+    // page, the head never says she is still in the chat: the page last heard she was, but it
+    // doesn't know what happened while it was away until the stream has caught up.
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    mockStore.world.handBack(chat);
+    const lines = new Set<string>();
+    const watch = new MutationObserver(() => lines.add(chatHead().line));
+    watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+    onTestFinished(() => watch.disconnect());
+    await router.navigate(PAGE);
+    lines.add(chatHead().line);
+    await ready(screen);
+    await vi.waitFor(() => expect(systemLines()).toEqual(['Maria Rivera joined the chat', 'Claude is helping again.']));
+    watch.disconnect();
+    expect([...lines]).not.toContain(HEAD.en.ownerInChat);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+
+    // Away again, she takes it over again: back on the page, the head says so once it has caught up.
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    mockStore.world.takeOver(chat);
+    await router.navigate(PAGE);
+    await ready(screen);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)), { timeout: 3_000 });
+  });
+
   it('callback_card_shows_the_kernel_title', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);
@@ -2184,6 +2323,36 @@ const LONG_CHAT = [
 
 /** The AI disclosure, as the page shows it in English. */
 const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";
+
+/**
+ * The chat's head in each language: the AI disclosure and "Ask for Maria Rivera", or while Maria is
+ * in the chat, the line that says so in the disclosure's place, and no Ask.
+ */
+const HEAD = {
+  en: {
+    disclosure: DISCLOSURE,
+    ownerInChat: 'Maria Rivera is in this chat. Claude, an AI, is paused until Maria Rivera hands it back.',
+    ask: 'Ask for Maria Rivera',
+  },
+  es: {
+    disclosure: 'Estás hablando con Claude, una IA que responde por Rivera Plumbing. Puedes pedir hablar con Maria Rivera cuando quieras.',
+    ownerInChat: 'Maria Rivera está en este chat. Claude, una IA, está en pausa hasta que Maria Rivera le devuelva el chat.',
+    ask: 'Pedir hablar con Maria Rivera',
+  },
+} as const;
+
+/** The chat's head as the visitor sees it: the line under the chat's title, and its buttons by name. */
+function chatHead(): { line: string; asks: string[] } {
+  const head = document.querySelector('.cd-public-shell__chat-head');
+  return {
+    line: head?.querySelector('.cd-public-shell__disclosure')?.textContent ?? '',
+    asks: [...(head?.querySelectorAll('button') ?? [])].map((button) => button.textContent ?? ''),
+  };
+}
+
+/** The head as it is with Claude answering, and while Maria is in the chat. */
+const withClaude = (head: (typeof HEAD)['en' | 'es']) => ({ line: head.disclosure, asks: [head.ask] });
+const withOwner = (head: (typeof HEAD)['en' | 'es']) => ({ line: head.ownerInChat, asks: [] });
 
 /** Whether `el` is wholly inside the window. */
 function inWindow(el: Element): boolean {
