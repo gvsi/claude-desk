@@ -59,7 +59,7 @@ PERMIT_ALL = ('@id("test_permit_all") @card("test-permit-all") @tier("auto") '
 
 def charge_card(card_id: str, cents: int, **fields) -> RuleCard:
     return RuleCard(card_id=card_id, applies_to="effect:charge", mode="auto", who="anyone", max_amount_cents=cents,
-                    reason="Payment links up to a limit.", **fields)
+                    reason=fields.pop("reason", "Payment links up to a limit."), **fields)
 
 
 async def enable(app: FastAPI, desk: Rivera, fake: FakeAdapter) -> FakeAdapter:
@@ -385,7 +385,7 @@ async def test_lowering_drafts_the_active_money_cards_down_to_the_new_cap(desk_p
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert sorted(await versions_of(app, copy)) == [1, 2]
 
-    lowered = lower_to_cap(active.cards, active.cards, 10_000)
+    lowered = lower_to_cap(active.cards, active.cards, 10_000, "en")
     response = await post_draft(client, copy, lowered, 2, auto_money_cap_cents=10_000)
     assert response.status_code == 200, response.text
     drafted = PolicyVersionContract.model_validate(response.json())
@@ -403,7 +403,7 @@ async def test_lowering_drafts_the_active_money_cards_down_to_the_new_cap(desk_p
     assert (await policy_entries(client, copy))[-1] == {"version": drafted.version, "activated": True, "from": 2,
                                                          "auto_money_cap_cents": 10_000}
     # lowered to 0, the card asks instead
-    [asks] = [card for card in lower_to_cap(drafted.cards, drafted.cards, 0) if card.card_id == "links"]
+    [asks] = [card for card in lower_to_cap(drafted.cards, drafted.cards, 0, "en") if card.card_id == "links"]
     assert (asks.mode, asks.who, asks.applies_to, asks.max_amount_cents) == ("ask", "anyone", "effect:charge", None)
 
 
@@ -417,19 +417,96 @@ def test_lower_to_cap_touches_only_carried_money_cards():
     active = [big, small, quotes]
     reworded = big.model_copy(update={"reason": "Links for jobs, up to a limit."})
     new = charge_card("new-links", 30_000)
-    assert lower_to_cap([big, small, quotes, new], active, 10_000) == [
-        big.model_copy(update={"max_amount_cents": 10_000}), small, quotes, new]
-    # carried is by card_id alone: the model may reword a card's reason
-    assert lower_to_cap([reworded], active, 10_000) == [reworded.model_copy(update={"max_amount_cents": 10_000})]
-    assert lower_to_cap([small], active, 5_000) == [small]                    # at the cap: unchanged
+    at_100 = {"max_amount_cents": 10_000, "reason": "Up to $100, your payment limit."}
+    assert lower_to_cap([big, small, quotes, new], active, 10_000, "en") == [
+        big.model_copy(update=at_100), small, quotes, new]
+    # carried is by card_id alone: the model may reword a card's reason, which the lowering replaces
+    assert lower_to_cap([reworded], active, 10_000, "en") == [reworded.model_copy(update=at_100)]
+    assert lower_to_cap([small], active, 5_000, "en") == [small]              # at the cap: unchanged
     # at 0 a carried money card asks instead, with the same scope and no auto-only limits
-    [asks, refunds, *_] = lower_to_cap(active, active, 0)
+    [asks, refunds, *_] = lower_to_cap(active, active, 0, "en")
     assert asks == RuleCard(card_id="links", applies_to="effect:charge", mode="ask", who="anyone",
-                            reason=big.reason)
+                            reason="Your payment limit is $0.")
     assert (refunds.mode, refunds.who, refunds.max_amount_cents) == ("ask", "record_owner", None)
     for cap in (-1, 1_000_001, True, 500.0):
         with pytest.raises(ValueError):
-            lower_to_cap(active, active, cap)
+            lower_to_cap(active, active, cap, "en")
+
+
+def test_a_lowered_card_states_its_new_limit():
+    # Each lowered card's reason is replaced whole by a code-built sentence naming the new limit, in the language
+    # the owner reads the rules in: whole dollars without cents and with thousands separators, cents only when
+    # there are some, the same number format in Spanish. The old reason, and the old amount it quoted, are gone.
+    links = charge_card("links", 300_000, reason="Payment links for quotes up to $3,000.")
+    active = [links]
+    sentences = {
+        ("en", 150_000): "Up to $1,500, your payment limit.",
+        ("es", 150_000): "Hasta $1,500, tu límite de pago.",
+        ("en", 10_050): "Up to $100.50, your payment limit.",
+        ("es", 10_050): "Hasta $100.50, tu límite de pago.",
+        ("en", 10_000): "Up to $100, your payment limit.",
+        ("es", 10_000): "Hasta $100, tu límite de pago.",
+        ("en", 5): "Up to $0.05, your payment limit.",
+        ("es", 5): "Hasta $0.05, tu límite de pago.",
+        ("en", 0): "Your payment limit is $0.",
+        ("es", 0): "Tu límite de pago es $0.",
+    }
+    for (language, cap), sentence in sentences.items():
+        [lowered] = lower_to_cap([links], active, cap, language)
+        assert lowered.reason == sentence, (language, cap)
+        assert "3,000" not in lowered.reason and "quotes" not in lowered.reason
+    # cards the lowering doesn't change keep their reason: at or under the cap, not money, or not carried
+    small = charge_card("small", 10_000, reason="Small payments.")
+    quotes = RuleCard(card_id="quotes", applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=90_000,
+                      reason="Quotes from the price list.")
+    new = charge_card("new-links", 300_000, reason="New links.")
+    for language in ("en", "es"):
+        assert lower_to_cap([small, quotes, new], [links, small, quotes], 10_000, language) == [small, quotes, new]
+
+
+def test_lower_to_cap_needs_a_language_it_writes():
+    # The language has no default: English or Spanish, else a ValueError, as a cap out of range is.
+    links = charge_card("links", 30_000)
+    for language in ("fr", "EN", "", None, "en-US"):
+        with pytest.raises(ValueError):
+            lower_to_cap([links], [links], 10_000, language)
+    with pytest.raises(TypeError):
+        lower_to_cap([links], [links], 10_000)                              # no default
+
+
+def test_lowering_never_loosens_a_card():
+    # Whatever the cap, the lowering keeps every card, in order, under its ID, for the same people and target; it
+    # never raises a limit, never turns a card that asks or never acts into one that acts on its own, and an auto
+    # card it keeps auto keeps its hours, review and discount limit. At 0 the only change is to ask.
+    weekdays = HoursWindow(days=["mon", "tue", "wed", "thu", "fri"], start=time(9), end=time(17))
+    cards = [
+        charge_card("links", 30_000, max_discount_bp=500, hours=weekdays, review=True),
+        charge_card("mid", 9_999),
+        RuleCard(card_id="refunds", applies_to="payments.create_refund", mode="auto", who="record_owner",
+                 max_amount_cents=5_000, reason="Small refunds to the customer who paid."),
+        RuleCard(card_id="person", applies_to="native.payment_link", mode="auto", who="person", person_id="p-dana",
+                 max_amount_cents=1_000_000, reason="Dana's links."),
+        RuleCard(card_id="asks", applies_to="effect:charge", mode="ask", who="anyone", reason="Payments ask."),
+        RuleCard(card_id="never", applies_to="effect:pay_out", mode="never", who="anyone", reason="No payouts."),
+        RuleCard(card_id="quotes", applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=90_000,
+                 reason="Quotes from the price list."),
+    ]
+    for cap in (0, 1, 5_000, 9_999, 10_000, 30_000, 1_000_000):
+        for language in ("en", "es"):
+            lowered = lower_to_cap(cards, cards, cap, language)
+            assert [card.card_id for card in lowered] == [card.card_id for card in cards], (cap, language)
+            for before, after in zip(cards, lowered, strict=True):
+                same = ("applies_to", "who", "person_id", "agent_key_id", "is_default")
+                assert after.model_dump(include=set(same)) == before.model_dump(include=set(same)), before.card_id
+                assert after.mode == before.mode or (before.mode, after.mode) == ("auto", "ask"), before.card_id
+                if after.mode == "auto":
+                    assert (after.max_amount_cents is None) == (before.max_amount_cents is None), before.card_id
+                    assert after.max_amount_cents is None or after.max_amount_cents <= before.max_amount_cents
+                    assert (after.hours, after.review, after.max_discount_bp) == (
+                        before.hours, before.review, before.max_discount_bp), before.card_id
+                if after != before:                                         # a lowered card: an auto money card
+                    assert money_cap.auto_money(before) and before.max_amount_cents > cap, before.card_id
+                    assert after.max_amount_cents == (cap if cap else None), before.card_id
 
 
 def test_one_predicate_says_which_cards_the_cap_bounds():
@@ -457,7 +534,7 @@ def test_one_predicate_says_which_cards_the_cap_bounds():
     quotes = RuleCard(card_id="quotes", applies_to="native.quote", mode="auto", who="anyone", max_amount_cents=90_000,
                       reason="Quotes from the price list.")
     for card in (charge_card("links", 30_000), charge_card("small", 5_000), asks, refunds, quotes):
-        lowered = lower_to_cap([card], [card], 10_000) != [card]
+        lowered = lower_to_cap([card], [card], 10_000, "en") != [card]
         assert lowered == bool(compiler.above_money_cap([card], 10_000)), card.card_id
 
 
@@ -533,7 +610,8 @@ async def test_an_allow_before_a_cap_change_is_refused_at_execution(desk_prove, 
     allowed = await link_for(client, visitor, link, 20_000, call_id="link-200")
     assert (allowed.outcome, allowed.policy_version) == ("allow", 2)
     lowered = await draft_and_confirm(client, copy.owner_token, copy.desk_id,
-                                      lower_to_cap(active.cards, active.cards, 10_000), auto_money_cap_cents=10_000)
+                                      lower_to_cap(active.cards, active.cards, 10_000, "en"),
+                                      auto_money_cap_cents=10_000)
     assert (lowered.version, lowered.auto_money_cap_cents) == (3, 10_000)
     response = await client.post("/execute", headers=visitor.headers, json={
         "decision_id": allowed.decision_id, "session_id": visitor.session_id, "generation": 0})
