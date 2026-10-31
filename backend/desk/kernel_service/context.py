@@ -91,9 +91,12 @@ async def session_context(ctx: KernelCtx, principal: Principal, session_row: Ses
     profiles = {row.tool: _profile(row) for row in rows if row.profile is not None}
     given = await resolved_tools(ctx, principal, session_row, desk_row)
     declared = decide.declared_tools(principal.kind)
+    valid_business = {tool for tool, profile in profiles.items() if profile.source == "business"
+                      and await adapters.resolve(ctx, desk_id, tool) is not None}
+    given = {tool for tool, profile in profiles.items() if tool in given
+             and (profile.source != "business" or tool in valid_business)}
     if principal.kind in ("visitor", "agent"):
-        declared = declared | {tool for tool, profile in profiles.items() if profile.source == "business"
-                               and profile.business is not None and profile.business.config.block == "intake"}
+        declared = declared | valid_business
 
     readers = labels.session_readers(session_row)
     # the owner reads the business's own text; a conversation is never given a document's canary

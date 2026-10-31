@@ -62,7 +62,6 @@ from desk.contracts import (
     SeedDocument,
     SessionMode,
     SessionState,
-    ToolName,
     Violation,
 )
 from desk.events import EvHeld, EvMessage, EvOwnerJoined, EvOwnerLeft, EvReceipt, EvResolved

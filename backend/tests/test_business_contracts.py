@@ -69,3 +69,20 @@ def test_intake_receipt_uses_block_and_quoted_title_in_both_languages():
         '“Customer enquiry”: datos guardados para Maria Rivera')
     with pytest.raises(KeyError):
         render.executed_status('desk.missing', 'en', owner='Maria Rivera')
+
+
+def test_api_model_tools_and_owner_row_accept_an_enabled_business_tool():
+    from desk.api.tools import from_api_name, model_tools
+    from desk.api.versions import tool_row
+    from desk.kernel_api import SessionContext
+    from desk.kernel_service.adapters.blocks import profile
+
+    definition = contracts.BusinessToolDef(title='Customer enquiry', description='Take details.',
+                                          config={'block': 'intake', 'questions': ['What do you need?']})
+    stored = profile('desk.enquiry', definition).model_copy(update={'status': 'enabled', 'review_reason': None})
+    context = SessionContext(tools=[stored], tools_declared=[stored], facts=[], knowledge=[])
+    entry = model_tools(context)[0]
+    assert from_api_name(entry['name']) == stored.tool
+    assert entry['input_schema'] == stored.input_schema
+    assert entry['description'] == stored.description_confirmed
+    assert tool_row(stored, []).business.title == definition.title
