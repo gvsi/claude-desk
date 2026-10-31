@@ -66,7 +66,7 @@ BOOKING_CLAIM = "it said a booking was made instead of showing the card"
 REPLY_WHY_BY_RULE = {
     "lex.en.booking": BOOKING_CLAIM, "lex.es.booking": BOOKING_CLAIM,
     # Proposed wording awaiting the owner's sign-off.
-    "soft.unavailable": "the wording check didn't answer in time",
+    "soft.unavailable": "the checkpoint wasn't available",
     "soft.denies_ai": "it said it wasn't an AI",
 }
 REPLY_WHY = {
@@ -530,8 +530,8 @@ def _newest_first(items: list[BriefingItem]) -> list[BriefingItem]:
 class Counted:
     """What the briefing from `start` to `end` counts: the refused requests, bookings and leads, the conversations'
     text rows, and each conversation Claude answered alone (a reply it delivered, other than the handoff clause, and no
-    booking, lead, hold, refused request, callback or delivered handoff) at its newest such reply, by session. Stopped drafts
-    do not make a conversation busy."""
+    booking, lead, hold, refused request, callback or delivered handoff) at its newest such reply, by session.
+    Stopped drafts do not make a conversation busy."""
 
     stopped: list[Stopped]
     bookings: list[Timed]
