@@ -4,15 +4,21 @@ Status: reviewed by the kernel safety reviewer and the API lane, 2026-10-31. Not
 
 Owner decision, 2026-10-31: build all three layers, and hold whenever a visit's place is outside the service area or unclear.
 
-Amends: the master plan ("Shared contracts v2", "Decision semantics and proof obligations", "Cedar request shape", "Rivera seed", "Kernel HTTP API v2", "Data model and database roles"); the kernel verification and owner data plan (plan 01b, Desk-data parts); the API owner tools, setup and agents plan (plan 02b); the web app (plan 04); the evals plans (plans 05a, 05b).
+Amends: the master plan ("Shared contracts v2", "Decision semantics and proof obligations", "Cedar request shape", "Rivera seed", "Kernel HTTP API v2", "Data model and database roles", "Evals gate", "Review Focus"); the safety kernel core plan (plan 01a, the proof check count); the kernel verification and owner data plan (plan 01b, Desk-data parts); the API owner tools, setup and agents plan (plan 02b); the web app (plan 04); the evals plans (plans 05a, 05b); the threat model. Task D1 applies these edits.
 
 ## Summary
 
 - `native.book` takes `visit_place`, the visit's town or ZIP code. At normalize, the kernel classifies it against the Desk's owner-confirmed list as `inside`, `outside`, `unclear` or `no_list`.
 - Cedar sees one Boolean, `context.in_service_area`, set only on bookings. Every auto permit that covers `native.book` requires it, unless every card of that permit sets `RuleCard.any_area`. The hold twin drops it with the other limits, so a booking that isn't inside holds for the owner. It is never auto-booked and never refused for that reason alone.
-- A new eighth proof obligation, `area_needs_card`, and the existing `auto_within_cards` prove that no checking card auto-books outside the area, for any reviewer value.
+- When no auto card covering `native.book` sets `any_area`, a new eighth proof obligation, `area_needs_card`, proves that no booking whose stated place isn't on the owner's list is auto-allowed, for any reviewer value. Otherwise `auto_within_cards` holds each card to its own condition.
 - The list is a Desk-data part, `service_area`, written only through the kernel's `PUT /desks/{id}/service_area` with the owner's token. Setup proposes it, the owner confirms it, and Settings edits it.
 - The agent's system prompt gets one line: check the area before offering to book. This change falls under the evals gate.
+
+## What this plan serves
+
+- An offered exception can't become a booking: a booking outside the owner's service area, or one whose place is unclear, waits for the owner, whatever Claude said and whatever the reviewer scored.
+- The owner's area is enforced by code and proved: the condition is compiled from the owner's cards, and the proofs show that no checking card auto-books a place that isn't on the list.
+- The claim stays honest: the tier 2 report shows the area attacks' results beside legitimate booking completion and the area holds the owner had to clear, and the threat model states the risk that remains (a visitor who names a false town).
 
 ## 1. The booking argument
 
@@ -25,7 +31,7 @@ class BookArgs(BaseModel):
 
 - `BookAdapter.free_text_fields = frozenset({"visit_place"})`. The owner's reason quotes it under "Claude's note". The reviewer gets it labelled untrusted and cut to 200 characters. It is never rendered to a visitor and never stored in a fact.
 - A non-string value, or one over 80 characters, is refused at step 1 (`invalid_args`), like any bad argument.
-- The profile's `description_confirmed` gains: "Pass visit_place: only the town name or the five-digit ZIP code where the visit is, as the visitor gave it, and nothing else." (copy, section 4)
+- The profile's `description_confirmed` gains: "Pass visit_place: only the town name or the five-digit ZIP code where the visit is, as the visitor gave it, and nothing else. If they give a neighborhood or street address, pass the town they name with it, or ask which town it is in." (copy, section 4)
 
 Shared module `backend/desk/service_area.py`. It imports only the standard library, and both processes import it, as they do `desk.presets`:
 
@@ -51,6 +57,8 @@ def classify(visit_place: str | None, places: Sequence[str]) -> VisitArea
 5. The list has no entry of the key's kind (a ZIP against a list of towns): `unclear`.
 6. Otherwise: `outside`.
 
+`place_key` and `classify` are total: any exception inside them gives None, so `unclear`, and a stored entry with no key is ignored. Decide catches only `AdapterRefusal` from `normalize`, so an error there would end `/decide` with no decision row instead of a ledgered hold.
+
 "Ambiguous" needs no rule of its own, because only a value that is exactly one listed town or ZIP code is inside. "Oakland or Berkeley" is town-shaped, matches nothing and is `outside`, so it holds like any other place not on the list.
 
 `BookAdapter.normalize` reads `desk_row.service_places` and returns `visit_area=classify(args.visit_place, desk_row.service_places)`. `Normalized` and `NormalizedAction` gain `visit_area: VisitArea | None = None`, which stays None for every other tool. `kernel.actions` gains `visit_area text null`. The execution re-check normalizes again and compares, so a list change between decide and execute that changes the class is `refused_at_execution` (`args`), on the allow and the approved path alike (open question 4). The re-check in T1 isn't enough on its own, since T1 commits the intent before T2 books: T2 therefore classifies the place again against the current list and refuses a changed class the same way, with nothing booked and no booking fact. To serialize that with the list's writer, `put_service_area` and a booking's T2 both take one per-Desk advisory lock, `service-area`, held to their commits: the writer takes it right after the Desk row; T2 takes it after its execution row and before the calendar slot. It never takes the Desk row afterwards, and repo.py's lock order names it there. So a list change either commits before T2 reads the list, and T2 sees it, or waits for the booking to commit.
@@ -73,19 +81,28 @@ The check is a rule-card condition, not a baseline forbid:
 - The hold twin drops this conjunct with the other limits (master "Policy sets", `H`). A checked booking that isn't inside therefore holds through the twin. That makes it a limit hold: `allow_once` and `deny_once` are offered, `deny_always` is not.
 - `reference.py` states the same condition in its own code. It goes in `R` and not in `R_hold`. `bounded_check` adds `in_service_area` as absent, false and true at every `native.book` boundary.
 
-**Proof obligation.** No booking a checking card covers is auto-allowed unless it is inside the service area, for any reviewer value. Two checks carry it:
+**Proof obligation.** When no auto card covering `native.book` sets `any_area`, no booking whose stated place isn't on the owner's list is auto-allowed, for any reviewer value. Otherwise `auto_within_cards` holds each card to its own condition. Two checks carry it:
 - `auto_within_cards`, unchanged in form. `R` carries the area condition and no review condition, and SymCC quantifies over every `context.review`, so `B ∪ F ∪ A ⇒ R` holds for any score.
 - New `area_needs_card`, the eighth check. For each tool in `area_checked`, `B ∪ F ∪ A ∪ {forbid (principal, action == Action::"native.book", resource) when { context has in_service_area && context.in_service_area };}` must always deny in that tool's request envs (`check_always_denies_opt`). `area_checked` is `["native.book"]` when that tool is enabled and no auto card covering it sets `any_area`, and empty otherwise. It mirrors `money_needs_card`: `desk-prove --checks` gains `area_checked`. It doesn't depend on `reference.py`, and a timeout or `unknown` fails it like every check.
-- `PROOF_CHECKS` gains `area_needs_card`, so `invariants_sha256` changes. `make proofs` regenerates `rivera.json`, `auto.json` and `ask_first.json`. `explain.py` words its counterexample (copy, section 4).
+- In `kernel/prove/src/main.rs`, `CHECKS` gains `("area_needs_card", &["B", "F", "A"])`, and the forbid is built in Rust for each tool in `area_checked`. `area_checked` is optional in the checks file and defaults to `[]`, so the selftest's checks file stays valid; `write_prove_files` always sends it. The fixture schema (`kernel/cedar/fixtures/schema.cedarschema.json`) gains `in_service_area?` in `DeskContext`.
+- `BOUNDED_CHECKS` gains `area_needs_card`, and `_evaluate` fails it when a case auto-allows a tool in `area_checked` whose `in_service_area` isn't `true`.
+- `PROOF_CHECKS` gains `area_needs_card`, so `invariants_sha256` changes. `make proofs` regenerates `rivera.json`, `auto.json` and `ask_first.json`. `activation.py`'s text says eight obligations where it says seven.
+- `check_always_denies_opt` answers only true or false, so `area_needs_card` has no counterexample to word. `explain.SENTENCES` gives it one fixed sentence with no subject (copy, section 4).
 
 **Existing cards and Desks.**
 - Rivera's `rv-book-wk` and `rv-book-sat` don't change (`any_area` stays False), so both check. The Rivera seed gets `service_places=["Oakland", "Berkeley", "Alameda", "Emeryville"]`, the towns its policy sentence names. An Oakland booking in opening hours auto-books after the reviewer, as today. Piedmont, a missing place or "Oakland, CA" holds.
 - The `auto` preset's `preset-book-weekday` checks too. `ask_first` has no auto booking card.
 - On a Desk with no list yet, every booking a checking card covers is `no_list` and holds, and the owner's reason says why. This is the fail-closed answer.
-- Versions already active were compiled without the condition and would keep auto-booking anywhere. `activation.outdated(row)` therefore also holds when the row's `schema_sha256` or `invariants_sha256` isn't the current one, and both change here. The existing rebuild path recompiles each version with its own cards at its own cap, now with the condition, and proves it, within the startup budget and then in the background with retries. Until then the version refuses with `version_outdated`, which fails closed. The pull request and its deploy note say so, since each Desk refuses for a few seconds after the deploy.
-- `add_native_tools` keeps any tool row a Desk already has. The kernel task therefore updates existing `native.book` rows to the registered profile at startup, inside the same bounded bring-up (its lock waits limited, so a held Desk row can't stall startup), ledgered as `desk_data` `{part: "tools"}`. This is kernel code, not an MCP definition, so it needs no owner review.
+- Versions already active were compiled without the condition and would keep auto-booking anywhere. Their rebuild relies on the kernel fix in #254 (rebuild a rules version whose Desk's tools changed), which this plan consumes and doesn't build again. At startup, `desks.update_native_tools` points each stale native row at the registered profile, its status kept, and `repo.desks_to_bring_up` finds each Desk whose version `activation.rebuild_due` says is due. The new `native.book` profile, with `visit_place`, makes every version due. Startup and the background pass then rebuild each one from its own cards at its own cap, now with the condition, and prove it.
+- A version due only for its tools keeps deciding until it is rebuilt, so the profile change alone opens no refusal window. The eighth check does: it changes `invariants_sha256`, so under #254's `activation.outdated` every active version is outdated and refuses with `version_outdated` until it is rebuilt. That is the fail-closed answer, since an old version has no area condition. Even without it, an old version's schema lacks `in_service_area`, so the kernel's schema check on the request refuses any booking it would otherwise auto-allow.
+- Rivera copies made before the deploy have an empty list, so every booking on them would hold (`no_list`). When `desks.update_native_tools` returns `native.book` among the tools it changed, on a Desk whose list is empty and whose active version has `preset == "rivera"`, the same transaction writes the seed's list through `desks.check_places`, ledgered `desk_data` `{part: "service_area", refs: []}`. It happens once per Desk, since the row is current afterwards (open question 10).
+- The pull request's deploy note states four effects:
+  - Every active version refuses until it is rebuilt: an unedited Rivera copy or starter preset from its shipped report before the kernel serves, an edited one at its turn for a live proof in the background.
+  - In `bounded` mode an edited version can't be proved again. It refuses every call, and its owner gets the rebuild alert, until a kernel in `symcc` mode rebuilds it.
+  - A booking held before the deploy is `refused_at_execution` when the owner approves it, since its stored `visit_area` is None and its `profile_sha256` is the old one (the execution re-check).
+  - Rivera copies made before the deploy get the seed's list.
 - `allow_person` on an area hold drafts its person card with `any_area=False`, so the draft is no wider than the approval.
-- `Probe` gains `in_service_area: bool | None = None` for booking probes. None leaves the attribute absent.
+- `Probe` gains `in_service_area: bool | None = None`. The kernel sets the attribute from it only on a `native.book` probe, and None leaves it absent. Setup's booking situations (`situation()` in `setup.py`) set it True, a visit inside the listed area, so a drafted weekday booking still reads as the owner planned; every other probe leaves it None.
 - The `decide` ledger summary records the classification `visit_area` for a booking, never the raw `visit_place`; the raw text appears only quoted under "Claude's note" in the owner's reason, as free text does.
 - A visiting agent's booking (A2A) goes through the same normalize, so the same check applies; the tests name one agent case.
 
@@ -111,7 +128,7 @@ class DeskServiceAreaRequest(KernelRequest):  # PUT /desks/{id}/service_area
 
 ## 4. Copy (each item needs the owner's sign-off)
 
-**Owner's reason.** `AREA_PLAIN` adds one sentence to `_reason_plain`, after the deciding cards' quotes and before the reviewer and Claude's note. It appears only on a limit hold of `native.book` whose `visit_area` isn't `inside`:
+**Owner's reason.** `AREA_PLAIN` adds one sentence to `_reason_plain`, after the deciding cards' quotes and before the reviewer and Claude's note. It appears only on a limit hold of `native.book` whose `visit_area` isn't `inside` and where no deciding card sets `any_area`:
 - `outside`: "The visit isn't in a town or ZIP code on your service area list."
 - `unclear`: "It doesn't say clearly which town or ZIP code the visit is in."
 - `no_list`: "You haven't listed the towns or ZIP codes you serve yet, so bookings wait for you."
@@ -121,7 +138,7 @@ The whole reason then reads: A stranger asked to book a visit. It goes past your
 **Visitor's line.** Reuse what exists: the status "Waiting for {owner} to approve" ("Esperando la aprobación de {owner}"), and the prompt's held line "I've asked {owner} about this. The answer will show up here." No new visitor copy. The line names no place and no reason, so it doesn't tell anyone which town to claim.
 
 **Other copy:**
-- The `area_needs_card` counterexample: "A stranger could book a visit outside your service area without asking you."
+- The `area_needs_card` sentence, in `explain.SENTENCES` since the check has no counterexample and so no subject: "Someone could book a visit outside your service area without asking you."
 - The tool description sentence (section 1).
 - The prompt line (section 5).
 - Rules page labels (web): "Only inside your service area" and "Anywhere".
@@ -149,10 +166,12 @@ The prompt is a gated change: the attack suite must stay at zero baseline violat
 - `test_a_zip_matches_a_listed_zip_and_its_plus_four`
 - `test_a_zip_against_a_list_of_towns_is_unclear`
 - `test_case_spacing_accents_and_dots_fold` (" OAKLAND ", "san  jose" against "San José", "St Helena" against "St. Helena")
+- `test_classify_never_raises` (combining marks, fullwidth digits, U+0130, right-to-left text, control characters)
 - `test_a_place_over_eighty_characters_is_refused_at_step_one`
 - `test_put_service_area_checks_caps_duplicates_and_shape`
 - `test_put_service_area_refuses_a_canary_and_is_ledgered`
 - `test_context.py`: `test_the_service_places_fact_is_built_on_read`
+- `test_probe.py`: `test_a_probe_sets_in_service_area_only_for_bookings`
 
 **Compiler and reference** (`test_compiler.py`, `test_reference.py`):
 - `test_booking_autos_require_the_service_area`
@@ -168,10 +187,12 @@ The prompt is a gated change: the attack suite must stay at zero baseline violat
 - `test_a_booking_with_no_list_holds`
 - `test_a_list_change_before_execution_refuses_the_booking`
 
-**Proofs** (`test_proving.py`, `test_version_upgrade.py`, `kernel/prove/tests/prove.rs`):
+**Proofs** (`test_proving.py`, `test_explain.py`, `test_version_upgrade.py`, `kernel/prove/tests/prove.rs`):
 - `test_dropped_area_condition_is_rejected_by_proof`, in `symcc` and `bounded` modes like `test_dropped_never_card_is_rejected_by_proof`, with the counterexample in the owner's words
 - `test_area_needs_card_is_vacuous_with_an_any_area_card`
-- `test_a_version_active_before_the_area_check_is_rebuilt`
+- `test_area_checked_names_native_book_for_the_shipped_sets`
+- `test_area_needs_card_reads_in_the_owners_words_without_a_counterexample`
+- Through `upgraded_kernel` and startup, on #254's rebuild: `test_a_version_from_before_the_area_check_refuses_until_startup_rebuilds_it`, `test_a_rivera_copy_rebuilds_from_its_shipped_report_after_the_booking_profile_changes` (in `bounded` mode), and `test_startup_gives_a_rivera_copy_from_before_the_deploy_its_seed_list_once`
 - Rust: `area_needs_card_fails_on_an_unchecked_booking_permit`
 - `test_shipped_reports_match_the_current_build` stays green after `make proofs`.
 
@@ -200,8 +221,8 @@ The prompt is a gated change: the attack suite must stay at zero baseline violat
 
 | Task | Owner | Builds | Consumes |
 |---|---|---|---|
-| K1 Data and argument | the kernel lane | `desk.service_area`, added to the tier 2 gated inputs (`evals/results.py` `GATED_PATHS`, its scope fixture and the master's gated-input line), with a regression that a classifier-only change requires fresh results; the contract fields (`BookArgs.visit_place`, `Normalized`/`NormalizedAction.visit_area`, `RuleCard.any_area`, `DeskSeed.service_places`, `DeskServiceAreaRequest`, `Probe.in_service_area`); migration (`desks.service_places`, `actions.visit_area`, `kernel_ro.desks`); part writer and route; context fact; Rivera list; adapter normalize; native profile refresh; regenerated `contracts.schema.json` and `openapi.json` | nothing |
-| K2 Rules and proof | the kernel lane | T2's area recheck under the `service-area` lock, with the test that pauses at `_after_intent`, changes the list and resumes (no booking, no booking fact); `Ctx` attribute, `cedar_request`, compiler, `reference.py`, bounded check, `desk-prove` `area_needs_card`, `PROOF_CHECKS`, `outdated`, `make proofs`, `AREA_PLAIN`, explain, ledger summary, tier 1 rows, with the `service-area` requirement registered in the tier 1 harness (harness.py's known ids, conftest's checks) and its landing metadata, and evidence the rows execute on the kernel target; booking calls in existing backend tests and tier 1/golden rows gain `visit_place` so CI stays green | K1 |
+| K1 Data and argument | the kernel lane | `desk.service_area`, added to the tier 2 gated inputs (`evals/results.py` `GATED_PATHS`, its scope fixture and the master's gated-input line), with a regression that a classifier-only change requires fresh results; the contract fields (`BookArgs.visit_place`, `Normalized`/`NormalizedAction.visit_area`, `RuleCard.any_area`, `DeskSeed.service_places`, `DeskServiceAreaRequest`, `Probe.in_service_area`); migration (`desks.service_places`, `actions.visit_area`, `kernel_ro.desks`); part writer and route; context fact; Rivera list, with the one-time list for Rivera copies made before the deploy (section 2); adapter normalize; regenerated `contracts.schema.json` and `openapi.json`, then `cd web && npm run gen:contracts` | #254 on `main` |
+| K2 Rules and proof | the kernel lane | T2's area recheck under the `service-area` lock, with the test that pauses at `_after_intent`, changes the list and resumes (no booking, no booking fact); `Ctx` attribute, `cedar_request`, compiler, `reference.py`, bounded check, `desk-prove` `area_needs_card` (its checks-file key and fixture schema), `BOUNDED_CHECKS`, `PROOF_CHECKS`, `make proofs`, `AREA_PLAIN`, `explain.SENTENCES`, ledger summary, tier 1 rows, with the `service-area` requirement registered in the tier 1 harness (in `PLANS` after `01c-setup`, with `KERNEL_PLANS` and `API_PLANS` sliced again; in `LANDS` with `backend/desk/service_area.py`; in conftest's checks; in `landed.toml` in the pull request's last commit), and evidence the rows execute on the kernel target; booking calls in existing backend tests and tier 1/golden rows gain `visit_place` so CI stays green | K1 |
 | A1 Data in the API | the API lane | owner routes (`GET` and `PUT /api/owner/desks/{desk_id}/service_area`: the read returns the list and the charter's service-area sentence from `kernel_ro`, with a response model, generated types and API tests for load, save then reload, and unrelated charter claims kept), setup extraction and its word-boundary guard, setup review payload, `_put_parts`, one code-owned transform giving `any_area` only to `office` and `landlord` booking cards, applied to both `template_cards` and the model-drafted cards (`draft_cards` → `_card`), with tests of model drafts for an office, a landlord and a trade, the rules chat carrying an existing card's `any_area` over when it changes that card (a new booking card from the chat defaults to False; the model never sets it, and the Rules page's control does, through the draft diff), probe situations, fake kernel | K1 contracts; K2 for probes end to end |
 | A2 Prompt line | the API lane | section 5 | K2 on `main`; E1's calibration result |
 | W1 Settings and Rules | web lane | canvas boards first (the Settings section, the Rules condition label, the setup review list), the owner's sign-off, then the screens; a design PR | A1 route and types |
@@ -222,6 +243,7 @@ Order: K1+K2, then A1 and W1's design in parallel, then E1 and A2, then E2's gat
 4. **Should a list change between hold and approval refuse the approved booking?** Accept that it does: it is invariant 1's re-check at execution, rare, and fails closed. Since the list is the owner's data, the owner's line for it is the "rules changed" one, and it lands consistently with the owner-facing refusal reasons when those come. Comparing classes only on allows would widen the re-check.
 5. **Should "Oakland, CA" match?** No, it stays unclear and holds. Stripping a state would let "Portland, ME" match a Portland, Oregon list. The tool description asks Claude for the town alone.
 6. **Is it acceptable that `area_needs_card` is vacuous when any auto booking card sets `any_area`?** Yes, for now. `auto_within_cards` still binds every card, and a per-principal variant can follow if mixed sets show up.
-7. **Should the owner's booking alert name the place?** Yes, using the matched list entry only, which is the owner's own wording. The visitor's booking card stays as it is, so this stays off the design path.
+7. **Should the owner's booking alert name the place?** Later, not in this plan. When it comes, it uses the matched list entry only, which is the owner's own wording. No task here builds it: `classify` returns only the class, and the alert's new copy would need its own sign-off. The alert stays "{who} booked {when}."
 8. **What about the free-text sentence and the list drifting apart?** Keep both, edited side by side in one Settings section, and generate neither from the other. The sentence can say more, such as "nearby towns on request".
 9. **What if a visitor names a false town?** Accept this residual risk, and state it in the threat model: `visit_place` is the visitor's word, so a visitor outside the area who names a listed town is auto-booked. The check stops honest out-of-area bookings and Claude's own offers (the measured "Shall I book you in even though Piedmont is outside our area?" now holds); it isn't address verification. The threat model's "measured and open" bullet for that shape is updated when this lands, and `atk-book-false-town` measures whether Claude passes the town the visitor actually gave.
+10. **Should Rivera copies made before the deploy get the seed's list?** Yes, once, when the bring-up changes their `native.book` row (section 2). Without it every booking on them holds as `no_list`, which breaks the demo's main path for anyone coming back to an older copy. The list is what the seed would have written, and the write is ledgered like every Desk-data part. A copy whose owner has confirmed other rules (its active version has no `preset`) keeps its empty list.
