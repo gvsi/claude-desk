@@ -836,14 +836,38 @@ function draftCard(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'w
 /** Monday to Friday, all day. */
 const WEEKDAYS_ALL_DAY = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } satisfies RuleCard['hours'];
 
+/** A request held for the owner, as Claude on Rules reads it: its tool, the kernel's line on it, and the reason of the rule that held it. */
+export interface HeldForChat {
+  tool: ToolName;
+  reasonPlain: string;
+  heldBy: string | null;
+}
+
+/** What the owner calls each tool's requests, as the API has them (`TOOL_LABELS` in `backend/desk/api/rules.py`). */
+const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
+  'native.quote': 'quote',
+  'native.find_slots': 'open times',
+  'native.book': 'booking',
+  'native.release_document': 'document',
+  'native.payment_link': 'payment link',
+  'native.charge_mandate': 'agent payment',
+  'native.capture_lead': 'contact details',
+  'native.request_callback': 'callback',
+  'native.start_verification': 'verification',
+  'payments.list_charges': 'payment history',
+  'payments.create_refund': 'refund',
+};
+
 /**
  * How Rivera's Claude answers the owner on Rules, in place of the API's model turn: the Rules
  * page's suggestions draft their change ("Stop quoting on weekends" moves the quote rule for
  * anyone to weekdays, so weekend quotes ask; "Quote water heater installs up to $600" adds a
- * quote rule up to that amount), a question is answered with no draft, and anything else says
- * what Claude can draft. `active` is the Desk's active rules.
+ * quote rule up to that amount); "Why was this refund held?" is answered about the newest held
+ * request of the tool it names, with the rule that held it; another question is answered with no
+ * draft, and anything else says what Claude can draft. `active` is the Desk's active rules, and
+ * `held` its held requests, newest first.
  */
-export function ruleChatReply(text: string, active: readonly RuleCard[]): RuleChatReply {
+export function ruleChatReply(text: string, active: readonly RuleCard[], held: readonly HeldForChat[] = []): RuleChatReply {
   const lower = text.toLowerCase();
   if (lower.includes('weekend') && lower.includes('quot')) {
     const quote = active.find((card) => card.applies_to === 'native.quote' && card.who === 'anyone' && card.mode === 'auto' && card.is_default !== true);
@@ -876,10 +900,11 @@ export function ruleChatReply(text: string, active: readonly RuleCard[]): RuleCh
       ],
     };
   }
-  if (lower.includes('refund') && (lower.includes('why') || lower.includes('held'))) {
+  const asked = hasWord(lower, 'why') || hasWord(lower, 'held') ? held.find((h) => hasWord(lower, TOOL_LABELS[h.tool] ?? h.tool)) : undefined;
+  if (asked !== undefined) {
+    const why = asked.heldBy === null ? 'No rule you set covers it, so it waited for your answer.' : `It was held by your rule: ${asked.heldBy}`;
     return {
-      answer:
-        "Dana's refund waited for you because refunds ask you first: your rule says refunds to a customer wait for your answer. If you'd like small refunds to go through on their own, ask me to draft that rule.",
+      answer: `${asked.reasonPlain} ${why} If you'd like requests like this to go through on their own, ask me to draft that rule.`,
       add: [],
     };
   }

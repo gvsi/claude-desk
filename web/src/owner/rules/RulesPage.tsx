@@ -26,11 +26,11 @@ import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
-import { deskPath } from '../useDesks.ts';
+import { deskPath, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
-import { hubSections, parseLimit } from './hub.ts';
+import { holdQuestion, hubSections, parseLimit } from './hub.ts';
 import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
 import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
@@ -40,8 +40,11 @@ import './RulesPage.css';
 /** The Rules page's title, which the pages under it (All rules, a change's review) name it by. */
 export const RULES_TITLE = 'Rules';
 
-/** What the owner can ask Claude for on Rules, in her words (the presets board's, with the owner's later words). */
-const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600', "Why was Dana's refund held?"] as const;
+/**
+ * What the owner can ask Claude for on Rules, in her words (the presets board's), then, while a
+ * request is held, why the latest one was (`holdQuestion`).
+ */
+const RULES_CHIPS = ['Stop quoting on weekends', 'Quote water heater installs up to $600'] as const;
 
 const COMPOSER_LABEL = 'Ask Claude to change a rule';
 const COMPOSER_HELPER = 'Claude shows you the change and example situations before anything applies.';
@@ -83,6 +86,10 @@ export function RulesPage() {
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
   const people = useQuery(peopleQuery(deskId));
   const suggestions = useQuery({ ...suggestionsQuery(deskId), refetchInterval: pollMs('rules') });
+  // The Desk's held requests, as Needs you lists them: the latest is one more thing to ask about.
+  const needsYou = useNeedsYou(deskId);
+  const question = holdQuestion(needsYou.data ?? []);
+  const chips = question === null ? RULES_CHIPS : [...RULES_CHIPS, question];
   const failure = useReadFailure(rules);
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);
@@ -220,7 +227,7 @@ export function RulesPage() {
       {presetSaid === null ? null : <Notice tone={presetSaid.tone}>{presetSaid.line}</Notice>}
       <div className="cd-rules__ask">
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} onSend={ask} />
-        <SuggestionChips label="Suggestions" suggestions={RULES_CHIPS} onPick={ask} />
+        <SuggestionChips label="Suggestions" suggestions={chips} onPick={ask} />
       </div>
       {active === undefined ? null : <SuggestedRules deskId={deskId} suggestions={suggestions.data ?? []} onDrafted={(draft) => review(draft, active)} />}
       {body}

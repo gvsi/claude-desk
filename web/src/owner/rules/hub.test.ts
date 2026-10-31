@@ -1,20 +1,20 @@
 /**
  * The Rules page's model: the Desk's tools grouped by connector with the outcome each one's rules
  * give it, the rules that govern a tool (for the connector and tool pages), the card an outcome
- * menu drafts, and the payment limit's field.
+ * menu drafts, the payment limit's field, and the held request Ask Claude's suggestions ask about.
  */
 import { beforeEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { RuleCard, ToolName } from '../../api/contracts.ts';
-import type { PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
+import type { NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import type { ToolSummaryView } from '../../ds/index.ts';
-import { peopleOut, rulesView } from '../../mocks/readModels.ts';
+import { needsYou, peopleOut, rulesView } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { validateContract } from '../../mocks/validate.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
-import { governingRules, hubSections, parseLimit, toolFallback, toolRuleRows, withOutcome } from './hub.ts';
+import { governingRules, holdQuestion, hubSections, parseLimit, toolFallback, toolRuleRows, withOutcome } from './hub.ts';
 
 /** The mock's main Desk, a fresh Rivera copy for every test. */
 function desk(): DeskRecord {
@@ -467,5 +467,35 @@ describe('the Rules hub', () => {
     for (const wrong of ['12.5', '-1', '1e3', '', '1,000', '$500', 'five']) {
       expect(parseLimit(wrong), wrong).toEqual({ error: 'Enter whole dollars, from 0 to 10,000.' });
     }
+  });
+
+  it('hold_question_names_the_newest_held_request', () => {
+    /** What Needs you lists for the main Desk now. */
+    const listed = () => needsYou(mockStore.world, desk());
+    // The seed's hold, a visitor's quote at 15% off.
+    expect(holdQuestion(listed())).toBe('Why was this quote held?');
+
+    // Dana's refund, held after it: the newest hold is the one asked about, whatever order the list has.
+    mockStore.world.addHeldRefund();
+    const both = listed();
+    expect(holdQuestion(both)).toBe('Why was this refund held?');
+    expect(holdQuestion([...both].reverse())).toBe('Why was this refund held?');
+
+    // A newer hold of a tool with no plain noun (open times) is left out, and the one before it is
+    // asked about; so is one with no action to name.
+    const refund = both.find((item): item is Extract<NeedsYouItem, { decision: object }> => item.decision?.action?.tool === 'payments.create_refund');
+    if (!refund?.decision.action) throw new Error('Dana has a refund held');
+    const later = (minutes: number) => new Date(Date.parse(refund.held_at) + minutes * 60_000).toISOString();
+    const slots: NeedsYouItem = {
+      ...refund,
+      held_at: later(1),
+      decision: { ...refund.decision, decision_id: 'dec-slots', action: { ...refund.decision.action, tool: 'native.find_slots' } },
+    };
+    const unnamed: NeedsYouItem = { ...refund, held_at: later(2), decision: { ...refund.decision, decision_id: 'dec-unnamed', action: null } };
+    expect(holdQuestion([...both, slots, unnamed])).toBe('Why was this refund held?');
+    expect(holdQuestion([slots, unnamed])).toBeNull();
+
+    // No hold, no question.
+    expect(holdQuestion([])).toBeNull();
   });
 });
