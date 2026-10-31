@@ -18,10 +18,10 @@ import type {
   SessionState,
   SseEvent,
 } from '../../api/contracts';
-import { chen, requestHrefOf, rivera, RIVERA_MONEY_CAP_CENTS } from './index';
+import { chen, meridian, requestHrefOf, rivera, RIVERA_MONEY_CAP_CENTS } from './index';
 import type { ConversationFixture, TranscriptTurn } from './index';
 
-const FIXTURES = { rivera, chen };
+const FIXTURES = { rivera, chen, meridian };
 
 const BACKEND = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..', 'backend', 'desk');
 const CONTRACTS_PY = path.join(BACKEND, 'contracts.py');
@@ -374,6 +374,43 @@ describe('fixtures', () => {
       expect(pair.en.template, `${template} en`).toBe(template);
       expect(pair.es.template, `${template} es`).toBe(template);
     }
+  });
+
+  test('public_desks_are_what_the_kernel_serves', () => {
+    // Each business's public Desk: its brand colors as plain #rrggbb, which the public page lets
+    // through; its charter as the kernel's charter cards, each reading its template's fact; and,
+    // where the Desk has hours, an open status the header can show whole.
+    const CHARTER_FACTS: Partial<Record<ClauseTemplate, RegExp>> = {
+      hours: /^charter:hours$/,
+      policy: /^charter:policy:/,
+      contact: /^charter:contact$/,
+    };
+    const desks = [
+      ['en', rivera.publicDesk.en],
+      ['es', rivera.publicDesk.es],
+      ['en', chen.publicDesk.en],
+      ['es', chen.publicDesk.es],
+      ['en', meridian.publicDesk.en],
+    ] as const;
+    for (const [language, desk] of desks) {
+      const where = `${desk.business_name} (${language})`;
+      expect(Object.keys(desk.brand).sort(), where).toEqual(['accent', 'primary']);
+      for (const color of Object.values(desk.brand)) expect(color, where).toMatch(/^#[0-9A-F]{6}$/i);
+      expect(desk.charter.length, where).toBeGreaterThan(0);
+      for (const block of desk.charter) {
+        const fact = CHARTER_FACTS[block.template as ClauseTemplate];
+        expect(fact, `${where}: ${block.template} is a charter card`).toBeDefined();
+        expect(block.fact_id, `${where}: ${block.template}`).toMatch(fact ?? /^$/);
+      }
+    }
+    // The city office's Desk has hours, so its header shows the kernel's open status.
+    const status = meridian.publicDesk.en.open_status;
+    expect(status?.open).toBe(true);
+    expect(status?.text).toBe('Open now, until 4:30 pm');
+    expect(meridian.publicDesk.en.owner_display_name).toBe(meridian.business.ownerName);
+    // Its number is in 555-0100 to 555-0199, the range kept for fiction in every area code.
+    const contact = meridian.publicDesk.en.charter.find((block) => block.template === 'contact');
+    expect(contact?.title).toMatch(/^\(\d{3}\) 555-01\d{2}$/);
   });
 
   test('card_fixtures_are_cards', () => {

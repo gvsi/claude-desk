@@ -206,6 +206,13 @@
   flex: none;
 }
 
+/* On a vision page, the line an inert Ask shows once pressed: a row of its own in the chat's pinned
+   head, 8 px under the title and Ask (the head's 10 px row gap, less 2 px). */
+.cd-public-shell__chat-head > .cd-vision-inert-line:not(:empty) {
+  flex-basis: 100%;
+  margin-top: calc(var(--space-8) - var(--space-10));
+}
+
 /* The conversation's scroll region, the one part of the page that scrolls: between the chat's head
    and the composer area, the chat's full width (out to the edges of its gutters, so the scrollbar
    sits at the chat's edge and the wheel scrolls it anywhere over the chat). It is positioned, so

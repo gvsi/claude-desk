@@ -21,6 +21,20 @@
   min-width: 0;
 }
 
+/* The city office's answer about a permit: Claude's words and the fact card each leads into, 12 px
+   apart, the space ClaudeMessage leaves between its blocks, as the board draws them as one message. */
+.board-vision-city__answer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+/* What to try next, 20 px under the conversation. */
+.board-vision-city__suggestions {
+  margin-top: var(--space-20);
+}
+
 /* The team Desk: the title and its line, then the teammates (220 px), Luis's conversation and his
    access (260 px), 28 px apart; the day's line and the footer at the foot, 16 px apart. */
 .board-vision-team {

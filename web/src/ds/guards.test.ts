@@ -597,26 +597,41 @@ describe('design system source guards', () => {
 
   it('inert_controls_only_on_the_vision_pages', () => {
     // The inert props make a control do nothing, for a vision page, which makes no requests. A real
-    // page must send, answer and download, so only the components that take them, the vision boards'
-    // page parts, the vision pages and the module of the line an inert control shows may name them.
-    const named = (text: string) => matches(/\binert(?:Send|Answers|Download)\b/)(withoutComments(text));
+    // page must send, answer, download, pick a suggestion and ask for the owner, so only the
+    // components that take them, the vision boards' page parts, the vision pages and the module of
+    // the line an inert control shows may name them.
+    const named = (text: string) => matches(/\binert(?:Send|Answers|Download|Suggestions|Ask)\b/)(withoutComments(text));
     expect(named('<Composer variant="visitor" onSend={send} inertSend />')).toEqual(['inertSend']);
     expect(named('const props = { inertAnswers: true, inertDownload };')).toEqual(['inertAnswers', 'inertDownload']);
     expect(named('// inertSend in a comment\nconst inert = true; const inertSending = 1;')).toEqual([]);
+    expect(named('<SuggestionChips label="Try asking" suggestions={chips} onPick={pick} inertSuggestions />')).toEqual(['inertSuggestions']);
+    expect(named('<PublicShell inertAsk onAskForOwner={ask} />; const asked = inertAsking;')).toEqual(['inertAsk']);
     const allowed = (file: string) =>
-      ['ds/components/ApprovalCard/', 'ds/components/Composer/', 'ds/components/ReplyCard/', 'ds/components/ClaudeMessage/', 'vision/'].some((folder) =>
-        file.startsWith(folder),
-      ) ||
+      [
+        'ds/components/ApprovalCard/',
+        'ds/components/Composer/',
+        'ds/components/ReplyCard/',
+        'ds/components/ClaudeMessage/',
+        'ds/components/SuggestionChips/',
+        'ds/components/PublicShell/',
+        'vision/',
+      ].some((folder) => file.startsWith(folder)) ||
       file === 'ds/components/VisionBar/visionInert.tsx' ||
       file === 'ds/boards/vision.tsx';
     const files = webSources().filter(({ file }) => file !== `ds/${THIS_FILE}`);
     expect(files.filter(({ file, text }) => !allowed(file) && named(text).length > 0).map(({ file }) => file)).toEqual([]);
-    // They are used where they are meant to be, so the check can't pass by finding nothing.
+    // They are used where they are meant to be, so the check can't pass by finding nothing: the
+    // phone's held quote and composer; the Claude account's invoice, composer and Ask; and the city
+    // office's composer, Ask and suggestions.
     expect(named(files.find(({ file }) => file === 'ds/boards/vision.tsx')?.text ?? '').sort()).toEqual([
       'inertAnswers',
+      'inertAsk',
+      'inertAsk',
       'inertDownload',
       'inertSend',
       'inertSend',
+      'inertSend',
+      'inertSuggestions',
     ]);
   });
 

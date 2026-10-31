@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Once, at the very top of each vision page: the team Desk, the Claude account and the phone (N-R2-Vision-TeamDesk, -ClaudeAccount, -Phone), and the city office's page, redrawn from a resident's side, when it comes in a later change.
+- Once, at the very top of each vision page: the team Desk, the Claude account, the phone and a resident on the city office's public page (N-R2-Vision-TeamDesk, -ClaudeAccount, -Phone, -CityOffice-Resident).
 - Not on Settings › Channels: the app's Channels page follows N-Run2-Settings-Channels, with no bar. N-R2-Vision-Channels, the same page under the bar, is a vision story only (`Boards/Vision, channels`).
 - Over an owner page, pass it as `AppShell`'s `banner`, so it runs the window's width above the sidebar and the page. Over a public page or a page of its own, put it first, above everything else.
 - Not for a Settings section the prototype only sketches (Notifications, Billing): those open with the vision note inside the page (`Pill` README, "A vision note").
@@ -34,4 +34,4 @@ Also exported: `VISION_LINE`, the line's words.
 
 ## The line an inert control shows
 
-`visionInert.tsx` holds `VISION_INERT_LINE`, "This is a vision page, so nothing is sent.", exported from the package, and `VisionInertLine`, the polite live region that shows it. A vision page's inert controls (`Composer`'s `inertSend`, `ApprovalCard`'s `inertAnswers` and `ReplyCard`'s `inertDownload`) each draw one under their row: present from the start so its change is announced, out of the flow while empty, and filled on the control's first press, where it stays. It is English only, as the vision pages are, and uses only the caption type and `text-secondary`.
+`visionInert.tsx` holds `VISION_INERT_LINE`, "This is a vision page, so nothing is sent.", exported from the package, and `VisionInertLine`, the polite live region that shows it. A vision page's inert controls (`Composer`'s `inertSend`, `ApprovalCard`'s `inertAnswers`, `ReplyCard`'s `inertDownload`, `SuggestionChips`' `inertSuggestions` and `PublicShell`'s `inertAsk`) each draw one under their row: present from the start so its change is announced, out of the flow while empty, and filled on the control's first press, where it stays. It is English only, as the vision pages are, and uses only the caption type and `text-secondary`.

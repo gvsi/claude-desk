@@ -126,5 +126,15 @@ export const Board: Story = {
     await userEvent.click(composer);
     await userEvent.keyboard('{Enter}');
     await expect(composer).toHaveValue('Thanks again');
+
+    // Ask for Maria Rivera asks for no one either: it keeps the focus, and its first press says so
+    // once, in its own line in the chat's pinned head.
+    const ask = within(main).getByRole('button', { name: 'Ask for Maria Rivera' });
+    await userEvent.click(ask);
+    await expect(ask).toHaveFocus();
+    const askLine = one(main, '.cd-public-shell__chat-head > .cd-vision-inert-line');
+    await expect(askLine).toHaveAttribute('role', 'status');
+    await expect(askLine).toHaveTextContent(VISION_INERT_LINE);
+    await expect(within(main).getAllByText(VISION_INERT_LINE)).toEqual([askLine, line]);
   },
 };

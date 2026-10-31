@@ -7,6 +7,7 @@ import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { ReplyCard } from '../ReplyCard/ReplyCard.tsx';
 import { TextLink } from '../TextLink/TextLink.tsx';
+import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { aboutLinkHref } from './guards.ts';
 import { PublicBrandHeader } from './PublicBrandHeader.tsx';
 
@@ -56,6 +57,12 @@ export interface PublicShellProps {
   openStatus?: PublicOpenStatus;
   /** Asks for the owner in the chat. */
   onAskForOwner: () => void;
+  /**
+   * Vision pages only, which make no requests: "Ask for {owner}" keeps its look, focus and place,
+   * but pressing it does nothing (`onAskForOwner` is never called), and the first press shows the
+   * vision line in the chat's pinned head, under its title and the button. Never on a real page.
+   */
+  inertAsk?: boolean;
   /** `PublicDesk.charter`: cards as `ReplyCard`s, prose as text, in the about column. */
   about?: RenderedBlock[];
   /** Links for people's AI agents, under "For AI agents" after the about blocks. */
@@ -402,6 +409,7 @@ export function PublicShell({
   language,
   openStatus,
   onAskForOwner,
+  inertAsk = false,
   about,
   aboutLinks,
   footer = true,
@@ -425,6 +433,7 @@ export function PublicShell({
   useLayoutEffect(() => {
     setAboutFocused(aboutRef.current !== null && document.activeElement === aboutRef.current);
   }, [aboutBeside]);
+  const [inertAskPressed, setInertAskPressed] = useState(false);
   const name = <Name>{brand.name}</Name>;
   const owner = <Name>{ownerName}</Name>;
 
@@ -503,9 +512,11 @@ export function PublicShell({
               </h2>
               <p className="cd-public-shell__disclosure cd-type-meta">{copy.disclosure(name, owner)}</p>
             </div>
-            <Button variant="secondary" onClick={onAskForOwner}>
+            {/* A vision page's Ask goes nowhere, and says so once, in the pinned head under its row. */}
+            <Button variant="secondary" onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
               {copy.askFor(owner)}
             </Button>
+            {inertAsk ? <VisionInertLine shown={inertAskPressed} /> : null}
           </div>
           {/* The one part of the page that scrolls (on a short shell, it grows and the shell
               scrolls). Too narrow for the about column beside the chat, the column opens it, above

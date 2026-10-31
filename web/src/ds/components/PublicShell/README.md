@@ -131,6 +131,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 - `about`, the `PublicDesk.charter` blocks, and `aboutLinks` for people's agents.
 - `composer`, a visitor `Composer` in the page's language, pinned at the bottom, and `children`, the conversation, in the scroll region. Whatever the page adds after the conversation (notices, the element it keeps above the composer) goes in `children` too.
 - `banner`, a full-width line above the brand header, such as the `VisionBar` on the Claude account vision page (N-R2-Vision-ClaudeAccount). It sits inside the shell, at the top of its column, so the page stays the window's height and the composer and footer stay at its foot. It is pinned with the brand header, and on a short shell it scrolls away with it (see "A short shell").
+- `inertAsk` is for the vision pages only (the city office and the Claude account), which make no requests. "Ask for {ownerName}" keeps its look, focus and place, but pressing it does nothing and `onAskForOwner` is never called. The first press shows "This is a vision page, so nothing is sent." (`VISION_INERT_LINE`) in a polite `role="status"` line, a secondary caption on a row of its own in the chat's pinned head, 8 px under the title and the button; later presses change nothing. The line is there, empty and taking no room, from the start, so its change is announced. Never on a real page.
 
 ## Props
 
@@ -141,6 +142,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
+| `inertAsk` | `boolean` | Vision pages only: Ask does nothing and its first press shows the vision line. `false` by default. |
 | `about` | `RenderedBlock[]` | The charter blocks. |
 | `aboutLinks` | `{ label: string; href: string }[]` | Paths on this site only. |
 | `footer` | `boolean` | `true` by default; `false` when embedded. |

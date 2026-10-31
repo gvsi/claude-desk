@@ -3,13 +3,13 @@
  * and tokens for the `Boards/Vision, *` stories only, as `parts.tsx` composes the other pages. The web
  * app (plan 04, Task 17) builds the same pages from the same components: the vision bar over each,
  * every fact in a `FactCard`, the phones in `PhoneFrame`, and Luis's access in `AccessPanel`. The
- * data here is the boards' own sample data: Rivera Plumbing's team, Dana's visit and the phone apps.
- * The city office's page is being redrawn from a resident's side and comes in a later change.
+ * data here is the boards' own sample data: Rivera Plumbing's team, Dana's visit, the phone apps,
+ * and Marcus Bell on Meridian Bay Permits' public page, a fictional city permits office.
  */
 import type { ReactNode } from 'react';
 import { fn } from 'storybook/test';
 
-import type { DecisionState } from '../../api/contracts.ts';
+import type { DecisionState, PublicDesk } from '../../api/contracts.ts';
 import { AccessPanel } from '../components/AccessPanel/AccessPanel.tsx';
 import { AppShell } from '../components/AppShell/AppShell.tsx';
 import { ApprovalCard } from '../components/ApprovalCard/ApprovalCard.tsx';
@@ -27,12 +27,13 @@ import { Pill } from '../components/Pill/Pill.tsx';
 import { PublicShell } from '../components/PublicShell/PublicShell.tsx';
 import { Sidebar, initialsOf, type NavCount, type NavKey } from '../components/Sidebar/Sidebar.tsx';
 import { StatusDot, type StatusTone } from '../components/StatusDot/StatusDot.tsx';
+import { SuggestionChips } from '../components/SuggestionChips/SuggestionChips.tsx';
 import { SystemLine } from '../components/SystemLine/SystemLine.tsx';
 import { Transcript } from '../components/Transcript/Transcript.tsx';
 import { TranscriptRow } from '../components/TranscriptRow/TranscriptRow.tsx';
 import { VisionBar } from '../components/VisionBar/VisionBar.tsx';
 import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx';
-import { cardBlock, proseBlock, rivera } from '../fixtures/index.ts';
+import { cardBlock, meridian, proseBlock, rivera } from '../fixtures/index.ts';
 import { MAIN_LINE, OWNER_HREFS, brandOf } from './parts.tsx';
 
 import './vision.css';
@@ -324,6 +325,7 @@ export function ClaudeAccountChat() {
       ownerName={owner}
       language="en"
       onAskForOwner={fn()}
+      inertAsk
       about={CLAUDE_ACCOUNT_ABOUT}
       composer={<Composer variant="visitor" label="Message Rivera Plumbing" placeholder="Message Rivera Plumbing" maxLength={2000} onSend={fn()} inertSend />}
     >
@@ -471,5 +473,169 @@ export function PhoneApps() {
         <ConceptFooter />
       </main>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The city office (N-R2-Vision-CityOffice-Resident): a resident on a city permits office's public
+// page. Meridian Bay Permits is fictional; no vision page names a real city office.
+
+/** Who answers for the city when Claude hands over, as the page names them ("Ask for Permit Center staff"). */
+const CITY_STAFF = meridian.business.ownerName;
+
+/**
+ * The city's public Desk, the fixtures' `meridian.publicDesk.en`: its name and the Permit Center,
+ * its colors, its charter and its open status, as the board draws them (`meridian.ts` names the
+ * charter's two vision lines).
+ */
+export const CITY_DESK: PublicDesk = meridian.publicDesk.en;
+
+/**
+ * Marcus Bell's visit, word for word as the board writes it: his messages, Claude's words, the
+ * line when he's verified and the receipts. Claude's words lead into the cards and state no
+ * status, fee, date or time (invariant 2); the garage question is a plan checker's decision, so it
+ * is held for staff.
+ *
+ * By the owner's vision-copy ruling (follow the product's rules, keep the warmth), the garage
+ * reply says who it went to and where the answer comes, and the held receipt is the kernel's
+ * visitor line for a hold, "Waiting for {owner} to approve"; the hold's reason shows only on owner
+ * screens. The system line and the other receipts are a vision of what the kernel's lines could
+ * say, beyond what they say today: the app writes "Verified with a code", and the kernel's visitor
+ * lines are "Reply checked against {owner}'s rules", "Verification started" and "Times read from
+ * {owner}'s calendar". No tool reads a permit file ("Read from your own permit file").
+ */
+export const CITY_TURNS = {
+  status: 'Hi, it’s Marcus Bell. What’s the status of my kitchen remodel permit?',
+  verifyFirst: 'I can look that up after you confirm it’s you.',
+  codeSent: 'Code sent to the email on the application',
+  verified: 'Verified with a code sent to the email on the application',
+  stands: 'Thanks, Marcus. Here’s where your kitchen remodel stands.',
+  next: 'Here’s what comes next.',
+  readFile: 'Read from your own permit file',
+  inspector: 'When can an inspector come out?',
+  times: 'These times are open on the inspection calendar. Which one works for you?',
+  readCalendar: 'Times read from the inspection calendar',
+  garage: 'One more thing. I’d like to turn my garage into a home office. Does that need a permit at all?',
+  staffDecides: 'Whether your garage conversion needs a permit is a plan checker’s decision. I’ve asked Permit Center staff, and the answer will show up here.',
+  waitingForStaff: 'Waiting for Permit Center staff to approve',
+  checked: 'Reply checked against the City’s rules',
+} as const;
+
+/**
+ * The prompt before a code is sent, under the `verify_prompt` template. Its words are a vision of
+ * what the template could carry: the kernel writes "I'll send a code to the contact on record.",
+ * and here the contact on record is the email on the application.
+ */
+export const CITY_VERIFY_PROMPT = cardBlock('verify_prompt', { fact_id: null, title: 'I’ll send a code to the email on the application.' });
+
+/**
+ * Marcus's permit, as fact cards: its status and the fee due (the fee is only ever here), then
+ * what comes next. No reply card template covers a permit, so these are `FactCard`s.
+ */
+export const CITY_PERMIT = {
+  status: {
+    label: 'Permit status',
+    icon: 'document',
+    title: 'Plan check passed',
+    lines: ['Kitchen remodel, permit B-2026-0412', 'Fee due before issue: $1,286'],
+  },
+  nextSteps: {
+    label: 'Next steps',
+    icon: 'rules',
+    title: 'Pay the fee, then book the first inspection',
+    lines: ['Pay online or at the Permit Center, 250 Harbor Street', 'First inspection: rough-in for electrical, plumbing and framing'],
+  },
+} as const satisfies Record<string, FactCardProps>;
+
+/** The inspection calendar's open times for a rough-in, as the board lists them. */
+const INSPECTION_SLOTS = [
+  { option_id: 'S-20261104-0800', label: 'Wednesday, November 4, 8:00 am to 12:00 pm' },
+  { option_id: 'S-20261105-1300', label: 'Thursday, November 5, 1:00 pm to 4:00 pm' },
+  { option_id: 'S-20261109-0800', label: 'Monday, November 9, 8:00 am to 12:00 pm' },
+];
+
+/**
+ * The open inspection times under the `booking_options` template, in its contract: a `slots:` fact,
+ * and each time as a line and as an option whose id is the slot id of its start. Its title
+ * ("Rough-in inspection"), its permit line and its time ranges are a vision of what the template
+ * could carry: the kernel writes "Times that are open" and one start time per slot.
+ */
+export const CITY_INSPECTION_TIMES = cardBlock('booking_options', {
+  fact_id: 'slots:B-2026-0412',
+  title: 'Rough-in inspection',
+  lines: ['Permit B-2026-0412, once the fee is paid', ...INSPECTION_SLOTS.map((slot) => slot.label)],
+  options: INSPECTION_SLOTS,
+});
+
+/** What a resident might ask next, under the conversation. */
+export const CITY_SUGGESTIONS = ['Book an inspection', 'Pay the fee', 'Talk to staff'] as const;
+
+/** Claude's words in the city's chat, as a checked reply's prose block. */
+function CityReply({ text }: { text: string }) {
+  return <ClaudeMessage blocks={[proseBlock(text)]} language="en" ownerName={CITY_STAFF} />;
+}
+
+/** The two receipts under each of Claude's answers: the reply's check, then what ran or waits. */
+function cityReceipts(seq: number, source: ReceiptSource, plain: string) {
+  return [
+    <MarginReceipt key="checked" source={CHECKED} plain={CITY_TURNS.checked} ledgerSeq={seq} />,
+    <MarginReceipt key="action" source={source} plain={plain} ledgerSeq={seq + 1} />,
+  ];
+}
+
+/** Meridian Bay Permits' public page, under the vision bar, for a resident asking about his permit. */
+export function CityOfficeChat() {
+  const t = CITY_TURNS;
+  return (
+    <PublicShell
+      banner={<VisionBar backHref={VISION_BACK_HREF} />}
+      brand={brandOf(CITY_DESK)}
+      ownerName={CITY_STAFF}
+      language="en"
+      openStatus={CITY_DESK.open_status}
+      onAskForOwner={fn()}
+      inertAsk
+      about={CITY_DESK.charter}
+      composer={
+        <Composer variant="visitor" label="Message Meridian Bay Permits" placeholder="Message Meridian Bay Permits" maxLength={2000} onSend={fn()} inertSend />
+      }
+    >
+      <Transcript label="Conversation with Meridian Bay Permits">
+        <TranscriptRow>
+          <VisitorMessage text={t.status} />
+        </TranscriptRow>
+        <TranscriptRow margin={cityReceipts(51, decided('executed'), t.codeSent)}>
+          <ClaudeMessage blocks={[proseBlock(t.verifyFirst), CITY_VERIFY_PROMPT]} language="en" ownerName={CITY_STAFF} />
+        </TranscriptRow>
+        <SystemLine text={t.verified} />
+        <TranscriptRow margin={cityReceipts(53, decided('executed'), t.readFile)}>
+          {/* One answer, drawn as the board draws it: Claude's words lead into each fact card. The
+              kernel delivers a reply as its prose, then its cards, so prose, card, prose, card in
+              one reply is the board's vision. */}
+          <div className="board-vision-city__answer">
+            <CityReply text={t.stands} />
+            <FactCard {...CITY_PERMIT.status} />
+            <CityReply text={t.next} />
+            <FactCard {...CITY_PERMIT.nextSteps} />
+          </div>
+        </TranscriptRow>
+        <TranscriptRow>
+          <VisitorMessage text={t.inspector} />
+        </TranscriptRow>
+        <TranscriptRow margin={cityReceipts(55, decided('executed'), t.readCalendar)}>
+          <ClaudeMessage blocks={[proseBlock(t.times), CITY_INSPECTION_TIMES]} language="en" ownerName={CITY_STAFF} />
+        </TranscriptRow>
+        <TranscriptRow>
+          <VisitorMessage text={t.garage} />
+        </TranscriptRow>
+        <TranscriptRow margin={cityReceipts(57, decided('held'), t.waitingForStaff)}>
+          <CityReply text={t.staffDecides} />
+        </TranscriptRow>
+      </Transcript>
+      {/* A vision page makes no requests: a suggestion goes nowhere, and its first pick says so. */}
+      <div className="board-vision-city__suggestions">
+        <SuggestionChips label="Try asking" suggestions={CITY_SUGGESTIONS} onPick={fn()} inertSuggestions />
+      </div>
+    </PublicShell>
   );
 }
