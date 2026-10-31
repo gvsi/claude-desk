@@ -7,8 +7,9 @@ signed and ledgered; seeds that activate only from cached proofs, in either proo
 proved before confirm, and a rule set wider than its cards rejected in plain words; the public Desk
 with no private field; a document's canary in a reply; hostile tool names and fact ids, each still
 ledgered; and an owner take-over between an execution's intent and its side effect. Two more come
-from the PR review: a first reply with no marker of any language gets one checked rewrite, and so does a French or
-German one whose only English markers are words that language writes too.
+from the PR review: a first reply with no marker of any language gets one checked rewrite.
+Positive evidence of another language still hands off at once, including French or German whose
+only English markers are words that language writes too.
 
 Three cases run kernel code in-process (`white_box`): one breaks the compiler to see the proof
 catch it, one hides the shipped proof reports or the prover and restarts the kernel, and one takes
