@@ -1,8 +1,9 @@
 /**
  * How often owner screens poll, in milliseconds, through React Query's `refetchInterval` (which
  * pauses while the tab is hidden), how often typing pings go out on either side of a chat, and how
- * often the agents page reads the built-in agent's run. Tests speed every interval up with
- * `setPollScale`.
+ * often the agents page reads the built-in agent's run. The Demo inbox polls on its own interval,
+ * which also pauses while the tab is hidden, so it stops the moment its sheet closes. Tests speed
+ * every interval up with `setPollScale`.
  */
 export const POLL_MS = {
   needsYou: 3_000,
