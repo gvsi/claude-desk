@@ -1566,7 +1566,7 @@
     "/api/owner/conversations/{session_id}": {
       "get": {
         "summary": "Conversation",
-        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).",
+        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).\nStatus reasons are read concurrently with the owner's kernel credential, with bounded caching for final\nexecution refusals; an unreadable reason is null, so the stored transcript still renders.",
         "operationId": "owner_conversation",
         "parameters": [
           {

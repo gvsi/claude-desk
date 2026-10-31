@@ -462,7 +462,9 @@ async def tool_decisions(owner: OwnerCtx, desk_id: str, tool: str, *, before: st
                          limit: int) -> ToolDecisions:
     """A page of the Desk's decisions on `tool`, newest first, from the `before` cursor: 404 for a tool the Desk
     doesn't have. Each is marked `replayed` when it is recorded history, failing closed (`decision_replayed`): one
-    whose ledger entry can't be read is marked too, so a decision of unknown origin never shows as live."""
+    whose ledger entry can't be read is marked too, so a decision of unknown origin never shows as live.
+    Owner-only refusal reasons are read concurrently and cached by final decision version; an unavailable or
+    refused kernel read leaves that reason null while the rest of the history still renders."""
     if await owner.ro.one("tools", desk_id=desk_id, tool=tool) is None:
         raise ApiProblem(404, "not_found")
     rows = await latest_decisions(owner, desk_id, limit + 1, tool=tool,

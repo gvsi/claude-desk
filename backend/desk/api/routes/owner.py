@@ -454,7 +454,9 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
                        after: Annotated[int, Query(ge=0)] = 0) -> OwnerTranscript:
     """A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).
     The cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the
-    visitor's typing dots stop, while they are typing (presence in this process's memory, never stored)."""
+    visitor's typing dots stop, while they are typing (presence in this process's memory, never stored).
+    Status reasons are read concurrently with the owner's kernel credential, with bounded caching for final
+    execution refusals; an unreadable reason is null, so the stored transcript still renders."""
     session = await ctx.ro.session(session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         raise ApiProblem(404, "not_found")
@@ -463,10 +465,11 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
                          assurance=session["assurance"], mode=session["mode"], generation=session["generation"])
     process = runtime(request)
     items = await transcript(ctx.ro.conn, ids, "owner", after)
-    for item in items:
-        if item.kind == "status" and item.event is not None:
-            item.owner_plain = await owner_reads.refusal_reason(
-                ctx, item.event.decision_id, session_id, item.event.state, item.event.ledger_seq)
+    statuses = [item for item in items if item.kind == "status" and item.event is not None]
+    reasons = await asyncio.gather(*(owner_reads.refusal_reason(
+        ctx, item.event.decision_id, session_id, item.event.state, item.event.ledger_seq) for item in statuses))
+    for item, reason in zip(statuses, reasons, strict=True):
+        item.owner_plain = reason
     return OwnerTranscript(state=state, items=items,
                            typing_until=process.presence.visitor_typing_until(session_id, process.clock()))
 
