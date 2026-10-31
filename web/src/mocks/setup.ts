@@ -85,6 +85,9 @@ interface Interview {
   holdNext: boolean;
   /** An answer turn still running: the API refuses another answer until it commits. */
   running: { text: string } | null;
+  /** Consent runs in the background when a test holds it; its result lands on a later GET. */
+  holdConsent: boolean;
+  consentResult: 'landed' | 'failed' | null;
 }
 
 const INTERVIEWS = new WeakMap<MockWorld, Map<string, Interview>>();
@@ -487,6 +490,28 @@ function say(interview: Interview, role: SetupMessage['role'], text: string): vo
   interview.state.messages.push({ role, text });
 }
 
+/** The reads and first question after the owner gives (or declines) consent. */
+function completeConsent(interview: Interview): void {
+  if (interview.state.consent) say(interview, 'tool_label', MEMORY_LABEL);
+  const first = SETUP_QUESTIONS[0];
+  if (first) {
+    interview.state.question = first.key;
+    say(interview, 'claude', first.text);
+  }
+  interview.state.busy = false;
+}
+
+/** For tests: consent answers 202 until the returned function lets a later GET land its result. */
+export function holdNextConsent(world: MockWorld, interviewId: string): (outcome: 'landed' | 'failed') => void {
+  const interview = interviewsOf(world).get(interviewId);
+  if (!interview) throw new Error(`no setup interview ${interviewId}`);
+  interview.holdConsent = true;
+  return (outcome) => {
+    if (!interview.state.busy) throw new Error('no consent turn is running');
+    interview.consentResult = outcome;
+  };
+}
+
 /**
  * An answer turn, committed: the owner's words, then Claude's follow-up on the same question when
  * the answer leaves it open, else the next question (or the end of the questions). Only the money
@@ -591,6 +616,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
       slug: desk.summary.slug,
       step: 'questions',
       consent: null,
+      busy: false,
       question: null,
       messages: [
         {
@@ -607,6 +633,8 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     draftVersion: null,
     holdNext: false,
     running: null,
+    holdConsent: false,
+    consentResult: null,
   };
   interviewsOf(world).set(interview.state.interview_id, interview);
   return interview;
@@ -690,7 +718,18 @@ export const SETUP_ROUTES: ServedRoutes = {
   },
   setup(sv, req) {
     const found = interviewOf(sv, req);
-    return isFailure(found) ? found : ok(stateOf(found.interview));
+    if (isFailure(found)) return found;
+    const { interview } = found;
+    if (interview.consentResult === 'landed') {
+      interview.consentResult = null;
+      completeConsent(interview);
+    } else if (interview.consentResult === 'failed') {
+      interview.consentResult = null;
+      interview.state.busy = false;
+      interview.state.consent = null;
+      interview.state.messages.pop();
+    }
+    return ok(stateOf(interview));
   },
   setupConsent(sv, req) {
     const found = interviewOf(sv, req);
@@ -698,16 +737,17 @@ export const SETUP_ROUTES: ServedRoutes = {
     const allow = isRecord(req.body) ? req.body.allow : undefined;
     if (req.malformed || typeof allow !== 'boolean') return INVALID;
     const { interview } = found;
+    if (interview.state.busy) return { status: 202, body: stateOf(interview) };
     if (interview.state.consent != null) return CONFLICT;
     interview.state.consent = allow;
     say(interview, 'owner', allow ? 'Yes, use it' : "No, I'll type it");
-    // With consent, the memory read runs as the owner's own tool; without it, nothing is ever read.
-    if (allow) say(interview, 'tool_label', MEMORY_LABEL);
-    const first = SETUP_QUESTIONS[0];
-    if (first) {
-      interview.state.question = first.key;
-      say(interview, 'claude', first.text);
+    if (interview.holdConsent) {
+      interview.holdConsent = false;
+      interview.state.busy = true;
+      return { status: 202, body: stateOf(interview) };
     }
+    // Without consent, nothing is ever read.
+    completeConsent(interview);
     return ok(stateOf(interview));
   },
   setupAnswer(sv, req) {
