@@ -218,7 +218,7 @@ export const LongNameOnAPhone: Story = {
   },
   play: async ({ canvas }) => {
     await expect(window.innerWidth).toBe(390);
-    await expectBalancedLines(canvas.getByRole('heading', { level: 1 }), LONG_TITLE, 4);
+    await expectBalancedLines(canvas.getByRole('heading', { level: 1 }), LONG_TITLE);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };
