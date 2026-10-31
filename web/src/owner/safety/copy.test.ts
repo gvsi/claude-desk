@@ -54,6 +54,7 @@ function causeEnum(): string[] {
 const SIGNED_CAUSES = {
   owner_rule: 'Your rule says no',
   not_verified: 'Not verified yet',
+  not_their_record: 'Only for the person it belongs to',
   recipient: 'Only to you or a contact on record',
   no_such_slot: "That time isn't open",
   unknown_item: 'Not on the price list',

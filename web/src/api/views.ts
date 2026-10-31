@@ -305,7 +305,7 @@ export interface Attempt {
   ledger_seq: number;
   /**
    * Why a refused request was refused, or null: for a held request, a stopped draft, and a
-   * refusal the API can't place. Read it as `cause ?? null`.
+   * refusal the API can't place. The API sends it on every entry, and only a refused one may have one.
    */
   cause: RefusalCause | null;
 }

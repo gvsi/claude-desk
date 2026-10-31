@@ -59,6 +59,7 @@ export const CATEGORY_COPY = {
 export const CAUSE_COPY = {
   owner_rule: 'Your rule says no',
   not_verified: 'Not verified yet',
+  not_their_record: 'Only for the person it belongs to',
   recipient: 'Only to you or a contact on record',
   no_such_slot: "That time isn't open",
   unknown_item: 'Not on the price list',
@@ -85,7 +86,7 @@ export const CAUSE_COPY = {
  * anything but a refused request, since a stopped draft or a hold was never turned down.
  */
 export function causeLabel(a: Pick<Attempt, 'kind' | 'cause'>): string | null {
-  const cause = a.cause ?? null;
+  const { cause } = a;
   if (a.kind !== 'refused' || cause === null || !Object.hasOwn(CAUSE_COPY, cause)) return null;
   return CAUSE_COPY[cause];
 }
