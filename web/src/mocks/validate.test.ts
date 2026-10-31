@@ -179,4 +179,19 @@ describe('mock payloads', () => {
     const errors = checks.flatMap(([model, value]) => validateContract(model, value));
     expect(errors).toEqual([]);
   });
+
+  it('confirming_a_tool_already_on_answers_in_the_contracts_shape', async () => {
+    // A seeded tool that is already on, confirmed at its own hash, changes nothing and drafts
+    // nothing, and its profile still says why it waits for review: it doesn't.
+    const owner = { params: { desk_id: RIVERA.deskId } };
+    const rules = (await body('rules', owner)) as RulesView;
+    for (const name of ['payments.list_charges', 'native.quote']) {
+      const row = rules.tools.find((tool) => tool.tool === name);
+      expect(row?.status, name).toBe('enabled');
+      const confirmed = (await body('confirmTool', { ...owner, body: { tools: [{ tool: name, definition_sha256: row?.definition_sha256 }], enable: true } })) as ToolConfirmedOut;
+      expect(confirmed.draft, name).toBeNull();
+      expect(confirmed.profile, name).toMatchObject({ tool: name, status: 'enabled', review_reason: null });
+      expect(validateContract('ToolConfirmed', confirmed), name).toEqual([]);
+    }
+  });
 });

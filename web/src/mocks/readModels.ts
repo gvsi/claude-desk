@@ -572,7 +572,7 @@ export function rulesView(desk: DeskRecord): RulesView {
       definition_sha256: tool.definition_sha256 ?? null,
       pending_definition_text: tool.pending_definition_text ?? null,
       pending_sha256: tool.pending_sha256 ?? null,
-      review_reason: tool.review_reason ?? null,
+      review_reason: tool.review_reason,
       cards: cards
         .filter((card) => covering.has(card.card_id))
         .map((card) => ({ card_id: card.card_id, mode: card.mode, reason: card.reason, shared: card.applies_to.startsWith('effect:') })),

@@ -32,7 +32,7 @@ import type {
   Suggestion,
   ToolConfirmEntry,
   ToolConfirmedOut,
-  ToolRow,
+  ToolReviewReason,
   TranscriptItem,
   TranscriptKind,
 } from '../api/views.ts';
@@ -101,9 +101,10 @@ export interface SessionRecord {
 
 /**
  * A tool as the kernel's tool row has it, with why it waits for review (`review_reason`, null unless
- * it does), which the contract types don't have yet.
+ * it does), which the contract types don't have yet. Every record carries the reason, so the profile
+ * a tool confirm answers with always has it.
  */
-export type ToolRecord = ToolProfile & Pick<ToolRow, 'review_reason'>;
+export type ToolRecord = ToolProfile & { review_reason: ToolReviewReason | null };
 
 export interface DeskRecord {
   summary: DeskSummary;
