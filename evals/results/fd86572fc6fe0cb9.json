@@ -1,6 +1,6 @@
 {
  "schema": 1,
- "inputs": "cca3334c5bc6d56b",
+ "inputs": "fd86572fc6fe0cb9",
  "gated": [
   [
    "9782db5eca84395911a6163eb3ea746636c6e466",
@@ -19,7 +19,7 @@
    "backend/desk/contracts.py"
   ],
   [
-   "a3788fc2f5f2f9865c092dd6b7649bcd9ccd5ec9",
+   "c2639e4f7054087af080328b0a97d5c712f666a1",
    "backend/desk/kernel_api.py"
   ],
   [
@@ -83,9 +83,9 @@
    "kernel"
   ]
  ],
- "git_sha": "e65eec8d8bdcd5cd8fd566f76361d1cb60b69bdd",
- "created_at": "2026-10-31T23:15:13.587632Z",
- "pass_id": "20261031-231513-78aab7",
+ "git_sha": "e40fc9e18847613ce2c008b8220b75c2ea6be0dc",
+ "created_at": "2026-10-31T23:18:21.462311Z",
+ "pass_id": "20261031-231821-285ef0",
  "runs_per_scenario": 1,
  "served_models": {
   "api": [],
