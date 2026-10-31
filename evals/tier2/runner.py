@@ -38,13 +38,14 @@
 6. The copy's records (`Records.snapshot`), each decision read through `owner_decision`, the
    owner's Demo inbox, usage (`app.model_calls`, and the kernel's checks' calls in its `review` and
    `reply` entries, a reply's soft-promise call among them, as `evals.usage.kernel_check_call` reads
-   them for the report; a call that can't be read is `infra`, and a Desk-side model other than the
-   configured one is `config_mismatch`), `check_complete` (anything missing is `infra`, so a blind
-   snapshot can't read as clean), then `judge_run`, in memory. The
-   owner's Demo inbox is the kernel's, whose read route and verification codes plan 01b adds (the
-   kernel writes owner alerts and checkpoint notices there already): before that plan has landed
-   where the pass runs (`landed`), the run doesn't read it and the artifact says so
-   (`owner_inbox_unread`), which the verdict names as a skipped check.
+   them for the report; an entry whose call can't be read is `infra`, and a Desk-side model other than
+   the configured one is `config_mismatch`, each failed run keeping every call it read, the models that
+   served them and the entries it couldn't read, `usage_unread`, which the pass charges a run's estimate
+   for), `check_complete` (anything missing is `infra`, so a blind snapshot can't read as clean),
+   then `judge_run`, in memory. The owner's Demo inbox is the kernel's, whose read route and
+   verification codes plan 01b adds (the kernel writes owner alerts and checkpoint notices there
+   already): before that plan has landed where the pass runs (`landed`), the run doesn't read it and
+   the artifact says so (`owner_inbox_unread`), which the verdict names as a skipped check.
 
 The whole run has a wall clock (`wall_clock_s`); passing it is a `timeout`. The outcome is written
 to `out_dir` with codes, agent keys, cookies, tokens and link tokens redacted.
@@ -55,7 +56,7 @@ import importlib
 import json
 import random
 import re
-from collections.abc import AsyncIterator, Callable, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from contextlib import aclosing
 from dataclasses import replace
 from datetime import datetime
@@ -786,7 +787,7 @@ class _Run:
             unread = None
         self.secrets |= {code for entry in inbox if entry.kind == "verification_code"
                          for code in _CODE.findall(entry.body)}
-        usage, served = await self._usage(records)
+        usage, served, usage_unread, mismatches = await self._usage(records)
         verified_ref = self.verified_ref
         artifact = RunArtifact(
             scenario_id=self.scenario.id, rep=self.rep, pass_id=self.pass_id, landed=self.landed, copy_id=self.copy_id,
@@ -796,11 +797,17 @@ class _Run:
             markers=[*seed_markers(self.documents, self.people.values()), *self.planted],
             documents_fetched=self.documents_fetched, records=records, decisions_full=decisions, owner_inbox=inbox,
             owner_inbox_unread=unread, verification_unavailable=self.verification_unavailable,
-            public_key_hex=self.target.kernel.health.public_key_hex, usage=usage, simulator_usage=self.sim_run.usage,
-            served_models=served,
+            public_key_hex=self.target.kernel.health.public_key_hex, usage=usage, usage_unread=usage_unread,
+            simulator_usage=self.sim_run.usage, served_models=served,
             providers=Providers(api=getattr(self.target, "provider", None) or "anthropic",
                                 simulator=self.simulator.provider, kernel_checks="anthropic"),
         )
+        # A usage read that failed still leaves the artifact with every call it read and the models that served
+        # them, so the pass charges them (and a run's estimate for what it couldn't read) and records the models.
+        if mismatches:
+            raise RunFailed("config_mismatch", "; ".join([*sorted(set(mismatches)), *usage_unread]), artifact)
+        if usage_unread:
+            raise RunFailed("infra", "; ".join(usage_unread), artifact)
         if problems := check_complete(artifact):
             raise RunFailed("infra", "the run's records are incomplete: " + "; ".join(problems), artifact)
         return artifact
@@ -814,14 +821,16 @@ class _Run:
             raise RunFailed("infra", f"the copy has {len(matches)} people named as the seed's {ref}, not one")
         return matches[0]
 
-    async def _usage(self, records: dict[str, list[dict]]) -> tuple[list[dict], dict[str, list[str]]]:
-        """Every Desk-side model call's usage (the API's rows, and the kernel's checks' calls as
+    async def _usage(self, records: dict[str, list[dict]]) -> tuple[list[dict], dict[str, list[str]], list[str],
+                                                                    list[str]]:
+        """Every Desk-side model call the run can read (the API's rows, and the kernel's checks' calls as
         `evals.usage.kernel_check_call` reads them from the ledger, a reply's soft-promise call among them),
-        and the models that served each part. A kernel check's call that can't be read fails the run as
-        `infra`; a call on a model or route other than the configured ones, as `config_mismatch`."""
+        the models that served each part, the ledger entries whose call can't be read (each with why) and
+        the calls on a model or route other than the configured ones. An entry it can't read doesn't stop
+        the read, so every call it can read is kept."""
         from evals.usage import kernel_check_call   # here, since evals.usage imports this module (via evals.results)
 
-        usage, mismatches = [], []
+        usage, unread, mismatches = [], [], []
         api, kernel = set(), set()
         for session_id in self.session_ids:
             for row in await self.records.model_calls(session_id):
@@ -832,25 +841,26 @@ class _Run:
                     mismatches.append(f"the API's {route} call was served by {served}, configured "
                                       f"{DESK_MODELS.get(route, 'no model for that route')}")
         for entry in records.get("ledger_entries", []):
-            event = entry.get("event") or {}
-            kind, seq = event.get("kind"), entry.get("seq")
+            event, seq = entry.get("event"), entry.get("seq")
+            if not isinstance(event, Mapping):   # it can't say whether it is a check, so it isn't read as none
+                unread.append(f"ledger entry {seq} has no event to read")
+                continue
             try:
                 call = kernel_check_call(event)
-            except ValueError as error:   # a call the run can't read is never left out of its usage and spend
-                raise RunFailed("infra", f"ledger entry {seq}: {error}") from None
+            except ValueError as error:   # never left out of the run's usage and spend unseen
+                unread.append(f"ledger entry {seq}: {error}")
+                continue
             if call is None:
                 continue
-            served = production_name(call.model)
+            kind, served = event["kind"], production_name(call.model)
             usage.append({"part": "kernel_checks", "kind": kind, "seq": seq, **call.model_dump(), "model": served})
             kernel.add(served)
             if served != KERNEL_CHECK_MODELS[kind]:
                 mismatches.append(f"the kernel's {kind} check was served by {served}, configured "
                                   f"{KERNEL_CHECK_MODELS[kind]}")
-        if mismatches:
-            raise RunFailed("config_mismatch", "; ".join(sorted(set(mismatches))))
         served_models = {"api": sorted(api), "simulator": sorted(set(self.sim_run.served_models)),
                          "kernel_checks": sorted(kernel)}
-        return usage, served_models
+        return usage, served_models, unread, mismatches
 
 
 def _pending_addition(tool: str, text: str) -> str:

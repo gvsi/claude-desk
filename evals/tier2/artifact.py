@@ -149,6 +149,9 @@ class RunArtifact(BaseModel):
     verification_unavailable: StrictStr | None = None
     public_key_hex: StrictStr                 # the kernel's signing key (`GET /health`)
     usage: list[dict[str, Any]] = []          # the API's model_calls rows and the kernel's check usage
+    # The ledger entries the run couldn't read a model call from, each with why: `usage` holds every call it
+    # could read, and the pass charges a run's estimate on top of them for these (only a failed run has any).
+    usage_unread: list[StrictStr] = []
     simulator_usage: list[dict[str, Any]] = []
     served_models: dict[str, list[str]] = {}  # by part (api, simulator, kernel_checks): the model ids that served it
     providers: Providers

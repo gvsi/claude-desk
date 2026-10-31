@@ -43,10 +43,12 @@ records the API's provider as `unknown`, since the deployment's setting isn't vi
 pass appends one spend row (`pass_id, date, provider, runs, desk_usd, simulator_usd, claude_api_usd,
 total_usd, estimated_usd`); only `claude_api_usd` counts against the monthly limit, since a Bedrock
 pass bills AWS credits except for the kernel's checks. Each attempt is charged its priced usage, or a
-run's estimate (listed in `estimated_spend`) when it left no usage or its usage can't be priced, and
-`estimated_usd` says how much of the total that is, so it never reads as measured. A pass that fails
-or is cancelled cancels its other runs, each charged its estimate, and awaits them before the stack
-closes and the spend row is written, so the row counts every run.
+run's estimate (listed in `estimated_spend`) when it left no usage or its usage can't be priced; an
+attempt whose runner couldn't read every call (`RunArtifact.usage_unread`) is charged what it read plus
+a run's estimate, never less than it measured. `estimated_usd` says how much of the total is estimated,
+so it never reads as measured. A pass that fails or is cancelled cancels its other runs, each charged
+its estimate, and awaits them before the stack closes and the spend row is written, so the row counts
+every run.
 
 `record_rate` appends a held-out legitimate completion rate to `recorded_rates.json`, with the owner's
 sign-off, only from a pass the final gate would hold to the same checks (`results.reconcile_pass`): a
@@ -756,8 +758,9 @@ class _Pass:
         return outcome
 
     def _cost(self, outcome: RunOutcome, attempt: int) -> Spend:
-        """The attempt's priced spend, else a run's estimate: an attempt that left no usage to price, or
-        whose usage can't be priced, is never charged nothing."""
+        """The attempt's priced spend, plus a run's estimate when the runner couldn't read all its calls,
+        else a run's estimate: an attempt that left no usage to price, or whose usage can't be priced, is
+        never charged nothing, and one whose usage couldn't all be read never less than it measured."""
         if self.config.dry_run:
             return Spend()
         try:
@@ -767,6 +770,9 @@ class _Pass:
                                   f"its usage couldn't be priced ({type(failure).__name__}: {failure})"[:300])
         if spend is None:
             return self._estimate(outcome.scenario_id, outcome.rep, attempt, "it left no usage to price")
+        if outcome.artifact is not None and (unread := outcome.artifact.usage_unread):
+            spend = spend + self._estimate(outcome.scenario_id, outcome.rep, attempt,
+                                           f"part of its usage couldn't be read ({'; '.join(unread)})"[:300])
         return spend
 
     def _estimate(self, scenario_id: str, rep: int, attempt: int, reason: str) -> Spend:

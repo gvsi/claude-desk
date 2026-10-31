@@ -1328,6 +1328,82 @@ async def test_a_kernel_check_whose_call_cant_be_read_fails_the_run(kind, call, 
     assert unread in outcome.error.detail
 
 
+async def test_a_run_whose_usage_read_fails_keeps_what_it_read():
+    """A failed usage read never loses the calls the run could read: after an unreadable entry the run
+    fails as `infra` and still carries every readable call, before and after it, the models that served
+    them and the entry it couldn't read (`usage_unread`); on a wrong model it fails as `config_mismatch`
+    with every call and model it read. So the pass charges and records what was spent."""
+    scenario = attack(max_turns=1)
+    run = chat(scenario, 1)
+    soft = call_usage(HAIKU, input_tokens=900, cached=0, output=40)
+    first = checked_reply(run, soft)
+    broken = checked_reply(run, {**soft, "output_tokens": None})
+    last = checked_reply(run, soft)
+    desk = Desk(run)
+    outcome = await drive(scenario, desk, Visitor(desk))
+    assert (outcome.error.kind, outcome.verdict) == ("infra", None)
+    artifact = outcome.artifact
+    assert [(row["part"], row.get("seq")) for row in artifact.usage] == [
+        ("api", None), ("kernel_checks", first), ("kernel_checks", last)]
+    assert artifact.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": [HAIKU]}
+    assert artifact.usage_unread == [
+        f"ledger entry {broken}: the kernel's reply entry holds a call whose output_tokens can't be read"]
+    assert outcome.error.detail == artifact.usage_unread[0]
+
+    run = chat(scenario, 1)
+    seq = checked_reply(run, call_usage("claude-sonnet-5-5", input_tokens=900, cached=0, output=40))
+    desk = Desk(run)
+    outcome = await drive(scenario, desk, Visitor(desk))
+    assert (outcome.error.kind, outcome.verdict) == ("config_mismatch", None)
+    assert [(row["part"], row.get("seq"), row["model"]) for row in outcome.artifact.usage] == [
+        ("api", None, OPUS), ("kernel_checks", seq, "claude-sonnet-5-5")]
+    assert outcome.artifact.served_models["kernel_checks"] == ["claude-sonnet-5-5"]
+    assert outcome.artifact.usage_unread == []
+
+
+async def test_a_ledger_entry_with_no_event_fails_the_run():
+    """An entry with no event can't say whether it records a check's call, so it is never read as none:
+    the run fails as `infra`, naming it."""
+    scenario = attack(max_turns=1)
+    run = chat(scenario, 1)
+    seq = run.event("reply", ref_id="m-unsaid", soft_promise=None)
+    run.ledger[seq - 1] = None
+    desk = Desk(run)
+    outcome = await drive(scenario, desk, Visitor(desk))
+    assert (outcome.error.kind, outcome.verdict) == ("infra", None)
+    assert outcome.error.detail == f"ledger entry {seq} has no event to read"
+    assert outcome.artifact.usage_unread == [outcome.error.detail]
+
+
+NO_SUMMARY = object()
+
+
+@pytest.mark.parametrize(("kind", "summary", "unread"), [
+    ("reply", NO_SUMMARY, "no summary to read"),
+    ("reply", None, "no summary to read"),
+    ("reply", [], "no summary to read"),
+    ("reply", "", "no summary to read"),
+    ("reply", False, "no summary to read"),
+    ("reply", {"message_id": "m-unsaid", "ok": True}, "doesn't say whether its check made a call"),
+    ("review", [], "no summary to read"),
+])
+async def test_a_kernel_entry_that_cant_say_what_its_check_called_fails_the_run(kind, summary, unread):
+    """Only an explicit `soft_promise: null` says a reply's check made no call. A `reply` entry without
+    that key, or a kernel check's entry whose summary isn't an object, can't say, so the run fails as
+    `infra`, naming the entry, rather than count no call."""
+    scenario = attack(max_turns=1)
+    run = chat(scenario, 1)
+    seq = run.event(kind, ref_id="m-unsaid")
+    if summary is NO_SUMMARY:
+        del run.ledger[seq - 1]["summary"]
+    else:
+        run.ledger[seq - 1]["summary"] = summary
+    desk = Desk(run)
+    outcome = await drive(scenario, desk, Visitor(desk))
+    assert (outcome.error.kind, outcome.verdict) == ("infra", None)
+    assert f"ledger entry {seq}: the kernel's {kind} entry" in outcome.error.detail and unread in outcome.error.detail
+
+
 # DeskClient's tier 2 operations, on a mock transport
 
 async def test_desk_client_signs_each_a2a_turn_as_its_agent(monkeypatch):
