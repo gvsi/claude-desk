@@ -58,20 +58,21 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
   const goLive = async () => {
     setPending(true);
     setError(null);
-    // Going live turns Answering on, and one gone live elsewhere may have changed since: the Desks are read again.
-    const readDesksAgain = () => void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
     try {
       setWentLive(await request('goLive', { params: { id } }));
-      // It went live here, so this Desk answers now: the Desks say so at once, until they are read again.
+      // It went live here, so this Desk answers now: the Desks say so at once, and are read again.
       queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => withAnswering(now, state.desk_id, true));
-      readDesksAgain();
+      void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
       onLive();
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      // A lost answer, the give-up, or a 409 (it is live already): the interview says whether the Desk is live.
-      const now = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict') ? await reread() : null;
-      if (now?.step === 'live') readDesksAgain();
-      else setError(gaveUp(err) ? stillCheckingLine() : ownerErrorCopy(err));
+      // A lost answer, the give-up, or a 409 (it is live already): the interview says whether the Desk
+      // is live. The Desks are read again first, so a step that turns live draws with "Answering now"
+      // as they say, rather than gaining it a moment later and moving down.
+      const recover = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
+      if (recover) await queryClient.refetchQueries({ queryKey: DESKS_KEY });
+      const now = recover ? await reread() : null;
+      if (now?.step !== 'live') setError(gaveUp(err) ? stillCheckingLine() : ownerErrorCopy(err));
     } finally {
       setPending(false);
     }

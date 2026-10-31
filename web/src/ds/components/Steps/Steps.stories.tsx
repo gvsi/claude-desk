@@ -176,10 +176,18 @@ export const SetupFinished: Story = {
 
 export const SetupFinishedDrawsCheck: Story = {
   args: { label: 'Set up your Desk', steps: SETUP_STEPS, current: 4, finished: true, drawCheck: true },
-  parameters: { canvas: 'none', canvasNote: `${FINISHED_NOTE} Reached live, the check draws once; under reduced motion it is drawn from the start.` },
+  parameters: {
+    canvas: 'none',
+    canvasNote: `${FINISHED_NOTE} Reached live, the check draws once. Under reduced motion it doesn't move: it is drawn from the start, with no animation and its stroke whole. Storybook shows the motion your system asks for, and the design system's browser tests render this story under reduced motion.`,
+  },
   play: async ({ canvasElement }) => {
-    // finished_check_draws_once: motion-base on the emphasis ease, once, ending drawn.
     const path = await expectFinishedLast(canvasElement);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      // finished_check_still_under_reduced_motion: no draw, the check whole from the start.
+      expectComputed(path, { animationName: 'none', strokeDashoffset: '0px' });
+      return;
+    }
+    // finished_check_draws_once: motion-base on the emphasis ease, once, ending drawn.
     expectComputed(path, {
       animationName: 'cd-steps-draw',
       animationDuration: '0.2s',
@@ -187,6 +195,24 @@ export const SetupFinishedDrawsCheck: Story = {
       animationTimingFunction: 'cubic-bezier(0.165, 0.84, 0.44, 1)',
       animationFillMode: 'forwards',
     });
+    // check_draws_short_arm_first: early in the draw the stroke shows from the path's end, the short
+    // arm's tip at (4, 12), while its start, the long arm's tip at (20, 6), is still hidden, as a hand
+    // writes a check. The offset runs from minus the dash to 0, so the hidden part is [0, -offset].
+    const [draw] = path.getAnimations();
+    if (!draw) throw new Error('No draw on the check');
+    draw.pause();
+    draw.currentTime = 50;
+    const length = path.getTotalLength();
+    const hiddenUpTo = -Number.parseFloat(getComputedStyle(path).strokeDashoffset);
+    await expect(hiddenUpTo).toBeGreaterThan(0);
+    await expect(hiddenUpTo).toBeLessThan(length);
+    const tip = (at: number) => {
+      const point = path.getPointAtLength(at);
+      return [Math.round(point.x), Math.round(point.y)];
+    };
+    await expect(tip(0)).toEqual([20, 6]);
+    await expect(tip(length)).toEqual([4, 12]);
+    draw.finish();
     await waitFor(() => expect(getComputedStyle(path).strokeDashoffset).toBe('0px'));
     // Only the last step's check draws: the steps done before it are drawn already.
     const done = canvasElement.querySelectorAll('.cd-steps__step--done svg path');

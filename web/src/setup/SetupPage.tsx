@@ -120,11 +120,6 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const desks = useQuery({ ...desksQuery(), enabled: deskId !== null });
   const desk = deskId === null || desks.data === undefined ? null : (findDesk(desks.data, deskId)?.desk ?? null);
   const business = desk?.business_name ?? null;
-  // The step the interview was at when this page first read it: a Desk that goes live here is a
-  // moment (the last step's check draws once); a page opened on a live Desk shows it already drawn.
-  const [openedAt, setOpenedAt] = useState<SetupStep | null>(null);
-  if (setup.data !== undefined && openedAt === null) setOpenedAt(setup.data.step);
-
   /** The interview moved on: the screen shows its next step, as the API's state now says. */
   const moveTo = useCallback(
     (step: SetupStep) => queryClient.setQueryData<SetupState>(setupQuery(setupId).queryKey, (now) => (now === undefined ? now : { ...now, step })),
@@ -145,7 +140,8 @@ function SetupInterview({ setupId }: { setupId: string }) {
 
   const state = setup.data;
   // The step setup opened at on this page: a step come to after it was reached live, and its
-  // results land as they arrive.
+  // results land as they arrive. A Desk that goes live here is a moment (the last step's check
+  // draws once); a page opened on a live Desk shows it already drawn.
   const [openedAt, setOpenedAt] = useState<SetupStep | null>(null);
   if (openedAt === null && state !== undefined) setOpenedAt(state.step);
   const opened = openedAt ?? state?.step;
@@ -195,7 +191,15 @@ function SetupInterview({ setupId }: { setupId: string }) {
       break;
     case 'preview':
     case 'live':
-      body = <LiveStep state={state} business={name} answering={answering} onLive={() => moveTo('live')} reread={reread} />;
+      // Live, the title names the business and "Answering now" follows the Desks, so while they are
+      // first read (on a reload) the step waits whole on the loading line, rather than drawing a
+      // title and a link that their arrival would rewrite and push down.
+      body =
+        state.step === 'live' && desks.isPending ? (
+          <LoadingLine>{SETUP_COPY.questions.loading}</LoadingLine>
+        ) : (
+          <LiveStep state={state} business={name} answering={answering} onLive={() => moveTo('live')} reread={reread} />
+        );
       break;
   }
   return (

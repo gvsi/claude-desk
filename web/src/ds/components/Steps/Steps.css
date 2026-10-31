@@ -65,10 +65,12 @@
   color: var(--text-primary);
 }
 
-/* A finished flow's last check, drawn once as the person reaches it. */
+/* A finished flow's last check, drawn once as the person reaches it, short arm first, as a hand
+   writes a check: the offset starts negative, so the stroke shows from the path's end (the short
+   arm's tip) back to its start (the long arm's tip). */
 .cd-steps__check--draw path {
   stroke-dasharray: 24;
-  stroke-dashoffset: 24;
+  stroke-dashoffset: -24;
   animation: cd-steps-draw var(--motion-base) var(--motion-ease-emphasis) forwards;
 }
 

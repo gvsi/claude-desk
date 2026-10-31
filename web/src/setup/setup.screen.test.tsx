@@ -13,12 +13,13 @@ import type { RenderResult } from 'vitest-browser-react';
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RuleCard } from '../api/contracts.ts';
-import type { RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
+import type { BusinessOut, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { hubSections } from '../owner/rules/hub.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
+import { withAnswering } from '../owner/useDesks.ts';
 import { worker } from '../mocks/browser.ts';
 import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextStart } from '../mocks/setup.ts';
 import { rulesView } from '../mocks/readModels.ts';
@@ -186,6 +187,9 @@ const LONG_BUSINESS_NAME = 'Bayview Heating, Plumbing & Drain Services of Greate
 
 /** The composer's failed box, which keeps an answer that didn't go through beside "Try again". */
 const keptAnswer = (screen: RenderResult) => screen.getByRole('group', { name: 'Your answer' });
+
+/** Setup's loading line, while what a step needs is read. */
+const OPENING = 'Opening your setup';
 
 /** Setup's five steps in the bar, as screen readers read them. */
 const setupSteps = (screen: RenderResult) => screen.getByRole('list', { name: 'Set up your Desk' }).getByRole('listitem');
@@ -1692,6 +1696,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
     expect(deskOf(state).summary.answering).toBe(true);
     await expect.element(screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true })).toBeVisible();
+    // The Desks, read again after the lost answer, say it answers: "Answering now" shows.
+    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
 
     // The link is the API's `public_url`, and "Open" opens it in a new tab.
     const url = `${window.location.origin}/d/${state.slug}`;
@@ -1877,6 +1883,60 @@ describe('setup', () => {
     await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
     expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
     expect(deskOf(state).summary.answering).toBe(false);
+  });
+
+  it('slow_desks_read_never_pushes_the_link_down', async () => {
+    // A reload on the live step: the Desks are read once the interview names the Desk, and slowly.
+    const state = await interviewAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    const read = await mockStore.dispatch('desks');
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the Desks');
+    let release = () => {};
+    const until = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockStore.inject({ route: 'desks', status: 200, until, body: read.body });
+    const mark = mockStore.requests.length;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
+
+    // While they are read, the step waits whole, on setup's loading line: no title without its
+    // business, and no link that "Answering now" would push down when it lands.
+    await expect.element(screen.getByText(OPENING, { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Copy link' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('heading', { level: 1 }).elements()).toHaveLength(0);
+
+    // Once they land, the title, its line and the link draw together, and the link stays put.
+    release();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    const link = screen.getByRole('button', { name: 'Copy link' });
+    await expect.element(link).toBeVisible();
+    const top = link.element().getBoundingClientRect().top;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(link.element().getBoundingClientRect().top).toBe(top);
+    expect(screen.getByText(OPENING, { exact: true }).elements()).toHaveLength(0);
+
+    // In the page: a go-live whose answer was lost, with the Desks read again slowly. The step stays
+    // on the preview until they land, then turns live with "Answering now" already under the title.
+    const second = await interviewAtPreview();
+    const page2 = (await renderRoute(`/app/setup/${second.interview_id}`)).screen;
+    await expect.element(page2.getByRole('button', { name: 'Go live' })).toBeVisible();
+    const before = await mockStore.dispatch('desks');
+    if ('network' in before || before.status !== 200) throw new Error('the mock reads the Desks');
+    let land = () => {};
+    const slow = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    mockStore.inject({ route: 'desks', status: 200, until: slow, body: withAnswering(before.body as BusinessOut[], second.desk_id, true) });
+    mockStore.inject({ route: 'goLive', status: 'network', afterCommit: true });
+    const from = mockStore.requests.length;
+    await page2.getByRole('button', { name: 'Go live' }).click();
+    await expect.poll(() => requests('desks', from).length).toBeGreaterThan(0);
+    expect(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' }).elements()).toHaveLength(0);
+    land();
+    await expect.element(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(page2.getByText('Answering now', { exact: true }).elements()).toHaveLength(1);
   });
 
   it('going_live_under_reduced_motion_is_drawn_still', async () => {
