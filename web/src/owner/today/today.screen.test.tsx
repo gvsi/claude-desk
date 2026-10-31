@@ -560,6 +560,45 @@ describe('Today', () => {
     expect(again.getByText(/No one has needed you/).elements()).toHaveLength(0);
   });
 
+  it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
+    // The signed Today boards draw each day's bar 24 px wide, centered over its initial in one of
+    // seven equal columns 6 px apart, at every width: a busy day is a taller bar, never a wider one.
+    const { screen } = await renderRoute(TODAY, { viewport });
+    const list = region(screen, 'Last 7 days').getByRole('list', { name: 'Bookings per day' });
+    await expect.element(list).toBeVisible();
+    const box = list.element().getBoundingClientRect();
+    const days = list
+      .getByRole('listitem')
+      .elements()
+      .map((day) => {
+        const room = day.querySelector('.cd-week__bar-room')?.getBoundingClientRect();
+        const bar = day.querySelector('.cd-week__bar')?.getBoundingClientRect();
+        const initial = day.querySelector('.cd-week__initial');
+        if (!room || !bar || !initial) throw new Error('each day has its bar and its initial');
+        // The letter itself: the initial's own box stretches across the whole column.
+        const letter = document.createRange();
+        letter.selectNodeContents(initial);
+        return { column: day.getBoundingClientRect(), room, bar, letter: letter.getBoundingClientRect() };
+      });
+    expect(days).toHaveLength(7);
+    const center = (r: DOMRect) => r.left + r.width / 2;
+    for (const { column, bar, letter } of days) {
+      expect(bar.width).toBe(24);
+      expect(center(bar)).toBeCloseTo(center(column), 1);
+      expect(letter.width, 'a letter, narrower than its column').toBeLessThan(column.width / 2);
+      expect(center(letter)).toBeCloseTo(center(bar), 0);
+    }
+    expect(days[0]?.column.left).toBeCloseTo(box.left, 1);
+    expect(days[6]?.column.right).toBeCloseTo(box.right, 1);
+    const gaps = days.slice(1).map((day, i) => day.column.left - (days[i]?.column.right ?? Number.NaN));
+    for (const gap of gaps) expect(gap).toBeCloseTo(6, 1);
+
+    // The heights keep their meaning: the seed's one booking, today, fills the room; the rest are flat.
+    const heights = days.map(({ bar }) => bar.height);
+    expect(heights.at(-1)).toBe(days[6]?.room.height);
+    expect(new Set(heights.slice(0, 6))).toEqual(new Set([2]));
+  });
+
   it('window_stays_put_below_the_wide_layout', async () => {
     // Below 1280 px "Last 7 days" sits under the page, deep in the shell's scrolling column. The
     // window itself never scrolls: only the column does, so the shell's bars stay in place.
