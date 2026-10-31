@@ -855,6 +855,29 @@ PUBLIC_POLICY_PATTERNS = (
 )
 
 
+# Function words distinguish short undetermined policy fragments from a longer unmarked group.
+PUBLIC_POLICY_MARKERS = frozenset("""
+about after ahora ahí al all also am an and any aquí are at ayudar ayudo be been before being bueno
+but by call can claro con could cual cuando cuál cuándo cómo del did does donde down día dónde el
+enseguida entonces eres es esa ese eso esto estoy está están estás for from get gracias gusto hacer
+had hasta have hay hello help her here hi him his hola how i if in into is it its just know la las
+let like listo lo look los may might more must muy my más necesito need not now nuestra nuestro of
+off on only or our out perfecto pero please puede puedo quedó quiero qué see she should some soy su
+sure sus sí también te tengo than thank thanks that the their them then there these they this those
+ti tiene to too tu tus un una unas unos until up us usted ustedes very want was we were what when
+where which who whom why will with would y ya yes yo you your
+""".split())
+
+
+def unsupported_public_policy_language(text: str) -> bool:
+    """Mirror the contract's other-language and unmarked-fragment examples."""
+    text = unicodedata.normalize("NFKC", text)
+    words = re.findall(r"[^\W\d_]+", text.lower())
+    return detect_language(text) == "other" or (
+        len(words) >= 4 and not PUBLIC_POLICY_MARKERS.intersection(words)
+        and not any(mark in text for mark in "ñ¿¡"))
+
+
 def public_policy_rules(text: str) -> list[str]:
     """Mirror the contract's numeric and English/Spanish promise examples, not the full scan.
 
@@ -862,12 +885,35 @@ def public_policy_rules(text: str) -> list[str]:
     Exhaustive lexicon behavior is covered by the real kernel's own tests.
     """
     rules = {"percent_sign" if hit.rule_id == "percent" else hit.rule_id for hit in scan_prose(text, {})}
+    if unsupported_public_policy_language(text):
+        rules.add("language")
     if any(unicodedata.category(char) == "Cf" for char in text):
         rules.add("format_control")
     for rule, pattern in PUBLIC_POLICY_PATTERNS:
         if re.search(pattern, text, re.IGNORECASE):
             rules.add(rule)
     return sorted(rules)
+
+
+def public_policy_fields(parts: list[tuple[str | None, str]]) -> dict[str, list[str]]:
+    """Attribute the contract's policy examples in the actual public or reply order."""
+    fields = {key: set(public_policy_rules(value)) for key, value in parts if key is not None}
+    ranges, pieces, offset = [], [], 0
+    for key, value in parts:
+        value = unicodedata.normalize("NFKC", value)
+        ranges.append((key, offset, offset + len(value)))
+        pieces.append(value)
+        offset += len(value) + 1
+    combined = "\n".join(pieces)
+    if unsupported_public_policy_language(combined):
+        for key in fields:
+            fields[key].add("language")
+    for rule, pattern in PUBLIC_POLICY_PATTERNS:
+        for match in re.finditer(pattern, combined, re.IGNORECASE):
+            for key, low, high in ranges:
+                if key is not None and low < match.end() and match.start() < high:
+                    fields[key].add(rule)
+    return {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
 
 
 # Signed agents ---------------------------------------------------------------------------------------
@@ -2789,6 +2835,14 @@ class FakeKernelState:
             card = self._clause(session, desk, clause, language, violations)
             if card is not None:
                 cards.append(card)
+        policies = [(card.fact_id, card.text) for card in cards if card.template == "policy"
+                    and card.fact_id is not None and card.fact_id.startswith("charter:policy:")]
+        if policies:
+            refused = public_policy_fields([(None, draft.prose), *policies])
+            fact_ids = list(dict.fromkeys(fact_id for fact_id, _ in policies if fact_id in refused))
+            if fact_ids:
+                violations.append(Violation(kind="unknown_fact", span="policy", rule_id="policy_combined",
+                                            fact_ids=fact_ids))
         prose = [RenderedBlock(kind="prose", text=draft.prose)] if draft.prose else []
         return self._verdict(session, desk, language, prose + cards, violations,
                              [clause.fact_id for clause in draft.clauses if clause.fact_id])
@@ -3052,19 +3106,11 @@ class FakeKernelState:
             raise Refusal(422, "invalid")
         values = {claim.key: claim.value for claim in charter
                   if claim.key.startswith("policy:") and claim.kind == "text"}
-        fields = {key: set(public_policy_rules(value)) for key, value in values.items()}
-        ranges, pieces, offset = [], [], 0
-        for key in sorted(values):
-            value = values[key]
-            ranges.append((key, offset, offset + len(value)))
-            pieces.append(value)
-            offset += len(value) + 1
-        for rule, pattern in PUBLIC_POLICY_PATTERNS:
-            for match in re.finditer(pattern, "\n".join(pieces), re.IGNORECASE):
-                for key, low, high in ranges:
-                    if low < match.end() and match.start() < high:
-                        fields[key].add(rule)
-        fields = {key: sorted(rules) for key, rules in sorted(fields.items()) if rules}
+        if len(values) > 40:
+            raise Refusal(422, "invalid", {"charter": ["policy_count_limit"]})
+        if sum(map(len, values.values())) > 8_000:
+            raise Refusal(422, "invalid", {"charter": ["policy_text_limit"]})
+        fields = public_policy_fields(sorted(values.items()))
         if fields:
             targets = [desk] if desk is not None else sorted(
                 (row for row in self.desks.values() if row.copy_id == copy_id), key=lambda row: row.desk_id)

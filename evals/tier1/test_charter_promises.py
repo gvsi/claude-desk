@@ -11,6 +11,7 @@ from evals.tier1.test_reply_golden import check_reply, handed_off, passes
 @pytest.mark.parametrize(("text", "rules"), [
     ("20% off for first-time clients", ["digit", "percent_sign"]),
     ("We work with small businesses and families.", []),
+    ("Nous garantissons des consultations gratuites pour tous les clients.", ["language"]),
     ("20 % de descuento", ["digit", "lex.es.promise", "percent_sign"]),
     ("Trabajamos con pequeños negocios y familias.", []),
     ("We offer \u202eeerf\u202c consultations.", ["format_control"]),
@@ -42,8 +43,8 @@ async def test_website_policy_is_refused_or_renders_from_an_accepted_fact(k: Ker
 @pytest.mark.parametrize(("parts", "rules"), [
     (("No", "charge for consultations."), ["lex.en.promise"]),
     (("Ask about", "our services."), []),
-    (("Sin", "costo para consultas."), ["lex.es.promise"]),
-    (("Pregunte por", "nuestros servicios."), []),
+    (("Sin", "costo para consultas aquí."), ["lex.es.promise"]),
+    (("Pregunte por", "nuestros servicios aquí."), []),
     (("Your appointment is", "confirmed."), ["lex.en.booking"]),
     (("Tell us", "what you need."), []),
     (("Tu cita está", "confirmada."), ["lex.es.booking"]),
