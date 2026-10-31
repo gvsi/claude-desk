@@ -406,9 +406,9 @@ export interface SetupState {
   step: SetupStep;
   messages: SetupMessage[];
   /** Whether the owner let Claude read their memory and website; null until asked. */
-  consent?: boolean | null; // pending: plan 02b Task 6; drop when the generated API types have it
+  consent: boolean | null;
   /** The question waiting for an answer; null before consent and after the last one. */
-  question?: QuestionKey | null; // pending: plan 02b Task 6; drop when the generated API types have it
+  question: QuestionKey | null;
 }
 
 export interface SetupTools {
@@ -610,6 +610,16 @@ export interface StartSetupBody {
   description: string;
   timezone: string;
   owner_display_name?: string;
+}
+
+/**
+ * A setup answer and the question it answers (`SetupState.question` when it was asked): the API
+ * refuses it with 409 `conflict` once the interview has moved past that question, so an answer
+ * sent twice never answers the next one (plan 02b Task 6, as amended).
+ */
+export interface SetupAnswerBody {
+  question: QuestionKey;
+  text: string;
 }
 
 export interface ConsentBody {

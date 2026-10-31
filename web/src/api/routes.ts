@@ -57,6 +57,7 @@ import type {
   RulesDraft,
   RulesView,
   SafetyCheck,
+  SetupAnswerBody,
   SetupState,
   SetupTools,
   SituationResult,
@@ -223,7 +224,7 @@ interface RouteShapes {
   startSetup: { body: StartSetupBody; response: SetupState };
   setup: { body: undefined; response: SetupState };
   setupConsent: { body: ConsentBody; response: SetupState };
-  setupAnswer: { body: TextBody; response: SetupState };
+  setupAnswer: { body: SetupAnswerBody; response: SetupState };
   setupTools: { body: undefined; response: SetupTools };
   setupConnect: { body: ConnectBody; response: ToolRow[] };
 

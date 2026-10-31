@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
-import type { SetupMessage, SetupState } from '../api/views.ts';
+import type { QuestionKey, SetupMessage, SetupState } from '../api/views.ts';
 import { Button, ClaudeMessage, Composer, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { QUESTION_ORDER, SETUP_COPY } from './copy.ts';
@@ -19,15 +19,27 @@ export interface QuestionsStepProps {
   reread: () => Promise<SetupState | null>;
 }
 
-/** The owner hasn't been asked to let Claude read their memory and website yet, or hasn't answered. */
+/** The owner hasn't answered whether Claude may read their memory and website. */
 function awaitsConsent(state: SetupState): boolean {
-  if (state.consent !== undefined) return state.consent === null;
-  return !state.messages.some((message) => message.role === 'owner');
+  return state.consent === null;
 }
 
+/** An answer as sent: the question it answers, the words, and how often the owner had said those words before. */
+interface Answer {
+  question: QuestionKey;
+  text: string;
+  before: number;
+}
+
+/** How often the conversation holds the owner saying `text`. */
+const timesSaid = (state: SetupState, text: string) => state.messages.filter((message) => message.role === 'owner' && message.text === text).length;
+
+/** The interview, as read, holds the answer: its words are there once more than before it was sent. */
+const holds = (state: SetupState, answer: Answer) => timesSaid(state, answer.text) > answer.before;
+
 /**
- * The question in view, counted from 1: the API's own when it says which (`question`), else the
- * questions Claude has asked since the consent question. Null before consent.
+ * The question in view, counted from 1: the API's own (`question`), else the questions Claude has
+ * asked since the consent question. Null before consent.
  */
 function questionNumber(state: SetupState): number | null {
   if (awaitsConsent(state)) return null;
@@ -81,7 +93,8 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
   const [consenting, setConsenting] = useState<boolean | null>(null);
   const [consentError, setConsentError] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
+  /** The answer that didn't go through, or whose outcome is unknown, with the question it answers. */
+  const [failed, setFailed] = useState<Answer | null>(null);
   /** Words to put back in the composer once it takes text again. */
   const [refill, setRefill] = useState<{ text: string } | null>(null);
   const id = state.interview_id;
@@ -104,21 +117,43 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     }
   };
 
-  const send = async (text: string) => {
-    setSending(text);
+  /**
+   * Sends `answer` for its own question. A lost answer may have been taken, and one the API refuses
+   * as stale (409) means the interview has moved past that question: either way the interview is
+   * read, and where it stands says what happened. Taken: on to the next question. Moved past without
+   * these words: they stay in the composer for the question now asked. Else they come back with the
+   * failure line.
+   */
+  const submit = async (answer: Answer) => {
+    setSending(answer.text);
     setFailed(null);
     try {
-      onState(await request('setupAnswer', { params: { id }, body: { text } }));
+      onState(await request('setupAnswer', { params: { id }, body: { question: answer.question, text: answer.text } }));
       setSending(null);
     } catch (err) {
       if (err instanceof ApiError && err.kind === 'unauthorized') return;
-      // A lost answer may have been taken: one the interview now holds isn't asked for again.
-      const now = isUncertain(err) ? await reread() : null;
+      const unknown = isUncertain(err) || (err instanceof ApiError && err.kind === 'conflict');
+      const now = unknown ? await reread() : null;
       setSending(null);
-      if (now !== null && now.messages.length > state.messages.length) return;
-      setFailed(text);
-      setRefill({ text });
+      if (now !== null && holds(now, answer)) return;
+      if (now !== null && (now.step !== 'questions' || now.question !== answer.question)) {
+        setRefill({ text: answer.text });
+        return;
+      }
+      setFailed(answer);
+      setRefill({ text: answer.text });
     }
+  };
+
+  /** The composer's words, as the answer to the question the page shows. */
+  const send = (text: string) => {
+    if (state.question === null) {
+      // No question is waiting here: read where the interview stands, and keep the words.
+      setRefill({ text });
+      void reread();
+      return;
+    }
+    void submit({ question: state.question, text, before: timesSaid(state, text) });
   };
 
   useEffect(() => {
@@ -128,12 +163,13 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
     setRefill(null);
   }, [refill, sending]);
 
+  /** "Try again": the words in the composer, still as the answer to the question they were written for. */
   const retry = () => {
+    if (failed === null) return;
     const box = composer.current?.querySelector('textarea');
-    const text = box?.value.trim() || failed;
-    if (!text) return;
+    const text = box?.value.trim() || failed.text;
     if (box) fillComposer(box, '');
-    void send(text);
+    void submit({ ...failed, text });
   };
 
   return (
@@ -160,7 +196,7 @@ export function QuestionsStep({ state, onState, reread }: QuestionsStepProps) {
         </>
       ) : (
         <div ref={composer}>
-          <AnswerBox failed={failed !== null} sending={sending !== null} onSend={(text) => void send(text)} onRetry={retry} />
+          <AnswerBox failed={failed !== null} sending={sending !== null} onSend={send} onRetry={retry} />
         </div>
       )}
     </div>

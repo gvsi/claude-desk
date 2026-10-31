@@ -384,11 +384,14 @@ export const SETUP_ROUTES: ServedRoutes = {
   setupAnswer(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
-    const text = isRecord(req.body) ? req.body.text : undefined;
+    const body = isRecord(req.body) ? req.body : {};
+    const { text, question } = body;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX) return INVALID;
+    if (typeof question !== 'string' || !SETUP_QUESTIONS.some((q) => q.key === question)) return INVALID;
     const { interview } = found;
     const at = SETUP_QUESTIONS.findIndex((q) => q.key === interview.state.question);
-    if (interview.state.step !== 'questions' || at === -1) return CONFLICT;
+    // An answer to a question the interview has moved past is refused, never applied to the next one.
+    if (interview.state.step !== 'questions' || at === -1 || question !== interview.state.question) return CONFLICT;
     say(interview, 'owner', text);
     // Only the money limit's own answer sets the limit.
     if (interview.state.question === 'money_limit') interview.capCents = capFromAnswer(text);

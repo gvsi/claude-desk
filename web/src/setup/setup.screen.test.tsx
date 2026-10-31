@@ -40,7 +40,7 @@ async function interviewAtTools(): Promise<SetupState> {
   const id = state.interview_id;
   for (const question of SETUP_QUESTIONS) {
     const text = question.key === 'money_limit' ? '$500 is fine. Anything bigger, ask me.' : 'Yes, that works.';
-    await mockStore.dispatch('setupAnswer', { params: { id }, body: { text } });
+    await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: question.key, text } });
   }
   return state;
 }
@@ -187,7 +187,11 @@ describe('setup', () => {
     await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
     await expect.element(box).toHaveValue('');
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
-    expect(requests('setupAnswer').map((r) => r.body)).toEqual([{ text: answer }, { text: answer }]);
+    // Each send names the question it answers.
+    expect(requests('setupAnswer').map((r) => r.body)).toEqual([
+      { question: 'what_you_do', text: answer },
+      { question: 'what_you_do', text: answer },
+    ]);
 
     // An answer whose reply was lost, which the API took: the interview is read again, and the
     // answer isn't called failed or asked for again.
@@ -199,6 +203,34 @@ describe('setup', () => {
     expect(requests('setup').length).toBeGreaterThan(reads);
     expect(screen.getByText(FAILED_LINE, { exact: true }).elements()).toHaveLength(0);
     await expect.element(box).toHaveValue('');
+  });
+
+  it('stale_answer_is_refused_and_kept', async () => {
+    const { interview_id: id } = await startInterview();
+    const { screen } = await renderRoute(`/app/setup/${id}`);
+    const box = screen.getByRole('textbox', { name: 'Your answer' });
+    await expect.element(box).toBeVisible();
+
+    // The first question is answered elsewhere (another tab) while this page still shows it.
+    await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: 'what_you_do', text: 'Leaks and drains.' } });
+    const mark = mockStore.requests.length;
+    await box.fill('Water heaters too.');
+    await screen.getByRole('button', { name: 'Send' }).click();
+
+    // The API refuses an answer to a question the interview has moved past: the page reads where it
+    // stands, and the words, which weren't applied, stay in the composer.
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}`, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Leaks and drains.', { exact: true })).toBeVisible();
+    await expect.element(box).toHaveValue('Water heaters too.');
+    await expect.element(screen.getByText('Question 2 of 7', { exact: true })).toBeVisible();
+    expect(requests('setupAnswer', mark).map((r) => r.body)).toEqual([{ question: 'what_you_do', text: 'Water heaters too.' }]);
+    expect(requests('setup', mark).length).toBeGreaterThan(0);
+    expect(screen.getByRole('log', { name: 'Setup questions' }).getByText('Water heaters too.', { exact: true }).elements()).toHaveLength(0);
+
+    // Sent again, they answer the question now asked.
+    await screen.getByRole('button', { name: 'Send' }).click();
+    await expect.element(screen.getByText(`Got it. ${SETUP_QUESTIONS[2]?.text ?? ''}`, { exact: true })).toBeVisible();
+    expect(requests('setupAnswer', mark).map((r) => r.body).at(-1)).toEqual({ question: 'hours_and_area', text: 'Water heaters too.' });
   });
 
   it('tool_turns_on_only_after_its_change_is_confirmed', async () => {
@@ -571,7 +603,7 @@ describe('setup', () => {
   /** Each step of a setup, as a test opens it: its path, and what shows once it is drawn. */
   async function everyStep(): Promise<{ name: string; path: string; ready: RegExp | string }[]> {
     const questions = await startInterview();
-    await mockStore.dispatch('setupAnswer', { params: { id: questions.interview_id }, body: { text: 'Leaks, drains and water heaters, around Oakland.' } });
+    await mockStore.dispatch('setupAnswer', { params: { id: questions.interview_id }, body: { question: 'what_you_do', text: 'Leaks, drains and water heaters, around Oakland.' } });
     const tools = await interviewAtTools();
     const { state: rules } = await interviewAtRules();
     const { state: safety } = await interviewAtSafety();
