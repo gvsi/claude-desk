@@ -721,6 +721,62 @@ describe('public chat page', () => {
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
   });
 
+  it('disclosure_stays_in_view_through_a_long_chat', async () => {
+    // The AI disclosure is part of the always-on baseline. However long the chat gets, and wherever
+    // the visitor is in it, the business's header and the disclosure stay on screen: the page is the
+    // window's height and never scrolls, and only the conversation scrolls, between them and the
+    // composer.
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PAGE, { viewport, seed: 'rivera' });
+      await ready(screen);
+      for (const text of LONG_CHAT) await say(screen, text);
+      await vi.waitFor(
+        () => {
+          expectHeaderAndDisclosureInView(screen, `${viewport}, at the end of the chat`);
+          expectEndAboveTheComposer(screen);
+        },
+        { timeout: 1_000 },
+      );
+
+      // Reading back up, to the middle of the chat and then to its start.
+      const region = chatScroller();
+      expect(region.scrollHeight, `${viewport}: the chat is long enough to scroll`).toBeGreaterThan(2 * region.clientHeight);
+      region.scrollTo({ top: (region.scrollHeight - region.clientHeight) / 2, behavior: 'instant' });
+      expectHeaderAndDisclosureInView(screen, `${viewport}, in the middle of the chat`);
+      region.scrollTo({ top: 0, behavior: 'instant' });
+      expectHeaderAndDisclosureInView(screen, `${viewport}, at the start of the chat`);
+      expectNoHorizontalScroll();
+    }
+  }, 30_000);
+
+  it('reload_on_a_phone_opens_at_the_newest_turn', async () => {
+    // A visitor on a phone reloads a long chat: it comes back from the stored conversation and opens
+    // at its newest turn, just above the composer, with the business's header and the AI disclosure
+    // still in view above it.
+    const first = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
+    await ready(first.screen);
+    for (const text of LONG_CHAT) await say(first.screen, text);
+    const conversation = () => document.querySelector('[role="log"]')?.textContent ?? '';
+    const before = conversation();
+    const rows = document.querySelectorAll('.cd-transcript-row').length;
+    expect(rows).toBe(2 * LONG_CHAT.length);
+
+    // A new page load, with the same visitor cookie.
+    const second = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(second.screen);
+    await vi.waitFor(() => expect(conversation()).toBe(before));
+    expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(rows);
+    await vi.waitFor(
+      () => {
+        expectHeaderAndDisclosureInView(second.screen, 'after the reload');
+        expectEndAboveTheComposer(second.screen);
+      },
+      { timeout: 1_000 },
+    );
+    expect(chatScroller().scrollTop, 'opened at the newest turn, not the first').toBeGreaterThan(0);
+    expectNoHorizontalScroll();
+  }, 30_000);
+
   it('reload_restores_the_conversation', async () => {
     const first = await renderRoute(PAGE);
     await ready(first.screen);
@@ -1211,6 +1267,39 @@ function chatScroller(): HTMLElement {
     if (overflowY === 'auto' || overflowY === 'scroll') return node;
   }
   throw new Error('the conversation has no scroll region of its own');
+}
+
+/** A chat long enough to scroll on any window: prices, a time, a booking, a callback, a discount and a hello. */
+const LONG_CHAT = [
+  'How much is drain clearing?',
+  'Can someone come Tuesday afternoon?',
+  'Book the first one',
+  'Can you call me back?',
+  'Can I get 15% off if I pay cash?',
+  'Hello there',
+] as const;
+
+/** The AI disclosure, as the page shows it in English. */
+const DISCLOSURE = "You're chatting with Claude, an AI answering for Rivera Plumbing. Ask for Maria Rivera anytime.";
+
+/** Whether `el` is wholly inside the window. */
+function inWindow(el: Element): boolean {
+  const { top, bottom, left, right } = el.getBoundingClientRect();
+  return top >= 0 && left >= 0 && bottom <= innerHeight && right <= innerWidth;
+}
+
+/**
+ * The page itself doesn't scroll (it is the window's height), and the business's header and the
+ * line with the AI disclosure are wholly on screen.
+ */
+function expectHeaderAndDisclosureInView(screen: RenderResult, where: string): void {
+  const header = screen.getByRole('banner').element();
+  const disclosure = screen.getByText(DISCLOSURE, { exact: true }).element();
+  expect({ pageHeight: document.documentElement.scrollHeight, header: inWindow(header), disclosure: inWindow(disclosure) }, where).toEqual({
+    pageHeight: innerHeight,
+    header: true,
+    disclosure: true,
+  });
 }
 
 /** Whether `el` is wholly in the part of `region` on screen. */
