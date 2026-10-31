@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from desk.api import rules
+from desk.api import rules, versions
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, owner_ctx, require_model_budget, runtime
 from desk.api.ratelimit import RateLimitLedger
 from desk.api.routes.setup import PROVING_RESPONSES, proving_answer
@@ -254,7 +254,7 @@ async def confirm_tools(desk_id: DeskId, body: ToolsConfirmIn, request: Request,
     checked = ToolsConfirmRequest(desk_id=ctx.desk(desk_id), **body.model_dump())
 
     async def work(owner: OwnerCtx, state: Runtime) -> ToolConfirmed:
-        return await owner.kernel.call("POST /tools/confirm", checked)
+        return await versions.confirm_tools(owner, checked)
 
     return await _drafting(request, ctx, desk_id, work, body=body, changes_rules=not body.enable)
 

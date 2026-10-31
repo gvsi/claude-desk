@@ -17,7 +17,7 @@ from desk.api.kernel_client import KernelUnavailable
 from desk.api.proving import AnswerError
 from desk.api.schemas import CardDiff, CoveringCard, RulesDraft, RulesSummary, ToolRow
 from desk.contracts import PolicyVersion, RuleCard, ToolProfile
-from desk.kernel_api import PolicyDraftRequest, ToolsConnectRequest
+from desk.kernel_api import PolicyDraftRequest, ToolConfirmed, ToolsConfirmRequest, ToolsConnectRequest
 
 TOOL_ROW_FIELDS = tuple(name for name in ToolRow.model_fields if name != "cards")
 
@@ -69,8 +69,14 @@ async def post_draft(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], expec
     check_always_on(cards)
     request = PolicyDraftRequest(desk_id=desk_id, cards=cards, expected_parent=expected_parent,
                                  auto_money_cap_cents=auto_money_cap_cents)
+    return await _proving_call(owner, "POST /policy/draft", request)
+
+
+async def _proving_call(owner: OwnerCtx, route: str, request: Any) -> Any:
+    """The kernel's answer to a request it proves a draft for; one that doesn't come in time is 409
+    `rules_cannot_be_checked`, since the proof may still be running. The kernel's refusals come back as they are."""
     try:
-        return await owner.kernel.call("POST /policy/draft", request)
+        return await owner.kernel.call(route, request)
     except KernelUnavailable as unavailable:
         if unavailable.status is None:                   # no answer in time: the proof may still be running
             raise ApiProblem(409, "rules_cannot_be_checked") from None
@@ -117,6 +123,19 @@ async def tool_rows(owner: OwnerCtx, desk_id: str, cards: Iterable[RuleCard]) ->
     """The Desk's tools as the kernel lists them, by name, each with the `cards` that cover it."""
     cards = list(cards)
     return [tool_row(row, cards) for row in await owner.ro.rows("tools", desk_id=desk_id, order_by=("tool",))]
+
+
+async def confirm_tools(owner: OwnerCtx, request: ToolsConfirmRequest) -> ToolConfirmed:
+    """The kernel's review of the owner's batch of pins. Enabling drafts a version the kernel proves, held to what
+    `post_draft` is: no answer in time, or a draft whose proof timed out or ran bounded (`checkable`), is 409
+    `rules_cannot_be_checked`, an error the proving routes don't keep, so the owner's retry asks the kernel again.
+    Disabling proves nothing, so its answer and errors come back as they are."""
+    if not request.enable:
+        return await owner.kernel.call("POST /tools/confirm", request)
+    confirmed = await _proving_call(owner, "POST /tools/confirm", request)
+    if confirmed.draft is not None:
+        checkable(confirmed.draft)
+    return confirmed
 
 
 async def connect_payments(owner: OwnerCtx, desk_id: str) -> list[ToolRow]:

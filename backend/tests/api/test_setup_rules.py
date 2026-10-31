@@ -14,12 +14,15 @@ tool review goes through the owner's policy route, drafting enables until explic
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, time, timedelta
 from time import monotonic
+from types import SimpleNamespace
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -29,7 +32,9 @@ from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text as sql
 
 from desk.api import proving
-from desk.api.deps import ApiProblem
+from desk.api.deps import ApiProblem, OwnerCtx, owner_ctx, proving_work
+from desk.api.kernel_client import KernelFailed, KernelUnavailable
+from desk.api.main import _install_error_handlers as install_error_handlers
 from desk.api.main import create_app
 from desk.api.prompts import (
     CARD_DRAFT_SYSTEM,
@@ -46,11 +51,25 @@ from desk.api.prompts import (
     SetupAnswers,
     SituationDraft,
 )
+from desk.api.routes import rules as rules_routes
 from desk.api.schemas import RulesDraft, SafetyCheck, SetupTools, SituationResult, ToolRow
 from desk.api.setup import after_hours_start, calendar_slots, price_items
 from desk.api.setup_templates import SAFETY_PROBES, template_cards
-from desk.contracts import ITEM_ID_PATTERN, SLOT_ID_PATTERN, HoursWindow, PolicyVersion, RuleCard
-from desk.kernel_api import PolicyConfirmRequest, PolicyDraftRequest, PolicyProbeRequest, ToolConfirmed
+from desk.contracts import (
+    ITEM_ID_PATTERN,
+    SLOT_ID_PATTERN,
+    HoursWindow,
+    PolicyVersion,
+    ProofCheck,
+    ProofReport,
+    RuleCard,
+)
+from desk.kernel_api import (
+    PolicyConfirmRequest,
+    PolicyDraftRequest,
+    PolicyProbeRequest,
+    ToolConfirmed,
+)
 from desk.presets import PRESETS
 from tests.api.fakes import ScriptedModel, gated, response
 from tests.api.fakes import text as text_block
@@ -1292,6 +1311,99 @@ async def test_setup_tool_review_uses_shared_batch_validation(app, browser, fake
     reply = await owner.browser.post(f"/api/owner/policy/{state['desk_id']}/tools/confirm", json=body)
     assert (reply.status_code, reply.json()) == (422, {"error": "invalid"})
     assert fake.called("POST /tools/confirm") == []
+
+
+# Batch tool review on the real policy router and proving tasks, without a database: the owner's context is given and
+# its kernel view answers `POST /tools/confirm` from a script.
+TOOL_REVIEW_PATH = "/api/owner/policy/desk-1/tools/confirm"
+TOOL_REVIEW_BODY = {"tools": [{"tool": "payments.create_refund", "definition_sha256": "a" * 64}], "enable": True}
+PROVED = ProofReport(ok=True, method="symcc", checks=[ProofCheck(name="baseline", ok=True)])
+
+
+def tool_review(proof: ProofReport) -> ToolConfirmed:
+    """The kernel's answer to an enabling batch: the tool still `needs_review` and a draft carrying `proof`."""
+    status = "draft" if proof.method == "bounded" else "proved" if proof.ok else "rejected"
+    draft = PolicyVersion(desk_id="desk-1", version=2, parent_version=1, cards=[], cedar_sha256="c" * 64,
+                          schema_sha256="d" * 64, baseline_sha256="e" * 64, profiles_sha256="f" * 64,
+                          invariants_sha256="0" * 64, review_thresholds_version=1, status=status, proof=proof)
+    profile = tool_profile("payments.create_refund").model_copy(update={"status": "needs_review",
+                                                                        "review_reason": "new"})
+    return ToolConfirmed(profiles=[profile], draft=draft)
+
+
+class ToolReviewKernel:
+    """The owner's kernel view: each call takes the next scripted answer, raising it when it is an error."""
+
+    def __init__(self, *answers: ToolConfirmed | Exception):
+        self.answers, self.calls = list(answers), []
+
+    async def call(self, route: str, request: Any) -> Any:
+        self.calls.append((route, request))
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+class NoDatabase:
+    @contextlib.asynccontextmanager
+    async def connect(self) -> AsyncIterator[None]:
+        yield None
+
+
+@contextlib.asynccontextmanager
+async def tool_review_client(kernel: ToolReviewKernel) -> AsyncIterator[httpx.AsyncClient]:
+    app = FastAPI()
+    install_error_handlers(app)
+    app.include_router(rules_routes.policy_router)
+    owner = OwnerCtx(copy_id="copy-1", desk_ids=("desk-1",), owner_session_id="owner-session", owner_generation=1,
+                     kernel=kernel, ro=None)
+    app.dependency_overrides[owner_ctx] = lambda: owner
+
+    async def admitted(*args: Any, **kwargs: Any) -> None:
+        pass
+
+    state = SimpleNamespace(proving=proving_work(), settings=SimpleNamespace(kernel_ro_schema="kernel_ro"),
+                            limiter=SimpleNamespace(enforce=admitted), database=NoDatabase)
+    state.started = lambda: state
+    app.state.runtime = state
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        yield client
+
+
+@pytest.mark.parametrize("unchecked", [
+    tool_review(ProofReport(ok=False, method="symcc", timed_out=True, checks=[])),
+    tool_review(ProofReport(ok=True, method="bounded", cases=1_000, checks=[ProofCheck(name="baseline", ok=True)])),
+    KernelUnavailable("POST /tools/confirm"),
+], ids=["timed_out", "bounded", "no_answer_in_time"])
+async def test_tool_review_that_cannot_be_checked_is_not_kept_and_a_retry_proves_it(unchecked):
+    # A draft whose proof couldn't run to the end, or a kernel that didn't answer in time, is "Rules can't be checked
+    # right now", as every other draft is, rather than an answer kept for ten minutes (or a 503): the owner's retry
+    # reaches the kernel and takes the proved draft.
+    kernel = ToolReviewKernel(unchecked, tool_review(PROVED))
+    async with tool_review_client(kernel) as client:
+        reply = await client.post(TOOL_REVIEW_PATH, json=TOOL_REVIEW_BODY)
+        assert (reply.status_code, reply.json()) == (409, {"error": "rules_cannot_be_checked"})
+        reply = await client.post(TOOL_REVIEW_PATH, json=TOOL_REVIEW_BODY)
+    assert reply.status_code == 200, reply.text
+    assert ToolConfirmed.model_validate(reply.json()) == tool_review(PROVED)
+    assert len(kernel.calls) == 2
+
+
+@pytest.mark.parametrize(("enable", "failure", "status", "error"), [
+    (True, KernelFailed(409, "conflict"), 409, {"error": "kernel", "code": "conflict"}),
+    (True, KernelUnavailable("POST /tools/confirm", 503), 503, {"error": "kernel", "code": "kernel_unavailable"}),
+    (False, KernelFailed(422, "invalid"), 422, {"error": "kernel", "code": "invalid"}),
+    (False, KernelUnavailable("POST /tools/confirm"), 503, {"error": "kernel", "code": "kernel_unavailable"}),
+], ids=["enable_refused", "enable_kernel_down", "disable_refused", "disable_no_answer_in_time"])
+async def test_tool_review_passes_kernel_refusals_through(enable, failure, status, error):
+    # Only an enabling batch drafts a version to prove: the kernel's refusals of either come back as they are, and a
+    # disabling batch that got no answer in time is the kernel being unavailable, not rules that can't be checked.
+    kernel = ToolReviewKernel(failure)
+    async with tool_review_client(kernel) as client:
+        reply = await client.post(TOOL_REVIEW_PATH, json={**TOOL_REVIEW_BODY, "enable": enable})
+    assert (reply.status_code, reply.json()) == (status, error)
+    assert len(kernel.calls) == 1
 
 
 async def test_an_answer_error_is_kept_for_one_retry_without_its_frames():
