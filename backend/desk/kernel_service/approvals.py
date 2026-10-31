@@ -226,6 +226,9 @@ async def cancel(ctx: KernelCtx, session_row: SessionRow, decision_id: str) -> D
                         named=named)
     row = await execute.refresh_decision(ctx, row)
     if row.state != "held":
+        # a reconciliation in the read may have committed, so the owner could close the session since its
+        # check: a closed session is answered as closed, never with the decision's state
+        await ctx.recheck()
         await ledger.append(ctx, copy_id=row.copy_id, desk_id=row.desk_id, event=LedgerEvent(
             kind="decide", origin="kernel", session_id=row.session_id, ref_id=row.decision_id,
             summary={"decision_id": row.decision_id, "cancel_refused": row.state}))

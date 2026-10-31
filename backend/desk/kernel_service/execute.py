@@ -369,7 +369,10 @@ async def _refused_at_execution(ctx: KernelCtx, target: _Target, check: str) -> 
 
 
 async def _not_runnable(ctx: KernelCtx, row: DecisionRow, refused: str) -> KernelFailure:
-    """A decision in no state to run (409), ledgered, with what reading it settled committed."""
+    """A decision in no state to run (409), ledgered, with what reading it settled committed. A
+    reconciliation in the read may have committed, so the owner could close the session since its
+    check: a closed session is answered as closed first (`ctx.recheck`), never with the state."""
+    await ctx.recheck()
     await _note(ctx, row, {"decision_id": row.decision_id, "refused": refused})
     await ctx.db.commit()
     return KernelFailure(409, "conflict", f"not_runnable:{refused}")

@@ -421,8 +421,8 @@ async def test_a_reconciliation_stands_when_the_read_that_settled_it_is_refused(
     monkeypatch.setattr(execute, "reconcile_orphans", paused_after(execute.reconcile_orphans, paused, go_on))
     reading = asyncio.create_task(client.get(f"/decisions/{allowed.decision_id}", headers=visitor.headers))
     await asyncio.wait_for(paused.wait(), timeout=5)
-    # the Desk is deleted while the read goes on, straight to its row: the route would wait for the session row
-    # the read holds from authentication (its `last_seen_at`)
+    # the Desk is deleted while the read goes on, straight to its row (once the read's reconciliation commits it
+    # holds no session row, so the route itself could close the session here too, as the closing tests below do)
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         [desk] = await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == rows.desk_id)))
@@ -462,3 +462,72 @@ async def test_a_record_commits_whatever_happens_to_its_session(app, client, mon
                                                          {"limit": "visitor_message"})
     after = await get_context(client, visitor.session_id, visitor.headers)
     assert (after.status_code, after.json()) == (409, {"code": "closed"})
+
+
+NEW_CONTACT = {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield", "contact": "dana.w@example.net"}]}
+
+
+async def closed_mid_read(client: httpx.AsyncClient, rows, monkeypatch, request: Callable[[], Awaitable[httpx.Response]]
+                          ) -> httpx.Response:
+    """`request`'s answer when the owner gives the session's person another contact (closing the session) right
+    after the read's reconciliation commits: from then on the read holds no session row, so the write doesn't wait."""
+    from .test_desk_writes import put_part
+    paused, go_on = asyncio.Event(), asyncio.Event()
+    monkeypatch.setattr(execute, "reconcile_orphans", paused_after(execute.reconcile_orphans, paused, go_on))
+    task = asyncio.create_task(request())
+    await asyncio.wait_for(paused.wait(), timeout=5)
+    changed = await asyncio.wait_for(put_part(client, rows, "people", NEW_CONTACT), timeout=5)
+    assert changed.status_code == 200, changed.text
+    go_on.set()
+    return await asyncio.wait_for(task, timeout=5)
+
+
+async def verified_fake_quote_desk(app: FastAPI, client: httpx.AsyncClient):
+    from .fakes import FakeAdapter
+    from .helpers import verify_session
+    from .test_approvals import add_person
+    from .test_compiler import card
+    from .test_decide import desk_with, open_visitor
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    visitor = await open_visitor(client, rows)
+    dana = await add_person(app, rows, "dana", "Dana Whitfield")
+    await verify_session(app, rows.copy_id, visitor.session_id, dana)
+    return quote, rows, visitor
+
+
+async def test_a_cancel_closed_mid_read_answers_closed(app, client, registry, monkeypatch, frozen_clock):
+    # after a cancel's reconciliation commits, a session the owner closed meanwhile is answered as closed,
+    # never with its decision's state
+    from desk.kernel_service.adapters.base import AdapterResult
+    from desk.contracts import Claim, Fact
+    from desk.kernel_service import labels
+    from .test_decide import decided
+    from .test_execute import leave_an_intent
+    quote, rows, visitor = await verified_fake_quote_desk(app, client)
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
+    await leave_an_intent(app, client, monkeypatch, "stored", visitor, allowed, rows.copy_id)
+    frozen_clock.advance(31)                                    # no execution is running it now
+    quote.script["reconcile"] = lambda xctx, action: AdapterResult(
+        facts=[Fact(fact_id="quote:rec-1", kind="quote", status="available", source="kernel",
+                    claims=[Claim(key="title", kind="text", value="a quote")],
+                    label=labels.new_fact_label(xctx.session_row))], model_view={"ok": True})
+    response = await closed_mid_read(client, rows, monkeypatch, lambda: client.post(
+        f"/decisions/{allowed.decision_id}/cancel", headers=visitor.headers, json={"session_id": visitor.session_id}))
+    assert (response.status_code, response.json()) == (409, {"code": "closed"})
+
+
+async def test_a_retry_still_unknown_closed_mid_read_answers_closed(app, client, registry, monkeypatch, frozen_clock):
+    # a retry of an unknown allow whose adapter still can't say: its reconciliation commits, the owner closes the
+    # session, and the retry's refusal answers closed, not conflict
+    from desk.kernel_service.adapters.base import AdapterUnknown
+    from .test_decide import decided
+    from .test_execute import executed, post_execute
+    quote, rows, visitor = await verified_fake_quote_desk(app, client)
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
+    quote.script["execute"] = RuntimeError("lost")
+    assert (await executed(client, visitor, allowed)).state == "unknown"
+    quote.script["reconcile"] = AdapterUnknown("still")
+    frozen_clock.advance(1)                                     # the read writes last_seen_at, locking its row
+    response = await closed_mid_read(client, rows, monkeypatch, lambda: post_execute(client, visitor, allowed))
+    assert (response.status_code, response.json()) == (409, {"code": "closed"})
