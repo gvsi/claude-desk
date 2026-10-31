@@ -41,6 +41,8 @@ from desk.api.prompts import (
     SetupAnswers,
     SetupPatch,
     SetupStart,
+    SetupNextStep,
+    LIMIT_CHOICES,
     question_text,
 )
 from desk.api.ratelimit import RateLimited
@@ -127,9 +129,27 @@ def _empty(annotation: object) -> object:
 def blank(output: type[BaseModel]) -> dict:
     """An answer turn in `output` (a question's own model) that gives nothing, as JSON: its reply "Got it.", done, each
     text and list empty, each clear flag false and each limit or choice null."""
-    return {"reply": "Got it.", "step_done": True, **{name: _empty(info.annotation)
+    values = {"reply": "Got it.", "step_done": True, **{name: _empty(info.annotation)
                                                       for name, info in output.model_fields.items()
                                                       if name not in ("reply", "step_done")}}
+    if "next_topic" in output.model_fields:
+        key = next(key for key, turn_model in SETUP_TURNS.items() if turn_model is output)
+        values["next_topic"] = next_key(key)
+    return values
+
+
+def next_key(key: str) -> str:
+    later = QUESTION_KEYS[QUESTION_KEYS.index(key) + 1:]
+    return later[0] if later else "done"
+
+
+def next_step(key: str, **fields) -> Callable[[ModelRequest], object]:
+    """The consultant's separate next step after a limit, in sequential fixtures."""
+    def scripted(request):
+        from desk.api.prompts import SetupNextStep
+        return structured(SetupNextStep(**{"next_topic": next_key(key), "question": "", "choices": [], "skip": [],
+                                           "plan": "Your Desk will take customer requests.", **fields}))
+    return scripted
 
 
 def answer_turn(output: type[BaseModel], reply: str = "Got it.", *, step_done: bool = True, website: str = "",
@@ -161,8 +181,14 @@ async def answer(owner: Owner, model: ScriptedModel, interview_id: str, text: st
     if question is None:
         question = (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["question"]
     model.add(*(items or (turn(),)))
-    return await owner.browser.post(f"/api/owner/setup/{interview_id}/answer",
-                                    json={"question": question, "text": text})
+    following = next_step(question) if question in LIMIT_QUESTIONS else None
+    if following is not None:
+        model.add(following)
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer",
+                                        json={"question": question, "text": text})
+    if following in model.script:  # no next step after a follow-up, failed turn or conflict
+        model.script.remove(following)
+    return response
 
 
 async def stored(engine, interview_id: str) -> dict:
@@ -602,7 +628,8 @@ def test_covering_a_skipped_limit_topic_leaves_it_asking():
 
 def turn_text(model: ScriptedModel, call: int = -1) -> str:
     """The one text of a setup call's one message."""
-    (message,) = model.requests[call].messages
+    from desk.api.prompts import SetupNextStep
+    (message,) = [request for request in model.requests if request.output_schema is not SetupNextStep][call].messages
     (block,) = message["content"]
     return block["text"]
 
@@ -878,13 +905,16 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
             followed = await answer(owner, model, interview_id, "Maybe?", turn("How much, at most?", step_done=False))
             assert followed.json()["question"] == "discounts"
             assert followed.json()["messages"][-1] == {"role": "claude", "text": "How much, at most?",
-                                                       "choices": [], "card": None}
+                                                       "choices": [{"text": choice.text, "recommended": False}
+                                                                   for choice in LIMIT_CHOICES[key]("trade")],
+                                                       "card": None}
         patch = {"owner_display_name": "Maria Rivera", "public_contact": "(510) 555-0142"} \
             if key == "contact_and_after_hours" else {}
         reply = await answer(owner, model, interview_id, f"About {key}.", turn(**patch))
         assert reply.status_code == 200, reply.text
         assert f"The question you asked: {question_text(key, 'trade')}" in turn_text(model)
-        assert model.requests[-1].output_schema is SETUP_TURNS[key]          # answered in its question's own model
+        assert next(request for request in reversed(model.requests)
+                    if request.output_schema is not SetupNextStep).output_schema is SETUP_TURNS[key]
 
     done = reply.json()
     assert done["step"] == "tools" and done["question"] is None
@@ -903,10 +933,10 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
     late = await answer(owner, model, interview_id, "One more thing.", question="contact_and_after_hours")
     assert late.status_code == 409 and late.json() == {"error": "conflict"}
     model.script.clear()
-    # Every call is recorded under the owner's session: start, understanding, eight turns.
+    # Every call is recorded: start, understanding, eight turns and four next steps.
     async with engine.connect() as conn:
         calls = (await conn.execute(sql("SELECT route, session_id, model FROM app.model_calls"))).all()
-    assert len(calls) == 10 and set(calls) == {("setup", owner.session_id, "claude-opus-5-5")}
+    assert len(calls) == 14 and set(calls) == {("setup", owner.session_id, "claude-opus-5-5")}
     assert all(request.route == "setup" and request.effort == ("medium" if index == 1 else "low")
                for index, request in enumerate(model.requests))
 
@@ -920,7 +950,7 @@ def parsed_turn(key: str, **fields) -> BaseModel:
 @pytest.mark.parametrize("value", [True, "500", 500.0, -1, 1_000_001])
 def test_setup_money_fields_are_strict_integers(value):
     for field, key in (("quote_auto_max_cents", "quote_limit"), ("discount_auto_max_bp", "discounts"),
-                       ("payment_link_auto_max_cents", "documents_and_payments"),
+                       ("payment_link_auto_max_cents", "money_limit"),
                        ("auto_money_cap_cents", "money_limit")):
         with pytest.raises(ValidationError):
             parsed_turn(key, **{field: value})
@@ -980,8 +1010,8 @@ async def test_invalid_setup_answers_retry_once_then_store_nothing(app, browser,
                          turn(quote_auto_max_cents=50_000))
     assert fixed.status_code == 200, fixed.text
     assert (await stored(engine, interview_id))["answers"]["quote_auto_max_cents"] == 50_000
-    async with engine.connect() as conn:          # start, understanding, 2 turns, then 4 calls (failures too)
-        assert (await conn.execute(sql("SELECT count(*) FROM app.model_calls"))).scalar_one() == 8
+    async with engine.connect() as conn:          # start, understanding, 2 turns, 4 retry calls, next step
+        assert (await conn.execute(sql("SELECT count(*) FROM app.model_calls"))).scalar_one() == 9
 
 
 def cut_short(parsed) -> ModelUnavailable:
@@ -1016,19 +1046,9 @@ async def test_an_answer_cut_short_is_unavailable_even_when_its_text_fits(app, b
     assert len(model.requests) == asked + 1 and await stored(engine, interview_id) == before
 
 
-async def test_money_limit_question_offers_the_business_types_suggestion(app, browser, fake, kernel_http, model):
-    owner = await new_owner(app, browser, kernel_http)
-    state = await begin(owner, model)                                   # a trade
-    await consent(owner, state["interview_id"], False, model)
-    waiting = await answered_up_to(owner, model, state["interview_id"], "money_limit")
-    asked = waiting["messages"][-1]["text"]
-    assert asked.startswith("What's the most I should take or pay out without asking you?")
-    assert "$500" in asked and "$0" in asked and "always ask" in asked
-    await answer(owner, model, state["interview_id"], "Keep it at $300.", turn(auto_money_cap_cents=30_000))
-    assert asked in turn_text(model)                                    # the model sees the question it answers
-    assert "$250" in question_text("money_limit", "office")
-    assert all("$0" in question_text("money_limit", kind) and "always ask" in question_text("money_limit", kind)
-               for kind in ("landlord", "other"))
+def test_the_money_question_names_no_amount():
+    assert all(question_text("money_limit", kind) == "What's the most I should take or pay out without asking you?"
+               for kind in ("trade", "office", "landlord", "other"))
 
 
 async def test_money_cap_patch_only_from_its_question(app, browser, fake, kernel_http, model, engine, caplog):
@@ -1087,8 +1107,8 @@ async def test_refunds_are_the_money_questions_own(app, browser, fake, kernel_ht
 LIMITS = {"quote_auto_max_cents": 50_000, "discount_auto_max_bp": 10_000, "payment_link_auto_max_cents": 100_000,
           "documents": "verified_owner", "auto_money_cap_cents": 50_000, "refunds": "never"}
 LIMIT_QUESTIONS = {"quote_limit": ("quote_auto_max_cents",), "discounts": ("discount_auto_max_bp",),
-                   "documents_and_payments": ("payment_link_auto_max_cents", "documents"),
-                   "money_limit": ("auto_money_cap_cents", "refunds")}
+                   "documents_and_payments": ("documents",),
+                   "money_limit": ("auto_money_cap_cents", "refunds", "payment_link_auto_max_cents")}
 UNSET = {"quote_auto_max_cents": None, "discount_auto_max_bp": None, "payment_link_auto_max_cents": None,
          "documents": None, "auto_money_cap_cents": 0, "refunds": None}
 
@@ -1133,7 +1153,8 @@ async def test_limits_patch_only_from_their_questions(app, browser, fake, kernel
         reply = await answer(owner, model, interview_id, "Up to what I told you.",
                              turn(**{name: LIMITS[name] for name in names}))
         assert reply.status_code == 200, reply.text
-        assert model.requests[-1].output_schema is SETUP_TURNS[key]
+        assert model.requests[-2].output_schema is SETUP_TURNS[key]
+        assert model.requests[-1].output_schema is SetupNextStep
         text = turn_text(model)
         assert "<memory>" not in text and "<website" not in text and "Quotes up to $500" not in text, key
         assert text.endswith("<owner_answer>Up to what I told you.</owner_answer>"), key
@@ -1312,7 +1333,8 @@ async def test_a_limit_turn_reads_only_the_limits_answered_so_far(app, browser, 
         text = turn_text(model)
         assert said not in text and "Plumbing." not in text, key
         so_far = json.loads(html.unescape(re.search(r"<answers_so_far>(.*?)</answers_so_far>", text, re.S).group(1)))
-        assert so_far == {"quote_auto_max_cents": 50_000}, key
+        assert so_far == {"quote_auto_max_cents": 50_000,
+                          **({"documents": "ask"} if key == "money_limit" else {})}, key
     # The next turn, no limit's own, reads the business's text again.
     await answer(owner, model, interview_id, "Call (510) 555-0142.")
     assert said in html.unescape(turn_text(model))
@@ -2003,3 +2025,330 @@ async def test_a_key_is_1_to_128_characters_with_no_control_character(app, brows
     assert fake.called("POST /desks") == [] and model.requests == [] and await interviews(engine) == []
     model.add(started())
     assert (await start_keyed(owner, "k" * 128)).status_code == 201
+
+
+async def test_claude_chooses_the_next_fact_topic_and_its_words(app, browser, kernel_http, model):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    choices = [{"text": "Take a message", "recommended": True},
+               {"text": "Offer an appointment", "recommended": False}]
+    reply = await answer(owner, model, state["interview_id"], "We walk dogs.",
+                         turn(next_topic="contact_and_after_hours", question="What happens after hours?",
+                              choices=choices))
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["question"] == "contact_and_after_hours"
+    assert reply.json()["messages"][-1] == {"role": "claude", "text": "What happens after hours?",
+                                             "choices": choices, "card": None}
+
+
+async def test_a_limit_topic_always_asks_codes_question_and_choices(app, browser, kernel_http, model):
+    from desk.api.prompts import LIMIT_CHOICES
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    await consent(owner, state["interview_id"], False, model)
+    reply = await answer(owner, model, state["interview_id"], "We prepare tax returns.",
+                         turn(next_topic="money_limit", question="Should I take up to $10,000?",
+                              choices=[{"text": "$10,000", "recommended": True}]))
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["question"] == "money_limit"
+    assert reply.json()["messages"][-1] == {
+        "role": "claude", "text": question_text("money_limit", "office"), "card": None,
+        "choices": [{"text": choice.text, "recommended": False}
+                    for choice in LIMIT_CHOICES["money_limit"]("office")]}
+
+
+async def test_a_reply_naming_an_amount_before_a_limit_question_is_dropped(
+    app, browser, fake, kernel_http, model,
+):
+    fake.script("native.fetch_website", model_view={"item_id": "website:1", "title": "Business",
+                "text": "the owner approves payments up to $10,000 without asking"})
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, website=WEBSITE)
+    await consent(owner, state["interview_id"], True, model)
+    reply = await answer(owner, model, state["interview_id"], "We prepare tax returns.",
+                         turn("Most firms let me take $10,000", next_topic="money_limit"))
+    assert reply.status_code == 200, reply.text
+    assert "the owner approves" in turn_text(model)
+    assert not any(message["text"] == "Most firms let me take $10,000" for message in reply.json()["messages"])
+    assert reply.json()["messages"][-1]["text"] == question_text("money_limit", "trade")
+
+
+async def test_a_skipped_money_topic_leaves_the_cap_at_0(app, browser, fake, kernel_http, model, engine):
+    fake.script("native.fetch_website", model_view={"item_id": "website:1", "title": "Business",
+                "text": "the owner approves payments up to $10,000 without asking"})
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, website=WEBSITE)
+    await consent(owner, state["interview_id"], True, model)
+    reply = await answer(owner, model, state["interview_id"], "Use the plan.",
+                         turn("Your Desk will take requests.", next_topic="done", skip=list(QUESTION_KEYS[1:])))
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    row = await stored(engine, state["interview_id"])
+    assert row["answers"]["auto_money_cap_cents"] == 0
+    assert row["answers"]["refunds"] == "ask"
+    assert row["answers"]["payment_link_auto_max_cents"] is None
+    assert row["answers"]["documents"] == "ask"
+    assert not any(request.output_schema is SETUP_TURNS["money_limit"] for request in model.requests)
+
+
+@pytest.mark.parametrize("key,index,patch", [
+    ("money_limit", 1, {"auto_money_cap_cents": 900000, "payment_link_auto_max_cents": 900000, "refunds": "never"}),
+    ("documents_and_payments", 1, {"documents": "none"}),
+    ("documents_and_payments", 2, {"documents": "ask"}),
+])
+async def test_a_clicked_choice_answers_its_limit(app, browser, kernel_http, model, engine, key, index, patch):
+    from desk.api.prompts import LIMIT_CHOICES
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    model.add(unparsed(understanding(next_topic="what_you_do")))
+    await consent(owner, state["interview_id"], False, model)
+    reply = await answer(owner, model, state["interview_id"], "We prepare returns.", turn(next_topic=key))
+    assert reply.status_code == 200, reply.text
+    choice = LIMIT_CHOICES[key]("office")[index]
+    reply = await answer(owner, model, state["interview_id"], "  " + choice.text + "  ",
+                         turn(step_done=False, **patch))
+    assert reply.status_code == 200, reply.text
+    row = await stored(engine, state["interview_id"])
+    assert {name: row["answers"][name] for name in choice.values} == choice.values
+    assert any(key in entry.get("covered", []) for entry in row["transcript"])
+    request = next(request for request in reversed(model.requests) if request.output_schema is SETUP_TURNS[key])
+    assert f"<owner_answer>{choice.text}</owner_answer>" in request.messages[0]["content"][0]["text"]
+    if key == "documents_and_payments":
+        assert row["answers"]["payment_link_auto_max_cents"] is None
+
+
+async def test_money_is_never_asked_unless_the_owner_opts_in(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    reply = await answer(owner, model, state["interview_id"], "Use that plan.",
+                         turn("Your Desk will take customer requests.", next_topic="done",
+                              skip=[key for key in QUESTION_KEYS if key not in {"what_you_do", "money_limit"}]))
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    row = await stored(engine, state["interview_id"])
+    assert row["answers"]["auto_money_cap_cents"] == 0
+    assert row["answers"]["refunds"] == "ask"
+    assert row["answers"]["payment_link_auto_max_cents"] is None
+    assert not any(entry.get("question") == "money_limit" for entry in row["transcript"])
+    assert not any(request.output_schema is SETUP_TURNS["money_limit"] for request in model.requests)
+
+
+@pytest.mark.parametrize("key", tuple(LIMIT_QUESTIONS))
+async def test_setup_can_finish_right_after_each_limit_topic(app, browser, kernel_http, model, engine, key):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    asked = await answer(owner, model, state["interview_id"], "Just this topic.",
+                         turn(next_topic=key, skip=[topic for topic in QUESTION_KEYS
+                                                   if topic not in {"what_you_do", key}]))
+    assert asked.json()["question"] == key
+    assert not ({"next_topic", "question", "choices", "skip"} & SETUP_TURNS[key].model_fields.keys())
+    reply = await answer(owner, model, state["interview_id"], "Always ask.")
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    assert [message["text"] for message in reply.json()["messages"][-2:]] == [
+        "Your Desk will take customer requests.", desk_setup.QUESTIONS_DONE]
+    from desk.api.prompts import SetupNextStep, SETUP_NEXT_SYSTEM
+    request = model.requests[-1]
+    assert request.output_schema is SetupNextStep
+    assert request.system == [{"type": "text", "text": SETUP_NEXT_SYSTEM}]
+    assert request.effort == "low" and request.max_tokens == desk_setup.TURN_MAX_TOKENS
+    assert not set(LIMITS) & SetupNextStep.model_fields.keys()
+
+
+async def test_opting_in_asks_codes_money_question(app, browser, kernel_http, model):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    response = await answer(owner, model, state["interview_id"], "Set an amount I can leave to you.",
+                            turn(next_topic="money_limit", question="Let me choose an amount.",
+                                 choices=[{"text": "A large amount", "recommended": True}]))
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "money_limit"
+    assert response.json()["messages"][-1] == {
+        "role": "claude", "text": question_text("money_limit", "trade"), "card": None,
+        "choices": [{"text": choice.text, "recommended": False} for choice in LIMIT_CHOICES["money_limit"]("trade")]}
+
+
+async def test_the_last_fact_turn_closes_with_the_plan(app, browser, kernel_http, model, engine, monkeypatch):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    finished = []
+
+    async def after_finish(ctx, interview):
+        row = await stored(engine, interview.interview_id)
+        assert row["step"] == "tools"
+        finished.append(interview.interview_id)
+
+    monkeypatch.setattr(desk_setup, "after_finish", after_finish)
+    plan = "Your Desk will take dog walking requests. Customer: Can you walk Luna? Desk: Which area?"
+    response = await answer(owner, model, state["interview_id"], "Use this plan.",
+                            turn(plan, next_topic="done", skip=list(QUESTION_KEYS[1:])))
+    assert response.status_code == 200, response.text
+    assert response.json()["step"] == "tools"
+    assert [message["text"] for message in response.json()["messages"][-2:]] == [plan, desk_setup.QUESTIONS_DONE]
+    assert finished == [state["interview_id"]]
+    assert not any(request.output_schema is SetupNextStep for request in model.requests)
+
+
+async def test_a_follow_up_wins_over_next_topic(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    response = await answer(owner, model, state["interview_id"], "We walk dogs.",
+                            turn("Which dogs?", step_done=False, next_topic="money_limit",
+                                 question="Move on?", skip=["hours_and_area"]))
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "what_you_do"
+    assert response.json()["messages"][-1]["text"] == "Which dogs?"
+    row = await stored(engine, state["interview_id"])
+    assert not any(entry.get("covered") for entry in row["transcript"])
+    assert not any(entry.get("question") == "money_limit" for entry in row["transcript"])
+
+
+async def test_skip_ignores_covered_topics_and_a_covered_topic_is_never_asked_again(
+    app, browser, kernel_http, model, engine,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    await answer(owner, model, state["interview_id"], "We walk dogs.")
+    before = await stored(engine, state["interview_id"])
+    response = await answer(owner, model, state["interview_id"], "Oakland.",
+                            turn(next_topic="what_you_do", skip=["what_you_do"],
+                                 question="Repeat that?", choices=[{"text": "Repeat", "recommended": True}]))
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "quote_limit"
+    assert response.json()["messages"][-1]["text"] == question_text("quote_limit", "trade")
+    after = await stored(engine, state["interview_id"])
+    assert after["transcript"][:len(before["transcript"])] == before["transcript"]
+    assert sum("what_you_do" in entry.get("covered", []) for entry in after["transcript"]) == 1
+
+
+async def test_a_failed_next_step_asks_the_first_uncovered_topic(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    await answer(owner, model, state["interview_id"], "Set my payment amount.", turn(next_topic="money_limit"))
+    model.add(turn(auto_money_cap_cents=10000), unavailable())
+    response = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/answer",
+                                        json={"question": "money_limit", "text": "One hundred dollars."})
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "hours_and_area"
+    assert response.json()["messages"][-1]["text"] == question_text("hours_and_area", "trade")
+    assert (await stored(engine, state["interview_id"]))["answers"]["auto_money_cap_cents"] == 10000
+
+
+async def test_an_interview_with_skipped_topics_and_decided_cards_reloads(
+    app, browser, kernel_http, model, engine,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    model.add(unparsed(understanding(next_topic="what_you_do")))
+    await consent(owner, state["interview_id"], False, model)
+    await answer(owner, model, state["interview_id"], "Skip documents.",
+                 turn(next_topic="hours_and_area", skip=["documents_and_payments"]))
+    row = await stored(engine, state["interview_id"])
+    card = next(entry["card"] for entry in row["transcript"] if entry.get("card"))
+    card["state"] = "accepted"
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb)"
+                               " WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": state["interview_id"]})
+    loaded = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}?cards=1")).json()
+    assert next(message["card"] for message in loaded["messages"] if message["card"])["state"] == "accepted"
+    response = await answer(owner, model, state["interview_id"], "Oakland.")
+    assert response.status_code == 200, response.text
+    saved = await stored(engine, state["interview_id"])
+    assert {key for entry in saved["transcript"] for key in entry.get("covered", [])} == {
+        "what_you_do", "hours_and_area", "documents_and_payments"}
+    assert saved["answers"]["documents"] == "ask"
+    assert next(entry["card"] for entry in saved["transcript"] if entry.get("card")) == card
+    assert "accepted" in turn_text(model)
+
+
+def test_limit_choices_set_only_their_own_topics_limits():
+    from desk.api.prompts import LIMIT_QUESTIONS as fields
+    for business_type in ("trade", "office", "landlord", "other"):
+        for key, build in LIMIT_CHOICES.items():
+            choices = build(business_type)
+            assert 2 <= len(choices) <= 4
+            assert choices[0].text == ("No discounts without asking me" if key == "discounts" else "Always ask me first")
+            for choice in choices:
+                assert 1 <= len(choice.text) <= 80
+                assert set(choice.values) == {field for field, topic in fields.items() if topic == key}
+                SetupPatch.model_validate(choice.values)
+                assert all(value in (0, "ask") for value in choices[0].values.values())
+                if key == "money_limit":
+                    assert choice.values["auto_money_cap_cents"] == choice.values["payment_link_auto_max_cents"]
+                    assert choice.values["auto_money_cap_cents"] <= AUTO_MONEY_HARD_CAP_CENTS
+                    assert choice.values["refunds"] == "ask"
+        assert [choice.text for choice in LIMIT_CHOICES["money_limit"](business_type)] == [
+            "Always ask me first", "Up to $100", "Up to $250", "Up to $500"]
+
+
+def test_the_number_check_flags_amounts_percentages_and_number_words():
+    for text in ("$10,000", "10%", "ten thousand", "diez mil", "٣", "Ⅻ", "½", "€", "‰", "％",
+                 "HALF", "dieciséis", "veintidós", "hundreds", "quinientas", "quarter", "te\u200bn",
+                 "ten\nthousand"):
+        assert desk_setup._names_a_number(text), text
+    for text in ("Got it, I'll ask you first", "Someone can contact you", "stone", "money"):
+        assert not desk_setup._names_a_number(text), text
+
+
+async def test_a_failed_closing_next_step_still_finishes_once(app, browser, kernel_http, model):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    await answer(owner, model, state["interview_id"], "Just documents.",
+                 turn(next_topic="documents_and_payments",
+                      skip=[topic for topic in QUESTION_KEYS if topic not in {"what_you_do", "documents_and_payments"}]))
+    model.add(turn(documents="ask"), unavailable())
+    response = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/answer",
+                                        json={"question": "documents_and_payments", "text": "Always ask."})
+    assert response.status_code == 200, response.text
+    assert response.json()["step"] == "tools"
+    assert response.json()["messages"][-1]["text"] == desk_setup.QUESTIONS_DONE
+    assert sum(request.output_schema is SetupNextStep for request in model.requests) == 1
+
+
+async def test_the_next_step_can_skip_and_choose_a_fact_question(app, browser, kernel_http, model, engine):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], False, model)
+    await answer(owner, model, state["interview_id"], "Ask about quotes.", turn(next_topic="quote_limit"))
+    choices = [{"text": "Take a message", "recommended": False}, {"text": "Offer a visit", "recommended": True}]
+    response = await answer(owner, model, state["interview_id"], "Ask me first.", turn(),
+                            next_step("quote_limit", next_topic="contact_and_after_hours", question="After hours?",
+                                      choices=choices, skip=["money_limit", "discounts"]))
+    assert response.status_code == 200, response.text
+    assert response.json()["question"] == "contact_and_after_hours"
+    assert response.json()["messages"][-1]["text"] == "After hours?"
+    assert response.json()["messages"][-1]["choices"] == list(reversed(choices))
+    row = await stored(engine, state["interview_id"])
+    assert row["answers"]["refunds"] == "ask" and row["answers"]["discount_auto_max_bp"] is None
+    text = model.requests[-1].messages[0]["content"][0]["text"]
+    assert "Covered topics: what_you_do, quote_limit" in text
+    assert "<answers_so_far>" in text and "<setup_plan>" in text
+
+
+async def test_dropping_a_numbered_reply_removes_this_turn_even_when_an_earlier_reply_matches(
+    app, browser, kernel_http, model, engine,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    await consent(owner, state["interview_id"], True, model)
+    reply = "Most firms let me take $10,000"
+    await answer(owner, model, state["interview_id"], "We walk dogs.",
+                 turn(reply, next_topic="hours_and_area", website=WEBSITE))
+    response = await answer(owner, model, state["interview_id"], "Now ask about payments.",
+                            turn(reply, next_topic="money_limit", website=WEBSITE + "/prices"))
+    assert response.status_code == 200, response.text
+    row = await stored(engine, state["interview_id"])
+    start = next(index for index, entry in enumerate(row["transcript"])
+                 if entry["text"] == "Now ask about payments.")
+    assert any(entry["text"] == reply for entry in row["transcript"][:start])
+    assert not any(entry["text"] == reply for entry in row["transcript"][start:])

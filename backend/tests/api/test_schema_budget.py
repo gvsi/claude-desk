@@ -23,6 +23,7 @@ from desk.api.prompts import (
     DraftedSituations,
     RuleChat,
     SetupStart,
+    SetupNextStep,
     SetupUnderstanding,
     Translation,
     Triage,
@@ -33,7 +34,7 @@ REQUEST_OPTIONAL_MAX, REQUEST_UNION_MAX = 24, 16
 
 # Every structured output the API sends, by the route that sends it.
 OUTPUTS: dict[str, tuple[type[BaseModel], ...]] = {
-    "setup": (SetupStart, SetupUnderstanding, *SETUP_TURNS.values()),
+    "setup": (SetupStart, SetupUnderstanding, SetupNextStep, *SETUP_TURNS.values()),
     "card_draft": (DraftedRules,),
     "situations": (DraftedSituations,),
     "rules_chat": (RuleChat,),

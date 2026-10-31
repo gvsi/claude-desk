@@ -15,8 +15,6 @@ from desk.api.prompts import (
     CARD_DRAFT_SYSTEM,
     DEMO_TASKS,
     KERNEL_ONLY_TEMPLATES,
-    MONEY_SUGGESTION,
-    MONEY_SUGGESTION_NONE,
     NOTES,
     PROMPT_VERSION,
     QUESTIONS,
@@ -28,6 +26,8 @@ from desk.api.prompts import (
     SEND_REPLY_TOOL,
     SETUP_RETRY,
     SETUP_START_SYSTEM,
+    SETUP_NEXT_SYSTEM,
+    SETUP_NEXT_HEAD,
     SETUP_TURN_HEAD,
     SETUP_TURN_SYSTEM,
     SETUP_TURNS,
@@ -42,6 +42,7 @@ from desk.api.prompts import (
     HoursAnswer,
     PriceAnswer,
     SetupStart,
+    SetupNextStep,
     Translation,
     Triage,
     conversation_system,
@@ -168,7 +169,7 @@ PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation
                 "RECEIPT_LINE", "agent_task", "AgentStep", "desk_reply_text",
                 # the setup interview's (Plan 02b)
                 "SETUP_START_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_TURN_HEAD", "SETUP_RETRY", "QUESTIONS",
-                "QUESTION_KEYS", "MONEY_SUGGESTION", "MONEY_SUGGESTION_NONE", "SUGGESTED_MONEY_CAP_CENTS",
+                "QUESTION_KEYS", "SETUP_NEXT_SYSTEM", "SETUP_NEXT_HEAD", "SetupNextStep",
                 "question_text", "setup_turn_head", "SetupStart", "SetupTurn", "SETUP_TURNS", "SetupPatch",
                 "SetupAnswers", "HoursAnswer", "PriceAnswer",
                 # triage and owner translations (Plan 02b, Task 10)
@@ -177,7 +178,7 @@ PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation
                 "wrap", "ROW_TAGS", "wrap_action_update", "wrap_website", "SUMMARY_LABELS", "SHOWN_LABELS",
                 "SHOWN_SUFFIX", "summary_line", "conversation_so_far", "RESULT_LABEL", "result_line",
                 "THIS_QUESTION_SO_FAR_TAG", "SETUP_EXCHANGE_LABELS", "this_question_so_far"}
-SETUP_OUTPUTS = (SetupStart, *SETUP_TURNS.values(), HoursAnswer, PriceAnswer)
+SETUP_OUTPUTS = (SetupStart, SetupNextStep, *SETUP_TURNS.values(), HoursAnswer, PriceAnswer)
 ANNOTATION_OUTPUTS = (Triage, Translation)
 
 
@@ -209,9 +210,9 @@ def _fixed() -> set[str]:
             *(line for line in VISITING_AGENT_SYSTEM.splitlines() if len(line) > 20),
             *AGENT_TASK.split("{task}"), RECEIPT_LINE,
             *(field.description for field in AgentStep.model_fields.values()),
-            *(line for system in (SETUP_START_SYSTEM, SETUP_TURN_SYSTEM) for line in system.splitlines()
+            *(line for system in (SETUP_START_SYSTEM, SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM) for line in system.splitlines()
               if len(line) > 20),
-            *(part for template in (SETUP_TURN_HEAD, SETUP_RETRY, MONEY_SUGGESTION, MONEY_SUGGESTION_NONE,
+            *(part for template in (SETUP_TURN_HEAD, SETUP_NEXT_HEAD, SETUP_RETRY,
                                     *QUESTIONS.values()) for part in _parts(template)),
             *(field.description for output in SETUP_OUTPUTS for field in output.model_fields.values()
               if field.description),

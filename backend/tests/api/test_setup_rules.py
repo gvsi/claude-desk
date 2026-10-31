@@ -79,8 +79,8 @@ PATCHES: dict[str, dict] = {
     "hours_and_area": {"hours": HOURS, "service_area": "Oakland and Berkeley"},
     "quote_limit": {"quote_auto_max_cents": 50_000, "price_items": PRICES},
     "discounts": {"discount_auto_max_bp": 1_000},
-    "documents_and_payments": {"documents": "verified_owner", "payment_link_auto_max_cents": 100_000},
-    "money_limit": {"auto_money_cap_cents": CAP, "refunds": "ask"},
+    "documents_and_payments": {"documents": "verified_owner"},
+    "money_limit": {"auto_money_cap_cents": CAP, "refunds": "ask", "payment_link_auto_max_cents": 100_000},
     "contact_and_after_hours": {"public_contact": "(510) 555-0142", "after_hours": "Take a message."},
 }
 UTILITY = [card.card_id for card in PRESETS["ask_first"]]
