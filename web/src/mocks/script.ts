@@ -843,7 +843,11 @@ export interface HeldForChat {
   heldBy: string | null;
 }
 
-/** What the owner calls each tool's requests, as the API has them (`TOOL_LABELS` in `backend/desk/api/rules.py`). */
+/**
+ * What the owner calls each tool's requests, so Claude knows which hold a question names: the API's
+ * words (`TOOL_LABELS` in `backend/desk/api/rules.py`), but "identity check" for a verification,
+ * as the owner app and Rules' question about a hold name it.
+ */
 const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
   'native.quote': 'quote',
   'native.find_slots': 'open times',
@@ -853,7 +857,7 @@ const TOOL_LABELS: Readonly<Partial<Record<ToolName, string>>> = {
   'native.charge_mandate': 'agent payment',
   'native.capture_lead': 'contact details',
   'native.request_callback': 'callback',
-  'native.start_verification': 'verification',
+  'native.start_verification': 'identity check',
   'payments.list_charges': 'payment history',
   'payments.create_refund': 'refund',
 };

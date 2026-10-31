@@ -131,7 +131,8 @@ describe('the connector catalog', () => {
       // "Contact details" is plural: no noun.
       'native.capture_lead': null,
       'native.request_callback': 'callback',
-      'native.start_verification': 'verification',
+      // The owner app's word for these ("identity checks"), plainer than the API's "verification".
+      'native.start_verification': 'identity check',
       // The setup interview's own tools hold nothing on a Desk.
       'native.fetch_website': null,
       'native.read_memory': null,

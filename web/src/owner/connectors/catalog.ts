@@ -125,8 +125,9 @@ export const TOOL_NAMES = {
 /**
  * Each tool's request as one thing the owner names after "this", plain and lowercase, as Rules asks
  * Claude about a held one ("Why was this refund held?"): the API's words for each tool's requests
- * (`TOOL_LABELS` in `backend/desk/api/rules.py`) where they name one thing. Open times and contact
- * details are plural, and the setup interview's own tools hold nothing on a Desk, so these have none.
+ * (`TOOL_LABELS` in `backend/desk/api/rules.py`) where they name one thing, and the owner app's
+ * "identity check" in place of the API's "verification". Open times and contact details are
+ * plural, and the setup interview's own tools hold nothing on a Desk, so these have none.
  */
 const TOOL_NOUNS = {
   'native.quote': 'quote',
@@ -135,7 +136,7 @@ const TOOL_NOUNS = {
   'native.payment_link': 'payment link',
   'native.charge_mandate': 'agent payment',
   'native.request_callback': 'callback',
-  'native.start_verification': 'verification',
+  'native.start_verification': 'identity check',
   'payments.list_charges': 'payment history',
   'payments.create_refund': 'refund',
 } as const satisfies Partial<Record<ToolName, string>>;
