@@ -150,8 +150,12 @@ function chatView() {
   };
 }
 
-// Each test starts with no "Try to break it" hand-off waiting in this browser.
-beforeEach(() => writeLocal('breakItHandoff', null));
+// Each test starts as a fresh page: no "Try to break it" hand-off waiting in this browser, and none
+// taken yet.
+beforeEach(() => {
+  writeLocal('breakItHandoff', null);
+  forgetTakenBreakItHandoffs();
+});
 
 describe('public chat page', () => {
   it('public_page_discloses_ai_en_es', async () => {
