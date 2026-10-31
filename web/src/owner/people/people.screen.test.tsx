@@ -18,7 +18,7 @@ import { mockStore } from '../../mocks/store.ts';
 import { MINUTE } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectScreenBasics } from '../../test/screen.ts';
+import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { SHARE_COPY, displayLink } from '../share/shareCopy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
@@ -470,5 +470,46 @@ describe('share', () => {
     await screen.getByRole('button', { name: 'Copy link' }).click();
     expect(writeText).toHaveBeenCalledWith(url);
     await expectScreenBasics(screen.container, { owner: true });
+  });
+});
+
+describe('customers and share, everywhere', () => {
+  /** Each page of this task with what shows once it is drawn: the list with leads, a person's page with rules, and Share. */
+  async function everyPage(): Promise<{ name: string; path: string; ready: string }[]> {
+    addLead(SAM);
+    addLead({ ...JORDAN, replayed: true });
+    await withCards([DANA_BOOK, DANA_DOCS, DANA_LINK]);
+    return [
+      { name: 'customers', path: PEOPLE, ready: JORDAN.note },
+      { name: 'person', path: `${PEOPLE}/${dana.personId}`, ready: DANA_DOCS.reason },
+      { name: 'share', path: `${DESK}/share`, ready: 'Ready-made words' },
+    ];
+  }
+
+  it('people_have_no_jargon', async () => {
+    for (const { name, path, ready } of await everyPage()) {
+      const { screen } = await renderRoute(path);
+      await expect.element(screen.getByText(ready, { exact: true }).first()).toBeVisible();
+      try {
+        await expectScreenBasics(screen.container, { owner: true });
+        assertNoJargon(screen.container);
+      } catch (err) {
+        throw new Error(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  });
+
+  it('people_and_share_fit_a_phone', async () => {
+    for (const { name, path, ready } of await everyPage()) {
+      const { screen } = await renderRoute(path, { viewport: 'phone' });
+      await expect.element(screen.getByText(ready, { exact: true }).first()).toBeVisible();
+      expect(document.documentElement.scrollWidth, name).toBeLessThanOrEqual(window.innerWidth);
+      expectNoHorizontalScroll();
+      // Nothing in the page runs past its column.
+      const content = screen.container.querySelector('.cd-app-shell__content')?.getBoundingClientRect();
+      for (const el of screen.getByRole('main').element().querySelectorAll('*')) {
+        expect(Math.round(el.getBoundingClientRect().right), `${name}: ${el.className}`).toBeLessThanOrEqual(Math.round(content?.right ?? 0));
+      }
+    }
   });
 });
