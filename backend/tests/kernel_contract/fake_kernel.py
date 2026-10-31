@@ -1623,9 +1623,9 @@ class FakeKernelState:
         call = ToolCall(call_id="seed-held-quote", tool="native.quote",
                         args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 1500})
         action = self._normalize(session, desk, call)
-        outcome, card_ids = self._rule(session, desk, action)
+        outcome, card_ids, baseline = self._rule(session, desk, action)
         digest = sha256_hex(canonical({"desk_id": None, "tool": call.tool, "args": call.args}))
-        return self._new_decision(session, desk, call, digest, action, outcome, card_ids)
+        return self._new_decision(session, desk, call, digest, action, outcome, card_ids, baseline=baseline)
 
     # Sessions ------------------------------------------------------------------------------------
 
@@ -1950,10 +1950,10 @@ class FakeKernelState:
             call = ToolCall(call_id=new_id("call"), tool="native.quote",
                             args={"items": [{"item_id": "drain", "qty": 1}], "requested_discount_bp": 1500})
         action = self._normalize(session, desk, call)
-        outcome, card_ids = self._rule(session, desk, action)
+        outcome, card_ids, baseline = self._rule(session, desk, action)
         digest = sha256_hex(canonical({"desk_id": None, "tool": call.tool, "args": call.args}))
         inbox = len(self.inbox)
-        decision = self._new_decision(session, desk, call, digest, action, outcome, card_ids)
+        decision = self._new_decision(session, desk, call, digest, action, outcome, card_ids, baseline=baseline)
         del self.inbox[inbox:]                          # a hold's owner alert: a replay leaves none
         record = self.decisions[decision.decision_id]
         if outcome == "allow":
@@ -2121,12 +2121,13 @@ class FakeKernelState:
         action = self._normalize(session, desk, call)
         if action is None:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused")
-        outcome, card_ids = self._rule(session, desk, action)
+        outcome, card_ids, baseline = self._rule(session, desk, action)
         script = self._scripts.get(call.tool)
         scripted = script is not None and script.outcome is not None
         if scripted:
-            outcome = script.outcome
-        return self._new_decision(session, desk, call, digest, action, outcome, card_ids, scripted=scripted)
+            outcome, baseline = script.outcome, None
+        return self._new_decision(session, desk, call, digest, action, outcome, card_ids, scripted=scripted,
+                                  baseline=baseline)
 
     def _normalize(self, session: Session, desk: Desk, call: ToolCall) -> NormalizedAction | None:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
@@ -2178,41 +2179,42 @@ class FakeKernelState:
             resource=resource, list_cents=list_cents, discount_bp=discount_bp, amount_cents=amount_cents,
             recipient=recipient, starts_at=starts_at)
 
-    def _rule(self, session: Session, desk: Desk, action: NormalizedAction) -> tuple[str, list[str]]:
-        """The Rivera cards' outcome for a normalized call (the kernel evaluates Cedar)."""
+    def _rule(self, session: Session, desk: Desk, action: NormalizedAction) -> tuple[str, list[str], str | None]:
+        """The Rivera cards' outcome for a normalized call (the kernel evaluates Cedar), the cards behind it, and for
+        a refusal by the always-on baseline the `@id` of its forbid in `kernel/cedar/baseline.cedar`."""
         tool = action.tool
         if self._never(desk, tool):
-            return "refuse", [f"never-{tool}"]
+            return "refuse", [f"never-{tool}"], None
         if tool == "native.quote":
-            return ("hold" if action.discount_bp else "allow"), ["rv-quote"]
+            return ("hold" if action.discount_bp else "allow"), ["rv-quote"], None
         if tool == "native.book":
             window = in_hours(action.starts_at, desk.hours)
             if window is None:
-                return "hold", ["rv-book-wk"]
-            return "allow", ["rv-book-sat" if window.days == ["sat"] else "rv-book-wk"]
+                return "hold", ["rv-book-wk"], None
+            return "allow", ["rv-book-sat" if window.days == ["sat"] else "rv-book-wk"], None
         if tool == "native.release_document":
             if session.person_id is not None and session.person_id == action.resource.owner_person_id:
-                return "allow", ["rv-docs"]
-            return "refuse", []                 # the baseline: private data only to its verified record owner
+                return "allow", ["rv-docs"], None
+            return "refuse", [], "private_data_record_owner"     # private data only to its verified record owner
         if money_tool(tool, action.effects) and not 0 < (action.amount_cents or 0) <= AUTO_MONEY_HARD_CAP_CENTS:
-            return "refuse", []                 # the baseline: money always carries an amount, at most $10,000
+            return "refuse", [], "money_has_amount"              # money always carries an amount, at most $10,000
         if tool == "native.charge_mandate" and not self._room_for(session, action):
-            return "refuse", []                 # the baseline: an agent's charge stays within its mandate
+            return "refuse", [], "agent_charge_within_mandate"   # an agent's charge stays within its mandate
         if tool in ("native.payment_link", "native.charge_mandate"):
             card = next((card for card in desk.cards if card.applies_to == tool and card.mode == "auto"), None)
             if card is not None:
                 # within the card's limit and the active version's money cap, else it asks (the baseline's cap)
                 within = action.amount_cents <= min(card.max_amount_cents, desk.auto_money_cap_cents)
-                return ("allow" if within else "hold"), [card.card_id]
+                return ("allow" if within else "hold"), [card.card_id], None
         preset = next((card.card_id for card in desk.cards if card.applies_to == tool and card.mode == "auto"
                        and card.who == "anyone" and card.card_id.startswith("preset-")), None)
         if preset is not None:
-            return "allow", [preset]
-        return "hold", [f"default-{tool}"]
+            return "allow", [preset], None
+        return "hold", [f"default-{tool}"], None
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,
                       action: NormalizedAction | None, outcome: str, card_ids: list[str], *,
-                      why: str | None = None, scripted: bool = False) -> Decision:
+                      why: str | None = None, scripted: bool = False, baseline: str | None = None) -> Decision:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
@@ -2236,11 +2238,11 @@ class FakeKernelState:
                        if (answer != "allow_person" or (session.person_id is not None and not past_cap))
                        and (answer != "deny_always" or not limit_hold)]
             inbox = [self._alert_owner(desk, "A request is waiting for you.", decision_id=decision_id)]
-        tier = {"allow": "A", "hold": "H", "refuse": "B"}[outcome]
         decision = self._signed(Decision(
             decision_id=decision_id, session_id=session.session_id, call_id=call.call_id, action=action,
             outcome=outcome, state=state, policy_version=desk.policy_version,
-            policy_ids=[f"{tier}.{card_id}" for card_id in card_ids], card_ids=card_ids,
+            policy_ids=self._policy_ids(desk, outcome, card_ids, baseline=baseline, scripted=scripted),
+            card_ids=card_ids,
             reason_plain=self._reason(session, desk, call, action, card_ids),
             visitor_plain=status_line(state, tool=tool, session_kind=session.kind, language=session.last_language,
                                       owner=desk.owner_display_name),
@@ -2259,6 +2261,24 @@ class FakeKernelState:
                                              "starts_at"}),
                 "resource_kind": action.resource.kind, "created_at": self.now})
         return decision.model_copy(update={"inbox": inbox})
+
+    @staticmethod
+    def _policy_ids(desk: Desk, outcome: str, card_ids: list[str], *, baseline: str | None = None,
+                    scripted: bool = False) -> list[str]:
+        """The deciding policies, as the kernel's engine names them (`<set>.<@id>`, the compiler's `@id`s), sorted: a
+        refusal by the baseline names its forbid, `B.<baseline>`; a `never` card's refusal its forbid, `F.never.<card>`;
+        an allow its auto card's permit, `A.auto.<card>`; and a hold either an auto card's hold twin, `H.twin.<card>`
+        (past the card's limits), or an ask card's permit, `H.ask.<card>` (the default asks, and the ask card a scripted
+        hold stands for). A refusal before evaluation names none, as the kernel's step-1 refusals don't; a scripted
+        refusal stands for a `never` card's."""
+        if baseline is not None:
+            return [f"B.{baseline}"]
+        if outcome == "allow":
+            return sorted(f"A.auto.{card_id}" for card_id in card_ids)
+        if outcome == "refuse":
+            return sorted(f"F.never.{card_id}" for card_id in card_ids)
+        autos = set() if scripted else {card.card_id for card in desk.cards if card.mode == "auto"}
+        return sorted(f"H.{'twin' if card_id in autos else 'ask'}.{card_id}" for card_id in card_ids)
 
     def _alert_owner(self, desk: Desk, preview: str, *, decision_id: str | None = None) -> InboxNotice:
         """An owner alert in the copy's Demo inbox ("approval" alerts at once by the seed's defaults), and its
@@ -2306,7 +2326,7 @@ class FakeKernelState:
             "state": decision.state, "answers": list(decision.answers), "policy_version": decision.policy_version,
             "card_ids": decision.card_ids, "review": None, "reason_plain": decision.reason_plain,
             "visitor_plain": decision.visitor_plain, "expires_at": decision.expires_at,
-            "ledger_seq": decision.ledger_seq, "created_at": record.created_at})
+            "ledger_seq": decision.ledger_seq, "created_at": record.created_at, "policy_ids": decision.policy_ids})
 
     def _transition(self, record: DecisionRecord, state: str, kind: str = "decide", **summary) -> Decision:
         """Move a decision to `state`: ledgered, re-signed, mirrored."""

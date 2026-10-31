@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp
+from desk.api.ro import KernelRO
 from desk.contracts import (
     AgentAuth,
     ApprovalResult,
@@ -511,6 +512,48 @@ async def test_approving_after_the_rules_changed_runs_nothing(kernel, ro_read, a
     assert ro_read(ro_schema, copy.copy_id, "SELECT count(*) AS n FROM {ro}.quotes WHERE session_id = %s",
                    (session_id,)) == [{"n": 0}]
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
+
+
+async def read_policy_ids(api_ro_conn, ro_schema: str, copy: CopyCreated, decision_id: str) -> list[str]:
+    """A decision's deciding policies, as the API reads them: `policy_ids` of its kernel_ro row, in the copy."""
+    row = await KernelRO(api_ro_conn, copy.copy_id, ro_schema).one("decisions", decision_id=decision_id)
+    return row["policy_ids"]
+
+
+@pytest.mark.kernel_plan("01a")
+async def test_a_never_cards_refusal_names_its_forbid(kernel, ro_read, arrange, api_ro_conn):
+    """The owner's Safety entries say why a refusal happened from the decision's deciding policies, which the API reads
+    in `kernel_ro.decisions.policy_ids` as the engine names them (`<set>.<@id>`). A `never` card's refusal names its
+    forbid, `F.never.<card>`, alike in the decision the session gets, the kernel's record and the row the API reads."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    await arrange.never(http.owner(copy.owner_token), ro_read, ro_schema, copy, "native.quote")
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    refusal = await decide(view, session_id, 0, "call-1", "native.quote",
+                           quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing")))
+    assert (refusal.outcome, refusal.state, refusal.card_ids) == ("refuse", "refused", ["never-native.quote"])
+    expected = ["F.never.never-native.quote"]
+    assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
+    assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
+
+
+@pytest.mark.kernel_plan("01a")
+async def test_an_allow_and_a_limit_hold_name_their_permits(kernel, ro_read, arrange, api_ro_conn):
+    """Allows and holds name their deciding permits the same way: a quote at list price is allowed by its auto card's
+    permit, `A.auto.<card>`, and one past the card's discount limit is held by that card's hold twin, `H.twin.<card>`,
+    alike in the decision the session gets, the kernel's record and the row the API reads."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    drain = item_id(ro_read, ro_schema, copy, "Drain clearing")
+    at_list = await decide(view, session_id, 0, "call-1", "native.quote", quote_args(drain, 0))
+    off = await decide(view, session_id, 0, "call-2", "native.quote", quote_args(drain, 500))
+    for decision, outcome, expected in ((at_list, "allow", ["A.auto.rv-quote"]), (off, "hold", ["H.twin.rv-quote"])):
+        assert (decision.outcome, decision.card_ids) == (outcome, ["rv-quote"])
+        assert decision.policy_ids == arrange.recorded_policy_ids(decision.decision_id) == expected
+        assert await read_policy_ids(api_ro_conn, ro_schema, copy, decision.decision_id) == expected
 
 
 @pytest.mark.kernel_plan("01a")
@@ -1453,6 +1496,31 @@ async def test_document_link_is_single_use(kernel, ro_read):
     page = await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])
     seen = (executed.model_dump_json(), card.text, json.dumps([entry.event.summary for entry in page.entries]))
     assert [text for text in seen if token in text] == []
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_a_baseline_refusal_names_its_forbid(kernel, ro_read, arrange, api_ro_conn):
+    """A refusal by the always-on baseline names the baseline's forbid, `B.<@id>`, with no card behind it: a session
+    verified as Dana asks for a document on someone else's record, and `B.private_data_record_owner` refuses it, alike
+    in the decision the session gets, the kernel's record and the row the API reads."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    created = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    view, session_id = http.session(created.session_token), created.state.session_id
+    started = await verify_start(view, session_id, DANA)
+    await verify_check(view, session_id, code_in(await session_inbox(view, session_id), started.inbox[0].entry_id))
+    ((person_id,),) = [tuple(row.values()) for row in ro_read(
+        ro_schema, copy.copy_id, "SELECT person_id FROM {ro}.sessions WHERE session_id = %s", (session_id,))]
+    (document,) = ro_read(ro_schema, copy.copy_id, "SELECT document_id FROM {ro}.documents WHERE desk_id = %s"
+                                                   " AND record_owner_person_id <> %s ORDER BY document_id LIMIT 1",
+                          (copy.desk_ids[0], person_id))
+
+    refusal = await decide(view, session_id, 0, "call-1", "native.release_document",
+                           {"document_id": document["document_id"]})
+    assert (refusal.outcome, refusal.state, refusal.card_ids) == ("refuse", "refused", [])
+    expected = ["B.private_data_record_owner"]
+    assert refusal.policy_ids == arrange.recorded_policy_ids(refusal.decision_id) == expected
+    assert await read_policy_ids(api_ro_conn, ro_schema, copy, refusal.decision_id) == expected
 
 
 # Single-use links: payment links (Plan 01c) -------------------------------------------------------------------------
