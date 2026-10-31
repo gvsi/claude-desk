@@ -200,6 +200,46 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("No doubt about it: no hidden charges.", "lex.en.promise", "no hidden charges"),
     ("There's no one-off charge.", "lex.en.promise", "no one-off charge"),
     ("There's no one-time cost.", "lex.en.promise", "no one-time cost"),
+    # nor after any other word, which can start a waiver or sit in a sentence that makes one ("No
+    # worries about costs; you pay nothing."), so a charge, cost or fee after it blocks, failing
+    # closed when it states no price
+    ("No worries about costs; you pay nothing.", "lex.en.promise", "No worries about costs"),
+    ("No worries about fees; you pay nothing.", "lex.en.promise", "No worries about fees"),
+    ("No questions about costs: there aren't any.", "lex.en.promise", "No questions about costs"),
+    ("No questions about fees: there aren't any.", "lex.en.promise", "No questions about fees"),
+    ("No worries about cost, the quote below has it.", "lex.en.promise", "No worries about cost"),
+    ("No questions about cost?", "lex.en.promise", "No questions about cost"),
+    ("There's no fixed cost for a repair like this.", "lex.en.promise", "no fixed cost"),
+    ("We have no exact fee for that yet.", "lex.en.promise", "no exact fee"),
+    ("There's no single fee that fits every job.", "lex.en.promise", "no single fee"),
+    ("No problem about fees, the quote below has them.", "lex.en.promise", "No problem about fees"),
+    ("No worries about fees, the quote below has them.", "lex.en.promise", "No worries about fees"),
+    ("No questions about fees?", "lex.en.promise", "No questions about fees"),
+    ("No worries, there's no extra charge.", "lex.en.promise", "no extra charge"),
+    ("No problem: no hidden fees.", "lex.en.promise", "no hidden fees"),
+    ("No problem the cost is in the quote below.", "lex.en.promise", "No problem the cost"),
+    ("No questions asked, no fee.", "lex.en.promise", "no fee"),
+    ("There's no set-up charge.", "lex.en.promise", "no set-up charge"),
+    ("There's no set-up fee.", "lex.en.promise", "no set-up fee"),
+    ("There's no setup cost.", "lex.en.promise", "no setup cost"),
+    ("There's no set up fee.", "lex.en.promise", "no set up fee"),
+    ("There's no set up charge.", "lex.en.promise", "no set up charge"),
+    ("No set up cost for new customers.", "lex.en.promise", "No set up cost"),
+    ("No standard fees will be charged.", "lex.en.promise", "No standard fees"),
+    ("For seniors there is no standard service charge.", "lex.en.promise", "no standard service charge"),
+    ("No single charge will be applied.", "lex.en.promise", "No single charge"),
+    ("Returning clients pay no fixed fee.", "lex.en.promise", "no fixed fee"),
+    ("You pay no set fee for the first visit.", "lex.en.promise", "no set fee"),
+    ("There's no set cost until Maria sees the leak.", "lex.en.promise", "no set cost"),
+    ("There's no exact cost until Maria sees it.", "lex.en.promise", "no exact cost"),
+    ("There's no fixed fee for repairs.", "lex.en.promise", "no fixed fee"),
+    ("There's no standard charge for that; the quote below has it.", "lex.en.promise", "no standard charge"),
+    ("There's no set  up fee.", "lex.en.promise", "no set  up fee"),
+    ("There's no extra fee for that.", "lex.en.promise", "no extra fee"),
+    ("There's no service fee.", "lex.en.promise", "no service fee"),
+    ("There are no added fees.", "lex.en.promise", "no added fees"),
+    # the fee line doesn't take "matter", "one", "way" or "doubt"
+    ("No matter the fee, call us.", "lex.en.promise", "No matter the fee"),
     ("Sin recargo.", "lex.es.promise", "Sin recargo"),                              # a surcharge of nothing
     ("La visita va sin cargo extra.", "lex.es.promise", "sin cargo"),             # the word after needs no rule
     ("Se lo hacemos sin costo adicional.", "lex.es.promise", "sin costo"),
@@ -208,6 +248,20 @@ AMOUNT_AND_TIME_WORDS = [   # (prose, rule_id, span): amounts, fractions, "free"
     ("La visita va sin ningún coste.", "lex.es.promise", "sin ningún coste"),
     ("La visita va sin comisión.", "lex.es.promise", "sin comisión"),
     ("Sin ninguna comisión por la visita.", "lex.es.promise", "Sin ninguna comisión"),
+    # "no hay", "no tiene" or "no lleva" and any one or two words before a charge, cost or
+    # surcharge, in the plural too
+    ("No hay cargo extra.", "lex.es.promise", "No hay cargo"),
+    ("No tiene costo.", "lex.es.promise", "No tiene costo"),
+    ("La visita no lleva recargo.", "lex.es.promise", "no lleva recargo"),
+    ("No tiene coste para usted.", "lex.es.promise", "No tiene coste"),
+    ("No hay ningún cargo adicional.", "lex.es.promise", "No hay ningún cargo"),
+    ("La revisión no tiene ningún costo extra.", "lex.es.promise", "no tiene ningún costo"),
+    ("No lleva un recargo por la visita.", "lex.es.promise", "No lleva un recargo"),
+    ("No hay cargos ocultos.", "lex.es.promise", "No hay cargos"),
+    ("No hay costos adicionales.", "lex.es.promise", "No hay costos"),
+    ("Las revisiones no tienen costo.", "lex.es.promise", "no tienen costo"),
+    ("Las visitas no llevan recargos.", "lex.es.promise", "no llevan recargos"),
+    ("No-hay-cargo-extra.", "lex.es.promise", "No-hay-cargo"),
     ("Maria can be there in an hour.", "lex.en.date", "in an hour"),
     ("She can be there in a few minutes.", "lex.en.date", "in a few minutes"),
     ("Maria can come in a couple of hours.", "lex.en.date", "in a couple of hours"),
@@ -263,6 +317,13 @@ def test_amount_and_time_words_are_blocked(prose, rule_id, span):
     "No way it costs that much.",
     "No doubt the cost is worth it.",
     "No matter the charges, Maria can help.",
+    # "no hay", "no tiene" or "no lleva" states no price with more than two words, a stop or the
+    # noun before it
+    "No tiene que preocuparse por el costo; está en la cotización.",
+    "¿No hay más preguntas sobre el costo?",
+    "No hay problema; el costo está en la cotización de abajo.",
+    "El costo no tiene sorpresas: está en la cotización de abajo.",
+    "El cargo no lleva nada oculto, todo está en la cotización.",
 ])
 def test_ordinary_words_beside_the_amount_and_time_words_pass(prose):
     assert reply_check.scan_prose(prose) == []
