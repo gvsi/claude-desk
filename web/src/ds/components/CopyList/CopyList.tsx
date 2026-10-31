@@ -9,9 +9,10 @@ export interface CopyListItem {
   /** Where the words go: "Google profile", "Email signature", "Voicemail". */
   title: string;
   /**
-   * The words, as they are shown and copied. A node when they hold a name someone chose (the
-   * business's, the owner's), so the screen can mark each name as user text:
-   * `<span data-copy="user">`. Copy then copies the words as they read, as plain text.
+   * The words. A string is shown and copied as it is. A node, when they hold a name someone chose
+   * (the business's, the owner's), lets the screen mark each name as user text:
+   * `<span data-copy="user">`. Copy then copies what is shown, as plain text: a line break for each
+   * `<br>`, and no words only a screen reader hears (`.cd-sr-only`).
    */
   text: ReactNode;
 }
@@ -39,9 +40,42 @@ export function CopyList({ label, items, onCopy }: CopyListProps) {
   );
 }
 
-/** The words to copy: the screen's string as it is, or, for words with marked names in them, the text they read as. */
+/** Spaces as HTML collapses them; a non-breaking space stays. */
+const COLLAPSIBLE = /[ \t\n\r\f]+/g;
+
+/**
+ * The words as they are shown, read from the rendered words without changing them: text with its
+ * spaces collapsed as the browser draws them, a line break for each `<br>`, and nothing from an
+ * element nobody sees: one that is `.cd-sr-only` (words for a screen reader alone, which the
+ * browser's own `innerText` would keep, since clipped text is still rendered) or not displayed.
+ * The words are a paragraph's inline content, so this is what a person reads.
+ */
+function shownText(el: Element): string {
+  const view = el.ownerDocument.defaultView;
+  let text = '';
+  for (const child of el.childNodes) {
+    if (child.nodeType === child.TEXT_NODE) {
+      text += (child.textContent ?? '').replace(COLLAPSIBLE, ' ');
+    } else if (child instanceof Element) {
+      if (child.localName === 'br') text += '\n';
+      else if (child.classList.contains('cd-sr-only') || view?.getComputedStyle(child).display === 'none') continue;
+      else text += shownText(child);
+    }
+  }
+  return text;
+}
+
+/**
+ * The words to copy: the screen's string as it is, or, for words with marked names in them, the
+ * words as they are shown (`shownText`), with no spaces at the ends of a line.
+ */
 function plainWords(text: ReactNode, shown: HTMLElement | null): string {
-  return typeof text === 'string' ? text : (shown?.textContent ?? '');
+  if (typeof text === 'string') return text;
+  if (!shown) return '';
+  return shownText(shown)
+    .replace(/ {2,}/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/^ +| +$/g, '');
 }
 
 function CopyRow({ item, onCopy }: { item: CopyListItem; onCopy: CopyListProps['onCopy'] }) {

@@ -124,3 +124,32 @@ export const MarkedNames: Story = {
     await expect(args.onCopy).toHaveBeenLastCalledWith(voicemail);
   },
 };
+
+export const LineBreakAndHiddenWords: Story = {
+  name: 'Words with a line break and hidden words',
+  args: {
+    items: [
+      {
+        title: 'Business card',
+        text: (
+          <>
+            Ask {theirs(BUSINESS)} any time at desk.example/aaa.
+            <br />
+            Answered by Claude, an AI.<span className="cd-sr-only"> The link opens a chat.</span>
+          </>
+        ),
+      },
+    ],
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'N-Run2-Share’s ready-made words with a line break and words only a screen reader hears: Copy copies what is shown, the line break included and the hidden words left out.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    // copy_list_copies_what_is_shown: the line break comes through as one, and words a screen reader
+    // hears but nobody sees aren't copied.
+    const row = within(canvas.getByRole('list', { name: 'Ready-made words' })).getByRole('listitem');
+    await userEvent.click(within(row).getByRole('button', { name: 'Copy Business card' }));
+    await expect(args.onCopy).toHaveBeenLastCalledWith('Ask AAA Plumbing any time at desk.example/aaa.\nAnswered by Claude, an AI.');
+  },
+};
