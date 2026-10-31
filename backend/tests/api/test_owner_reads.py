@@ -889,6 +889,36 @@ async def test_safety_cause_from_adapter_check(scene):
     assert item["cause"] == "no_such_slot"
 
 
+async def test_verification_commits_between_owner_reads(scene, monkeypatch):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    rows = KernelRO.rows
+    refusal = None
+
+    async def interleaved(ro, view, **filters):
+        nonlocal refusal
+        found = await rows(ro, view, **filters)
+        if view == "sessions" and refusal is None:
+            scene.fake.verify(who.session_id, "dana")
+            desk = scene.fake.desks[scene.owner.desk_id]
+            person = scene.fake.sessions[who.session_id].person_id
+            document = next(doc for doc in desk.documents.values() if doc.record_owner_person_id != person)
+            refusal = await who.decide("native.release_document", {"document_id": document.document_id})
+            assert refusal.outcome == "refuse"
+            assert refusal.policy_ids == ["B.private_data_record_owner"]
+        return found
+
+    monkeypatch.setattr(KernelRO, "rows", interleaved)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200
+    # Both the verification and decision committed after the snapshot started: neither belongs in this read.
+    assert all(item["ref_id"] != refusal.decision_id for item in listed.json())
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] == "not_their_record"
+
+
 @pytest.mark.parametrize("summary", [
     {"reason": {"withheld": True}},
     {"reason": "adapter_refused", "check": {"withheld": True}},

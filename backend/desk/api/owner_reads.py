@@ -768,11 +768,17 @@ async def today(ctx: OwnerCtx, desk_id: str, now: datetime) -> Today:
 async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
     """The Desk's refused requests and Claude's stopped drafts, newest first, each with its AI-written triage once
     written (Plan 02b, Task 10), else None. Only refusals count in Today; their nullable `cause` maps the decision's
-    `policy_ids` and its already-read ledger decide summary's `reason`/`check` through `refusal_cause`."""
+    `policy_ids` and its already-read ledger decide summary's `reason`/`check` through `refusal_cause`.
+    Sessions, decisions and ledger entries share one snapshot so a newly verified session's refusal cannot be
+    labelled with an older verification state. No kernel call runs while the snapshot is open."""
+    conn = ctx.ro.conn
+    await conn.commit()
+    await conn.execution_options(isolation_level="REPEATABLE READ")   # reset when the connection is pooled again
     sessions = {row["session_id"]: row for row in await ctx.ro.rows("sessions", desk_id=desk_id)}
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     triage = await triaged(ctx.ro.conn, ctx.copy_id, desk_id=desk_id)
+    await conn.commit()
     found = sorted(_stopped_attempts(decisions, ledger, sessions), key=lambda attempt: attempt.ref_id, reverse=True)
     found.sort(key=lambda attempt: attempt.at, reverse=True)
     return [Attempt(ref_id=attempt.ref_id, kind=attempt.kind, reason_plain=attempt.reason_plain,
