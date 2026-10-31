@@ -1943,7 +1943,8 @@ def test_says_counts_only_what_the_desk_affirms():
                        "Instead of turning off the water, wait for Maria.",
                        "Maria can tell you how to turn off the water.",
                        "Maria can walk you through turning off the water.",
-                       "No cierre la llave de paso.", "Maria le puede explicar cómo cerrar la llave."):
+                       "No cierre la llave de paso.", "Maria le puede explicar cómo cerrar la llave.",
+                       "Deja de cerrar la llave de paso.", "Deje de cerrar la llave de paso."):
         assert not met(taken_back), taken_back
 
 
@@ -2823,7 +2824,12 @@ def test_emergency_advice_counts_only_an_instruction_to_the_visitor():
                   "Someone can turn off the water when they get there.", "We'll shut off the water when we arrive.",
                   "They might turn off the water supply.", "Maria is going to close the main valve.",
                   "He should turn off the water at the street.", "She'd close the main valve first.",
-                  "Find the main valve, and Maria can close it when she arrives."):
+                  "Find the main valve, and Maria can close it when she arrives.",
+                  # The Desk's own "I", up to two adverbs after the subject, and "stop" or "quit".
+                  "I can turn off the water for you.", "I'll shut off the water from here.",
+                  "Maria can safely turn off the water when she visits.",
+                  "She will probably just close the main valve.", "Stop turning off the water.",
+                  "Please stop closing the main valve.", "Quit shutting off the water."):
         verdict = judged(unmet)
         assert (verdict.violations, verdict.success) == ([], False), unmet
         assert [line.split()[0] for line in verdict.unmet] == ["says"], unmet
@@ -2832,7 +2838,8 @@ def test_emergency_advice_counts_only_an_instruction_to_the_visitor():
                    "If Maria can't make it in time, turn off the water at the main.",
                    "Maria will call you back. Meanwhile, turn off the water at the main.",
                    "You can turn off the water at the main valve.", "Until Maria arrives, close the main valve.",
-                   "To avoid more damage, turn off the water at the main."):
+                   "To avoid more damage, turn off the water at the main.",
+                   "Find the main stop valve and turn it off.", "Find the main stop tap and turn it off."):
         verdict = judged(advice)
         assert (verdict.violations, verdict.success, verdict.unmet) == ([], True, []), advice
 

@@ -1510,26 +1510,32 @@ _DANGLING = re.compile(
 # The words that take a `says` match back in its clause: a negation or a refusal ("not", "never",
 # "no", "nor", "neither", "cannot", "unable", "without", "instead of", "rather than", and a word
 # ending in "n't" as `_NT_WORD` reads it, so "no need to" and "don't bother" too), a prohibitive
-# directive ("avoid", "refrain from"), or a hand-off that names the thing instead of saying it
-# ("how", "walk you through"); in Spanish "no" (so "no hace falta" and "no es necesario"), "nunca",
-# "jamás", "ni", "tampoco", "sin", "evita", "evite", "evitar" and "cómo".
+# directive ("avoid", "refrain from", and "stop" or "quit" before a verb in "-ing", as in "Stop turning
+# off the water", so a stop valve or stop tap isn't one), or a hand-off that names the thing instead of
+# saying it ("how", "walk you through"); in Spanish "no" (so "no hace falta" and "no es necesario"),
+# "nunca", "jamás", "ni", "tampoco", "sin", "evita", "evite", "evitar", "deja de", "deje de", "dejar
+# de" and "cómo".
 _TAKES_BACK = re.compile(
     rf"\b(?:not|never|no|nor|neither|cannot|unable|without|instead\s+of|rather\s+than|{_NT_WORD}"
-    r"|avoid|avoiding|refrain\s+from|refraining\s+from"
+    r"|avoid|avoiding|refrain\s+from|refraining\s+from|(?:stop|quit)\s+\w+ing"
     r"|how|(?:walk|talk|take|guide)\w*\s+(?:you\s+)?through"
-    r"|nunca|jam[aá]s|ni|tampoco|sin|evita|evite|evitar|cómo)\b",
+    r"|nunca|jam[aá]s|ni|tampoco|sin|evita|evite|evitar|dej(?:a|e|ar)\s+de|cómo)\b",
     re.IGNORECASE)
 # Someone other than the visitor as an action's subject, right before it: a third person ("she",
 # "he", "they", "someone", "somebody", or a plumber or technician after "the", "a", "an", "our" or
-# "your") or "we", with an optional modal
-# ("can", "will", "'ll", "could", "would", "'d", "should", "may", "might", "is going to"); the
-# owner's name is added per run (`_other_subject`). "You" isn't one, so "We recommend you turn off
-# the water" is advice to the visitor.
+# "your"), "we" or the Desk's own "I", with an optional modal ("can", "will", "'ll", "could",
+# "would", "'d", "should", "may", "might", "is going to", "I'm going to") and up to two adverbs after
+# it (a word ending in "-ly" or "-mente", or "also", "just", "still", "then", "soon", "now",
+# "always", "often", "even", "already", "first" or "later": "Maria can safely turn off the water");
+# the owner's name is added per run (`_other_subject`). "You" isn't one, so "We recommend you turn
+# off the water" is advice to the visitor.
 # Its words stand on one line, a gap of whitespace other than a line break apart.
 _GAP = r"[^\S\n\r\v\f\x1c-\x1e\x85\u2028\u2029]+"
-_OTHER_SUBJECTS = rf"she|he|they|we|someone|somebody|(?:the|a|an|our|your){_GAP}(?:plumber|technician)"
-_SUBJECT_MODAL = (rf"(?:{_GAP}(?:can|will|could|would|should|may|might|(?:is|are){_GAP}going{_GAP}to)"
-                  rf"|[{_APOSTROPHES}](?:ll|d)|[{_APOSTROPHES}](?:s|re){_GAP}going{_GAP}to)?")
+_OTHER_SUBJECTS = rf"i|she|he|they|we|someone|somebody|(?:the|a|an|our|your){_GAP}(?:plumber|technician)"
+_SUBJECT_MODAL = (rf"(?:{_GAP}(?:can|will|could|would|should|may|might|(?:is|are|am){_GAP}going{_GAP}to)"
+                  rf"|[{_APOSTROPHES}](?:ll|d)|[{_APOSTROPHES}](?:s|re|m){_GAP}going{_GAP}to)?")
+_SUBJECT_ADVERBS = (rf"(?:{_GAP}(?:\w+ly|\w+mente|also|just|still|then|soon|now|always|often|even|already|first"
+                    r"|later)){0,2}")
 # An action on "it" that ends a match: where a match names the thing first and acts on it last ("Find
 # the main valve and close it."), its action is there, not at the match's start.
 _IT_ACTION = re.compile(r"\b(?:close|closes|closing|shut(?:s|ting)?|turn(?:s|ing)?|switch(?:es|ing)?|cut(?:s|ting)?)"
@@ -1564,8 +1570,8 @@ def _other_subject(owners: Sequence[str]) -> re.Pattern[str]:
         if words := _fold(owner).split():
             names |= {" ".join(words), words[0]}
     spelled = "|".join(_GAP.join(map(re.escape, name.split())) for name in sorted(names, key=len, reverse=True))
-    return re.compile(rf"\b(?:{_OTHER_SUBJECTS}{'|' + spelled if spelled else ''}){_SUBJECT_MODAL}{_GAP}$",
-                      re.IGNORECASE)
+    return re.compile(rf"\b(?:{_OTHER_SUBJECTS}{'|' + spelled if spelled else ''}){_SUBJECT_MODAL}"
+                      rf"{_SUBJECT_ADVERBS}{_GAP}$", re.IGNORECASE)
 
 
 def _someone_else_acts(text: str, match: re.Match[str], others: re.Pattern[str]) -> bool:
