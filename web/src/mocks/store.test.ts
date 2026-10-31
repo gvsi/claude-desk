@@ -442,7 +442,8 @@ describe('the scripted Desk', () => {
   it('verified_discount_names_the_person_and_drafts_its_percent', async () => {
     // Dana confirms it's her, then asks for 20% off: Maria's card names her, and "Only for Dana
     // Whitfield, always" drafts a rule for her at that percent and its price. Once that rule is
-    // active, another percent is a change the draft's review shows; the same percent changes nothing.
+    // active, the same card drafted again changes nothing, and another percent is a change the
+    // draft's review shows.
     const { events } = await openChat();
     await send('Can you send my invoice?');
     await drain();
@@ -478,7 +479,9 @@ describe('the scripted Desk', () => {
     const first = await review(twenty.cards);
     expect(first.diff?.added.map((card) => [card.card_id, ...limits(card)])).toEqual([['person-per-dana-native.quote', 2000, 14_400]]);
     expect((await call('confirmRules', { params: { desk_id: deskId }, body: { version: first.version } })).status).toBe(200);
+    expect((await review(twenty.cards)).diff).toEqual({ added: [], removed: [], changed: [] });
 
+    // 10% off is a higher price than her rule's $144.00, so it is held again.
     const ten = await allowForDana('What about 10% off?');
     expect(ten.decision?.reason_plain).toBe('Dana Whitfield, verified with a code, asked for a drain clearing quote at 10% off, $162.00 instead of $180.00.');
     const lowered = await review(ten.cards);
@@ -487,9 +490,6 @@ describe('the scripted Desk', () => {
     expect(lowered.diff?.changed.map(([before, after]) => [before.card_id, limits(before), limits(after)])).toEqual([
       ['person-per-dana-native.quote', [2000, 14_400], [1000, 16_200]],
     ]);
-
-    const again = await allowForDana('20% off again, please?');
-    expect((await review(again.cards)).diff).toEqual({ added: [], removed: [], changed: [] });
   });
 
   it('executed_receipts_say_what_ran', async () => {
