@@ -889,22 +889,31 @@ async def test_messages_stay_append_only_across_turns(api_conn, engine, locks, c
 
 
 async def test_new_visitor_message_joins_the_next_call(api_conn, engine, locks, caller, visitor, fake):
-    busy = []
+    busy, calls_before_turn = [], []
 
     async def meanwhile(request: httpx.Request) -> None:      # the visitor writes again while the slots are looked up
         if not busy:
             await said(api_conn, caller, "Saturday would be best.")
             busy.append(await pending(caller, ScriptedModel(), engine, locks))
 
+    async def turn_starts(request: httpx.Request) -> None:
+        calls_before_turn.append(len(model.requests))
+
     await said(api_conn, caller, "When could you come?")
     model = ScriptedModel([response(tool_use("native__find_slots", {"days": 3}, id="toolu_slots")),
                            response(reply("Here are the open times, Saturday included."))])
-    async with KernelHttp("http://fake-kernel", transport=Kernel(fake, before={"/decide": meanwhile})) as http:
+    kernel = Kernel(fake, before={"/decide": meanwhile, f"/sessions/{caller.session_id}/turn": turn_starts})
+    async with KernelHttp("http://fake-kernel", transport=kernel) as http:
         assert await pending(replace(caller, kernel=http.session(visitor.token)), model, engine, locks) == "done"
 
     # the message's own request found the turn running; Claude read the message with the call's result, in one user
     # message (the result first), and the turn answered both with no third call
     assert busy == ["busy"] and len(model.requests) == 2
+    # the kernel heard each message before Claude read it (GitHub issue #121): the first as the turn started, the
+    # second before the call that read it, once
+    assert [call.body["text"] for call in fake.called("POST /sessions/{session_id}/turn")] == [
+        "When could you come?", "Saturday would be best."]
+    assert calls_before_turn == [0, 1]
     first, second = model.requests
     added = second.messages[len(first.messages):]
     assert [message["role"] for message in added] == ["assistant", "user"]
@@ -1162,31 +1171,52 @@ def context_path(caller: Caller) -> str:
     (422, "invalid", "kernel_unavailable", [("writing", None), ("error", "kernel_unavailable"), ("turn_end", None)]),
     (500, "internal", "kernel_unavailable", [("writing", None), ("error", "kernel_unavailable"), ("turn_end", None)]),
 ], ids=["closed", "stale_generation", "invalid", "unavailable"])
-async def test_the_turn_routes_refusals_end_the_turn_as_contexts_do(api_conn, kernel_http, fake, ro_schema, status,
-                                                                    code, ended, shown):
-    """The turn's first kernel call, `POST /sessions/{session_id}/turn`, runs right after the session and mode checks,
-    and the same answer from it or from `/context` ends the turn the same way: a closed session with the session
-    error, a stale generation silently, anything else as the kernel being unavailable. Claude is never called and no
-    tool runs. The turn's first call comes before Claude starts writing, so its refusal shows no `writing`."""
+async def test_the_turn_routes_refusals_end_the_turn_as_contexts_do(api_conn, engine, kernel_http, fake, ro_schema,
+                                                                    status, code, ended, shown):
+    """`POST /sessions/{session_id}/turn` runs right after the session and mode checks, and again before a model call
+    that places a newer message (here one the visitor sent during `/context`). The same answer from either call or
+    from `/context` ends the turn the same way: a closed session with the session error, a stale generation silently,
+    anything else as the kernel being unavailable. Claude is never called, no tool runs, and every message still waits
+    for a turn. The first call comes before Claude starts writing, so its refusal shows no `writing`."""
     seen = {}
-    for refused in (turn_path, context_path):
+    for refused in ("start", "newer", "context"):
         visitor = await new_visitor(kernel_http, fake)
         kernel = Kernel(fake)
         async with KernelHttp("http://fake-kernel", transport=kernel) as http:
             caller = Caller(copy_id=visitor.ids.copy_id, desk_id=visitor.ids.desk_id,
                             session_id=visitor.ids.session_id, kind="visitor", kernel=http.session(visitor.token),
                             ro_schema=ro_schema)
-            kernel.refuse[refused(caller)] = (status, code)
+            turns = []
+
+            async def sent_again(request: httpx.Request) -> None:   # this answer is for the newer message's call
+                turns.append(request)
+                if len(turns) == 2:
+                    kernel.refuse[turn_path(caller)] = (status, code)
+
+            async def meanwhile(request: httpx.Request) -> None:     # the visitor writes again during /context
+                async with engine.connect() as conn:
+                    await said(conn, caller, "Can someone come on Saturday instead?")
+
+            if refused == "start":
+                kernel.refuse[turn_path(caller)] = (status, code)
+            elif refused == "context":
+                kernel.refuse[context_path(caller)] = (status, code)
+            else:
+                kernel.before.update({turn_path(caller): sent_again, context_path(caller): meanwhile})
             await said(api_conn, caller, "Hola, ¿tienen citas mañana?")
             model = ScriptedModel()
             outcome = await loop.run_turn(api_conn, caller, model)
         events_shown = [(event.type, getattr(event, "code", None)) for event in await events(api_conn,
                                                                                              caller.session_id)]
-        seen[refused.__name__] = (outcome, events_shown, model.requests)
-        if refused is turn_path:
-            assert kernel.answered(context_path(caller)) == [] and fake.called("/decide") == []
-    assert seen["context_path"] == (ended, shown, [])
-    assert seen["turn_path"] == (ended, [event for event in shown if event != ("writing", None)], [])
+        seen[refused] = (outcome, events_shown, model.requests)
+        assert kernel.answered("/decide") == [], refused
+        assert {seq for (seq,) in await rows(api_conn, caller.session_id, "visitor_text", "model_seq")} == {None}
+        if refused == "start":
+            assert kernel.answered(context_path(caller)) == []
+        if refused == "newer":
+            assert len(kernel.answered(turn_path(caller))) == 2
+    assert seen["context"] == seen["newer"] == (ended, shown, [])
+    assert seen["start"] == (ended, [event for event in shown if event != ("writing", None)], [])
 
 
 async def test_a_take_over_or_a_close_just_before_the_turn_starts_ends_it(api_conn, kernel_http, fake, ro_schema):

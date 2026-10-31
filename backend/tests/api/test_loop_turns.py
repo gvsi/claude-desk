@@ -15,6 +15,7 @@ import pytest
 from pydantic import TypeAdapter
 from sqlalchemy import text
 
+import desk.api.loop as loop_module
 from desk.api import prompts
 from desk.api.kernel_client import KernelHttp
 from desk.api.loop import MAX_MODEL_CALLS, run_turn
@@ -1119,6 +1120,70 @@ async def test_text_written_while_the_owner_had_the_chat_sets_the_turns_language
     assert sent.body == {"generation": fake.sessions[caller.session_id].generation, "text": words, "desk_id": None}
     (request,) = model.requests
     assert html.escape(words, quote=False) in json.dumps(request.messages, ensure_ascii=False)   # Claude reads it now
+
+
+async def test_a_message_sent_mid_turn_goes_to_the_kernel_before_claude_reads_it(api_conn, engine, caller, visitor,
+                                                                                  fake):
+    """The turn tells the kernel its newest message as it starts, but one the visitor sends while it runs (here during
+    a tool call) joins the next model call, so that call is preceded by `/turn` again, with the newer message: what
+    the turn renders from then on speaks its language. One call per newer message, and none when nothing arrived."""
+    words = "Perdón, ¿mejor pueden venir mañana?"
+    model = ScriptedModel([response(tool_use("native__find_slots", {"days": 3}, id="toolu_friday")),
+                           response(tool_use("native__find_slots", {"days": 1}, id="toolu_tomorrow")),
+                           response(reply("Tengo horarios mañana por la mañana."))])
+    calls_before_turn = []
+
+    async def watch(path: str) -> None:
+        if path == "/decide":
+            if len(model.requests) == 1:                   # the visitor writes again during the first call
+                async with engine.connect() as conn:
+                    await append_message(conn, caller.ids, "visitor_text", text=words)
+                    await conn.commit()
+        else:
+            calls_before_turn.append(len(model.requests))
+
+    await said(api_conn, caller, "Hi, can someone come on Friday?")
+    paths = {"/decide", f"/sessions/{caller.session_id}/turn"}
+    async with KernelHttp("http://fake-kernel", transport=Watching(fake, paths, watch)) as http:
+        assert await run_turn(api_conn, replace(caller, kernel=http.session(visitor.token)), model) == "done"
+
+    assert [call.body["text"] for call in fake.called(TURN)] == ["Hi, can someone come on Friday?", words]
+    assert calls_before_turn == [0, 1]                     # as the turn starts, then before the call that reads it
+    escaped = html.escape(words, quote=False)
+    assert escaped not in json.dumps(model.requests[0].messages, ensure_ascii=False)
+    assert escaped in json.dumps(model.requests[1].messages, ensure_ascii=False)
+    receipts: dict[str, list[str]] = {}
+    for event in await events(api_conn, caller.session_id):
+        if event.type == "receipt":
+            receipts.setdefault(event.decision_id, []).append(event.visitor_plain)
+    friday, tomorrow = receipts.values()
+    assert (friday[-1], tomorrow[-1]) == ("Times read from Maria Rivera's calendar",
+                                          "Horarios tomados del calendario de Maria Rivera")
+
+
+async def test_a_message_placed_after_the_last_look_still_goes_first(api_conn, caller, visitor, fake, monkeypatch):
+    """Should a message land between the loop's look at what waits and the model call placing it, the call's input
+    names it, and `/turn` still goes before Claude reads it."""
+    async def found_nothing(conn, session_id: str) -> None:   # every look the loop takes misses it
+        return None
+
+    monkeypatch.setattr(loop_module, "latest_said", found_nothing)
+    words = "¿Tienen citas mañana por la tarde?"
+    await said(api_conn, caller, words)
+    model = ScriptedModel([response(reply("Sí, con gusto."))])
+    calls_before_turn = []
+
+    async def watch(path: str) -> None:
+        calls_before_turn.append(len(model.requests))
+
+    paths = {f"/sessions/{caller.session_id}/turn"}
+    async with KernelHttp("http://fake-kernel", transport=Watching(fake, paths, watch)) as http:
+        assert await run_turn(api_conn, replace(caller, kernel=http.session(visitor.token)), model) == "done"
+
+    (sent,) = fake.called(TURN)
+    assert sent.body["text"] == words and calls_before_turn == [0]
+    routes = [call.route for call in fake.calls]
+    assert routes.index(CONTEXT) < routes.index(TURN)         # sent once the call had placed it
 
 
 @pytest.mark.parametrize("stop", ["paused", "over_budget"])

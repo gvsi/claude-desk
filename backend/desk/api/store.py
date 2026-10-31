@@ -98,13 +98,23 @@ class Ids:
 
 
 @dataclass(frozen=True)
+class Said:
+    """A visitor's or a visiting agent's message: its transcript cursor `n` and its text (untrusted)."""
+
+    n: int
+    text: str
+
+
+@dataclass(frozen=True)
 class ModelInput:
     """A model call's request as the current context holds it: the system prompt it froze (None for a context opened
-    before contexts froze one), its frozen tools and its messages."""
+    before contexts froze one), its frozen tools and its messages; and `said`, the newest visitor or agent message
+    this call placed in the context, if any, whose language the loop tells the kernel (`loop`)."""
 
     system: list[dict] | None
     tools: list[dict]
     messages: list[dict]
+    said: Said | None = None
 
 
 @dataclass(frozen=True)
@@ -181,6 +191,7 @@ DELIVERY_AUTHORS = frozenset({"claude", "owner", "desk"})
 COLUMNS = frozenset({"author", "text", "blocks", "language", "owner_translation", "wake", "ref_id", "call_id",
                      "event_seq"})
 REPLAYED_KINDS = frozenset({"visitor_text", "agent_text", "delivered", "status"})   # what a recorded night holds
+SAID_KINDS = ("visitor_text", "agent_text")   # what a visitor, or a visiting agent, wrote
 PRESENCE_KINDS = frozenset({"owner_joined", "owner_left"})   # the owner's take-over and hand-back, as their events
 EVENT_KINDS = frozenset({"delivered", "status", *PRESENCE_KINDS})   # rows holding the event they published
 NOT_REPLAYED = MESSAGES.c.replay_id.is_(None)   # every query that builds a model context leaves out recorded history
@@ -412,7 +423,7 @@ async def _place(conn: AsyncConnection, ns: Sequence[int], context: int, first_s
 
 async def _pending(conn: AsyncConnection, session_id: str) -> list[Any]:
     """Rows the model hasn't been sent yet, in the order they were written; recorded history never is."""
-    return list(await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind).where(
+    return list(await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.text).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_seq.is_(None),
         MESSAGES.c.model_content.is_not(None), NOT_REPLAYED).order_by(MESSAGES.c.n)))
 
@@ -584,6 +595,7 @@ async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelIn
     ordered = [row.n for row in pending if row.kind != "tool_change"] + [
         row.n for row in pending if row.kind == "tool_change"]
     await _place(conn, ordered, current, await _next_seq(conn, session_id))
+    said = next((Said(row.n, row.text) for row in reversed(pending) if row.kind in SAID_KINDS), None)
 
     rows = await conn.execute(select(MESSAGES.c.kind, MESSAGES.c.model_content).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_context == current).order_by(MESSAGES.c.model_seq))
@@ -618,7 +630,7 @@ async def prepare_model_input(conn: AsyncConnection, session_id: str) -> ModelIn
         else:
             user.append(row.model_content)
     close_gap()
-    return ModelInput(system=system_prompt, tools=tools, messages=messages)
+    return ModelInput(system=system_prompt, tools=tools, messages=messages, said=said)
 
 
 async def append_assistant(conn: AsyncConnection, ids: Ids, content: list[dict], *, generation: int) -> int:
@@ -682,15 +694,16 @@ async def latest_pending(conn: AsyncConnection, session_id: str) -> int | None:
         MESSAGES.c.model_content.is_not(None)))).scalar_one()
 
 
-async def latest_said(conn: AsyncConnection, session_id: str) -> str | None:
-    """The text of the newest visitor or agent message the session's next model call places in its context (the rows
-    `_pending` finds), whether or not it woke the turn: text written while the owner had the chat wakes nothing, yet
-    reaches Claude with the next turn. The turn tells the kernel its language (`loop`). None when no such message
-    waits (only a whisper, an action update or a note does)."""
-    return (await conn.execute(select(MESSAGES.c.text).where(
-        MESSAGES.c.session_id == session_id, MESSAGES.c.kind.in_(("visitor_text", "agent_text")),
+async def latest_said(conn: AsyncConnection, session_id: str) -> Said | None:
+    """The newest visitor or agent message the session's next model call places in its context (the rows `_pending`
+    finds), whether or not it woke the turn: text written while the owner had the chat wakes nothing, yet reaches
+    Claude with the next turn. The turn tells the kernel its language (`loop`). None when no such message waits (only
+    a whisper, an action update or a note does)."""
+    found = (await conn.execute(select(MESSAGES.c.n, MESSAGES.c.text).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind.in_(SAID_KINDS),
         MESSAGES.c.model_seq.is_(None), MESSAGES.c.model_content.is_not(None), NOT_REPLAYED)
-        .order_by(MESSAGES.c.n.desc()).limit(1))).scalar_one_or_none()
+        .order_by(MESSAGES.c.n.desc()).limit(1))).first()
+    return None if found is None else Said(found.n, found.text)
 
 
 async def clear_wake(conn: AsyncConnection, session_id: str) -> int:

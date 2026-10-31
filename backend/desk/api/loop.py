@@ -3,12 +3,12 @@ Plan 02a, Task 5).
 
 `run_turn(conn, caller, model)` answers what is waiting in a session. It reads the session's mode and generation
 from the kernel (`GET /whoami`), sends it the visitor's or agent's newest message so it renders the turn in that
-message's language (`POST /sessions/{session_id}/turn`, before a paused or over-budget turn's handoff too), reads the
-session's tools and facts (`GET /context`), brings the model context up to date (a `desk_context` row when the facts
-change, tool changes, or a fresh context, which a changed system prompt opens too), then calls Claude on the system
-prompt and tools the context froze, and acts on each response by its stop reason. Claude only proposes: every tool
-call goes through `/decide` (`tools.route_call`), and every reply through `/check_reply` and `deliver()`
-(`tools.send_reply`).
+message's language (`POST /sessions/{session_id}/turn`, before a paused or over-budget turn's handoff too, and again
+before a model call that places a newer message), reads the session's tools and facts (`GET /context`), brings the
+model context up to date (a `desk_context` row when the facts change, tool changes, or a fresh context, which a
+changed system prompt opens too), then calls Claude on the system prompt and tools the context froze, and acts on
+each response by its stop reason. Claude only proposes: every tool call goes through `/decide`
+(`tools.route_call`), and every reply through `/check_reply` and `deliver()` (`tools.send_reply`).
 
 `run_pending(caller, model, ...)` is how a request starts turns (Task 6): one session's turns run one at a time,
 under the turn lock (`turn_lock`), until no work is waiting (an agent's request runs one turn at most).
@@ -46,6 +46,7 @@ from desk.api.ro import KernelRO
 from desk.api.sse import append_metric, emit
 from desk.api.store import (
     OpenToolUse,
+    Said,
     append_assistant,
     append_message,
     append_stopped_draft,
@@ -196,6 +197,7 @@ class _Turn:
     system: list[dict] = field(default_factory=list)   # the system prompt this turn rendered
     rebound: bool = False                              # a thinking-binding 400 started a fresh context this turn
     recovered: bool = False                            # the turn `_drain` runs so Claude reads recovered results
+    said_n: int | None = None                          # the newest message sent to `/turn` this turn, by its `n`
 
     @property
     def visitor(self) -> bool:
@@ -209,7 +211,7 @@ class _Turn:
         self.generation = session.generation
         if session.mode == "owner":                        # the owner took over: Claude stays quiet
             return "not_ai"
-        refused = await self._start()                      # first, even for a handoff: it speaks the turn's language
+        refused = await self._tell_waiting()               # first, even for a handoff: it speaks the turn's language
         if refused is not None:
             return refused
         if session.mode == "paused":                       # the breaker tripped: the kernel's handoff, no model call
@@ -240,32 +242,41 @@ class _Turn:
             if self.model_calls >= MAX_MODEL_CALLS:
                 return await self._hand_off()
             response = await self._call()
+            if isinstance(response, str):                  # the kernel refused a newer message's `/turn`
+                return response
             outcome = await self._act(response)
             if outcome is not None:
                 return outcome
 
-    async def _start(self) -> TurnOutcome | None:
-        """Tell the kernel the turn's language before anything is rendered in it (GitHub issue #121), right after the
-        session and mode checks, so a paused or over-budget turn's handoff speaks it too: the newest visitor or agent
-        message reaching Claude this turn (`store.latest_said`), whether or not it woke the turn, cut to the
-        contract's `TURN_TEXT_CHARS`, goes to `POST /sessions/{session_id}/turn`, and the kernel keeps the language
-        it detects as the session's, which the turn's receipts and cards and the reply check's fallback then speak. A
-        turn with no such message sends nothing. The text is untrusted and goes only to the kernel's detector:
-        nothing here logs or keeps it. How the turn ends when the kernel refuses, as it would on `/context`
-        (`_failed`), else None."""
-        conn, caller = self.conn, self.caller
-        said = await latest_said(conn, caller.session_id)
-        await conn.commit()
-        if said is None:
+    async def _tell_waiting(self) -> TurnOutcome | None:
+        """Tell the kernel the turn's language before anything is rendered in it (GitHub issue #121): the newest
+        visitor or agent message waiting for the next model call (`store.latest_said`), whether or not it woke the
+        turn, goes to `POST /sessions/{session_id}/turn` (`_tell`), and the kernel keeps the language it detects as
+        the session's, which the turn's receipts and cards and the reply check's fallback then speak. The turn calls
+        it right after the session and mode checks, so a paused or over-budget turn's handoff speaks it too, and
+        before each model call (`_call`), where it sends only a message newer than the last it sent. Nothing waiting,
+        nothing sent. How the turn ends when the kernel refuses, as it would on `/context`, else None."""
+        said = await latest_said(self.conn, self.caller.session_id)
+        await self.conn.commit()
+        return await self._tell(said)
+
+    async def _tell(self, said: Said | None) -> TurnOutcome | None:
+        """Send `said` to `POST /sessions/{session_id}/turn`, cut to the contract's `TURN_TEXT_CHARS`, unless the turn
+        already sent it or a newer message: once per newer message, which the route detects again by design. The text
+        is untrusted and goes only to the kernel's detector: nothing here logs or keeps it. How the turn ends when the
+        kernel refuses, as it would on `/context` (`_failed`), else None."""
+        if said is None or (self.said_n is not None and said.n <= self.said_n):
             return None
+        caller = self.caller
         try:
             await caller.kernel.call("POST /sessions/{session_id}/turn",
-                                     TurnRequest(generation=self.generation, text=said[:TURN_TEXT_CHARS]),
+                                     TurnRequest(generation=self.generation, text=said.text[:TURN_TEXT_CHARS]),
                                      path={"session_id": caller.session_id})
         except KernelFailed as failure:
             return _failed(failure)
         except KernelUnavailable:
             return "kernel_unavailable"
+        self.said_n = said.n
         return None
 
     async def _bring_up_to_date(self, context: SessionContext, system: list[dict]) -> None:
@@ -304,15 +315,26 @@ class _Turn:
         if fresh:
             await start_fresh_context(conn, ids, model_tools(context), system=system)
 
-    async def _call(self) -> ModelResponse | None:
+    async def _call(self) -> ModelResponse | TurnOutcome | None:
         """One model call on the context as it stands (the system prompt and tools it froze, and its messages), its
         usage recorded at once; None when the model was unavailable. A 400 saying a replayed thinking block is bound
         to a different conversation calls once more on a fresh context (`_rebind`); a second one, like any other
-        failure, is None."""
+        failure, is None.
+
+        A visitor or agent message newer than the one the turn last sent `/turn` (one sent while the turn ran) joins
+        this call, so it goes to `/turn` first (`_tell`): looked up before the call places it, so a refusal leaves it
+        waiting for a turn, as `/context`'s does, and taken from what the call placed should one land in between.
+        A refusal ends the turn: its outcome is returned in place of a response."""
         conn, caller = self.conn, self.caller
         while True:
+            refused = await self._tell_waiting()           # a newer message, while it still waits
+            if refused is not None:
+                return refused
             model_input = await prepare_model_input(conn, caller.session_id)
             await conn.commit()
+            refused = await self._tell(model_input.said)   # one that landed as the call placed the rows
+            if refused is not None:
+                return refused
             self.model_calls += 1
             try:
                 response = await self.model.call(ModelRequest(route="conversation", system=model_input.system,
