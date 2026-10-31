@@ -384,6 +384,10 @@ export interface JobProposal {
    */
   title: string;
   /**
+   * Who this is for, at most 60 characters; empty if unclear.
+   */
+  who?: string;
+  /**
    * Why this helps, at most 200 characters.
    */
   why: string;

@@ -213,10 +213,10 @@ def understanding(**fields) -> dict:
     return {
         "reply": "You help homeowners with plumbing. Most callers need a repair or a visit.",
         "jobs": [
-            {"job": "intake", "title": "Catch repair requests", "why": "Keep leads after hours",
+            {"job": "intake", "title": "Catch repair requests", "who": "", "why": "Keep leads after hours",
              "how": "Take the details you need", "autonomy": "auto",
              "config": {"block": "intake", "questions": ["What needs fixing?"]}},
-            {"job": "schedule", "title": "Book a visit", "why": "Save scheduling time",
+            {"job": "schedule", "title": "Book a visit", "who": "", "why": "Save scheduling time",
              "how": "Offer an open slot", "autonomy": "auto",
              "config": {"block": "typed_booking", "appointment_type": "Visit", "minutes": 60}},
         ],
@@ -266,6 +266,35 @@ async def test_the_opening_shows_no_cards_and_keeps_the_plan_hidden(
     assert [card.kind for card in loaded.planned] == ["job", "job", "connector", "connector"]
     assert all(card.state == "proposed" for card in loaded.planned)
     assert all(card.job.config is None and card.job.can_do_today for card in loaded.planned if card.job)
+
+
+@pytest.mark.parametrize("who", ["New clients", "", "W" * 60, "W" * 61])
+async def test_a_job_card_carries_who_it_is_for(app, browser, kernel_http, model, engine, who):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    draft = {**understanding()["jobs"][0], "who": who}
+    opening = understanding(jobs=[draft, understanding()["jobs"][1]], connectors=[], next_topic="what_you_do")
+    before = len(model.requests)
+    model.add(unparsed(opening))
+    if len(who) > 60:
+        model.add(unparsed(opening))
+    await consent(owner, interview_id, False, model, cards=True)
+    assert len(model.requests) == before + (2 if len(who) > 60 else 1)
+    async with engine.connect() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, interview_id)
+    if len(who) > 60:
+        errors = model.requests[-1].messages[-1]["content"][0]["text"]
+        assert "jobs.0.who" in errors and "max_length=60" in errors and who not in errors
+        assert [card.job.job for card in interview.planned] == ["schedule"]
+        return
+    proposal_id = interview.planned[0].proposal_id
+    assert interview.planned[0].job.who == who
+    model.add(turn(next={"kind": "job", "job": proposal_id}, question="Take repair requests?"))
+    response = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                        json={"question": "what_you_do", "text": "Repairs."})
+    assert response.status_code == 200, response.text
+    assert response.json()["messages"][-1]["card"]["job"]["who"] == who
 
 
 async def test_a_client_with_cards_gets_card_asks(app, browser, kernel_http, model, engine):
@@ -423,7 +452,8 @@ async def test_a_turn_can_add_a_job_to_the_plan(
     await consent(owner, interview_id, False, model, cards=True)
     proposal_id = "p-123456abcdef"
     monkeypatch.setattr(desk_setup, "new_proposal_id", lambda: proposal_id)
-    draft = {"job": "payment", "title": "Take a deposit", "why": "Reserve work", "how": "Send a link",
+    draft = {"job": "payment", "title": "Take a deposit", "who": "Clients you've priced",
+             "why": "Reserve work", "how": "Send a link",
              "autonomy": "ask", "config": {"block": "purpose_payment", "purpose": "Deposit", "amount_cents": 99999}}
     response = await answer(owner, model, interview_id, "We take deposits.",
                             turn(next={"kind": "job", "job": proposal_id}, add_jobs=[draft]))
@@ -432,6 +462,7 @@ async def test_a_turn_can_add_a_job_to_the_plan(
     row = await stored(engine, interview_id)
     card = next(card for entry in row["transcript"] for card in entry.get("planned", []))
     assert card["proposal_id"] == proposal_id and card["job"]["can_do_today"] is True
+    assert card["job"]["who"] == draft["who"]
     assert card["job"]["config"] == ({"block": "purpose_payment", "purpose": "Deposit", "amount_cents": None}
                                        if business_tools_enabled else None)
     response = await answer(owner, model, interview_id, "Oakland.",
@@ -449,7 +480,7 @@ async def test_a_dropped_draft_gets_one_retry_with_its_errors(
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     private = "P" * 75
-    valid = {"job": "payment", "title": "Retainer", "why": "Start work", "how": "Send a link", "autonomy": "ask",
+    valid = {"job": "payment", "title": "Retainer", "who": "", "why": "Start work", "how": "Send a link", "autonomy": "ask",
              "config": {"block": "purpose_payment", "purpose": "Retainer"}}
     bad = {**valid, "config": {"block": "purpose_payment", "purpose": private}}
     other = {**understanding()["jobs"][0], "config": None}
@@ -603,7 +634,7 @@ async def test_a_follow_up_can_update_the_hidden_plan_without_advancing(app, bro
     response = await answer(owner, model, interview_id, "We only take requests, and urgent calls.",
                             turn("Which requests?", step_done=False, next={"kind": "done"},
                                  skip=["hours_and_area"], drop=[dropped],
-                                 add_jobs=[{"job": "urgent", "title": "Route urgent calls", "why": "Avoid delays",
+                                 add_jobs=[{"job": "urgent", "title": "Route urgent calls", "who": "", "why": "Avoid delays",
                                             "how": "Take details", "autonomy": "ask", "config": None}]))
     assert response.status_code == 200, response.text
     assert response.json()["question"] == "what_you_do"
@@ -619,7 +650,7 @@ async def test_a_job_added_at_the_end_is_asked_before_closing(app, browser, kern
     state = await begin(owner, model)
     interview_id = state["interview_id"]
     await consent(owner, interview_id, False, model, cards=True)
-    draft = {"job": "answer", "title": "Answer tax questions", "why": "Save time", "how": "Use business facts",
+    draft = {"job": "answer", "title": "Answer tax questions", "who": "", "why": "Save time", "how": "Use business facts",
              "autonomy": "auto", "config": None}
     if where == "limit":
         await answer(owner, model, interview_id, "Just quotes.",
@@ -838,6 +869,7 @@ def test_the_seam_models_hold_their_bounds():
 
     job = JobProposal(job="answer", title="Answer questions", why="Save time", how="Use business facts",
                       autonomy="auto", can_do_today=True, config=None)
+    assert job.who == ""  # Older stored proposals have no Who row.
     connector = ConnectorProposal(app="stripe", label="Stripe", why="Take payments", connectable=True)
     card = {"proposal_id": "p-012345abcdef", "state": "proposed", "kind": "job", "job": job,
             "connector": None}
@@ -907,7 +939,7 @@ def proposal_entries() -> list[dict]:
         {"role": "claude", "text": "", "card": {
             "proposal_id": "p-012345abcdef", "kind": "job", "state": "proposed", "connector": None,
             "superseded_by": None,
-            "job": {"job": "schedule", "title": "Book an intro", "why": "Meet new clients", "how": "Book a slot",
+            "job": {"job": "schedule", "title": "Book an intro", "who": "", "why": "Meet new clients", "how": "Book a slot",
                     "autonomy": "auto", "can_do_today": True,
                     "config": {"block": "typed_booking", "appointment_type": "Intro", "minutes": 30}}}},
         {"role": "claude", "text": "", "card": {
@@ -2847,7 +2879,7 @@ async def test_typing_a_change_replaces_the_waiting_card(
     from desk.api.prompts import CAPABILITIES
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=business_tools_enabled)
     owner, interview_id, proposal_id = await pending_job(app, browser, kernel_http, model, engine)
-    revised = {**understanding()["jobs"][1], "title": "Book a 30-minute call", "autonomy": "ask",
+    revised = {**understanding()["jobs"][1], "title": "Book a 30-minute call", "who": "New clients", "autonomy": "ask",
                "how": "Ask me before booking a call.",
                "config": {"block": "typed_booking", "appointment_type": "Call", "minutes": 30}}
     model.add(unparsed({"reply": "I'll ask before booking.", "decision": "change", "revised": [revised],
@@ -2862,6 +2894,7 @@ async def test_typing_a_change_replaces_the_waiting_card(
     assert new["proposal_id"] != proposal_id and new["state"] == "proposed"
     assert state["pending_card"] == new["proposal_id"] and state["question"] is None
     assert new["job"]["title"] == revised["title"] and new["job"]["autonomy"] == "ask"
+    assert new["job"]["who"] == revised["who"]
     assert new["job"]["how"] == revised["how"] and new["job"]["job"] == "schedule"
     assert new["job"]["can_do_today"] == CAPABILITIES["schedule"]
     assert new["job"]["config"] == (revised["config"] if business_tools_enabled else None)

@@ -201,7 +201,8 @@ def test_setup_stripe_acknowledgment_waits_for_code_to_connect():
 
 def test_added_setup_jobs_have_bounded_short_names_and_one_plain_line():
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
-        assert "Write each like a planned job: title at most 60 characters" in system
+        assert "Write each like a planned job: title and who at most 60 characters each" in system
+        assert "who empty when it's for everyone" in system
         assert "why at most 200, how one plain line of at most 300" in system
         assert "config null unless the job uses its matching block, with no payment amount" in system
 
@@ -209,6 +210,9 @@ def test_added_setup_jobs_have_bounded_short_names_and_one_plain_line():
 def test_setup_job_cards_use_short_names_and_one_plain_line():
     system = prompts.SETUP_UNDERSTAND_SYSTEM
     assert "title (a short name for the job in the owner's words" in system
+    assert "who (who it's for, in a few words" in system
+    assert "empty when it's for everyone" in system
+    assert "title and who at most 60 characters each, why at most 200, how at most 300" in system
     assert "how (one plain line on what happens" in system
     assert "what it hands to the owner" not in system
 

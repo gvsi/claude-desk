@@ -9116,6 +9116,13 @@
             "title": "Title",
             "description": "Title, at most 60 characters."
           },
+          "who": {
+            "type": "string",
+            "maxLength": 60,
+            "title": "Who",
+            "description": "Who this is for, at most 60 characters; empty if unclear.",
+            "default": ""
+          },
           "why": {
             "type": "string",
             "maxLength": 200,

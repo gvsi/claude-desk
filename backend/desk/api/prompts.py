@@ -462,9 +462,9 @@ on its own), tell them to change it on its card above, where a later choice repl
 change a decided card yourself, so never say you have.
 - skip: the topics left that don't fit this business. drop: the ids of planned items that no longer fit after what \
 the owner said. add_jobs: at most two new jobs, only when the owner's answers show one worth proposing that isn't \
-in the plan; they join the plan and you can propose them next turn. Write each like a planned job: title at most \
-60 characters, why at most 200, how one plain line of at most 300, autonomy, and config null unless the job uses \
-its matching block, with no payment amount.
+in the plan; they join the plan and you can propose them next turn. Write each like a planned job: title and who \
+at most 60 characters each (who empty when it's for everyone), why at most 200, how one plain line of at most 300, \
+autonomy, and config null unless the job uses its matching block, with no payment amount.
 - choices, for a topic question: two to four short answers the owner might give (each at most 80 characters) when \
 the answer is likely one of a few, else an empty list. Mark one recommended only when it's a setting or default \
 you're proposing for how the Desk behaves, such as "Ask me before confirming each booking", with your reason in \
@@ -704,13 +704,14 @@ how this kind of business works: no price list for a business that prices after 
 payment only for a purpose the business really takes money for (a deposit, an application fee, a retainer), and \
 "answer" only when answering questions is itself a main job, with a title naming what it answers.
 - For each job: job (its kind), title (a short name for the job in the owner's words, such as "Book a free intro \
-call"), why (the value in the owner's terms, specific to this business: hours back, leads not lost after hours, \
+call"), who (who it's for, in a few words, such as "New clients" or "Clients you've priced"; empty when it's for \
+everyone), why (the value in the owner's terms, specific to this business: hours back, leads not lost after hours, \
 fewer no-shows), how (one plain line on what happens, such as "New clients pick a time within your opening hours \
 and book a 20-minute call."), and autonomy: auto when the Desk can safely do it on its own, ask when the owner should approve each one. Start every \
 payment at ask. A job the Desk can't do yet says so plainly in how: today it takes the details for a person to \
 reply.
-- Lengths, which code enforces (a job that breaks one is dropped): title at most 60 characters, why at most 200, \
-how at most 300.
+- Lengths, which code enforces (a job that breaks one is dropped): title and who at most 60 characters each, why \
+at most 200, how at most 300.
 - config: null unless the job uses its matching block: intake has questions (the business's own, at most five, \
 each under 120 characters), schedule has typed_booking with an appointment_type (at most 60 characters) and \
 minutes from 15 to 60 (use 60 for anything longer), payment has purpose_payment with a purpose only (at most 60 \
@@ -976,6 +977,7 @@ class JobProposal(BaseModel):
 
     job: JobKind
     title: str = Field(max_length=60, description="Title, at most 60 characters.")
+    who: str = Field(default="", max_length=60, description="Who this is for, at most 60 characters; empty if unclear.")
     why: str = Field(max_length=200, description="Why this helps, at most 200 characters.")
     how: str = Field(max_length=300, description="How the Desk helps, at most 300 characters.")
     autonomy: Autonomy
@@ -1048,6 +1050,7 @@ class JobDraft(BaseModel):
 
     job: JobKind
     title: str = Field(max_length=60, description="Title, at most 60 characters.")
+    who: str = Field(max_length=60, description="Who this is for, at most 60 characters; empty if unclear.")
     why: str = Field(max_length=200, description="Why this helps, at most 200 characters.")
     how: str = Field(max_length=300, description="How the Desk helps, at most 300 characters.")
     autonomy: Autonomy
