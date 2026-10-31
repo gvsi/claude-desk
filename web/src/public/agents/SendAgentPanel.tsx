@@ -288,7 +288,8 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
     void send(task, key, keyMadeAt, true);
   };
 
-  // A lost start's "Try again" lasts as long as its key's window: then the reload takes its place.
+  // A lost start's "Try again" lasts as long as its key's window: then the reload takes its place,
+  // in the same notice and the same button, so a visitor whose focus is on it stays there.
   const { status: shown, key: shownKey, keyMadeAt: shownMadeAt } = state;
   useEffect(() => {
     if (shown !== 'lost' || shownMadeAt === null) return;

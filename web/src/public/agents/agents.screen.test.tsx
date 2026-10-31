@@ -1241,9 +1241,13 @@ describe('agents page', () => {
     vi.advanceTimersByTime(KEY_RETRY_WINDOW_MS - 1);
     await settle();
     expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(1);
+    // The visitor is on "Try again" when the window closes: the reload takes its place in the same
+    // notice, and the visitor's focus stays there, on "Reload the page", rather than falling to the page.
+    (panel.getByRole('button', { name: 'Try again' }).element() as HTMLElement).focus();
     vi.advanceTimersByTime(1);
     await until(() => expect(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).elements()).toHaveLength(1));
     expect(panel.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(document.activeElement).toBe(panel.getByRole('button', { name: RELOAD_PAGE_LABEL.en }).element());
     expect(panel.getByText(AGENT_START_LOST_COPY.en, { exact: true }).elements()).toHaveLength(1);
     expect(chipsIn(screen)).toEqual([]);
     expect(requests('sendAgent')).toHaveLength(1);
