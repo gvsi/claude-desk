@@ -6,6 +6,7 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -86,8 +87,9 @@ interface ShownDesk {
 const DeskContext = createContext<OwnerDeskContext | null>(null);
 
 /**
- * Gives the pages under it the business and Desk they are drawn for: the owner's frame around every
- * page of a Desk, and the still preview of Today behind the intro dialog.
+ * Gives the pages under it the business and Desk they are drawn for, and what they can do to it:
+ * the owner's frame around every page of a Desk, its nested pages included (Settings' sections), and
+ * the still preview of Today behind the intro dialog, where both do nothing.
  */
 export function OwnerDeskProvider({ value, children }: { value: OwnerDeskContext; children: ReactNode }) {
   return <DeskContext.Provider value={value}>{children}</DeskContext.Provider>;
@@ -357,8 +359,15 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const layoutClass = ['cd-owner-layout', fill ? 'cd-owner-layout--fill' : '', CENTERED_PAGES.has(current) ? 'cd-owner-layout--centered' : '']
     .filter(Boolean)
     .join(' ');
-  const setAnswering = (on: boolean) => answering.mutate(on);
-  const holdDesk = (on: boolean) => onHold(on ? { business, desk } : null);
+  // What every page under this Desk gets (`useOwnerDesk`), built here only. It stays the same object
+  // until the business or the Desk changes, so the pages don't draw again on each of the frame's reads.
+  const { mutate: answer } = answering;
+  const setAnswering = useCallback((on: boolean) => answer(on), [answer]);
+  const holdDesk = useCallback((on: boolean) => onHold(on ? { business, desk } : null), [onHold, business, desk]);
+  const deskContext = useMemo<OwnerDeskContext>(
+    () => ({ business, desk, setAnswering, holdDesk, reachPlace }),
+    [business, desk, setAnswering, holdDesk, reachPlace],
+  );
   const sidebar = (
     <OwnerSidebar
       businesses={businesses}
@@ -391,7 +400,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
           </div>
         ) : null}
         <AskClaudeProvider value={askClaude.value}>
-          <OwnerDeskProvider value={{ business, desk, setAnswering, holdDesk, reachPlace }}>
+          <OwnerDeskProvider value={deskContext}>
             <Outlet />
           </OwnerDeskProvider>
         </AskClaudeProvider>
