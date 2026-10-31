@@ -359,10 +359,11 @@ export const isFailure = (value: Failure | object): value is Failure => 'status'
 /**
  * Whether `session` has every tool its Desk's rules allow, as `/context` gives them: while the
  * Desk's Answering switch is off, a visitor's or agent's session keeps only callbacks and leads
- * (master plan, "Model-visible tools"), except the owner's preview.
+ * (master plan, "Model-visible tools"), except the owner's preview. A Desk the copy no longer has
+ * is not answering: it fails closed.
  */
 function hasAllTools(world: MockWorld, session: SessionRecord): boolean {
-  return session.ownerPreview || world.desk(session.deskId)?.summary.answering !== false;
+  return session.ownerPreview || world.desk(session.deskId)?.summary.answering === true;
 }
 
 /**
