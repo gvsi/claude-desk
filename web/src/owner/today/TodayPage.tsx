@@ -13,6 +13,7 @@ import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, heldOldestFirst, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
+import { ContinueSetup } from './ContinueSetup.tsx';
 import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem, type ReadFailure } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
@@ -42,13 +43,14 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
 export const COPIED_FOR_MS = 1_600;
 
 /**
- * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy,
- * "Things to try", then, in this order, "Needs you" and "Live now" when they have something, and
- * "Since last night" always; the right column has the public page a new tab away and the last 7
- * days. Today opens no visitor chat itself, and has no composer: changing a rule by asking Claude
- * lives on Rules. An address that names a held request (`#request-<id>`, as the Demo inbox links an
- * owner's alert) brings that request's card into view and focus. Until what the page first shows is
- * read, it holds the loading line alone, so it opens drawn however the owner came to it.
+ * `/app/:deskId/today`: the greeting with who is here now and the Desk's public link to copy, "Not
+ * live yet" while the Desk's setup hasn't gone live, "Things to try", then, in this order, "Needs
+ * you" and "Live now" when they have something, and "Since last night" always; the right column
+ * has the public page a new tab away and the last 7 days. Today opens no visitor chat itself, and
+ * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
+ * request (`#request-<id>`, as the Demo inbox links an owner's alert) brings that request's card
+ * into view and focus. Until what the page first shows is read, it holds the loading line alone,
+ * so it opens drawn however the owner came to it.
  */
 export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const { business, desk, reachPlace } = useOwnerDesk();
@@ -81,6 +83,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const [inboxOpen, setInboxOpen] = useState(false);
 
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
+  // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
+  // and for a Desk listed without it (an API from before it).
+  const setup = desk.setup ?? null;
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
@@ -120,6 +125,27 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   }, []);
   // Focus brings the card into view too. A request with no card here is left alone.
   const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
+  // Decide from the committed sections, since dismissing before the answer's refresh lands can
+  // expose a cached hold and keep Needs you mounted. Only move on once that section is gone.
+  const needsYouSection = useRef<HTMLElement>(null);
+  const liveNow = useRef<HTMLElement>(null);
+  const sinceLastNight = useRef<HTMLElement>(null);
+  const dismissedFocus = useRef<{ next: string | undefined } | null>(null);
+  const dismissAnswer = (id: string, next: string | undefined) => {
+    dismissedFocus.current = { next };
+    answers.dismiss(id);
+  };
+  useLayoutEffect(() => {
+    const dismissed = dismissedFocus.current;
+    if (dismissed === null) return;
+    dismissedFocus.current = null;
+    if (needsYouSection.current !== null) {
+      const card = dismissed.next === undefined ? undefined : answeredFocus.cardFor(dismissed.next);
+      (card ?? needsYouSection.current).focus();
+    } else {
+      (liveNow.current ?? sinceLastNight.current)?.focus({ preventScroll: true });
+    }
+  });
   const focusFirstHeld = () => {
     if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
   };
@@ -215,7 +241,11 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
             {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
           </p>
         </div>
+        {setup !== null ? (
+          <ContinueSetup business={desk.business_name} interviewId={setup.interview_id} step={setup.step} answering={desk.answering} />
+        ) : null}
         <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
+        {/* Drawn while it lists something or a read has failed: its Dismiss sends focus on when neither is left. */}
         {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
           <NeedsYou
             held={held}
@@ -225,10 +255,12 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
             registerCard={registerCard}
             answeredFocus={answeredFocus}
             readFailure={readFailure}
+            sectionRef={needsYouSection}
+            onDismiss={dismissAnswer}
           />
         ) : null}
-        {live.length > 0 ? <LiveNow live={live} /> : null}
-        <SinceLastNight />
+        {live.length > 0 ? <LiveNow live={live} sectionRef={liveNow} /> : null}
+        <SinceLastNight sectionRef={sinceLastNight} />
       </div>
       <TodayAside deskId={deskId} slug={desk.slug} inbox={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />} />
     </div>

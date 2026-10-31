@@ -60,6 +60,8 @@ from desk.kernel_api import (
     PolicyDraftRequest,
     PublicDesk,
     ToolsConfirmRequest,
+    TurnRequest,
+    TurnStarted,
     WhoAmI,
 )
 from scripts.export_schema import export_schema
@@ -306,6 +308,20 @@ def test_create_session_takes_preview():
     assert CreateSessionRequest(desk_slug="rivera-plumbing-abc123", kind="visitor", preview=True).preview is True
     with pytest.raises(ValidationError):          # a preview is the owner acting as a visitor, never an agent: 422 invalid
         CreateSessionRequest(desk_slug="rivera-plumbing-abc123", kind="agent", preview=True)
+
+
+def test_the_turn_sends_one_message_and_answers_a_language():
+    # POST /sessions/{session_id}/turn (issue #121): the newest visitor or agent message, at most 2,000 characters,
+    # only to detect its language, and the session's language after it, one the kernel has templates for
+    assert KERNEL_ROUTES["POST /sessions/{session_id}/turn"] == (TurnRequest, TurnStarted)
+    assert TurnRequest(generation=0, text="x" * 2000).desk_id is None          # an owner session names its Desk
+    with pytest.raises(ValidationError):
+        TurnRequest(generation=0, text="x" * 2001)                            # 422 invalid, nothing cut
+    assert set(TurnRequest.model_fields) == {"generation", "text", "desk_id"}
+    assert set(TurnStarted.model_fields) == {"language"}
+    assert [TurnStarted(language=language).language for language in ("en", "es")] == ["en", "es"]
+    with pytest.raises(ValidationError):
+        TurnStarted(language="fr")
 
 
 def test_kernel_error_codes_include_rate_limited():

@@ -14,6 +14,7 @@ import { ROUTES } from '../../api/routes.ts';
 import type { Suggestion } from '../../api/views.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { settled } from '../../ds/test/settled.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -407,6 +408,32 @@ describe('rules page', () => {
     await expectTurnOpensAtTheOwnersWords(log, 'Quote water heater installs up to $600', 'the next change');
   });
 
+  it('rule_chat_returns_focus_to_a_suggestion_the_click_did_not_focus', async () => {
+    // Safari focuses no button a click presses, so when a suggestion opens Ask Claude beside the
+    // page (1440 px), focus is still on the page's body. Closing the panel still returns focus to
+    // the suggestion that opened it.
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const chip = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Stop quoting on weekends' });
+    await expect.element(chip).toBeVisible();
+    const chipEl = chip.element();
+    // What Safari does: the press moves no focus to the button.
+    chipEl.addEventListener('mousedown', (event) => event.preventDefault());
+    const opened: { focus: Element | null } = { focus: null };
+    chipEl.addEventListener('click', () => {
+      opened.focus = document.activeElement;
+    });
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    await userEvent.click(chip);
+    expect(opened.focus, 'the click left focus on the body').toBe(document.body);
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+
+    await userEvent.keyboard('{Escape}');
+    await expect.element(panel).not.toBeInTheDocument();
+    await expect.element(chip).toHaveFocus();
+  });
+
   it('rules_header_keeps_its_title_whole_beside_ask_claude', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Why was this quote held?' }).click();
@@ -424,6 +451,8 @@ describe('rules page', () => {
       await page.viewport(width, 900);
       await expect.poll(() => window.innerWidth).toBe(width);
       await expect.poll(() => screen.container.querySelector('.cd-app-shell')?.classList.contains('cd-app-shell--compact')).toBe(width < 768);
+      // Measured at rest: the panel has slid in and the page has glided beside it.
+      await settled(screen.container);
       const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
       const header = title.closest('.cd-page-header') as HTMLElement;
       // From 1024 px up the panel stays beside the page.
@@ -868,8 +897,10 @@ describe("Ask Claude's question about a hold", () => {
   });
 
   it('hold_question_never_shows_a_hold_from_an_earlier_read', async () => {
-    // The seed's quote, held and read, so the app keeps it.
-    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    // The seed's quote, held and read, so the app keeps it. Polls are far apart (a minute), so the
+    // only read after the count below is the one Rules sends as it opens: an earlier poll held open
+    // would be reused by it and never counted again.
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { pollScale: 20 });
     const group = screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
 
@@ -881,12 +912,14 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.world.answer(held, 'deny_once');
     await router.navigate(`${DESK}/rules/all`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    // Counted before Rules opens again: the page's own read may reach the server before or after
+    // the page draws, and once it's out no other read is sent until it comes back.
+    const before = reads.held();
     await router.navigate(`${DESK}/rules`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     const again = screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(again.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
-    const waiting = reads.held();
-    await expect.poll(() => reads.held()).toBeGreaterThan(waiting);
+    await expect.poll(() => reads.held()).toBeGreaterThan(before);
     expect(chipWords(again)).toEqual([...FIXED_CHIPS]);
 
     // Dana's refund is held meanwhile: once the reads come back, the chip asks about it.

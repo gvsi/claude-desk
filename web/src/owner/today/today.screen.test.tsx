@@ -10,9 +10,9 @@ import { page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
-import { observeRequests } from '../../api/http.ts';
+import { newIdempotencyKey, observeRequests } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
-import type { BriefingItem, BriefingList, ConversationSummary, NeedsYouItem, ThisWeek, Today } from '../../api/views.ts';
+import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, RefusalCause, SetupState, ThisWeek, Today } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
@@ -21,7 +21,10 @@ import { writeLocal } from '../../lib/storage.ts';
 import { worker } from '../../mocks/browser.ts';
 import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
+import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { CARD_REASON } from '../../mocks/world.ts';
+import { START_EXAMPLES } from '../../setup/copy.ts';
 import { expectLandedInPlace, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import {
@@ -34,6 +37,7 @@ import {
   nextFrames,
 } from '../../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
+import { CAUSE_COPY } from '../safety/copy.ts';
 import { needsYouKey } from '../useDesks.ts';
 import { COPIED_FOR_MS } from './TodayPage.tsx';
 
@@ -89,6 +93,13 @@ async function heldItems(): Promise<NeedsYouItem[]> {
   return (answer.body as NeedsYouItem[]).filter((item) => item.decision != null);
 }
 
+/** Everything the mock's Needs you holds for the main Desk now. */
+async function needsYouRead(): Promise<NeedsYouItem[]> {
+  const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock reads Needs you');
+  return answer.body as NeedsYouItem[];
+}
+
 /** The seeded hold as the kernel has it now. */
 function seededHold(): Decision {
   const held = [...mockStore.world.decisions.values()].find((d) => d.decision.reason_plain === SEEDED_REASON);
@@ -109,6 +120,50 @@ function region(screen: RenderResult, name: string) {
 /** A held request's card, by what was asked. */
 function heldCard(screen: RenderResult, reason: string) {
   return screen.getByRole('article', { name: `Held for you: ${reason}`, exact: true });
+}
+
+/**
+ * Answers the seeded held request on Today with "Allow this time" and waits until its card has
+ * landed and settled, with Dismiss under it.
+ */
+async function allowTheSeededRequest(screen: RenderResult): Promise<void> {
+  const card = heldCard(screen, SEEDED_REASON);
+  const allow = card.getByRole('button', { name: 'Allow this time' });
+  await expect.element(allow).toBeVisible();
+  const item = card.element().closest('li');
+  if (!item) throw new Error('the card sits in an item of Needs you');
+  const landing = watchAnswerLanding(card.element(), item);
+  await allow.click();
+  await landing;
+  await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+}
+
+/** Puts focus on Needs you's one Dismiss without moving the page, and presses Enter on it. */
+async function dismissFromTheKeyboard(screen: RenderResult): Promise<void> {
+  const button = region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).element() as HTMLElement;
+  button.focus({ preventScroll: true });
+  expect(document.activeElement).toBe(button);
+  await userEvent.keyboard('{Enter}');
+}
+
+/**
+ * Scrolls the page's column until Needs you's one Dismiss sits just inside its foot, as an owner who
+ * has just answered there sees it, then puts keyboard focus on it without moving the page. `next`,
+ * the section after Needs you, is then out of sight below, so a focus that brought it into view
+ * would scroll the page. Returns the column.
+ */
+async function focusDismissAtTheFoot(screen: RenderResult, next: Element): Promise<HTMLElement> {
+  const column = document.querySelector('main');
+  if (!column) throw new Error('the owner frame draws the page column');
+  const button = region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).element() as HTMLElement;
+  column.scrollTop += button.getBoundingClientRect().bottom - column.getBoundingClientRect().bottom + 8;
+  await nextFrames();
+  expect(column.scrollTop, 'the page is scrolled down to Dismiss').toBeGreaterThan(0);
+  expect(button.getBoundingClientRect().bottom, 'Dismiss is in sight').toBeLessThanOrEqual(column.getBoundingClientRect().bottom);
+  expect(next.getBoundingClientRect().top, 'the next section is out of sight below').toBeGreaterThan(column.getBoundingClientRect().bottom);
+  button.focus({ preventScroll: true });
+  expect(document.activeElement).toBe(button);
+  return column;
 }
 
 /**
@@ -216,12 +271,13 @@ function minutesAgo(minutes: number): string {
 }
 
 const REFUSAL: BriefingItem = {
-  kind: 'blocked',
+  kind: 'turned_down',
   at: minutesAgo(30),
   session_id: 'ses-agent-1',
   display_name: null,
   ref_id: 'dec-refused-1',
-  line: 'An agent tried to book without a signed limit. Nothing was booked.',
+  line: "Alex Kim's assistant tried to charge $250.00 in one go, over its signed limit of $20 a charge.",
+  cause: 'agent_limit',
 };
 const BOOKING: BriefingItem = {
   kind: 'booking',
@@ -230,6 +286,7 @@ const BOOKING: BriefingItem = {
   display_name: 'Dana Whitfield',
   ref_id: 'dec-dana-book',
   line: 'A visitor booked Tuesday, November 3 at 2:00 pm, inside your weekday hours.',
+  cause: null,
 };
 const ANSWER: BriefingItem = {
   kind: 'answer',
@@ -238,6 +295,7 @@ const ANSWER: BriefingItem = {
   display_name: 'Dana Whitfield',
   ref_id: 'ses-dana-verified',
   line: null,
+  cause: null,
 };
 
 const ZERO_DAYS = ['2026-10-23', '2026-10-24', '2026-10-25', '2026-10-26', '2026-10-27', '2026-10-28', '2026-10-29'].map((date) => ({
@@ -825,18 +883,23 @@ describe('Today', () => {
   });
 
   it('briefing_shows_one_row_per_kind', async () => {
-    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { blocked: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } } }));
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { turned_down: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } } }));
     const { screen } = await renderRoute(TODAY);
     const since = region(screen, 'Since last night');
-    await expect.element(since.getByText(REFUSAL.line ?? '', { exact: true })).toBeVisible();
+    // A refused request is turned down, beside a hollow dot, and says why by its cause's own label
+    // rather than the kernel's line. It opens on Safety.
+    const why = CAUSE_COPY.agent_limit;
+    await expect.element(since.getByText(why, { exact: true })).toBeVisible();
     const rows = since.getByRole('listitem');
     expect(rows.elements()).toHaveLength(3);
     const now = new Date();
-    const [blocked, booked, answered] = rows.elements();
+    const [turnedDown, booked, answered] = rows.elements();
 
-    expect(blocked?.textContent).toContain('Blocked');
-    expect(blocked?.textContent).toContain(formatWhen(REFUSAL.at, LA, now));
-    const refusal = since.getByRole('link', { name: new RegExp(REFUSAL.line ?? '') });
+    expect(turnedDown?.querySelector('.cd-briefing-row__kind')?.textContent).toBe('Turned down');
+    expect(turnedDown?.querySelector('.cd-briefing-row__kind .cd-status-dot')?.className).toBe('cd-status-dot cd-status-dot--info');
+    expect(turnedDown?.textContent).toContain(formatWhen(REFUSAL.at, LA, now));
+    expect(turnedDown?.textContent).not.toContain(REFUSAL.line);
+    const refusal = since.getByRole('link', { name: new RegExp(why) });
     await expect.element(refusal).toHaveAttribute('href', `${DESK}/safety/dec-refused-1`);
 
     expect(booked?.textContent).toContain('Booked');
@@ -858,29 +921,58 @@ describe('Today', () => {
     // All three are on the card already, so there is no "See all" to open.
     expect(since.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
 
-    // A blocked reply has no line of its own, and a night with no booking leaves its row out.
+    // Three things, but no booking among the newest, so two rows: "See all 3" opens the third.
+    mockStore.reset('rivera');
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { turned_down: REFUSAL, booking: null, lead_or_answer: ANSWER } } }));
+    const third = await renderRoute(TODAY);
+    const two = region(third.screen, 'Since last night');
+    await expect.element(two.getByText(why, { exact: true })).toBeVisible();
+    expect(two.getByText('Booked').elements()).toHaveLength(0);
+    expect(two.getByRole('listitem').elements()).toHaveLength(2);
+    await expect.element(two.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
+  });
+
+  it('a_turned_down_request_without_a_cause_shows_the_kernels_line_or_none', async () => {
+    // A refusal the API can't place comes with no cause, and a cause this build has no words for
+    // reads the same: the row gives the kernel's line, when there is one, and opens on Safety.
+    const showsTheLine = async (turnedDown: BriefingItem) => {
+      mockStore.reset('rivera');
+      await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 1, newest: { turned_down: turnedDown, booking: null, lead_or_answer: null } } }));
+      const { screen } = await renderRoute(TODAY);
+      const since = region(screen, 'Since last night');
+      await expect.element(since.getByText(REFUSAL.line ?? '', { exact: true })).toBeVisible();
+      expect(since.getByText(CAUSE_COPY.agent_limit).elements()).toHaveLength(0);
+      await expect.element(since.getByRole('link', { name: /Turned down/ })).toHaveAttribute('href', `${DESK}/safety/dec-refused-1`);
+    };
+    await showsTheLine({ ...REFUSAL, cause: null });
+    await showsTheLine({ ...REFUSAL, cause: 'a_cause_added_later' as unknown as RefusalCause });
+
+    // With no line either, the row says only that it was turned down.
     mockStore.reset('rivera');
     await injectToday((t) => ({
       ...t,
-      briefing: { ...t.briefing, total: 2, newest: { blocked: { ...REFUSAL, ref_id: '41', line: null }, booking: null, lead_or_answer: ANSWER } },
+      briefing: { ...t.briefing, total: 1, newest: { turned_down: { ...REFUSAL, cause: null, line: null }, booking: null, lead_or_answer: null } },
     }));
-    const again = await renderRoute(TODAY);
-    const night = region(again.screen, 'Since last night');
-    await expect.element(night.getByText('A reply was stopped before it was shown.', { exact: true })).toBeVisible();
-    const kinds = night.getByRole('listitem').elements().map((row) => (row.textContent?.includes('Blocked') ? 'Blocked' : 'Answered'));
-    expect(kinds).toEqual(['Blocked', 'Answered']);
-    expect(night.getByText('Booked').elements()).toHaveLength(0);
-    await expect.element(night.getByRole('link', { name: /A reply was stopped/ })).toHaveAttribute('href', `${DESK}/safety/41`);
-    expect(night.getByRole('link', { name: /^See all/ }).elements()).toHaveLength(0);
+    const { screen } = await renderRoute(TODAY);
+    const row = region(screen, 'Since last night').getByRole('listitem');
+    await expect.element(row).toBeVisible();
+    expect(row.element().querySelector('.cd-briefing-row__kind')?.textContent).toBe('Turned down');
+    expect(row.element().querySelector('.cd-briefing-row__line')).toBeNull();
+    expect(row.element().querySelector('a')?.getAttribute('href')).toBe(`${DESK}/safety/dec-refused-1`);
+  });
 
-    // Three things, but no booking among the newest, so two rows: "See all 3" opens the third.
-    mockStore.reset('rivera');
-    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: { blocked: REFUSAL, booking: null, lead_or_answer: ANSWER } } }));
-    const third = await renderRoute(TODAY);
-    const two = region(third.screen, 'Since last night');
-    await expect.element(two.getByText(REFUSAL.line ?? '', { exact: true })).toBeVisible();
-    expect(two.getByRole('listitem').elements()).toHaveLength(2);
-    await expect.element(two.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
+  it('a_newest_row_the_api_leaves_out_is_skipped', async () => {
+    // An API from before turned-down requests sends `blocked` where `turned_down` now is. The key this
+    // build doesn't read and the one that's missing make no row; the rows it can name still show, and
+    // "See all 3" opens the rest.
+    const older = { blocked: { ...REFUSAL, kind: 'blocked' }, booking: BOOKING, lead_or_answer: ANSWER } as unknown as Today['briefing']['newest'];
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, total: 3, newest: older } }));
+    const { screen } = await renderRoute(TODAY);
+    const since = region(screen, 'Since last night');
+    await expect.element(since.getByText('Claude answered Dana Whitfield.')).toBeVisible();
+    const rows = since.getByRole('listitem').elements();
+    expect(rows.map((row) => row.querySelector('.cd-briefing-row__kind')?.textContent)).toEqual(['Booked', 'Answered']);
+    await expect.element(since.getByRole('link', { name: 'See all 3' })).toHaveAttribute('href', `${DESK}/today/briefing`);
   });
 
   it('see_all_opens_the_full_briefing', async () => {
@@ -888,13 +980,13 @@ describe('Today', () => {
       { ...REFUSAL, at: minutesAgo(10) },
       { ...ANSWER, at: minutesAgo(20), ref_id: 'ses-a', session_id: 'ses-a', display_name: null },
       { ...BOOKING, at: minutesAgo(30) },
-      { kind: 'lead', at: minutesAgo(40), session_id: 'ses-b', display_name: 'Dana Whitfield', ref_id: 'lead-1', line: '(510) 555-0118 · Leaking water heater' },
+      { kind: 'lead', at: minutesAgo(40), session_id: 'ses-b', display_name: 'Dana Whitfield', ref_id: 'lead-1', line: '(510) 555-0118 · Leaking water heater', cause: null },
       { ...REFUSAL, at: minutesAgo(50), ref_id: 'dec-refused-2' },
       { ...ANSWER, at: minutesAgo(60), ref_id: 'ses-c', session_id: 'ses-c', display_name: null },
     ];
     await injectToday((t) => ({
       ...t,
-      briefing: { ...t.briefing, total: 6, newest: { blocked: items[0] ?? null, booking: items[2] ?? null, lead_or_answer: items[1] ?? null } },
+      briefing: { ...t.briefing, total: 6, newest: { turned_down: items[0] ?? null, booking: items[2] ?? null, lead_or_answer: items[1] ?? null } },
     }));
     const list: BriefingList = { since: '2026-10-28T18:00:00-07:00', items };
     mockStore.inject({ route: 'briefing', status: 200, times: 10_000, body: list });
@@ -960,11 +1052,13 @@ describe('Today', () => {
 
     await expect.element(block.getByText('Claude handled 3', { exact: true })).toBeVisible();
     await expect.element(block.getByText('You stepped in 1 time', { exact: true })).toBeVisible();
-    await expect.element(block.getByText('2 stopped', { exact: true })).toBeVisible();
+    await expect.element(block.getByRole('heading', { level: 3, name: 'Turned down', exact: true })).toBeVisible();
+    await expect.element(block.getByText('2 requests', { exact: true })).toBeVisible();
     await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
+    expect(block.element().textContent).not.toMatch(/attempt|talk it around|stopped/i);
 
-    // The design system's figure styles: the booked total at the figure size, the stopped count at
-    // the smaller one, both in the interface's face with tabular figures.
+    // The design system's figure styles: the booked total at the figure size, the count of
+    // requests turned down at the smaller one, both in the interface's face with tabular figures.
     const [booked, stopped] = [...block.element().querySelectorAll('.cd-week__number')];
     expect([booked?.textContent, stopped?.textContent]).toEqual(['$378', '2']);
     if (!booked || !stopped) throw new Error('Last 7 days shows both figures');
@@ -1014,9 +1108,11 @@ describe('Today', () => {
     const bookings = block.getByRole('heading', { name: 'Bookings', exact: true }).element().closest('.cd-week__part');
     expect(bookings?.querySelector('a')).toBeNull();
     await expect.element(block.getByText('No conversations in the last 7 days.', { exact: true })).toBeVisible();
-    await expect.element(block.getByText('No attempts in the last 7 days.', { exact: true })).toBeVisible();
+    await expect.element(block.getByRole('heading', { level: 3, name: 'Turned down', exact: true })).toBeVisible();
+    await expect.element(block.getByText('Nothing turned down in the last 7 days.', { exact: true })).toBeVisible();
     await expect.element(block.getByRole('link', { name: 'Open Safety' })).toHaveAttribute('href', `${DESK}/safety`);
     expect(block.getByText(/Claude handled/).elements()).toHaveLength(0);
+    expect(block.element().textContent).not.toMatch(/attempt|talk it around/i);
 
     // Claude handled every conversation and the owner didn't step in. That says only what the
     // owner did, never that no one needed them: a request can still be waiting in Needs you.
@@ -1030,21 +1126,28 @@ describe('Today', () => {
     expect(again.getByText(/No one has needed you/).elements()).toHaveLength(0);
   });
 
-  it('attempts_count_refused_requests_only', async () => {
-    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody tried:
-    // "Since last night" shows it as blocked, and the last 7 days have no attempt to talk Claude around.
+  it('turned_down_counts_refused_requests_only', async () => {
+    // Rivera's copy keeps one of Claude's drafts the reply check stopped, which nobody tried: it
+    // stays on Safety, so "Since last night" turns nothing down and the last 7 days turned no request down.
     const { screen } = await renderRoute(TODAY);
     const block = region(screen, 'Last 7 days');
     const night = region(screen, 'Since last night');
-    await expect.element(night.getByText('A reply was stopped before it was shown.', { exact: true })).toBeVisible();
-    await expect.element(block.getByText('No attempts in the last 7 days.', { exact: true })).toBeVisible();
+    await expect.element(night.getByText('Booked', { exact: true })).toBeVisible();
+    expect(night.getByText('Turned down', { exact: true }).elements()).toHaveLength(0);
+    await expect.element(block.getByText('Nothing turned down in the last 7 days.', { exact: true })).toBeVisible();
 
-    // The built-in agent tries to charge over its signed limit, which the kernel refuses: that one counts.
-    const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
+    // The built-in agent tries to charge over its signed limit, which the kernel refuses: that one
+    // counts, and "Since last night" turns it down, says why by its cause's label, and opens it on Safety.
+    const refusals = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').map((d) => d.decision);
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
-    await expect.poll(refused, { timeout: 5_000 }).toBe(1);
-    await expect.element(block.getByText('1 stopped', { exact: true })).toBeVisible();
+    await expect.poll(() => refusals().length, { timeout: 5_000 }).toBe(1);
+    await expect.element(block.getByText('1 request', { exact: true })).toBeVisible();
+    expect(block.getByText('Nothing turned down in the last 7 days.').elements()).toHaveLength(0);
+    const turnedDown = night.getByRole('link', { name: /Turned down/ });
+    await expect.element(turnedDown).toHaveAttribute('href', `${DESK}/safety/${encodeURIComponent(refusals()[0]?.decision_id ?? '')}`);
+    await expect.element(turnedDown.getByText(CAUSE_COPY.agent_limit, { exact: true })).toBeVisible();
+    expect(turnedDown.element().textContent).not.toContain(refusals()[0]?.reason_plain);
   });
 
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
@@ -1408,6 +1511,96 @@ describe('Today', () => {
     await expect.element(card).not.toBeInTheDocument();
   });
 
+  it('dismissing_the_last_answer_focuses_live_now', async () => {
+    // The only request, answered here, then dismissed from the keyboard with the page scrolled down
+    // to it: Needs you goes, and focus goes on to Live now, the section after it, where the page stands.
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await allowTheSeededRequest(screen);
+    expect(region(screen, 'Needs you').getByRole('article').elements()).toHaveLength(1);
+    const live = region(screen, 'Live now');
+    const column = await focusDismissAtTheFoot(screen, live.element());
+
+    const before = { column: column.scrollTop, window: window.scrollY };
+    await userEvent.keyboard('{Enter}');
+    await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(live.element());
+    expect(column.scrollTop).toBe(before.column);
+    expect(window.scrollY).toBe(before.window);
+    // Live now has moved up into the place Needs you left, in sight.
+    const box = live.element().getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(column.getBoundingClientRect().top);
+    expect(box.bottom).toBeLessThanOrEqual(column.getBoundingClientRect().bottom);
+  });
+
+  it('dismissing_the_last_answer_with_no_live_chat_focuses_since_last_night', async () => {
+    // No chat is live, so Today draws no Live now: focus goes on to Since last night instead, where
+    // the page stands.
+    await injectToday((t) => ({ ...t, live: [] }));
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await allowTheSeededRequest(screen);
+    expect(region(screen, 'Needs you').getByRole('article').elements()).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Live now' }).elements()).toHaveLength(0);
+    const since = region(screen, 'Since last night');
+    const column = await focusDismissAtTheFoot(screen, since.element());
+
+    const before = { column: column.scrollTop, window: window.scrollY };
+    await userEvent.keyboard('{Enter}');
+    await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(since.element());
+    expect(column.scrollTop).toBe(before.column);
+    expect(window.scrollY).toBe(before.window);
+    expect(since.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(column.getBoundingClientRect().top);
+  });
+
+  it('dismissing_before_the_refresh_finishes_keeps_focus_in_needs_you', async () => {
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    const read = holdReads(needsYouPath);
+    onTestFinished(read.release);
+    await allowTheSeededRequest(screen);
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    const needs = region(screen, 'Needs you');
+
+    // Dismiss before the answer's refresh lands: the cached hold reappears, so the section stays.
+    await dismissFromTheKeyboard(screen);
+    await expect.element(needs.getByRole('button', { name: 'Dismiss' })).not.toBeInTheDocument();
+    await expect.element(heldCard(screen, SEEDED_REASON).getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    expect(document.activeElement).toBe(needs.element());
+
+    read.release();
+    await expect.element(needs).not.toBeInTheDocument();
+  });
+
+  it('dismissing_an_answer_with_a_request_still_held_focuses_needs_you', async () => {
+    // Another request still waits, so Needs you stays, and focus goes to it, as it always has.
+    mockStore.world.addHeldRefund();
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await expect.element(heldCard(screen, REFUND_REASON)).toBeVisible();
+    await allowTheSeededRequest(screen);
+    const needs = region(screen, 'Needs you');
+
+    await dismissFromTheKeyboard(screen);
+    await expect.element(heldCard(screen, SEEDED_REASON)).not.toBeInTheDocument();
+    await expect.element(heldCard(screen, REFUND_REASON)).toBeVisible();
+    expect(document.activeElement).toBe(needs.element());
+  });
+
+  it('dismissing_the_last_answer_while_reads_fail_focuses_needs_you', async () => {
+    // Needs you can't be read, and says so: it stays to say it once its last request goes, so focus
+    // stays on it.
+    const { screen } = await renderRoute(TODAY, { viewport: 'phone' });
+    await allowTheSeededRequest(screen);
+    const needs = region(screen, 'Needs you');
+    const line = needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await expect.element(line, { timeout: 5_000 }).toBeVisible();
+
+    await dismissFromTheKeyboard(screen);
+    await expect.element(heldCard(screen, SEEDED_REASON)).not.toBeInTheDocument();
+    await expect.element(line).toBeVisible();
+    expect(document.activeElement).toBe(needs.element());
+  });
+
   it('rule_draft_from_answer_links_to_review', async () => {
     mockStore.world.addHeldRefund();
     const { screen, router } = await renderRoute(TODAY);
@@ -1503,9 +1696,11 @@ describe('Today', () => {
     await expect.element(wants.first().getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
     expect(wants.first().getByText(CALLBACK_REASON).element().closest('[data-copy="user"]')).not.toBeNull();
     await expect.element(wants.first().getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true })).toBeVisible();
+    // A chat holds one open handoff, as the kernel keeps it: a second call-back closes the first and
+    // opens its own, so the owner keeps one item, which shows what is promised now.
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Please call me tonight' } });
-    await expect.poll(() => wants.elements().length, { timeout: 2_000 }).toBe(2);
-    await expect.element(wants.nth(1).getByText("You'll call back. No time was promised.", { exact: true })).toBeVisible();
+    await expect.element(wants.first().getByText("You'll call back. No time was promised.", { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(wants.elements()).toHaveLength(1);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Joining reads the chat, takes it over at the generation read, and opens it.
@@ -1582,6 +1777,98 @@ describe('Today', () => {
     expect(screen.getByRole('alert').elements()).toHaveLength(0);
   });
 
+  it('card_handoff_draws_no_callback_line', async () => {
+    // The handoff card handed the chat to Maria: no call back was promised, so its card says the
+    // Desk's own reason and no call-back time, and joins and closes as a call-back request does.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can I talk to Maria?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants, { timeout: 2_000 }).toBeVisible();
+    await expect.element(wants.getByText(CARD_REASON, { exact: true })).toBeVisible();
+    expect(wants.element().textContent).not.toMatch(/call back/i);
+    await expect.element(wants.getByRole('button', { name: 'Join the chat' })).toBeVisible();
+    await expect.element(wants.getByRole('button', { name: 'Mark done' })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Once it's done, a call-back request in its place still says when.
+    await mockStore.dispatch('handoffDone', { params: { handoff_id: [...mockStore.world.handoffs.keys()][0] ?? '' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(wants.elements()).toHaveLength(1);
+  });
+
+  it('card_handoff_quotes_the_visitor', async () => {
+    // As a held request's card does: the visitor's last words, set off as theirs, under the Desk's
+    // reason. A call-back request's reason is already what they typed, so it quotes nothing more.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can I talk to Maria?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    const words = wants.getByText('Can I talk to Maria?', { exact: true });
+    await expect.element(words, { timeout: 2_000 }).toBeVisible();
+    expect(words.element().closest('[data-copy="user"]')).not.toBeNull();
+    expect(words.element().parentElement?.textContent).toBe('From the visitor: “Can I talk to Maria?”');
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Nothing to quote: no line.
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => ({ ...item, from_the_visitor: null })) });
+    const quiet = await renderRoute(TODAY);
+    await expect.element(quiet.screen.getByRole('article', { name: 'Wants you' }).getByText(CARD_REASON, { exact: true })).toBeVisible();
+    expect(quiet.screen.getByRole('article', { name: 'Wants you' }).element().textContent).not.toContain('From the visitor');
+
+    // A call-back request quotes nothing more.
+    const callback = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can you call me back?');
+    const asked = callback.screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(asked.getByText(CALLBACK_REASON, { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(asked.element().textContent).not.toContain('From the visitor');
+  });
+
+  it('callback_without_a_kind_keeps_its_line', async () => {
+    // An API that doesn't send `kind` yet: a handoff without one is a call-back request, and still
+    // says when Maria will call back.
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const withoutKind = (await needsYouRead()).map((item) => {
+      if (item.handoff == null) return item;
+      const handoff = { ...item.handoff };
+      delete handoff.kind;
+      return { ...item, handoff };
+    });
+    expect(withoutKind.filter((item) => item.handoff != null).map((item) => item.handoff && 'kind' in item.handoff)).toEqual([false]);
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: withoutKind });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants.getByText(CALLBACK_REASON, { exact: true })).toBeVisible();
+    await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true })).toBeVisible();
+  });
+
+  it('unknown_handoff_kind_promises_no_call_back', async () => {
+    // Only a call-back request promises a call back: a handoff whose kind is null, or one this build
+    // doesn't know, says its reason and nothing about calling back.
+    await visitorSays('Can you call me back?');
+    await expect.poll(async () => (await needsYouRead()).some((item) => item.handoff != null), { timeout: 2_000 }).toBe(true);
+    const items = await needsYouRead();
+    const callback = items.find((item) => item.handoff != null);
+    if (callback?.handoff == null) throw new Error('the call-back request is in Needs you');
+    const as = (kind: unknown, id: string): NeedsYouItem => ({ ...callback, handoff: { ...callback.handoff, handoff_id: id, kind: kind as 'callback' } });
+    mockStore.inject({
+      route: 'needsYou',
+      status: 200,
+      times: 10_000,
+      body: [...items.filter((item) => item.handoff == null), as(null, 'handoff-null'), as('meeting', 'handoff-meeting')],
+    });
+
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.poll(() => wants.elements().length).toBe(2);
+    for (const card of wants.elements()) {
+      expect(card.textContent).toContain(CALLBACK_REASON);
+      expect(card.textContent).not.toMatch(/call back/i);
+    }
+  });
+
   it('allow_person_above_the_limit_says_so', async () => {
     mockStore.world.addHeldRefund();
     const { screen } = await renderRoute(TODAY);
@@ -1618,6 +1905,429 @@ describe('Today', () => {
       .toBeVisible();
     expect(document.body.textContent).not.toContain("That didn't go through. Check it and try again.");
     expect(router.state.location.pathname).toBe(TODAY);
+  });
+
+  it.each(['desktop', 'phone'] as const)('things_to_try_opens_the_vision_article_on_%s', async (viewport) => {
+    // One quiet link under the list, after its card, opens the Vision article under About this prototype.
+    const { screen, router } = await renderRoute(TODAY, { viewport });
+    const things = region(screen, 'Things to try');
+    const link = things.getByRole('link', { name: 'Vision: where a Desk could go next', exact: true });
+    await expect.element(link).toHaveAttribute('href', '/about/vision');
+    const list = things.getByRole('list').first().element();
+    expect(link.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(list.getBoundingClientRect().bottom);
+    // It replaces the link to the city office: no other link leads to a vision page.
+    const vision = things.getByRole('link').elements().filter((a) => (a.getAttribute('href') ?? '').startsWith('/vision/'));
+    expect(vision).toEqual([]);
+    expect(things.element().textContent).not.toContain('Where this is going');
+    // The same tab, through the router: the app stays loaded.
+    expect(link.element().getAttribute('target')).toBeNull();
+    await link.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'A front desk that never closes', exact: true })).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(0);
+    const heading = screen.container.querySelector('h1')?.getBoundingClientRect();
+    expect(heading?.top).toBeGreaterThanOrEqual(0);
+    expect(heading?.bottom).toBeLessThanOrEqual(window.innerHeight);
+  });
+});
+
+describe("Today's unfinished setup", () => {
+  /** The start step's first example: Juniper Hair Studio, whose owner is Priya Shah. */
+  const JUNIPER = START_EXAMPLES.en.examples[0]?.description ?? '';
+
+  /** A Desk the mock's setup made, its questions answered, then left at its tools. */
+  async function deskAtTools(): Promise<SetupState> {
+    const started = await mockStore.dispatch('startSetup', { body: { description: JUNIPER, timezone: LA, idempotency_key: newIdempotencyKey() } });
+    if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+    const state = started.body as SetupState;
+    const id = state.interview_id;
+    await mockStore.dispatch('setupConsent', { params: { id }, body: { allow: false } });
+    for (const question of SETUP_QUESTIONS) await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: question.key, text: 'Yes, that works.' } });
+    return state;
+  }
+
+  /** A Desk the mock's setup made, its questions answered and its rules drafted, then left there. */
+  async function deskAtRules(): Promise<SetupState> {
+    const state = await deskAtTools();
+    await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
+    return state;
+  }
+
+  it('unfinished_setup_leads_back_into_it', async () => {
+    // Priya left her new Desk's setup at its rules. Its Today says it isn't live yet, at the top of
+    // the page, and leads back into the interview at that step.
+    const state = await deskAtRules();
+    const { screen, router } = await renderRoute(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
+    await expect.element(card).toBeVisible();
+    await expect.element(card.getByText('Not live yet', { exact: true })).toBeVisible();
+    expect(card.element().querySelector('.cd-status-dot--held')).not.toBeNull();
+    const title = card.getByRole('heading', { level: 2, name: 'Finish setting up Juniper Hair Studio' });
+    await expect.element(title).toBeVisible();
+    // The business's name is the owner's own words.
+    expect(title.element().querySelector('[data-copy="user"]')?.textContent).toBe('Juniper Hair Studio');
+    await expect
+      .element(
+        card.getByText(
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          { exact: true },
+        ),
+      )
+      .toBeVisible();
+    // The setup steps, at Rules.
+    const steps = card.getByRole('list', { name: 'Setup steps' });
+    expect(steps.getByRole('listitem').elements().map((step) => step.textContent)).toEqual(['Questions, done', 'Tools, done', '3Rules', '4Safety check', '5Live']);
+    expect(steps.element().querySelector('[aria-current="step"]')?.textContent).toBe('3Rules');
+    const resume = card.getByRole('link', { name: 'Continue setup' });
+    await expect.element(resume).toHaveAttribute('href', `/app/setup/${state.interview_id}`);
+
+    // It comes first in Today's column, above Things to try, which stays.
+    const things = screen.getByRole('heading', { level: 2, name: 'Things to try' }).element();
+    expect(card.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // "Continue setup" reopens the interview at its rules.
+    await resume.click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+  });
+
+  it('save_and_exit_lands_on_the_card', async () => {
+    // Leaving setup with "Save and exit" opens the new Desk's Today, which leads back in: no loop
+    // between the two, and the card names the step the owner left.
+    const state = await deskAtRules();
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
+    await expect
+      .element(
+        card.getByText(
+          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+          { exact: true },
+        ),
+      )
+      .toBeVisible();
+    expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+  });
+
+  /** The card's line at the rules, with Answering off. */
+  const AT_RULES = "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.";
+
+  /**
+   * Opens setup at its tools, with the copy's Desks read there, at the tools; then `meanwhile` sets
+   * how the Desks answer from here on, the owner goes on to the rules and, once the draft is in and
+   * the API has moved setup on, leaves with "Save and exit" at once, within the few seconds Today
+   * counts the Desks read as fresh. Resolves on Today.
+   */
+  async function leaveRightAfterAStep(meanwhile: () => void = () => undefined): Promise<RenderResult> {
+    const state = await deskAtTools();
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    // The bar names the business once the copy's Desks are read, at the tools.
+    await expect.element(screen.getByText('Juniper Hair Studio', { exact: true }).first()).toBeVisible();
+    meanwhile();
+    const startedAt = performance.now();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(0);
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    // Today never draws the step before, not even for a moment as it opens.
+    const sawTools = watchFor('Pick up at your tools');
+    onTestFinished(() => expect(sawTools(), 'Today drew the tools step').toBe(false));
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    expect(performance.now() - startedAt, "left within the Desks' fresh window").toBeLessThan(5_000);
+    return screen;
+  }
+
+  /** The card names the rules, with the steps at Rules. */
+  async function expectCardAtRules(screen: RenderResult): Promise<void> {
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
+    await expect.element(card.getByText(AT_RULES, { exact: true })).toBeVisible();
+    expect(card.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('3Rules');
+  }
+
+  it('leaving_setup_right_after_a_step_names_the_new_step', async () => {
+    // The owner reads setup at its tools, goes on to the rules and leaves at once: the card names the rules, not the tools.
+    await expectCardAtRules(await leaveRightAfterAStep());
+  });
+
+  it('leaving_setup_names_the_new_step_while_the_desks_are_still_read', async () => {
+    // The copy's Desks, read again from the tools on, answer slowly: each read is answered as setup
+    // stands when it arrives, and the answer comes only when the test lets it. Today already names
+    // the step setup holds, rather than the one the Desks named at the tools.
+    let held = 0;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const screen = await leaveRightAfterAStep(() => {
+      worker.use(
+        http.get(ROUTES.desks.path, async () => {
+          held += 1;
+          const answer = await mockStore.dispatch('desks');
+          await released;
+          if ('network' in answer) return HttpResponse.error();
+          return HttpResponse.json(answer.body as object, { status: answer.status });
+        }),
+      );
+    });
+    await expect.poll(() => held).toBeGreaterThan(0);
+    await expectCardAtRules(screen);
+    // The answers come: the read sent as setup moved on, answered with the tools before the draft
+    // moved the API on, is let go; the one sent since names the rules. The card still names them.
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expectCardAtRules(screen);
+  });
+
+  it('leaving_setup_names_the_new_step_when_the_desks_cannot_be_read', async () => {
+    // The copy's Desks can't be read again after the tools: Today still names the step setup holds,
+    // and keeps naming it while the reads keep failing.
+    let before = 0;
+    const screen = await leaveRightAfterAStep(() => {
+      before = requests('desks').length;
+      mockStore.inject({ route: 'desks', status: 503, times: 10_000 });
+    });
+    await expectCardAtRules(screen);
+    // Every read of the Desks from the tools on fails: the step change's, and Today's own with its retry.
+    await expect.poll(() => requests('desks').length - before, { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
+    await expectCardAtRules(screen);
+  });
+
+  it('with_answering_on_the_line_says_nothing_of_answering', async () => {
+    // The Answering switch is separate from setup: Priya turned Answering on before finishing her
+    // setup, so the card names where she picks up, and says nothing of Answering staying off.
+    const state = await deskAtRules();
+    await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: true } });
+    const { screen } = await renderRoute(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
+    await expect
+      .element(card.getByText("Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live.", { exact: true }))
+      .toBeVisible();
+    expect(card.element().textContent).not.toMatch(/Answering/);
+    await expect.element(screen.getByRole('switch', { name: /Answering/ })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('a_draft_that_lands_after_leaving_moves_the_card_on', async () => {
+    // The owner goes on from the tools and leaves while the rules draft is still being made: the API
+    // still has setup at its tools, so Today names them. Once the draft lands and the API moves setup
+    // on, Today names the rules, with no reload.
+    const state = await deskAtTools();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    worker.use(
+      http.post(ROUTES.setupRules.path.replace('{id}', state.interview_id), async () => {
+        await released;
+        return undefined;
+      }),
+    );
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByText('Drafting your rules', { exact: true })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
+    await expect
+      .element(card.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
+      .toBeVisible();
+
+    release();
+    await expectCardAtRules(screen);
+  });
+
+  /** The card's line at the tools, with Answering off. */
+  const AT_TOOLS = 'Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.';
+
+  /**
+   * From Today, setup reopened at its tools; the rules it goes on to can't be checked (the API keeps
+   * it at the tools), and the owner leaves from there with "Save and exit", back to a Today already
+   * read. `meanwhile` runs once setup shows its tools. Resolves on Today, watching for the rules ever
+   * being named on the way.
+   */
+  async function leaveAfterACheckThatCannotRun(meanwhile: () => void = () => undefined) {
+    const state = await deskAtTools();
+    mockStore.inject({ route: 'setupRules', status: 409, body: { error: 'rules_cannot_be_checked' } });
+    const { screen, router } = await renderRoute(`/app/${state.desk_id}/today`);
+    const first = region(screen, 'Finish setting up Juniper Hair Studio');
+    await expect.element(first.getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    await first.getByRole('link', { name: 'Continue setup' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+    meanwhile();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByText(/^I can't check these rules right now/)).toBeVisible();
+    const sawRules = watchFor('Pick up at your rules');
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    return { screen, router, state, sawRules };
+  }
+
+  it('rules_that_cannot_be_checked_leave_today_at_the_tools', async () => {
+    // The API keeps setup at its tools when its rules can't be checked: Today names the tools, and
+    // never the rules the page went on to, not even for a moment.
+    const { screen, sawRules } = await leaveAfterACheckThatCannotRun();
+    await expect.element(region(screen, 'Finish setting up Juniper Hair Studio').getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    expect(sawRules()).toBe(false);
+  });
+
+  it('rules_that_cannot_be_checked_reopen_at_the_tools_when_the_desks_cannot_be_read', async () => {
+    // The same, with the copy's Desks failing from the tools on: the card still names the tools, and
+    // "Continue setup" opens the tools, whose Continue checks the rules again.
+    const { screen, router, state, sawRules } = await leaveAfterACheckThatCannotRun(() => {
+      mockStore.inject({ route: 'desks', status: 503, times: 10_000 });
+    });
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
+    await expect.element(card.getByText(AT_TOOLS, { exact: true })).toBeVisible();
+    expect(sawRules()).toBe(false);
+    await card.getByRole('link', { name: 'Continue setup' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
+  });
+
+  it('the_card_waits_for_today_to_open', async () => {
+    // Leaving setup for Today while what Today first shows is still being read: Today holds its
+    // loading line alone, with no card, then opens with the card first.
+    const state = await deskAtRules();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', state.desk_id));
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
+
+    needsYou.release();
+    const card = region(screen, 'Finish setting up Juniper Hair Studio');
+    await expect.element(card).toBeVisible();
+    const things = screen.getByRole('heading', { level: 2, name: 'Things to try' }).element();
+    expect(card.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('unfinished_setup_fits_a_laptop_and_a_phone', async () => {
+    // On a laptop "Continue setup" sits at the words' right, level with their top. On a phone the
+    // card still comes first, and the button drops under the words, from their left edge, as Today's
+    // other rows do. Nothing scrolls sideways at either width.
+    const state = await deskAtRules();
+    const parts = (screen: RenderResult) => {
+      const card = region(screen, 'Finish setting up Juniper Hair Studio');
+      return {
+        card: card.element().getBoundingClientRect(),
+        // The "Not live yet" line, the words' first.
+        status: (card.getByText('Not live yet', { exact: true }).element().closest('p') ?? document.body).getBoundingClientRect(),
+        line: card.getByText(/^Your answers are saved\./).element().getBoundingClientRect(),
+        button: card.getByRole('link', { name: 'Continue setup' }).element().getBoundingClientRect(),
+        // The steps as drawn: the row, or under 480 px of its own width the one line that says where it is.
+        steps: (card.getByRole('list', { name: 'Setup steps' }).element().parentElement ?? document.body).getBoundingClientRect(),
+        things: screen.getByRole('heading', { level: 2, name: 'Things to try' }).element().getBoundingClientRect(),
+      };
+    };
+
+    const laptop = await renderRoute(`/app/${state.desk_id}/today`);
+    await expect.element(region(laptop.screen, 'Finish setting up Juniper Hair Studio')).toBeVisible();
+    const wide = parts(laptop.screen);
+    expect(wide.button.left).toBeGreaterThanOrEqual(wide.line.right);
+    expect(Math.abs(wide.button.top - wide.status.top)).toBeLessThanOrEqual(1);
+    expect(wide.steps.top).toBeGreaterThanOrEqual(Math.max(wide.line.bottom, wide.button.bottom));
+    expect(wide.card.bottom).toBeLessThanOrEqual(wide.things.top);
+    expectNoHorizontalScroll();
+
+    const phone = await renderRoute(`/app/${state.desk_id}/today`, { viewport: 'phone' });
+    await expect.element(region(phone.screen, 'Finish setting up Juniper Hair Studio')).toBeVisible();
+    const narrow = parts(phone.screen);
+    expect(narrow.card.bottom).toBeLessThanOrEqual(narrow.things.top);
+    expect(narrow.button.top).toBeGreaterThanOrEqual(narrow.line.bottom);
+    expect(Math.abs(narrow.button.left - narrow.line.left)).toBeLessThanOrEqual(1);
+    expect(narrow.steps.top).toBeGreaterThanOrEqual(narrow.button.bottom);
+    expect(narrow.button.right).toBeLessThanOrEqual(narrow.card.right);
+    const main = phone.screen.getByRole('main').element();
+    expect(main.scrollWidth).toBeLessThanOrEqual(main.clientWidth);
+    expectNoHorizontalScroll();
+    await expectScreenBasics(phone.screen.container, { owner: true });
+  });
+
+  it('a_live_desk_has_no_setup_card', async () => {
+    // The seeded copy's Desk is live and was made without setup: Today has no card, and Things to try stays.
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Things to try')).toBeVisible();
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
+    expect(screen.getByRole('heading', { name: /^Finish setting up/ }).elements()).toHaveLength(0);
+    expect(screen.getByRole('link', { name: 'Continue setup' }).elements()).toHaveLength(0);
+  });
+
+  it('a_desk_listed_without_its_setup_has_no_card', async () => {
+    // An API from before `setup` lists the Desk without it: Today opens as for a live Desk.
+    const read = await mockStore.dispatch('desks');
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the Desks');
+    const without = (read.body as BusinessOut[]).map((business) => ({
+      ...business,
+      desks: business.desks.map(({ setup: _setup, ...desk }) => desk),
+    }));
+    mockStore.inject({ route: 'desks', status: 200, times: 10_000, body: without });
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await expect.element(region(screen, 'Things to try')).toBeVisible();
+    expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
+  });
+
+  it('the_line_names_the_step_setup_stopped_at', async () => {
+    // At each step setup can stop at, the card says where the owner picks up and the steps mark it;
+    // once the Desk goes live, the card leaves.
+    const state = await deskAtRules();
+    const id = state.interview_id;
+    const lineAt = async (step: string, line: string) => {
+      const { screen } = await renderRoute(`/app/${state.desk_id}/today`);
+      const card = region(screen, 'Finish setting up Juniper Hair Studio');
+      await expect.element(card.getByText(line, { exact: true }), { timeout: 5_000 }).toBeVisible();
+      const current = card.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]');
+      expect(current?.textContent, step).toBe(step);
+    };
+    await lineAt(
+      '3Rules',
+      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+    );
+    await mockStore.dispatch('setupSituations', { params: { id } });
+    await lineAt(
+      '3Rules',
+      "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
+    );
+    await mockStore.dispatch('setupSafetyCheck', { params: { id } });
+    await lineAt(
+      '4Safety check',
+      "Your answers are saved. Pick up at the safety check, and I'll check your rules again before anything goes live. Answering stays off until then.",
+    );
+    await mockStore.dispatch('setupConfirm', { params: { id } });
+    await lineAt('5Live', 'Your answers are saved. Pick up at going live. Answering stays off until then.');
+
+    await mockStore.dispatch('goLive', { params: { id } });
+    const live = await renderRoute(`/app/${state.desk_id}/today`);
+    await expect.element(region(live.screen, 'Things to try')).toBeVisible();
+    expect(live.screen.getByText('Not live yet').elements()).toHaveLength(0);
+    expect(live.screen.getByRole('link', { name: 'Continue setup' }).elements()).toHaveLength(0);
+
+    // A Desk left at its questions, and one left at its tools.
+    const started = await mockStore.dispatch('startSetup', { body: { description: JUNIPER, timezone: LA, idempotency_key: newIdempotencyKey() } });
+    if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
+    const next = started.body as SetupState;
+    const atQuestions = await renderRoute(`/app/${next.desk_id}/today`);
+    const first = region(atQuestions.screen, 'Finish setting up Juniper Hair Studio');
+    await expect
+      .element(first.getByText('Your answers are saved. Pick up at the questions. Answering stays off until your Desk is live.', { exact: true }))
+      .toBeVisible();
+    expect(first.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
+    const tools = await deskAtTools();
+    const atTools = await renderRoute(`/app/${tools.desk_id}/today`);
+    const second = region(atTools.screen, 'Finish setting up Juniper Hair Studio');
+    await expect
+      .element(second.getByText('Your answers are saved. Pick up at your tools. Answering stays off until your Desk is live.', { exact: true }))
+      .toBeVisible();
+    expect(second.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('2Tools');
   });
 });
 

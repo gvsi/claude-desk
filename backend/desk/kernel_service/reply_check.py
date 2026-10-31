@@ -6,7 +6,13 @@ the session-state rows ("Session state responses": token, copy, closed, generati
 1. A paused session (the breaker) gets only the handoff clause and a `session_paused` violation;
    nothing is scanned.
 2. Language: `lang.detect` on the prose. Another language is `unsupported_language`; too little to
-   tell falls back to the session's last language, else English. Cards render in this language.
+   tell falls back to the session's language, else English. Cards render in this language. The
+   session's language is set at turn start from the visitor's latest message
+   (`POST /sessions/{session_id}/turn`, `turn.py`), and kept or changed at the end by the language
+   of Claude's prose (step 7). It decides only the language a reply whose prose can't be told
+   renders in: the code's checks find the same in a draft whichever language the session reads,
+   since both lexicons always run; the soft-promise check is told that language, with the cards
+   rendered in it.
 3. `scan_prose`: numerals and the letters drawn as digits, currency and percent signs, words
    mixing Latin letters with another script (but for the Desk's own name and its business's
    name, as the owner set them), both lexicons (`lexicon/en.txt` and `lexicon/es.txt`, whatever
@@ -29,12 +35,25 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reads the prose and the cards' texts (never the visitor's words) and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
    (`soft.denies_ai`). No verdict (a timeout, an error, a refusal, an unparsable answer) blocks
-   too (`soft.unavailable`).
+   too (`soft.unavailable`). While the session has an open handoff the handoff card opened
+   (`open_handoff_ids`, kind `card`), the card's text is one of those cards, though the reply
+   doesn't show it again: the owner has the conversation, so a later "Maria Rivera will reply
+   here" is backed, as the card that opened it said. A call-back request backs nothing (the
+   owner's decision of 2026-10-31): its own card names a time and never says the owner will
+   reply here, and once its window has passed nothing promises a call. That handoff is read
+   without a lock, so the model never holds one; a reply that passes with its card is checked
+   again in step 7.
 6. `ok` when nothing was found: the prose (when not empty) and the cards; otherwise only the
-   handoff clause, in the reply's language.
+   handoff clause, in the reply's language, or no block at all for a first attempt the API
+   rewrites (`final` false, every violation one a rewrite can fix), which is never shown.
 7. `finalize`: the session is seen and keeps a detected language for its next reply and status
-   lines (its row written only now, so no lock on it is held while the model reads the draft),
-   and the verdict is ledgered (`reply`) and signed in the same transaction.
+   lines, until the next turn starts (its row written only now, so no lock on it is held while the
+   model reads the draft); a reply that passed step 5 with an open handoff's card passes only if a
+   handoff is still open, held until the verdict commits (`handoff_still_open`), and otherwise fails
+   as the check would have failed it without the card (`soft.handoff_closed`); when the verdict
+   shows the handoff card, an owner handoff is opened for the session unless one is open already
+   (`open_card_handoff`, the owner's decision of 2026-10-30); and the verdict is ledgered (`reply`)
+   and signed in the same transaction.
 
 The owner's messages (`owner_message`) end in the same record: a say is checked for canaries
 alone and shown as typed in an `owner_said` card, and a whisper is only ledgered.
@@ -53,6 +72,7 @@ never prose.
 
 import hashlib
 import json
+import logging
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping, Sequence
@@ -61,23 +81,29 @@ from pathlib import Path
 import desk_kernel
 from fastapi import APIRouter, Request
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, Violation)
-from desk.db.models import Booking, Business, CalendarSlot, Desk
+from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Person
+from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
-from desk.kernel_service import agents, auth, context, labels, lang, ledger, render
+from desk.kernel_service import agents, auth, context, demo_inbox, labels, lang, ledger, render
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
 from desk.kernel_service.decisions import CallUsage, SoftPromiseInput
 from desk.kernel_service.render.cards import DeskInfo, slot_claims
-from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, route_template, storable
+from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, log_error, new_id, route_template, storable
+from desk.kernel_service.sessions import verified
+from desk.rewrites import REWRITABLE
 
 VERDICT_DOMAIN = b"desk-verdict-v1\0"
 SPAN_CHARS = 40
 KERNEL_ONLY = frozenset({"owner_said", "payment_confirmed", "link_cancelled"})   # only the kernel issues these
 NUMBER_SEPARATORS = frozenset(".,:'’ ")                        # inside one number: "1.234,56", "10:30"
 NO_CANARIES = labels.NO_CANARIES
+logger = logging.getLogger(__name__)
+HANDOFF_CLOSED = "soft.handoff_closed"   # a reply passed on an open handoff's card, and the handoff was done by the end
 
 # ---- Prose ----------------------------------------------------------------------------------------
 
@@ -528,8 +554,11 @@ def handoff(language: render.Language, desk: DeskInfo) -> RenderedBlock:
     return render.render_clause(Clause(template="handoff"), None, language, desk)
 
 
-async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft) -> ReplyVerdict:
-    """Steps 1 to 7 for a draft from Claude in an authenticated session ("Reply check")."""
+async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft, *,
+                      final: bool = True) -> ReplyVerdict:
+    """Steps 1 to 7 for a draft from Claude in an authenticated session ("Reply check"). `final` is
+    `CheckReplyRequest.final`: false for a first attempt the API rewrites when every violation is
+    rewritable."""
     desk_id = session_row.desk_id
     desk = await _desk_info(ctx, desk_id)
     fallback = render.language(session_row.last_language)
@@ -538,7 +567,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     if session_row.mode == "paused":
         return await finalize(ctx, session_row, blocks=[handoff(fallback, desk)], language=fallback, author="claude",
                               violations=[Violation(kind="session_paused", span="", rule_id="session_paused")],
-                              fact_ids=fact_ids, seen=True, canaries=canaries)
+                              fact_ids=fact_ids, seen=True, canaries=canaries, final=final)
     prose = shown(draft.prose)
     detected = lang.detect(prose)
     language: render.Language = detected if detected in ("en", "es") else fallback
@@ -552,8 +581,14 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                              booking_card=any(card.template == "booking_confirmed" for card in cards))
     violations += refused
     usage = None
+    handoff_backed = False                  # the soft-promise check was shown an open handoff's card
     if not violations and prose.strip():
-        found, usage = await soft_promises(ctx, language, prose, cards)
+        backing = list(cards)
+        if not any(card.template == "handoff" for card in cards) and await open_handoff_ids(ctx, session_row,
+                                                                                             cards_only=True):
+            backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
+            handoff_backed = True
+        found, usage = await soft_promises(ctx, language, prose, backing)
         violations += found
     if violations:
         blocks = [handoff(language, desk)]
@@ -561,15 +596,17 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
         blocks = ([RenderedBlock(kind="prose", text=prose)] if prose.strip() else []) + cards
     return await finalize(ctx, session_row, blocks=blocks, violations=violations, language=language,
                           author="claude", fact_ids=fact_ids, soft_promise=usage, seen=True,
-                          detected=detected if detected in ("en", "es") else None, canaries=canaries)
+                          detected=detected if detected in ("en", "es") else None, canaries=canaries,
+                          handoff_backed=handoff_backed, final=final)
 
 
 async def soft_promises(ctx: KernelCtx, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None]:
-    """Step 5: the soft-promise check on prose the scan passed and the cards rendered for it. A
-    `soft_promise` violation per flag set (`soft.promise`, `soft.denies_ai`), or `soft.unavailable`
-    when there is no verdict, each spanning the prose's start; and the call's usage, for the
-    ledger."""
+    """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
+    rendered for it, and an open handoff's card). A `soft_promise` violation per flag set
+    (`soft.promise`, `soft.denies_ai`), or `soft.unavailable` when there is no verdict, each
+    spanning the prose's start; and the call's usage, for the ledger. (`finalize` adds
+    `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
     verdict, usage = await ctx.decisions.soft_promise(
         SoftPromiseInput(language=language, prose=prose, cards=[card.text for card in cards]))
     if verdict is None:
@@ -597,9 +634,10 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                    violations: Sequence[Violation], language: render.Language, author: str,
                    fact_ids: Sequence[str] = (), soft_promise: CallUsage | None = None, seen: bool = False,
                    detected: render.Language | None = None, visitor_plain_key: str | None = None,
-                   message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES) -> ReplyVerdict:
+                   message_id: str | None = None, canaries: Mapping[str, str] = NO_CANARIES,
+                   handoff_backed: bool = False, final: bool = True) -> ReplyVerdict:
     """Step 7's record, in the caller's transaction: the `reply` ledger entry
-    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise}`, the reply
+    `{message_id, author, ok, language, violations, rule_ids, fact_ids, soft_promise, final}`, the reply
     receipt and the signature, at the session's generation as the request read it. `ok` is no
     violations. The receipt is the status line `visitor_plain_key`, or without one `reply_checked`
     when ok and `reply_handed_off` otherwise. The owner's say ends here too, with its own receipts
@@ -612,12 +650,43 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     it while the soft-promise check runs and a take-over doesn't wait for the model; it comes
     before the ledger head, as the lock order says (`repo.py`). A take-over that commits while
     the check runs keeps its mode and generation (only these two columns are written), and the
-    verdict carries the generation the draft was checked at, which `deliver()` then drops."""
+    verdict carries the generation the draft was checked at, which `deliver()` then drops.
+
+    With `handoff_backed` (the soft-promise check passed the prose shown an open handoff's card,
+    which it read without a lock while the model ran), a passing verdict stands only if the
+    session still has an open handoff of kind `card`, which `handoff_still_open` then holds `FOR
+    SHARE` until the verdict commits, so the owner can't mark it done before the reply is on
+    record. If the owner marked it done meanwhile, or a call-back request made it a call-back's,
+    nothing backs the card's words any longer: the verdict fails as the
+    check would have failed it without the card, with a `soft_promise` violation
+    (`soft.handoff_closed`) and the handoff card in the prose's place, which then opens a new
+    handoff.
+
+    When the verdict of Claude's draft shows the handoff card and the visitor will see it, the
+    session's owner handoff is opened next, before the ledger head (`open_card_handoff`), and
+    ledgered just before the verdict: a reply that passed citing the handoff clause always; a
+    blocked draft when it is `final`, or when one of its violations is outside the kinds a rewrite
+    can fix (`desk.rewrites.REWRITABLE`), since the API then hands off at once. A first attempt
+    (`final` false) blocked only for rewritable kinds is never shown, since the API asks Claude
+    for a rewrite, so it opens none, and its verdict, still signed and ledgered, carries no blocks:
+    the kernel never signs a showable handoff card that no handoff backs, and the API's rewrite
+    reads only the violations. An owner's message never opens one, and neither does the
+    owner's own preview of the Desk (`preview`; the owner's decision of 2026-10-31)."""
     if seen:
         session_row.last_seen_at = ctx.clock.now()
         if detected is not None:
             session_row.last_language = detected
         await ctx.db.flush()
+    if handoff_backed and not violations and not await handoff_still_open(ctx, session_row):
+        prose = next((block.text for block in blocks if block.kind == "prose"), "")
+        violations = [Violation(kind="soft_promise", span=_span(prose), rule_id=HANDOFF_CLOSED)]
+        blocks = [handoff(language, await _desk_info(ctx, session_row.desk_id))]
+    shown = not violations or final or any(violation.kind not in REWRITABLE for violation in violations)
+    if author == "claude" and not shown:
+        blocks = []                    # the API rewrites it: no handoff card is signed that no handoff backs
+    if author == "claude" and shown and not session_row.preview and any(block.template == "handoff"
+                                                                        for block in blocks):
+        await open_card_handoff(ctx, session_row)
     ok = not violations
     message_id = message_id if message_id is not None else new_id("msg")
     summary = {"message_id": message_id, "author": author, "ok": ok, "language": language,
@@ -625,7 +694,8 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                "rule_ids": [violation.rule_id for violation in violations],
                "fact_ids": [ledger.withheld_ref(fact_id) if labels.find_canaries(fact_id, canaries)
                             else ledger.safe_ref(fact_id) for fact_id in fact_ids],
-               "soft_promise": soft_promise.model_dump(mode="json") if soft_promise is not None else None}
+               "soft_promise": soft_promise.model_dump(mode="json") if soft_promise is not None else None,
+               "final": final}
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
     owner = (await _desk_info(ctx, session_row.desk_id)).owner_display_name
@@ -637,6 +707,129 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
     return ReplyVerdict(ok=ok, language=language, blocks=list(blocks), violations=list(violations),
                         message_id=message_id, generation=session_row.generation, visitor_plain=visitor_plain,
                         ledger_seq=entry.seq, signature=signature)
+
+
+# ---- The handoff the card opens -------------------------------------------------------------------
+
+# Owner-only text from kernel templates, in the owner's language (English, as the owner's previews are):
+# no visitor text, no prose of Claude's, no contact.
+CARD_REASON = "The Desk handed this to you."
+A_VISITOR = "A visitor"
+
+
+def card_alert(who: str) -> str:
+    """The owner's alert for a handoff the card opened: who is waiting, and nothing of what was said."""
+    return f"{who} is waiting in a conversation the Desk handed to you."
+
+
+async def open_handoff_ids(ctx: KernelCtx, session_row: SessionRow, *, lock: bool = False,
+                           cards_only: bool = False) -> list[str]:
+    """The IDs of the session's open handoffs, of either kind, or with `cards_only` only those the
+    handoff card opened: read without a lock, or with `lock` held `FOR SHARE` (step 10 of the lock
+    order), so the owner can't mark one done until the caller's transaction ends."""
+    stmt = select(Handoff.handoff_id).where(Handoff.desk_id == session_row.desk_id,
+                                           Handoff.session_id == session_row.session_id, Handoff.status == "open")
+    if cards_only:
+        stmt = stmt.where(Handoff.kind == "card")
+    if lock:
+        stmt = stmt.order_by(Handoff.handoff_id).with_for_update(read=True)
+    return list(await ctx.db.scalars(ctx.repo.scoped(stmt)))
+
+
+async def _lock_session(ctx: KernelCtx, session_row: SessionRow):
+    """Step 1 of the lock order: the session row `FOR NO KEY UPDATE`, the mode `finalize`'s write
+    takes, read as columns (its generation, kind, assurance and person), so the row the request
+    read keeps the generation the verdict is signed at."""
+    return (await ctx.db.execute(ctx.repo.scoped(
+        select(SessionRow.generation, SessionRow.kind, SessionRow.assurance, SessionRow.person_id).where(
+            SessionRow.session_id == session_row.session_id).with_for_update(key_share=True)))).one()
+
+
+async def handoff_still_open(ctx: KernelCtx, session_row: SessionRow) -> bool:
+    """Whether the session still has an open handoff the handoff card opened, in the lock order:
+    the session row, then those open handoffs `FOR SHARE`, held until the caller's transaction
+    ends, so none of them is marked done, or made a call-back's, before what leans on it is on
+    record."""
+    await _lock_session(ctx, session_row)
+    return bool(await open_handoff_ids(ctx, session_row, lock=True, cards_only=True))
+
+
+async def _awaiting_holds(ctx: KernelCtx, session_row: SessionRow) -> list[str]:
+    """The IDs of the session's held decisions the owner hasn't answered and that haven't expired,
+    read without a lock (a read waits for nothing, so it keeps the lock order)."""
+    return list(await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow.decision_id).where(
+        DecisionRow.session_id == session_row.session_id, DecisionRow.state == "held",
+        DecisionRow.expires_at > ctx.clock.now()))))
+
+
+async def awaits_the_owner(ctx: KernelCtx, session_row: SessionRow) -> bool:
+    """Whether the session has a held request awaiting the owner: one neither answered, cancelled
+    nor past its expiry, which a read would expire. A read that fails counts as none, in a savepoint
+    of its own, so the transaction goes on: skipping the handoff only spares the owner a second
+    alert, so not knowing fails toward telling the owner."""
+    try:
+        async with ctx.db.begin_nested():
+            return bool(await _awaiting_holds(ctx, session_row))
+    except SQLAlchemyError as error:
+        log_error(logger, error, "held_decisions_unread")
+        return False
+
+
+async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:
+    """Who is waiting, as the owner's records name them: a verified person's display name, else
+    "A visitor" (an agent's key has no name of its own)."""
+    if not verified(kind, assurance, person_id):
+        return A_VISITOR
+    name = (await ctx.db.execute(ctx.repo.scoped(select(Person.display_name).where(
+        Person.person_id == person_id, Person.removed_at.is_(None))))).scalar_one_or_none()
+    return name or A_VISITOR
+
+
+async def open_card_handoff(ctx: KernelCtx, session_row: SessionRow) -> str | None:
+    """The owner's handoff for a verdict that shows the handoff card ("Let me check with Maria
+    Rivera. Maria Rivera will reply here."), in the verdict's transaction, so the card's promise
+    has something behind it (the owner's decision of 2026-10-30). Returns its ID, or None when it
+    opens none.
+
+    In the lock order: the session row first (`FOR NO KEY UPDATE`, the mode `finalize`'s write
+    takes, read as columns, so the row the request read keeps the generation the verdict is signed
+    at), then the session's open handoffs `FOR SHARE`, then the ledger head. Two checks of one
+    session, a call-back's execution (which holds the session row `FOR UPDATE`) and the owner's
+    mark of done (which holds the handoff `FOR UPDATE`) each come wholly before or after it.
+
+    It opens none when a take-over or hand-back has moved the session to another generation since
+    the request read it (`deliver()` drops the verdict, so the visitor never sees the card); while
+    the session has a held request awaiting the owner, whose alert and item the owner already has
+    for the conversation (`awaits_the_owner`, the owner's decision of 2026-10-31), so the owner sees
+    one item and gets one alert; or when the session already has an open handoff of either kind (an
+    earlier card, or a call-back request): one at a time, so a conversation of blocked drafts alerts
+    the owner once. Otherwise
+    it inserts one of kind `card`: open, no call-back window and no fact (it promises no call
+    back), the kernel's reason (`CARD_REASON`), and as `action_id` its own ID, which no action's
+    can equal; alerts the owner (`handoff`, under the Desk's notification preferences, with no
+    decision) with who is waiting (`card_alert`); and ledgers `desk_data` `{part: "handoffs",
+    refs: [handoff_id], kind: "card"}` on the session, the entry the owner's mark of done writes
+    too. The owner marks it done with `POST /handoffs/{id}/done`, after which the next card opens
+    a new one; a session closing changes nothing of it."""
+    current = await _lock_session(ctx, session_row)
+    if current.generation != session_row.generation:
+        return None
+    if await awaits_the_owner(ctx, session_row):
+        return None
+    if await open_handoff_ids(ctx, session_row, lock=True):
+        return None
+    copy_id, desk_id, session_id = session_row.copy_id, session_row.desk_id, session_row.session_id
+    handoff_id = new_id("handoff")
+    ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=copy_id, desk_id=desk_id, session_id=session_id,
+                       reason=CARD_REASON, callback_window=None, status="open", kind="card", action_id=handoff_id,
+                       window_start=None, window_end=None, created_at=ctx.clock.now()))
+    await ctx.db.flush()
+    who = await _waiting(ctx, current.kind, current.assurance, current.person_id)
+    await demo_inbox.alert_owner(ctx, desk_id, "handoff", render.owner_preview("handoff"), card_alert(who))
+    await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+        kind="desk_data", origin="kernel", session_id=session_id,
+        summary={"part": "handoffs", "refs": [handoff_id], "kind": "card"}))
+    return handoff_id
 
 
 # ---- The owner's messages -------------------------------------------------------------------------
@@ -719,7 +912,7 @@ async def post_check_reply(body: CheckReplyRequest, ctx: Ctx, request: Request) 
     if row.mode == "owner":
         raise AuthError(409, "mode_owner", "mode_owner", route=route_template(request),
                         named=Named(copy_id=row.copy_id, desk_id=row.desk_id, session_id=row.session_id))
-    verdict = await check_draft(ctx, row, draft)
-    if row.kind == "agent":
-        await agents.end_turn(ctx, request, verdict)
+    verdict = await check_draft(ctx, row, draft, final=body.final)
+    if row.kind == "agent":            # a turn ends at a blocked check only when the API said it was final
+        await agents.end_turn(ctx, request, verdict, final=body.final and "final" in body.model_fields_set)
     return verdict

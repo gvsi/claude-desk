@@ -1648,7 +1648,7 @@
     "/api/owner/desks/{desk_id}/safety": {
       "get": {
         "summary": "Safety",
-        "description": "The attempts the checkpoint stopped on the Desk, newest first: refused requests and replies of Claude's it\nblocked (the \"stopped\" Today counts).",
+        "description": "The Desk's refused requests and Claude's stopped drafts, newest first. Today and Safety count refused requests\nonly (owner decision, 2026-10-31). Each refusal's nullable `cause` comes from its decision's `policy_ids` and\nits ledger decide summary's `reason`/`check` and the session's verified state; drafts have no cause.",
         "operationId": "owner_safety",
         "parameters": [
           {
@@ -2712,7 +2712,7 @@
     "/api/owner/setup/{id}": {
       "get": {
         "summary": "Setup Interview",
-        "description": "The setup interview as it stands.",
+        "description": "The setup interview as it stands, removing abandoned turn entries and reopening consent if needed.",
         "operationId": "owner_setup_interview",
         "parameters": [
           {
@@ -2757,6 +2757,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "application/json": {
@@ -2783,7 +2793,7 @@
     "/api/owner/setup/{id}/consent": {
       "post": {
         "summary": "Setup Consent",
-        "description": "The owner's answer to whether Claude may read their Claude memory and website, given once (409 `conflict`\nafter). On yes, both are read through the kernel as the owner's setup tools, each shown as a label; on no,\nneither ever is. Then the first question.",
+        "description": "Use the shared turn runner to store consent, then read Claude memory and the named website through the\nkernel on yes, or skip both on no. Claude's first question and the read labels land together. Wait for the\nbusy commit; answer 200 when finished within 25 seconds, otherwise 202 `SetupState` with `busy: true`.\nCancelling the request leaves the run working. A repeat while busy answers 202 without starting or\ncounting another run; after it lands, consent is 409 `conflict`. Failed or abandoned runs reopen consent.",
         "operationId": "owner_setup_consent",
         "parameters": [
           {
@@ -2817,6 +2827,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "401": {
             "content": {
@@ -2884,7 +2904,7 @@
     "/api/owner/setup/{id}/answer": {
       "post": {
         "summary": "Setup Answer",
-        "description": "The owner's answer to the question waiting, which the answer names (409 `conflict` when none is waiting or\nanother is, so an answer sent twice answers once): Claude replies, the answers are updated and, once the question\nis covered, the next one is asked. 503 `model_unavailable` when Claude couldn't answer, with nothing stored, so the\nsame answer can be sent again.",
+        "description": "Use the shared turn runner for the owner's answer to the question waiting, which the answer names\n(409 `conflict` when none is waiting or another is, so an answer sent twice answers once). Claude replies,\nupdates the answers and asks the next question once this one is covered. Wait for the busy commit, then up to\n25 seconds: 200 with the landed state or 202 `SetupState` with `busy: true`. Any turn while busy answers 202\nwithout running or counting on the limits. Cancelling the request leaves the turn working. Failure or\nabandonment removes the staged answer and leaves the same question waiting, so the owner can retry.\n503 `model_unavailable` when Claude couldn't answer or the run deadline expires.",
         "operationId": "owner_setup_answer",
         "parameters": [
           {
@@ -2918,6 +2938,16 @@
                 }
               }
             }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
           },
           "401": {
             "content": {
@@ -6689,6 +6719,117 @@
         }
       }
     },
+    "/api/owner/policy/{desk_id}/tools/confirm": {
+      "post": {
+        "summary": "Confirm Tools",
+        "description": "Send the owner's reviewed pins to the kernel. Enabling drafts a rules version; only explicit policy\nconfirmation activates it. Disabling takes effect immediately. A slow proof answers 202 with this request.",
+        "operationId": "owner_confirm_tools",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolsConfirmIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolConfirmed"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvingPending"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/owner/policy/{desk_id}/confirm": {
       "post": {
         "summary": "Confirm Rules",
@@ -7227,6 +7368,40 @@
           "ledger_seq": {
             "type": "integer",
             "title": "Ledger Seq"
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "owner_rule",
+                  "not_verified",
+                  "not_their_record",
+                  "recipient",
+                  "no_such_slot",
+                  "unknown_item",
+                  "over_quote_ceiling",
+                  "quote_unpayable",
+                  "no_such_charge",
+                  "not_refundable",
+                  "no_such_document",
+                  "no_amount",
+                  "tool_not_available",
+                  "incomplete_request",
+                  "paused",
+                  "no_rules",
+                  "rules_unchecked",
+                  "agent_pay_out",
+                  "agent_limit",
+                  "other_copy",
+                  "no_rule"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cause"
           }
         },
         "type": "object",
@@ -7238,10 +7413,11 @@
           "origin",
           "created_at",
           "triage",
-          "ledger_seq"
+          "ledger_seq",
+          "cause"
         ],
         "title": "Attempt",
-        "description": "An attempt the checkpoint stopped (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b)."
+        "description": "A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a\nclosed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`\nand the session's verified state;\nthe web holds its words. It is null for held requests, stopped drafts and unmapped refusals."
       },
       "Briefing": {
         "properties": {
@@ -7262,9 +7438,9 @@
             "type": "integer",
             "title": "Leads"
           },
-          "blocked": {
+          "turned_down": {
             "type": "integer",
-            "title": "Blocked"
+            "title": "Turned Down"
           },
           "total": {
             "type": "integer",
@@ -7280,7 +7456,7 @@
           "conversations",
           "bookings",
           "leads",
-          "blocked",
+          "turned_down",
           "total",
           "newest"
         ],
@@ -7292,7 +7468,7 @@
           "kind": {
             "type": "string",
             "enum": [
-              "blocked",
+              "turned_down",
               "booking",
               "lead",
               "answer"
@@ -7340,6 +7516,40 @@
               }
             ],
             "title": "Line"
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "owner_rule",
+                  "not_verified",
+                  "not_their_record",
+                  "recipient",
+                  "no_such_slot",
+                  "unknown_item",
+                  "over_quote_ceiling",
+                  "quote_unpayable",
+                  "no_such_charge",
+                  "not_refundable",
+                  "no_such_document",
+                  "no_amount",
+                  "tool_not_available",
+                  "incomplete_request",
+                  "paused",
+                  "no_rules",
+                  "rules_unchecked",
+                  "agent_pay_out",
+                  "agent_limit",
+                  "other_copy",
+                  "no_rule"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cause"
           }
         },
         "type": "object",
@@ -7349,10 +7559,11 @@
           "session_id",
           "display_name",
           "ref_id",
-          "line"
+          "line",
+          "cause"
         ],
         "title": "BriefingItem",
-        "description": "One thing that happened since last night. `ref_id` is what it links to: the attempt's `ref_id` for `blocked`,\nthe decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a\nrefusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None."
+        "description": "One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,\nthe decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a\nrefusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required\nand nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped\nrefusals. Stopped drafts stay on Safety and out of the briefing."
       },
       "BriefingList": {
         "properties": {
@@ -7379,7 +7590,7 @@
       },
       "BriefingNewest": {
         "properties": {
-          "blocked": {
+          "turned_down": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/BriefingItem"
@@ -7412,12 +7623,12 @@
         },
         "type": "object",
         "required": [
-          "blocked",
+          "turned_down",
           "booking",
           "lead_or_answer"
         ],
         "title": "BriefingNewest",
-        "description": "The newest blocked attempt, booking, and lead or answer (the lead when both share a time); None when none."
+        "description": "The newest refused request, booking, and lead or answer (the lead when both share a time); None when none."
       },
       "BusinessOut": {
         "properties": {
@@ -8890,6 +9101,14 @@
               "done"
             ],
             "title": "Status"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "callback",
+              "card"
+            ],
+            "title": "Kind"
           }
         },
         "type": "object",
@@ -8898,10 +9117,11 @@
           "session_id",
           "reason",
           "callback_window",
-          "status"
+          "status",
+          "kind"
         ],
         "title": "Handoff",
-        "description": "An open callback request (`kernel_ro.handoffs`). `reason` is \"<name> \u00b7 <contact> \u00b7 <reason>\" as the visitor\ntyped them (untrusted text); `callback_window` is \"<start>/<end>\" in ISO 8601, or None without one."
+        "description": "A conversation handed to the owner (`kernel_ro.handoffs`), of one of two kinds:\n\n- `callback`: a visitor's call-back request. `reason` is \"<name> \u00b7 <contact> \u00b7 <reason>\" as the visitor typed them\n  (untrusted text); `callback_window` is \"<start>/<end>\" in ISO 8601, or None without one.\n- `card`: the handoff card the session saw (a passed reply citing it, or a blocked final draft or one no rewrite\n  fixes). `reason` is the kernel's own template (\"The Desk handed this to you.\"), and `callback_window` is None:\n  no call back was promised.\n\nA null window alone can't tell them apart; `kind` does, and a row's kind never changes. A card handoff opens\nnone in the owner's preview, while a held request awaits the owner, or while the session has an open handoff. A\ncall-back request closes the session's open card handoff (it reads `done` from then on) and opens its own\n`callback` row with a new ID."
       },
       "Health": {
         "properties": {
@@ -9595,7 +9815,7 @@
           "from_the_visitor"
         ],
         "title": "NeedsYouItem",
-        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open callback request (`handoff`), never both; who it came from, and the last thing they wrote (untrusted)."
+        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from, and the last\nthing they wrote (untrusted)."
       },
       "NeedsYouSession": {
         "properties": {
@@ -11745,6 +11965,11 @@
             ],
             "title": "Question"
           },
+          "busy": {
+            "type": "boolean",
+            "title": "Busy",
+            "default": false
+          },
           "messages": {
             "items": {
               "$ref": "#/components/schemas/SetupMessage"
@@ -11764,7 +11989,7 @@
           "messages"
         ],
         "title": "SetupState",
-        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent and after the last one) and the conversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
+        "description": "A setup interview as it stands: its Desk, made at the start with Answering off, the step it is at, whether the\nowner let Claude read their memory and website (None until asked), the question waiting for an answer (None\nbefore consent, while busy and after the last one), whether an owner turn is pending (`busy`), and the\nconversation so far. Its messages start at Claude's consent\nquestion: the owner's opening description isn't shown back to them."
       },
       "SetupTools": {
         "properties": {
@@ -11995,7 +12220,7 @@
           "days"
         ],
         "title": "ThisWeek",
-        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier\nbooking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last\none `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the\nreply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the\ndrafts."
+        "description": "\"Last 7 days\": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;\n`booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier\nbooking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last\none `end`. `stopped` counts refused requests from visitors and agents (owner decision, 2026-10-31).\nSafety lists Claude's stopped drafts too, without counting them; the briefing omits them."
       },
       "Today": {
         "properties": {
@@ -12059,6 +12284,33 @@
           "args"
         ],
         "title": "ToolCall"
+      },
+      "ToolConfirmed": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/ToolProfile"
+            },
+            "type": "array",
+            "title": "Profiles"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "profiles",
+          "draft"
+        ],
+        "title": "ToolConfirmed"
       },
       "ToolDecisionRow": {
         "properties": {
@@ -12168,6 +12420,41 @@
         ],
         "title": "ToolDecisions",
         "description": "`GET /api/owner/desks/{desk_id}/tools/{tool}/decisions`: a page of the tool's decisions on the Desk, newest\nfirst; `next_before` is the cursor for the next page, None on the last."
+      },
+      "ToolPin": {
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "native.quote",
+              "native.find_slots",
+              "native.book",
+              "native.release_document",
+              "native.payment_link",
+              "native.charge_mandate",
+              "native.capture_lead",
+              "native.request_callback",
+              "native.start_verification",
+              "native.fetch_website",
+              "native.read_memory",
+              "payments.list_charges",
+              "payments.create_refund"
+            ],
+            "title": "Tool"
+          },
+          "definition_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Definition Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tool",
+          "definition_sha256"
+        ],
+        "title": "ToolPin"
       },
       "ToolProfile": {
         "properties": {
@@ -12409,6 +12696,31 @@
         ],
         "title": "ToolRow",
         "description": "A tool of the Desk as the kernel lists it (`kernel_ro.tools`): its effects, whether it can be undone, its\nstatus (`needs_review` until the owner confirms a connected tool), the description Claude sees and, for a\nconnected tool, the hash of the definition it is pinned to and a changed definition waiting for review; and the\nactive rules' cards that cover it, default asks included, in card order (Plan 02b, Task 9)."
+      },
+      "ToolsConfirmIn": {
+        "properties": {
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/ToolPin"
+            },
+            "type": "array",
+            "maxItems": 13,
+            "minItems": 1,
+            "title": "Tools"
+          },
+          "enable": {
+            "type": "boolean",
+            "title": "Enable"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "tools",
+          "enable"
+        ],
+        "title": "ToolsConfirmIn",
+        "description": "The shared batch review body; the checked Desk ID comes from the route."
       },
       "TranscriptItem": {
         "properties": {
@@ -12711,7 +13023,7 @@
           "stopped"
         ],
         "title": "WeekDay",
-        "description": "One date of \"Last 7 days\", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,\nnot Claude's own drafts the reply check stopped."
+        "description": "One date of \"Last 7 days\", counted as `ThisWeek` counts: `stopped` counts refused requests that day\n(owner decision, 2026-10-31). Claude's stopped drafts are listed on Safety but not counted."
       },
       "WentLive": {
         "properties": {

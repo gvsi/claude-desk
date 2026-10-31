@@ -1,7 +1,8 @@
 /**
  * The public chat: a Desk's page as a stranger sees it, inside the design system's PublicShell.
- * Every message, card and receipt is the kernel's, shown as it arrived; the page adds only its own
- * chrome (copy.ts) and the design system's error lines. A reply shows whole once the kernel has
+ * Every message, card and receipt is the kernel's; chats outside the owner's preview omit only
+ * the reply check's own receipt. The page adds only its own chrome (copy.ts) and the design system's error lines.
+ * A reply shows whole once the kernel has
  * checked it, with its receipts attached under it; while Claude writes, only "Claude is writing".
  *
  * Reused by setup's preview (`embedded`), which sits inside an owner screen.
@@ -40,6 +41,7 @@ import { brandFrom } from './brand.ts';
 import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
+import { messageReceiptVisible } from './messageReceipt.ts';
 import { useVisitorChat, type ChatStatus } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
@@ -54,7 +56,7 @@ export interface PublicChatProps {
   slug: string;
   /** Inside an owner screen, which has its own footer and landmarks. */
   embedded?: boolean;
-  /** The owner's preview of this Desk (Today's "Chat as a customer"). */
+  /** The owner's own preview of this Desk (setup's Live step or Today's "Chat as a customer"). */
   previewDeskId?: string;
   /** Called with the chat's session once it is open. */
   onSession?: (session: SessionState) => void;
@@ -95,6 +97,7 @@ function failureLine(failure: SendFailure | undefined, language: CopyLanguage, c
 
 interface RowProps {
   row: ChatRow;
+  ownerPreview: boolean;
   ownerName: string;
   language: CopyLanguage;
   onResend: (id: string) => void;
@@ -102,13 +105,19 @@ interface RowProps {
   after?: ReactNode[];
 }
 
-/** One row: the message and, attached under it, its receipts exactly as the kernel wrote them. */
-function ChatRowView({ row, ownerName, language, onResend, after = [] }: RowProps) {
+/** One row: the message and its visible receipts, exactly as the kernel wrote them. */
+function ChatRowView({ row, ownerPreview, ownerName, language, onResend, after = [] }: RowProps) {
   const { item } = row;
   const copy = PUBLIC_COPY[language];
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
+  // Filter after grouping, for live and history alike: the message still settles its turn and
+  // keeps every action receipt. Pending receipts and the writing line are never filtered.
+  const visibleReceipts =
+    item.kind === 'message' && !messageReceiptVisible(item.ev, ownerPreview)
+      ? row.receipts.filter((receipt) => receipt.source.kind !== 'reply')
+      : row.receipts;
   const receipts = [
-    ...row.receipts.map((receipt: ReceiptView, index) => (
+    ...visibleReceipts.map((receipt: ReceiptView, index) => (
       <MarginReceipt
         key={`${receipt.ledgerSeq}-${index}`}
         source={receipt.source}
@@ -439,6 +448,8 @@ function PublicState({ embedded, language, children }: { embedded: boolean; lang
 }
 
 export function PublicChat({ slug, embedded = false, previewDeskId, onSession, aboutLinks, idea }: PublicChatProps) {
+  // Setup and Today open the owner's own preview with a Desk id; its session is still a visitor.
+  const ownerPreview = typeof previewDeskId === 'string' && previewDeskId.length > 0;
   const chat = useVisitorChat(slug, previewDeskId);
   // Page chrome follows the browser; each message's cards follow the message's own language.
   const [language] = useState(browserLanguage);
@@ -484,6 +495,15 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   useEffect(() => {
     if (drawn && chat.state.rows.some((row) => row.live === true)) shown();
   }, [drawn, chat.state.rows, shown]);
+
+  // The verify card whose form the visitor closed with "I can't get the code" while the owner was in
+  // the chat, by its row's key. It stays closed only while she is in the chat: the form comes back
+  // under its card in the same render that says she is out, and stays open if she joins again.
+  const [verifyClosed, setVerifyClosed] = useState<string | null>(null);
+  const ownerHere = chat.ownerInChat;
+  useEffect(() => {
+    if (!ownerHere) setVerifyClosed(null);
+  }, [ownerHere]);
 
   // Words wait in the composer once it can be used: the link's idea as the page opens, and words
   // that didn't send when the chat ended, in the new chat's. Neither is sent without Send. Words
@@ -539,7 +559,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     if (!ready) return [];
     return state.openHolds
       .filter((id) => {
-        const held = state.holds.get(id);
+        const held = state.latest.get(id);
         return held !== undefined && receipts.includes(held);
       })
       .map((id) => (
@@ -562,8 +582,16 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // written in and the visitor hasn't confirmed it's them, then the verified line.
   const verified = chat.session?.verified === true;
   const verifyRow = latestVerifyRow(state.rows);
+  // "I can't get the code" asks for the owner. While she is in the chat she is already here, so it
+  // asks for nobody: it closes that card's form, sends nothing, and the visitor's place moves to the
+  // composer, without scrolling the conversation. The form comes back once she is out of the chat,
+  // and a later verify card brings it back under that card.
+  const closeVerify = () => {
+    setVerifyClosed(verifyRow);
+    composerRef.current?.querySelector('textarea')?.focus({ preventScroll: true });
+  };
   const verifyUnder = (row: ChatRow): ReactNode[] =>
-    verifyRow !== null && rowKey(row) === verifyRow && (verified || ready)
+    verifyRow !== null && rowKey(row) === verifyRow && (verified || (ready && !(ownerHere && verifyClosed === verifyRow)))
       ? [
           <VerifyInline
             key="verify"
@@ -572,7 +600,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
             assurance={chat.session?.assurance ?? 'none'}
             language={language}
             onSubmit={chat.verify}
-            onAskForOwner={askForOwner}
+            onAskForOwner={chat.ownerInChat ? closeVerify : askForOwner}
           />,
         ]
       : [];
@@ -637,6 +665,10 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         language={language}
         openStatus={openStatus}
         onAskForOwner={askForOwner}
+        // While the owner has taken the chat over, the head says so in the disclosure's place, still
+        // naming Claude as an AI, and Ask goes. The visitor chat's own value, from the kernel's
+        // session mode, as it is: nothing on the page decides it.
+        ownerInChat={chat.ownerInChat}
         about={desk.charter}
         aboutLinks={aboutLinks}
         footer={!embedded}
@@ -671,6 +703,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
             <ChatRowView
               key={rowKey(row)}
               row={row}
+              ownerPreview={ownerPreview}
               ownerName={ownerName}
               language={language}
               onResend={resend}

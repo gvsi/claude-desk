@@ -1,0 +1,140 @@
+/**
+ * Suggestion chips on a touch screen. A chip is 28 px tall and its neighbours are 8 px away, beside
+ * it and, once the row wraps on a phone, above and below it, so its unseen hit area reaches halfway
+ * across each gap and no further: a tap between two chips lands on the nearer one, and nothing about
+ * the chips moves or shows.
+ */
+import { act, type ReactElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { expect, it } from 'vitest';
+
+import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea } from '../../test/touch.ts';
+import { SuggestionChips } from './SuggestionChips.tsx';
+
+declare global {
+  // Tells React this test drives its updates inside act().
+  var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
+}
+
+/** Three example labels, which wrap onto their own lines in a phone's 358 px column. */
+const EXAMPLES = ['A plumber in Oakland', 'A bakery that takes custom orders', 'A tax preparer'];
+
+/** Renders `ui` into a fresh host on the page; the returned function takes it off again. */
+function mount(ui: ReactElement): { host: HTMLDivElement; unmount: () => void } {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  act(() => root.render(ui));
+  return {
+    host,
+    unmount: () => {
+      act(() => root.unmount());
+      host.remove();
+    },
+  };
+}
+
+it('shows_three_suggestions_by_default_and_four_when_requested', () => {
+  const suggestions = ['A hair salon in Oakland', 'A plumber in Oakland', 'Apartments in Sacramento', 'A CPA firm in San Jose'];
+  const { host, unmount } = mount(
+    <>
+      <SuggestionChips label="Default" suggestions={suggestions} onPick={() => {}} />
+      <SuggestionChips label="Starters" suggestions={suggestions} max={4} onPick={() => {}} />
+    </>,
+  );
+  try {
+    const words = (label: string) => [...host.querySelectorAll(`[aria-label="${label}"] button`)].map((chip) => chip.textContent);
+    expect(words('Default')).toEqual(suggestions.slice(0, 3));
+    expect(words('Starters')).toEqual(suggestions);
+  } finally {
+    unmount();
+  }
+});
+
+it('touch_hit_areas_reach_halfway_to_each_neighbour', async () => {
+  const { host, unmount } = mount(
+    <div style={{ width: 358, padding: 16 }}>
+      <SuggestionChips label="Examples" suggestions={EXAMPLES} onPick={() => {}} />
+    </div>,
+  );
+  try {
+    const chips = [...host.querySelectorAll<HTMLElement>('.cd-chip')];
+    const fine = chips.map((chip) => chip.getBoundingClientRect().toJSON());
+    const group = host.querySelector<HTMLElement>('.cd-suggestion-chips')?.getBoundingClientRect().toJSON();
+    expect(getComputedStyle(chips[0] as HTMLElement, '::after').content, 'no hit area under a fine pointer').toBe('none');
+    // The row wraps: the second chip starts a line under the first, 8 px below it.
+    const [first, second] = fine as [DOMRect, DOMRect];
+    expect(second.top - first.bottom, 'the rows are 8 px apart').toBe(8);
+
+    await coarsePointer();
+    expect(chips.map((chip) => chip.getBoundingClientRect().toJSON()), 'the chips keep their boxes').toEqual(fine);
+    expect(host.querySelector<HTMLElement>('.cd-suggestion-chips')?.getBoundingClientRect().toJSON(), 'the row keeps its box').toEqual(group);
+    for (const chip of chips) {
+      const own = chip.getBoundingClientRect();
+      const area = hitArea(chip);
+      // 4 px past each edge, half the gap: 36 px tall where 44 would reach into the next row.
+      expect([own.top - area.top, area.bottom - own.bottom], `${chip.textContent}: halfway to the rows above and below`).toEqual([4, 4]);
+      expect(area.width, `${chip.textContent}: as wide as the chip, already over 44 px`).toBe(own.width);
+      expectHitAreaLands(chip);
+      expectUnseen(chip);
+    }
+    for (let i = 0; i < chips.length; i += 1) {
+      for (let j = i + 1; j < chips.length; j += 1) {
+        const [a, b] = [chips[i] as HTMLElement, chips[j] as HTMLElement];
+        expectApart(hitArea(a), hitArea(b), `${a.textContent} and ${b.textContent}`);
+      }
+    }
+  } finally {
+    unmount();
+  }
+});
+
+it('touch_hit_areas_side_by_side_stay_apart', async () => {
+  // Short suggestions share a line, 8 px apart: the hit areas meet in the middle of the gap.
+  const { host, unmount } = mount(
+    <div style={{ width: 600, padding: 16 }}>
+      <SuggestionChips label="Suggestions" suggestions={['Book a visit', 'Get a quote', 'Hours']} onPick={() => {}} />
+    </div>,
+  );
+  try {
+    await coarsePointer();
+    const chips = [...host.querySelectorAll<HTMLElement>('.cd-chip')];
+    expect(new Set(chips.map((chip) => chip.getBoundingClientRect().top)).size, 'one line').toBe(1);
+    for (let i = 1; i < chips.length; i += 1) {
+      const [a, b] = [chips[i - 1] as HTMLElement, chips[i] as HTMLElement];
+      expect(b.getBoundingClientRect().left - a.getBoundingClientRect().right, 'side by side, 8 px apart').toBe(8);
+      expectApart(hitArea(a), hitArea(b), `${a.textContent} and ${b.textContent}`);
+    }
+    for (const chip of chips) expectHitAreaLands(chip);
+  } finally {
+    unmount();
+  }
+});
+
+it('touch_hit_areas_add_no_scroll_where_the_chips_end_a_scroll_region', async () => {
+  // The chips can end a scroll region flush, as they end the conversation on a vision page's public
+  // page: their hit areas reach past its end, but it scrolls no further than before.
+  const { host, unmount } = mount(
+    <div className="scroller" style={{ width: 358, height: 120, overflowY: 'auto' }}>
+      <div style={{ height: 200 }} />
+      <SuggestionChips label="Try asking" suggestions={['Book an inspection', 'Pay the fee', 'Talk to staff']} onPick={() => {}} />
+    </div>,
+  );
+  try {
+    const scroller = host.querySelector<HTMLElement>('.scroller') as HTMLElement;
+    const fine = scroller.scrollHeight;
+    const chips = [...host.querySelectorAll<HTMLElement>('.cd-chip')];
+    const boxes = chips.map((chip) => chip.getBoundingClientRect().toJSON());
+    await coarsePointer();
+    expect(chips.map((chip) => chip.getBoundingClientRect().toJSON()), 'the chips keep their boxes').toEqual(boxes);
+    expect(scroller.scrollHeight, 'the region scrolls no further').toBe(fine);
+    scroller.scrollTop = scroller.scrollHeight;
+    for (const chip of chips) {
+      const own = chip.getBoundingClientRect();
+      expect(chip.contains(document.elementFromPoint(own.left + 4, own.top - 3)), `${chip.textContent}: still takes a tap just above it`).toBe(true);
+    }
+  } finally {
+    unmount();
+  }
+});

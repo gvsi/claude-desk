@@ -364,6 +364,11 @@
       "properties": {
         "draft": {
           "$ref": "#/$defs/ReplyDraft"
+        },
+        "final": {
+          "default": true,
+          "title": "Final",
+          "type": "boolean"
         }
       },
       "required": [
@@ -472,6 +477,17 @@
         "owner_token": {
           "title": "Owner Token",
           "type": "string"
+        },
+        "seeded_chat": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SeededChat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "replayed_messages": {
           "default": [],
@@ -3666,6 +3682,28 @@
       "title": "SeedPerson",
       "type": "object"
     },
+    "SeededChat": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "visitor_line": {
+          "title": "Visitor Line",
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        }
+      },
+      "required": [
+        "session_id",
+        "visitor_line",
+        "decision"
+      ],
+      "title": "SeededChat",
+      "type": "object"
+    },
     "SessionContext": {
       "properties": {
         "tools": {
@@ -4153,6 +4191,55 @@
         "tool"
       ],
       "title": "ToolsSimulateChangeRequest",
+      "type": "object"
+    },
+    "TurnRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "generation": {
+          "title": "Generation",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 2000,
+          "title": "Text",
+          "type": "string"
+        },
+        "desk_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Desk Id"
+        }
+      },
+      "required": [
+        "generation",
+        "text"
+      ],
+      "title": "TurnRequest",
+      "type": "object"
+    },
+    "TurnStarted": {
+      "properties": {
+        "language": {
+          "enum": [
+            "en",
+            "es"
+          ],
+          "title": "Language",
+          "type": "string"
+        }
+      },
+      "required": [
+        "language"
+      ],
+      "title": "TurnStarted",
       "type": "object"
     },
     "VerifyCheckRequest": {

@@ -6,7 +6,7 @@ import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Icon, Notice, Pill, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
 import { BREAK_IT_IDEAS, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
-import { VISION_PATHS } from '../../vision/data.ts';
+import { VISION_ARTICLE } from '../../about/links.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, useToday } from '../useDesks.ts';
@@ -84,8 +84,8 @@ function routerClick(go: () => void) {
 
 /**
  * Today's "Things to try": four ways into the demo, each with its next step, ticked off in place as
- * the owner does it, and counted in the line under the heading; then a link to where this is going,
- * the labelled vision pages. "Answer a held request" waits until something is held, and stays once
+ * the owner does it, and counted in the line under the heading; then a link to the Vision article,
+ * where a Desk could go next. "Answer a held request" waits until something is held, and stays once
  * it's answered: ticked when the answer counts, or settled in its slot with how the answer ended when
  * it doesn't (a request that had expired or been cancelled, or an answer given on a Desk the list
  * doesn't count). The public page always opens in a new tab, never on Today. "Hide this list" is
@@ -163,7 +163,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
           <Thing
             icon="conversations"
             title={CHAT.title}
-            detail="Your public page opens in a new tab. Ask about a leak, a price or a time."
+            detail="Your public page opens in a new tab. Ask about a price or a time."
             end={rowDone(signals.done.chat, CHAT.done)}
           >
             <Button variant="secondary" href={link} external>
@@ -191,7 +191,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
         </ul>
       </Card>
       <p className="cd-things__vision cd-type-meta">
-        <TextLink href={VISION_PATHS.cityOffice}>Where this is going: channels, a city office and a team Desk</TextLink>
+        <TextLink href={VISION_ARTICLE.route}>Vision: where a Desk could go next</TextLink>
       </p>
     </section>
   );

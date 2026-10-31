@@ -56,6 +56,7 @@ export const VISITOR_PLAIN = {
     allowed: "Checked against Maria Rivera's rules",
     held: 'Waiting for Maria Rivera to approve',
     refused: 'Not something I can do here',
+    refused_over_mandate: 'Refused: over the signed limit for this agent',
     approved: 'Maria Rivera approved this',
     denied: 'Maria Rivera decided not to go ahead',
     expired: 'This request timed out',
@@ -71,6 +72,7 @@ export const VISITOR_PLAIN = {
     allowed: 'Revisado con las reglas de Maria Rivera',
     held: 'Esperando la aprobación de Maria Rivera',
     refused: 'No es algo que pueda hacer aquí',
+    refused_over_mandate: 'Rechazado: supera el límite firmado para este agente',
     approved: 'Maria Rivera lo aprobó',
     denied: 'Maria Rivera decidió no seguir adelante',
     expired: 'Esta solicitud venció',
@@ -84,7 +86,7 @@ export const VISITOR_PLAIN = {
   },
 } as const satisfies Record<
   Language,
-  Record<Exclude<DecisionState, 'executed'> | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
+  Record<Exclude<DecisionState, 'executed'> | 'refused_over_mandate' | 'reply_checked' | 'reply_handed_off' | 'owner_said', string>
 >;
 
 /**
@@ -107,7 +109,7 @@ const OWNER = rivera.business.ownerName;
  * The visitor's line for a decision in `state`: an executed one names what its tool did, in the
  * signed per-tool words the design system's fixtures carry, never a bare "Done".
  */
-export function statusLine(language: Language, state: DecisionState, tool: ToolName | null): string {
+export function statusLine(language: Language, state: DecisionState | 'refused_over_mandate', tool: ToolName | null): string {
   if (state !== 'executed') return VISITOR_PLAIN[language][state];
   if (tool === null || !hasExecutedLine(tool)) throw new Error(`the mock has no executed line for ${tool ?? 'a decision with no tool'}`);
   return executedLine(tool, language, OWNER);
@@ -273,7 +275,14 @@ export interface DecisionSpec {
   /** For an `allow`: the action ran, so the decision is `executed`. */
   executed: boolean;
   cardIds: string[];
+  /**
+   * The policies that decided it, as the kernel names them, when they aren't the cards' own (a
+   * baseline refusal): Safety's cause is read from them, as the API reads it.
+   */
+  policyIds?: string[];
   reasonPlain: string;
+  /** A refusal with the kernel's more specific visitor status line. */
+  visitorStatus?: 'refused_over_mandate';
   /** For a `hold`: what held it, which decides the answers it offers (`answersFor`). */
   hold?: HoldKind;
   listCents?: number | null;
@@ -456,8 +465,11 @@ export interface TurnContext {
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
   status(type: StatusEvent['type'], decision: Decision): StatusEvent;
-  /** A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the visitor gets the handoff. */
-  reply(blocks: RenderedBlock[], opts?: { blocked?: boolean }): EvMessage;
+  /**
+   * A checked reply with its ledger entry; `blocked` when Claude's draft failed the check and the
+   * visitor gets the handoff, and `paused` when the check stopped it because the chat is paused.
+   */
+  reply(blocks: RenderedBlock[], opts?: { blocked?: boolean; paused?: boolean }): EvMessage;
   /**
    * Sends a demo code to `person`'s contact on record, as the kernel's `/verify/start` does: the
    * challenge the code answers, a Demo inbox entry for this session with the code in its body, and
@@ -534,6 +546,12 @@ export const CALLBACK_REASON = `${CALLBACK_LEAD.name} · ${CALLBACK_LEAD.contact
 
 /** Claude hands the visitor to Maria: the kernel's handoff card, as asking for her gets. */
 const HANDOFF_STEPS: readonly Step[] = [writing, (ctx) => ctx.reply([blocks.handoff[ctx.language]])];
+
+/**
+ * A turn in a chat the breaker paused, as the API runs one: no model call and no "writing", only
+ * the kernel's handoff, which its check stops as paused.
+ */
+export const PAUSED_TURN: readonly Step[] = [(ctx) => ctx.reply([blocks.handoff[ctx.language]], { paused: true })];
 
 export const SCRIPT: readonly ScriptRule[] = [
   {
@@ -684,7 +702,7 @@ export function afterVerify(allTools: boolean): readonly Step[] {
  * The seeded hold's turn, as the design system's fixtures have it (`rivera.conversations.visitor`):
  * the 15% quote is held, and Claude's draft named the discount in its own words, so the reply was
  * stopped and the visitor got the handoff card. A fresh copy keeps that stopped reply, which
- * Safety and the briefing show; a discount asked in a live chat gets the discount row's reply.
+ * Safety shows; a discount asked in a live chat gets the discount row's reply.
  */
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
   (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),

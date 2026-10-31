@@ -18,3 +18,24 @@
   text-align: start;
   overflow-wrap: anywhere;
 }
+
+/* On a touch screen each chip takes a tap through an unseen hit area centred on it, which reaches
+   toward size-touch but only halfway across the 8 px gap to each neighbour, beside it or, once the
+   row wraps, above and below it: 36 px tall for a one-line chip, and a tap between two chips lands
+   on the nearer one. Nothing is drawn and no chip moves; position: relative only gives the hit area
+   its frame. The hit area is placed from inside the chip's 1 px border, so its reach adds the border.
+   Layout containment keeps the hit area out of any scroll region's extent, so chips that end one
+   flush, as on a vision page's conversation, don't let it scroll further; a flex row uses no chip's
+   baseline, so nothing in the row moves. */
+@media (pointer: coarse) {
+  .cd-suggestion-chips > .cd-chip {
+    position: relative;
+    contain: layout;
+  }
+
+  .cd-suggestion-chips > .cd-chip::after {
+    content: '';
+    position: absolute;
+    inset: max(-1 * (var(--space-8) / 2 + 1px), min(0px, (100% - var(--size-touch)) / 2));
+  }
+}

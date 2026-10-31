@@ -38,14 +38,27 @@ import {
   knowledgeList,
   peopleOut,
   publicDesk,
+  REPORT_DAYS,
   reports,
   rulesView,
   today,
   visitorTranscript,
 } from './readModels.ts';
-import { EVENT_GAP_MS, afterAnswer, afterVerify, allows, cardDiffFor, ruleChatReply, scriptedTurn, turnEnd, type Language, type Step } from './script.ts';
+import {
+  EVENT_GAP_MS,
+  PAUSED_TURN,
+  afterAnswer,
+  afterVerify,
+  allows,
+  cardDiffFor,
+  ruleChatReply,
+  scriptedTurn,
+  turnEnd,
+  type Language,
+  type Step,
+} from './script.ts';
 import { PRESETS, seedWorld, type MockSeed } from './seed.ts';
-import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupGreeting } from './setup.ts';
+import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses, withSetupBusinessName, withSetupDesks, withSetupGreeting } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
 /** Plan 02's limit on a visitor's message and on the owner's words. */
@@ -427,7 +440,9 @@ const SERVED: ServedRoutes = {
     return ok(copyOut(sv.world));
   },
   me(sv, req) {
-    return req.cookies.owner ? ok(copyOut(sv.world)) : NO_OWNER;
+    if (!req.cookies.owner) return NO_OWNER;
+    const copy = copyOut(sv.world);
+    return ok({ ...copy, desks: withSetupDesks(sv.world, copy.desks) });
   },
   desks(sv, req) {
     return req.cookies.owner ? ok(withSetupBusinesses(sv.world, [businessOut(sv.world)])) : NO_OWNER;
@@ -471,7 +486,12 @@ const SERVED: ServedRoutes = {
   },
   reports(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
-    return isFailure(desk) ? desk : ok(reports(sv.world, desk));
+    if (isFailure(desk)) return desk;
+    // `days`: whole local dates, 1 to 365, as the API takes them; anything else is refused.
+    const asked = req.query.get('days');
+    const days = asked === null ? REPORT_DAYS.default : /^\d+$/.test(asked) ? Number(asked) : NaN;
+    if (!Number.isInteger(days) || days < 1 || days > REPORT_DAYS.max) return INVALID;
+    return ok(reports(sv.world, desk, days));
   },
   answer(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
@@ -743,6 +763,8 @@ const SERVED: ServedRoutes = {
     sv.world.visitorText(session, text);
     // The turn's tools are read when it starts, which may be after a turn in progress ends.
     if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session)), session.language, text);
+    // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
+    else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
   },
   visitorTyping(sv, req) {

@@ -56,6 +56,34 @@
   flex: none;
 }
 
+/* An unseen, centred size-touch target leaves the pill and its inline baseline in place.
+   The hit area starts inside the 1 px border, so a layout's reach cap includes that border. */
+@media (pointer: coarse) {
+  .cd-chip {
+    position: relative;
+  }
+
+  .cd-chip::after {
+    content: '';
+    position: absolute;
+    inset-block: max(-1 * (var(--cd-touch-reach-block, var(--size-touch)) + 1px), min(0px, (100% - var(--size-touch)) / 2));
+    inset-inline: max(-1 * (var(--cd-touch-reach-inline, var(--size-touch)) + 1px), min(0px, (100% - var(--size-touch)) / 2));
+  }
+
+  /* Safety's filters and their design boards wrap with space-8 gaps in both directions.
+     Reach only halfway to each neighbour. These flex rows use no chip's baseline, so layout
+     containment keeps the hit areas out of scroll extents without moving any words. */
+  .cd-attempts__filters,
+  .board-chips {
+    --cd-touch-reach-block: calc(var(--space-8) / 2);
+    --cd-touch-reach-inline: calc(var(--space-8) / 2);
+  }
+
+  :is(.cd-attempts__filters, .board-chips) > .cd-chip {
+    contain: layout;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cd-chip {
     transition: none;

@@ -7,7 +7,7 @@
  * sheet's keyboard walk holds at an upright tablet and at the narrowest phone, 320 px.
  */
 import { composeStories } from '@storybook/react-vite';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
@@ -445,4 +445,83 @@ it('open_menu_closes_when_the_panel_becomes_a_sheet', async () => {
   const quotes = container.querySelector<HTMLElement>('a[href="#quotes"]');
   if (!menu || !quotes) throw new Error('A control behind the sheet is missing');
   await expectModal([menu, quotes]);
+});
+
+/**
+ * The Rules page as Safari has it: a click doesn't focus the button it presses, so when the panel
+ * opens, focus is on the page's body, not on the opener. `opened` records where it was.
+ */
+function SafariScreen({ shell, opened }: { shell: boolean; opened: { focus: Element | null } }) {
+  const [open, setOpen] = useState(false);
+  const panel = open ? (
+    <AskClaudePanel onClose={() => setOpen(false)} onSend={() => {}}>
+      <p>Conversation</p>
+    </AskClaudePanel>
+  ) : null;
+  const opener = (
+    <button
+      type="button"
+      // What Safari does: the press moves no focus to the button.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => {
+        opened.focus = document.activeElement;
+        setOpen(true);
+      }}
+    >
+      Ask Claude to change a rule
+    </button>
+  );
+  if (!shell) {
+    return (
+      <div>
+        <h1>Rules</h1>
+        {opener}
+        {panel}
+      </div>
+    );
+  }
+  return (
+    <AppShell
+      business={chen.business.name}
+      sidebar={
+        <nav aria-label="Main">
+          <a href="#rules">Rules</a>
+        </nav>
+      }
+      panel={panel}
+    >
+      <h1>Rules</h1>
+      {opener}
+    </AppShell>
+  );
+}
+
+it('focus_returns_to_an_opener_the_click_did_not_focus', async () => {
+  // Opened by a click that left focus on the page's body, as Safari's does, the sheet still returns
+  // focus to the button that opened it, whether Escape or Close shuts it, in the shell on a phone
+  // and a tablet, and on its own.
+  const cases = [
+    { size: PHONE, shell: true, close: 'Escape' },
+    { size: TABLET, shell: true, close: 'Close' },
+    { size: PHONE, shell: false, close: 'Escape' },
+  ] as const;
+  for (const { size, shell, close } of cases) {
+    const label = `${size.width} px, ${shell ? 'in the shell' : 'on its own'}, ${close}`;
+    await page.viewport(size.width, size.height);
+    const opened: { focus: Element | null } = { focus: null };
+    act(() => root.render(<SafariScreen shell={shell} opened={opened} />));
+    (document.activeElement as HTMLElement | null)?.blur();
+    const opener = page.getByRole('button', { name: 'Ask Claude to change a rule' });
+    await userEvent.click(opener);
+    expect(opened.focus, `${label}: the click left focus on the body`).toBe(document.body);
+    await vi.waitFor(() => expect(panel().getAttribute('role'), label).toBe('dialog'));
+    expect(panel().contains(document.activeElement), `${label}: focus moved into the sheet`).toBe(true);
+
+    if (close === 'Escape') await userEvent.keyboard('{Escape}');
+    else await userEvent.click(page.getByRole('button', { name: 'Close' }));
+    await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude'), `${label}: closed`).toBeNull());
+    expect(document.activeElement, `${label}: focus returns to the opener`).toBe(opener.element());
+    expect(container.querySelector('[inert]'), label).toBeNull();
+    act(() => root.render(<div />));
+  }
 });

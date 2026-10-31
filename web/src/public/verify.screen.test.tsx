@@ -9,6 +9,7 @@ import { userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { SseEvent } from '../api/contracts.ts';
+import { request } from '../api/http.ts';
 import { ROUTES } from '../api/routes.ts';
 import { rivera } from '../ds/fixtures/index.ts';
 import { CHAT_ENDED_COPY, NEW_CHAT_LABEL, UNREACHABLE_COPY } from '../ds/index.ts';
@@ -99,8 +100,102 @@ describe('verification', () => {
     // The form sits with the message that asked for the code, under its receipts.
     expect(row?.querySelector('.cd-transcript-row__margin input[autocomplete="one-time-code"]')).not.toBeNull();
     const receipts = [...(row?.querySelectorAll('.cd-transcript-row__margin .cd-margin-receipt') ?? [])].map((el) => el.textContent?.trim());
-    expect(receipts).toEqual(["Reply checked against Maria Rivera's rules", 'Verification started']);
+    expect(receipts).toEqual(['Verification started']);
     await expectScreenBasics(screen.container, { owner: false });
+  });
+
+  it('cant_get_the_code_closes_the_form_while_the_owner_is_in_the_chat', async () => {
+    const ask = "I'd like to talk to Maria Rivera.";
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    await say(screen, 'Can you send my invoice?');
+    const escape = screen.getByRole('button', { name: 'I can’t get the code' });
+    await expect.element(escape).toBeVisible();
+
+    // Maria takes the chat over. She is already here, so the form's way out asks for nobody: it
+    // closes the form, sends nothing, and focus moves on to the composer. The kernel's card stays.
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(document.querySelector('.cd-public-shell__disclosure')?.textContent).toMatch(/^Maria Rivera is in this chat\./));
+    const sent = requests('sendMessage').length;
+    await escape.click();
+    await expect.element(screen.getByRole('textbox', { name: '6-digit code' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Rivera Plumbing' })).toHaveFocus();
+    expect(screen.getByText(ask, { exact: true }).query()).toBeNull();
+    expect(requests('sendMessage')).toHaveLength(sent);
+    await expect.element(screen.getByRole('article', { name: "Confirm it's you" })).toBeVisible();
+
+    // She hands the chat back: the form comes back under the card, its way out with it.
+    mockStore.world.handBack(chat);
+    await expect.element(screen.getByRole('textbox', { name: '6-digit code' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'I can’t get the code' })).toBeVisible();
+
+    // With Claude answering, the same button asks for her, as the head's Ask does.
+    const again = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(again.screen);
+    await say(again.screen, 'Can you send my invoice?');
+    await again.screen.getByRole('button', { name: 'I can’t get the code' }).click();
+    await expect.element(again.screen.getByText(ask, { exact: true })).toBeVisible();
+    await vi.waitFor(() => expect(requests('sendMessage').map((r) => r.body)).toContainEqual({ text: ask }));
+  });
+
+  it('a_late_verify_answer_never_brings_the_owner_back', async () => {
+    const ownerLine = /^Maria Rivera is in this chat\./;
+    const headLine = () => document.querySelector('.cd-public-shell__disclosure')?.textContent ?? '';
+    /** The head's lines from now on, until `stop`. */
+    const watchHead = () => {
+      const seen = new Set<string>([headLine()]);
+      const watch = new MutationObserver(() => seen.add(headLine()));
+      watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+      onTestFinished(() => watch.disconnect());
+      return { seen: () => [...seen], stop: () => watch.disconnect() };
+    };
+    /** A request held until the test lets it land. */
+    const held = () => {
+      let release = () => {};
+      const until = new Promise<void>((resolve) => (release = resolve));
+      return { until, release };
+    };
+
+    for (const answer of ['the verify answer', 'the read after a lost verify answer'] as const) {
+      // Dana asks for her invoice, and Maria takes the chat over while the form is up.
+      const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+      await ready(screen);
+      await say(screen, 'Can you send my invoice?');
+      const chat = mockStore.visitorSession(RIVERA.slug);
+      if (!chat) throw new Error('this browser has a chat');
+      mockStore.world.takeOver(chat);
+      await vi.waitFor(() => expect(headLine()).toMatch(ownerLine));
+
+      // Dana sends the code. Its answer (or, when that is lost, the read of the session after it)
+      // was taken while the chat was in Maria's hands, and lands only after she has handed it back
+      // and Claude has started writing.
+      const late = held();
+      if (answer === 'the verify answer') {
+        mockStore.inject({ route: 'verifyCheck', status: 200, afterCommit: true, until: late.until, body: { state: { ...chat.state, verified: true, assurance: 'demo_code' } } });
+      } else {
+        const read = await request('visitorSession', { params: { slug: RIVERA.slug } });
+        mockStore.inject({ route: 'verifyCheck', status: 'network', afterCommit: true });
+        mockStore.inject({ route: 'visitorSession', status: 200, until: late.until, body: { ...read, state: { ...read.state, verified: true, assurance: 'demo_code' } } });
+      }
+      const route = answer === 'the verify answer' ? 'verifyCheck' : 'visitorSession';
+      const asked = requests(route).length;
+      await screen.getByRole('textbox', { name: '6-digit code' }).fill(DEMO_CODE);
+      await screen.getByRole('button', { name: 'Confirm' }).click();
+      await vi.waitFor(() => expect(requests(route)).toHaveLength(asked + 1));
+      mockStore.world.handBack(chat);
+      mockStore.emit(RIVERA.slug, { type: 'writing' });
+      await vi.waitFor(() => expect(headLine()).toMatch(/^You're chatting with Claude/));
+
+      // It lands: Dana is verified, and the head never says Maria is back in the chat.
+      const head = watchHead();
+      late.release();
+      await expect.element(screen.getByText(VERIFIED)).toBeVisible();
+      head.stop();
+      expect(head.seen().filter((line) => ownerLine.test(line)), answer).toEqual([]);
+      expect(headLine(), answer).toMatch(/^You're chatting with Claude/);
+    }
   });
 
   it('code_goes_only_to_the_verify_route', async () => {
@@ -120,7 +215,7 @@ describe('verification', () => {
     await expect.element(invoice).toBeVisible();
     const invoiceReceipts = (card: Element) =>
       [...(card.closest('.cd-transcript-row')?.querySelectorAll('.cd-transcript-row__margin .cd-margin-receipt') ?? [])].map((el) => el.textContent?.trim());
-    const explained = ["Reply checked against Maria Rivera's rules", "Document shared from Maria Rivera's records"];
+    const explained = ["Document shared from Maria Rivera's records"];
     await vi.waitFor(() => expect(invoiceReceipts(invoice.element())).toEqual(explained));
 
     // The same after a reload, read back from the stored conversation.

@@ -8,10 +8,13 @@
   min-width: 0;
 }
 
+/* A name that wraps balances its lines, as page titles do (`PageHeader`), so its last word doesn't
+   sit on a line of its own. */
 .cd-tool-page-header__title {
   margin: 0;
   color: var(--text-primary);
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .cd-tool-page-header__description {

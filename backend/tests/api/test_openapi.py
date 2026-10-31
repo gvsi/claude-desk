@@ -38,6 +38,17 @@ def test_openapi_export_is_current():
     assert export_openapi() == json.loads(OPENAPI_PATH.read_text()), "run: cd backend && uv run python scripts/export_openapi.py"
 
 
+def test_briefing_contract_counts_only_turned_down_requests():
+    schemas = json.loads(OPENAPI_PATH.read_text())["components"]["schemas"]
+    item = schemas["BriefingItem"]
+    assert item["properties"]["kind"]["enum"] == ["turned_down", "booking", "lead", "answer"]
+    assert "cause" in item["required"]
+    assert item["properties"]["cause"] == schemas["Attempt"]["properties"]["cause"]
+    for name in ("Briefing", "BriefingNewest"):
+        assert "turned_down" in schemas[name]["required"]
+        assert "blocked" not in schemas[name]["properties"]
+
+
 def test_knowledge_list_has_required_nullable_fields():
     document = export_openapi()
     operation = document["paths"]["/api/owner/desks/{desk_id}/knowledge"]["get"]

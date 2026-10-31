@@ -125,6 +125,14 @@ class ModeRequest(KernelRequest):             # POST /sessions/{id}/mode (bumps 
     mode: SessionMode
     generation: int
 
+TURN_TEXT_CHARS = 2000
+
+class TurnRequest(KernelRequest):             # POST /sessions/{session_id}/turn, once at turn start before /context
+    generation: int
+    text: str = Field(max_length=TURN_TEXT_CHARS)   # the newest visitor or agent message, untrusted text: read only
+                                                    # to detect its language, never stored, logged or ledgered
+    desk_id: str | None = None            # required iff the caller is an owner session
+
 class VerifyStartRequest(KernelRequest):      # POST /verify/start
     session_id: str
     contact: str                          # as typed; codes go only to the contact on record
@@ -159,6 +167,8 @@ class AnswerRequest(KernelRequest):           # POST /approvals/{decision_id}/an
 
 class CheckReplyRequest(KernelRequest):       # POST /check_reply
     draft: ReplyDraft
+    final: bool = True                    # false: a first attempt the API rewrites if every violation is rewritable
+                                          # (desk.rewrites), so its handoff clause opens no owner handoff then
 
 class OwnerMessageRequest(KernelRequest):     # POST /owner/messages (the kernel ledgers both kinds)
     session_id: str
@@ -190,6 +200,12 @@ class ToolPin(BaseModel):                  # a tool and the hash the owner revie
     tool: ToolName
     definition_sha256: Sha256Hex
 
+def each_tool_once(tools: list[ToolPin]) -> list[ToolPin]:
+    """The batch rule /tools/confirm and the owner API's body share: a batch names each tool once."""
+    if len({pin.tool for pin in tools}) != len(tools):
+        raise ValueError("a batch names each tool once")
+    return tools
+
 class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole connector in one batch, one tool a list of one
     desk_id: str
     tools: list[ToolPin] = Field(min_length=1, max_length=len(get_args(ToolName)))
@@ -197,8 +213,7 @@ class ToolsConfirmRequest(KernelRequest):     # POST /tools/confirm: a whole con
 
     @model_validator(mode="after")
     def _each_tool_once(self) -> Self:
-        if len({pin.tool for pin in self.tools}) != len(self.tools):
-            raise ValueError("a batch names each tool once")
+        each_tool_once(self.tools)
         return self
 
 class ToolsSimulateChangeRequest(KernelRequest):   # POST /tools/simulate_change (demo)
@@ -228,7 +243,7 @@ class LedgerAppendRequest(KernelRequest):     # POST /ledger/append: origin "api
 KERNEL_REQUESTS: tuple[type[BaseModel], ...] = (
     CreateCopyRequest, CreateDeskRequest, DeskBusinessRequest, DeskCharterRequest, DeskHoursRequest,
     DeskPricesRequest, DeskCalendarRequest, DeskPeopleRequest, DeskNotificationsRequest,
-    DeskAnsweringRequest, DocumentUploadRequest, CreateSessionRequest, ModeRequest, VerifyStartRequest,
+    DeskAnsweringRequest, DocumentUploadRequest, CreateSessionRequest, ModeRequest, TurnRequest, VerifyStartRequest,
     VerifyCheckRequest, DecideRequest, ExecuteRequest, CancelRequest, AnswerRequest, CheckReplyRequest,
     OwnerMessageRequest, PolicyDraftRequest, PolicyProbeRequest, PolicyConfirmRequest,
     ToolsConnectRequest, ToolsConfirmRequest, ToolsSimulateChangeRequest, KnowledgeRequest,
@@ -264,6 +279,10 @@ class SessionContext(BaseModel):          # GET /context/{session_id}; facts and
     tools_declared: list[ToolProfile]     # every profile a session of its kind could ever be given
     facts: list[Fact]
     knowledge: list[KnowledgeItem]
+
+class TurnStarted(BaseModel):             # POST /sessions/{session_id}/turn
+    language: Literal["en", "es"]         # the session's language after the call: the message's when the kernel
+                                          # could tell it, else the one the session had
 
 class ToolConfirmed(BaseModel):           # POST /tools/confirm
     profiles: list[ToolProfile]           # the batch's tools as they stand now, in the request's order
@@ -343,7 +362,7 @@ class KernelError(BaseModel):             # the body of every non-2xx kernel ans
                   "conflict", "invalid", "rate_limited", "seed_unproved", "internal"]   # rate_limited: 429 (POST /agents/demo)
 
 KERNEL_RESPONSES: tuple[type[BaseModel], ...] = (
-    DeskCreated, DeskUpdated, DocumentCreated, VerifyStarted, WhoAmI, SessionContext, ToolConfirmed,
+    DeskCreated, DeskUpdated, DocumentCreated, VerifyStarted, WhoAmI, SessionContext, TurnStarted, ToolConfirmed,
     PaymentLinkView, PaymentLinkStateResult, LinkCancelled, PublicDesk, Health, KernelError,
 )
 
@@ -372,6 +391,7 @@ KERNEL_ROUTES: dict[str, tuple[type[BaseModel] | None, type | None]] = {
     "GET /demo_inbox?session_id=": (None, list[DemoInboxEntry]),
     "GET /demo_inbox": (None, list[DemoInboxEntry]),
     "GET /context/{session_id}?desk_id=": (None, SessionContext),
+    "POST /sessions/{session_id}/turn": (TurnRequest, TurnStarted),
     "POST /decide": (DecideRequest, Decision),
     "GET /decisions/{id}": (None, Decision),
     "GET /decisions/by_call?session_id=&generation=&call_id=": (None, Decision),

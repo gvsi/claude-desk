@@ -46,6 +46,13 @@
   min-width: 0;
 }
 
+/* A StatusLabel as the whole label ("1 held for you" with its dot) sits at the top of the label's
+   line rather than on the dot's made-up baseline, which would push the line, and the button, 2 px
+   past size-control. */
+.cd-button__label > .cd-status-label {
+  vertical-align: top;
+}
+
 /* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
 .cd-button.cd-button--primary {
   background: var(--button-primary);
@@ -224,6 +231,20 @@ a.cd-button[aria-disabled='true']:not([aria-busy='true'], .cd-button--waiting) {
 @keyframes cd-button-spin {
   to {
     transform: rotate(1turn);
+  }
+}
+
+/* On a touch screen, a button shorter or narrower than size-touch reaches it with an unseen hit area
+   centred on it, so a finger that lands just beside it still presses it. Nothing is drawn and
+   nothing moves: the button keeps its size and place, and the hit area is out of the flow. A layout
+   that puts its controls closer together than that caps the reach on each axis at half its gap
+   (--cd-touch-reach-block, --cd-touch-reach-inline), so two hit areas never overlap. */
+@media (pointer: coarse) {
+  .cd-button::after {
+    content: '';
+    position: absolute;
+    inset-block: max(-1 * var(--cd-touch-reach-block, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+    inset-inline: max(-1 * var(--cd-touch-reach-inline, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
   }
 }
 

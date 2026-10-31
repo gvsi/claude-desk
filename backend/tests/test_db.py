@@ -1151,6 +1151,127 @@ def test_a_code_entry_from_before_the_inbox_challenge_revision_names_none(scratc
         scratch.migrate(command.upgrade, "head")
 
 
+HANDOFF_KIND_REVISION = "01b_2b_handoff_kind"
+
+
+def test_a_handoff_from_before_the_kind_revision_is_a_callback(scratch):
+    """Every handoff written before the kind revision was a call-back request, and reads as one;
+    from then on each row names its kind, `callback` or `card`, and a card's handoff, which no
+    action wrote, names its own id where a call-back names its action, so no action's lookup can
+    find it, and only a card's does. The downgrade deletes nothing, and the next upgrade reads
+    each kept row's kind back from it, so a card stays a card and a call-back a call-back; the
+    revision runs again over what it added, and keeps them too."""
+    admin = scratch.conn
+
+    def insert(handoff_id: str, action_id: str, *kind: str) -> None:
+        names, values = (", kind", ", %s") if kind else ("", "")
+        admin.execute(f"INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, status,"
+                      f" action_id{names}) VALUES (%s, 'copy-kind', 'desk-kind', %s, 'open', %s{values})",
+                      (handoff_id, f"session-{handoff_id}", action_id, *kind))     # a session holds one open
+
+    def kinds() -> dict[str, str]:
+        rows = admin.execute("SELECT handoff_id, kind FROM kernel.handoffs WHERE copy_id = 'copy-kind'").fetchall()
+        return dict(rows)
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(HANDOFF_KIND_REVISION).down_revision
+    try:
+        scratch.migrate(command.downgrade, before)
+        assert "kind" not in columns(admin, "kernel", "handoffs")
+        assert "kind" not in columns(admin, "kernel_ro", "handoffs")
+        insert("handoff-before", "act-before")
+        scratch.migrate(command.upgrade, "head")
+        assert kinds() == {"handoff-before": "callback"}
+        assert nullable_columns(admin, "kernel", "handoffs")["kind"] is False
+        (default,) = admin.execute("SELECT column_default FROM information_schema.columns WHERE table_schema = 'kernel'"
+                                   " AND table_name = 'handoffs' AND column_name = 'kind'").fetchone()
+        assert default == "'callback'::text"         # the previous release, during a deploy, names no kind
+        assert columns(admin, "kernel_ro", "handoffs")[-1] == "kind"
+        assert nullable_columns(admin, "kernel", "handoffs")["created_at"] is True    # null on rows from before
+        assert admin.execute("SELECT indexdef FROM pg_indexes WHERE schemaname = 'kernel'"
+                             " AND indexname = 'handoffs_open_by_session'").fetchone() == (
+            "CREATE INDEX handoffs_open_by_session ON kernel.handoffs USING btree (session_id)"
+            " WHERE (status = 'open'::text)",)
+        insert("handoff-card", "handoff-card", "card")
+        insert("handoff-callback", "act-callback", "callback")
+        for refused in (("handoff-x", "act-x", "card"), ("handoff-y", "handoff-y", "callback"),
+                        ("handoff-z", "act-z", "other")):
+            with pytest.raises(psycopg.errors.CheckViolation):
+                insert(*refused)
+        insert("handoff-unnamed", "act-unnamed")                     # as the previous release writes a call-back
+        assert kinds()["handoff-unnamed"] == "callback"
+        admin.execute("DELETE FROM kernel.handoffs WHERE handoff_id = 'handoff-unnamed'")
+        with pytest.raises(psycopg.errors.CheckViolation):          # and it can't write a card's that way
+            insert("handoff-unnamed", "handoff-unnamed")
+
+        # down again with a card's handoff in the table: nothing is deleted, it stays a valid row, and the next
+        # upgrade reads each row's kind back from it
+        kept = {"handoff-before": "callback", "handoff-card": "card", "handoff-callback": "callback"}
+        assert kinds() == kept
+        scratch.migrate(command.downgrade, before)
+        assert admin.execute("SELECT count(*) FROM kernel.handoffs WHERE copy_id = 'copy-kind'").fetchone() == (3,)
+        assert "created_at" not in columns(admin, "kernel", "handoffs")
+        assert admin.execute("SELECT count(*) FROM pg_indexes WHERE schemaname = 'kernel'"
+                             " AND indexname = 'handoffs_open_by_session'").fetchone() == (0,)
+        scratch.migrate(command.upgrade, "head")
+        assert kinds() == kept
+        scratch.migrate(command.stamp, before)                       # the revision runs again over what it added
+        scratch.migrate(command.upgrade, HANDOFF_KIND_REVISION)
+        assert kinds() == kept
+        checks = admin.execute("SELECT count(*) FROM pg_constraint WHERE conrelid = 'kernel.handoffs'::regclass"
+                               " AND conname IN ('handoffs_kind_check', 'handoffs_card_names_itself')").fetchone()
+        assert checks == (2,)
+        assert columns(admin, "kernel_ro", "handoffs")[-1] == "kind"
+    finally:
+        admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-kind'")
+        scratch.migrate(command.upgrade, "head")
+
+
+def test_handoff_kinds_come_back_from_their_rows_under_forced_row_security(scratch):
+    """On a managed Postgres the migration role is neither SUPERUSER nor BYPASSRLS, and under the
+    table's forced row security the table's owner sees none of its rows, so an UPDATE would
+    backfill nothing. The kind revision rewrites the column instead, which reads every row
+    whoever runs it: run as such an owner, its downgrade's and upgrade's steps on the table bring
+    each row's kind back from the row."""
+    migration = ScriptDirectory.from_config(alembic_config()).get_revision(HANDOFF_KIND_REVISION).module
+    admin = scratch.conn
+    with admin.transaction(force_rollback=True):
+        for handoff_id, action_id, kind in (("handoff-rls-card", "handoff-rls-card", "card"),
+                                            ("handoff-rls-callback", "act-rls-callback", "callback")):
+            admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, status, action_id,"
+                          " kind) VALUES (%s, 'copy-rls', 'desk-rls', %s, 'open', %s, %s)",
+                          (handoff_id, f"session-{handoff_id}", action_id, kind))
+        admin.execute("DROP VIEW kernel_ro.handoffs")                # the revision drops and creates it around them
+        admin.execute("CREATE ROLE desk_test_handoffs_owner NOLOGIN NOSUPERUSER NOBYPASSRLS")
+        admin.execute("GRANT USAGE ON SCHEMA kernel TO desk_test_handoffs_owner")
+        admin.execute("ALTER TABLE kernel.handoffs OWNER TO desk_test_handoffs_owner")
+        admin.execute("SET LOCAL ROLE desk_test_handoffs_owner")
+        assert admin.execute("SELECT count(*) FROM kernel.handoffs").fetchone() == (0,)   # it sees no row
+        admin.execute(migration.DROP_KIND)
+        admin.execute(migration.ADD_KIND)
+        admin.execute("RESET ROLE")
+        kinds = dict(admin.execute("SELECT handoff_id, kind FROM kernel.handoffs"
+                                   " WHERE copy_id = 'copy-rls'").fetchall())
+    assert kinds == {"handoff-rls-card": "card", "handoff-rls-callback": "callback"}
+
+
+def test_the_previous_release_writes_call_backs_as_it_did(scratch):
+    """During a deploy the previous release's kernel serves beside the migrated database, and it
+    writes a call-back's handoff naming no kind, beside any other open handoff of the session's, as
+    it always has: each insert still succeeds, as a call-back. One open handoff per session is kept
+    by this release's code, under the session row, not by the table."""
+    admin = scratch.conn
+    try:
+        for handoff_id in ("handoff-old-a", "handoff-old-b"):
+            admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, reason, status,"
+                          " action_id) VALUES (%s, 'copy-old', 'desk-old', 'session-old', 'Sam Lee', 'open', %s)",
+                          (handoff_id, f"act-{handoff_id}"))
+        rows = admin.execute("SELECT handoff_id, kind, status, created_at FROM kernel.handoffs"
+                             " WHERE copy_id = 'copy-old' ORDER BY handoff_id").fetchall()
+        assert rows == [("handoff-old-a", "callback", "open", None), ("handoff-old-b", "callback", "open", None)]
+    finally:
+        admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-old'")
+
+
 def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:
     """Whether the database behind `conn` has kernel.demo_inbox.decision_id, and whether it has its check."""
     (checks,) = conn.execute("SELECT count(*) FROM pg_constraint WHERE conrelid = 'kernel.demo_inbox'::regclass"

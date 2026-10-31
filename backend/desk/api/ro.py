@@ -104,13 +104,16 @@ class KernelRO:
 
 def replayed(entry: dict | None) -> bool:
     """Whether a ledger entry is recorded history: a kernel entry whose summary carries the `replayed` mark, which only
-    the kernel's replay writes (Plan 01d). A missing entry is not, so this is for an entry the caller has read; a read
+    the kernel's replay writes (Plan 01d). Malformed events or summaries count as replayed conservatively.
+    A missing entry is not, so this is for an entry the caller has read; a read
     about a decision, whether it keeps the decision from a model or labels it for the owner (a booking, a charge, a
     refusal, a tool's decision), asks `decision_replayed`, which fails closed."""
     if entry is None:
         return False
-    event = entry["event"] or {}
-    return event.get("origin", "kernel") == "kernel" and isinstance((event.get("summary") or {}).get("replayed"), dict)
+    event = entry.get("event")
+    if not isinstance(event, dict) or not isinstance(event.get("summary"), dict):
+        return True
+    return event.get("origin", "kernel") == "kernel" and isinstance(event["summary"].get("replayed"), dict)
 
 
 def decision_replayed(decision: dict[str, Any], entry: dict[str, Any] | None) -> bool:

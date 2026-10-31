@@ -134,7 +134,7 @@ test('open_a_document_from_the_sidebar', async ({ page }) => {
   await expect(back).toHaveAttribute('href', today);
 
   // The top bar's link switches to the prediction.
-  const documents = page.getByRole('navigation', { name: 'Documents' });
+  const documents = page.getByRole('navigation', { name: 'About this prototype' });
   await expect(documents.getByRole('link', { name: 'Product proposal', exact: true })).toHaveAttribute('aria-current', 'page');
   await documents.getByRole('link', { name: 'Capability prediction', exact: true }).click();
   await page.waitForURL('**/about/prediction');
@@ -236,7 +236,7 @@ test('going_back_returns_to_the_readers_place', async ({ page }) => {
 
   // The proposal opens at its top, and so does the prediction from the proposal's link part way down. Back and
   // Forward return to where the reader was in each.
-  await page.getByRole('navigation', { name: 'Documents' }).getByRole('link', { name: 'Product proposal', exact: true }).click();
+  await page.getByRole('navigation', { name: 'About this prototype' }).getByRole('link', { name: 'Product proposal', exact: true }).click();
   await expect(title(page, 'Product proposal')).toBeVisible();
   expect(await scrollY(page), 'opened').toBe(0);
   const inText = page.locator('article').getByRole('link', { name: 'capability prediction', exact: true });

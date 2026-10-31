@@ -99,13 +99,13 @@ export const Board: Story = {
 
     // The about column: hours, the service area and the phone, as the board draws them.
     const about = canvas.getByRole('complementary', { name: 'About Rivera Plumbing' });
-    await expect(within(about).getAllByRole('article').map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Policy', 'Contact']);
+    await expect(within(about).getAllByRole('article').map((card) => card.getAttribute('aria-label'))).toEqual(['Hours', 'Service area', 'Contact']);
     expectComputed(one(main, '.cd-composer__box'), SPEC.composer);
     await expectFooter(canvasElement);
 
     // focus_order_is_logical: the bar, Ask for Maria Rivera, the download, then the composer.
     await expectTabOrder(userEvent, [
-      within(bar).getByRole('link', { name: 'Back to your Desk' }),
+      within(bar).getByRole('link', { name: 'Back to Vision' }),
       within(main).getByRole('button', { name: 'Ask for Maria Rivera' }),
       download,
       within(main).getByRole('textbox', { name: 'Message Rivera Plumbing' }),

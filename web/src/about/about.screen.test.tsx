@@ -23,6 +23,65 @@ afterEach(() => {
 });
 
 describe('About pages', () => {
+  it.each(['desktop', 'phone'] as const)('read_next_opens_vision_at_the_top_on_%s', async (viewport) => {
+    const { screen, router } = await renderRoute('/about/proposal', { viewport, strict: true });
+    await expect.element(screen.getByRole('heading', { name: 'Product proposal', exact: true })).toBeVisible();
+    const next = screen.container.querySelector('[data-next-label]')?.parentElement?.querySelector('a');
+    if (!next) throw new Error('no Read next');
+    await userEvent.click(next);
+    await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
+    await expect.element(screen.getByRole('heading', { name: 'A front desk that never closes', exact: true })).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(0);
+    const heading = screen.container.querySelector('h1')?.getBoundingClientRect();
+    expect(heading?.top).toBeGreaterThanOrEqual(0);
+    expect(heading?.bottom).toBeLessThanOrEqual(window.innerHeight);
+  });
+
+  it.each(['desktop', 'phone'] as const)('vision_cards_open_at_the_top_and_history_restores_the_place_on_%s', async (viewport) => {
+    // Isolate the page's restoration from Chromium's anchoring when the shorter picture replaces the article.
+    document.documentElement.style.overflowAnchor = 'none';
+    document.body.style.overflowAnchor = 'none';
+    onTestFinished(() => {
+      document.documentElement.style.overflowAnchor = '';
+      document.body.style.overflowAnchor = '';
+    });
+    const { screen, router } = await renderRoute('/about/vision', { viewport, strict: true });
+    await expect.element(screen.getByRole('heading', { name: 'A front desk that never closes', exact: true })).toBeVisible();
+    await document.fonts.ready;
+    const scrollTo = async (top: number) => {
+      const scrolled = new Promise((resolve) => window.addEventListener('scroll', resolve, { once: true }));
+      window.scrollTo({ top, behavior: 'instant' });
+      await scrolled;
+      return window.scrollY;
+    };
+    const card = screen.container.querySelector<HTMLAnchorElement>('a[href="/vision/phone"]');
+    if (!card) throw new Error('no phone card');
+    const articlePlace = await scrollTo(card.getBoundingClientRect().top + window.scrollY - 150);
+    expect(articlePlace).toBeGreaterThan(0);
+    card.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/vision/phone');
+    const bar = screen.getByRole('note', { name: 'Vision', exact: true });
+    await expect.element(bar).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(0);
+    const box = bar.element().getBoundingClientRect();
+    expect(box.top).toBeGreaterThanOrEqual(0);
+    expect(box.bottom).toBeLessThanOrEqual(window.innerHeight);
+
+    const phonePlace = await scrollTo(100);
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { name: 'A front desk that never closes', exact: true })).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(articlePlace);
+    await router.navigate(1);
+    await expect.element(bar).toBeVisible();
+    await expect.poll(() => window.scrollY).toBe(phonePlace);
+
+    // A DOM click leaves the scroll where the reader put it, even when the bar is above the viewport.
+    const back = screen.getByRole('link', { name: 'Back to Vision', exact: true }).element() as HTMLAnchorElement;
+    back.click();
+    await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
+    await expect.poll(() => window.scrollY).toBe(0);
+  });
+
   it('about_pages_render_at_their_routes', async () => {
     writeLocal('lastDesk', null);
     // Nothing is logged on the way, such as React Router's warning, given once, for a page whose code is
@@ -39,7 +98,7 @@ describe('About pages', () => {
       await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true })).toBeVisible();
       await expect.element(screen.getByRole('article')).toBeVisible();
       await expect.element(screen.getByRole('link', { name: 'Try Desk prototype', exact: true })).toHaveAttribute('href', '/');
-      const documents = screen.getByRole('navigation', { name: 'Documents' });
+      const documents = screen.getByRole('navigation', { name: 'About this prototype' });
       await expect.element(documents.getByRole('link', { name: title, exact: true })).toHaveAttribute('aria-current', 'page');
 
       // The switch opens the other page at its own address.
@@ -58,6 +117,83 @@ describe('About pages', () => {
       const { screen } = await renderRoute(path);
       await expect.element(screen.getByText("This page doesn't exist", { exact: true }), { message: path }).toBeVisible();
     }
+  });
+
+  it('the_about_set_reads_as_one', async () => {
+    // The three About pages as one set: the same switch on each, the page on show marked; "Read next" running
+    // prediction, proposal, Vision and back to the prediction; and the one link into the prototype.
+    const SET = [
+      {
+        path: '/about/prediction',
+        title: 'Capability prediction',
+        heading: 'Capability prediction',
+        next: { title: 'Product proposal', path: '/about/proposal' },
+      },
+      {
+        path: '/about/proposal',
+        title: 'Product proposal',
+        heading: 'Product proposal',
+        next: { title: 'Vision', path: '/about/vision' },
+      },
+      {
+        path: '/about/vision',
+        title: 'Vision',
+        heading: 'A front desk that never closes',
+        next: { title: 'Capability prediction', path: '/about/prediction' },
+      },
+    ] as const;
+    const SUMMARIES: Record<string, string> = {
+      'Capability prediction':
+        'What a generally available Claude model will do for a small business by October 2027, and what will still hold it back.',
+      'Product proposal': 'What Claude Desk is, who it’s for, what v1 enforces in code, and how we’ll know it works.',
+      Vision: 'A front desk that never closes: where a Desk could go next, and the rules that wouldn’t change.',
+    };
+    for (const [lastDesk, to] of [
+      [RIVERA.deskId, `/app/${RIVERA.deskId}/today`],
+      [null, '/'],
+    ] as const) {
+      for (const viewport of ['desktop', 'phone'] as const) {
+        for (const { path, title, heading, next } of SET) {
+          const where = `${path} at ${viewport}, last Desk ${lastDesk}`;
+          writeLocal('lastDesk', lastDesk);
+          const { screen } = await renderRoute(path, { viewport });
+          await expect.element(screen.getByRole('heading', { level: 1, name: heading, exact: true }), { message: where }).toBeVisible();
+
+          // The switch: the three pages in order, the one on show marked as the current page and no other.
+          const documents = screen.getByRole('navigation', { name: 'About this prototype', exact: true });
+          const links = documents.getByRole('link').elements();
+          expect(links.map((link) => link.textContent), where).toEqual(['Capability prediction', 'Product proposal', 'Vision']);
+          expect(links.map((link) => link.getAttribute('href')), where).toEqual(['/about/prediction', '/about/proposal', '/about/vision']);
+          expect(links.map((link) => link.getAttribute('aria-current')), where).toEqual(SET.map((page) => (page.title === title ? 'page' : null)));
+
+          // "Read next": the next page in the set, its title and summary, the title the card's one link.
+          const label = screen.container.querySelector('[data-next-label]');
+          expect(label?.textContent, where).toBe('Read next');
+          const card = label?.parentElement;
+          const cardLinks = [...(card?.querySelectorAll('a') ?? [])];
+          expect(cardLinks.map((link) => [link.textContent, link.getAttribute('href')]), where).toEqual([[next.title, next.path]]);
+          expect(card?.textContent, where).toContain(SUMMARIES[next.title]);
+
+          // One way into the prototype, the same words and target on every page.
+          const tryIt = screen.getByRole('link', { name: 'Try Desk prototype', exact: true });
+          expect(tryIt.elements(), where).toHaveLength(1);
+          await expect.element(tryIt, { message: where }).toHaveAttribute('href', to);
+          expect(screen.container.textContent, where).not.toContain('Back to your Desk');
+        }
+      }
+    }
+
+    // Followed, "Read next" goes round the set and back to where it started.
+    writeLocal('lastDesk', null);
+    const { screen, router } = await renderRoute(SET[0].path);
+    for (const { heading, next } of SET) {
+      await expect.element(screen.getByRole('heading', { level: 1, name: heading, exact: true })).toBeVisible();
+      const link = screen.container.querySelector('[data-next-label]')?.parentElement?.querySelector('a');
+      if (!link) throw new Error(`${heading}: no Read next`);
+      await userEvent.click(link);
+      await expect.poll(() => router.state.location.pathname).toBe(next.path);
+    }
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Capability prediction', exact: true })).toBeVisible();
   });
 
   it('about_pages_make_no_requests', async () => {

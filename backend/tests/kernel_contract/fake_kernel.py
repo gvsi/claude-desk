@@ -22,12 +22,30 @@ contract test, before the task that first uses them.
   `set_mode`. `POST /owner/messages` takes a say or a whisper in any mode: a say is looked at for document canaries
   only, and a clean one is an `owner_statement` fact and one `owner_said` card of the text verbatim, signed at the
   session's generation; a whisper is ledgered with its length alone.
+- The handoff card's owner handoff (#96): a verdict of Claude's that shows the handoff card and that the session
+  will see opens a `handoffs` row of kind `card` for the session (open, no call-back window, the kernel's reason):
+  a reply that passed citing the card, or a blocked draft when its check is `final` (`CheckReplyRequest.final`) or
+  any violation is outside `desk.rewrites.REWRITABLE` (a non-final draft blocked only for those is the API's to
+  rewrite, never shown). It opens none for the owner's preview session, while the session has a held request
+  awaiting the owner, or while it has an open handoff of either kind (one per session); otherwise it alerts the
+  owner (event kind `handoff`, when the Desk's preferences alert it at once; no decision) with who is waiting, and
+  ledgers it `desk_data` on the session. An owner's say opens none, nor does a replayed night's blocked draft. A
+  non-final draft blocked only for rewritable kinds gets no blocks at all (still signed, its violations kept). A
+  call-back request first closes the session's open handoffs, the card's or an earlier call-back's, as the
+  owner's mark of done does (`done`, a call-back's fact expired, `desk_data` naming it with `replaced_by`, the
+  call-back's new id), then opens its own of kind `callback` under that id; a row's kind never changes, so a stale
+  mark of done on a closed one is 409.
+  `POST /handoffs/{id}/done` closes either kind. A reply entry records `final`.
 - The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
   asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
   every ledger entry it writes appended now and marked `summary.replayed` with its moment and the recording, and the
   copy's answer carrying the events in shown order (`replayed_messages`, kept in `replayed_nights` too) and its
   `replay_id`. With none recorded a copy that asks is live; `without_seeded_night()` makes any request that
   carries `replay_night`, true or false, 422 `invalid`, as a kernel whose request model lacks the field answers it.
+- The turn's language (GitHub issue #121): `POST /sessions/{session_id}/turn` takes a turn's newest visitor or agent
+  message (at most 2,000 characters, else 422 `invalid`) and keeps the language `detect_language` finds in it as the
+  session's `last_language`, which the turn's status lines and verdicts then speak; the one on record stays when it
+  finds neither English nor Spanish. The text is read for that alone, never kept, mirrored or ledgered.
 - Verification (Plan 01b): `/verify/start` sends a fresh code only to a contact on record (a Demo inbox entry
   and its code-free notice) and answers every contact with one message; `/verify/check` takes the session's live
   challenge's code within ten minutes and five attempts, else 422 `invalid`; a session reads only the code entries
@@ -50,7 +68,8 @@ contract test, before the task that first uses them.
   minutes), the key must be the one bound to the session at creation, and a failure is 401, ledgered `agent_auth
   {route, reason, agent_key_id}` with the kernel's reason.
   A nonce is bound at its first use to one session and body hash and lasts one A2A turn: it is spent by a passing
-  verdict, an immediate-handoff violation, the second reply check or 5 minutes, after which the same request is 409
+  verdict, an immediate-handoff violation (any kind outside `desk.rewrites.REWRITABLE`), a blocked check sent with
+  `final: true`, the second reply check or 5 minutes, after which the same request is 409
   `replayed`; another body or session under it is 401. An opening `POST /sessions` whose nonce is bound or spent
   with the same body hash returns the bound session and creates nothing. An agent session is never given refunds,
   and gets `native.payment_link` and `native.charge_mandate` only with a verified mandate; a mandate charge is
@@ -77,12 +96,12 @@ contract test, before the task that first uses them.
   and enabled tools but for a timed-out rejection, which proves again; `POST /policy/confirm` activates only a proved
   draft whose parent is still active (else 409); `POST /policy/{version}/probe` decides each `Probe` through the
   fake's card rules below, changing nothing. `POST /tools/connect` pins the mock payments tools `needs_review`, and
-  `POST /tools/simulate_change` (the owner's demo action) drifts a connected one back to `needs_review` with its
-  changed definition pending. `POST /documents` adds a document through the seed path's writer and `POST /knowledge`
-  upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a route's calls until a test lets
-  them through, as a slow proof does. The fake's rules are cards read plainly (a `never` refuses, an `auto` card whose
-  limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no specificity order between overlapping
-  cards, and an effect card covers a tool by any one of its effects.
+  `POST /tools/simulate_change` (the owner's demo action) drifts a connected one back to `needs_review` (a disabled
+  one stays disabled) with its changed definition pending. `POST /documents` adds a document through the seed path's
+  writer and `POST /knowledge` upserts an owner-only or public knowledge item (Plan 01b). The `gate` knob holds a
+  route's calls until a test lets them through, as a slow proof does. The fake's rules are cards read plainly (a
+  `never` refuses, an `auto` card whose limits hold allows, an `ask` card or anything uncovered holds), not Cedar: no
+  specificity order between overlapping cards, and an effect card covers a tool by any one of its effects.
 - Refused calls (the baseline's "every attempt logged"): a call refused because its session is closed or its Desk
   deleted is ledgered `auth {route, reason: "closed"}` on that Desk, naming the session it acted for (none for an
   owner route or a new session), as the kernel's `auth.AuthError` does; a refused agent signature is ledgered as
@@ -162,6 +181,7 @@ from desk.contracts import (
     RuleCard,
     SeedDocument,
     SeedPerson,
+    SeededChat,
     SessionCreated,
     SessionState,
     ToolCall,
@@ -173,6 +193,7 @@ from desk.contracts import (
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
+    TURN_TEXT_CHARS,
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
@@ -210,13 +231,19 @@ from desk.kernel_api import (
     PublicDesk,
     SessionContext,
     ToolsConnectRequest,
+    ToolsConfirmRequest,
+    ToolConfirmed,
+    ToolPin,
     ToolsSimulateChangeRequest,
+    TurnRequest,
+    TurnStarted,
     VerifyCheckRequest,
     VerifyStarted,
     VerifyStartRequest,
     WhoAmI,
 )
 from desk.presets import PRESETS
+from desk.rewrites import REWRITABLE
 from tests.kernel_contract.ro_tables import FakeRO
 
 IDLE_LIMIT = timedelta(hours=24)        # a visitor or agent session closes after this long idle
@@ -230,6 +257,14 @@ class Refusal(Exception):
     def __init__(self, status: int, code: str):
         super().__init__(f"{status} {code}")
         self.status, self.code = status, code
+
+
+class AdapterCheckRefused(Exception):
+    """A normalization refusal whose fixed adapter check is ledgered by decide."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
 
 
 def sha256_hex(value: str | bytes) -> str:
@@ -282,7 +317,8 @@ RIVERA_CHARTER = [Claim(key="contact", kind="text", value="(510) 555-0142"),
                   Claim(key="policy:first_visit", kind="text",
                         value="The service call deposit is credited to the repair if you go ahead."),
                   Claim(key="policy:arrival", kind="text", value="Maria texts before she arrives.")]
-NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout"], "briefing": ["lead", "callback", "booking"]}
+NOTIFICATIONS = {"now": ["approval", "emergency", "breaker", "lockout", "handoff"],
+                 "briefing": ["lead", "callback", "booking"]}
 # The owner's simulated Claude memory (the kernel's fixtures/memory.json, Plan 01c): (title, text).
 MEMORY_ITEMS = [("Business", "Rivera Plumbing, run by Maria Rivera."),
                 ("Trade", "Plumbing: leaks, drains and water heaters."),
@@ -497,7 +533,7 @@ def tool_profile(tool: str) -> ToolProfile:
     return ToolProfile(tool=tool, source=source, effects=effects, reversible=reversible, adapter=f"fake.{tool}",
                        resource_kind=resource_kind, description_confirmed=description,
                        input_schema=INPUT_SCHEMAS[tool],
-                       definition_sha256=sha256_hex(tool) if source == "mcp" else None, status="enabled")
+                       definition_sha256=sha256_hex(tool), status="enabled")
 
 
 def signed_time(moment: datetime) -> str:
@@ -757,6 +793,8 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "verify": "Escribe el código enviado al contacto registrado.", "hours": "Horario",
                      "owner_said": "Escrito por {owner}",
                      "owner_say_blocked": "No se envió: incluía texto de un documento privado"}}
+# The reason of a handoff the handoff card opens (#96), the kernel's own words, never the draft's or the visitor's.
+CARD_HANDOFF_REASON = "The Desk handed this to you."
 OWNER_TEXT_MAX = 2000                   # an owner's say or whisper, in characters (Plan 01b)
 NUMBER_RULES = (("digit", re.compile(r"\d")), ("currency", re.compile(r"[$€£¥¢]")), ("percent", re.compile(r"%")))
 
@@ -841,7 +879,8 @@ SAFE_REF = re.compile(r"[A-Za-z0-9._:-]{1,64}")
 SIGNED_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
 AGENT_TS_SKEW = timedelta(minutes=5)    # an agent's `ts` is within this of the kernel's clock
 NONCE_TTL = timedelta(minutes=5)        # a nonce's turn ends this long after its first use at the latest
-IMMEDIATE_HANDOFF = frozenset({"canary", "unsupported_language", "session_paused"})
+# the violations that hand off at once: every kind but those a rewrite can fix, as the kernel's
+IMMEDIATE_HANDOFF = frozenset(get_args(Violation.model_fields["kind"].annotation)) - REWRITABLE
 DEMO_AGENTS_PER_COPY_PER_HOUR = 10
 DEMO_WALLET = "demo-wallet"
 DEMO_MANDATE = {"per_charge_cents": 2_000, "total_cents": 10_000}   # the master's "Agent demo" row
@@ -1007,7 +1046,8 @@ class PaymentLink:
 @dataclass
 class VersionRecord:
     """A rules version the owner drafted: its cards (the owner's, then the compiler's default asks), its parent, its
-    proof and status, the key a repeat of the same draft finds it by, and its money cap (Plan 01b)."""
+    proof and status, the key a repeat of the same draft finds it by, its money cap (Plan 01b), the tools it enables
+    and the profiles it was proved against (`_draft_profiles`)."""
 
     version: int
     parent: int | None
@@ -1017,6 +1057,8 @@ class VersionRecord:
     key: tuple
     created_at: datetime
     auto_money_cap_cents: int = 0               # the most its auto money cards take or pay out per action
+    enables: tuple[ToolPin, ...] = ()
+    profiles: tuple[tuple[str, str | None], ...] = ()
 
 
 @dataclass
@@ -1046,6 +1088,7 @@ class Desk:
     policy_version: int = 1
     versions: dict[int, VersionRecord] = field(default_factory=dict)   # owner drafts, by version
     auto_money_cap_cents: int = 0       # the active version's money cap: 0 for a Desk `POST /desks` makes
+    notify_now: list[str] = field(default_factory=list)              # event kinds that alert at once
     ledger: list[LedgerEntry] = field(default_factory=list)
     booked: set[str] = field(default_factory=set)                     # slot_ids with a confirmed booking
 
@@ -1485,7 +1528,7 @@ class FakeKernelState:
         return PolicyVersion(desk_id=desk.desk_id, version=record.version, parent_version=record.parent,
                              cards=record.cards, cedar_sha256=sha256_hex(canonical(cards)),
                              schema_sha256=sha256_hex("schema"), baseline_sha256=sha256_hex("baseline"),
-                             profiles_sha256=sha256_hex(canonical(list(record.key[2]))),
+                             profiles_sha256=sha256_hex(canonical(list(record.profiles))),
                              invariants_sha256=sha256_hex("invariants"), review_thresholds_version=1,
                              auto_money_cap_cents=record.auto_money_cap_cents, status=record.status, proof=record.proof)
 
@@ -1547,11 +1590,9 @@ class FakeKernelState:
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
         desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
         for index, item in enumerate(RIVERA_KNOWLEDGE):
-            # Each real insert reads the clock. Move the shared clock forward between seeds so later
-            # writes cannot predate them.
-            if index:
-                self.now += timedelta(microseconds=1)
-            self._store_knowledge(desk, item.model_copy(deep=True))
+            # Preserve insertion order without moving the shared clock used by other fake activity.
+            self._store_knowledge(desk, item.model_copy(deep=True),
+                                  created_at=self.now + timedelta(microseconds=index))
         return desk
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
@@ -1594,6 +1635,7 @@ class FakeKernelState:
         for slot in seed.calendar_slots:
             desk.slots[slot.slot_id] = slot
             self._put("calendar_slots", (desk.desk_id, slot.slot_id), {**slot.model_dump(), **ids})
+        desk.notify_now = list(seed.notifications.now)
         self._put("notification_prefs", (desk.desk_id,), {**ids, **seed.notifications.model_dump()})
         for tool in tools:
             self._put_tool(desk, tool_profile(tool))
@@ -1673,15 +1715,17 @@ class FakeKernelState:
             raise Refusal(401, "auth")
         return session
 
-    def session_call(self, request: Request, session_id: str, desk_id: str | None = None) -> tuple[Session, Desk]:
+    def session_call(self, request: Request, session_id: str, desk_id: str | None = None, *,
+                     seen: bool = True) -> tuple[Session, Desk]:
         """The first three "Session state responses" rows for a call naming `session_id`: the session token must
         hash to it, or an agent's signature authenticate it (401); an owner names its own session and a `desk_id` of
-        its copy (else 404); closed is 409."""
+        its copy (else 404); closed is 409. Without `seen` the call doesn't count as the session's activity
+        (`_check_open`)."""
         if self._signed_by_agent(request):
             session = self._agent(request, session_id)
             if desk_id is not None:
                 raise Refusal(422, "invalid")   # desk_id is for owner sessions only
-            self._check_open(session)
+            self._check_open(session, seen=seen)
             return session, self.desks[session.desk_id]
         if request.headers.get("x-owner-session") is not None:
             copy, owner = self.owner_of(request)
@@ -1697,7 +1741,7 @@ class FakeKernelState:
             raise Refusal(401, "auth")
         if desk_id is not None:
             raise Refusal(422, "invalid")       # desk_id is for owner sessions only
-        self._check_open(session)
+        self._check_open(session, seen=seen)
         return session, self.desks[session.desk_id]
 
     # Agents ----------------------------------------------------------------------------------------
@@ -1775,12 +1819,13 @@ class FakeKernelState:
         request.state.agent_nonce = bound
         return session
 
-    def _end_agent_turn(self, request: Request, verdict: ReplyVerdict) -> None:
-        """A reply check ends its nonce's turn when it passes, hands off at once, or is the turn's second check."""
+    def _end_agent_turn(self, request: Request, verdict: ReplyVerdict, *, final: bool = False) -> None:
+        """A reply check ends its nonce's turn when it passes, hands off at once, was sent with `final: true` (so its
+        handoff is shown and nothing rewrites it), or is the turn's second check."""
         nonce: AgentNonce = request.state.agent_nonce
         nonce.check_replies += 1
         immediate = {violation.kind for violation in verdict.violations} & IMMEDIATE_HANDOFF
-        if verdict.ok or immediate or nonce.check_replies >= 2:
+        if verdict.ok or immediate or final or nonce.check_replies >= 2:
             nonce.spent_at = self.now
 
     def _check_mandate(self, desk: Desk, key: AgentKey, mandate: Mandate) -> None:
@@ -1861,16 +1906,18 @@ class FakeKernelState:
         remaining = self._remaining(session)
         return remaining is not None and action.amount_cents is not None and action.amount_cents <= remaining
 
-    def _check_open(self, session: Session) -> None:
+    def _check_open(self, session: Session, *, seen: bool = True) -> None:
         """The session is open (a visitor's or an agent's closes after 24 hours idle), else 409 `closed`, ledgered
-        `auth` on its Desk."""
+        `auth` on its Desk; then, with `seen`, it was active now. The turn route passes `seen=False`, as the kernel's
+        does: starting a turn keeps no idle conversation open."""
         if session.closed_at is None and session.kind != "owner" and self.now - session.last_seen > IDLE_LIMIT:
             session.closed_at = session.last_seen + IDLE_LIMIT
             self._put_session(session)
         if session.closed_at is not None:
             raise self._refused(self.desks.get(session.desk_id or ""), 409, "closed", "closed",
                                 session_id=session.session_id)
-        session.last_seen = self.now
+        if seen:
+            session.last_seen = self.now
 
     @staticmethod
     def _check_generation(session: Session, generation: int) -> None:
@@ -1900,12 +1947,15 @@ class FakeKernelState:
         owner, owner_token = self._new_session(copy_id, None, "owner", verified=True, assurance="owner_session")
         copy = Copy(copy_id=copy_id, owner_session_id=owner.session_id, desk_ids=[desk.desk_id])
         self.copies[copy_id] = copy
-        self._seed_held_request(desk)
+        held = self._seed_held_request(desk)
+        seeded_chat = SeededChat(session_id=held.session_id,
+                                 visitor_line="Could you do the drain clearing at 15% off?", decision=held)
         events, replay_id = self._replay(desk) if body.replay_night and self._night else ([], None)
         if replay_id is not None:
             self.replayed_nights[copy_id] = (replay_id, events)
         return CopyCreated(copy_id=copy_id, desk_ids=copy.desk_ids, owner_session=owner.state(),
-                           owner_token=owner_token, replayed_messages=events, replay_id=replay_id)
+                           owner_token=owner_token, seeded_chat=seeded_chat,
+                           replayed_messages=events, replay_id=replay_id)
 
     # The recorded night (Plan 01d) ----------------------------------------------------------------------------
 
@@ -2071,6 +2121,23 @@ class FakeKernelState:
         return WhoAmI(kind=session.kind, copy_id=copy.copy_id, desk_id=session.desk_id,
                       desk_ids=[session.desk_id], session=session.state())
 
+    def turn(self, request: Request, body: TurnRequest) -> TurnStarted:
+        """A turn starts (GitHub issue #121): the language `detect_language` finds in its newest visitor or agent
+        message becomes the session's, or the one on record stays when it finds neither English nor Spanish (English
+        for a session with none). The text is read for that alone, never kept, mirrored or ledgered, and a repeat
+        detects again and changes nothing else, not even the session's activity (`seen=False`). Over the contract's
+        `TURN_TEXT_CHARS` is 422 `invalid`, then the session checks: 401, 404, 409 `closed`, a stale generation 409
+        `stale_generation`."""
+        if len(body.text) > TURN_TEXT_CHARS:
+            raise Refusal(422, "invalid")
+        session, _ = self.session_call(request, request.path_params["session_id"], body.desk_id, seen=False)
+        self._check_generation(session, body.generation)
+        detected = detect_language(body.text)
+        if detected in ("en", "es") and detected != session.last_language:
+            session.last_language = detected
+            self._put_session(session)
+        return TurnStarted(language=session.last_language or "en")
+
     # Decisions -----------------------------------------------------------------------------------
 
     def tools_given(self, session: Session, desk: Desk) -> tuple[str, ...]:
@@ -2133,7 +2200,11 @@ class FakeKernelState:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="not_given")
         if not matches(desk.tools[call.tool].input_schema, call.args):
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="invalid_args")
-        action = self._normalize(session, desk, call)
+        try:
+            action = self._normalize(session, desk, call)
+        except AdapterCheckRefused as refusal:
+            return self._new_decision(session, desk, call, digest, None, "refuse", [],
+                                      why="adapter_refused", check=refusal.code)
         if action is None:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused")
         outcome, card_ids, baseline = self._rule(session, desk, action)
@@ -2146,27 +2217,27 @@ class FakeKernelState:
 
     def _normalize(self, session: Session, desk: Desk, call: ToolCall) -> NormalizedAction | None:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
-        args; None refuses."""
+        args; a known adapter refusal carries its check code, otherwise None refuses."""
         tool, args = call.tool, call.args
         resource = ResourceRef(kind="desk", id=desk.desk_id, owner_person_id=None)
         list_cents = discount_bp = amount_cents = recipient = starts_at = None
         if tool == "native.quote":
             if any(item["item_id"] not in desk.prices for item in args["items"]):
-                return None
+                raise AdapterCheckRefused("unknown_item")
             list_cents = sum(desk.prices[item["item_id"]].unit_cents * item["qty"] for item in args["items"])
             if list_cents > 1_000_000:
-                return None
+                raise AdapterCheckRefused("over_limit")
             discount_bp = args.get("requested_discount_bp", 0)
             amount_cents = list_cents - list_cents * discount_bp // 10_000
         elif tool == "native.book":
             slot = desk.slots.get(args["slot_id"])
             if slot is None or slot.starts_at <= self.now:
-                return None
+                raise AdapterCheckRefused("no_such_slot")
             resource, starts_at = ResourceRef(kind="slot", id=slot.slot_id, owner_person_id=None), slot.starts_at
         elif tool == "native.release_document":
             document = desk.documents.get(args["document_id"])
             if document is None:
-                return None
+                raise AdapterCheckRefused("no_such_document")
             resource = ResourceRef(kind="document", id=document.document_id,
                                    owner_person_id=document.record_owner_person_id)
             recipient = "verified_contact"
@@ -2185,7 +2256,8 @@ class FakeKernelState:
             resource = ResourceRef(kind="quote", id=quote["quote_id"], owner_person_id=None)
             amount_cents = quote["amount_cents"]
         elif tool == "payments.create_refund":
-            return None                         # charges to refund arrive with Plan 01c
+            # The fake has no provider charge records to resolve during refund normalization.
+            raise AdapterCheckRefused("no_such_charge")
         profile = desk.tools[tool]
         return NormalizedAction(
             action_id=new_id("act"), copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
@@ -2229,7 +2301,8 @@ class FakeKernelState:
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,
                       action: NormalizedAction | None, outcome: str, card_ids: list[str], *,
-                      why: str | None = None, scripted: bool = False, baseline: str | None = None) -> Decision:
+                      why: str | None = None, check: str | None = None, scripted: bool = False,
+                      baseline: str | None = None) -> Decision:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
@@ -2237,6 +2310,8 @@ class FakeKernelState:
                    "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version, "reviewed": False}
         if why is not None:
             summary["reason"] = why
+        if check is not None:
+            summary["check"] = check
         entry = self.append(desk, "decide", summary, session_id=session.session_id, ref_id=decision_id)
         expires_at = self.now + {"allow": ALLOW_FOR, "hold": HOLD_FOR, "refuse": timedelta(0)}[outcome]
         answers, inbox = [], []
@@ -2540,11 +2615,13 @@ class FakeKernelState:
                                             "created_at": self.now})
             view = {"lead_id": lead_id, "saved": True}
         elif tool == "native.request_callback":
+            # one open handoff per session: the open ones close first, the card's or an earlier call-back's
             handoff_id = new_id("handoff")
+            self._close_open_handoffs(session, desk, replaced_by=handoff_id)
             self.handoffs[handoff_id] = {
                 "handoff_id": handoff_id, **ids, "session_id": session.session_id,
                 "reason": f"{args['name']} · {args['contact']} · {args['reason']}", "callback_window": None,
-                "status": "open"}
+                "status": "open", "kind": "callback"}
             self._put("handoffs", (handoff_id,), dict(self.handoffs[handoff_id]))
             facts.append(Fact(fact_id=f"handoff:{handoff_id}", kind="handoff", status="committed", source="kernel",
                               label=label, claims=[Claim(key="handoff", kind="ref", value=handoff_id)]))
@@ -2629,10 +2706,11 @@ class FakeKernelState:
             self._put_fact(desk, fact)
         return facts, view, inbox
 
-    def _store_knowledge(self, desk: Desk, item: KnowledgeItem) -> KnowledgeItem:
+    def _store_knowledge(self, desk: Desk, item: KnowledgeItem, *,
+                         created_at: datetime | None = None) -> KnowledgeItem:
         """Upsert a knowledge item by its ID, mirrored and ledgered `desk_data` (no text in the entry)."""
         desk.knowledge[item.item_id] = item
-        created_at = desk.knowledge_created_at.setdefault(item.item_id, self.now)
+        created_at = desk.knowledge_created_at.setdefault(item.item_id, self.now if created_at is None else created_at)
         self._put("knowledge_items", (desk.desk_id, item.item_id), {
             "item_id": item.item_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id, "source": item.source,
             "title": item.title, "text": item.text, "readers": list(item.label.readers), "created_at": created_at})
@@ -2696,16 +2774,17 @@ class FakeKernelState:
         self._check_generation(session, draft.generation)
         if session.mode == "owner":
             raise Refusal(409, "mode_owner")
-        verdict = self._check_draft(session, desk, draft)
+        verdict = self._check_draft(session, desk, draft, final=body.final)
         if session.kind == "agent":
-            self._end_agent_turn(request, verdict)
+            self._end_agent_turn(request, verdict, final=body.final and "final" in body.model_fields_set)
         return verdict
 
-    def _check_draft(self, session: Session, desk: Desk, draft: ReplyDraft) -> ReplyVerdict:
+    def _check_draft(self, session: Session, desk: Desk, draft: ReplyDraft, *, final: bool = True) -> ReplyVerdict:
         language = session.last_language or "en"
         if session.mode == "paused":
             return self._verdict(session, desk, language, [],
-                                 [Violation(kind="session_paused", span="", rule_id="session.paused")], [])
+                                 [Violation(kind="session_paused", span="", rule_id="session.paused")], [],
+                                 final=final)
         detected = detect_language(draft.prose)
         violations = []
         if detected == "other":
@@ -2725,7 +2804,7 @@ class FakeKernelState:
                 cards.append(card)
         prose = [RenderedBlock(kind="prose", text=draft.prose)] if draft.prose else []
         return self._verdict(session, desk, language, prose + cards, violations,
-                             [clause.fact_id for clause in draft.clauses if clause.fact_id])
+                             [clause.fact_id for clause in draft.clauses if clause.fact_id], final=final)
 
     def _canaries(self, copy_id: str) -> dict[str, str]:
         """The canary of each document of the copy, on any of its Desks, by document ID in ID order (the kernel's
@@ -2812,21 +2891,31 @@ class FakeKernelState:
 
     def _verdict(self, session: Session, desk: Desk, language: str, blocks: list[RenderedBlock],
                  violations: list[Violation], fact_ids: list[str], *, author: str = "claude",
-                 message_id: str | None = None) -> ReplyVerdict:
+                 message_id: str | None = None, final: bool = True) -> ReplyVerdict:
         """Step 7: the handoff alone unless ok, ledgered as `reply` with its author, signed over the six fields. An
         owner's say (`author="owner"`) that fails shows nothing at all: the owner's own words never become Claude's
-        handoff."""
+        handoff. A verdict of Claude's that shows the handoff card and that the session will see (it passed citing
+        the card, or it blocked a `final` draft or one with a kind a rewrite can't fix) first opens the session's
+        owner handoff (`_open_card_handoff`); one the session won't see (the API rewrites it) has no blocks. The
+        reply entry records `final`."""
         ok = not violations
         if not ok and author == "owner":
             blocks = []
         elif not ok:
             text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
             blocks = [RenderedBlock(kind="card", template="handoff", text=text, title=text)]
+        shown = ok or final or any(violation.kind not in REWRITABLE for violation in violations)
+        if author == "claude" and not shown:
+            blocks = []                     # the API rewrites it: no handoff card is signed that no handoff backs
+        # a replayed night holds only finished things and no Demo inbox entry (Plan 01d): its blocked drafts open none
+        if (author == "claude" and shown and self._replaying is None
+                and any(block.template == "handoff" for block in blocks)):
+            self._open_card_handoff(session, desk)
         message_id = message_id or new_id("msg")
         entry = self.append(desk, "reply", {
             "message_id": message_id, "author": author, "ok": ok, "language": language,
             "violations": [violation.kind for violation in violations],
-            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids},
+            "rule_ids": [violation.rule_id for violation in violations], "fact_ids": fact_ids, "final": final},
             session_id=session.session_id, ref_id=message_id)
         plain = ("owner_said" if ok else "owner_say_blocked") if author == "owner" else (
             "checked" if ok else "handed_off")
@@ -2838,6 +2927,55 @@ class FakeKernelState:
             signature=fake_signature({"session_id": session.session_id, "generation": session.generation,
                                       "message_id": message_id, "blocks_sha256": blocks_sha256,
                                       "visitor_plain": visitor_plain, "ledger_seq": entry.seq}))
+
+    def _open_card_handoff(self, session: Session, desk: Desk) -> str | None:
+        """The owner's handoff for a verdict that shows the handoff card (#96), as the kernel's
+        `reply_check.open_card_handoff`: none for the owner's preview session, while the session has a held request
+        awaiting the owner (one not answered, cancelled or expired), or while it has an open handoff of either kind
+        (an earlier card's or a call-back request); else one of kind `card`, open, with no call-back window and the
+        kernel's reason, its
+        owner alert (`handoff`, only when the Desk's preferences alert it at once; no decision) naming only who is
+        waiting, and `desk_data {part: "handoffs", refs, kind: "card"}` on the session. Returns its ID, or None."""
+        if session.preview or self._open_handoff(session) is not None:
+            return None
+        if any(record.decision.session_id == session.session_id and record.decision.state == "held"
+               and record.decision.expires_at > self.now for record in self.decisions.values()):
+            return None
+        handoff_id = new_id("handoff")
+        self.handoffs[handoff_id] = {
+            "handoff_id": handoff_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id,
+            "session_id": session.session_id, "reason": CARD_HANDOFF_REASON, "callback_window": None,
+            "status": "open", "kind": "card"}
+        self._put("handoffs", (handoff_id,), dict(self.handoffs[handoff_id]))
+        if "handoff" in desk.notify_now:
+            person = desk.people.get(session.person_id or "") if session.verified else None
+            who = person.display_name if person is not None else "A visitor"
+            entry = DemoInboxEntry(entry_id=new_id("inbox"), to="owner", kind="alert", created_at=self.now,
+                                   body=f"{who} is waiting in a conversation the Desk handed to you.")
+            self.inbox.append((desk.copy_id, entry))
+        self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "kind": "card"},
+                    session_id=session.session_id)
+        return handoff_id
+
+    def _close_open_handoffs(self, session: Session, desk: Desk, *, replaced_by: str) -> None:
+        """Close the session's open handoffs before a call-back opens its own (`replaced_by`), each as the owner's mark
+        of done closes one: `done`, its `handoff:<id>` fact (a call-back's) expired, ledgered `desk_data` naming it
+        and the call-back's handoff, so the owner's history reads it as replaced, not marked done. A row's kind
+        never changes, so the owner's stale mark of done on one is 409."""
+        for handoff_id, row in self.handoffs.items():
+            if row["session_id"] != session.session_id or row["status"] != "open":
+                continue
+            row["status"] = "done"
+            self._put("handoffs", (handoff_id,), dict(row))
+            fact = desk.facts.get(f"handoff:{handoff_id}")
+            if fact is not None:
+                self._put_fact(desk, fact.model_copy(update={"status": "expired"}))
+            self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "replaced_by": replaced_by})
+
+    def _open_handoff(self, session: Session) -> str | None:
+        """The ID of the session's open handoff, of either kind; a session holds at most one."""
+        return next((handoff_id for handoff_id, row in self.handoffs.items()
+                     if row["session_id"] == session.session_id and row["status"] == "open"), None)
 
     def owner_message(self, request: Request, body: OwnerMessageRequest) -> OwnerMessageResult:
         """The owner's say or whisper into an open visitor or agent session of their copy, in any mode (Plan 01b):
@@ -2954,7 +3092,8 @@ class FakeKernelState:
         self.append(desk, "desk_data", {"part": "desk", "deleted": True})
 
     def handoff_done(self, request: Request, body: Any) -> DeskUpdated:
-        """The owner closes a callback request: `open` → `done` once, ledgered `desk_data` naming it."""
+        """The owner closes a handoff, a call-back request's or the handoff card's: `open` → `done` once, ledgered
+        `desk_data` naming it."""
         copy, _ = self.owner_of(request)
         handoff = self.handoffs.get(request.path_params["id"])
         if handoff is None or handoff["copy_id"] != copy.copy_id:
@@ -3078,22 +3217,33 @@ class FakeKernelState:
     def desk_notifications(self, request: Request, body: DeskNotificationsRequest) -> DeskUpdated:
         """What alerts the owner at once and what waits for the briefing."""
         desk = self._owners_desk(request, request.path_params["id"])
+        desk.notify_now = list(body.notifications.now)
         self._put("notification_prefs", (desk.desk_id,), {"copy_id": desk.copy_id, "desk_id": desk.desk_id,
                                                           **body.notifications.model_dump()})
         return self._part_updated(desk, "notifications")
 
     # Rules drafts, probes and confirms (Plans 01a and 01c) --------------------------------------------
 
-    def _default_cards(self, desk: Desk, cards: list[RuleCard]) -> list[RuleCard]:
+    def _default_cards(self, desk: Desk, cards: list[RuleCard], enables: tuple[ToolPin, ...] = ()) -> list[RuleCard]:
         """The compiler's default asks: an `ask` card for anyone on each enabled tool that no card for anyone covers,
         by itself or through one of its effects."""
         covered = {card.applies_to for card in cards if card.who == "anyone"}
+        enabling = {pin.tool for pin in enables}
         return [RuleCard(card_id=f"default-{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
                          reason=DEFAULT_REASON)
-                for tool, profile in sorted(desk.tools.items()) if profile.status == "enabled"
+                for tool, profile in sorted(desk.tools.items()) if (profile.status == "enabled" or tool in enabling)
                 and tool not in covered and not any(f"effect:{effect}" in covered for effect in profile.effects)]
 
-    def policy_draft(self, request: Request, body: PolicyDraftRequest) -> PolicyVersion:
+    @staticmethod
+    def _draft_profiles(desk: Desk, enables: tuple[ToolPin, ...] = ()) -> tuple[tuple[str, str | None], ...]:
+        """What a draft is proved against, as the kernel's `current_hashes` takes it: each tool enabled now with its
+        pin, plus the draft's enables at theirs, by tool. Confirming a draft whose tools no longer match is refused."""
+        pins = {tool: profile.definition_sha256 for tool, profile in desk.tools.items() if profile.status == "enabled"}
+        pins.update((pin.tool, pin.definition_sha256) for pin in enables)
+        return tuple(sorted(pins.items()))
+
+    def policy_draft(self, request: Request, body: PolicyDraftRequest, *,
+                     enables: tuple[ToolPin, ...] = ()) -> PolicyVersion:
         """The owner's cards compiled and proved against the active version (`expected_parent`, else 409): a new
         version with the compiler's default asks, `proved` or `rejected` (or `draft` when bounded), ledgered `policy`.
         The same cards on the same parent and tools return that version, except that a timed-out rejection proves
@@ -3110,9 +3260,9 @@ class FakeKernelState:
                 or (card.mode == "auto" and moves_money(card) and (card.max_amount_cents or 0) > cap)
                 for card in body.cards):
             raise Refusal(422, "invalid")
-        enabled = tuple(sorted(tool for tool, profile in desk.tools.items() if profile.status == "enabled"))
+        profiles = self._draft_profiles(desk, enables)
         key = (body.expected_parent, sha256_hex(canonical([card.model_dump(mode="json") for card in body.cards])),
-               enabled, cap)
+               profiles, cap, tuple(sorted((pin.tool, pin.definition_sha256) for pin in enables)))
         record = next((record for record in desk.versions.values() if record.key == key), None)
         if record is not None and not (record.status == "rejected" and record.proof.timed_out):
             return self._policy_version(desk, record)
@@ -3120,8 +3270,9 @@ class FakeKernelState:
         status = "draft" if proof.method == "bounded" else "proved" if proof.ok else "rejected"
         if record is None:
             record = VersionRecord(version=self._next_version(desk), parent=body.expected_parent,
-                                   cards=[*body.cards, *self._default_cards(desk, body.cards)], status=status,
-                                   proof=proof, key=key, created_at=self.now, auto_money_cap_cents=cap)
+                                   cards=[*body.cards, *self._default_cards(desk, body.cards, enables)], status=status,
+                                   proof=proof, key=key, created_at=self.now, auto_money_cap_cents=cap, enables=enables,
+                                   profiles=profiles)
             desk.versions[record.version] = record
         else:
             record.status, record.proof = status, proof
@@ -3130,8 +3281,9 @@ class FakeKernelState:
         return self._policy_version(desk, record)
 
     def policy_confirm(self, request: Request, body: PolicyConfirmRequest) -> PolicyVersion:
-        """Activate a proved draft whose parent is still the active version, superseding it (ledgered `policy`), so
-        its money cap becomes the Desk's; anything else is 409, ledgered as refused. An unknown version is 404."""
+        """Activate a proved draft whose parent is still the active version, and whose enables' pins and tools are
+        still those it was proved against, superseding it (ledgered `policy`), so its money cap becomes the Desk's;
+        anything else is 409, ledgered as refused. An unknown version is 404."""
         desk = self._owners_desk(request, body.desk_id)
         record = desk.versions.get(body.version)
         if record is None:
@@ -3140,7 +3292,20 @@ class FakeKernelState:
             refused = "not_proved" if record.status != "proved" else "parent_changed"
             self.append(desk, "policy", {"version": record.version, "refused": refused})
             raise Refusal(409, "conflict")
+        if any(pin.tool not in desk.tools
+               or pin.definition_sha256 != self._current_tool_pin(desk.tools[pin.tool]) for pin in record.enables):
+            self.append(desk, "policy", {"version": record.version, "refused": "pin_changed"})
+            raise Refusal(409, "conflict")
+        if self._draft_profiles(desk, record.enables) != record.profiles:
+            self.append(desk, "policy", {"version": record.version, "refused": "hash_changed"})
+            raise Refusal(409, "conflict")
         self._supersede_active(desk)
+        for pin in record.enables:
+            profile = desk.tools[pin.tool]
+            self._put_tool(desk, profile.model_copy(update={
+                "status": "enabled", "review_reason": None, "definition_sha256": pin.definition_sha256,
+                "pending_definition_text": None, "pending_sha256": None}))
+            self.append(desk, "tool_pin", {"tool": pin.tool, "event": "enabled", "version": record.version})
         desk.cards, desk.policy_version, record.status = list(record.cards), record.version, "active"
         desk.auto_money_cap_cents = record.auto_money_cap_cents
         self._put_version(desk, record)
@@ -3214,12 +3379,13 @@ class FakeKernelState:
         if record is None and version != desk.policy_version:
             raise Refusal(404, "not_found")
         cards = record.cards if record is not None else desk.cards
-        results = [self._probe(desk, cards, probe) for probe in body.probes]
+        enables = record.enables if record is not None and record.status not in ("active", "superseded") else ()
+        results = [self._probe(desk, cards, probe, enables=enables) for probe in body.probes]
         self.append(desk, "policy", {"version": version, "probes": len(results),
                                      "outcomes": [result.outcome for result in results]})
         return results
 
-    def _probe_tools(self, desk: Desk, probe: Probe) -> tuple[str, ...]:
+    def _probe_tools(self, desk: Desk, probe: Probe, enables: tuple[ToolPin, ...] = ()) -> tuple[str, ...]:
         """The tools a stand-in session of the probe's caller would be given (Answering aside: a probe asks what the
         rules would do once the Desk answers)."""
         if probe.actor == "owner":
@@ -3230,7 +3396,9 @@ class FakeKernelState:
             mandate = probe.agent_mandate_remaining_cents is not None
             given = tuple(tool for tool in given if tool != "payments.create_refund"
                           and (tool not in MANDATE_TOOLS or mandate)) + (("native.charge_mandate",) if mandate else ())
-        return tuple(tool for tool in given if tool in desk.tools and desk.tools[tool].status == "enabled")
+        enabling = {pin.tool for pin in enables}
+        return tuple(tool for tool in given if tool in desk.tools
+                     and (desk.tools[tool].status == "enabled" or tool in enabling))
 
     @staticmethod
     def _scope_matches(card: RuleCard, probe: Probe, verified: bool, own: bool) -> bool:
@@ -3243,7 +3411,8 @@ class FakeKernelState:
         subject = probe.subject_id if probe.who == card.who else None
         return subject is not None and subject in (card.person_id, card.agent_key_id)
 
-    def _probe(self, desk: Desk, cards: list[RuleCard], probe: Probe) -> ProbeResult:
+    def _probe(self, desk: Desk, cards: list[RuleCard], probe: Probe, *,
+               enables: tuple[ToolPin, ...] = ()) -> ProbeResult:
         """One probe through the fake's rules: the tool must be given and its args fit; the baseline (private data
         only to its verified record owner, no payouts for agents, an agent's charge within its mandate, an amount
         on every money tool); then a `never` card refuses, an `auto` card whose limits hold allows (a reviewed one
@@ -3257,7 +3426,7 @@ class FakeKernelState:
             return ProbeResult(probe=probe, outcome=outcome, depends_on_review=review, card_ids=card_ids,
                                reason_plain=f"{caller} asked to use {tool}. {reason}")
 
-        if tool not in self._probe_tools(desk, probe) or not matches(desk.tools[tool].input_schema, probe.call.args):
+        if tool not in self._probe_tools(desk, probe, enables) or not matches(desk.tools[tool].input_schema, probe.call.args):
             return result("refuse", [], "Claude has no such tool for them here.")
         profile = desk.tools[tool]
         discount = probe.call.args.get("requested_discount_bp", 0) if tool == "native.quote" else 0
@@ -3323,6 +3492,50 @@ class FakeKernelState:
 
     # Connected tools (Plan 01c) -----------------------------------------------------------------------
 
+    @staticmethod
+    def _current_tool_pin(profile: ToolProfile) -> str | None:
+        return None if profile.review_reason == "delisted" else profile.pending_sha256 or profile.definition_sha256
+
+    def tools_confirm(self, request: Request, body: ToolsConfirmRequest) -> ToolConfirmed:
+        """Review one batch atomically: disabling is immediate; enabling drafts the active cards and cap.
+        The draft's pins are checked again at explicit policy confirmation."""
+        desk = self._owners_desk(request, body.desk_id)
+
+        def refuse(status: int, code: str, reason: str) -> None:
+            self.append(desk, "tool_pin", {"tools": [pin.tool for pin in body.tools],
+                                          "enable": body.enable, "refused": reason})
+            raise Refusal(status, code)
+
+        if not body.enable and any(pin.tool == "native.start_verification" for pin in body.tools):
+            refuse(422, "invalid", "always_on")
+        if any(pin.tool not in desk.tools for pin in body.tools):
+            refuse(404, "not_found", "unknown_tool")
+        for pin in body.tools:
+            profile = desk.tools[pin.tool]
+            hashes = ({self._current_tool_pin(profile)} if body.enable else
+                      {profile.definition_sha256, profile.pending_sha256, self._current_tool_pin(profile)
+                       if profile.source == "native" else None})
+            if pin.definition_sha256 not in hashes:
+                refuse(409, "conflict", "hash_changed")
+        draft = None
+        if body.enable:
+            enables = tuple(pin for pin in body.tools if desk.tools[pin.tool].status != "enabled"
+                            or desk.tools[pin.tool].definition_sha256 != pin.definition_sha256)
+            if enables:
+                if not desk.policy_version:
+                    refuse(409, "conflict", "no_active_version")
+                draft = self.policy_draft(request, PolicyDraftRequest(
+                    desk_id=desk.desk_id, cards=[card for card in desk.cards if not card.is_default],
+                    expected_parent=desk.policy_version, auto_money_cap_cents=desk.auto_money_cap_cents),
+                    enables=enables)
+        else:
+            for pin in body.tools:
+                profile = desk.tools[pin.tool]
+                if profile.status != "disabled":
+                    self._put_tool(desk, profile.model_copy(update={"status": "disabled", "review_reason": None}))
+                    self.append(desk, "tool_pin", {"tool": pin.tool, "event": "disabled"})
+        return ToolConfirmed(profiles=[desk.tools[pin.tool] for pin in body.tools], draft=draft)
+
     def tools_connect(self, request: Request, body: ToolsConnectRequest) -> list[ToolProfile]:
         """The mock payments server's tools, each pinned by its definition's hash and `needs_review` (`review_reason`
         "new") until the owner confirms it (a tool already connected is left as it is), ledgered `tool_pin`."""
@@ -3338,9 +3551,10 @@ class FakeKernelState:
 
     def tools_simulate_change(self, request: Request, body: ToolsSimulateChangeRequest) -> ToolProfile:
         """The owner's demo action: the mock payments server changes the tool's definition for this copy, and the
-        re-listing finds it at once (ledgered `tool_pin`, simulated then drift, with the owner alerted): the tool is
-        `needs_review` ("changed"), the changed definition waiting as quoted text under its own hash, its pin
-        unchanged. A tool the Desk doesn't have is 404; a native tool, which no server defines, is 422 `invalid`."""
+        re-listing finds it at once (ledgered `tool_pin`, simulated then drift): the changed definition waits as quoted
+        text under its own hash, its pin unchanged. An enabled or waiting tool is `needs_review` ("changed") and the
+        owner is alerted; a disabled tool stays disabled, with no alert (`mcp_pins.check_pin`). A tool the Desk doesn't
+        have is 404; a native tool, which no server defines, is 422 `invalid`."""
         desk = self._owners_desk(request, body.desk_id)
         profile = desk.tools.get(body.tool)
         if profile is None:
@@ -3349,13 +3563,16 @@ class FakeKernelState:
             raise Refusal(422, "invalid")
         listed = canonical({"name": profile.tool.removeprefix("payments."), "inputSchema": profile.input_schema,
                             "description": f"{TOOL_FACTS[profile.tool][3]} {SIMULATED_CHANGE}"})
-        changed = profile.model_copy(update={"status": "needs_review", "review_reason": "changed",
-                                             "pending_definition_text": listed, "pending_sha256": sha256_hex(listed)})
+        disabled = profile.status == "disabled"
+        review = {} if disabled else {"status": "needs_review", "review_reason": "changed"}
+        changed = profile.model_copy(update={**review, "pending_definition_text": listed,
+                                             "pending_sha256": sha256_hex(listed)})
         self._put_tool(desk, changed)
         self.append(desk, "tool_pin", {"tool": profile.tool, "event": "simulated"})
         self.append(desk, "tool_pin", {"tool": profile.tool, "event": "drift",
                                        "pending_sha256": changed.pending_sha256})
-        self._alert_owner(desk, f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")
+        if not disabled:
+            self._alert_owner(desk, f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")
         return changed
 
     # Verification --------------------------------------------------------------------------------
@@ -3711,6 +3928,7 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /sessions": "create_session",
     "POST /sessions/{id}/mode": "session_mode",
     "GET /whoami": "whoami",
+    "POST /sessions/{session_id}/turn": "turn",
     "GET /context/{session_id}?desk_id=": "context",
     "POST /decide": "decide",
     "GET /decisions/by_call?session_id=&generation=&call_id=": "decision_by_call",
@@ -3736,6 +3954,7 @@ FAKE_ROUTES: dict[str, str] = {
     "POST /policy/confirm": "policy_confirm",
     "GET /policy/{version}/cancelled_links?desk_id=": "cancelled_links",
     "POST /tools/connect": "tools_connect",
+    "POST /tools/confirm": "tools_confirm",
     "POST /knowledge": "knowledge",
     "POST /documents": "documents",
     "POST /tools/simulate_change": "tools_simulate_change",

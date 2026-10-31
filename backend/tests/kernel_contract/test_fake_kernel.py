@@ -11,12 +11,16 @@ import pytest
 from pydantic import ValidationError
 
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable
-from desk.contracts import CopyCreated, NormalizedAction, ResourceRef, SessionCreated
-from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health
+from desk.contracts import CopyCreated, NormalizedAction, Probe, ResourceRef, SessionCreated, ToolCall
+from desk.kernel_api import (
+    CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health, PolicyProbeRequest, ToolPin,
+    ToolsConfirmRequest, ToolsConnectRequest, TurnRequest,
+)
 from tests.kernel_contract.fake_kernel import FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO
 from tests.kernel_contract.test_contract import (
     LINK_ROUTES,
+    a_new_desk,
     answer,
     check_reply,
     checkout,
@@ -43,6 +47,48 @@ async def copy_and_visitor(http: KernelHttp, state: FakeKernelState) -> tuple[Co
     copy = await http.public().call("POST /copies", CreateCopyRequest())
     slug = state.desks[copy.desk_ids[0]].slug
     return copy, await http.public().call("POST /sessions", CreateSessionRequest(desk_slug=slug, kind="visitor"))
+
+
+async def test_pending_tool_enables_are_available_to_draft_probes_only():
+    state = FakeKernelState()
+    async with KernelHttp("http://fake-kernel", transport=httpx.ASGITransport(app=fake_kernel_app(state))) as http:
+        copy = await http.public().call("POST /copies", CreateCopyRequest())
+        owner = http.owner(copy.owner_token)
+        created = await owner.call("POST /desks", a_new_desk())
+        desk_id = created.desk_id
+        profiles = await owner.call("POST /tools/connect", ToolsConnectRequest(desk_id=desk_id, server="mock_payments"))
+        pin = next(profile for profile in profiles if profile.tool == "payments.list_charges")
+        reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(desk_id=desk_id, enable=True, tools=[
+            ToolPin(tool=pin.tool, definition_sha256=pin.definition_sha256)]))
+        probe = PolicyProbeRequest(desk_id=desk_id, probes=[Probe(
+            actor="visitor", who="record_owner", resource_kind="charge", resource_owner="caller",
+            call=ToolCall(call_id="draft-charges", tool=pin.tool, args={}))])
+        result = await owner.call("POST /policy/{version}/probe", probe, path={"version": reviewed.draft.version})
+        assert result[0].outcome == "hold"
+        assert result[0].card_ids == ["default-payments.list_charges"]
+        result = await owner.call("POST /policy/{version}/probe", probe,
+                                  path={"version": state.desks[desk_id].policy_version})
+        assert result[0].outcome == "refuse"
+        assert state.desks[desk_id].tools[pin.tool].status == "needs_review"
+
+
+async def test_native_tool_review_uses_the_served_pin_and_cannot_disable_verification():
+    state = FakeKernelState()
+    async with KernelHttp("http://fake-kernel", transport=httpx.ASGITransport(app=fake_kernel_app(state))) as http:
+        copy = await http.public().call("POST /copies", CreateCopyRequest())
+        owner, desk_id = http.owner(copy.owner_token), copy.desk_ids[0]
+        profile = state.desks[desk_id].tools["native.book"]
+        pin = ToolPin(tool=profile.tool, definition_sha256=profile.definition_sha256)
+        disabled = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+            desk_id=desk_id, enable=False, tools=[pin]))
+        assert disabled.draft is None and disabled.profiles[0].status == "disabled"
+        reviewed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+            desk_id=desk_id, enable=True, tools=[pin]))
+        assert reviewed.draft is not None and reviewed.profiles[0].status == "disabled"
+        verification = state.desks[desk_id].tools["native.start_verification"]
+        assert await refused(owner.call("POST /tools/confirm", ToolsConfirmRequest(
+            desk_id=desk_id, enable=False, tools=[ToolPin(
+                tool=verification.tool, definition_sha256=verification.definition_sha256)]))) == (422, "invalid")
 
 
 async def test_failures_answer_before_anything_changes(fake):
@@ -257,6 +303,21 @@ async def test_expiry_follows_the_fakes_clock(fake):
     assert await refused(read_decision(view, held.decision_id)) == (409, "closed")
     assert await refused(answer(http.owner(copy.owner_token), held.decision_id, "allow_once")) == (409, "conflict")
     assert state.decisions[held.decision_id].decision.state == "expired"
+
+
+async def test_a_turn_leaves_the_sessions_activity_alone(fake):
+    """The kernel's turn route reads the session without marking it seen, so starting a turn keeps no idle
+    conversation open: the fake's `/turn` leaves `last_seen` as it was, while any other session call moves it."""
+    http, state = fake
+    _, visitor = await copy_and_visitor(http, state)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    seen = state.sessions[session_id].last_seen
+    state.now += timedelta(minutes=5)
+    started = await view.call("POST /sessions/{session_id}/turn",
+                              TurnRequest(generation=0, text="Hola, ¿tienen citas?"), path={"session_id": session_id})
+    assert started.language == "es" and state.sessions[session_id].last_seen == seen
+    await context(view, session_id)
+    assert state.sessions[session_id].last_seen == state.now
 
 
 async def test_the_mirror_is_copy_scoped_and_read_only(fake, api_conn):

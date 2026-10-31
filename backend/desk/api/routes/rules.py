@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from desk.api import rules
+from desk.api import rules, versions
 from desk.api.deps import ApiProblem, OwnerCtx, Runtime, owner_ctx, require_model_budget, runtime
 from desk.api.ratelimit import RateLimitLedger
 from desk.api.routes.setup import PROVING_RESPONSES, proving_answer
@@ -47,6 +47,7 @@ from desk.api.schemas import (
     Suggestion,
     ToolDecisions,
     ToolRow,
+    ToolsConfirmIn,
     error_responses,
     operation_ids,
 )
@@ -56,6 +57,8 @@ from desk.kernel_api import (
     DocumentCreated,
     DocumentUploadRequest,
     KnowledgeRequest,
+    ToolConfirmed,
+    ToolsConfirmRequest,
     ToolsSimulateChangeRequest,
 )
 
@@ -251,6 +254,19 @@ async def draft_money_cap(desk_id: DeskId, body: MoneyCapIn, request: Request,
         return await rules.draft_money_cap(owner, desk_id, body.auto_money_cap_cents)
 
     return await _drafting(request, ctx, desk_id, work, body=body)
+
+
+@policy_router.post("/tools/confirm", response_model=ToolConfirmed, responses=PROVING_RESPONSES)
+async def confirm_tools(desk_id: DeskId, body: ToolsConfirmIn, request: Request,
+                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
+    """Send the owner's reviewed pins to the kernel. Enabling drafts a rules version; only explicit policy
+    confirmation activates it. Disabling takes effect immediately. A slow proof answers 202 with this request."""
+    checked = ToolsConfirmRequest(desk_id=ctx.desk(desk_id), **body.model_dump())
+
+    async def work(owner: OwnerCtx, state: Runtime) -> ToolConfirmed:
+        return await versions.confirm_tools(owner, checked)
+
+    return await _drafting(request, ctx, desk_id, work, body=body, changes_rules=not body.enable)
 
 
 @policy_router.post("/confirm", response_model=PolicyVersion, responses=PROVING_RESPONSES)

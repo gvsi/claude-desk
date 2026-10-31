@@ -312,6 +312,7 @@ export interface CancelRequest {
 }
 export interface CheckReplyRequest {
   draft: ReplyDraft;
+  final?: boolean;
 }
 export interface ReplyDraft {
   session_id: string;
@@ -345,6 +346,7 @@ export interface CopyCreated {
   desk_ids: string[];
   owner_session: SessionState;
   owner_token: string;
+  seeded_chat?: SeededChat | null;
   replayed_messages?: ReplayedEvent[];
   replay_id?: string | null;
 }
@@ -355,6 +357,11 @@ export interface SessionState {
   assurance: "none" | "demo_code" | "owner_session";
   mode: "ai" | "owner" | "paused";
   generation: number;
+}
+export interface SeededChat {
+  session_id: string;
+  visitor_line: string;
+  decision: Decision;
 }
 export interface ReplayedEvent {
   session_id: string;
@@ -875,6 +882,14 @@ export interface ToolsSimulateChangeRequest {
     | "native.read_memory"
     | "payments.list_charges"
     | "payments.create_refund";
+}
+export interface TurnRequest {
+  generation: number;
+  text: string;
+  desk_id?: string | null;
+}
+export interface TurnStarted {
+  language: "en" | "es";
 }
 export interface VerifyCheckRequest {
   session_id: string;

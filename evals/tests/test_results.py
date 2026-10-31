@@ -140,6 +140,7 @@ OWNERS_SCOPE = {
     "backend/desk/api/setup_templates.py": "backend/desk/api/setup_templates.py",
     "backend/desk/presets.py": "backend/desk/presets.py",
     "backend/desk/money_cap.py": "backend/desk/money_cap.py",
+    "backend/desk/rewrites.py": "backend/desk/rewrites.py",
     "backend/desk/api/model.py": "backend/desk/api/model.py",
     "evals/tier2/runner.py": "evals/tier2/runner.py",
     "evals/tier2/simulator.py": "evals/tier2/simulator.py",

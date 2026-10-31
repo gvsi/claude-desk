@@ -14,6 +14,41 @@
   text-decoration-color: currentColor;
 }
 
+/* On a touch screen, a link takes a tap anywhere in a size-touch band centred on its words, through
+   an unseen hit area: nothing is drawn and no word moves (position: relative only gives the hit area
+   its frame). A layout that puts controls closer together caps the reach on each axis at half its gap
+   (--cd-touch-reach-block, --cd-touch-reach-inline), so two hit areas never overlap. */
+@media (pointer: coarse) {
+  .cd-text-link {
+    position: relative;
+  }
+
+  .cd-text-link::after {
+    content: '';
+    position: absolute;
+    inset-block: max(-1 * var(--cd-touch-reach-block, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+    inset-inline: max(-1 * var(--cd-touch-reach-inline, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+  }
+
+  /* Links in a list sit one above another, 8 px apart at the closest, as the public page's links
+     for agents do: each reaches halfway across that gap above and below. */
+  li > .cd-text-link {
+    --cd-touch-reach-block: calc(var(--space-8) / 2);
+  }
+
+  /* In running text a link's line may sit a few px from another link. The explicit opt-out also
+     covers sentences outside article typography: only the words take the tap. */
+  .cd-text-link--running-text,
+  :is(.cd-type-article-body, .cd-type-article-body-phone) .cd-text-link {
+    position: static;
+  }
+
+  .cd-text-link--running-text::after,
+  :is(.cd-type-article-body, .cd-type-article-body-phone) .cd-text-link::after {
+    content: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cd-text-link {
     transition: none;

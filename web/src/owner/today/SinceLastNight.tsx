@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react';
+import { useId, type ReactNode, type Ref } from 'react';
 
 import { ownerErrorCopy } from '../../api/http.ts';
 import type { BriefingItem, Today } from '../../api/views.ts';
@@ -55,17 +55,26 @@ export function QuietNight({ since, action }: { since: string; action?: ReactNod
   return <EmptyState title="A quiet night" body={`Nothing new since ${formatClock(since, business.timezone)} yesterday.`} action={action} />;
 }
 
-/** The short form's rows: the newest blocked attempt, the newest booking, the newest lead or answer, each when there is one. */
+/**
+ * The short form's rows: the newest turned-down request, the newest booking, the newest lead or
+ * answer, each when there is one. A key the API leaves out, as one from before a kind was renamed
+ * would, makes no row rather than breaking the card.
+ */
 function shortForm(briefing: Today['briefing']): BriefingItem[] {
-  const { blocked, booking, lead_or_answer: leadOrAnswer } = briefing.newest;
-  return [blocked, booking, leadOrAnswer].filter((item): item is BriefingItem => item !== null);
+  const { turned_down: turnedDown, booking, lead_or_answer: leadOrAnswer } = briefing.newest;
+  return [turnedDown, booking, leadOrAnswer].filter((item): item is BriefingItem => item != null);
+}
+
+export interface SinceLastNightProps {
+  /** The section, which takes focus when dismissing Needs you's last request takes Needs you away and no chat is live. */
+  sectionRef?: Ref<HTMLElement>;
 }
 
 /**
  * Today's "Since last night", always shown: one row of each kind, and "See all {n}" when the night
  * has more than those rows, or a quiet night. Read with Today and polled with it.
  */
-export function SinceLastNight() {
+export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   const { desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const today = useToday(deskId, { retryOnMount: false });
@@ -108,7 +117,7 @@ export function SinceLastNight() {
   }
 
   return (
-    <section className="cd-today__section" aria-labelledby={titleId}>
+    <section ref={sectionRef} className="cd-today__section" aria-labelledby={titleId} tabIndex={-1}>
       <SectionHeader id={titleId} title="Since last night" caption={replayed ? <RecordedHistoryLink deskId={deskId} /> : undefined} />
       <Card>{body}</Card>
     </section>

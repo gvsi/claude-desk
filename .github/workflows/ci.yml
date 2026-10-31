@@ -158,8 +158,12 @@ jobs:
           build: false
       - name: Check the tier 2 results
         env:
-          RESULTS_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || 'HEAD~1' }}
-        run: uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE"
+          RESULTS_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        run: |
+          if [ -z "$RESULTS_BASE" ]; then
+            RESULTS_BASE="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+          fi
+          uv run --project tools python -m desk_tools.gate --name tier2-results --run-if evals/results.py --required-if evals/results -- make evals-results-check BASE="$RESULTS_BASE"
 
   web:
     name: web tests

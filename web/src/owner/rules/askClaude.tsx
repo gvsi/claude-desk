@@ -9,6 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
+import { clickedControl } from '../../ds/index.ts';
 import { DRAFT_FAILED, RuleChat, chatTurn, type ChatTurn } from './RuleChat.tsx';
 
 /** What a page under a Desk can do with the panel. */
@@ -53,7 +54,9 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [open, setOpen] = useState(false);
   const [waiting, setWaiting] = useState(0);
-  // What had focus when the panel opened, which it goes back to when the panel closes.
+  // What opened the panel, which focus goes back to when the panel closes: what had focus, or else
+  // the control the click that opened it landed on. Safari focuses no button a click presses, so
+  // after a click focus is still on the page's body.
   const opener = useRef<HTMLElement | null>(null);
   // Each conversation's requests go out one after another; a closed conversation's answers go nowhere.
   const queue = useRef<Promise<void>>(Promise.resolve());
@@ -74,7 +77,7 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
       if (text === '') return;
       if (!open) {
         const active = document.activeElement;
-        opener.current = active instanceof HTMLElement && active !== document.body ? active : null;
+        opener.current = active instanceof HTMLElement && active !== document.body ? active : clickedControl();
         setOpen(true);
         setFocusComposer(true);
       }
