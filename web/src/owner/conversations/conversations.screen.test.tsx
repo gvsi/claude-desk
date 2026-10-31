@@ -1199,7 +1199,11 @@ describe('Conversations', () => {
     }
     const asked = () => log(screen).getByText(question, { exact: true }).element().closest('.cd-transcript-row');
     await expect.poll(() => asked()?.querySelectorAll('.cd-margin-receipt').length ?? 0).toBe(1);
-    const read = asked()?.querySelector('.cd-margin-receipt')?.textContent;
+    // It shows the kernel's short line until the owner's read of its decision answers, then the
+    // decision's state and reason: the line the owner reads.
+    const shown = () => asked()?.querySelector('.cd-margin-receipt')?.textContent ?? '';
+    await expect.poll(shown).toMatch(/^Automatic\. /);
+    const read = shown();
 
     // The reply comes, and the receipt moves under it, after the reply's own check. The reply and its
     // check land; the receipt the owner has already read shows at once.
