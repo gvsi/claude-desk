@@ -114,8 +114,11 @@ function interviewsOf(world: MockWorld): Map<string, Interview> {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** A copy of the interview's state, as an answer carries it. */
-const stateOf = (interview: Interview): SetupState => ({ ...interview.state, messages: interview.state.messages.map((m) => ({ ...m })) });
+/** Cards are opt-in per response; filtering never removes the interview's stored proposals. */
+const stateOf = (interview: Interview, query?: URLSearchParams): SetupState => ({
+  ...interview.state,
+  messages: interview.state.messages.filter((m) => query?.get('cards') === '1' || m.card === null).map((m) => ({ ...m })),
+});
 
 const ok = <T>(body: T) => ({ status: 200, body }) as const;
 /** A new interview: 201, as the API answers its creation. */
@@ -896,7 +899,7 @@ export const SETUP_ROUTES: ServedRoutes = {
       interview.state.consent = null;
       interview.state.messages.pop();
     }
-    return ok(stateOf(interview));
+    return ok(stateOf(interview, req.query));
   },
   setupConsent(sv, req) {
     const found = interviewOf(sv, req);
@@ -904,18 +907,18 @@ export const SETUP_ROUTES: ServedRoutes = {
     const allow = isRecord(req.body) ? req.body.allow : undefined;
     if (req.malformed || typeof allow !== 'boolean') return INVALID;
     const { interview } = found;
-    if (interview.state.busy) return { status: 202, body: stateOf(interview) };
+    if (interview.state.busy) return { status: 202, body: stateOf(interview, req.query) };
     if (interview.state.consent != null) return CONFLICT;
     interview.state.consent = allow;
     say(interview, 'owner', allow ? 'Yes, use it' : "No, I'll type it");
     if (interview.holdConsent) {
       interview.holdConsent = false;
       interview.state.busy = true;
-      return { status: 202, body: stateOf(interview) };
+      return { status: 202, body: stateOf(interview, req.query) };
     }
     // Without consent, nothing is ever read.
     completeConsent(interview);
-    return ok(stateOf(interview));
+    return ok(stateOf(interview, req.query));
   },
   setupAnswer(sv, req) {
     const found = interviewOf(sv, req);
@@ -934,10 +937,10 @@ export const SETUP_ROUTES: ServedRoutes = {
       // A turn that runs long: it commits later, when the test lets it.
       interview.holdNext = false;
       interview.running = { text };
-      return ok(stateOf(interview));
+      return ok(stateOf(interview, req.query));
     }
     applyAnswer(sv.world, interview, text);
-    return ok(stateOf(interview));
+    return ok(stateOf(interview, req.query));
   },
   setupTools(sv, req) {
     const found = interviewOf(sv, req);
@@ -970,7 +973,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     proposal.state = body.accept ? 'accepted' : 'declined';
     if (proposal.job && typeof body.title === 'string') proposal.job.title = body.title;
     if (proposal.job?.config?.block === 'purpose_payment' && typeof body.amount_cents === 'number') proposal.job.config.amount_cents = body.amount_cents;
-    return ok(stateOf(interview));
+    return ok(stateOf(interview, req.query));
   },
   setupSuggestions(sv, req) {
     const found = interviewOf(sv, req);
@@ -982,7 +985,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (!interview.covered.has('money_limit')) interview.capCents = 0;
     for (const question of SETUP_QUESTIONS) interview.covered.add(question.key);
     finishQuestions(sv.world, interview, true);
-    return ok(stateOf(interview));
+    return ok(stateOf(interview, req.query));
   },
   setupConnect(sv, req) {
     const found = interviewOf(sv, req);

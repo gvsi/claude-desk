@@ -84,12 +84,32 @@ async function startState(description = CPA): Promise<SetupState> {
 }
 
 async function setupState(key: RouteKey, id: string, body?: unknown, proposal_id?: string): Promise<SetupState> {
-  const answer = await mockStore.dispatch(key, { params: { id, ...(proposal_id === undefined ? {} : { proposal_id }) }, body });
+  const answer = await mockStore.dispatch(key, { params: { id, ...(proposal_id === undefined ? {} : { proposal_id }) }, query: { cards: '1' }, body });
   if ('network' in answer || answer.status !== 200) throw new Error(`${key} must answer 200`);
   return answer.body as SetupState;
 }
 
 describe('setup consultant run and decisions', () => {
+  it('serves_cards_only_with_exact_opt_in_on_all_five_setup_state_routes', async () => {
+    for (const key of ['setup', 'setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions'] as const) {
+      for (const cards of [undefined, '0', 'true', '1']) {
+        let state = await startState();
+        const id = state.interview_id;
+        if (key !== 'setupConsent') state = await setupState('setupConsent', id, { allow: true });
+        const proposal_id = state.messages.find((message) => message.card?.job?.job === 'schedule')?.card?.proposal_id ?? '';
+        const body = key === 'setupConsent' ? { allow: true }
+          : key === 'setupAnswer' ? { question: state.question, text: 'Individuals only' }
+          : key === 'setupProposal' ? { accept: true } : key === 'setupSuggestions' ? {} : undefined;
+        const answer = await mockStore.dispatch(key, { params: { id, proposal_id }, query: cards === undefined ? {} : { cards }, body });
+        expect(answer).toMatchObject({ status: 200 });
+        if ('network' in answer || answer.status !== 200) throw new Error('setup must answer');
+        const full = await setupState('setup', id);
+        expect(full.messages.filter((message) => message.card)).toHaveLength(6);
+        expect(answer.body).toEqual({ ...full, messages: full.messages.filter((message) => cards === '1' || message.card === null) });
+      }
+    }
+  });
+
   it('keeps_ambiguous_or_invalid_cpa_money_answers_at_zero', async () => {
     for (const text of ['I file 2026 returns', '-500', '$10,001', 'Always ask me first', 'Up to $500', '$250.50']) {
       let state = await startState();

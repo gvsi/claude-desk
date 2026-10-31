@@ -109,10 +109,30 @@ describe('request', () => {
     await expect(request('setupConsent', { params: { id: 's1' }, body: { allow: true } })).rejects.toMatchObject({ kind: 'unavailable' });
   });
 
+  it('opts_into_cards_on_all_five_setup_reads_and_mutations_but_not_start', async () => {
+    const requests = [
+      () => request('setup', { params: { id: 'i1' }, query: { after: 'marker', cards: '0' } }),
+      () => request('setupConsent', { params: { id: 'i1' }, body: { allow: true } }),
+      () => request('setupAnswer', { params: { id: 'i1' }, body: { question: 'what_you_do', text: 'Tax returns' } }),
+      () => request('setupProposal', { params: { id: 'i1', proposal_id: 'p1' }, body: { accept: true } }),
+      () => request('setupSuggestions', { params: { id: 'i1' }, body: {} }),
+      () => request('startSetup', { body: { description: 'CPA firm', timezone: 'UTC', idempotency_key: 'cards' } }),
+      () => request('setupTools', { params: { id: 'i1' } }),
+      () => request('me'),
+    ];
+    reply({ status: 200, body: {} });
+    for (const send of requests) await send();
+    for (let index = 0; index < requests.length; index += 1) {
+      const query = new URL(call(index).url, 'https://example.test').searchParams;
+      expect(query.get('cards'), call(index).url).toBe(index < 5 ? '1' : null);
+      if (index === 0) expect(query.get('after')).toBe('marker');
+    }
+  });
+
   it('sends_setup_suggestions_as_an_empty_object', async () => {
     reply({ status: 200, body: { step: 'tools' } });
     await request('setupSuggestions', { params: { id: 'i1' }, body: {} });
-    expect(call(0).url).toBe('/api/owner/setup/i1/suggestions');
+    expect(call(0).url).toBe('/api/owner/setup/i1/suggestions?cards=1');
     expect(call(0).init.method).toBe('POST');
     expect(call(0).init.body).toBe('{}');
   });
@@ -123,7 +143,7 @@ describe('request', () => {
       params: { id: 'interview /1', proposal_id: 'p/2' },
       body: { accept: true, title: 'Intro consult' },
     });
-    expect(call(0).url).toBe('/api/owner/setup/interview%20%2F1/proposals/p%2F2');
+    expect(call(0).url).toBe('/api/owner/setup/interview%20%2F1/proposals/p%2F2?cards=1');
     expect(call(0).init.method).toBe('POST');
     expect(call(0).init.credentials).toBe('same-origin');
     expect(JSON.parse(String(call(0).init.body))).toEqual({ accept: true, title: 'Intro consult' });
