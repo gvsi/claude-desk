@@ -717,9 +717,10 @@ async def cancel_link(ctx: KernelCtx, token: str) -> PaymentLinkStateResult:
 
 # ---- Reconciliation --------------------------------------------------------------------------------------
 
-async def reconcile_link(ctx: KernelCtx, link_id: str) -> None:
+async def reconcile_link(ctx: KernelCtx, link_id: str) -> bool:
     """Settles one link as a read finds it, in the caller's transaction, with its row locked `FOR
-    UPDATE SKIP LOCKED` (a link a completion or an activation holds is left for the next read):
+    UPDATE SKIP LOCKED` (a link a completion or an activation holds is left for the next read), and
+    says whether it moved it; a read commits that at once (`settle_link`):
 
     - `issued` with no completion started and past its expiry: `expired`;
     - `issued` with a completion marker older than `execute.ORPHAN_AFTER`: no completion is running
@@ -731,35 +732,48 @@ async def reconcile_link(ctx: KernelCtx, link_id: str) -> None:
       else `expired`; a provider that can't be reached leaves it `unknown`."""
     link = await _lock(ctx, PaymentLink.link_id == link_id, skip_locked=True)
     if link is None:
-        return
+        return False
     now = ctx.clock.now()
+    orphaned = False
     if link.state == "issued":
         if _due(link, now):
             await _expire(ctx, link)
-            return
+            return True
         if link.completion_started_at is None or link.completion_started_at > now - execute.ORPHAN_AFTER:
-            return
+            return False
         await _move(ctx, link, "unknown")
         await _ledger(ctx, link, state="unknown", reason="orphaned")
+        orphaned = True
     if link.state != "unknown":
-        return
+        return orphaned
     try:
         settled = await provider(ctx).cancel(link.provider_checkout_id)
     except (ProviderError, ProviderTimeout):
         log.info("payment_link_still_unknown link_id=%s", link.link_id)
-        return
+        return orphaned
     if settled.state == "succeeded":
         if settled.charge_id is None:
             log.error("payment_link_paid_without_charge link_id=%s", link.link_id)
-            return
+            return orphaned
         session_row = (await ctx.db.scalars(ctx.repo.scoped(select(SessionRow).where(
             SessionRow.session_id == link.session_id)))).one()
         await record_paid(ctx, link, session_row, settled.charge_id, confirm=False)
-        return
+        return True
     state = "cancelled" if link.cancel_reason is not None else "expired"
     await _move(ctx, link, state)
     moved_by = {"version": link.cancelled_by_version} if link.cancelled_by_version is not None else {}
     await _ledger(ctx, link, state=state, reason=link.cancel_reason or "expired", **moved_by, reconciled=True)
+    return True
+
+
+async def settle_link(ctx: KernelCtx, link_id: str) -> None:
+    """`reconcile_link` as a read runs it: what it moved is committed at once with a plain commit,
+    before the read goes on, since it records what already happened (an expiry, or what the
+    provider's atomic cancel found: a payment or a cancelled checkout), as a decision's read commits
+    its reconciliation (`execute.reconcile_orphans`). A read that fails afterwards leaves it
+    standing, and the next read finds the link settled, asking the provider nothing again."""
+    if await reconcile_link(ctx, link_id):
+        await ctx.db.commit()
 
 
 async def reconcile_links_at_startup(runtime: KernelRuntime) -> list[str]:
@@ -855,14 +869,15 @@ async def cancelled_links(ctx: KernelCtx, desk_id: str, version: int) -> list[Li
     a rule change whose session is still open, each with its chat line: a verdict with one
     `link_cancelled` block in the session's last language, rendered when read, signed at the
     session's current generation and ledgered `reply` (naming the link's fact). Links that version
-    moved to `unknown` are reconciled first, so one the provider then cancels is listed too. It is
-    idempotent per `(link_id, version)`: a repeat read lists the same links, each with a freshly
-    signed verdict and its own `reply` entry, so the API can read a version again after a failure."""
+    moved to `unknown` are reconciled first, each committed at once (`settle_link`), so one the
+    provider then cancels is listed too. It is idempotent per `(link_id, version)`: a repeat read
+    lists the same links, each with a freshly signed verdict and its own `reply` entry, so the API
+    can read a version again after a failure."""
     pending = await ctx.db.scalars(ctx.repo.scoped(select(PaymentLink.link_id).where(
         PaymentLink.desk_id == desk_id, PaymentLink.state == "unknown", PaymentLink.cancelled_by_version == version)
         .order_by(PaymentLink.link_id)))
     for link_id in list(pending):
-        await reconcile_link(ctx, link_id)
+        await settle_link(ctx, link_id)
     rows = (await ctx.db.execute(ctx.repo.scoped(select(PaymentLink, SessionRow).join(
         SessionRow, SessionRow.session_id == PaymentLink.session_id).where(
         PaymentLink.desk_id == desk_id, PaymentLink.state == "cancelled", PaymentLink.cancel_reason == "rules_changed",
@@ -915,17 +930,18 @@ async def cancel_desk_links(ctx: KernelCtx, desk_id: str) -> None:
 async def link_view(ctx: KernelCtx, token: str) -> PaymentLinkView:
     """`GET /payment_links/{token}`: the link's title, amount and state, its session's last language,
     the business's name as the link's Desk's public page serves it now (`public.header_of`: one
-    holding a document canary is withheld there, and here), and `customer_name`, in the request's
-    transaction (unbound until the token's hash names a copy), once a read has settled it
-    (`reconcile_link`): an issued link past its expiry is `expired`, unless a completion has started.
-    A link a rule change cancelled says so (`cancel_reason`). A token no link has, or no token could
-    be, is 404 `not_found`, the same for all."""
+    holding a document canary is withheld there, and here), and `customer_name`, read in the
+    request's transaction (unbound until the token's hash names a copy) once the read has settled
+    the link (`settle_link`, which commits what it moved before the read goes on): an issued link
+    past its expiry is `expired`, unless a completion has started. A link a rule change cancelled
+    says so (`cancel_reason`). A token no link has, or no token could be, is 404 `not_found`, the
+    same for all."""
     digest = await _bind_token(ctx, token)
     link_id = (await ctx.db.execute(ctx.repo.scoped(select(PaymentLink.link_id).where(
         PaymentLink.token_sha256 == digest)))).scalar_one_or_none()
     if link_id is None:
         raise KernelFailure(404, "not_found", "unknown_payment_link")
-    await reconcile_link(ctx, link_id)
+    await settle_link(ctx, link_id)
     link = (await ctx.db.scalars(ctx.repo.scoped(select(PaymentLink).where(PaymentLink.link_id == link_id)
                                                  .execution_options(populate_existing=True)))).one()
     desk, business = (await ctx.db.execute(ctx.repo.scoped(select(Desk, Business).join(

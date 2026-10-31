@@ -299,6 +299,33 @@ async def test_provider_timeout_settles_once(app, client, reviewer, mockpay, rea
     assert (await view(client, link.token)).state == seen.state          # settled once
 
 
+async def test_a_reads_reconciliation_stands_when_the_read_fails_after_it(app, client, reviewer, mockpay,
+                                                                          monkeypatch):
+    """A read that settles a link records what the provider says already happened (here, that the
+    checkout was paid) and commits it at once, before the read goes on: the read failing afterwards
+    leaves the link `paid`, with its charge fact, and the next read finds it settled, asking the
+    provider nothing again."""
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    link = await rv_link(app, client, reviewer, copy, visitor)
+    await delay(mockpay, copy, "complete", 3)
+    assert (await completed(client, link.token)).state == "unknown"
+    await charged(copy, f"{link.action_id}:charge")
+
+    async def fails(*args, **kwargs):
+        raise RuntimeError("the read fails after its reconciliation")
+
+    monkeypatch.setattr(payments.labels, "copy_canaries", fails)          # read after the link is settled
+    response = await client.get(f"/payment_links/{link.token}")
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    assert (await link_row(app, copy, link.link_id)).state == "paid"
+    assert len(await charge_facts(app, copy)) == 1
+    assert paid_entry(await payment_entries(app, copy))["reconciled"] is True
+    monkeypatch.undo()
+    assert (await view(client, link.token)).state == "paid"
+    assert len([entry for entry in await payment_entries(app, copy) if entry.get("state") == "paid"]) == 1
+
+
 def paid_entry(entries: list[dict]) -> dict:
     [paid] = [entry for entry in entries if entry.get("state") == "paid"]
     return paid
@@ -790,6 +817,41 @@ async def test_completion_and_activation_do_not_interleave(desk_prove, app, clie
     entries = [entry.event for entry in await ledger_rows(app, copy)]
     assert entries[-1].kind == "policy" and entries[-1].summary["version"] == 2
     assert [row[0] for row in charges(copy)] == [key]
+
+
+@pytest.mark.solver
+async def test_a_cancelled_links_reads_reconciliation_stands_when_the_read_fails_after_it(
+        desk_prove, app, client, reviewer, monkeypatch):
+    """The owner's read of a version's cancelled links first settles at the provider each link that
+    version moved to `unknown`, and commits that at once, before the read goes on: the read failing
+    afterwards leaves the link `cancelled` for the rules, and the next read lists it, asking the
+    provider nothing again."""
+    copy = await rivera(app, client)
+    visitor = await open_visitor(client, copy)
+    link = await rv_link(app, client, reviewer, copy, visitor, ("heater", 2))                    # $300
+    lowered = await drafted(client, copy, rivera_cards(link=RV_LINK_100), auto_money_cap_cents=10_000)
+
+    async def confirmed_now() -> None:                      # C1's marker is committed: the link goes to unknown
+        await confirm(client, copy, lowered.version)
+
+    monkeypatch.setattr(payments, "_after_marker", confirmed_now)
+    response = await post_complete(client, link.token)
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert (await link_row(app, copy, link.link_id)).state == "unknown"
+
+    async def fails(*args, **kwargs):
+        raise RuntimeError("the read fails after its reconciliation")
+
+    monkeypatch.setattr(payments, "_desk_info", fails)                 # read after the link is settled
+    response = await get_cancelled(client, copy, lowered.version)
+    assert (response.status_code, response.json()) == (500, {"code": "internal"})
+    row = await link_row(app, copy, link.link_id)
+    assert (row.state, row.cancel_reason) == ("cancelled", "rules_changed")
+    monkeypatch.undo()
+    assert [line.link_id for line in await cancelled_links(client, copy, lowered.version)] == [link.link_id]
+    assert [entry for entry in await payment_entries(app, copy) if entry.get("reconciled")] == [
+        {"link_id": link.link_id, "state": "cancelled", "reason": "rules_changed", "version": 2, "reconciled": True}]
+    assert charges(copy) == []
 
 
 @pytest.mark.solver

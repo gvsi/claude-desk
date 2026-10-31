@@ -274,6 +274,8 @@ PLAIN_COMMITS = {
                              "through this commit, and no recheck may take back a payment that happened",
     ("payments.py", "_settle"): "C3: an exception in C2 settled, which holds nothing read",
     ("payments.py", "reconcile_links_at_startup"): "startup reconciliation, outside any request",
+    ("payments.py", "settle_link"): "a link's reconciliation on a read, a record of what already happened, "
+                                    "committed before the read goes on",
     ("repo.py", "kernel_transaction"): "runs them first whenever the transaction read anything",
     ("repo.py", "commit"): "KernelCtx.commit, which runs them first",
 }
