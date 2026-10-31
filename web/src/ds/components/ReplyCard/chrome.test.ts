@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CLAUSE_TEMPLATES } from '../../../api/contracts.ts';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
-import { CARD_CHROME, LINK_CANCELLED_CHROME, MONEY_TEMPLATES } from './chrome.ts';
+import { CARD_CHROME, MONEY_TEMPLATES } from './chrome.ts';
 
 const LANGUAGES = ['en', 'es'] as const satisfies readonly CopyLanguage[];
 
@@ -31,12 +31,13 @@ describe('CARD_CHROME', () => {
   });
 
   it('a_cancelled_link_moves_no_money', () => {
-    // The card for a link a rule change cancelled has a label in both languages and no note: no money
-    // moved, so it doesn't say "Test payment", and its label has no amount, date or promise.
-    expect(LINK_CANCELLED_CHROME).toEqual({
+    // The link_cancelled card has a label in both languages and no note or button: no money moved,
+    // so it doesn't say "Test payment", the link is gone, and its label has no amount, date or promise.
+    expect(MONEY_TEMPLATES).not.toContain('link_cancelled');
+    expect(CARD_CHROME.link_cancelled).toEqual({
       en: { label: 'Payment link cancelled' },
       es: { label: 'Enlace de pago cancelado' },
     });
-    for (const language of LANGUAGES) expect(LINK_CANCELLED_CHROME[language].label).not.toMatch(/[0-9$€]/);
+    for (const language of LANGUAGES) expect(CARD_CHROME.link_cancelled[language].label).not.toMatch(/[0-9$€]/);
   });
 });

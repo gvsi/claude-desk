@@ -24,7 +24,6 @@ import type {
   ToolProfile,
 } from '../api/contracts.ts';
 import type {
-  CancelReason,
   DeskSummary,
   Handoff,
   PolicyVersionOut,
@@ -206,14 +205,14 @@ export interface InboxRecord {
 }
 
 export interface LinkRecord {
-  /** The kernel's `PaymentLinkView`, exactly as the contracts have it. */
+  /**
+   * The kernel's `PaymentLinkView`, exactly as the contracts have it: `cancel_reason` is
+   * `rules_changed` once a change to the business's rules cancelled the link, and `customer_name`
+   * the kernel's name for a link issued to a verified person ("Dana W."), only while it is open.
+   */
   view: PaymentLinkView;
   deskId: string;
   sessionId: string;
-  /** `rules_changed` once a change to the business's rules cancelled the link, else null. */
-  cancelReason: CancelReason | null;
-  /** The kernel's name for a link issued to a verified person, "Dana W."; null otherwise. */
-  customerName: string | null;
 }
 
 /** What verified Dana writes when she asks for her drain clearing payment back. Untrusted, as any visitor's words. */
@@ -785,17 +784,24 @@ export class MockWorld {
   }
 
   /**
-   * A payment link for `session`, `issued`, with a token of its own, which it returns. A link
-   * issued to a verified person carries their first name and last initial, as the kernel's does.
+   * A payment link for `session`, `issued`, with a token of its own, which it returns. It names the
+   * business, and a link issued to a verified person carries their first name and last initial, as
+   * the kernel's does.
    */
   issueLink(session: SessionRecord, fields: { title: string; amountCents: number; language: Language }): string {
     const token = this.linkToken();
     this.links.set(token, {
-      view: { title: fields.title, amount_cents: fields.amountCents, state: 'issued', language: fields.language },
+      view: {
+        title: fields.title,
+        amount_cents: fields.amountCents,
+        state: 'issued',
+        language: fields.language,
+        business_name: BUSINESS.name,
+        customer_name: session.person ? shortName(session.person.name) : null,
+        cancel_reason: null,
+      },
       deskId: session.deskId,
       sessionId: session.state.session_id,
-      cancelReason: null,
-      customerName: session.person ? shortName(session.person.name) : null,
     });
     return token;
   }
@@ -808,7 +814,7 @@ export class MockWorld {
   payLink(token: string, link: LinkRecord): ReplyVerdict {
     const session = this.sessions.get(link.sessionId);
     if (!session) throw new Error(`payment link ${token} has no session`);
-    link.view = { ...link.view, state: 'paid' };
+    link.view = { ...link.view, state: 'paid', customer_name: null };
     this.appendLedger(this.deskOf(session), {
       kind: 'payment',
       origin: 'kernel',
@@ -829,8 +835,7 @@ export class MockWorld {
   cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'desk_deleted' | 'rules_changed'): void {
     const session = this.sessions.get(link.sessionId);
     if (!session) throw new Error(`payment link ${token} has no session`);
-    link.view = { ...link.view, state: 'cancelled' };
-    link.cancelReason = by === 'rules_changed' ? 'rules_changed' : null;
+    link.view = { ...link.view, state: 'cancelled', customer_name: null, cancel_reason: by === 'rules_changed' ? 'rules_changed' : null };
     this.appendLedger(this.deskOf(session), {
       kind: 'payment',
       origin: 'kernel',
@@ -1114,14 +1119,14 @@ export class MockWorld {
    * applies at once with no draft, except that verification can't be turned off. Turning on names
    * each tool's listed hash (a changed one's pending hash, never the old one) and drafts one version
    * for the tools not yet on, at the active rules and cap, which applies only when the owner
-   * confirms it.
+   * confirms it. The answer lists the batch's tools as they stand now, in the request's order.
    */
   confirmTools(desk: DeskRecord, entries: readonly ToolConfirmEntry[], enable: boolean): ToolConfirmedOut | ToolConfirmRefusal {
     const tools = entries.map((entry) => desk.tools.find((tool) => tool.tool === entry.tool));
     if (tools.some((tool) => tool === undefined)) return 'not_found';
     const profileOf = (name: string) => desk.tools.find((tool) => tool.tool === name) as ToolProfile;
-    const [first] = entries;
-    if (first === undefined) return 'not_found';
+    const profiles = () => entries.map((entry) => ({ ...profileOf(entry.tool) }));
+    if (entries.length === 0) return 'not_found';
     if (!enable) {
       if (entries.some((entry) => entry.tool === 'native.start_verification')) return 'conflict';
       const off = new Set(entries.map((entry) => entry.tool));
@@ -1130,7 +1135,7 @@ export class MockWorld {
       for (const entry of entries) {
         this.appendLedger(desk, { kind: 'tool_pin', origin: 'kernel', session_id: null, ref_id: entry.tool, summary: { tool: entry.tool, enabled: false } });
       }
-      return { profile: { ...profileOf(first.tool) }, draft: null };
+      return { profiles: profiles(), draft: null };
     }
     const hashed = entries.every((entry, i) => {
       const tool = tools[i];
@@ -1141,11 +1146,11 @@ export class MockWorld {
       const tool = profileOf(entry.tool);
       return !(tool.status === 'enabled' && tool.definition_sha256 === entry.definition_sha256);
     });
-    if (enables.length === 0) return { profile: { ...profileOf(first.tool) }, draft: null };
+    if (enables.length === 0) return { profiles: profiles(), draft: null };
     const draft = this.draftCards(desk, desk.policy.cards, { enables });
     const record = desk.drafts.get(draft.version);
     if (record === undefined) throw new Error(`draft ${draft.version} was not stored`);
-    return { profile: { ...profileOf(first.tool) }, draft: this.versionOf(desk, record, 'proved') };
+    return { profiles: profiles(), draft: this.versionOf(desk, record, 'proved') };
   }
 
   /** Writes seeded turns into history from `from`, each step `EVENT_GAP_MS` apart and turns `gap` apart. */

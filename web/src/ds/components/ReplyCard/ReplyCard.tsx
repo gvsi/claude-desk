@@ -29,6 +29,7 @@ const TEMPLATE_ICONS = {
   charge_confirmed: 'card',
   callback_confirmed: 'calendar',
   payment_confirmed: 'outcome',
+  link_cancelled: 'card',
 } as const satisfies Record<ClauseTemplate, IconName | 'outcome'>;
 
 /**

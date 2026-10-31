@@ -177,7 +177,7 @@ export { MockCheckout, type MockCheckoutProps } from './components/MockCheckout/
 // Reply cards
 export { ReplyCard, type ReplyCardProps } from './components/ReplyCard/ReplyCard.tsx';
 export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
-export { CARD_CHROME, LINK_CANCELLED_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
+export { CARD_CHROME, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 export { LinkCancelledCard, type LinkCancelledCardProps } from './components/ReplyCard/LinkCancelledCard.tsx';
 
 // Conversation

@@ -29,6 +29,7 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 | Template | Fields the card reads |
 | --- | --- |
 | `quote`, `charges` | `title`, `lines` |
+| `link_cancelled` | `title` (the link's amount), `lines` (what the link was for, then the kernel's line) |
 | `booking_options` | `title`, then one line and one option per open time |
 | `booking_confirmed` | `title` (the date), `lines` ("Arriving {start} to {end}", "With {owner}"; no booking ID) |
 | `hours` | `title` (the first window), `lines` (any more windows) |
@@ -42,6 +43,7 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 
 - Every card about money moving always says "Test payment, no money moves" / "Pago de prueba, no se mueve dinero". `MONEY_TEMPLATES` lists them: `payment_link`, `payment_confirmed`, `charge_confirmed` and `refund_issued`. `chrome.test.ts` fails if one of them lacks the note in either language, or if a template outside the list carries it, so a new money card goes in the list.
 - `payment_link` ends with a secondary "Open payment page" button. `document_link` ends with a primary "Download" button. Both go to the proxied path, and the path is never shown as text.
+- `link_cancelled`, the Desk's own card for a payment link a confirmed rule change cancelled, says "Payment link cancelled" / "Enlace de pago cancelado" beside the payment link's `card` icon. No money moved, so it has no test-payment note, and the link is gone, so it has no button.
 
 ## A vision page's Download (`inertDownload`)
 
@@ -61,9 +63,9 @@ The kernel fills these fields for each template (the master plan's "Clauses" row
 
 - `line`: the kernel's one line for the cancelled link, the `title` of its rendered `link_cancelled` block, shown as written. The kernel renders it from the owner's display name, with no fact, in the session's language.
 - `language`: the event's language, or the public page's `?lang=`.
-- Its chrome is `LINK_CANCELLED_CHROME`: "Payment link cancelled" / "Enlace de pago cancelado", with the payment link's `card` icon. It has no test-payment note, since no money moved, and no link or button, since the link is gone.
+- Its chrome is `CARD_CHROME.link_cancelled`: "Payment link cancelled" / "Enlace de pago cancelado", with the payment link's `card` icon. It has no test-payment note, since no money moved, and no link or button, since the link is gone.
 - The line is the card's headline, in `section` type, as `ReplyCard` shows a block's `title`.
-- It takes the line, not a `CardBlock`, because `link_cancelled` isn't a `ClauseTemplate` in the generated contract yet. When the kernel payments contract (plan 01c) adds it, the chrome moves into `CARD_CHROME` and `ReplyCard` shows the block itself.
+- It takes the line, not a `CardBlock`, from when `link_cancelled` wasn't a `ClauseTemplate` in the generated contract. The kernel payments contract (plan 01c) adds it, so `ReplyCard` shows the block itself; the public chat moves to it next.
 
 ## Why there's no date tile or price column
 
@@ -78,4 +80,4 @@ Card data carries no separate amount or date. The kernel renders money and times
 | `ownerName` | `string` | Required. The owner's display name. |
 | `inertDownload` | `boolean` | Vision pages only, document cards only: Download is a button going nowhere. `false` by default. |
 
-The card is a `Card` at most 520 px wide with 16 px padding, an `article` named by its label. Label in secondary `caption`, headline in `section`, details in secondary `meta`, options in `body`, note in secondary `caption`. Also exported: `cardView`, `CARD_CHROME`, `MONEY_TEMPLATES`, `LINK_CANCELLED_CHROME` and the `CardView` and `CardChrome` types.
+The card is a `Card` at most 520 px wide with 16 px padding, an `article` named by its label. Label in secondary `caption`, headline in `section`, details in secondary `meta`, options in `body`, note in secondary `caption`. Also exported: `cardView`, `CARD_CHROME`, `MONEY_TEMPLATES` and the `CardView` and `CardChrome` types.

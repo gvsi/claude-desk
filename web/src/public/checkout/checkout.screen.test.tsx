@@ -108,7 +108,7 @@ describe('mock checkout', () => {
 
     // Without the business's name, the payment's alone; before a link shows, the app's own name.
     const token = issueLink('en');
-    const asTheApiSendsIt: PaymentLinkOut = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
+    const asTheApiSendsIt: Omit<PaymentLinkOut, 'business_name' | 'customer_name'> = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
     mockStore.inject({ route: 'paymentLink', status: 200, times: 1, body: asTheApiSendsIt });
     const unnamed = await renderRoute(`/pay/${token}`);
     await expect.element(unnamed.screen.getByRole('heading', { name: 'Service call deposit' })).toBeVisible();
@@ -189,11 +189,11 @@ describe('mock checkout', () => {
   });
 
   it('checkout_leaves_out_a_missing_business_name', async () => {
-    // Today's API sends the kernel's view of the link alone: the business's name comes with the
-    // kernel payments plan (plan 01c). Until then the checkout works as it is and leaves the name out.
+    // The kernel's view names the business, but a view without the name (as the API sent before
+    // the kernel payments plan, plan 01c) still works: the checkout leaves the name out.
     const token = issueLink('en', 2000);
-    const asTheApiSendsIt: PaymentLinkOut = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
-    mockStore.inject({ route: 'paymentLink', status: 200, times: 10_000, body: asTheApiSendsIt });
+    const withoutTheName: Omit<PaymentLinkOut, 'business_name' | 'customer_name'> = { title: 'Service call deposit', amount_cents: 2000, state: 'issued', language: 'en' };
+    mockStore.inject({ route: 'paymentLink', status: 200, times: 10_000, body: withoutTheName });
     const { screen } = await renderRoute(`/pay/${token}`);
     await expect.element(screen.getByRole('heading', { name: 'Service call deposit' })).toBeVisible();
     await expect.element(screen.getByText('This page is part of a chat with Claude, an AI.')).toBeVisible();

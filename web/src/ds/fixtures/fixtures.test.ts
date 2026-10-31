@@ -73,8 +73,8 @@ const cardBlocks = allBlocks.filter((block) => block.kind === 'card');
 
 type CardField = 'title' | 'lines' | 'options' | 'href';
 
-// The master plan's "Clauses" row: quote and charges fill title and lines, booking_options its
-// options, payment_link and document_link title and href, the rest title.
+// The master plan's "Clauses" row: quote, charges and link_cancelled fill title and lines,
+// booking_options its options, payment_link and document_link title and href, the rest title.
 const CLAUSE_FIELDS = {
   quote: ['title', 'lines'],
   booking_options: ['options'],
@@ -92,6 +92,7 @@ const CLAUSE_FIELDS = {
   charge_confirmed: ['title'],
   callback_confirmed: ['title'],
   payment_confirmed: ['title'],
+  link_cancelled: ['title', 'lines'],
 } satisfies Record<ClauseTemplate, readonly CardField[]>;
 
 // The proxied paths that are the only place a link token reaches a visitor.

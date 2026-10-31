@@ -46,10 +46,7 @@ function closed(node: unknown): unknown {
  * shape: the mock sends them, so they are checked here until `contracts.schema.json` has them, and
  * then their entry goes (`pending_fields_wait_for_the_contracts`).
  */
-export const PENDING_FIELDS: Readonly<Record<string, Readonly<Record<string, object>>>> = {
-  // Why a tool waits for review, null unless it does (kernel payments plan 01c Task 4).
-  ToolProfile: { review_reason: { enum: ['new', 'changed', 'delisted', null] } },
-};
+export const PENDING_FIELDS: Readonly<Record<string, Readonly<Record<string, object>>>> = {};
 
 /** The schema with each pending field added to its model; a field the schema already has is left as the schema says. */
 function withPending(contracts: typeof schema): unknown {

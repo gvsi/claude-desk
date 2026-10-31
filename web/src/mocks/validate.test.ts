@@ -104,7 +104,9 @@ describe('mock payloads', () => {
     // stream, and cancels another.
     const [paid, dropped] = [...mockStore.world.links.keys()];
     if (paid === undefined || dropped === undefined) throw new Error('the deposit samples issue two links');
+    checks.push(['PaymentLinkView', await body('paymentLink', { params: { token: paid } })]);
     checks.push(['PaymentLinkStateResult', await body('completePayment', { params: { token: paid } })]);
+    checks.push(['PaymentLinkView', await body('paymentLink', { params: { token: paid } })]);
     checks.push(['PaymentLinkStateResult', await body('cancelPayment', { params: { token: dropped } })]);
 
     // The visitor cancels one of their holds; its resolved receipt joins the stream.
@@ -192,7 +194,7 @@ describe('mock payloads', () => {
       expect(row?.status, name).toBe('enabled');
       const confirmed = (await body('confirmTool', { ...owner, body: { tools: [{ tool: name, definition_sha256: row?.definition_sha256 }], enable: true } })) as ToolConfirmedOut;
       expect(confirmed.draft, name).toBeNull();
-      expect(confirmed.profile, name).toMatchObject({ tool: name, status: 'enabled', review_reason: null });
+      expect(confirmed.profiles, name).toMatchObject([{ tool: name, status: 'enabled', review_reason: null }]);
       expect(validateContract('ToolConfirmed', confirmed), name).toEqual([]);
     }
   });

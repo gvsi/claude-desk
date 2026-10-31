@@ -389,7 +389,7 @@ function ownerSession(sv: Server, req: Req): SessionRecord | Failure {
  * (plan 02b): the link's state now and, for a link a rule change cancelled, why.
  */
 function linkClosed(link: LinkRecord): Failure {
-  return failWith(409, 'kernel', { code: 'conflict', state: link.view.state, cancel_reason: link.cancelReason });
+  return failWith(409, 'kernel', { code: 'conflict', state: link.view.state, cancel_reason: link.view.cancel_reason ?? null });
 }
 
 /** Every route the mock answers from a copy. Unserved ones fall through to the catch-all, which records them. */
