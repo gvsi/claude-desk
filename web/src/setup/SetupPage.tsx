@@ -8,7 +8,7 @@ import type { SetupState, SetupStep } from '../api/views.ts';
 import { Button, ConceptFooter, LoadingLine, Mark, Notice, Steps, Wordmark } from '../ds/index.ts';
 import { inApp, useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../owner/inAppLinks.ts';
-import { desksQuery, findDesk, invalidateCopy } from '../owner/useDesks.ts';
+import { carrySetup, desksQuery, findDesk, invalidateCopy } from '../owner/useDesks.ts';
 import { SETUP_COPY, STEP_INDEX, STEP_NAMES } from './copy.ts';
 import { LiveStep } from './LiveStep.tsx';
 import { QuestionsStep } from './QuestionsStep.tsx';
@@ -123,14 +123,15 @@ function SetupInterview({ setupId }: { setupId: string }) {
 
   /**
    * The interview as it now stands. The copy's Desks name its step (`DeskSummary.setup`), so a new
-   * step has them read again: Today, opened next, would otherwise name the step before.
+   * step is written into them (`carrySetup`), which also reads them again in the background: Today,
+   * opened next, would otherwise name the step before.
    */
   const update = useCallback(
     (next: (now: SetupState | undefined) => SetupState | undefined) => {
       const key = setupQuery(setupId).queryKey;
       const was = queryClient.getQueryData<SetupState>(key)?.step;
       const now = queryClient.setQueryData<SetupState>(key, next);
-      if (now !== undefined && now.step !== was) void invalidateCopy(queryClient);
+      if (now !== undefined && now.step !== was) void carrySetup(queryClient, now);
     },
     [queryClient, setupId],
   );
@@ -138,10 +139,17 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const moveTo = useCallback((step: SetupStep) => update((now) => (now === undefined ? now : { ...now, step })), [update]);
   /** The API answered with the interview as it stands. */
   const onState = useCallback((next: SetupState) => update(() => next), [update]);
-  // Leaving setup, by "Save and exit", "Go to Today" or any other way, has the copy's Desks read
-  // again too: the steps' own reads (the draft, the situations, the safety check) move the interview
-  // on in the API without a step change here, and the page that opens next names the step it is at.
-  useEffect(() => () => void invalidateCopy(queryClient), [queryClient]);
+  // Leaving setup, by "Save and exit", "Go to Today" or any other way, writes the interview as it
+  // stands into the copy's Desks once more, then reads them again: the steps' own reads (the draft,
+  // the situations, the safety check) can have answered a read of them still out with the step
+  // before, and the page that opens next names the step setup holds, even while they can't be read.
+  useEffect(
+    () => () => {
+      const now = queryClient.getQueryData<SetupState>(setupQuery(setupId).queryKey);
+      void (now === undefined ? invalidateCopy(queryClient) : carrySetup(queryClient, now));
+    },
+    [queryClient, setupId],
+  );
   /** The interview read again, after a write whose answer was lost; null when it can't be read. */
   const reread = useCallback(
     () =>

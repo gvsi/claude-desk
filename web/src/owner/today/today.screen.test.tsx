@@ -1704,33 +1704,86 @@ describe("Today's unfinished setup", () => {
     expect(router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
   });
 
-  it('leaving_setup_right_after_a_step_names_the_new_step', async () => {
-    // The owner reads setup at its tools, goes on to the rules and leaves at once, well within the
-    // few seconds Today counts the Desks it read as fresh: the card names the rules, not the tools.
+  /** The card's line at the rules, with Answering off. */
+  const AT_RULES = "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.";
+
+  /**
+   * Opens setup at its tools, with the copy's Desks read there, at the tools; then `meanwhile` sets
+   * how the Desks answer from here on, the owner goes on to the rules and, once the draft is in and
+   * the API has moved setup on, leaves with "Save and exit" at once, within the few seconds Today
+   * counts the Desks read as fresh. Resolves on Today.
+   */
+  async function leaveRightAfterAStep(meanwhile: () => void = () => undefined): Promise<RenderResult> {
     const state = await deskAtTools();
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
     // The bar names the business once the copy's Desks are read, at the tools.
     await expect.element(screen.getByText('Okafor Plumbing', { exact: true }).first()).toBeVisible();
+    meanwhile();
     const startedAt = performance.now();
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
     await expect.poll(() => requests('setupRules').length).toBeGreaterThan(0);
-    // The draft is in: the API has moved setup on to the rules.
     await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    expect(performance.now() - startedAt, "left within the Desks' fresh window").toBeLessThan(5_000);
+    return screen;
+  }
+
+  /** The card names the rules, with the steps at Rules. */
+  async function expectCardAtRules(screen: RenderResult): Promise<void> {
     const card = region(screen, 'Finish setting up Okafor Plumbing');
-    await expect
-      .element(
-        card.getByText(
-          "Your answers are saved. Pick up at your rules, and I'll check them again before anything goes live. Answering stays off until then.",
-          { exact: true },
-        ),
-      )
-      .toBeVisible();
+    await expect.element(card.getByText(AT_RULES, { exact: true })).toBeVisible();
     expect(card.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('3Rules');
-    expect(performance.now() - startedAt, 'the card read the new step within the Desks\' fresh window').toBeLessThan(5_000);
+  }
+
+  it('leaving_setup_right_after_a_step_names_the_new_step', async () => {
+    // The owner reads setup at its tools, goes on to the rules and leaves at once: the card names the rules, not the tools.
+    await expectCardAtRules(await leaveRightAfterAStep());
+  });
+
+  it('leaving_setup_names_the_new_step_while_the_desks_are_still_read', async () => {
+    // The copy's Desks, read again from the tools on, answer slowly: each read is answered as setup
+    // stands when it arrives, and the answer comes only when the test lets it. Today already names
+    // the step setup holds, rather than the one the Desks named at the tools.
+    let held = 0;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const screen = await leaveRightAfterAStep(() => {
+      worker.use(
+        http.get(ROUTES.desks.path, async () => {
+          held += 1;
+          const answer = await mockStore.dispatch('desks');
+          await released;
+          if ('network' in answer) return HttpResponse.error();
+          return HttpResponse.json(answer.body as object, { status: answer.status });
+        }),
+      );
+    });
+    await expect.poll(() => held).toBeGreaterThan(0);
+    await expectCardAtRules(screen);
+    // The answers come: the read sent as setup moved on, answered with the tools before the draft
+    // moved the API on, is let go; the one sent since names the rules. The card still names them.
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expectCardAtRules(screen);
+  });
+
+  it('leaving_setup_names_the_new_step_when_the_desks_cannot_be_read', async () => {
+    // The copy's Desks can't be read again after the tools: Today still names the step setup holds,
+    // and keeps naming it while the reads keep failing.
+    let before = 0;
+    const screen = await leaveRightAfterAStep(() => {
+      before = requests('desks').length;
+      mockStore.inject({ route: 'desks', status: 503, times: 10_000 });
+    });
+    await expectCardAtRules(screen);
+    // Every read of the Desks from the tools on fails: the step change's, and Today's own with its retry.
+    await expect.poll(() => requests('desks').length - before, { timeout: 5_000 }).toBeGreaterThanOrEqual(2);
+    await expectCardAtRules(screen);
   });
 
   it('with_answering_on_the_line_says_nothing_of_answering', async () => {

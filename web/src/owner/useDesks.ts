@@ -8,7 +8,7 @@ import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanst
 import { useEffect, useState } from 'react';
 
 import { request } from '../api/http.ts';
-import type { BusinessOut, DeskSummary, NeedsYouItem } from '../api/views.ts';
+import type { BusinessOut, CopyOut, DeskSummary, NeedsYouItem, SetupStep } from '../api/views.ts';
 import { pollMs } from '../app/poll.ts';
 import { readLocal } from '../lib/storage.ts';
 
@@ -232,6 +232,24 @@ export async function invalidateCopy(queryClient: QueryClient): Promise<void> {
     queryClient.invalidateQueries({ queryKey: ME_KEY }),
     queryClient.invalidateQueries({ queryKey: OWNER_INBOX_KEY }),
   ]);
+}
+
+/**
+ * A Desk's setup interview as setup holds it now (its Desk, its id and its step), written into the
+ * copy's Desks read here, the businesses and the copy (`me`), whose `setup` names it: the interview
+ * and its step, or null once it is live. So the next page that reads them, Today, names the step at
+ * once, while a read of them is slow and after one fails. A read still out, answered before the
+ * step moved on, is let go (it reverts to what is written here), and they are read again in the
+ * background, so the API stays the source.
+ */
+export async function carrySetup(queryClient: QueryClient, state: { desk_id: string; interview_id: string; step: SetupStep }): Promise<void> {
+  const setup = state.step === 'live' ? null : { interview_id: state.interview_id, step: state.step };
+  const withSetup = (desk: DeskSummary): DeskSummary => (desk.desk_id === state.desk_id ? { ...desk, setup } : desk);
+  queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (now) => now?.map((business) => ({ ...business, desks: business.desks.map(withSetup) })));
+  queryClient.setQueryData<CopyOut>(ME_KEY, (now) => (now === undefined ? now : { ...now, desks: now.desks.map(withSetup) }));
+  void queryClient.cancelQueries({ queryKey: DESKS_KEY });
+  void queryClient.cancelQueries({ queryKey: ME_KEY });
+  await invalidateCopy(queryClient);
 }
 
 /** A Desk's own address in the owner app, which its pages sit under. */
