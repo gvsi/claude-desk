@@ -192,7 +192,17 @@ async function expectBackAt(page: Page, place: number, where: string): Promise<v
 }
 
 test('going_back_returns_to_the_readers_place', async ({ page }) => {
-  // Loaded at a section's address, a page opens at that section, though the router counts a load as a move back.
+  // Loaded at a section's address, a page opens at that section, though the router counts a load as a move back. The
+  // reading type's font files are held back until it has, so the type swaps in after the page opened there, as on a
+  // slow cold load; once the type has loaded, the section is still at its place.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route('https://fonts.gstatic.com/**', async (route) => {
+    await held;
+    await route.continue();
+  });
   await page.goto('/about/prediction#characteristics');
   await expect(title(page, 'Capability prediction')).toBeVisible(FIRST_DRAW);
   const atSection = () =>
@@ -201,7 +211,12 @@ test('going_back_returns_to_the_readers_place', async ({ page }) => {
       if (!section) return false;
       return Math.abs(section.getBoundingClientRect().top - parseFloat(getComputedStyle(section).scrollMarginTop)) <= 1;
     });
+  await expect.poll(() => page.evaluate(() => document.fonts.status), 'the type is still loading').toBe('loading');
   await expect.poll(atSection, 'opened at its section').toBe(true);
+  release();
+  await expect.poll(() => page.evaluate(() => document.fonts.status), 'the type has loaded').toBe('loaded');
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect.poll(atSection, 'still at its section once the type has loaded').toBe(true);
 
   // The proposal opens at its top, and so does the prediction from the proposal's link part way down. Back and
   // Forward return to where the reader was in each.
