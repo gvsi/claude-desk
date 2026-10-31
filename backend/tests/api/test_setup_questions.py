@@ -1204,28 +1204,44 @@ async def test_the_same_key_with_another_body_is_a_conflict(app, browser, fake, 
     assert len(await interviews(engine)) == 1
 
 
+@pytest.mark.parametrize("fail", ["unavailable", "unfit"])
+async def test_a_start_that_failed_before_the_desk_was_asked_for_frees_its_key(app, browser, fake, kernel_http, model,
+                                                                              engine, fail):
+    # Claude couldn't answer (or answered twice with what doesn't fit), so the kernel was never asked for a Desk: the
+    # start answers its error and leaves no row, and the same request sent again starts afresh.
+    owner = await new_owner(app, browser, kernel_http)
+    if fail == "unavailable":
+        model.add(unavailable())
+    else:
+        model.add(response(text_block("Rivera Plumbing.")), response(text_block("Rivera Plumbing.")))
+    first = await start_keyed(owner)
+    assert (first.status_code, first.json()) == (503, {"error": "model_unavailable"})
+    assert await interviews(engine) == [] and fake.called("POST /desks") == []
+    model.add(started())
+    again = await start_keyed(owner)
+    assert again.status_code == 201, again.text
+    assert len(fake.called("POST /desks")) == 1
+    assert (await start_keyed(owner)).json() == again.json()
+
+
 @pytest.mark.parametrize(("fail", "answered"), [
-    ("model", (503, {"error": "model_unavailable"})),
     ("422", (422, {"error": "kernel", "code": "invalid"})),
     ("500", (503, {"error": "kernel", "code": "internal"})),
     ("timeout", (503, {"error": "kernel", "code": "kernel_unavailable"})),
-], ids=["model unavailable", "kernel refused", "kernel 500", "kernel timeout"])
-async def test_a_repeat_of_a_failed_start_answers_its_failure(app, browser, fake, kernel_http, model, engine, fail,
-                                                              answered):
-    # The first start failed, and its answer was lost: the repeat answers the same failure and makes nothing, not even
-    # a model call. A new click sends a new key, which starts afresh.
+], ids=["kernel refused", "kernel 500", "kernel timeout"])
+async def test_a_start_that_failed_once_the_desk_was_asked_for_answers_its_failure_again(app, browser, fake,
+                                                                                       kernel_http, model, engine,
+                                                                                       fail, answered):
+    # The kernel was asked for the Desk, which may exist even when the answer was an error: the key keeps the outcome.
+    # A repeat answers the same failure and makes nothing, not even a model call; a new click sends a new key.
     owner = await new_owner(app, browser, kernel_http)
-    if fail == "model":
-        model.add(unavailable())
-    else:
-        model.add(started())
-        fake.fail("POST /desks", fail, times=1)
+    model.add(started())
+    fake.fail("POST /desks", fail, times=1)
     first = await start_keyed(owner)
     assert (first.status_code, first.json()) == answered
-    asked, made = len(model.requests), len(fake.called("POST /desks"))
     repeat = await start_keyed(owner)
     assert (repeat.status_code, repeat.json()) == answered
-    assert (len(model.requests), len(fake.called("POST /desks"))) == (asked, made)
+    assert (len(model.requests), len(fake.called("POST /desks"))) == (1, 1)
     ((interview_id, desk_id),) = await interviews(engine)
     assert desk_id is None
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).status_code == 404
@@ -1233,7 +1249,7 @@ async def test_a_repeat_of_a_failed_start_answers_its_failure(app, browser, fake
     model.add(started())
     fresh = await start_keyed(owner, "start-again")
     assert fresh.status_code == 201, fresh.text
-    assert len(fake.called("POST /desks")) == made + 1
+    assert len(fake.called("POST /desks")) == 2
 
 
 async def test_a_repeat_while_the_first_is_starting_answers_in_progress_at_once(app, browser, fake, kernel_http, model,

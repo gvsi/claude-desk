@@ -25,7 +25,9 @@ then the Desk's, with the blocks and signed statuses the kernel checked. Runs li
 A send with the client's idempotency key (one per click) claims the key in the copy before the kernel mints the agent
 (`DemoAgents.claim`, which checks and takes it with no await between, so of two requests racing in the process one
 takes it): a repeat answers the run the first started and starts nothing; one for another task, or from another
-session or to another Desk than the key's, is `KeyReused`; and a run whose agent couldn't be minted stays `failed`. Keys live in memory beside the runs, in a map of their own that
+session or to another Desk than the key's, is `KeyReused`. A run whose agent couldn't be minted ends `failed` and
+frees its key, since nothing was made, so the same request can be sent again; once a run started, its key keeps it
+however it ends. Keys live in memory beside the runs, in a map of their own that
 keeps each for its run's hour, so a key outlives a run record the 50-run bound dropped: its repeat answers the same
 run ID, whose poll is then 404, and never starts a second run. The map holds at most 1000 and never drops a key early:
 full, it refuses a new one (`KeysFull`) until the oldest key's hour ends. Like the runs, keys are this process's alone: a
@@ -277,7 +279,7 @@ class DemoAgents:
     def claim(self, copy_id: str, key: str, request_sha256: str, task: DemoTask, slug: str,
               launcher: Ids) -> tuple[str, DemoAgentRun | None]:
         """Take the key in the copy for a new `running` run, checked and taken with no await between: the run's ID
-        and its record, which the caller then `launch`es or `fail`s. When the copy already holds the key, the ID of
+        and its record, which the caller then `launch`es or `free`s. When the copy already holds the key, the ID of
         the run it started and None (`KeyReused` for another body, session or Desk); `KeysFull` when the map holds
         `MAX_KEYS`."""
         held = self.keyed(copy_id, key, request_sha256, slug, launcher)
@@ -300,9 +302,13 @@ class DemoAgents:
         oldest = next(iter(self._keys.values()))
         return max(1, math.ceil((oldest.claimed_at + RUN_LIFE - now).total_seconds()))
 
-    def fail(self, run: DemoAgentRun, reason: str) -> None:
-        """End a claimed run that couldn't start (its agent wasn't minted) `failed`."""
+    def free(self, copy_id: str, key: str, run: DemoAgentRun, reason: str) -> None:
+        """End a claimed run that couldn't start (its agent wasn't minted) `failed`, and let its key go: nothing was
+        made, so the same request may be sent again. A repeat that already has the run's ID reads it `failed`."""
         _fail(run, reason)
+        held = self._keys.get((copy_id, key))
+        if held is not None and held.run_id == run.run_id:
+            del self._keys[(copy_id, key)]
 
     def launch(self, issued: DemoAgentIssued, task: DemoTask, slug: str, launcher: Ids,
                run: DemoAgentRun | None = None) -> str:

@@ -10,12 +10,14 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   answering is deleted, and the request answers the kernel's error). Claude then asks for consent. A start sent with
   the client's `idempotency_key` writes the interview's row first, holding the key and its body's hash, with no Desk
   yet (a read of it is 404 meanwhile); a unique index on `(copy_id, idempotency_key)` lets one row in a copy hold a
-  key. A repeat (`repeated_start`) finds the row and answers its interview as it stands, with nothing made: 409
-  `conflict` for another body, the stored failure again when the first failed (`start_error`), and while the first is
-  still starting, 409 `in_progress` at once (`retry_after` 2 s), holding nothing while the client waits. The lookup,
-  the limits and the claim run under the key's lock in this process (`ADMISSIONS`), so a concurrent repeat waits for
-  the first's admission and is never counted; another process's repeat meets the unique index instead. A start
-  without a key writes its row last.
+  key. A start that fails before the kernel is asked for the Desk (Claude couldn't answer, say) deletes its row, since
+  nothing was made, so the same request can be sent again; once the Desk was asked for, the row keeps the outcome,
+  a failure too (`start_error`). A repeat (`repeated_start`) finds the row and answers its interview as it stands,
+  with nothing made: 409 `conflict` for another body, the stored failure again when the first failed, and while the
+  first is still starting, 409 `in_progress` at once (`retry_after` 2 s), holding nothing while the client waits.
+  The lookup, the limits and the claim run under the key's lock in this process (`ADMISSIONS`), so a concurrent
+  repeat waits for the first's admission and is never counted; another process's repeat meets the unique index
+  instead. A start without a key writes its row last.
 - **Consent** (`consent`): stored once. On yes, the owner's Claude memory is searched (`native.read_memory`), then
   the website read (`native.fetch_website`) when the description named one; then the first question. On no, no
   memory or website read ever runs for the interview, and a website the owner names later is kept as text.
@@ -78,9 +80,10 @@ from zoneinfo import ZoneInfo
 
 from psycopg.errors import LockNotAvailable
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.sql import Executable
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from desk.api.deps import ApiProblem, OwnerCtx
@@ -590,24 +593,31 @@ async def _answering_off(owner: OwnerCtx, desk_id: str) -> None:
                 raise failure from None
 
 
-async def _begin(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: SetupStartIn,
-                 interview_id: str) -> tuple[Interview, str]:
-    """Read the owner's description and make the Desk with Answering off: the interview asking for consent, and the
-    Desk's slug. Nothing of the interview is stored here."""
+async def _read_description(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
+                            body: SetupStartIn) -> tuple[SetupStart, CreateDeskRequest]:
+    """Claude's reading of the owner's description, and the Desk to ask the kernel for. Nothing is made here."""
     described = await structured(model, recorder(engine, owner), SETUP_START_SYSTEM,
                                  [_user(wrap(OWNER_DESCRIPTION_TAG, body.description))], SetupStart, START_MAX_TOKENS)
     business_name = " ".join(described.business_name.split())
     name = owner_name(body.owner_display_name, described.owner_display_name, business_name)
     seed = DeskSeed(name=DESK_NAME, charter=[], hours=[], price_items=[], calendar_slots=[], people=[], documents=[],
                     notifications=default_notifications(described.business_type))
-    created = await owner.kernel.call("POST /desks", CreateDeskRequest(
-        business=BusinessSeed(name=business_name, owner_display_name=name, timezone=body.timezone), desk=seed))
+    return described, CreateDeskRequest(
+        business=BusinessSeed(name=business_name, owner_display_name=name, timezone=body.timezone), desk=seed)
+
+
+async def _make_desk(owner: OwnerCtx, body: SetupStartIn, described: SetupStart, desk: CreateDeskRequest,
+                     interview_id: str) -> tuple[Interview, str]:
+    """Ask the kernel for the Desk and turn its Answering off: the interview asking for consent, and the Desk's slug.
+    Nothing of the interview is stored here."""
+    created = await owner.kernel.call("POST /desks", desk)
     await _answering_off(owner, created.desk_id)
     site = website_url(described.website)
     interview = Interview(
         interview_id=interview_id, copy_id=owner.copy_id, desk_id=created.desk_id,
         business_type=described.business_type, step="questions", consent=None,
-        answers=SetupAnswers(summary=described.summary, business_name=business_name, owner_display_name=name),
+        answers=SetupAnswers(summary=described.summary, business_name=desk.business.name,
+                             owner_display_name=desk.business.owner_display_name),
         transcript=[Entry(role="owner", text=body.description, website=site[0] if site else None),
                     Entry(role="claude", text=CONSENT_QUESTION, question="consent")])
     return interview, created.slug
@@ -632,7 +642,7 @@ async def _claim(engine: AsyncEngine, copy_id: str, key: str, request_sha256: st
     return interview_id
 
 
-def _failure_record(error: Exception) -> dict:
+def _failure_record(error: BaseException) -> dict:
     """What a keyed start that failed answered, for a repeat to answer again (`_failure`)."""
     if isinstance(error, ApiProblem):
         return {"status": error.status, "error": error.error, "code": error.code}
@@ -693,7 +703,8 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
     key = body.idempotency_key
     if key is None:
         await admit()
-        interview, slug = await _begin(owner, engine, model, body, "setup-" + secrets.token_hex(16))
+        described, desk = await _read_description(owner, engine, model, body)
+        interview, slug = await _make_desk(owner, body, described, desk, "setup-" + secrets.token_hex(16))
         async with engine.connect() as conn:
             await conn.execute(insert(INTERVIEWS).values(interview_id=interview.interview_id,
                                                          copy_id=interview.copy_id, desk_id=interview.desk_id,
@@ -714,22 +725,33 @@ async def start(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, body: 
         return repeat
     keyed = (INTERVIEWS.c.interview_id == interview_id, INTERVIEWS.c.copy_id == owner.copy_id)
     try:
-        interview, slug = await _begin(owner, engine, model, body, interview_id)
+        described, desk = await _read_description(owner, engine, model, body)
+    except BaseException:                           # nothing was made: the key is free for the same request again
+        await _settle(engine, delete(INTERVIEWS).where(*keyed))
+        raise
+    try:
+        interview, slug = await _make_desk(owner, body, described, desk, interview_id)
         async with engine.connect() as conn:
             await conn.execute(update(INTERVIEWS).where(*keyed).values(
                 desk_id=interview.desk_id, business_type=interview.business_type, **_stored(interview),
                 updated_at=func.now()))
             await conn.commit()
-    except Exception as error:
-        try:
-            async with engine.connect() as conn:
-                await conn.execute(update(INTERVIEWS).where(*keyed).values(start_error=_failure_record(error),
-                                                                           updated_at=func.now()))
-                await conn.commit()
-        except Exception as saving:                 # the first answer still goes out; a repeat waits, then 409
-            logger.warning("a keyed setup start's failure couldn't be saved (%s)", type(saving).__name__)
+    except BaseException as error:                  # the Desk was asked for: the key keeps the outcome
+        await _settle(engine, update(INTERVIEWS).where(*keyed).values(start_error=_failure_record(error),
+                                                                      updated_at=func.now()))
         raise
     return setup_state(interview, slug)
+
+
+async def _settle(engine: AsyncEngine, statement: Executable) -> None:
+    """A failed keyed start's last write to its row, on a connection of its own. One that fails is logged by type
+    only: the start's own answer still goes out, and its row stays in progress for a repeat to find."""
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(statement)
+            await conn.commit()
+    except Exception as failed:
+        logger.warning("a keyed setup start's row couldn't be settled (%s)", type(failed).__name__)
 
 
 async def read(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SetupState:

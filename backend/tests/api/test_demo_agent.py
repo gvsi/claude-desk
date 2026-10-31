@@ -723,25 +723,25 @@ async def test_the_same_key_for_another_task_is_a_conflict(app, browser, fake, k
     assert len(fake.called("POST /agents/demo")) == 1 and len(agent_model.requests) == 1
 
 
-async def test_a_repeat_after_a_failed_mint_answers_the_failed_run(app, browser, fake, kernel_http, agent_model):
-    # The kernel couldn't mint the agent and the error's answer was lost: the repeat answers the run the key claimed,
-    # `failed` with no turns, and mints nothing. A new click sends a new key, which starts afresh.
+async def test_a_failed_mint_frees_the_key_and_a_run_that_started_keeps_it(app, browser, fake, kernel_http,
+                                                                            agent_model):
+    # The kernel couldn't mint the agent, so nothing was made: the send answers its error and frees its key, and the
+    # same request sent again starts a run. Once a run started, the key keeps it however it ends: here its model
+    # can't answer, the run fails, and a repeat answers that failed run and mints nothing.
     slug = await new_slug(kernel_http, fake)
     client, _, _ = await open_session(app, browser, slug)
     fake.fail("POST /agents/demo", "500", times=1)
     first = await send_keyed(client, slug)
     assert (first.status_code, first.json()) == (503, {"error": "kernel", "code": "internal"})
-    repeat = await send_keyed(client, slug)
-    assert repeat.status_code == 202, repeat.text
-    run = (await read_run(client, slug, repeat.json()["run_id"])).json()
-    assert (run["state"], run["turns"]) == ("failed", [])
-    assert len(fake.called("POST /agents/demo")) == 1 and agent_model.requests == []
-
-    agent_model.add(step("", done=True))
-    fresh = await send_keyed(client, slug, key="agent-again")
-    assert fresh.status_code == 202 and fresh.json() != repeat.json()
+    agent_model.add(unavailable())
+    again = await send_keyed(client, slug)
+    assert again.status_code == 202, again.text
     await app.state.runtime.agents.drain()
-    assert (await read_run(client, slug, fresh.json()["run_id"])).json()["state"] == "done"
+    run = (await read_run(client, slug, again.json()["run_id"])).json()
+    assert (run["state"], run["turns"]) == ("failed", [])
+    repeat = await send_keyed(client, slug)
+    assert (repeat.status_code, repeat.json()) == (202, again.json())
+    assert len(fake.called("POST /agents/demo")) == 2 and len(agent_model.requests) == 1
 
 
 async def test_repeats_never_count_on_the_limit_and_a_refused_request_claims_nothing(app, browser, fake, kernel_http,

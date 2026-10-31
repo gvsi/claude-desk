@@ -419,15 +419,18 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
     here. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.
 
     With an `idempotency_key` (one per click), a repeat in the copy within the hour answers the run the first started
-    (its ID; poll it for its state) and starts nothing; a repeat that finds the key never counts on the limit. One
+    (its ID; poll it for its state) and starts nothing, and a repeat that finds the key never counts on the limit. One
     with another task, or from another session or to another Desk than the key's, is 409 `conflict`. The key is
-    claimed once the limit and the budget let the request through, before the kernel mints the agent, so a request
-    they refuse claims nothing; a run whose agent couldn't be minted stays `failed`, and a new click sends a new key.
-    A request is admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent
-    meanwhile waits for that admission, then answers the run; another process admits on its own, so during a deploy's
-    overlap a repeat routed to the other task can be counted twice. Keys live in this process's memory, like the
-    runs, each for its run's hour; while 1000 are held, a new one is 429 `rate_limited` until the oldest one's hour
-    ends. Without a key, each request starts its own run."""
+    claimed once the limit and the budget let the request through, before the kernel mints the agent. A request is
+    admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent meanwhile waits
+    for that admission, then answers the run; another process admits on its own, so during a deploy's overlap a repeat
+    routed to the other task can be counted twice. Keys live in this process's memory, like the runs, each for its
+    run's hour; while 1000 are held, a new one is 429 `rate_limited` until the oldest one's hour ends.
+
+    One rule for failures, as when starting setup: a request that fails before anything is made (refused by the limit
+    or the budget, or the kernel couldn't mint the agent) frees its key, so the same request can be sent again; once
+    the run started, the key keeps it however it ends, and a new click sends a new key. Without a key, each request
+    starts its own run."""
     state = runtime(request).started()
     claimed = None
     if body.idempotency_key is None:
@@ -447,8 +450,8 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
     try:
         issued = await _mint_agent(ctx)
     except BaseException:
-        if claimed is not None:
-            state.agents.fail(claimed, "the agent couldn't be minted")
+        if claimed is not None:                         # nothing was made: the key is free again
+            state.agents.free(ctx.ids.copy_id, body.idempotency_key, claimed, "the agent couldn't be minted")
         raise
     return AgentRunStarted(run_id=state.agents.launch(issued, body.task, slug, ctx.ids, run=claimed))
 
