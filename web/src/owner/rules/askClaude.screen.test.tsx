@@ -88,6 +88,50 @@ describe('ask claude', () => {
     expect(top()).toBeCloseTo(closed, 0);
   });
 
+  it('nothing_in_the_payments_rows_jumps_at_1512', async () => {
+    // At 1512 px the header keeps one line, but inside the Payments and Stripe rows, whose own
+    // height stays the same, the summary lines move when the column narrows. Scrolled to them, on
+    // the first frame of the open and of the close, every part of those rows is where it was.
+    await cdp().send('Animation.enable');
+    onTestFinished(async () => {
+      await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    });
+    const { screen } = await renderRoute(RULES, { viewport: { width: 1512, height: 982 } });
+    const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+    await expect.element(composer).toBeVisible();
+    const sections = () =>
+      [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section')].filter((section) =>
+        /^(Payments|Stripe)/.test(section.querySelector('.cd-connector-section__header')?.textContent?.trim() ?? ''),
+      );
+    await expect.poll(() => sections().length).toBe(2);
+    // The words go in first, since typing brings the composer into view; then the rows are scrolled to.
+    await composer.fill(ASK);
+    (sections()[0] as HTMLElement).scrollIntoView({ block: 'start' });
+    const main = screen.container.querySelector('main') as HTMLElement;
+    expect(main.scrollTop).toBeGreaterThan(0);
+    const parts = () => sections().flatMap((section) => [...section.querySelectorAll<HTMLElement>('*')]);
+    // Where each part is in the page, wherever it is scrolled (closing returns focus to the composer, which scrolls).
+    const tops = () => parts().map((el) => Math.round((el.getBoundingClientRect().top + main.scrollTop) * 10) / 10);
+    /** Each part that moved more than half a pixel from `was`, as "class: from → to". */
+    const jumps = (was: number[]) =>
+      tops().flatMap((top, index) => (Math.abs(top - (was[index] ?? top)) > 0.5 ? [`${parts()[index]?.className}: ${was[index]} → ${top}`] : []));
+    const closed = tops();
+
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
+    await userEvent.keyboard('{Enter}');
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    await expect.element(panel).toBeVisible();
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await settled(screen.container);
+    const opened = tops();
+
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
+    await panel.getByRole('button', { name: 'Close' }).click();
+    expect(jumps(opened), 'closing').toEqual([]);
+    await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await settled(screen.container);
+  });
+
   it('ask_claude_opens_at_once_under_reduced_motion', async () => {
     await reduceMotion();
     const { screen } = await renderRoute(RULES);

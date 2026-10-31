@@ -475,6 +475,17 @@ it('a_late_exit_never_cancels_the_next_panels_fallback', async () => {
 const reflowingPage = (
   <div>
     <div style={{ aspectRatio: '8 / 1' }} />
+    {/* Its own transform, which the glide must not scale. */}
+    <p data-testid="below" style={{ transform: 'scale(0.5)' }}>
+      Quotes
+    </p>
+  </div>
+);
+
+/** The same page in a fixed-height box, as a fill page's columns are: the box keeps its height, and what is in it still moves. */
+const fixedHeightPage = (
+  <div style={{ height: '240px' }}>
+    <div style={{ aspectRatio: '8 / 1' }} />
     <p data-testid="below">Quotes</p>
   </div>
 );
@@ -492,33 +503,72 @@ function holdAll(time: number | null): void {
   }
 }
 
-it('what_the_new_width_moves_up_or_down_glides_too', async () => {
-  // Laid out at its new width at once, the page changes height where its text or blocks reflow,
-  // and what is under them moves: it glides there on transform, as the page glides sideways, so
-  // nothing jumps on the first frame of the open or the close.
-  await motion();
-  await page.viewport(LAPTOP.width, LAPTOP.height);
+/**
+ * Opens and closes the panel beside `pageWith`, checking that what is under the reflowing block
+ * glides from where it was on the first frame of each, on the `translate` transform property, and
+ * lands where the new layout puts it.
+ */
+async function expectGlidesUpAndDown(pageWith: ReactNode, name: string): Promise<void> {
   const below = () => container.querySelector('[data-testid="below"]') as HTMLElement;
   const top = () => below().getBoundingClientRect().top;
-  act(() => root.render(shellWithPanel(false, () => {}, reflowingPage)));
+  act(() => root.render(shellWithPanel(false, () => {}, pageWith)));
   const closed = top();
 
-  act(() => root.render(shellWithPanel(true, () => {}, reflowingPage)));
+  act(() => root.render(shellWithPanel(true, () => {}, pageWith)));
   holdAll(0);
-  expect(Math.abs(top() - closed), 'opening: the first frame').toBeLessThanOrEqual(0.5);
+  expect(Math.abs(top() - closed), `${name}, opening: the first frame at ${top()}, was ${closed}`).toBeLessThanOrEqual(0.5);
   const lifts = below().getAnimations();
-  expect(lifts).toHaveLength(1);
-  expect(properties(lifts[0] as Animation)).toEqual(['transform']);
-  expect(lifts[0]?.effect?.getTiming().duration).toBe(Number.parseFloat(token('--motion-base')));
-  expect(easing(lifts[0]?.effect?.getTiming().easing ?? '')).toBe(easing(token('--motion-ease-emphasis')));
+  expect(lifts, name).toHaveLength(1);
+  expect(properties(lifts[0] as Animation), name).toEqual(['translate']);
+  expect(lifts[0]?.effect?.getTiming().duration, name).toBe(Number.parseFloat(token('--motion-base')));
+  expect(easing(lifts[0]?.effect?.getTiming().easing ?? ''), name).toBe(easing(token('--motion-ease-emphasis')));
   holdAll(null);
   const opened = top();
-  expect(closed - opened).toBeCloseTo(24, 0);
+  expect(closed - opened, name).toBeCloseTo(24, 0);
 
-  act(() => root.render(shellWithPanel(false, () => {}, reflowingPage)));
+  act(() => root.render(shellWithPanel(false, () => {}, pageWith)));
   holdAll(0);
-  expect(Math.abs(top() - opened), 'closing: the first frame').toBeLessThanOrEqual(0.5);
-  expect(below().getAnimations()[0]?.effect?.getTiming().duration).toBe(Number.parseFloat(token('--motion-fast')));
+  expect(Math.abs(top() - opened), `${name}, closing: the first frame at ${top()}, was ${opened}`).toBeLessThanOrEqual(0.5);
+  expect(below().getAnimations()[0]?.effect?.getTiming().duration, name).toBe(Number.parseFloat(token('--motion-fast')));
   holdAll(null);
-  expect(top()).toBeCloseTo(closed, 0);
+  expect(top(), name).toBeCloseTo(closed, 0);
+}
+
+it('what_the_new_width_moves_up_or_down_glides_too', async () => {
+  // Laid out at its new width at once, the page changes height where its text or blocks reflow,
+  // and what is under them moves: it glides there on a transform, as the page glides sideways, so
+  // nothing jumps on the first frame of the open or the close. A block with its own transform
+  // glides by the same distance on screen.
+  await motion();
+  await page.viewport(LAPTOP.width, LAPTOP.height);
+  await expectGlidesUpAndDown(reflowingPage, 'a scaled block');
+});
+
+it('what_moves_inside_a_fixed_height_box_glides_too', async () => {
+  // A box that keeps its height (a fill page's column) still lays out what is in it anew.
+  await motion();
+  await page.viewport(LAPTOP.width, LAPTOP.height);
+  await expectGlidesUpAndDown(fixedHeightPage, 'a fixed-height box');
+});
+
+it('a_long_page_glides_at_most_200_blocks', async () => {
+  // A thousand rows that each change height: only what can be seen moving glides, and never more
+  // than 200 blocks; the rest land in place, as the page itself does.
+  await motion();
+  await page.viewport(LAPTOP.width, LAPTOP.height);
+  const rows = (
+    <div>
+      {Array.from({ length: 1000 }, (_, index) => (
+        <div key={index} data-row="" style={{ aspectRatio: '480 / 1' }} />
+      ))}
+    </div>
+  );
+  act(() => root.render(shellWithPanel(false, () => {}, rows)));
+  act(() => root.render(shellWithPanel(true, () => {}, rows)));
+  const lifted = [...container.querySelectorAll('[data-row]')].filter((row) => row.getAnimations().length > 0);
+  expect(lifted.length).toBeGreaterThan(0);
+  expect(lifted.length).toBeLessThanOrEqual(200);
+  // Rows out of sight neither before nor after never glide.
+  const last = container.querySelectorAll('[data-row]')[999] as HTMLElement;
+  expect(last.getAnimations()).toHaveLength(0);
 });
