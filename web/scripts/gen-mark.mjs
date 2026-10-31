@@ -1,15 +1,23 @@
 #!/usr/bin/env node
-// Generates the Claude Desk mark's geometry (src/ds/components/Mark/markGeometry.ts) from the mark's
-// signed drawing (src/ds/components/Mark/mark.svg), which is also the page's icon, so `Mark` draws
-// exactly the same shapes.
-//   node scripts/gen-mark.mjs          write markGeometry.ts
-//   node scripts/gen-mark.mjs --check  exit 1 if markGeometry.ts is stale
+// Generates two files from the Claude Desk mark's signed drawing (src/ds/components/Mark/mark.svg),
+// so neither can drift from it:
+//   - markGeometry.ts, the shapes `Mark` draws, with or without the tile;
+//   - favicon.svg, the page's icon: the bell without its tile, in the drawing's dark ink on a light
+//     tab bar and in the light ink on a dark one.
+//   node scripts/gen-mark.mjs          write both files
+//   node scripts/gen-mark.mjs --check  exit 1 if either file is stale
 // The drawing is read strictly: a white tile, then one group holding the clay group and the ink
 // group, with nothing else. Any other element, attribute or value throws instead of being dropped.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+/**
+ * The light ink: on a dark ground, where the bell has no tile, its ink is drawn in this color in
+ * place of the drawing's dark ink (owner, 2026-10-30). The `mark-ink-light` token is this color.
+ */
+export const LIGHT_INK = '#faf9f5';
 
 const NUMBER = /^-?\d+(?:\.\d+)?$/;
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -159,32 +167,64 @@ export function buildMarkGeometry(svg) {
   ].join('\n');
 }
 
+/** An ink shape as the drawing writes it. */
+function shapeTag(shape) {
+  return 'd' in shape ? `<path d="${shape.d}"/>` : `<circle cx="${shape.cx}" cy="${shape.cy}" r="${shape.r}"/>`;
+}
+
+/**
+ * The favicon.svg text for the mark in `svg`: the bell without its tile, its clay as drawn, its ink
+ * the drawing's dark ink, and the light ink when the browser is in its dark color scheme, so one
+ * icon reads on a light tab bar and on a dark one.
+ */
+export function buildFavicon(svg) {
+  const { geometry, colors } = readMark(svg);
+  return [
+    '<!-- Generated from mark.svg by `npm run gen:mark`; never edit this file by hand. -->',
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${geometry.viewBox}">`,
+    `<style>@media (prefers-color-scheme: dark) { .ink { fill: ${LIGHT_INK} } }</style>`,
+    `<g transform="${geometry.art}">`,
+    `<g fill="${colors.clay}">${geometry.clay.map((d) => `<path d="${d}"/>`).join('')}</g>`,
+    `<g class="ink" fill="${colors.ink}">${geometry.ink.map(shapeTag).join('')}</g>`,
+    '</g>',
+    '</svg>',
+    '',
+  ].join('\n');
+}
+
+/** Every file generated from the drawing in `svg`: its path from `web/` and its text. */
+export function generatedFiles(svg) {
+  return [
+    { file: 'src/ds/components/Mark/markGeometry.ts', text: buildMarkGeometry(svg) },
+    { file: 'src/ds/components/Mark/favicon.svg', text: buildFavicon(svg) },
+  ];
+}
+
 function main(args) {
   const web = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
   const drawingPath = path.join(web, 'src', 'ds', 'components', 'Mark', 'mark.svg');
-  const outPath = path.join(web, 'src', 'ds', 'components', 'Mark', 'markGeometry.ts');
   const unknown = args.filter((arg) => arg !== '--check');
   if (unknown.length > 0) {
     console.error(`Unknown argument: ${unknown.join(' ')}. Use --check to verify without writing.`);
     return 2;
   }
-  const text = buildMarkGeometry(readFileSync(drawingPath, 'utf8'));
+  const files = generatedFiles(readFileSync(drawingPath, 'utf8'));
   if (args.includes('--check')) {
-    let current = '';
-    try {
-      current = readFileSync(outPath, 'utf8');
-    } catch {
-      // A missing file is stale.
-    }
-    if (current !== text) {
-      console.error('src/ds/components/Mark/markGeometry.ts is out of date with mark.svg. Run `npm run gen:mark`.');
-      return 1;
-    }
-    console.log('src/ds/components/Mark/markGeometry.ts matches mark.svg.');
+    const stale = files.filter(({ file, text }) => {
+      try {
+        return readFileSync(path.join(web, file), 'utf8') !== text;
+      } catch {
+        // A missing file is stale.
+        return true;
+      }
+    });
+    for (const { file } of stale) console.error(`${file} is out of date with mark.svg. Run \`npm run gen:mark\`.`);
+    if (stale.length > 0) return 1;
+    console.log(`${files.map(({ file }) => file).join(' and ')} match mark.svg.`);
     return 0;
   }
-  writeFileSync(outPath, text);
-  console.log('Wrote src/ds/components/Mark/markGeometry.ts from mark.svg.');
+  for (const { file, text } of files) writeFileSync(path.join(web, file), text);
+  console.log(`Wrote ${files.map(({ file }) => file).join(' and ')} from mark.svg.`);
   return 0;
 }
 

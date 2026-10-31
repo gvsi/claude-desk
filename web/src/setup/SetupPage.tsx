@@ -49,7 +49,7 @@ function SetupShell({ business, step, exitTo, wide = false, children }: SetupShe
         <div className="cd-setup__lead">
           <span className="cd-setup__brand">
             <Mark size={16} />
-            <Wordmark beta />
+            <Wordmark preview />
           </span>
           {business ? (
             <span className="cd-setup__business cd-type-control" data-copy="user">

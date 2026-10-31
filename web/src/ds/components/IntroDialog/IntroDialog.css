@@ -72,10 +72,6 @@
   gap: var(--space-8);
 }
 
-.cd-intro__brand > .cd-pill {
-  margin-left: var(--space-4);
-}
-
 .cd-intro__lede {
   display: flex;
   flex-direction: column;
@@ -236,17 +232,6 @@
   font-size: 12px;
   line-height: 1;
   font-weight: 560;
-}
-
-.cd-intro__tile {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: var(--size-control);
-  height: var(--size-control);
-  border-radius: var(--radius-control);
-  background: var(--bg-app);
 }
 
 .cd-intro__card-body {
