@@ -2070,6 +2070,10 @@ class FakeKernelState:
                 if (named and fact.kind == "charter" and "public" in fact.label.readers and self._current(fact)
                         and (template != "hours" or desk.hours)):
                     charter.append(self._render(desk, template, fact, language))
+        # Scan the final rendered group: filtering can bring separate promise fragments together.
+        policies = [(block.fact_id, block.text) for block in charter if block.template == "policy"]
+        if public_policy_fields(policies):
+            charter = [block for block in charter if block.template != "policy"]
         card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
                           tools=self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,

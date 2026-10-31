@@ -2432,6 +2432,31 @@ async def test_policy_unmarked_words_pass_write_public_read_and_reply(kernel, ro
     assert verdict.signature
 
 
+@pytest.mark.kernel_plan("01b")
+@pytest.mark.parametrize("stored", ["discount", "private", "expired"])
+async def test_public_read_withholds_unsafe_stored_policy_group(kernel, ro_read, arrange, stored):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    path = {"desk_slug": desk_slug(ro_read, schema, copy)}
+    if stored == "discount":
+        arrange.stored_policy(copy, "arrival", "20% off for first-time clients")
+    else:
+        texts = {"arrival": "No", "first_visit": "Ask about our services.",
+                 "service_area": "charge for consultations."}
+        for key, text in texts.items():
+            arrange.stored_policy(copy, key, text)
+        # The visible middle card separates the promise until read filtering removes it.
+        before = await http.public().call("GET /public/{desk_slug}", path=path)
+        assert [block.text for block in before.charter if block.template == "policy"] == list(texts.values())
+        arrange.stored_policy(copy, "first_visit", texts["first_visit"],
+                              readers=("owner",) if stored == "private" else ("public",),
+                              expired=stored == "expired")
+    for language in ("en", "es"):
+        page = await http.public().call("GET /public/{desk_slug}", path=path, query={"lang": language})
+        assert all(block.template != "policy" for block in page.charter)
+        assert {"hours", "contact"} <= {block.template for block in page.charter}
+
+
 async def draft(owner: CredentialView, desk_id: str, cards: list[RuleCard], parent: int):
     return await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
                                                                      expected_parent=parent))
