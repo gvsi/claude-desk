@@ -166,6 +166,7 @@ from desk.contracts import (
     ToolName,
     ToolProfile,
     Violation,
+    money_tool,
 )
 from desk.kernel_api import (
     KERNEL_ROUTES,
@@ -2213,12 +2214,16 @@ class FakeKernelState:
         expires_at = self.now + {"allow": ALLOW_FOR, "hold": HOLD_FOR, "refuse": timedelta(0)}[outcome]
         answers, inbox = [], []
         if outcome == "hold":
-            money = action.tool in MONEY_TOOLS and (action.amount_cents or 0) > AUTO_MONEY_HARD_CAP_CENTS
+            # allow_person on money only within the Desk's cap (`compiler.capped`), and never with no amount, as
+            # the kernel's `answers_for` offers it
+            cap = min(desk.auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS)
+            past_cap = money_tool(action.tool, action.effects) and (action.amount_cents is None
+                                                                    or action.amount_cents > cap)
             # a limit hold, through an auto card's hold twin, offers no "Deny always"; a scripted hold stands for an
             # ask card's and keeps it (master "Decision lifecycle")
             limit_hold = not scripted and self._decided_by_auto_card(desk, card_ids)
             answers = [answer for answer in HELD_ANSWERS
-                       if (answer != "allow_person" or (session.person_id is not None and not money))
+                       if (answer != "allow_person" or (session.person_id is not None and not past_cap))
                        and (answer != "deny_always" or not limit_hold)]
             inbox = [self._alert_owner(desk, "A request is waiting for you.", decision_id=decision_id)]
         tier = {"allow": "A", "hold": "H", "refuse": "B"}[outcome]

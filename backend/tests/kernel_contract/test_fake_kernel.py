@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable
-from desk.contracts import CopyCreated, SessionCreated
+from desk.contracts import CopyCreated, NormalizedAction, ResourceRef, SessionCreated
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DemoAgentRequest, Health
 from tests.kernel_contract.fake_kernel import Desk, FakeKernelState, fake_kernel_app
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA, FakeRO
@@ -297,6 +297,32 @@ async def test_the_mirror_holds_each_rules_versions_money_cap(fake, api_conn):
                 owner_display_name="Sam", brand={}, name="Main line", slug="new-business", hours=[],
                 created_at=state.now)
     assert (rivera.auto_money_cap_cents, made.auto_money_cap_cents) == (50_000, 0)
+
+
+async def test_a_money_hold_offers_allow_person_only_within_the_desks_cap(fake, monkeypatch):
+    """A held money request offers "Allow for this person" only when its amount is within the Desk's
+    money cap (the Rivera seed's $500), never up to the $10,000 ceiling, and never with no amount, as
+    the kernel's `answers_for` does: the fake is never looser than the kernel. Payment links normalize
+    only once Plan 01c brings quotes to pay, so here one is normalized at the amount under test."""
+    http, state = fake
+    _, visitor = await copy_and_visitor(http, state)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    state.verify(session_id, "dana")                         # a verified person, whom allow_person could name
+    amount: dict[str, int | None] = {}
+
+    def payment_link(session, desk, call) -> NormalizedAction:
+        return NormalizedAction(
+            action_id=f"act-{call.call_id}", copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
+            generation=session.generation, tool=call.tool, effects=desk.tools[call.tool].effects, args_sha256="args",
+            profile_sha256="profile", resource=ResourceRef(kind="quote", id=call.args["quote_id"], owner_person_id=None),
+            list_cents=amount["cents"], discount_bp=0, amount_cents=amount["cents"], recipient=None, starts_at=None)
+
+    monkeypatch.setattr(state, "_normalize", payment_link)
+    for call_id, cents, offered in (("call-1", 60_000, False), ("call-2", 50_000, True), ("call-3", None, False)):
+        amount["cents"] = cents
+        held = await decide(view, session_id, 0, call_id, "native.payment_link", {"quote_id": f"quote-{call_id}"})
+        assert held.outcome == "hold", held.reason_plain
+        assert ("allow_person" in held.answers) is offered, (cents, held.answers)
 
 
 async def test_an_owner_recovers_only_its_own_decisions(fake):
