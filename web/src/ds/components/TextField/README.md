@@ -17,6 +17,10 @@
 - With `maxLength`, a counter at the right of the hint line from 90% of the limit ("1350 / 1500"), in `caption` type, `text-secondary`. It is numbers only, so it reads the same in English and Spanish, and it shows "1500 / 1500" when the field is full.
 - The error under that: a refused dot beside the words, in `text-primary`. The outline stays neutral, so the error is never shown by color alone.
 
+## Held fields
+
+A read-only field, single or multiline, uses a `line-control` outline on `fill-secondary`, with a default cursor. Its words stay at full `text-primary` contrast, selectable and in the tab order, with the same focus ring. The muted fill says the words are held while a request settles; they can still be read and copied, so the field does not look disabled (owner, 2026-10-31, option B, “muted fill”; N-Explore-ReadOnly-B).
+
 ## Accessibility
 
 - The label is a `<label>` tied to the field.
