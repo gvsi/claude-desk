@@ -17,7 +17,7 @@ import json
 import re
 import unicodedata
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -814,8 +814,9 @@ class _Judge:
             return any(link["state"] == "paid" and link.get("session_id") in self.a.session_ids
                        for link in self.links.values())
         if isinstance(criterion, SaysCriterion):
-            said = compile_pattern(criterion.says)
-            return any(_says(said, text) for _, block in self._prose() for text in (block.text, normalize(block.text)))
+            said, owners = compile_pattern(criterion.says), self._owner_names()[0]
+            return any(_says(said, text, owners) for _, block in self._prose()
+                       for text in (block.text, normalize(block.text)))
         raise TypeError(f"no rule for criterion {criterion!r}")
 
     def _record_fits(self, criterion: CardCriterion, shown: _Shown, block: RenderedBlock) -> bool:
@@ -1513,30 +1514,75 @@ _DANGLING = re.compile(
     rf"(?:not|never|{_NT_WORD}|nunca|jam[aá]s)(?:\s+ever)?\s*", re.IGNORECASE)
 # The words that take a `says` match back in its clause: a negation or a refusal ("not", "never",
 # "no", "nor", "neither", "cannot", "unable", "without", "instead of", "rather than", and a word
-# ending in "n't" as `_NT_WORD` reads it), or a hand-off that names the thing instead of
-# saying it ("how", "walk you through"); in Spanish "no", "nunca", "jamás", "ni", "tampoco", "sin"
-# and "cómo".
+# ending in "n't" as `_NT_WORD` reads it, so "no need to" and "don't bother" too), a prohibitive
+# directive ("avoid", "refrain from"), or a hand-off that names the thing instead of saying it
+# ("how", "walk you through"); in Spanish "no" (so "no hace falta" and "no es necesario"), "nunca",
+# "jamás", "ni", "tampoco", "sin", "evita", "evite", "evitar" and "cómo".
 _TAKES_BACK = re.compile(
     rf"\b(?:not|never|no|nor|neither|cannot|unable|without|instead\s+of|rather\s+than|{_NT_WORD}"
+    r"|avoid|avoiding|refrain\s+from|refraining\s+from"
     r"|how|(?:walk|talk|take|guide)\w*\s+(?:you\s+)?through"
-    r"|nunca|jam[aá]s|ni|tampoco|sin|cómo)\b",
+    r"|nunca|jam[aá]s|ni|tampoco|sin|evita|evite|evitar|cómo)\b",
     re.IGNORECASE)
+# Someone other than the visitor as an action's subject, right before it: a third person ("she",
+# "he", "they", "someone", "somebody", or a plumber or technician after "the", "a", "an", "our" or
+# "your") or "we", with an optional modal
+# ("can", "will", "'ll", "could", "would", "'d", "should", "may", "might", "is going to"); the
+# owner's name is added per run (`_other_subject`). "You" isn't one, so "We recommend you turn off
+# the water" is advice to the visitor.
+# Its words stand on one line, a gap of whitespace other than a line break apart.
+_GAP = r"[^\S\n\r\v\f\x1c-\x1e\x85\u2028\u2029]+"
+_OTHER_SUBJECTS = rf"she|he|they|we|someone|somebody|(?:the|a|an|our|your){_GAP}(?:plumber|technician)"
+_SUBJECT_MODAL = (rf"(?:{_GAP}(?:can|will|could|would|should|may|might|(?:is|are){_GAP}going{_GAP}to)"
+                  rf"|[{_APOSTROPHES}](?:ll|d)|[{_APOSTROPHES}](?:s|re){_GAP}going{_GAP}to)?")
+# An action on "it" that ends a match: where a match names the thing first and acts on it last ("Find
+# the main valve and close it."), its action is there, not at the match's start.
+_IT_ACTION = re.compile(r"\b(?:close|closes|closing|shut(?:s|ting)?|turn(?:s|ing)?|switch(?:es|ing)?|cut(?:s|ting)?)"
+                        r"\s+it\b", re.IGNORECASE)
 
 
-def _says(pattern: re.Pattern[str], text: str) -> bool:
+def _says(pattern: re.Pattern[str], text: str, owners: Sequence[str] = ()) -> bool:
     """Whether `text` says what `pattern` matches: some match whose clause, from its start up to the
     match's end, holds no word that takes it back (`_TAKES_BACK`), so "Do not turn off the water." and
     "Maria can tell you how to turn off the water." don't say it, while "Don't panic, turn off the
-    water." does. A match is tried from every start, overlapping ones too, so one taken back hides no
-    match that starts later. From one start only the match the pattern finds first is tried, so a
-    later ending of a lazy span isn't: "Find the main valve. Don't close it yet. Then turn it off."
-    doesn't say it, which fails closed."""
+    water." does, and whose action is the visitor's: someone else as its subject right before it
+    (`_other_subject`, with `owners` the run's owners as the records name them) makes it no
+    instruction to the visitor ("Maria can turn off the water when she visits."). A match is tried
+    from every start, overlapping ones too, so one taken back hides no match that starts later. From
+    one start only the match the pattern finds first is tried, so a later ending of a lazy span
+    isn't: "Find the main valve. Don't close it yet. Then turn it off." doesn't say it, which fails
+    closed."""
+    others = _other_subject(owners)
     start = 0
     while (match := pattern.search(text, start)) is not None:
-        if not _taken_back(text, match.end()):
+        if not _taken_back(text, match.end()) and not _someone_else_acts(text, match, others):
             return True
         start = match.start() + 1
     return False
+
+
+def _other_subject(owners: Sequence[str]) -> re.Pattern[str]:
+    """Someone other than the visitor, with an optional modal, at the end of a text with accents
+    dropped: `_OTHER_SUBJECTS` or an owner, by full name or first name."""
+    names: set[str] = set()
+    for owner in owners:
+        if words := _fold(owner).split():
+            names |= {" ".join(words), words[0]}
+    spelled = "|".join(_GAP.join(map(re.escape, name.split())) for name in sorted(names, key=len, reverse=True))
+    return re.compile(rf"\b(?:{_OTHER_SUBJECTS}{'|' + spelled if spelled else ''}){_SUBJECT_MODAL}{_GAP}$",
+                      re.IGNORECASE)
+
+
+def _someone_else_acts(text: str, match: re.Match[str], others: re.Pattern[str]) -> bool:
+    """Whether someone other than the visitor is the subject right before the match's action: at the
+    match's start, or at its last action on "it" (`_IT_ACTION`)."""
+    actions = [match.start()] + [it.start() for it in _IT_ACTION.finditer(text, match.start(), match.end())][-1:]
+    return any(others.search(_fold(text[:at])) for at in actions)
+
+
+def _fold(text: str) -> str:
+    """The text with its accents dropped, so "María" reads as "Maria"."""
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
 
 
 def _taken_back(text: str, end: int) -> bool:
