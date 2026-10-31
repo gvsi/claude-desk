@@ -3908,7 +3908,7 @@ class FakeKernelState:
         from desk.kernel_api import BusinessToolsRequest
         from desk.kernel_service.adapters import profile_sha256
         from desk.kernel_service.adapters.blocks import profile as block_profile
-        from desk.kernel_service.business_tools import config_texts, public_fields, public_promise_fields
+        from desk.kernel_service.business_tools import config_texts, free_allow_words, public_fields, public_promise_fields
         from desk.kernel_service.repo import storable
 
         desk = self._owners_desk(request, request.path_params["id"])
@@ -3929,8 +3929,9 @@ class FakeKernelState:
         if "\x00" in text or any(document.canary in text for each in self.desks.values()
                                   if each.copy_id == desk.copy_id for document in each.documents.values()):
             refuse("business_tools_canary")
-        if public_promise_fields(public_fields(batch)):
-            refuse("public_promise")
+        for tool in batch.tools:
+            if public_promise_fields(public_fields(tool), allow_words=free_allow_words(tool)):
+                refuse("public_promise")
         # Build the entire batch before changing any row.
         profiles = [block_profile(tool.tool, BusinessToolDef.model_validate(tool.model_dump(exclude={"tool"})))
                     for tool in batch.tools]

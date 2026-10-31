@@ -29,6 +29,20 @@ async def put_intake(k: KernelHarness, desk: GoldenDesk, tool: dict) -> None:
                  auth=desk.owner, expect=Expect(fields={"desk_id": desk.desk_id}))
 
 
+@pytest.mark.requires("01c-setup")
+async def test_business_card_titles_refuse_prices_dates_and_unaccepted_promises(k: KernelHarness, records):
+    desk = await golden_desk(k)
+    for title in ('Pay $twenty', 'twenty dollars', '20 percent', 'Guaranteed help',
+                  'Half-price check', 'Tuesday 5pm drop-in', 'Reply within 24 hours',
+                  'We will call you back today'):
+        await k.call('PUT /desks/{id}/business_tools', path={'id': desk.desk_id},
+                     body={'tools': [{**intake(), 'title': title}]}, auth=desk.owner,
+                     expect=Expect(status=422, fields={'code': 'invalid'}))
+    if k.is_real:
+        assert not [row for row in await records.tools(desk.copy.copy_id) if row['source'] == 'business']
+    await put_intake(k, desk, {**intake(), 'title': 'Book a free intro consult'})
+
+
 async def enable_intake(k: KernelHarness, records, desk: GoldenDesk, *,
                         description: str = "Take the visitor's details.") -> dict:
     tool = intake(description=description)
