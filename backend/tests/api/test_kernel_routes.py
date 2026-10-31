@@ -19,6 +19,7 @@ change takes out the entries the kernel on `main` serves by then.
 
 import ast
 import re
+from collections import Counter
 from collections.abc import Mapping, Set
 from pathlib import Path
 
@@ -65,12 +66,40 @@ PENDING_KERNEL_ROUTES: dict[str, str] = {
 
 API = Path(desk.api.__file__).parent
 SEGMENT = r"[^/?\s]+"     # what an f-string's formatted value stands for: one path segment
-MODEL_CLIENTS = frozenset({"model", "self.model"})   # receivers whose `.call` is the model client's (desk.api.model)
+# Receivers whose `.call` or `.stream` isn't a kernel view's: the model client and the Anthropic client inside it
+# (desk.api.model).
+NOT_KERNEL_VIEWS = frozenset({"model", "self.model", "self._client.beta.messages"})
+
+
+def bindings(tree: ast.AST) -> Counter[str]:
+    """How many times each name is bound anywhere in `tree`, in any scope: an assignment, loop, `with`, comprehension
+    or walrus target, a parameter, an import, a def or class, an `except` name, a match capture, or a `global` or
+    `nonlocal` declaration."""
+    bound: Counter[str] = Counter()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound[node.id] += 1
+        elif isinstance(node, ast.arg):
+            bound[node.arg] += 1
+        elif isinstance(node, ast.alias):
+            bound[(node.asname or node.name).partition(".")[0]] += 1
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound[node.name] += 1
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
+            bound[node.name] += 1
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound[node.rest] += 1
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+    return bound
 
 
 def module_constants(tree: ast.Module) -> dict[str, ast.expr]:
-    """The names a module assigns once, at its top level, with the expression each holds."""
-    assigned: dict[str, list[ast.expr]] = {}
+    """The names a module binds exactly once, by an assignment at its top level, with the expression each holds. A
+    name bound anywhere else too (a parameter, a local, a loop or `with` target, a comprehension variable) isn't one,
+    so a call that passes it is unreadable instead of read as the module's value."""
+    bound = bindings(tree)
+    constants = {}
     for node in tree.body:
         if isinstance(node, ast.Assign):
             targets, value = node.targets, node.value
@@ -79,9 +108,9 @@ def module_constants(tree: ast.Module) -> dict[str, ast.expr]:
         else:
             continue
         for target in targets:
-            if isinstance(target, ast.Name):
-                assigned.setdefault(target.id, []).append(value)
-    return {name: values[0] for name, values in assigned.items() if len(values) == 1}
+            if isinstance(target, ast.Name) and bound[target.id] == 1:
+                constants[target.id] = value
+    return constants
 
 
 def route_keys(node: ast.expr, constants: Mapping[str, ast.expr], keys: Set[str]) -> set[str]:
@@ -104,16 +133,17 @@ def route_keys(node: ast.expr, constants: Mapping[str, ast.expr], keys: Set[str]
 
 
 def route_argument(call: ast.Call) -> ast.expr | None:
-    """The route a kernel view's `.call(route, ...)` or `.stream(route, ...)` passes, by position or as `route=`.
-    None for a call that isn't one: another method, the model client's `.call`, or a call with no argument that could
-    be a route (Starlette's `request.stream()`, the Anthropic client's `messages.stream(**kwargs)`)."""
+    """The route a kernel view's `.call(route, ...)` or `.stream(route, ...)` passes, by position or as `route=`, or
+    the call itself when it passes neither (only other keywords, or `**mapping`), which the scan can't read. None for
+    a call that isn't one: another method, a receiver in NOT_KERNEL_VIEWS, or a call with no arguments at all, which
+    names no route (Starlette's `request.stream()`; a kernel view's would raise before sending anything)."""
     func = call.func
     if (not isinstance(func, ast.Attribute) or func.attr not in ("call", "stream")
-            or ast.unparse(func.value) in MODEL_CLIENTS):
+            or ast.unparse(func.value) in NOT_KERNEL_VIEWS or not (call.args or call.keywords)):
         return None
     if call.args:
         return call.args[0]
-    return next((keyword.value for keyword in call.keywords if keyword.arg == "route"), None)
+    return next((keyword.value for keyword in call.keywords if keyword.arg == "route"), call)
 
 
 def routes_called(source: str, keys: Set[str]) -> tuple[set[str], list[str]]:
@@ -334,3 +364,36 @@ def test_a_pending_route_tagged_with_another_plan_than_the_kernels_fails():
         "POST /agents/demo is pending (01b) but the kernel's LATER_ROUTES has it in 01c"]
     assert tag_problems({"POST /handoffs/{id}/done": "01b"}, later) == [
         "POST /handoffs/{id}/done is pending (01b) but the kernel's LATER_ROUTES doesn't list it"]
+
+
+def test_a_kernel_call_with_no_route_argument_is_unreadable():
+    source = '''
+async def read(kernel, request, route, kwargs):
+    await kernel.call(**{"route": route})
+    async with kernel.stream(**kwargs):
+        pass
+    await kernel.call(path={"id": "d1"})
+    async for chunk in request.stream():
+        pass
+'''
+    assert routes_called(source, SCAN_KEYS) == (set(), [   # with no argument at all, a call names no route
+        "line 3: kernel.call(**{'route': route})", "line 4: kernel.stream(**kwargs)",
+        "line 6: kernel.call(path={'id': 'd1'})"])
+
+
+REBINDINGS = {
+    "a parameter": "async def read(kernel, ROUTE):\n    await kernel.call(ROUTE)\n",
+    "an assignment": "async def read(kernel):\n    ROUTE = 'GET /whoami'\n    await kernel.call(ROUTE)\n",
+    "a loop target": "async def read(kernel, routes):\n    for ROUTE in routes:\n        await kernel.call(ROUTE)\n",
+    "a with target": "async def read(kernel, opened):\n    with opened() as ROUTE:\n        await kernel.call(ROUTE)\n",
+    "a comprehension variable": "def read(kernel, routes):\n    return [kernel.call(ROUTE) for ROUTE in routes]\n",
+    "a parameter, for a dict": "async def read(kernel, STEPS, step):\n    await kernel.call(STEPS[step])\n",
+}
+
+
+def test_a_module_constant_that_an_enclosing_scope_rebinds_is_unreadable():
+    constants = 'ROUTE = "GET /health"\nSTEPS = {"complete": "POST /payment_links/{token}/complete"}\n\n'
+    for binding, function in REBINDINGS.items():
+        called, unreadable = routes_called(constants + function, SCAN_KEYS)
+        assert (called, [line.partition(": ")[2] for line in unreadable]) == (
+            set(), ["STEPS[step]" if "STEPS" in function else "ROUTE"]), binding
