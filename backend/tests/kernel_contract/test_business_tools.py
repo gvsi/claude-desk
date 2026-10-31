@@ -12,6 +12,35 @@ from tests.kernel_contract.test_contract import desk_slug, new_copy, new_visitor
 
 
 @pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize('title,config,accepted', [
+    ('Book a free intro consult', {'block': 'intake', 'questions': ['What?']}, True),
+    ('Intro consult', {'block': 'typed_booking', 'appointment_type': 'Free consult', 'minutes': 30}, True),
+    ('Intro consult', {'block': 'typed_booking', 'appointment_type': 'Consultas gratuitas', 'minutes': 30}, True),
+    ('Book a $0 intro consult', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Free consult, 50% off', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Retainer', {'block': 'purpose_payment', 'purpose': 'Free retainer', 'amount_cents': 5000}, False),
+    ('Pay no', {'block': 'purpose_payment', 'purpose': 'charge', 'amount_cents': 5000}, False),
+    ('Half-price check', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Tuesday 5pm drop-in', {'block': 'intake', 'questions': ['What?']}, False),
+    ('Reply within 24 hours', {'block': 'intake', 'questions': ['What?']}, False),
+    ('We will call you back today', {'block': 'intake', 'questions': ['What?']}, False),
+])
+async def test_business_card_text_and_narrow_free_word_exception(kernel, ro_read, title, config, accepted):
+    http, schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id = copy.desk_ids[0]
+    request = BusinessToolsRequest(tools=[BusinessTool(
+        tool='desk.consult', title=title, description='Take details.', config=config)])
+    call = http.owner(copy.owner_token).call('PUT /desks/{id}/business_tools', request, path={'id': desk_id})
+    if accepted:
+        assert (await call).desk_id == desk_id
+    else:
+        assert await refused(call) == (422, 'invalid')
+    rows = ro_read(schema, copy.copy_id, "SELECT tool FROM {ro}.tools WHERE source = 'business'", ())
+    assert bool(rows) is accepted
+
+
+@pytest.mark.kernel_plan("01c")
 async def test_business_tools_replace_and_expose_review_definition(kernel, ro_read):
     http, schema, _ = kernel
     copy = await new_copy(http)

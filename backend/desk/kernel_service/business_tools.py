@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from desk.contracts import BusinessToolDef, LedgerEvent
+from desk.contracts import BusinessTool, BusinessToolDef, LedgerEvent
 from desk.db.models import Tool
 from desk.kernel_api import BusinessToolsRequest, DeskUpdated
 from desk.kernel_service import adapters, desks, labels, ledger
@@ -17,6 +17,7 @@ from desk.kernel_service.adapters import blocks
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, storable
 
 router = APIRouter()
+FREE_WORDS = frozenset({"free", "gratis", "gratuito", "gratuita", "gratuitos", "gratuitas"})
 
 # Currency codes are unsafe even without an amount. Keep this local until the shared B7 check lands.
 CURRENCY_CODE = re.compile(r"\b(?:" + "|".join("""
@@ -44,33 +45,70 @@ def config_texts(value):
             yield from config_texts(item)
 
 
-def public_fields(batch: BusinessToolsRequest) -> dict[str, str]:
-    values = {f"{tool.tool}.title": tool.title for tool in batch.tools}
-    for tool in batch.tools:
-        config = tool.config
-        if config.block == "typed_booking":
-            values[f"{tool.tool}.appointment_type"] = config.appointment_type
-        elif config.block == "purpose_payment":
-            values[f"{tool.tool}.purpose"] = config.purpose
+def public_fields(tool: BusinessTool) -> dict[str, str]:
+    """One tool's visitor-facing fields in render order; never its structured amount."""
+    values = {f"{tool.tool}.title": tool.title}
+    config = tool.config
+    if config.block == "typed_booking":
+        values[f"{tool.tool}.appointment_type"] = config.appointment_type
+    elif config.block == "purpose_payment":
+        values[f"{tool.tool}.purpose"] = config.purpose
     return values
 
 
-def public_promise_fields(values: Mapping[str, str]) -> list[str]:
-    """The temporary B7 shim's pure check. No structured amount is passed here."""
+def free_allow_words(tool: BusinessTool) -> dict[str, frozenset[str]]:
+    allowed = {f"{tool.tool}.title": FREE_WORDS}
+    if tool.config.block == "typed_booking":
+        allowed[f"{tool.tool}.appointment_type"] = FREE_WORDS
+    return allowed
+
+
+def public_promise_fields(values: Mapping[str, str], *,
+                          allow_words: Mapping[str, frozenset[str]] = {}) -> list[str]:
+    """Shared real/fake check: one prose scan, preserving field boundaries for narrow exceptions."""
     from desk.kernel_service import reply_check
 
-    return [field for field, text in values.items()
-            if reply_check.scan_prose(text)
-            or CURRENCY_CODE.search(reply_check.shown(text))
-            or any(unicodedata.category(ch) == "Sc" for ch in reply_check.shown(text))]
+    pieces, bounds, offset = [], [], 0
+    for key, value in values.items():
+        text = reply_check.shown(value)
+        pieces.append(text)
+        bounds.append((key, offset, offset + len(text)))
+        offset += len(text) + 1
+    combined = "\n".join(pieces)
+    hits = reply_check.scan_prose(combined)
+    if CURRENCY_CODE.search(combined) or any(unicodedata.category(ch) == "Sc" for ch in combined):
+        return list(values)
+    if not hits:
+        return []
+    if any(hit.rule_id not in {"lex.en.promise", "lex.es.promise"} for hit in hits):
+        return list(values)
+
+    # scan_prose returns text spans but not offsets. Recover only promise-hit locations from
+    # its own read-only folding/lexicon machinery, until B7 exposes scan_public_text. Never
+    # rescan fields separately: a promise can straddle their boundary ("no" + "charge").
+    spans = {(f"lex.{language}.promise", origin[match.start()], origin[match.end() - 1] + 1)
+             for reading, origin in reply_check._readings(combined).items()
+             for language, entries in reply_check.LEXICONS.items() for category, pattern in entries
+             if category == "promise" for match in pattern.finditer(reading) if match.end() > match.start()}
+
+    def permitted(hit) -> bool:
+        occurrences = [(start, end) for rule, start, end in spans
+                       if rule == hit.rule_id and combined[start:end][:reply_check.SPAN_CHARS] == hit.span]
+        # When identical hits occur more than once, every occurrence must be within an allowed
+        # field; one allowed title must never exempt the same word in an unallowed purpose.
+        return bool(occurrences) and all(
+            any(left <= start and end <= right
+                and any(reading.casefold() in allow_words.get(key, frozenset())
+                        for reading in reply_check._readings(combined[start:end]))
+                for key, left, right in bounds) for start, end in occurrences)
+
+    return [] if all(permitted(hit) for hit in hits) else list(values)
 
 
-async def refuse_public_promises(ctx: KernelCtx, *, part: str, values: Mapping[str, str], desk_id: str) -> None:
-    # TODO B7: switch the call below directly to desks.refuse_public_promises once it lands.
-    check = getattr(desks, "refuse_public_promises", None)
-    if check is not None:
-        await check(ctx, part=part, values=values, desk_id=desk_id)
-    elif public_promise_fields(values):
+async def refuse_public_promises(ctx, part, values, desk_id=None, *,
+                                allow_words: Mapping[str, frozenset[str]] = {}) -> None:
+    # TODO B7: replace this shim with desks.refuse_public_promises and its shared scanner.
+    if public_promise_fields(values, allow_words=allow_words):
         raise _invalid(ctx, desk_id, "public_promise")
 
 
@@ -102,7 +140,9 @@ async def put_business_tools(id: str, body: dict, ctx: Ctx, request: Request) ->
         raise _invalid(ctx, id, "business_tools_text")
     if labels.canary_fields(shown, await labels.copy_canaries(ctx)):
         raise _invalid(ctx, id, "business_tools_canary")
-    await refuse_public_promises(ctx, part="business_tools", values=public_fields(parsed), desk_id=id)
+    for tool in parsed.tools:
+        await refuse_public_promises(ctx, part="business_tools", values=public_fields(tool), desk_id=id,
+                                     allow_words=free_allow_words(tool))
     rows = {row.tool: row for row in await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(
         Tool.desk_id == id, Tool.source == "business").order_by(Tool.tool).with_for_update()))}
     changes = []
