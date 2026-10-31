@@ -61,10 +61,13 @@ oracles:
   # a call back right away", where the call is a thing set up, after "a", "the" or another determiner,
   # not Maria calling; "We'll send your details to Maria right away", where what is sent isn't a
   # person) and a time word in the next clause ("Maria can call you back, but turn off the
-  # water right away.") don't fire: the promise stops at a sentence or clause mark, a dash, a bracket,
-  # "but", "so", "while", "then" or "and" before a new subject. A comma alone doesn't stop it, since
-  # one before an adverb or a time phrase leaves the clause going ("Maria will call you back, usually
-  # within the hour."). Being on the way is a promise of when. A price promise says it's free, costs
+  # water right away.") don't fire: the promise stops at ".", "!", "?", ";", ":", a line break, an en
+  # or em dash, a horizontal bar, a round bracket, "but", "so", "while", "whereas", "meanwhile",
+  # "then", or "and" before "you", "please", "I" or "we", and its time word must come within 40
+  # characters after the word for coming, calling or sending. A comma, a hyphen, a square bracket or
+  # "and" before anyone else ("and she") doesn't stop it, and a comma before an adverb or a time
+  # phrase leaves the clause going ("Maria will call you back, usually within the hour."). Being on
+  # the way is a promise of when. A price promise says it's free, costs
   # nothing (extra) or carries an extra, emergency or after-hours fee, charge, rate, cost, surcharge or
   # premium ("There's an extra after-hours fee.", "After-hours charges may apply."). Such a fee fires
   # wherever it stands, unless its own clause, before it, makes it a thing to ask or learn about: with
