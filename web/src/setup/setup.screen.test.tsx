@@ -12,6 +12,8 @@ import type { RenderResult } from 'vitest-browser-react';
 
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
+import { routes } from '../app/routes.tsx';
+import type { RouteObject } from 'react-router';
 import type { RuleCard } from '../api/contracts.ts';
 import type { BusinessOut, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
@@ -22,6 +24,7 @@ import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { hubSections } from '../owner/rules/hub.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
+import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
 import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextStart } from '../mocks/setup.ts';
 import { rulesView } from '../mocks/readModels.ts';
@@ -127,6 +130,59 @@ const startKeys = () => requests('startSetup').map((r) => (r.body as { idempoten
 
 /** Where `key`'s first request sits in the request log, or -1. */
 const firstAt = (key: RouteKey) => mockStore.requests.findIndex((r) => r.key === key);
+
+/**
+ * A start under way whose retry, the page's second send, waits unanswered until `release`: the
+ * first send is answered `in_progress` (retry after 2 s), and `posts` counts the sends.
+ */
+function holdStartRetry(): { release: () => void; posts: () => number } {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let posts = 0;
+  worker.use(
+    http.post('/api/owner/setup', async () => {
+      posts += 1;
+      if (posts === 2) await gate;
+      return undefined;
+    }),
+  );
+  mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress', retry_after: 2 } });
+  return { release, posts: () => posts };
+}
+
+/**
+ * The app's routes with the first visit's page, where "Save and exit" leads from the start, waiting
+ * to draw until `draw`: until then a navigation to it isn't drawn, and the page before stays.
+ */
+function holdFirstVisit(): { routes: RouteObject[]; draw: () => void } {
+  let drawable = false;
+  let draw = () => {};
+  const held = new Promise<void>((resolve) => {
+    draw = () => {
+      drawable = true;
+      resolve();
+    };
+  });
+  function HeldArrival() {
+    if (!drawable) throw held;
+    return <Arrival />;
+  }
+  return { routes: routes.map((route) => (route.path === '/' ? { ...route, element: <HeldArrival /> } : route)), draw };
+}
+
+/** Settles once a start is answered with its interview, as `request()` reads it, before the page's own code after it runs. */
+function startAnswered(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const stop = observeRequests((outcome) => {
+      if (outcome.key !== 'startSetup' || !outcome.ok) return;
+      stop();
+      resolve();
+    });
+    onTestFinished(stop);
+  });
+}
 
 const DISCLOSURE = /You're chatting with Claude, an AI answering for/;
 
@@ -472,48 +528,74 @@ describe('setup', () => {
   });
 
   it('start_left_while_under_way_stays_left', async () => {
-    // The owner leaves with "Save and exit" while a retry of a start under way is in flight. The
-    // retry then makes the interview, and the page, gone, neither keeps it nor takes anybody back
-    // into setup.
-    let release = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    let posts = 0;
-    worker.use(
-      http.post('/api/owner/setup', async () => {
-        posts += 1;
-        if (posts === 2) await gate;
-        return undefined;
-      }),
-    );
-    mockStore.inject({ route: 'startSetup', status: 409, body: { error: 'in_progress', retry_after: 2 } });
-    const { screen, router } = await renderRoute('/app/setup');
+    // The owner leaves with "Save and exit" while a retry of a start under way is in flight, and the
+    // retry's answer comes before the page they left for has drawn: the router has moved on, but a
+    // navigation draws in a transition, so the start page is still on screen. The retry has made the
+    // interview, and the start page, left, neither keeps it nor takes anybody back into setup.
+    const retry = holdStartRetry();
+    const firstVisit = holdFirstVisit();
+    const { screen, router } = await renderRoute('/app/setup', { routes: firstVisit.routes });
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
     await screen.getByRole('button', { name: 'Start' }).click();
-    await expect.poll(() => posts).toBe(2);
+    await expect.poll(retry.posts).toBe(2);
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
-    await expect.poll(() => router.state.location.pathname).not.toMatch(/^\/app\/setup/);
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    const box = screen.getByRole('textbox', { name: 'Your business' });
+    expect(box.elements(), 'the start page, still on screen').toHaveLength(1);
 
-    // The retry's answer, read: `request()` reports its success just before the page's own code
-    // after it runs, so the test wakes first, then lets that code run (every microtask queued before
-    // a task boundary has run by it) before looking.
-    const answered = new Promise<void>((resolve) => {
-      const stop = observeRequests((outcome) => {
-        if (outcome.key !== 'startSetup' || !outcome.ok) return;
-        stop();
-        resolve();
-      });
-      onTestFinished(stop);
-    });
+    const answered = startAnswered();
     const cached = vi.spyOn(QueryClient.prototype, 'setQueryData');
     onTestFinished(() => cached.mockRestore());
-    release();
+    retry.release();
     await answered;
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(box.elements(), 'the start page, still on screen when the answer comes').toHaveLength(1);
+    // The page the owner left for is let draw, and the start page goes. The start page's own code
+    // after the answer was queued as the answer was read, before the next page was let draw, and
+    // React draws that page in a later task: once the start page has gone, that code has run.
+    firstVisit.draw();
+    await expect.element(box).not.toBeInTheDocument();
     expect(requests('startSetup')).toHaveLength(2);
     expect(cached.mock.calls.filter(([key]) => Array.isArray(key) && key[0] === 'setup')).toEqual([]);
     expect(router.state.location.pathname).not.toMatch(/^\/app\/setup/);
+  });
+
+  it('start_left_then_come_back_to_is_tried_again_with_its_key', async () => {
+    // The owner leaves with "Save and exit" while a retry of a start under way is in flight, and goes
+    // Back before the page they left for has drawn, so the start page never went. The start they
+    // left is never called done or not done: the page says its outcome is unknown, with "Start" off
+    // and "Try again", which sends it again with its key. Its retry's answer, come meanwhile, takes
+    // nobody anywhere. One Desk.
+    const retry = holdStartRetry();
+    const firstVisit = holdFirstVisit();
+    const { screen, router } = await renderRoute('/app/setup', { routes: firstVisit.routes });
+    const desks = mockStore.world.desks.length;
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.poll(retry.posts).toBe(2);
+    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    await router.navigate(-1);
+    expect(router.state.location.pathname).toBe('/app/setup');
+    const box = screen.getByRole('textbox', { name: 'Your business' });
+    expect(box.elements(), 'the start page, never gone').toHaveLength(1);
+
+    const answered = startAnswered();
+    const cached = vi.spyOn(QueryClient.prototype, 'setQueryData');
+    onTestFinished(() => cached.mockRestore());
+    retry.release();
+    await answered;
+    await expect.element(screen.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
+    await expect.element(box).toHaveAttribute('readonly');
+    expect(router.state.location.pathname).toBe('/app/setup');
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    expect(router.state.location.pathname).toMatch(/^\/app\/setup\/setup-\d+$/);
+    expect(startKeys()).toHaveLength(3);
+    expect(new Set(startKeys()).size).toBe(1);
+    expect(mockStore.world.desks.length).toBe(desks + 1);
+    // Kept once, by "Try again": the retry's own answer kept nothing.
+    expect(cached.mock.calls.filter(([key]) => Array.isArray(key) && key[0] === 'setup')).toHaveLength(1);
   });
 
   it('start_under_way_after_its_retries_says_it_is_taking_longer', async () => {
