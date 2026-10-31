@@ -278,6 +278,31 @@ test('about_pages_print_without_the_pinned_bar', async ({ page }) => {
   expect(await bar.evaluate((el) => getComputedStyle(el).position)).toBe('static');
 });
 
+test('an_unplayed_chart_prints_complete', async ({ page }) => {
+  // Opened at a section past the lead chart, which hasn't been in view, so it waits to play.
+  await page.goto('/about/prediction#limitations');
+  await expect(title(page, 'Capability prediction')).toBeVisible(FIRST_DRAW);
+  const chart = page.locator('figure.cd-about-chart');
+  await expect(chart).toHaveAttribute('data-play', 'ready');
+  expect(await chart.evaluate((figure) => figure.getBoundingClientRect().bottom), 'above the window').toBeLessThanOrEqual(0);
+
+  // On paper it is drawn complete: every part shows, none scaled or cut off.
+  await page.emulateMedia({ media: 'print' });
+  const unfinished = await chart.evaluate((figure) =>
+    [...figure.querySelectorAll('svg *:not(title)')].flatMap((part) => {
+      const style = getComputedStyle(part);
+      const where = `${part.localName} (${part.getAttribute('data-tau3-part') ?? ''})`;
+      return [
+        part.checkVisibility() ? null : 'not visible',
+        style.opacity === '1' ? null : `opacity ${style.opacity}`,
+        style.transform === 'none' ? null : `transform ${style.transform}`,
+        style.clipPath === 'none' ? null : `clip-path ${style.clipPath}`,
+      ].flatMap((what) => (what === null ? [] : [`${where}: ${what}`]));
+    }),
+  );
+  expect(unfinished, 'printed').toEqual([]);
+});
+
 test('about_pages_fit_phone_width', async ({ page }) => {
   await eachPage(page, (where) => expectFits(page, where));
 });

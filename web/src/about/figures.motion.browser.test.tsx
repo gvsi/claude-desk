@@ -4,11 +4,254 @@
  * figures.browser.test.tsx; this file checks how a figure plays. Expected timings are written out here, never
  * read from the components or their styles.
  */
-import { describe, expect, it } from 'vitest';
+import type { ReactNode } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { page } from 'vitest/browser';
+import { render } from 'vitest-browser-react';
+
+import { Tau3Chart } from './figures/Tau3Chart.tsx';
+import { forgetPlayedFigures } from './figures/usePlayOnce.ts';
+
+afterEach(async () => {
+  // Each test is a fresh page load at the desktop size, in which no figure has played.
+  forgetPlayedFigures();
+  vi.unstubAllGlobals();
+  window.scrollTo(0, 0);
+  await page.viewport(1440, 900);
+});
+
+/** Waits `count` frames: long enough for an intersection observer to have heard a scroll. */
+async function frames(count = 3): Promise<void> {
+  for (let i = 0; i < count; i += 1) await new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+/** Mounts `ui` more than a window's height down the page, so it starts out of view, with room to scroll past it. */
+function renderBelowTheFold(ui: ReactNode) {
+  return render(
+    <>
+      <div style={{ height: '150vh' }} />
+      {ui}
+      <div style={{ height: '150vh' }} />
+    </>,
+  );
+}
+
+function figureIn(container: HTMLElement): HTMLElement {
+  const figure = container.querySelector('figure');
+  if (!figure) throw new Error('no figure');
+  return figure;
+}
+
+/**
+ * Each part drawn under `root` that is hidden, scaled, clipped or still animating, as "tag (class): what". A
+ * complete figure has none.
+ */
+function unfinishedParts(root: Element): string[] {
+  return [...root.querySelectorAll('svg *:not(title)')].flatMap((part) => {
+    const where = `${part.localName} (${part.getAttribute('class') ?? ''}${part.textContent ? `, ${part.textContent}` : ''})`;
+    return unfinished(part).map((what) => `${where}: ${what}`);
+  });
+}
+
+/** How one part is hidden, scaled, clipped or still animating; nothing for a part drawn in full and still. */
+function unfinished(part: Element): string[] {
+  const style = getComputedStyle(part);
+  return [
+    style.opacity === '1' ? null : `opacity ${style.opacity}`,
+    style.transform === 'none' ? null : `transform ${style.transform}`,
+    style.clipPath === 'none' ? null : `clip-path ${style.clipPath}`,
+    part.getAnimations().length === 0 ? null : 'animating',
+  ].filter((what) => what !== null);
+}
+
+/** A computed time ("0.48s", "200ms") in whole milliseconds. */
+function ms(time: string): number {
+  const value = parseFloat(time);
+  return Math.round(time.endsWith('ms') ? value : value * 1000);
+}
+
+/** The easing a motion token computes to, read off a probe element. */
+function tokenEasing(token: string): string {
+  const probe = document.createElement('span');
+  probe.style.animationTimingFunction = `var(${token})`;
+  document.body.append(probe);
+  const easing = getComputedStyle(probe).animationTimingFunction;
+  probe.remove();
+  return easing;
+}
+
+/** How a part plays: its animation's name, delay, duration (in ms), easing and fill. */
+function timing(part: Element) {
+  const style = getComputedStyle(part);
+  return {
+    name: style.animationName,
+    delay: ms(style.animationDelay),
+    duration: ms(style.animationDuration),
+    easing: style.animationTimingFunction,
+    fill: style.animationFillMode,
+  };
+}
+
+/** Whether any of `el` is inside the window. */
+function inView(el: Element): boolean {
+  const box = el.getBoundingClientRect();
+  return box.bottom > 0 && box.top < window.innerHeight;
+}
 
 describe('the about-motion project', () => {
   it('motion_project_runs_with_motion', () => {
     expect(matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(false);
     expect(matchMedia('(prefers-reduced-motion: no-preference)').matches).toBe(true);
+  });
+});
+
+describe('Tau3Chart with motion', () => {
+  it('play_once_marks_a_figure_the_first_time_it_is_in_view', async () => {
+    const screen = await renderBelowTheFold(<Tau3Chart />);
+    const figure = figureIn(screen.container);
+    await frames();
+    expect(inView(figure)).toBe(false);
+    expect(figure.dataset.play).toBe('ready');
+
+    // In view, it plays.
+    figure.scrollIntoView({ block: 'center' });
+    await expect.poll(() => figure.dataset.play).toBe('played');
+    await Promise.all(figure.getAnimations({ subtree: true }).map((animation) => animation.finished));
+
+    // Scrolled away and back, it stays played and doesn't play again.
+    window.scrollTo(0, 0);
+    await frames();
+    expect(inView(figure)).toBe(false);
+    expect(figure.dataset.play).toBe('played');
+    figure.scrollIntoView({ block: 'center' });
+    await frames();
+    expect(figure.dataset.play).toBe('played');
+    expect(figure.getAnimations({ subtree: true })).toEqual([]);
+  });
+
+  it('played_figure_stays_complete_after_a_remount', async () => {
+    const first = await render(<Tau3Chart />);
+    await expect.poll(() => figureIn(first.container).dataset.play).toBe('played');
+    await first.unmount();
+
+    // As when the reader opens the proposal and comes back: the chart draws again, complete, and doesn't play.
+    const again = await render(<Tau3Chart />);
+    const figure = figureIn(again.container);
+    expect(inView(figure)).toBe(true);
+    await frames();
+    expect(figure.hasAttribute('data-play')).toBe(false);
+    expect(unfinishedParts(figure)).toEqual([]);
+  });
+
+  it('chart_plays_in_its_signed_order', async () => {
+    // The board's order: the frame of the chart shows from the start; then the Claude releases one by one, then
+    // the top score, the ring and the point labels, then the fit, then the band and the prediction date.
+    const FROM_THE_START = ['grid', 'axis', 'tick', 'tick-label', 'score-label', 'bar', 'bar-label'];
+    const LATE = ['top', 'ring', 'point-label'];
+    const AFTER_THE_FIT = ['band', 'rule', 'prediction-date', 'band-label'];
+    const emphasis = tokenEasing('--motion-ease-emphasis');
+
+    for (const compact of [false, true]) {
+      const size = compact ? 'phone' : 'desktop';
+      if (compact) await page.viewport(390, 844);
+      const screen = await renderBelowTheFold(<Tau3Chart compact={compact} />);
+      const figure = figureIn(screen.container);
+      const parts = (name: string) => {
+        const found = [...figure.querySelectorAll(`[data-tau3-part="${name}"]`)];
+        expect(found.length, `${size}: ${name}`).toBeGreaterThan(0);
+        return found;
+      };
+      const each = (names: string[]) => names.flatMap((name) => parts(name).map((part) => ({ name, part })));
+
+      // Before it plays: the frame is drawn and nothing else is.
+      await frames();
+      expect(figure.dataset.play).toBe('ready');
+      for (const { name, part } of each(FROM_THE_START)) expect(unfinished(part), `${size}: ${name} before`).toEqual([]);
+      for (const { name, part } of each(['point', ...LATE, ...AFTER_THE_FIT])) {
+        expect(getComputedStyle(part).opacity, `${size}: ${name} before`).toBe('0');
+      }
+      expect(getComputedStyle(parts('fit')[0]!).clipPath, `${size}: the fit before`).not.toBe('none');
+
+      figure.scrollIntoView({ block: 'center' });
+      await expect.poll(() => figure.dataset.play).toBe('played');
+
+      // The frame never moves.
+      for (const { name, part } of each(FROM_THE_START)) expect(timing(part).name, `${size}: ${name}`).toBe('none');
+
+      // The seven releases scale in one by one in date order, 80 ms apart, each over 200 ms on the emphasis ease.
+      const points = parts('point').sort((a, b) => Number(a.getAttribute('cx')) - Number(b.getAttribute('cx')));
+      expect(points).toHaveLength(7);
+      expect(points.map((point) => timing(point).delay), size).toEqual([0, 80, 160, 240, 320, 400, 480]);
+      for (const point of points) {
+        expect(timing(point), size).toMatchObject({ duration: 200, easing: emphasis, fill: 'backwards' });
+      }
+      const lastPoint = timing(points.at(-1)!);
+
+      // Then the top score, the ring and the point labels fade in, after the last release starts and before the fit.
+      const fit = timing(parts('fit')[0]!);
+      for (const { name, part } of each(LATE)) {
+        const late = timing(part);
+        expect(late.delay, `${size}: ${name}`).toBeGreaterThan(lastPoint.delay);
+        expect(late.delay + late.duration, `${size}: ${name}`).toBeLessThanOrEqual(fit.delay);
+        expect(late, `${size}: ${name}`).toMatchObject({ duration: 200, fill: 'backwards' });
+      }
+
+      // The fit draws once the last release is in, over the signed 600 ms, on the emphasis ease.
+      expect(fit.delay, size).toBeGreaterThanOrEqual(lastPoint.delay + lastPoint.duration);
+      expect(fit, size).toMatchObject({ duration: 600, easing: emphasis });
+
+      // Then the band, the rule, the prediction date and the band's labels, which wait their turn hidden.
+      for (const { name, part } of each(AFTER_THE_FIT)) {
+        const after = timing(part);
+        expect(after.delay, `${size}: ${name}`).toBeGreaterThanOrEqual(fit.delay + fit.duration);
+        expect(after, `${size}: ${name}`).toMatchObject({ duration: 200, fill: 'backwards' });
+        expect(getComputedStyle(part).opacity, `${size}: ${name} while the fit draws`).toBe('0');
+      }
+
+      await screen.unmount();
+      forgetPlayedFigures();
+      window.scrollTo(0, 0);
+    }
+  });
+
+  it('fit_reveal_ends_unclipped', async () => {
+    const screen = await render(<Tau3Chart />);
+    const figure = figureIn(screen.container);
+    await expect.poll(() => figure.dataset.play).toBe('played');
+    const fit = figure.querySelector('[data-tau3-part="fit"]');
+    if (!fit) throw new Error('no fit');
+    const [draw, ...more] = fit.getAnimations();
+    expect(more).toEqual([]);
+    if (!(draw?.effect instanceof KeyframeEffect)) throw new Error('the fit has no reveal');
+
+    // The reveal fills backwards: it hides the line while it waits, and holds nothing once drawn.
+    expect(draw.effect.getComputedTiming().fill).toBe('backwards');
+    // It is measured against the stroke's box, which takes in the line's width and round caps, so even its last
+    // frame cuts nothing off; it opens from the right edge to nothing.
+    const clips = draw.effect.getKeyframes().map((keyframe) => String(keyframe.clipPath));
+    expect(clips).toHaveLength(2);
+    for (const clip of clips) expect(clip).toMatch(/ stroke-box$/);
+    expect(clips[0]).toMatch(/^inset\(0(?:px)? 100% 0(?:px)? 0(?:px)?\)/);
+    expect(clips[1]).toMatch(/^inset\(0(?:px)?\)/);
+
+    // Once drawn, the line is whole: unclipped, round caps and all, and nothing animates it.
+    await draw.finished;
+    expect(getComputedStyle(fit).clipPath).toBe('none');
+    expect(getComputedStyle(fit).strokeLinecap).toBe('round');
+    expect(fit.getAnimations()).toEqual([]);
+  });
+
+  it('chart_is_complete_without_an_observer', async () => {
+    // A browser with no IntersectionObserver, and a chart that hasn't played.
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const screen = await renderBelowTheFold(<Tau3Chart />);
+    const figure = figureIn(screen.container);
+    await frames();
+    expect(figure.hasAttribute('data-play')).toBe(false);
+    expect(unfinishedParts(figure)).toEqual([]);
+    figure.scrollIntoView({ block: 'center' });
+    await frames();
+    expect(figure.hasAttribute('data-play')).toBe(false);
+    expect(unfinishedParts(figure)).toEqual([]);
   });
 });

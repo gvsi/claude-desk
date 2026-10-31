@@ -178,6 +178,97 @@
   margin-top: var(--space-6);
 }
 
+/* The chart draws its argument once, the first time it is a third in view (`usePlayOnce` marks it): the frame and
+   the bar are there from the start; the seven Claude releases scale in one by one in date order; then the top
+   score, the ring and the point labels; then the fit draws towards the bar, over three motion-base (an explanatory
+   figure's signed exception to the motion range); then the band, the rule and the prediction date. Every rule here
+   is on screen with motion only, so unmarked, in print and under reduced motion the chart is drawn complete. Each
+   animation fills backwards: a part waits its turn hidden, and once played, nothing holds it. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  .cd-about-chart {
+    /* The beat between two releases; each one's place in date order (`--cd-tau3-i`) counts the beats it waits. */
+    --cd-tau3-step: calc(var(--motion-base) * 0.4);
+    /* The top score, the ring and the point labels: one beat after the seventh release starts. */
+    --cd-tau3-late: calc(var(--cd-tau3-step) * 7);
+    /* The fit: once they are in. */
+    --cd-tau3-fit: calc(var(--cd-tau3-late) + var(--motion-base));
+    /* The band and the prediction date: once the fit has drawn. */
+    --cd-tau3-after: calc(var(--cd-tau3-fit) + var(--motion-base) * 3);
+  }
+
+  .cd-about-chart [data-tau3-part='point'] {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .cd-about-chart[data-play='ready'] [data-tau3-part='point'] {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+
+  .cd-about-chart[data-play='ready'] :is(
+      [data-tau3-part='top'],
+      [data-tau3-part='ring'],
+      [data-tau3-part='point-label'],
+      [data-tau3-part='band'],
+      [data-tau3-part='rule'],
+      [data-tau3-part='prediction-date'],
+      [data-tau3-part='band-label']
+    ) {
+    opacity: 0;
+  }
+
+  /* The reveal is measured against the stroke's box, which takes in the line's width and round caps. */
+  .cd-about-chart[data-play='ready'] [data-tau3-part='fit'] {
+    clip-path: inset(0 100% 0 0) stroke-box;
+  }
+
+  .cd-about-chart[data-play='played'] [data-tau3-part='point'] {
+    animation: cd-tau3-scale-in var(--motion-base) var(--motion-ease-emphasis) backwards;
+    animation-delay: calc(var(--cd-tau3-i) * var(--cd-tau3-step));
+  }
+
+  .cd-about-chart[data-play='played'] :is([data-tau3-part='top'], [data-tau3-part='ring'], [data-tau3-part='point-label']) {
+    animation: cd-tau3-fade-in var(--motion-base) var(--motion-ease) var(--cd-tau3-late) backwards;
+  }
+
+  .cd-about-chart[data-play='played'] [data-tau3-part='fit'] {
+    animation: cd-tau3-draw calc(var(--motion-base) * 3) var(--motion-ease-emphasis) var(--cd-tau3-fit) backwards;
+  }
+
+  .cd-about-chart[data-play='played'] :is(
+      [data-tau3-part='band'],
+      [data-tau3-part='rule'],
+      [data-tau3-part='prediction-date'],
+      [data-tau3-part='band-label']
+    ) {
+    animation: cd-tau3-fade-in var(--motion-base) var(--motion-ease) var(--cd-tau3-after) backwards;
+  }
+
+  @keyframes cd-tau3-scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+  }
+
+  @keyframes cd-tau3-fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /* Left to right, from Opus 5 towards the bar. */
+  @keyframes cd-tau3-draw {
+    from {
+      clip-path: inset(0 100% 0 0) stroke-box;
+    }
+    to {
+      clip-path: inset(0) stroke-box;
+    }
+  }
+}
+
 /* The v1 architecture: the visitor, the chat layer and the kernel side by side, each box sized as the board
    draws them in the hero (104, 168 and 592 of 864), stacked on a phone. */
 

@@ -15,13 +15,42 @@ import { ARCHITECTURE_LABELS, ArchitectureFigure } from './figures/ArchitectureF
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale, readinessRows } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
+import { forgetPlayedFigures } from './figures/usePlayOnce.ts';
 
 const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 
 afterEach(async () => {
   await page.viewport(DESKTOP.width, DESKTOP.height);
+  // A figure that played in one test would draw complete in the next for that reason alone.
+  forgetPlayedFigures();
+  window.scrollTo(0, 0);
 });
+
+/** Waits `count` frames: long enough for an intersection observer to have heard a scroll. */
+async function frames(count = 3): Promise<void> {
+  for (let i = 0; i < count; i += 1) await new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+/**
+ * What under a figure moves or isn't drawn in full, as "tag (class): what": any element with an animation, and
+ * any part of its drawing that is hidden, scaled or clipped. A complete, still figure has none.
+ */
+function motionUnder(figure: Element): string[] {
+  const found: string[] = [];
+  const name = (el: Element) => `${el.localName} (${el.getAttribute('class') ?? ''}${el.textContent ? `, ${el.textContent}` : ''})`;
+  for (const el of [figure, ...figure.querySelectorAll('*')]) {
+    const { animationName } = getComputedStyle(el);
+    if (animationName !== 'none') found.push(`${name(el)}: animation ${animationName}`);
+  }
+  for (const part of figure.querySelectorAll('svg *:not(title)')) {
+    const style = getComputedStyle(part);
+    if (style.opacity !== '1') found.push(`${name(part)}: opacity ${style.opacity}`);
+    if (style.transform !== 'none') found.push(`${name(part)}: transform ${style.transform}`);
+    if (style.clipPath !== 'none') found.push(`${name(part)}: clip-path ${style.clipPath}`);
+  }
+  return found;
+}
 
 /** Each element's own `<title>`, as a tooltip shows it. */
 function titles(elements: Element[]): string[] {
@@ -198,6 +227,28 @@ describe('Tau3Chart', () => {
       );
       await screen.unmount();
     }
+  });
+
+  it('chart_is_complete_under_reduced_motion', async () => {
+    // Below the fold, then in view: under reduced motion the chart never plays, and is drawn complete throughout.
+    const screen = await render(
+      <>
+        <div style={{ height: '150vh' }} />
+        <Tau3Chart />
+        <div style={{ height: '150vh' }} />
+      </>,
+    );
+    const figure = screen.container.querySelector('figure');
+    if (!figure) throw new Error('no figure');
+    await frames();
+    expect(figure.getBoundingClientRect().top).toBeGreaterThan(window.innerHeight);
+    expect(figure.hasAttribute('data-play'), 'below the fold').toBe(false);
+    expect(motionUnder(figure), 'below the fold').toEqual([]);
+
+    figure.scrollIntoView({ block: 'center' });
+    await frames();
+    expect(figure.hasAttribute('data-play'), 'in view').toBe(false);
+    expect(motionUnder(figure), 'in view').toEqual([]);
   });
 
   it('chart_has_a_text_equivalent', async () => {

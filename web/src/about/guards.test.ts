@@ -139,7 +139,80 @@ function helperHomes(sources: Record<string, string>): Record<string, string[]> 
   );
 }
 
+/**
+ * The one place a figure's play marks may take effect: on screen, for a reader who hasn't asked for reduced motion.
+ * A rule outside it would hide or move a figure's parts on paper or under reduced motion, where the figure must be
+ * drawn complete.
+ */
+const MOTION_BLOCK = '@media screen and (prefers-reduced-motion: no-preference)';
+
+interface PlayRule {
+  /** The rule's selector, its whitespace collapsed. */
+  selector: string;
+  /** Whether it sits inside `MOTION_BLOCK`, at any depth. */
+  inMotion: boolean;
+}
+
+/** Every rule in a stylesheet whose selector names `data-play`, and whether it sits inside `MOTION_BLOCK`. */
+function playRules(css: string): PlayRule[] {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const collapse = (prelude: string) => prelude.trim().replace(/\s+/g, ' ').replace(/:\s*/g, ': ');
+  const motion = collapse(MOTION_BLOCK);
+  // The preludes of the blocks around the current place, outermost first.
+  const around: string[] = [];
+  const found: PlayRule[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (char === '{') {
+      const prelude = text.slice(start, i).trim().replace(/\s+/g, ' ');
+      if (!prelude.startsWith('@') && prelude.includes('data-play')) {
+        found.push({ selector: prelude, inMotion: around.some((outer) => collapse(outer) === motion) });
+      }
+      around.push(prelude);
+    } else if (char === '}') {
+      around.pop();
+    }
+    if (char === '{' || char === '}' || char === ';') start = i + 1;
+  }
+  return found;
+}
+
 describe('About page source guards', () => {
+  it('play_marks_apply_only_on_screen_with_motion', () => {
+    const outside = (css: string) => playRules(css).filter((rule) => !rule.inMotion).map((rule) => rule.selector);
+    const hide = "[data-play='ready'] .part { opacity: 0; }";
+    const hidden = "[data-play='ready'] .part";
+    // Each place a play rule would reach print or reduced motion, a comment that only looks like the block included.
+    const bad: [string, string][] = [
+      [hide, hidden],
+      [`@media (prefers-reduced-motion: no-preference) { ${hide} }`, hidden],
+      [`@media screen { ${hide} }`, hidden],
+      [`@media print { ${hide} }`, hidden],
+      [`@supports (clip-path: inset(0)) { ${hide} }`, hidden],
+      [`/* ${MOTION_BLOCK} { */ ${hide}`, hidden],
+      [
+        `${MOTION_BLOCK} { .chart { color: red; } }\n.chart:is(\n  [data-play='played']\n) .part { animation: none; }`,
+        ".chart:is( [data-play='played'] ) .part",
+      ],
+    ];
+    for (const [css, selector] of bad) expect(outside(css), css).toEqual([selector]);
+    // Inside the block, at any depth, a rule may name the marks; outside it, other rules may do as they like.
+    const good = [
+      `${MOTION_BLOCK} { ${hide} }`,
+      `${MOTION_BLOCK} {\n  .chart { --step: 1; }\n  @supports (clip-path: inset(0)) { ${hide} }\n  @keyframes fade { from { opacity: 0; } }\n}`,
+      `@media   screen and (prefers-reduced-motion:   no-preference) {\n${hide}\n}`,
+      '.chart { opacity: 1; } @media print { .chart { break-inside: avoid; } }',
+    ];
+    for (const css of good) expect(outside(css), css).toEqual([]);
+    expect(playRules(`${MOTION_BLOCK} { ${hide} }`)).toEqual([{ selector: "[data-play='ready'] .part", inMotion: true }]);
+
+    // The readers' stylesheet keys its figures on the marks, and only inside the block.
+    const reader = readFileSync(path.join(SRC, 'about/reader.css'), 'utf8');
+    expect(playRules(reader).length).toBeGreaterThan(0);
+    expect(outside(reader)).toEqual([]);
+  });
+
   const all = sources();
   const about = Object.entries(all).filter(([file]) => file.startsWith('about/') && !isTest(file));
 
