@@ -50,13 +50,13 @@ selects the column once the revision has run, is dropped before the column is re
 created again after.
 
 Revision ID: 01b_2b_handoff_kind
-Revises: 01c_5_mandate_reservations
+Revises: kernel_ro_decision_policy_ids
 """
 
 from alembic import op
 
 revision = "01b_2b_handoff_kind"
-down_revision = "01c_5_mandate_reservations"
+down_revision = "kernel_ro_decision_policy_ids"
 branch_labels = None
 depends_on = None
 
