@@ -156,9 +156,60 @@ function swapType(): void {
   onTestFinished(() => grown.remove());
 }
 
+
+/** The contents list's links marked as the section being read, as "name (aria-current)". */
+function marked(): string[] {
+  const contents = document.querySelector('nav[aria-label="On this page"]');
+  return [...(contents?.querySelectorAll('a[aria-current]') ?? [])].map(
+    (link) => `${readText(link)} (${link.getAttribute('aria-current')})`,
+  );
+}
+
+/** The heading of the section `anchor` names. */
+function headingOf(anchor: string): HTMLElement {
+  const heading = document.getElementById(anchor);
+  if (!heading) throw new Error(`no section #${anchor}`);
+  return heading;
+}
+
+/** The window's offset at which the section's heading sits at the top, below its scroll margin. */
+function placeOf(anchor: string): number {
+  const heading = headingOf(anchor);
+  return Math.round(heading.getBoundingClientRect().top + window.scrollY - parseFloat(getComputedStyle(heading).scrollMarginTop));
+}
+
+/** Moves the window to `y` in one jump, as an address or a reduced-motion link does, and waits for it to rest. */
+async function jumpTo(y: number): Promise<void> {
+  const top = Math.min(y, document.documentElement.scrollHeight - window.innerHeight);
+  if (Math.round(window.scrollY) === top) return;
+  const rested = new Promise((resolve) => window.addEventListener('scrollend', resolve, { once: true }));
+  window.scrollTo({ top, behavior: 'instant' });
+  await rested;
+}
+
+/**
+ * The section the 40% rule names where the window is now, read from the page: the last section whose heading's top
+ * is above 40% of the window. Away from the page's end, where the last section is marked instead.
+ */
+function byTheRule(): string {
+  const line = window.innerHeight * 0.4;
+  const above = [...document.querySelectorAll<HTMLElement>('article h2[id]')].filter((heading) => heading.getBoundingClientRect().top <= line);
+  return flat(above[above.length - 1]?.textContent);
+}
+
 /** Two frames: long enough for what the page heard to have been acted on. */
 async function twoFrames(): Promise<void> {
   await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+/**
+ * Follows the laptop contents list's link to `anchor`, clicked where it is, as a reader's click on the pinned list is.
+ * A driven click first brings its target into view, and for a link in the pinned column that can scroll the page.
+ */
+function followContentsLink(anchor: string): void {
+  const link = document.querySelector<HTMLElement>(`nav.cd-about-contents--side a[href="#${anchor}"]`);
+  if (!link) throw new Error(`no contents link to #${anchor}`);
+  link.click();
 }
 
 describe('ReaderPage', () => {
@@ -484,8 +535,20 @@ describe('ReaderPage', () => {
       const article = screen.container.querySelector('article');
       // The sentence that gave the hosted prototype's address reads as the page it is on, the repo link kept.
       const sentence = [...(article?.querySelectorAll('p') ?? [])].find((p) => p.textContent?.startsWith('You’re in it.'));
-      expect(flat(sentence?.textContent), where).toMatch(/^You’re in it\. The code is at owner: repo link\. Each visitor acts as Maria/);
-      expect(sentence?.querySelector('.cd-pill')?.textContent, where).toBe('owner: repo link');
+      expect(flat(sentence?.textContent), where).toMatch(
+        /^You’re in it\. The code is at github\.com\/gvsi\/claude-desk\. Each visitor acts as Maria/,
+      );
+      // The repository is the sentence's one link, a plain text link that opens in a new tab.
+      const links = [...(sentence?.querySelectorAll('a') ?? [])];
+      expect(links, where).toHaveLength(1);
+      const [repo] = links;
+      expect(repo?.textContent, where).toBe('github.com/gvsi/claude-desk');
+      expect(repo?.getAttribute('href'), where).toBe('https://github.com/gvsi/claude-desk');
+      expect(repo?.getAttribute('target'), where).toBe('_blank');
+      expect(repo?.getAttribute('rel'), where).toBe('noopener noreferrer');
+      expect(repo?.className, where).toBe('cd-text-link');
+      expect(repo?.querySelector('svg'), where).toBeNull();
+      expect(sentence?.querySelector('.cd-pill'), where).toBeNull();
       expect(article?.textContent, where).not.toContain('enforced core, is at');
       await screen.unmount();
     }
@@ -495,15 +558,14 @@ describe('ReaderPage', () => {
   });
 
   it('placeholders_show_as_pending', async () => {
-    // The proposal's placeholders as the document has them, until they are filled: five in the measures table
-    // and the two links in its last section.
+    // The proposal's placeholders as the document has them, until they are filled: five in the measures table.
+    // The one link in its last section still to give, the hosted address, is in the sentence the page replaces.
     const PENDING = [
       'measured: tier 2 pass, with its 95% upper bound',
       'measured: held-out rate with its 95% interval',
       'measured: false-hold rate',
       'measured: …',
       'measured: …',
-      'owner: repo link',
     ];
     for (const size of [DESKTOP, PHONE]) {
       const where = `proposal at ${size.width}`;
@@ -720,6 +782,160 @@ describe('ReaderPage', () => {
     expect(offsetOf('characteristics'), 'the swap moved the page').toBeGreaterThan(20);
     loaded();
     await expect.poll(() => Math.abs(offsetOf('characteristics')), { message: 'once the type has loaded' }).toBeLessThanOrEqual(1);
+    await screen.unmount();
+  });
+
+  it('a_font_correction_keeps_the_followed_mark', async () => {
+    // Following "Business path" stops at the proposal's end, where it stays marked. When the type then loads and the
+    // page has grown, the page follows the section to the new end by itself; that isn't the reader scrolling on, so
+    // the mark stays.
+    withoutScrollAnchoring();
+    const loaded = typeStillLoading();
+    const screen = await renderReader('proposal');
+    const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    await expect.poll(marked).toEqual(['v1 (location)']);
+    followContentsLink('business-path');
+    const end = () => Math.round(document.documentElement.scrollHeight - window.innerHeight);
+    await expect.poll(() => Math.round(window.scrollY)).toBe(end());
+    await expect.poll(marked).toEqual(['Business path (location)']);
+    await twoFrames();
+    swapType();
+    expect(end() - Math.round(window.scrollY), 'the page grew below the window').toBeGreaterThan(20);
+    loaded();
+    await expect.poll(() => Math.round(window.scrollY), { message: 'followed to the new end' }).toBe(end());
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(marked(), 'after the page followed the section').toEqual(['Business path (location)']);
+    await screen.unmount();
+  });
+
+  it('a_font_correction_keeps_the_followed_mark_with_scroll_anchoring_on', async () => {
+    // As above, with the browser's scroll anchoring left on, as a reader has it: anchoring moves the window to the end
+    // of the grown page by itself. That scroll keeps the window where the page means it to be, so the mark stays.
+    const loaded = typeStillLoading();
+    const screen = await renderReader('proposal');
+    const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    await expect.poll(marked).toEqual(['v1 (location)']);
+    followContentsLink('business-path');
+    const end = () => Math.round(document.documentElement.scrollHeight - window.innerHeight);
+    await expect.poll(() => Math.round(window.scrollY)).toBe(end());
+    await expect.poll(marked).toEqual(['Business path (location)']);
+    await twoFrames();
+    const before = Math.round(window.scrollY);
+    swapType();
+    await expect.poll(() => Math.round(window.scrollY), { message: 'anchoring kept the window at the end' }).toBe(end());
+    expect(Math.round(window.scrollY), 'anchoring moved the window').toBeGreaterThan(before);
+    loaded();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(marked(), 'after the type loaded').toEqual(['Business path (location)']);
+    await screen.unmount();
+  });
+
+  it('a_click_or_a_key_that_doesnt_scroll_keeps_the_followed_mark', async () => {
+    // Following "Business path" stops at the proposal's end, where it stays marked. A click elsewhere or a key that
+    // doesn't scroll isn't the reader scrolling on: when the page next looks, the mark is still there.
+    const screen = await renderReader('proposal');
+    const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    followContentsLink('business-path');
+    await expect.poll(() => Math.round(window.scrollY)).toBe(Math.round(document.documentElement.scrollHeight - window.innerHeight));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect.poll(marked).toEqual(['Business path (location)']);
+    window.dispatchEvent(new PointerEvent('pointerdown'));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x' }));
+    // Something that makes the page look again without the reader scrolling: a scroll coming to rest.
+    window.dispatchEvent(new Event('scrollend'));
+    await twoFrames();
+    expect(marked(), 'after a click and a key').toEqual(['Business path (location)']);
+    await screen.unmount();
+  });
+
+  it('a_contents_link_ends_an_addresss_keep', async () => {
+    // Opened at "Characteristics" while the type loads, then "Limitations" followed by a click alone, as assistive
+    // technology activates a link (no pointer or key events). Once the type loads, the page keeps Limitations, and
+    // never goes back to Characteristics on the way.
+    withoutScrollAnchoring();
+    const loaded = typeStillLoading();
+    const screen = await renderReader('prediction', { hash: '#characteristics' });
+    await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+    followContentsLink('limitations');
+    await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
+    const visits: string[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element, ...args: unknown[]) {
+      visits.push(this.id);
+      return (original as (...a: unknown[]) => void).apply(this, args);
+    } as typeof Element.prototype.scrollIntoView;
+    onTestFinished(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+    swapType();
+    loaded();
+    await expect.poll(() => Math.abs(offsetOf('limitations')), { message: 'kept at Limitations' }).toBeLessThanOrEqual(1);
+    await twoFrames();
+    expect(visits, 'sections the page moved to once the type loaded').not.toContain('characteristics');
+    await screen.unmount();
+  });
+
+  it('a_reader_scrolling_during_a_correction_is_followed', async () => {
+    // Following "Business path" stops at the proposal's end, where it stays marked. The type loads on a grown page and
+    // the page follows the section to the new end; while that move is still settling, the reader scrolls up with the
+    // wheel. The mark follows the reader, not the section the page was keeping.
+    withoutScrollAnchoring();
+    const loaded = typeStillLoading();
+    const screen = await renderReader('proposal');
+    const height = Math.max(1400, document.documentElement.scrollHeight - placeOf('business-path') + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    await expect.poll(marked).toEqual(['v1 (location)']);
+    followContentsLink('business-path');
+    const end = () => Math.round(document.documentElement.scrollHeight - window.innerHeight);
+    await expect.poll(() => Math.round(window.scrollY)).toBe(end());
+    await expect.poll(marked).toEqual(['Business path (location)']);
+    await twoFrames();
+    swapType();
+    const corrected = new Promise<void>((resolve) => {
+      const onScroll = () => {
+        if (Math.round(window.scrollY) !== end()) return;
+        window.removeEventListener('scroll', onScroll);
+        resolve();
+      };
+      window.addEventListener('scroll', onScroll);
+    });
+    loaded();
+    await corrected;
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 }));
+    await jumpTo(placeOf('who-its-for-and-the-problem') + 100);
+    // Where the reader stopped, the rule names another section than the one the page was keeping (which one depends on
+    // the page's type and the window's height).
+    const there = byTheRule();
+    expect(there, 'the rule names another section where the reader stopped').not.toBe('Business path');
+    await expect.poll(marked, { message: 'where the reader stopped' }).toEqual([`${there} (location)`]);
+    await screen.unmount();
+  });
+
+  it('a_followed_section_keeps_its_place_while_the_type_loads', async () => {
+    // Followed from the contents list before the type has loaded, a section that the swap moves after the jump has
+    // arrived is back at its place once the type has loaded. The jump is instant under reduced motion.
+    withoutScrollAnchoring();
+    const loaded = typeStillLoading();
+    const screen = await renderReader('prediction');
+    followContentsLink('limitations');
+    await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
+    await twoFrames();
+    swapType();
+    expect(offsetOf('limitations'), 'the swap moved the page').toBeGreaterThan(20);
+    loaded();
+    await expect.poll(() => Math.abs(offsetOf('limitations')), { message: 'once the type has loaded' }).toBeLessThanOrEqual(1);
+    expect(document.activeElement, 'focus stays on the section').toBe(headingOf('limitations'));
     await screen.unmount();
   });
 
@@ -1009,5 +1225,208 @@ describe('ReaderPage', () => {
     await expect.poll(() => seen.length).toBe(1);
     expect(seen[0]).toEqual({ robots: [], title: before });
     await screen.unmount();
+  });
+
+  it('contents_marks_the_section_being_read', async () => {
+    // Beside the article, the list marks the section being read, and only that one.
+    const screen = await renderReader('prediction');
+    const contents = screen.container.querySelector('nav[aria-label="On this page"]') as HTMLElement;
+    const bars = () => [...contents.querySelectorAll<HTMLElement>('[data-contents-bar]')];
+    expect(marked(), 'at the top, before the first section').toEqual([]);
+    expect(bars(), 'no bar before the first section').toEqual([]);
+    for (const [anchor, name] of [
+      ['limitations', 'Limitations'],
+      ['readiness', 'Readiness'],
+    ] as const) {
+      await jumpTo(placeOf(anchor));
+      await expect.poll(marked).toEqual([`${name} (location)`]);
+      // Its words in text-primary, the others' in text-secondary.
+      const links = [...contents.querySelectorAll<HTMLElement>('ol a')];
+      const current = links.find((link) => link.getAttribute('aria-current')) as HTMLElement;
+      expect(getComputedStyle(current).color, name).toBe(tokenColor('--text-primary'));
+      for (const link of links.filter((link) => link !== current)) {
+        expect(getComputedStyle(link).color, readText(link)).toBe(tokenColor('--text-secondary'));
+      }
+      // Not by colour alone: one 2 px bar in text-primary, in the gutter 12 px left of the list, beside the row's
+      // words.
+      expect(bars(), name).toHaveLength(1);
+      const bar = bars()[0] as HTMLElement;
+      expect(bar.getAttribute('aria-hidden'), name).toBe('true');
+      expect(getComputedStyle(bar).backgroundColor, name).toBe(tokenColor('--text-primary'));
+      const box = bar.getBoundingClientRect();
+      const words = current.querySelector('span:not([aria-hidden])')?.getBoundingClientRect() as DOMRect;
+      const list = contents.querySelector('ol')?.getBoundingClientRect() as DOMRect;
+      expect({ width: box.width, left: box.left, top: box.top, bottom: box.bottom }, name).toEqual({
+        width: 2,
+        left: list.left - 12,
+        top: words.top,
+        bottom: words.bottom,
+      });
+    }
+    await screen.unmount();
+
+    // On a phone the folded list marks nothing, and its words stay as they were, in text-primary.
+    const phone = await renderReader('prediction', { size: PHONE });
+    await userEvent.click(phone.container.querySelector('nav[aria-label="On this page"] summary') as HTMLElement);
+    await jumpTo(placeOf('limitations'));
+    await twoFrames();
+    expect(marked(), 'at 390').toEqual([]);
+    const folded = phone.container.querySelector('nav[aria-label="On this page"]') as HTMLElement;
+    expect(folded.querySelectorAll('[data-contents-bar]'), 'at 390').toHaveLength(0);
+    for (const link of folded.querySelectorAll('ol a')) {
+      expect(getComputedStyle(link).color, `at 390: ${readText(link)}`).toBe(tokenColor('--text-primary'));
+    }
+    await phone.unmount();
+  });
+
+  it('contents_mark_follows_a_jump_past_the_band', async () => {
+    const screen = await renderReader('prediction');
+    const line = window.innerHeight * 0.4;
+    /** The window's offset that puts `anchor`'s heading `by` above the window's top. */
+    const past = (anchor: string, by: number) => placeOf(anchor) + parseFloat(getComputedStyle(headingOf(anchor)).scrollMarginTop) + by;
+
+    // From part way through "Why it's coming" to part way through "Limitations", in one jump: the headings in
+    // between go from below the line to above the window, and no heading lands above the line, so nothing comes
+    // into or leaves the band the observer watches. The mark follows once the scroll rests.
+    await jumpTo(past('why-its-coming', 90));
+    await expect.poll(marked).toEqual(['Why it’s coming (location)']);
+    expect(headingOf('characteristics').getBoundingClientRect().top, 'the next heading starts below the line').toBeGreaterThan(line);
+    const to = past('limitations', 190);
+    expect(headingOf('readiness').getBoundingClientRect().top - (to - window.scrollY), 'the next heading lands below the line').toBeGreaterThan(line);
+    await jumpTo(to);
+    await expect.poll(marked).toEqual(['Limitations (location)']);
+
+    // From Limitations' place to Readiness' place.
+    await jumpTo(placeOf('limitations'));
+    await expect.poll(marked).toEqual(['Limitations (location)']);
+    await jumpTo(placeOf('readiness'));
+    await expect.poll(marked).toEqual(['Readiness (location)']);
+    await screen.unmount();
+
+    // In a browser without `scrollend`, the page waits for the scroll to go still instead.
+    let owner: object | null = window;
+    while (owner && !Object.prototype.hasOwnProperty.call(owner, 'onscrollend')) owner = Object.getPrototypeOf(owner);
+    const descriptor = owner ? Object.getOwnPropertyDescriptor(owner, 'onscrollend') : undefined;
+    expect(descriptor?.configurable, 'onscrollend can be hidden').toBe(true);
+    delete (owner as { onscrollend?: unknown }).onscrollend;
+    onTestFinished(() => {
+      if (owner && descriptor) Object.defineProperty(owner, 'onscrollend', descriptor);
+    });
+    expect(typeof window.onscrollend).toBe('undefined');
+    const without = await renderReader('prediction');
+    await jumpTo(past('why-its-coming', 90));
+    await expect.poll(marked).toEqual(['Why it’s coming (location)']);
+    await jumpTo(past('limitations', 190));
+    await expect.poll(marked, { message: 'without scrollend' }).toEqual(['Limitations (location)']);
+    await without.unmount();
+  });
+
+  it('contents_marks_a_short_last_section', async () => {
+    // A window tall enough that, scrolled to the page's end, the proposal's last heading is still below the line.
+    const screen = await renderReader('proposal');
+    const last = headingOf('the-prototype');
+    const belowLast = document.documentElement.scrollHeight - (last.getBoundingClientRect().top + window.scrollY);
+    const height = Math.max(1400, Math.ceil(belowLast / 0.6) + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    const line = height * 0.4;
+
+    // A little short of the end, the section before the last is the one being read.
+    const end = document.documentElement.scrollHeight - height;
+    const before = headingOf('business-path');
+    await jumpTo(end - 150);
+    await expect.poll(marked).toEqual(['Business path (location)']);
+
+    // At the page's end, the last section is the one being read, though its heading never reaches the line. It is
+    // marked as the end comes into view, before the scroll rests, as for a reader still holding a touchpad: the
+    // window's scroll-rest events are held back. No heading comes into the band above the line or leaves it.
+    const holdBack = (event: Event) => event.stopImmediatePropagation();
+    window.addEventListener('scrollend', holdBack, { capture: true });
+    onTestFinished(() => window.removeEventListener('scrollend', holdBack, { capture: true }));
+    const scrolled = new Promise((resolve) => window.addEventListener('scroll', resolve, { once: true }));
+    window.scrollTo({ top: end, behavior: 'instant' });
+    await scrolled;
+    expect(last.getBoundingClientRect().top, 'the last heading stays below the line').toBeGreaterThan(line);
+    expect(before.getBoundingClientRect().top, 'the heading before it stays above the line').toBeGreaterThan(0);
+    await expect.poll(marked, { message: 'before the scroll rests' }).toEqual(['The prototype (location)']);
+    window.removeEventListener('scrollend', holdBack, { capture: true });
+
+    // A jump to a section, then a small scroll up that takes its heading back below the line: the mark is the
+    // section now above it.
+    await jumpTo(placeOf('how-well-know-it-works'));
+    await expect.poll(marked).toEqual(['How we’ll know it works (location)']);
+    await jumpTo(window.scrollY - (line - headingOf('how-well-know-it-works').getBoundingClientRect().top) - 40);
+    await expect.poll(marked).toEqual(['v1 (location)']);
+    await screen.unmount();
+  });
+
+  it('a_followed_section_stays_marked_where_the_rule_cant_mark_it', async () => {
+    // A window tall enough that following "Business path" stops at the proposal's end, short of its place, where the
+    // 40% rule would mark the last section. The section followed stays marked until the reader scrolls on.
+    const screen = await renderReader('proposal');
+    const belowPlace = document.documentElement.scrollHeight - placeOf('business-path');
+    const height = Math.max(1400, belowPlace + 100);
+    await page.viewport(DESKTOP.width, height);
+    await expect.poll(() => window.innerHeight).toBe(height);
+    await jumpTo(placeOf('v1'));
+    await expect.poll(marked).toEqual(['v1 (location)']);
+
+    followContentsLink('business-path');
+    const end = document.documentElement.scrollHeight - window.innerHeight;
+    await expect.poll(() => Math.round(window.scrollY)).toBe(Math.round(end));
+    expect(placeOf('business-path'), 'the jump stops short of its place').toBeGreaterThan(end + 1);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(marked(), 'a moment after the jump').toEqual(['Business path (location)']);
+
+    // The reader's own next scroll marks by the rule again.
+    await jumpTo(0);
+    await expect.poll(marked, { message: 'back at the top' }).toEqual([]);
+    await screen.unmount();
+  });
+
+  it('contents_link_moves_focus_to_its_section', async () => {
+    const own = window.location.href;
+    onTestFinished(() => window.history.replaceState(window.history.state, '', own));
+    const screen = await renderReader('prediction');
+    const heading = headingOf('limitations');
+    const link = screen.container.querySelector<HTMLElement>('nav[aria-label="On this page"] a[href="#limitations"]');
+    expect(link?.getAttribute('href')).toBe('#limitations');
+    // Where the heading is once the page has handled the click: a listener on the document hears it after the page's.
+    let atClick = Number.NaN;
+    const onClick = () => {
+      atClick = heading.getBoundingClientRect().top;
+    };
+    document.addEventListener('click', onClick);
+    onTestFinished(() => document.removeEventListener('click', onClick));
+
+    // Followed from the keyboard, as a reader tabbing through the list does.
+    link?.focus();
+    await userEvent.keyboard('{Enter}');
+    // The jump is instant: the heading is at its place, below the pinned bar, in the frame of the click.
+    expect(getComputedStyle(heading).scrollMarginTop).toBe('88px');
+    expect(Math.abs(atClick - 88), `the heading's top at the click: ${atClick}`).toBeLessThanOrEqual(1);
+    expect(Math.abs(heading.getBoundingClientRect().top - 88)).toBeLessThanOrEqual(1);
+    // Focus moves to the section's heading, which shows no ring; the address names the section.
+    expect(document.activeElement).toBe(heading);
+    expect(heading.getAttribute('tabindex')).toBe('-1');
+    expect(heading.matches(':focus-visible'), 'focus came from the keyboard').toBe(true);
+    expect(getComputedStyle(heading).outlineStyle).toBe('none');
+    // The router draws the new address in a transition, which a busy machine may not have drawn yet.
+    await expect.poll(() => at.path).toBe('/about/prediction#limitations');
+    // The next Tab goes on from the section, not from the top of the page.
+    await userEvent.tab();
+    expect(heading.compareDocumentPosition(document.activeElement as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await screen.unmount();
+
+    // On a phone too, from the folded list.
+    const phone = await renderReader('proposal', { size: PHONE });
+    await userEvent.click(phone.container.querySelector('nav[aria-label="On this page"] summary') as HTMLElement);
+    await userEvent.click(phone.getByRole('link', { name: 'Why Anthropic', exact: true }));
+    const why = headingOf('why-anthropic');
+    expect(document.activeElement).toBe(why);
+    expect(Math.abs(why.getBoundingClientRect().top - parseFloat(getComputedStyle(why).scrollMarginTop))).toBeLessThanOrEqual(1);
+    await expect.poll(() => at.path).toBe('/about/proposal#why-anthropic');
+    expect(marked(), 'the phone list marks nothing').toEqual([]);
+    await phone.unmount();
   });
 });

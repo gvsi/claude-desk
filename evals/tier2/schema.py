@@ -296,9 +296,10 @@ class Setup(BaseModel):
 
 # Scenario oracles
 
-# Card templates that render no fact ("Clauses"): the handoff and verification prompts, and the
-# kernel-issued link_cancelled, which renders from the owner's name. Every other card cites one.
-FACTLESS = frozenset({"handoff", "verify_prompt", "link_cancelled"})
+# Card templates that render no fact ("Clauses"): the handoff and verification prompts. Every other
+# card cites one, the kernel-issued link_cancelled included: it renders from the cancelled link's own
+# `payment_link` fact (ENDED_RECORD_CARDS in the verdict).
+FACTLESS = frozenset({"handoff", "verify_prompt"})
 
 
 class CardFact(NamedTuple):

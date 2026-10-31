@@ -18,12 +18,13 @@ English and owner-only. The owner-only lines (`OWNER_STATUS`) sit apart from the
 Clause cards (`render_clause`) are the only visitor text that carries amounts and dates, and
 they are rendered by code from a fact, never from text a model wrote; the `owner_said` card holds
 the owner's own words, and only the kernel issues it, as it does `payment_confirmed` (a completed
-payment link) and `link_cancelled` (a link a rule change cancelled). Each template is registered
+payment link) and `link_cancelled` (a link a rule change cancelled, its amount and what it was for
+read from that link's own `payment_link` fact, then the kernel's line). Each template is registered
 once (`register_template`) with the fact kinds it renders, the fact ID (or ID prefix) it reads, the
 fact statuses that count as current, and a renderer per language that returns the card's headline
 (`title`) and details (`lines`), plus a choice per open time on a booking options card.
 A card's `text` is the headline and then the details, one per line. A template that names no fact
-kinds (handoff, verify_prompt, link_cancelled) renders without one. `Template.current` says
+kinds (handoff, verify_prompt) renders without one. `Template.current` says
 whether a fact may still be shown (a status the template renders, not expired), and a fact with
 nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an empty
 card.
@@ -212,5 +213,8 @@ register_template("refund_issued", {"refund"}, en.refund_issued, es.refund_issue
 register_template("charge_confirmed", {"charge"}, en.charge_confirmed, es.charge_confirmed, key="charge:",
                   statuses=("committed",))
 register_template("handoff", (), en.handoff, es.handoff)
-register_template("link_cancelled", (), en.link_cancelled, es.link_cancelled)
+# From the link's own fact, which its cancelling has expired. Only `payments.cancelled_links` renders it;
+# no status counts as current, so behind `kernel_only_template` a draft citing one is still `stale_fact`.
+register_template("link_cancelled", {"payment_link"}, en.link_cancelled, es.link_cancelled, key="payment_link:",
+                  statuses=())
 register_template("verify_prompt", (), en.verify_prompt, es.verify_prompt)

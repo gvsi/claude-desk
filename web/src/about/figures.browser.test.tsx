@@ -15,13 +15,42 @@ import { ARCHITECTURE_LABELS, ArchitectureFigure } from './figures/ArchitectureF
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale, readinessRows } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
+import { forgetPlayedFigures } from './figures/usePlayOnce.ts';
 
 const DESKTOP = { width: 1440, height: 900 };
 const PHONE = { width: 390, height: 844 };
 
 afterEach(async () => {
   await page.viewport(DESKTOP.width, DESKTOP.height);
+  // A figure that played in one test would draw complete in the next for that reason alone.
+  forgetPlayedFigures();
+  window.scrollTo(0, 0);
 });
+
+/** Waits `count` frames: long enough for an intersection observer to have heard a scroll. */
+async function frames(count = 3): Promise<void> {
+  for (let i = 0; i < count; i += 1) await new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+/**
+ * What under a figure moves or isn't drawn in full, as "tag (class): what": any element with an animation, and
+ * any part of its drawing that is hidden, scaled or clipped. A complete, still figure has none.
+ */
+function motionUnder(figure: Element): string[] {
+  const found: string[] = [];
+  const name = (el: Element) => `${el.localName} (${el.getAttribute('class') ?? ''}${el.textContent ? `, ${el.textContent}` : ''})`;
+  for (const el of [figure, ...figure.querySelectorAll('*')]) {
+    const { animationName } = getComputedStyle(el);
+    if (animationName !== 'none') found.push(`${name(el)}: animation ${animationName}`);
+  }
+  for (const part of figure.querySelectorAll('svg *:not(title)')) {
+    const style = getComputedStyle(part);
+    if (style.opacity !== '1') found.push(`${name(part)}: opacity ${style.opacity}`);
+    if (style.transform !== 'none') found.push(`${name(part)}: transform ${style.transform}`);
+    if (style.clipPath !== 'none') found.push(`${name(part)}: clip-path ${style.clipPath}`);
+  }
+  return found;
+}
 
 /** Each element's own `<title>`, as a tooltip shows it. */
 function titles(elements: Element[]): string[] {
@@ -121,6 +150,13 @@ const CLAUDE_POINTS = [
 ];
 const TOP_POINT = 'Qwen 3.8 Max, Jul 19, 2026: 55.2%, the top score';
 
+describe('the about project', () => {
+  it('about_project_runs_with_reduced_motion', () => {
+    // How the figures play is checked in the about-motion project's files, which this project leaves out.
+    expect(matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+  });
+});
+
 describe('Tau3Chart', () => {
   it('chart_shows_the_leaderboard', async () => {
     const primary = tokenColor('--text-primary');
@@ -193,6 +229,28 @@ describe('Tau3Chart', () => {
     }
   });
 
+  it('chart_is_complete_under_reduced_motion', async () => {
+    // Below the fold, then in view: under reduced motion the chart never plays, and is drawn complete throughout.
+    const screen = await render(
+      <>
+        <div style={{ height: '150vh' }} />
+        <Tau3Chart />
+        <div style={{ height: '150vh' }} />
+      </>,
+    );
+    const figure = screen.container.querySelector('figure');
+    if (!figure) throw new Error('no figure');
+    await frames();
+    expect(figure.getBoundingClientRect().top).toBeGreaterThan(window.innerHeight);
+    expect(figure.hasAttribute('data-play'), 'below the fold').toBe(false);
+    expect(motionUnder(figure), 'below the fold').toEqual([]);
+
+    figure.scrollIntoView({ block: 'center' });
+    await frames();
+    expect(figure.hasAttribute('data-play'), 'in view').toBe(false);
+    expect(motionUnder(figure), 'in view').toEqual([]);
+  });
+
   it('chart_has_a_text_equivalent', async () => {
     for (const compact of [false, true]) {
       const screen = await render(<Tau3Chart compact={compact} />);
@@ -256,6 +314,49 @@ describe('ArchitectureFigure', () => {
         `Figure 1 v1 architecture: two processes, two checkpoints. ${name}.`,
       );
       await screen.unmount();
+    }
+  });
+
+  it('architecture_is_still_under_reduced_motion', async () => {
+    // Below the fold, then in view: under reduced motion the figure never traces its path, and nothing in it moves
+    // or is lit (an outline in secondary ink on a hover ground) at any point.
+    const lit = `${tokenColor('--text-secondary')} 0px 0px 0px 1px inset`;
+    const hover = tokenColor('--fill-hover');
+    const litUnder = (figure: Element) =>
+      [...figure.querySelectorAll('*')].flatMap((el) => {
+        const { boxShadow, backgroundColor } = getComputedStyle(el);
+        const overlay = getComputedStyle(el, '::after');
+        const lightOver = overlay.content !== 'none' && Number(overlay.opacity) > 0 && overlay.boxShadow === lit;
+        return boxShadow === lit || backgroundColor === hover || lightOver ? [`${el.localName} (${el.getAttribute('class') ?? ''})`] : [];
+      });
+
+    for (const [size, compact] of [
+      [DESKTOP, false],
+      [PHONE, true],
+    ] as const) {
+      await page.viewport(size.width, size.height);
+      const screen = await render(
+        <>
+          <div style={{ height: '150vh' }} />
+          <ArchitectureFigure compact={compact} />
+          <div style={{ height: '150vh' }} />
+        </>,
+      );
+      const figure = screen.container.querySelector('figure');
+      if (!figure) throw new Error('no figure');
+      await frames();
+      expect(figure.getBoundingClientRect().top, `${size.width} wide`).toBeGreaterThan(window.innerHeight);
+      for (const where of ['below the fold', 'in view']) {
+        if (where === 'in view') {
+          figure.scrollIntoView({ block: 'center' });
+          await frames();
+        }
+        expect(figure.hasAttribute('data-play'), `${size.width} wide, ${where}`).toBe(false);
+        expect(motionUnder(figure), `${size.width} wide, ${where}`).toEqual([]);
+        expect(litUnder(figure), `${size.width} wide, ${where}`).toEqual([]);
+      }
+      await screen.unmount();
+      window.scrollTo(0, 0);
     }
   });
 

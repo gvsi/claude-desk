@@ -325,16 +325,18 @@ const cards = {
     en: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
     es: cardBlock('payment_confirmed', { fact_id: 'charge:ch-link-1', title: 'Service call deposit, $20.00' }),
   },
-  // The Desk's own card for a payment link a confirmed rule change cancelled: the kernel's one line,
-  // rendered from the owner's display name, with no fact.
+  // The Desk's own card for the deposit link once a confirmed rule change cancelled it, from that
+  // link's payment_link fact: the amount, what the link was for, then the kernel's line.
   link_cancelled: {
     en: cardBlock('link_cancelled', {
-      fact_id: null,
-      title: "This payment link was cancelled because Maria Rivera's rules changed. Ask again if you still want to pay.",
+      fact_id: 'payment_link:L-3301',
+      title: '$20.00',
+      lines: ['Service call deposit', "This payment link was cancelled because Maria Rivera's rules changed. Ask again if you still want to pay."],
     }),
     es: cardBlock('link_cancelled', {
-      fact_id: null,
-      title: 'Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera. Pídelo de nuevo si todavía quieres pagar.',
+      fact_id: 'payment_link:L-3301',
+      title: '$20.00',
+      lines: ['Service call deposit', 'Este enlace de pago se canceló porque cambiaron las reglas de Maria Rivera. Pídelo de nuevo si todavía quieres pagar.'],
     }),
   },
 } satisfies Record<ClauseTemplate, Bilingual<CardBlock>>;

@@ -178,6 +178,97 @@
   margin-top: var(--space-6);
 }
 
+/* The chart draws its argument once, the first time it is a third in view (`usePlayOnce` marks it): the frame and
+   the bar are there from the start; the seven Claude releases scale in one by one in date order; then the top
+   score, the ring and the point labels; then the fit draws towards the bar, over three motion-base (an explanatory
+   figure's signed exception to the motion range); then the band, the rule and the prediction date. Every rule here
+   is on screen with motion only, so unmarked, in print and under reduced motion the chart is drawn complete. Each
+   animation fills backwards: a part waits its turn hidden, and once played, nothing holds it. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  .cd-about-chart {
+    /* The beat between two releases; each one's place in date order (`--cd-tau3-i`) counts the beats it waits. */
+    --cd-tau3-step: calc(var(--motion-base) * 0.4);
+    /* The top score, the ring and the point labels: one beat after the seventh release starts. */
+    --cd-tau3-late: calc(var(--cd-tau3-step) * 7);
+    /* The fit: once they are in. */
+    --cd-tau3-fit: calc(var(--cd-tau3-late) + var(--motion-base));
+    /* The band and the prediction date: once the fit has drawn. */
+    --cd-tau3-after: calc(var(--cd-tau3-fit) + var(--motion-base) * 3);
+  }
+
+  .cd-about-chart [data-tau3-part='point'] {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+
+  .cd-about-chart[data-play='ready'] [data-tau3-part='point'] {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+
+  .cd-about-chart[data-play='ready'] :is(
+      [data-tau3-part='top'],
+      [data-tau3-part='ring'],
+      [data-tau3-part='point-label'],
+      [data-tau3-part='band'],
+      [data-tau3-part='rule'],
+      [data-tau3-part='prediction-date'],
+      [data-tau3-part='band-label']
+    ) {
+    opacity: 0;
+  }
+
+  /* The reveal is measured against the stroke's box, which takes in the line's width and round caps. */
+  .cd-about-chart[data-play='ready'] [data-tau3-part='fit'] {
+    clip-path: inset(0 100% 0 0) stroke-box;
+  }
+
+  .cd-about-chart[data-play='played'] [data-tau3-part='point'] {
+    animation: cd-tau3-scale-in var(--motion-base) var(--motion-ease-emphasis) backwards;
+    animation-delay: calc(var(--cd-tau3-i) * var(--cd-tau3-step));
+  }
+
+  .cd-about-chart[data-play='played'] :is([data-tau3-part='top'], [data-tau3-part='ring'], [data-tau3-part='point-label']) {
+    animation: cd-tau3-fade-in var(--motion-base) var(--motion-ease) var(--cd-tau3-late) backwards;
+  }
+
+  .cd-about-chart[data-play='played'] [data-tau3-part='fit'] {
+    animation: cd-tau3-draw calc(var(--motion-base) * 3) var(--motion-ease-emphasis) var(--cd-tau3-fit) backwards;
+  }
+
+  .cd-about-chart[data-play='played'] :is(
+      [data-tau3-part='band'],
+      [data-tau3-part='rule'],
+      [data-tau3-part='prediction-date'],
+      [data-tau3-part='band-label']
+    ) {
+    animation: cd-tau3-fade-in var(--motion-base) var(--motion-ease) var(--cd-tau3-after) backwards;
+  }
+
+  @keyframes cd-tau3-scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.5);
+    }
+  }
+
+  @keyframes cd-tau3-fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /* Left to right, from Opus 5 towards the bar. */
+  @keyframes cd-tau3-draw {
+    from {
+      clip-path: inset(0 100% 0 0) stroke-box;
+    }
+    to {
+      clip-path: inset(0) stroke-box;
+    }
+  }
+}
+
 /* The v1 architecture: the visitor, the chat layer and the kernel side by side, each box sized as the board
    draws them in the hero (104, 168 and 592 of 864), stacked on a phone. */
 
@@ -382,6 +473,81 @@
 
 .cd-about-arch--compact .cd-about-arch__ledger {
   margin-top: var(--space-12);
+}
+
+/* The figure traces one request once, the first time it is a third in view (`usePlayOnce` marks it): the visitor,
+   the chat layer, Decide and "Runs", Check reply and "Shown", then the signed ledger, each two staggers after the
+   one before (`--cd-arch-i` is a step's place on the path). Each step's light, an outline in secondary ink on a
+   hover ground, comes up over motion-fast, holds for two motion-base, and goes back over motion-fast; then the
+   figure rests as drawn. The light is a layer over the part's own look, not a replacement for it, so it brightens
+   whatever ground the part has (a surface, the ledger's fill, a pill's clear ground) and its ring lies over the
+   part's own outline or border rather than beside it. Nothing waits hidden, so a ready figure looks as it always
+   does, and every rule here is on screen with motion only. A keyframe's offset can't be worked out from the tokens,
+   so the light is three animations in turn (in, held, out) rather than one: only one runs at a time, and none fills,
+   so once the light has gone back nothing holds the part. */
+@media screen and (prefers-reduced-motion: no-preference) {
+  .cd-about-arch {
+    --cd-arch-step: calc(var(--motion-stagger) * 2);
+    --cd-arch-hold: calc(var(--motion-base) * 2);
+  }
+
+  /* A box and the ledger light themselves; an outcome lights its pill, below the list item that names its step.
+     Each holds its light in its own stacking context, under its words. */
+  .cd-about-arch[data-play='played'] :is(.cd-about-arch__box, .cd-about-arch__ledger)[data-arch-step],
+  .cd-about-arch[data-play='played'] [data-arch-step] > .cd-pill {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .cd-about-arch[data-play='played'] :is(.cd-about-arch__box, .cd-about-arch__ledger)[data-arch-step]::after,
+  .cd-about-arch[data-play='played'] [data-arch-step] > .cd-pill::after {
+    --cd-arch-turn: calc(var(--cd-arch-i) * var(--cd-arch-step));
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: var(--fill-hover);
+    box-shadow: inset 0 0 0 1px var(--text-secondary);
+    opacity: 0;
+    pointer-events: none;
+    animation:
+      cd-arch-light-in var(--motion-fast) var(--motion-ease) var(--cd-arch-turn),
+      cd-arch-lit var(--cd-arch-hold) var(--motion-ease) calc(var(--cd-arch-turn) + var(--motion-fast)),
+      cd-arch-light-out var(--motion-fast) var(--motion-ease) calc(var(--cd-arch-turn) + var(--motion-fast) + var(--cd-arch-hold));
+  }
+
+  /* A pill's border sits outside its padding box: its light reaches over the border, so the ring covers it. */
+  .cd-about-arch[data-play='played'] [data-arch-step] > .cd-pill::after {
+    inset: -1px;
+  }
+
+  @keyframes cd-arch-light-in {
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes cd-arch-lit {
+    from,
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes cd-arch-light-out {
+    from {
+      opacity: 1;
+    }
+
+    to {
+      opacity: 0;
+    }
+  }
 }
 
 /* The readiness scale: on each row the axis, its rating marked on four steps, and the rating in words; its
@@ -772,8 +938,32 @@
   text-decoration: none;
 }
 
-.cd-about-contents__link:hover {
+/* Beside the article, the list marks the section being read (ReaderPage's SideContents): its words in
+   text-primary, the others' in text-secondary, and a 2 px bar in text-primary beside its words, in the gutter.
+   The bar is one element, moved to the current row; it slides there in motion-base, and moves at once under
+   reduced motion. The folded list on a phone marks nothing. */
+.cd-about-contents--side .cd-about-contents__link {
+  color: var(--text-secondary);
+}
+
+.cd-about-contents--side .cd-about-contents__link[aria-current='location'] {
+  color: var(--text-primary);
+}
+
+.cd-about-contents .cd-about-contents__link:hover {
   color: var(--accent-blue);
+}
+
+.cd-about-contents__bar {
+  position: absolute;
+  top: 0;
+  left: calc(var(--space-12) * -1);
+  width: var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--text-primary);
+  transition:
+    transform var(--motion-base) var(--motion-ease-emphasis),
+    height var(--motion-base) var(--motion-ease-emphasis);
 }
 
 .cd-about-page .cd-about-contents__number {
@@ -833,6 +1023,11 @@
 
 .cd-about-article > h2:first-child {
   margin-top: 0;
+}
+
+/* Focus lands on a heading when the contents list's link to it is followed; it is not a control, so no ring. */
+.cd-about-article > h2:focus {
+  outline: none;
 }
 
 .cd-about-article strong {

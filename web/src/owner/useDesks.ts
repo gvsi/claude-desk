@@ -45,21 +45,34 @@ export function useDesks(deskId: string) {
   });
 }
 
+/** How a screen reads Today or Needs you. */
+export interface ReadOptions {
+  /**
+   * Whether a read that failed is sent again as this screen mounts (React Query's `retryOnMount`,
+   * default true). Everything that mounts with Today passes false, as Today opens on what its first
+   * reads found, a failure included: sent again, the read would start over as loading, and Today
+   * would hold again, or a part of it look as if it were still loading. One reader left on would be
+   * enough to send it. A poll or "Try again" still reads it again.
+   */
+  retryOnMount?: boolean;
+}
+
 /** A Desk's Today, polled while the tab is shown. */
-export function useToday(deskId: string) {
-  return useQuery({ ...todayQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('today') });
+export function useToday(deskId: string, { retryOnMount = true }: ReadOptions = {}) {
+  return useQuery({ ...todayQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('today'), retryOnMount });
 }
 
 /** What waits for the owner on a Desk: held requests and open callbacks, polled. */
-export function useNeedsYou(deskId: string) {
-  return useQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('needsYou') });
+export function useNeedsYou(deskId: string, { retryOnMount = true }: ReadOptions = {}) {
+  return useQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('needsYou'), retryOnMount });
 }
 
 /**
  * When the last read ahead of each Desk's Today gives up (a `Date.now()` time), per app (its query
- * client, so a reload starts afresh), until the Desk's frame next opens and takes it: the first
- * visit's page reads ahead and then opens the frame, which waits no longer than that, so a visit
- * has one deadline however many pages wait on it.
+ * client, so a reload starts afresh), until the Desk's Today next opens and takes it: the first
+ * visit's page, or the owner's loading page on a reload (`useTodayReadAhead`), starts reading and
+ * then opens Today, which waits no longer than that, so a visit has one deadline however many pages
+ * wait on it.
  */
 const readAheadDeadlines = new WeakMap<QueryClient, Map<string, number>>();
 
@@ -76,7 +89,7 @@ function deadlinesOf(queryClient: QueryClient): Map<string, number> {
  * Reads what a Desk's Today first shows (the copy's Desks, its Today and Needs you) at once, for up
  * to `capMs`, so a page can open onto a Today that is already drawn. A read that fails or runs long
  * is left to Today, which shows and retries it as it always does; this never throws. The Desk's
- * frame, opened next, waits no later than this does (`useTodayReadAhead`).
+ * Today, opened next, waits no later than this does (`useTodayOpening`).
  */
 export async function readTodayAhead(queryClient: QueryClient, deskId: string, capMs: number): Promise<void> {
   const deadline = Date.now() + capMs;
@@ -100,32 +113,68 @@ async function readTodayUntil(queryClient: QueryClient, deskId: string, deadline
 }
 
 /**
- * Whether a Desk's frame opening onto its Today from the owner's loading page (a reload, or a Desk
- * the copy's Desks don't list yet) is still reading Today ahead. `wanted`, as the frame first
- * renders, says whether to; then it reads what Today first shows, as a first visit does, so Today
- * opens drawn rather than section by section, each pushing the next down. It waits until the
- * deadline of the read ahead that opened this frame (the first visit's page), else `READ_AHEAD_MS`
- * from now: past that deadline, it doesn't wait at all.
+ * Whether a Desk's frame, opened at Today's address with the owner's loading page up (a reload, or
+ * a Desk the copy's Desks don't list yet: `wanted`, as the frame first renders), is still reading
+ * what Today first shows, so the loading page stays meanwhile and Today then opens drawn: one
+ * loading step. The reads go out with the Desks', and the wait ends no later than the deadline of
+ * the read ahead that opened the frame (a first visit's page), else `READ_AHEAD_MS` from the frame's
+ * first render. It leaves that deadline for Today, which waits no later.
  */
 export function useTodayReadAhead(deskId: string, wanted: boolean): boolean {
   const queryClient = useQueryClient();
+  const [first] = useState(() => {
+    const deadline = deadlinesOf(queryClient).get(deskId) ?? Date.now() + READ_AHEAD_MS;
+    return { wanted, deadline, reading: wanted && Date.now() < deadline };
+  });
+  const [reading, setReading] = useState(first.reading);
+  // Once, as the frame first renders: run again once Today has taken the deadline, it would leave
+  // the spent deadline for the Desk's next Today, a later visit with a wait of its own.
+  useEffect(() => {
+    if (!first.wanted) return undefined;
+    const deadlines = deadlinesOf(queryClient);
+    deadlines.set(deskId, first.deadline);
+    let live = true;
+    if (first.reading) {
+      void readTodayUntil(queryClient, deskId, first.deadline).then(() => {
+        if (live) setReading(false);
+      });
+    }
+    return () => {
+      live = false;
+      // Left before Today took it (Back, another Desk, a Desk that isn't the owner's): it goes with
+      // the loading page, rather than cut short the wait of a Today opened later.
+      if (deadlines.get(deskId) === first.deadline) deadlines.delete(deskId);
+    };
+  }, [first, queryClient, deskId]);
+  return reading;
+}
+
+/**
+ * Whether a Desk's Today, just opened, is still reading what it first shows (its Today and Needs
+ * you), so it keeps its sections back and they open together rather than one by one, each pushing
+ * the next down, when the owner comes from another Desk or another page. A first visit's page and a
+ * reload's loading page read them first (`readTodayAhead`, `useTodayReadAhead`). Reads already in,
+ * or failed, open it at once; else it waits no later than the read ahead that opened it gives up,
+ * or `READ_AHEAD_MS` from when it opened. Once open, it stays open.
+ */
+export function useTodayOpening(deskId: string): boolean {
+  const queryClient = useQueryClient();
+  const today = useToday(deskId, { retryOnMount: false });
+  const needsYou = useNeedsYou(deskId, { retryOnMount: false });
+  const read = (today.data !== undefined || today.isError) && (needsYou.data !== undefined || needsYou.isError);
   const [deadline] = useState(() => deadlinesOf(queryClient).get(deskId) ?? Date.now() + READ_AHEAD_MS);
-  const [reading, setReading] = useState(() => wanted && Date.now() < deadline);
-  // Taken once the frame has it: the Desk's next frame is a later visit, with a wait of its own.
+  const [open, setOpen] = useState(() => read || Date.now() >= deadline);
+  if (read && !open) setOpen(true);
+  // Taken once Today has it: the Desk's next Today is a later visit, with a wait of its own.
   useEffect(() => {
     deadlinesOf(queryClient).delete(deskId);
   }, [queryClient, deskId]);
   useEffect(() => {
-    if (!reading) return undefined;
-    let live = true;
-    void readTodayUntil(queryClient, deskId, deadline).then(() => {
-      if (live) setReading(false);
-    });
-    return () => {
-      live = false;
-    };
-  }, [reading, queryClient, deskId, deadline]);
-  return reading;
+    if (open) return undefined;
+    const timer = setTimeout(() => setOpen(true), deadline - Date.now());
+    return () => clearTimeout(timer);
+  }, [open, deadline]);
+  return !open;
 }
 
 /** The copy changed (a new copy, a Desk added or deleted): read the businesses and the copy again. */
@@ -150,6 +199,12 @@ export function findDesk(businesses: readonly BusinessOut[], deskId: string): { 
     if (desk) return { business, desk };
   }
   return null;
+}
+
+/** The same Desks with this Desk's Answering set to `on`; the same list when it doesn't hold the Desk. */
+export function withAnswering(businesses: BusinessOut[] | undefined, deskId: string, on: boolean): BusinessOut[] | undefined {
+  if (businesses === undefined || findDesk(businesses, deskId) === null) return businesses;
+  return businesses.map((b) => ({ ...b, desks: b.desks.map((d) => (d.desk_id === deskId ? { ...d, answering: on } : d)) }));
 }
 
 /** Of `desks`, the last Desk the owner opened when it is one of them, else the first; null when there are none. */

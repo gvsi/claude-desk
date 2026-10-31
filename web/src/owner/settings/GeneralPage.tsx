@@ -169,8 +169,10 @@ export function GeneralPage() {
         <SectionHeader id={businessId} title="Your business" />
         <DetailList items={details} />
       </section>
-      <Card as="section" label="Answering">
-        <Switch label="Answering" description={ANSWERING_LINE} checked={desk.answering} onChange={setAnswering} />
+      <Card as="section" label="Answering" padding={0}>
+        <div className="cd-settings__answering">
+          <Switch label="Answering" description={ANSWERING_LINE} checked={desk.answering} onChange={setAnswering} />
+        </div>
       </Card>
       <section aria-labelledby={deleteId} className="cd-settings__section cd-settings__delete">
         <SectionHeader id={deleteId} title="Delete this Desk" />

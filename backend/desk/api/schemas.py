@@ -83,13 +83,33 @@ def operation_ids(router: str) -> Callable[[APIRoute], str]:
     return lambda route: f"{router}_{route.name}"
 
 
+# Setup's steps (Plan 02b): an interview runs from `questions` to `live`, its go-live step, where it is finished.
+UnfinishedSetupStep = Literal["questions", "tools", "rules", "situations", "safety_check", "preview"]
+SetupStep = Literal[UnfinishedSetupStep, "live"]
+
+
+class DeskSetup(BaseModel):
+    """A Desk's setup interview that hasn't gone live: its ID (`GET /api/owner/setup/{id}`) and the step it is at.
+    Setup finishes at its go-live step (step `live`); an interview whose rules are confirmed but that hasn't gone live
+    (`preview`) is still unfinished, since going live is setup's last step."""
+
+    interview_id: str
+    step: UnfinishedSetupStep
+
+
 class DeskSummary(BaseModel):
+    """One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back
+    into it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.
+    `answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its
+    setup."""
+
     desk_id: str
     slug: str
     name: str
     business_name: str
     hours: list[HoursWindow]
     answering: bool
+    setup: DeskSetup | None
 
 
 class CopyOut(BaseModel):
@@ -517,7 +537,6 @@ class PaymentConflict(BaseModel):
 
 # Setup (Plan 02b) --------------------------------------------------------------------------------------------------
 
-SetupStep = Literal["questions", "tools", "rules", "situations", "safety_check", "preview", "live"]
 # Plan 01a's owner name pattern, which the kernel checks every owner name against: ^[A-Za-zÀ-ÿ' -]{1,40}$
 OWNER_NAME_CHARS = "A-Za-zÀ-ÿ' -"
 OWNER_NAME_PATTERN = rf"^[{OWNER_NAME_CHARS}]{{1,40}}$"

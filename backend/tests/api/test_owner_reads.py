@@ -323,7 +323,8 @@ async def test_switcher_lists_only_this_copys_businesses(app, browser, fake, ker
         "timezone": "America/Los_Angeles",
         "desks": [{"desk_id": owner.desk_id, "slug": owner.slug, "name": "Main line",
                    "business_name": "Rivera Plumbing",
-                   "hours": [window.model_dump(mode="json") for window in desk.hours], "answering": True}]}]
+                   "hours": [window.model_dump(mode="json") for window in desk.hours], "answering": True,
+                   "setup": None}]}]
     assert other.desk_id not in listed.text and fake.desks[other.desk_id].business_id not in listed.text
     assert (await browser(app).get("/api/owner/desks")).status_code == 401          # no owner cookie
 

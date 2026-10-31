@@ -1,11 +1,13 @@
 /**
- * The app's only use of localStorage: whether "Things to try" is hidden, and the last Desk the
- * owner opened. Nothing else is stored in the browser. Storage can be missing or blocked (a
- * private window, blocked site data), so neither function ever throws.
+ * The app's only use of localStorage: whether "Things to try" is hidden, the last Desk the owner
+ * opened, and "Try to break it"'s hand-off from Today to the public page in a new tab (one record,
+ * read once, `breakItIdeas.ts`). Nothing else is stored in the browser. Storage can be missing or
+ * blocked (a private window, blocked site data), so neither function ever throws.
  */
 const KEYS = {
   thingsToTryHidden: 'claude-desk.things-to-try-hidden',
   lastDesk: 'claude-desk.last-desk',
+  breakItHandoff: 'claude-desk.break-it-handoff',
 } as const;
 
 export type LocalKey = keyof typeof KEYS;

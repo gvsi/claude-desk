@@ -21,12 +21,14 @@
   min-width: 0;
 }
 
-/* A word with no break in it (a long business name) breaks rather than leaving the line. */
+/* A word with no break in it (a long business name) breaks rather than leaving the line. A title
+   that wraps balances its lines, so a long name doesn't leave "live" on a line of its own. */
 .cd-page-header__title {
   margin: 0;
   color: var(--text-primary);
   text-align: start;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .cd-page-header__subtitle {

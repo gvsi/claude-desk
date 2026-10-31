@@ -26,7 +26,7 @@ import {
 import { writeLocal } from '../lib/storage.ts';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
-import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead } from './useDesks.ts';
+import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead, withAnswering } from './useDesks.ts';
 
 import './OwnerLayout.css';
 
@@ -45,6 +45,12 @@ export interface OwnerDeskContext {
    * without the Desk is "not found" again.
    */
   holdDesk: (on: boolean) => void;
+  /**
+   * Goes to the owner's place on the page that history entry `key` shows, when Back or Forward
+   * returned to it while the page was still loading and too short to hold it: a page that draws
+   * after a loading line (Today) calls it once drawn. Otherwise it does nothing.
+   */
+  reachPlace: (key: string) => void;
 }
 
 /** The business and Desk a frame shows. */
@@ -111,12 +117,6 @@ export function RouterLink({ href, children, ...rest }: SidebarLinkProps | Rules
   );
 }
 
-/** The same Desks with this Desk's Answering set to `on`; the same list when it doesn't hold the Desk. */
-function withAnswering(businesses: BusinessOut[] | undefined, deskId: string, on: boolean): BusinessOut[] | undefined {
-  if (businesses === undefined || findDesk(businesses, deskId) === null) return businesses;
-  return businesses.map((b) => ({ ...b, desks: b.desks.map((d) => (d.desk_id === deskId ? { ...d, answering: on } : d)) }));
-}
-
 const onOff = (on: boolean) => (on ? 'on' : 'off');
 
 /**
@@ -134,10 +134,10 @@ export function OwnerLayout() {
  * One Desk's frame, mounted afresh for each Desk, so the copy's Desks are read again whenever the
  * owner lands on a Desk they don't list (a new copy's, a Desk just made). Only that fresh read can
  * say the Desk isn't the owner's, unless a page holds the Desk (`holdDesk`) while it settles a
- * delete: then the frame stays up as it last was, and the page moves on once it knows. Opened onto
- * Today with the loading page up (a reload, a Desk not listed yet), the loading page stays while
- * Today is read ahead too, as on a first visit, so Today opens drawn; a Desk already listed (a
- * switch between Desks) opens at once.
+ * delete: then the frame stays up as it last was, and the page moves on once it knows. Opened at
+ * Today's address with the loading page up (a reload, a Desk not listed yet), the loading page stays
+ * while what Today first shows is read too, so Today opens drawn after one loading step; a Desk
+ * already listed (a switch between Desks) opens at once, onto Today, which holds itself.
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
@@ -164,9 +164,10 @@ function DeskGate({ deskId }: { deskId: string }) {
  * land on Rules' top. Each place is remembered by its history entry as the owner scrolls, since by
  * the time a page has gone its area already holds the next one. A page is its route on this Desk;
  * moving within one page (an attempt or a conversation beside its list) keeps the page's place, as
- * those routes are made to.
+ * those routes are made to. A place the page can't reach yet, because it is still loading, waits for
+ * the page to ask for it once drawn (the `reachPlace` this returns).
  */
-function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string): void {
+function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string): (key: string) => void {
   const matches = useMatches();
   const page = matches[matches.length - 1]?.id;
   const { key } = useLocation();
@@ -174,6 +175,8 @@ function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string
   // The main area's place in each history entry, and the entry it is showing.
   const places = useRef(new Map<string, number>());
   const entry = useRef(key);
+  // The place Back or Forward returned to that the page was too short to hold, and its entry.
+  const unreached = useRef<{ key: string; top: number } | null>(null);
 
   // Set before the page's place below, so the scroll that place makes is heard as this entry's.
   useLayoutEffect(() => {
@@ -192,8 +195,21 @@ function useOpenPagesAtTop(inside: RefObject<HTMLElement | null>, deskId: string
     const main = inside.current?.closest('main');
     if (!main) return;
     // `key` and `navigationType` are read only when the page changes: within a page, its place stays.
-    main.scrollTop = navigationType === 'POP' ? (places.current.get(key) ?? 0) : 0;
+    const top = navigationType === 'POP' ? (places.current.get(key) ?? 0) : 0;
+    main.scrollTop = top;
+    unreached.current = main.scrollTop < top - 1 ? { key, top } : null;
   }, [inside, deskId, page]);
+
+  return useCallback(
+    (at: string) => {
+      const main = inside.current?.closest('main');
+      const place = unreached.current;
+      if (!main || place?.key !== at) return;
+      unreached.current = null;
+      main.scrollTop = place.top;
+    },
+    [inside],
+  );
 }
 
 interface DeskFrameProps extends ShownDesk {
@@ -207,11 +223,12 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
-  const today = useToday(deskId);
+  // Mounted with Today on a reload: a failed read of it is Today's to show, not to send again.
+  const today = useToday(deskId, { retryOnMount: false });
   // Ask Claude, beside the page that opened it (the Rules page, a tool's page).
   const askClaude = useAskClaudeHost(deskId, business.owner_display_name);
   const layout = useRef<HTMLDivElement>(null);
-  useOpenPagesAtTop(layout, deskId);
+  const reachPlace = useOpenPagesAtTop(layout, deskId);
   const [switching, setSwitching] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -336,7 +353,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
           </div>
         ) : null}
         <AskClaudeProvider value={askClaude.value}>
-          <Outlet context={{ business, desk, setAnswering, holdDesk } satisfies OwnerDeskContext} />
+          <Outlet context={{ business, desk, setAnswering, holdDesk, reachPlace } satisfies OwnerDeskContext} />
         </AskClaudeProvider>
         {fill ? null : (
           <footer className="cd-owner-layout__footer">

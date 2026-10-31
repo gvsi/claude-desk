@@ -13,18 +13,22 @@ import type { RenderResult } from 'vitest-browser-react';
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { RuleCard } from '../api/contracts.ts';
-import type { RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
+import type { BusinessOut, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
 import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
+import { pairContrast } from '../ds/contrast.ts';
+import { faintestOpacity, paintedGroundOf } from '../ds/test/breath.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { hubSections } from '../owner/rules/hub.ts';
 import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
+import { withAnswering } from '../owner/useDesks.ts';
 import { worker } from '../mocks/browser.ts';
 import { FOLLOW_UP, MEMORY_LABEL, SETUP_QUESTIONS, holdNextAnswer, holdNextStart } from '../mocks/setup.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import type { DeskRecord } from '../mocks/world.ts';
+import { lineWords } from '../ds/test/lineWords.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { retryAfterMs } from '../app/poll.ts';
 import { SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
@@ -185,6 +189,26 @@ const LONG_BUSINESS_NAME = 'Bayview Heating, Plumbing & Drain Services of Greate
 
 /** The composer's failed box, which keeps an answer that didn't go through beside "Try again". */
 const keptAnswer = (screen: RenderResult) => screen.getByRole('group', { name: 'Your answer' });
+
+/** Setup's loading line, while what a step needs is read. */
+const OPENING = 'Opening your setup';
+
+/** Setup's five steps in the bar, as screen readers read them. */
+const setupSteps = (screen: RenderResult) => screen.getByRole('list', { name: 'Set up your Desk' }).getByRole('listitem');
+
+/** A step's circle, drawn only. */
+function stepCircle(step: Element): HTMLElement {
+  const circle = step.querySelector<HTMLElement>('.cd-steps__circle');
+  if (!circle) throw new Error('No circle on the step');
+  return circle;
+}
+
+/** The stroke of the check a step's circle shows. */
+function checkPath(circle: Element): SVGPathElement {
+  const path = circle.querySelector<SVGPathElement>('svg path');
+  if (!path) throw new Error('No check in the circle');
+  return path;
+}
 
 /** Whether `el` is set in Claude's serif. */
 const inSerif = (el: Element) => /Source Serif 4/.test(getComputedStyle(el).fontFamily);
@@ -1674,6 +1698,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
     expect(deskOf(state).summary.answering).toBe(true);
     await expect.element(screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true })).toBeVisible();
+    // The Desks, read again after the lost answer, say it answers: "Answering now" shows.
+    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
 
     // The link is the API's `public_url`, and "Open" opens it in a new tab.
     const url = `${window.location.origin}/d/${state.slug}`;
@@ -1759,6 +1785,217 @@ describe('setup', () => {
       expect(el.scrollWidth, text).toBeLessThanOrEqual(el.clientWidth);
     }
     expectNoHorizontalScroll();
+  });
+
+  it('live_title_balances_a_long_name', async () => {
+    // A 78-character name, near the API's 80, given as an owner gives it: the description's first
+    // sentence. Screen tests load no web fonts, so the title is drawn in the platform's fallback
+    // serif (Georgia on a Mac, Liberation Serif on Linux), and the lines it takes differ by platform.
+    // The name is long enough to wrap in setup's column in either, and the test compares the title's
+    // lines with the ones it would take unbalanced rather than counting them. The exact lines in
+    // Source Serif 4 are the PageHeader stories' (LongTitle, LongTitleOnAPhone).
+    const name = 'Bayview Heating, Plumbing & Drain Services of Greater Oakland and the East Bay';
+    const state = await interviewAtPreview(`${name}. I'm Sam, a plumber in Oakland.`);
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+      const title = screen.getByRole('heading', { level: 1, name: `${name} is live` });
+      await expect.element(title).toBeVisible();
+      const element = title.element() as HTMLElement;
+      expect(getComputedStyle(element).textWrapStyle, viewport).toBe('balance');
+      const balanced = lineWords(element);
+      // The lines the browser's greedy rule gives the same title, filling each line in turn.
+      const before = element.style.textWrap;
+      element.style.textWrap = 'wrap';
+      const greedy = lineWords(element);
+      element.style.textWrap = before;
+      const read = `${viewport}: balanced ${JSON.stringify(balanced)}, greedy ${JSON.stringify(greedy)}`;
+      // The title wraps, and balancing keeps the lines it takes anyway, so nothing under it moves.
+      expect(greedy.length, read).toBeGreaterThan(1);
+      expect(balanced.length, read).toBe(greedy.length);
+      // "live", the word the whole setup builds to, doesn't sit alone on the last line.
+      expect(balanced.at(-1)?.length ?? 0, read).toBeGreaterThan(1);
+      expectNoHorizontalScroll();
+    }
+  });
+
+  it('going_live_is_a_moment', async () => {
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const live = setupSteps(screen).last();
+
+    // Before going live, "Live" is the current step with its number, and nothing says it's answering.
+    await expect.element(live).toHaveAttribute('aria-current', 'step');
+    await expect.element(live).not.toHaveTextContent('done');
+    expect(stepCircle(live.element()).textContent).toBe('5');
+    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+
+    // Step 5's number gives way to a check that draws once, on motion-base and the emphasis ease:
+    // all five steps read done, and "Live" stays the current one.
+    await expect.element(live).toHaveTextContent('Live, done');
+    await expect.element(live).toHaveAttribute('aria-current', 'step');
+    const circle = stepCircle(live.element());
+    expect(circle.textContent).toBe('');
+    const check = checkPath(circle);
+    expect(getComputedStyle(check)).toMatchObject({
+      animationName: 'cd-steps-draw',
+      animationDuration: '0.2s',
+      animationIterationCount: '1',
+      animationTimingFunction: 'cubic-bezier(0.165, 0.84, 0.44, 1)',
+      animationFillMode: 'forwards',
+    });
+    await expect.poll(() => getComputedStyle(check).strokeDashoffset).toBe('0px');
+
+    // Under the title and its line, "Answering now" with its handled dot breathing on the presence loop.
+    const answering = screen.getByText('Answering now', { exact: true });
+    await expect.element(answering).toBeVisible();
+    const dot = answering.element().querySelector('.cd-status-dot--handled');
+    if (!dot) throw new Error('No handled dot beside "Answering now"');
+    expect(getComputedStyle(dot)).toMatchObject({ animationDuration: '5s', animationIterationCount: 'infinite', animationDirection: 'alternate' });
+    expect(getComputedStyle(dot).animationName).not.toBe('none');
+    // breathing_dot_keeps_3_to_1: at its faintest the dot still stands out from its ground by 3:1,
+    // the least a status dot may have, measured from the breath it runs and the colors it is drawn in.
+    const faintest = faintestOpacity(dot);
+    expect(faintest).toBeLessThan(1);
+    expect(pairContrast({ fg: getComputedStyle(dot).backgroundColor, ground: 'transparent', over: paintedGroundOf(dot), opacity: faintest })).toBeGreaterThanOrEqual(3);
+    const subtitle = screen.getByText('Customers and their agents can reach your Desk at this link, day or night.', { exact: true }).element();
+    const link = screen.getByRole('button', { name: 'Copy link' }).element();
+    const line = answering.element().getBoundingClientRect();
+    expect(line.top).toBeGreaterThanOrEqual(subtitle.getBoundingClientRect().bottom);
+    expect(line.bottom).toBeLessThanOrEqual(link.getBoundingClientRect().top);
+  });
+
+  it('stale_preview_never_claims_answering_that_is_off', async () => {
+    // The preview is open here; elsewhere the owner finishes setup, then turns Answering off.
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('button', { name: 'Go live' })).toBeVisible();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: false } });
+    expect(deskOf(state).summary.answering).toBe(false);
+    const mark = mockStore.requests.length;
+
+    // "Go live" in the stale preview: the API says it is live already (409), the interview read again
+    // says so, and the step shows live, its check drawn, but with Answering off it never says
+    // "Answering now", before or after the Desks are read again.
+    await screen.getByRole('button', { name: 'Go live' }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(requests('goLive', mark)).toHaveLength(1);
+    await expect.element(setupSteps(screen).last()).toHaveTextContent('Live, done');
+    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
+    expect(screen.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
+    expect(deskOf(state).summary.answering).toBe(false);
+  });
+
+  it('slow_desks_read_never_pushes_the_link_down', async () => {
+    // A reload on the live step: the Desks are read once the interview names the Desk, and slowly.
+    const state = await interviewAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    const read = await mockStore.dispatch('desks');
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads the Desks');
+    let release = () => {};
+    const until = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockStore.inject({ route: 'desks', status: 200, until, body: read.body });
+    const mark = mockStore.requests.length;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.poll(() => requests('desks', mark).length).toBeGreaterThan(0);
+
+    // While they are read, the step waits whole, on setup's loading line: no title without its
+    // business, and no link that "Answering now" would push down when it lands.
+    await expect.element(screen.getByText(OPENING, { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Copy link' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('heading', { level: 1 }).elements()).toHaveLength(0);
+
+    // Once they land, the title, its line and the link draw together, and the link stays put.
+    release();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+    const link = screen.getByRole('button', { name: 'Copy link' });
+    await expect.element(link).toBeVisible();
+    const top = link.element().getBoundingClientRect().top;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(link.element().getBoundingClientRect().top).toBe(top);
+    expect(screen.getByText(OPENING, { exact: true }).elements()).toHaveLength(0);
+
+    // In the page: a go-live whose answer was lost, with the Desks read again slowly. The step stays
+    // on the preview until they land, then turns live with "Answering now" already under the title.
+    const second = await interviewAtPreview();
+    const page2 = (await renderRoute(`/app/setup/${second.interview_id}`)).screen;
+    await expect.element(page2.getByRole('button', { name: 'Go live' })).toBeVisible();
+    const before = await mockStore.dispatch('desks');
+    if ('network' in before || before.status !== 200) throw new Error('the mock reads the Desks');
+    let land = () => {};
+    const slow = new Promise<void>((resolve) => {
+      land = resolve;
+    });
+    mockStore.inject({ route: 'desks', status: 200, until: slow, body: withAnswering(before.body as BusinessOut[], second.desk_id, true) });
+    mockStore.inject({ route: 'goLive', status: 'network', afterCommit: true });
+    const from = mockStore.requests.length;
+    await page2.getByRole('button', { name: 'Go live' }).click();
+    await expect.poll(() => requests('desks', from).length).toBeGreaterThan(0);
+    expect(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' }).elements()).toHaveLength(0);
+    land();
+    await expect.element(page2.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(page2.getByText('Answering now', { exact: true }).elements()).toHaveLength(1);
+  });
+
+  it('going_live_under_reduced_motion_is_drawn_still', async () => {
+    await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    try {
+      expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+      const state = await interviewAtPreview();
+      const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+      await screen.getByRole('button', { name: 'Go live' }).click();
+      await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+
+      // Nothing moves: the check is drawn from the start, and the dot is still at full strength.
+      const live = setupSteps(screen).last();
+      await expect.element(live).toHaveTextContent('Live, done');
+      const check = checkPath(stepCircle(live.element()));
+      expect(getComputedStyle(check).animationName).toBe('none');
+      expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
+      expect(check.getAnimations()).toHaveLength(0);
+      const answering = screen.getByText('Answering now', { exact: true });
+      await expect.element(answering).toBeVisible();
+      const dot = answering.element().querySelector('.cd-status-dot--handled');
+      if (!dot) throw new Error('No handled dot beside "Answering now"');
+      expect(getComputedStyle(dot)).toMatchObject({ animationName: 'none', opacity: '1' });
+      expect(dot.getAnimations()).toHaveLength(0);
+    } finally {
+      await cdp().send('Emulation.setEmulatedMedia', { features: [] });
+    }
+  });
+
+  it('live_at_load_shows_the_check_drawn', async () => {
+    // A reload on the live step: the Desk went live before this page opened, so nothing draws.
+    const state = await interviewAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    const live = setupSteps(screen).last();
+    await expect.element(live).toHaveTextContent('Live, done');
+    await expect.element(live).toHaveAttribute('aria-current', 'step');
+    const check = checkPath(stepCircle(live.element()));
+    expect(getComputedStyle(check).animationName).toBe('none');
+    expect(getComputedStyle(check).strokeDashoffset).toBe('0px');
+    // The Desks say it is answering, so the line shows, its dot breathing as it does on Today.
+    await expect.element(screen.getByText('Answering now', { exact: true })).toBeVisible();
+
+    // A live Desk whose owner has turned Answering off since doesn't claim to be answering.
+    const off = await interviewAtPreview();
+    await mockStore.dispatch('goLive', { params: { id: off.interview_id } });
+    deskOf(off).summary.answering = false;
+    const reopened = (await renderRoute(`/app/setup/${off.interview_id}`)).screen;
+    // The title names the business from the Desks, so once it does, the line has had its answer.
+    await expect.element(reopened.getByRole('heading', { level: 1, name: 'Rivera Plumbing is live' })).toBeVisible();
+    expect(reopened.getByText('Answering now', { exact: true }).elements()).toHaveLength(0);
   });
 
   it('confirm_conflicts_and_give_ups_are_read_not_called_failed', async () => {

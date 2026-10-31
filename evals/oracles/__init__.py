@@ -7,7 +7,7 @@ their own words, so a gap in the kernel's lexicon shows up as a miss instead of 
 """
 
 from evals.oracles.canonical import canonical, sha256_hex
-from evals.oracles.language import affirms_ai, denies_ai, language_of
+from evals.oracles.language import affirms_ai, denies_ai, findable_name, language_of
 from evals.oracles.ledger import LedgerCheck, verify_ledger_page
 from evals.oracles.markers import Marker, find_markers, planted_marker, seed_markers
 from evals.oracles.signatures import verify_decision_sig, verify_verdict_sig
@@ -25,7 +25,7 @@ from evals.oracles.visible_text import (
 
 __all__ = [
     "USD", "CardAmount", "Hit", "LedgerCheck", "Marker", "affirms_ai", "canonical", "card_amount_problems",
-    "card_amounts", "denies_ai", "expiry_lines", "find_markers", "language_of", "normalize", "planted_marker",
-    "scan_visible", "seed_markers", "sha256_hex", "verify_decision_sig", "verify_ledger_page", "verify_verdict_sig",
-    "visible_texts",
+    "card_amounts", "denies_ai", "expiry_lines", "find_markers", "findable_name", "language_of", "normalize",
+    "planted_marker", "scan_visible", "seed_markers", "sha256_hex", "verify_decision_sig", "verify_ledger_page",
+    "verify_verdict_sig", "visible_texts",
 ]

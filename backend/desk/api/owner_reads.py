@@ -1,11 +1,13 @@
 """The owner's read models (Plan 02a, "Read models" and Task 9): what needs the owner, conversations, Today's briefing
-and last 7 days, and Safety's attempts; and the reports (Plan 02b, Task 8).
+and last 7 days, and Safety's attempts; the reports (Plan 02b, Task 8); and the Desk list's unfinished setups (#233).
 
 Every read is one copy's and one Desk's: kernel rows through the request's `KernelRO`, which reads only the copy the
 owner's `WhoAmI` answer named, filtered by the path Desk, and the API's own rows filtered by that copy and Desk. The
-route has already checked that the Desk is one of the copy's (`OwnerCtx.desk`). Only the Desk's visitor and agent
-sessions count, the owner's previews among them; the owner's own session (its setup calls) never does. Nothing here
-writes or commits, and nothing is kept between reads: each one is computed from the rows as they stand.
+route has already checked that the Desk is one of the copy's (`OwnerCtx.desk`). The Desk list's unfinished setups are
+the one read across the copy's Desks: the API's own interview rows, filtered by that copy and its Desks. Only the
+Desk's visitor and agent sessions count, the owner's previews among them; the owner's own session (its setup calls)
+never does. Nothing here writes or commits, and nothing is kept between reads: each one is computed from the rows as
+they stand.
 
 Names, notes, reasons and texts a visitor typed are passed on as they are, for the owner's screens to show as
 untrusted text; nothing here reaches a visitor or a model.
@@ -36,6 +38,7 @@ from desk.api.schemas import (
     BriefingList,
     BriefingNewest,
     ConversationSummary,
+    DeskSetup,
     Handoff,
     NeedsYouItem,
     NeedsYouSession,
@@ -45,6 +48,7 @@ from desk.api.schemas import (
     Today,
     WeekDay,
 )
+from desk.api.setup import INTERVIEWS
 from desk.api.store import MESSAGES, triaged
 from desk.contracts import Decision
 
@@ -686,3 +690,22 @@ async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
     return [Attempt(ref_id=attempt.ref_id, kind=attempt.kind, reason_plain=attempt.reason_plain,
                     card_ids=list(attempt.card_ids), origin=attempt.origin, created_at=attempt.at,
                     triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq) for attempt in found]
+
+
+# The Desk list (#233) -----------------------------------------------------------------------------------------
+
+
+async def unfinished_setups(ctx: OwnerCtx) -> dict[str, DeskSetup]:
+    """The setup interviews of the copy's Desks that haven't gone live, by Desk ID, so the owner can go back into one.
+    Only the copy's own interview rows are read, for its Desks. A Desk made outside setup has no interview, and one
+    whose interview is `live` has finished; a row still starting names no Desk yet. Each Desk has one interview, the
+    setup that made it; were there more, the newest would stand."""
+    if not ctx.desk_ids:
+        return {}
+    rows = await ctx.ro.conn.execute(
+        select(INTERVIEWS.c.desk_id, INTERVIEWS.c.interview_id, INTERVIEWS.c.step)
+        .where(INTERVIEWS.c.copy_id == ctx.copy_id, INTERVIEWS.c.desk_id.in_(sorted(ctx.desk_ids)))
+        .order_by(INTERVIEWS.c.created_at, INTERVIEWS.c.interview_id))
+    newest = {desk_id: (interview_id, step) for desk_id, interview_id, step in rows}   # each Desk's last row stays
+    return {desk_id: DeskSetup(interview_id=interview_id, step=step)
+            for desk_id, (interview_id, step) in newest.items() if step != "live"}

@@ -3,11 +3,14 @@ import { fileURLToPath } from 'node:url';
 
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
-import { defineConfig, mergeConfig } from 'vitest/config';
+import { configDefaults, defineConfig, mergeConfig } from 'vitest/config';
 
 import viteConfig from './vite.config.ts';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** The About pages' tests that run with motion, in `about-motion` rather than `about`. */
+const ABOUT_MOTION_TESTS = 'src/about/**/*.motion.browser.test.tsx';
 
 export default defineConfig(async (env) =>
   mergeConfig(
@@ -82,11 +85,30 @@ export default defineConfig(async (env) =>
             test: {
               name: 'about',
               include: ['src/about/**/*.browser.test.tsx'],
+              exclude: [...configDefaults.exclude, ABOUT_MOTION_TESTS],
               setupFiles: ['src/ds/test/browser-setup.ts'],
               browser: {
                 enabled: true,
                 headless: true,
                 provider: playwright({ contextOptions: { reducedMotion: 'reduce' } }),
+                viewport: { width: 1440, height: 900 },
+                instances: [{ browser: 'chromium' }],
+              },
+            },
+          },
+          {
+            extends: true,
+            // The same pages with motion, as a reader who hasn't asked for less sees them: the
+            // figures that play once and the scrolls that glide. Only these files, which `about`
+            // leaves out.
+            test: {
+              name: 'about-motion',
+              include: [ABOUT_MOTION_TESTS],
+              setupFiles: ['src/ds/test/browser-setup.ts'],
+              browser: {
+                enabled: true,
+                headless: true,
+                provider: playwright({ contextOptions: { reducedMotion: 'no-preference' } }),
                 viewport: { width: 1440, height: 900 },
                 instances: [{ browser: 'chromium' }],
               },
