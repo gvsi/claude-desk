@@ -13,8 +13,8 @@
  * identity, so only the cursor keeps one from showing twice: the API reads `last_seq` in the same
  * snapshot as the items, so the stream resumes after the last join or leave the transcript holds.
  *
- * A held request's later lines ("Cancelled", "Maria Rivera approved this") stay under the message
- * that holds it, as every receipt stays under its own message, however far the chat has gone on.
+ * A held request's later status replaces its waiting receipt under the same message, however far
+ * the chat has gone on. Every line remains the event's own visitor_plain.
  * Once Claude is writing, the receipts that follow wait for its reply, so a turn the API starts on
  * its own (after the visitor confirmed it's them) explains its reply too.
  *
@@ -84,7 +84,7 @@ export interface ChatState extends RowGroups<ChatItem, ReceiptView> {
   error: EvErrorCode | null;
   /** Held requests the visitor can still cancel, oldest first. */
   openHolds: string[];
-  /** Each decision held on the page, by `decision_id`: its held receipt, which its later statuses attach beside. */
+  /** Each decision held on the page, by `decision_id`: its latest receipt, replaced by later statuses. */
   holds: ReadonlyMap<string, ReceiptView>;
   /** Demo inbox notices for this chat (no code in them). */
   inbox: EvDemoInbox[];
@@ -210,8 +210,8 @@ function withHolds(openHolds: string[], ev: StatusEvent): string[] {
 }
 
 /**
- * A status as it joins the chat: its receipt, placed beside its hold's when the decision was held
- * on the page, and the holds with this one added when it is the hold itself.
+ * A status as it joins the chat: a held decision's latest receipt replaces its previous one, so
+ * waiting never appears beside an outcome. Keep the latest reference for any further resolution.
  */
 function statusPart(
   holds: ReadonlyMap<string, ReceiptView>,
@@ -219,7 +219,11 @@ function statusPart(
 ): { part: RowPart<ChatItem, ReceiptView>; holds: ReadonlyMap<string, ReceiptView> } {
   const receipt = receiptFromEvent(ev);
   if (ev.type === 'held') return { part: { kind: 'receipt', receipt }, holds: new Map(holds).set(ev.decision_id, receipt) };
-  return { part: { kind: 'receipt', receipt, beside: holds.get(ev.decision_id) }, holds };
+  const replaces = holds.get(ev.decision_id);
+  return {
+    part: { kind: 'receipt', receipt, replaces },
+    holds: replaces === undefined ? holds : new Map(holds).set(ev.decision_id, receipt),
+  };
 }
 
 function fromHistory(transcript: VisitorTranscript): ChatState {

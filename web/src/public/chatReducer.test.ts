@@ -54,7 +54,7 @@ describe('chatReducer', () => {
 
     // After the reply, a status attaches to the last row at once: the owner answered.
     const answered = run(events([resolved], 5), replied);
-    expect(answered.rows.at(-1)?.receipts).toEqual([receiptFromEvent(handoff), receiptFromEvent(held), receiptFromEvent(resolved)]);
+    expect(answered.rows.at(-1)?.receipts).toEqual([receiptFromEvent(handoff), receiptFromEvent(resolved)]);
     expect(answered.openHolds).toEqual([]);
 
     // A turn that ends with no reply keeps its receipts, under the visitor's message.
@@ -315,17 +315,17 @@ describe('chatReducer', () => {
     // The visitor cancels: the outcome goes under the message that holds the hold, and nothing new
     // under the quote.
     const resolved = run(events([cancelled], 9), goneOn);
-    expect(receiptsOf(resolved)).toEqual([[], [r(handoff), r(held), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt)]]);
+    expect(receiptsOf(resolved)).toEqual([[], [r(handoff), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt)]]);
     expect(resolved.openHolds).toEqual([]);
 
     // A status for a decision never held on the page still goes under the last row.
     const other: StatusEvent = { ...quoteReceipt, decision_id: 'dec-elsewhere', ledger_seq: 10 };
     const elsewhere = run(events([other], 10), resolved);
-    expect(receiptsOf(elsewhere)).toEqual([[], [r(handoff), r(held), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt), r(other)]]);
+    expect(receiptsOf(elsewhere)).toEqual([[], [r(handoff), r(cancelled)], [], [r(quoteMessage), r(quoteReceipt), r(other)]]);
 
     // While the hold's own turn waits for its reply, a later status waits with it.
     const early = run([{ type: 'sent', id: 'v1', text: 'Can I get 15% off?' }, ...events([held, { type: 'writing' }, cancelled, handoff])]);
-    expect(receiptsOf(early)).toEqual([[], [r(handoff), r(held), r(cancelled)]]);
+    expect(receiptsOf(early)).toEqual([[], [r(handoff), r(cancelled)]]);
 
     // Reloading the conversation puts every line back where it was.
     const stored: TranscriptItem[] = [
@@ -341,6 +341,43 @@ describe('chatReducer', () => {
     const reloaded = run([{ type: 'history', transcript: transcript(10, stored) }]);
     expect(receiptsOf(reloaded)).toEqual(receiptsOf(elsewhere));
     expect(reloaded.openHolds).toEqual([]);
+  });
+
+  it.each(['executed', 'denied'] as const)('replaces_a_hold_with_its_%s_outcome_live_and_after_reload', (state) => {
+    const [held, , handoff] = rivera.events.heldTurn as [StatusEvent, SseEvent, EvMessage, SseEvent];
+    const decision = rivera.decisions[state];
+    const resolved: StatusEvent = {
+      ...held,
+      type: 'resolved',
+      state,
+      visitor_plain: decision.visitor_plain,
+      ledger_seq: decision.ledger_seq,
+    };
+    const receipts = (chat: ChatState) => [...chat.leading, ...chat.pending, ...chat.rows.flatMap((row) => row.receipts)];
+    const expected = [receiptFromEvent(handoff), receiptFromEvent(resolved)];
+    const live = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events([held, handoff, { type: 'turn_end' }, resolved])]);
+    expect(receipts(live)).toEqual(expected);
+    expect(live.openHolds).toEqual([]);
+
+    const history = run([{
+      type: 'history',
+      transcript: transcript(4, [
+        visitorText(1, 'Can I get 10% off?'),
+        { ...item(2, 'status'), event: held },
+        { ...item(3, 'delivered'), event: handoff },
+        { ...item(4, 'status'), event: resolved },
+      ]),
+    }]);
+    expect(receipts(history)).toEqual(expected);
+    expect(history.openHolds).toEqual([]);
+    // Replaying statuses after the read cannot restore waiting or duplicate the outcome.
+    expect(receipts(run(events([held, resolved], 5), history))).toEqual(expected);
+
+    // Resolve before the reply: both pending and leading receipts are replaced in place.
+    const pending = run([{ type: 'sent', id: 'v1', text: 'Can I get 10% off?' }, ...events([held, resolved])]);
+    expect(pending.pending).toEqual([receiptFromEvent(resolved)]);
+    expect(receipts(run(events([handoff], 3), pending))).toEqual(expected);
+    expect(run(events([held, resolved])).leading).toEqual([receiptFromEvent(resolved)]);
   });
 
   it('owner_typing_until_the_owner_writes', () => {

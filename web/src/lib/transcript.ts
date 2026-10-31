@@ -54,8 +54,9 @@ export type RowPart<Row, R> =
   /**
    * A checkpoint result. With `beside`, a receipt already in the conversation that this one
    * follows, it attaches in the same place; when that one isn't there, as any other receipt.
+   * With `replaces`, it takes that receipt's place (the visitor's resolved hold).
    */
-  | { kind: 'receipt'; receipt: R; beside?: R | undefined };
+  | { kind: 'receipt'; receipt: R; beside?: R | undefined; replaces?: R | undefined };
 
 export function emptyGroups<Row, R>(): RowGroups<Row, R> {
   return { rows: [], leading: [], pending: [], awaitingReply: false };
@@ -93,6 +94,21 @@ function placeBeside<Row, R>(groups: RowGroups<Row, R>, receipt: R, beside: R): 
   return null;
 }
 
+/** Replaces a receipt in its existing place, including before its reply has arrived. */
+function replaceReceipt<Row, R>(groups: RowGroups<Row, R>, receipt: R, replaces: R): RowGroups<Row, R> | null {
+  const replace = (receipts: R[]) => receipts.map((current) => (current === replaces ? receipt : current));
+  const index = groups.rows.findIndex((row) => row.receipts.includes(replaces));
+  const row = groups.rows[index];
+  if (row !== undefined) {
+    const rows = [...groups.rows];
+    rows[index] = { ...row, receipts: replace(row.receipts) };
+    return { ...groups, rows };
+  }
+  if (groups.pending.includes(replaces)) return { ...groups, pending: replace(groups.pending) };
+  if (groups.leading.includes(replaces)) return { ...groups, leading: replace(groups.leading) };
+  return null;
+}
+
 /** The conversation with one more item. */
 export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>): RowGroups<Row, R> {
   switch (part.kind) {
@@ -112,6 +128,8 @@ export function addPart<Row, R>(groups: RowGroups<Row, R>, part: RowPart<Row, R>
     case 'writing':
       return groups.awaitingReply ? groups : { ...groups, awaitingReply: true };
     case 'receipt': {
+      const replaced = part.replaces === undefined ? null : replaceReceipt(groups, part.receipt, part.replaces);
+      if (replaced !== null) return replaced;
       const placed = part.beside === undefined ? null : placeBeside(groups, part.receipt, part.beside);
       if (placed !== null) return placed;
       if (groups.awaitingReply) return { ...groups, pending: [...groups.pending, part.receipt] };
