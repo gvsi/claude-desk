@@ -3,19 +3,23 @@
  * for each held request, the copy's codes and ledger checkpoints), in the design system's
  * `DemoInboxSheet` with `viewer="owner"`: a "Demo inbox" button with a count, which opens the
  * entries in a sheet at the right, each with when it came on the business's clock. An alert about a
- * held request links to that request's card on its own Desk's Today ("Open the request"): the inbox
- * is the whole copy's, so while the sheet is open each such request is read for the Desk it was
- * held on, and its alert links only once that read has answered.
+ * held request links to that request's card on its own Desk's Today ("Open the request") only while
+ * the request still waits for the owner: the inbox is the whole copy's, so while the sheet is open
+ * each such request is read for the Desk it was held on, and so is that Desk's Needs you. The alert
+ * links only while its request is still in that Needs you, as read since the sheet opened by a read
+ * that worked. A request answered anywhere, on Today too before its card is dismissed, shows its
+ * alert with no link.
  *
  * The copy's inbox is read with Today's other reads, as Today opens or just before, so the button
  * counts what is there and the sheet opens onto entries already read, never onto an inbox that only
- * looks empty. It is read again as the sheet opens and every few seconds while it is open, and
- * sends no new read from the moment it closes (a read already out finishes, with its one retry). If
- * Today opens while that first read is still out (it ran long), the button's place says the inbox
- * is opening; if it failed, Today opens on it, without sending it again, and the inbox's title says
- * it couldn't be opened, with "Try again". A later read that fails says the same under the sheet's
- * button, and inside the sheet while it is open, where the page behind is out of reach, so the
- * entries read before never pass for current.
+ * looks empty. It is read again as the sheet opens and every few seconds while it is open, with
+ * each linked Desk's Needs you that is no longer fresh, and sends no new read from the moment it
+ * closes (a read already out finishes, with its one retry). If Today opens while that first read is
+ * still out (it ran long), the button's place says the inbox is opening; if it failed, Today opens
+ * on it, without sending it again, and the inbox's title says it couldn't be opened, with "Try
+ * again". A later read that fails says the same under the sheet's button, and inside the sheet
+ * while it is open, where the page behind is out of reach, so the entries read before never pass
+ * for current.
  */
 import { focusManager, hashKey, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -25,7 +29,7 @@ import { Button, DemoInboxSheet, LoadingLine, Notice, SectionHeader, type DemoIn
 import { formatWhen } from '../../lib/format.ts';
 import { decisionQuery } from '../conversations/ownerReceipt.ts';
 import { requestPath } from '../today/requestLink.ts';
-import { FRESH_MS, OWNER_INBOX_KEY, ownerInboxQuery } from '../useDesks.ts';
+import { FRESH_MS, OWNER_INBOX_KEY, needsYouQuery, ownerInboxQuery } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 
 import './OwnerInbox.css';
@@ -45,8 +49,11 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   // comes while the close is still being drawn (a read already out finishes, with its one retry).
   const [open, setOpen] = useState(false);
   const openNow = useRef(false);
+  // When the sheet last opened, less `FRESH_MS`: a Desk's Needs you read before then is too old to link from.
+  const [openedAt, setOpenedAt] = useState(0);
   const openChanged = (next: boolean) => {
     openNow.current = next;
+    if (next) setOpenedAt(Date.now() - FRESH_MS);
     setOpen(next);
     onOpenChange?.(next);
   };
@@ -73,14 +80,19 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   // The count starts again as the change happens, from the query cache, not once Today has drawn it,
   // so a poll can't come due just after an answer. The poll is the sheet's own: `refetchInterval`
   // would stop only once Today had drawn the close, and a poll that came due in between would read.
+  // Each poll also reads again the Needs you of each Desk the links read (below) that is no longer
+  // fresh. Today's own Desk's, which Today polls more often than that, always is, so it adds nothing.
   const queryClient = useQueryClient();
+  const linkedDesks = useRef<readonly string[]>([]);
   useEffect(() => {
     if (!open) return undefined;
     let poll: number | undefined;
     const startCount = () => {
       window.clearInterval(poll);
       poll = window.setInterval(() => {
-        if (openNow.current && focusManager.isFocused()) void refetch({ cancelRefetch: false });
+        if (!openNow.current || !focusManager.isFocused()) return;
+        void refetch({ cancelRefetch: false });
+        for (const deskId of linkedDesks.current) void queryClient.prefetchQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS });
       }, pollMs('inbox'));
     };
     startCount();
@@ -103,8 +115,27 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
     const id = decisionIds[index];
     if (id !== undefined && data?.decision_id === id && data.action) deskOf.set(id, data.action.desk_id);
   });
+  // And each of those Desks' Needs you, Today's own read: read as the sheet opens unless it is
+  // fresh, then on the sheet's poll once it no longer is. An alert links only while its request is
+  // still in that list, as read since the sheet opened (or within `FRESH_MS` before) by a read that
+  // was the latest and worked. A request answered since, anywhere (on Today too, before its card
+  // is dismissed), draws no link, since it no longer waits for the owner; nor does one whose list
+  // hasn't been read since the sheet opened, or whose latest read failed, which may be out of date.
+  const heldDesks = [...new Set(deskOf.values())];
+  useEffect(() => {
+    linkedDesks.current = heldDesks;
+  });
+  const lists = useQueries({ queries: heldDesks.map((id) => ({ ...needsYouQuery(id), staleTime: FRESH_MS, enabled: open })) });
+  const waiting = new Set<string>();
+  lists.forEach(({ data, dataUpdatedAt, errorUpdatedAt }, index) => {
+    if (errorUpdatedAt > dataUpdatedAt || dataUpdatedAt < openedAt) return;
+    for (const item of data ?? []) {
+      const id = item.decision?.decision_id;
+      if (id !== undefined && deskOf.get(id) === heldDesks[index]) waiting.add(id);
+    }
+  });
   const hrefFor = (decisionId: string | null | undefined): string | undefined => {
-    const deskId = decisionId ? deskOf.get(decisionId) : undefined;
+    const deskId = decisionId && waiting.has(decisionId) ? deskOf.get(decisionId) : undefined;
     return decisionId && deskId !== undefined ? requestPath(deskId, decisionId) : undefined;
   };
 

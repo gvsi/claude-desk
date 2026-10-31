@@ -22,7 +22,7 @@ export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
-const needsYouQuery = (deskId: string) =>
+export const needsYouQuery = (deskId: string) =>
   queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
 export const ownerInboxQuery = () => queryOptions({ queryKey: OWNER_INBOX_KEY, queryFn: () => request('ownerInbox') });
 
