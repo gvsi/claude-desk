@@ -19,6 +19,7 @@ import type { CancelReason, PaymentLinkOut } from '../../api/views.ts';
 import { Button, ConceptFooter, DisclosureLine, MockCheckout, Notice, UNREACHABLE_COPY, type CopyLanguage } from '../../ds/index.ts';
 import { formatMoneyExact } from '../../lib/format.ts';
 import { browserLanguage } from '../../lib/language.ts';
+import { useDocumentLanguage } from '../useDocumentLanguage.ts';
 
 import './CheckoutPage.css';
 
@@ -49,6 +50,9 @@ function withState(link: PaymentLinkOut, state: PaymentLinkState, cancelReason: 
 export function CheckoutPage() {
   const { token = '' } = useParams();
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  // The page's words before a link shows follow the browser; a link's follow the link.
+  const [browser] = useState(browserLanguage);
+  useDocumentLanguage(load.kind === 'ready' ? load.link.language : browser);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   // Set while a pay or cancel is out, so a second press before the page re-renders sends nothing.
@@ -124,12 +128,11 @@ export function CheckoutPage() {
       </main>
     );
   }
-  return <CheckoutState load={load} onRetry={() => void read().then(setLoad)} />;
+  return <CheckoutState load={load} language={browser} onRetry={() => void read().then(setLoad)} />;
 }
 
 /** The page before a link shows: opening, a link that doesn't exist, or one that couldn't be read. */
-function CheckoutState({ load, onRetry }: { load: Exclude<Load, { kind: 'ready' }>; onRetry: () => void }) {
-  const [language] = useState(browserLanguage);
+function CheckoutState({ load, language, onRetry }: { load: Exclude<Load, { kind: 'ready' }>; language: CopyLanguage; onRetry: () => void }) {
   const copy = PAGE_COPY[language];
   let body: ReactNode;
   if (load.kind === 'not_found') body = <Notice tone="info">{copy.notFound}</Notice>;

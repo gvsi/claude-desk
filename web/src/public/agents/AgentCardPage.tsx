@@ -29,6 +29,7 @@ import {
 import { browserLanguage } from '../../lib/language.ts';
 import { brandFrom } from '../brand.ts';
 import { PUBLIC_COPY } from '../copy.ts';
+import { useDocumentLanguage } from '../useDocumentLanguage.ts';
 import { useAgentSession } from './agentSession.ts';
 import { AgentsCard } from './AgentsCard.tsx';
 import { ConnectYourOwn } from './ConnectYourOwn.tsx';
@@ -42,6 +43,7 @@ type Load = { kind: 'loading' } | { kind: 'not_found' } | { kind: 'unavailable' 
 export function AgentCardPage() {
   const { slug = '' } = useParams();
   const [language] = useState(browserLanguage);
+  useDocumentLanguage(language);
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
 
   const read = useCallback(async (): Promise<Load> => {

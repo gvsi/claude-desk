@@ -311,6 +311,19 @@ describe('agents page', () => {
     await expectScreenBasics(gone.screen.container, { owner: false });
   });
 
+  it('agents_document_language_follows_the_page', async () => {
+    // The document's language, as index.html sets it (the test browser's page has its own).
+    document.documentElement.lang = 'en';
+    // A Spanish browser: the whole document is Spanish while the page is open, from its first line.
+    const es = await renderRoute(PAGE, { language: 'es-MX' });
+    await expect.element(es.screen.getByRole('heading', { level: 1, name: 'Rivera Plumbing para agentes de IA' })).toBeVisible();
+    expect(document.documentElement.lang).toBe('es');
+    // Leaving the page hands the document its language back.
+    await es.router.navigate('/no/such/page');
+    await expect.element(es.screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.documentElement.lang).toBe('en');
+  });
+
   it('agent_page_opens_a_session_first', async () => {
     // The mock, like the API, refuses to send an agent for a browser with no chat.
     mockStore.reset('rivera');

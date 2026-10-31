@@ -125,6 +125,25 @@ describe('public chat page', () => {
     await expectScreenBasics(es.screen.container, { owner: false });
   });
 
+  it('document_language_follows_the_page', async () => {
+    // The document's language, as index.html sets it (the test browser's page has its own).
+    document.documentElement.lang = 'en';
+    // A Spanish browser: the whole document is Spanish while the page is open, so a screen reader
+    // reads what sits outside the page's own containers, such as the footer, as Spanish too.
+    const es = await renderRoute(PAGE, { language: 'es-MX' });
+    await ready(es.screen);
+    expect(document.documentElement.lang).toBe('es');
+    // Leaving the page hands the document its language back.
+    await es.router.navigate('/no/such/page');
+    await expect.element(es.screen.getByText("This page doesn't exist", { exact: true })).toBeVisible();
+    expect(document.documentElement.lang).toBe('en');
+
+    // An English browser keeps it English.
+    const en = await renderRoute(PAGE);
+    await ready(en.screen);
+    expect(document.documentElement.lang).toBe('en');
+  });
+
   it('quote_reveals_whole_after_writing', async () => {
     const { screen } = await renderRoute(PAGE);
     await ready(screen);
