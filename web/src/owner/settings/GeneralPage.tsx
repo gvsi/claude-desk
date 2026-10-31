@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
+import { ApiError, OWNER_ERROR_COPY, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
 import type { BusinessOut } from '../../api/views.ts';
 import { Button, Card, DetailList, Dialog, Notice, SectionHeader, Switch, type DetailItem } from '../../ds/index.ts';
 import { hoursParts } from '../../lib/format.ts';
@@ -125,17 +125,14 @@ export function GeneralPage() {
         holdDesk(false);
         return;
       }
-      // Not found: it was deleted already, from another tab or by a delete whose answer was lost.
-      if (kind === 'not_found') {
-        await leave();
-        return;
-      }
       const failed = () => {
         setConfirming(false);
-        setFailure(ownerErrorCopy(err));
+        // Not found for a Desk the copy still lists is the server's failure, not a Desk that went.
+        setFailure(kind === 'not_found' ? OWNER_ERROR_COPY.unavailable : ownerErrorCopy(err));
       };
-      // A lost answer may still have deleted it: the copy without this Desk says it did.
-      if (isUncertain(err)) {
+      // A lost answer may still have deleted it. Not found may mean it went already (another tab, a
+      // delete whose answer was lost) or a route that isn't there. The copy without this Desk says it went.
+      if (kind === 'not_found' || isUncertain(err)) {
         await settle(failed);
         return;
       }

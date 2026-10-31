@@ -271,8 +271,8 @@ describe('Settings', () => {
     expect(requests('deleteDesk')).toHaveLength(1);
     expect(unsureSawNotFound()).toBe(false);
 
-    // Deleted elsewhere (another tab) since the page was read: the delete answers not found, which
-    // means it is gone, so the owner moves on as from a 204.
+    // Deleted elsewhere (another tab) since the page was read: the delete answers not found, and the
+    // copy, read again, doesn't list the Desk, so the owner moves on as from a 204.
     const elsewhere = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
     await expect.element(main(elsewhere.screen).getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
     expect(await mockStore.dispatch('deleteDesk', { params: { desk_id: RIVERA.deskId } })).toMatchObject({ status: 204 });
@@ -280,6 +280,22 @@ describe('Settings', () => {
     await elsewhere.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => elsewhere.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     expect(elsewhere.screen.getByRole('alert').elements()).toEqual([]);
+
+    // Not found for a Desk the copy still lists (an API that doesn't serve the delete, or a wrong
+    // path) isn't taken as gone: the copy, read again, still has it, so the delete didn't go through.
+    // The page says so and stays, with the Desk and its Delete button.
+    const unserved = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
+    const unservedSection = main(unserved.screen).getByRole('region', { name: 'Delete this Desk' });
+    await expect.element(unservedSection.getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
+    mockStore.inject({ route: 'deleteDesk', status: 404 });
+    const readsBefore404 = requests('desks').length;
+    await unservedSection.getByRole('button', { name: 'Delete this Desk' }).click();
+    await unserved.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await expect.element(unservedSection.getByRole('alert')).toHaveTextContent(UNAVAILABLE);
+    expect(requests('desks').length).toBeGreaterThan(readsBefore404);
+    expect(unserved.router.state.location.pathname).toBe(GENERAL);
+    expect(mockStore.world.desk(RIVERA.deskId)).toBeDefined();
+    await expect.element(unservedSection.getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
 
     // The business's last Desk: deleting it opens setup, to make another.
     const last = await renderRoute(GENERAL, { seed: 'rivera' });
