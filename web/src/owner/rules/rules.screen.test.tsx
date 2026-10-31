@@ -605,12 +605,16 @@ describe('rules page', () => {
     await expect.element(screen.getByText('New limit: no payment over $100 without asking you.', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Was $500', { exact: true })).toBeVisible();
     await expect.element(screen.getByText(CANCELS_LINKS, { exact: true })).toBeVisible();
-    // Payment link's own $300 comes down to the new limit in the draft, and the review shows it;
-    // the agents' $20 deposit already fits, so it is the one change.
+    // Payment link's own $300 comes down to the new limit in the draft, and the review shows it,
+    // with the API's sentence for the new limit in place of the reason that quoted $300; the
+    // agents' $20 deposit already fits, so it is the one change.
     const lowered = reviewRows(screen);
     expect(lowered.map((row) => row.title)).toEqual(['Payment link']);
     expect(lowered[0]?.before).toContain('Automatic up to $300; over $300, ask me first');
+    expect(lowered[0]?.before).toContain('Payment links up to $300, checked by the reviewer.');
     expect(lowered[0]?.after).toContain('Automatic up to $100; over $100, ask me first');
+    expect(lowered[0]?.after).toContain('Up to $100, your payment limit.');
+    expect(lowered[0]?.after).not.toContain('$300');
     expect(screen.getByText('Your rules stay the same.', { exact: true }).elements()).toHaveLength(0);
     expect(desk().policy.auto_money_cap_cents).toBe(50_000);
     expect(desk().policy.cards.find((card) => card.card_id === 'rv-link')?.max_amount_cents).toBe(30_000);
@@ -639,10 +643,14 @@ describe('rules page', () => {
     await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('0');
     await payments.getByRole('button', { name: 'Review change' }).click();
     await expect.element(screen.getByText('New limit: every payment asks you first.', { exact: true })).toBeVisible();
-    // Each rule that took money on its own now asks first, in the review.
+    // Each rule that took money on its own now asks first, in the review, and says why in the API's
+    // sentence for a $0 limit.
     const asks = reviewRows(screen);
     expect(asks.map((row) => row.title).sort()).toEqual(['Charge within a signed limit', 'Payment link']);
-    for (const row of asks) expect(row.after, row.title).toContain('Ask me first');
+    for (const row of asks) {
+      expect(row.after, row.title).toContain('Ask me first');
+      expect(row.after, row.title).toContain('Your payment limit is $0.');
+    }
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
     await screen.getByRole('link', { name: 'See your rules' }).click();

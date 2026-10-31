@@ -5,6 +5,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { ToolName } from './contracts.ts';
+import type { MoneyCapIn } from './openapi.gen.ts';
 import { ROUTES, apiPath, type RouteBody, type RouteKey } from './routes.ts';
 import type { QuestionKey } from './views.ts';
 
@@ -119,7 +120,9 @@ describe('ROUTES', () => {
     expectTypeOf<RouteBody<'confirmTool'>>().toEqualTypeOf<{ tools: { tool: ToolName; definition_sha256: string }[]; enable: boolean }>();
     // A setup answer names the question it answers, so one sent twice can't answer the next (plan 02b Task 6).
     expectTypeOf<RouteBody<'setupAnswer'>>().toEqualTypeOf<{ question: QuestionKey; text: string }>();
-    // And draftMoneyCap's body, the payment limit a draft changes to (plan 02b).
+    // draftMoneyCap's body, the payment limit a draft changes to, is the API's own model, from its
+    // document (`MoneyCapIn`, openapi.gen.ts), not typed by hand.
+    expectTypeOf<RouteBody<'draftMoneyCap'>>().toEqualTypeOf<MoneyCapIn>();
     expectTypeOf<RouteBody<'draftMoneyCap'>>().toEqualTypeOf<{ auto_money_cap_cents: number }>();
   });
 

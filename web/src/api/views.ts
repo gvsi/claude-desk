@@ -617,14 +617,8 @@ export interface PresetBody {
   preset: RulesPreset;
 }
 
-/**
- * `draftMoneyCap`'s body (plan 02b; typed here until the regenerated types have it): the payment
- * limit a draft changes to, in cents, from 0 to the $10,000 platform ceiling. The draft keeps the
- * active rules, and nothing changes until the owner confirms it.
- */
-export interface MoneyCapBody {
-  auto_money_cap_cents: number;
-}
+/** `draftMoneyCap`'s body, the payment limit a draft changes to: the API's own model, from its document. */
+export type { MoneyCapIn } from './openapi.gen.ts';
 
 export interface ConfirmRulesBody {
   version: number;
