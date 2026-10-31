@@ -4,6 +4,8 @@ Status: reviewed by the kernel safety reviewer and the API lane, 2026-10-31. Not
 
 Owner decision, 2026-10-31: build all three layers, and hold whenever a visit's place is outside the service area or unclear.
 
+Owner decision, 2026-10-31 (later): Claude says up front when a place isn't served. The prompt line (section 5) tells the visitor the business doesn't list that place, then offers a message or a callback; the kernel's hold stays the backstop.
+
 Amends: the master plan ("Shared contracts v2", "Decision semantics and proof obligations", "Cedar request shape", "Rivera seed", "Kernel HTTP API v2", "Data model and database roles", "Evals gate", "Review Focus"); the safety kernel core plan (plan 01a, the proof check count); the kernel verification and owner data plan (plan 01b, Desk-data parts); the API owner tools, setup and agents plan (plan 02b); the web app (plan 04); the evals plans (plans 05a, 05b); the threat model. Task D1 applies these edits.
 
 ## Summary
@@ -149,7 +151,7 @@ The whole reason then reads: A stranger asked to book a visit. It goes past your
 
 In `SYSTEM_PROMPT`, under "Acting for the business", right after the "When you suggest a next step" line:
 
-"- If <desk_context> has a service_places fact, find out which town or ZIP code the visit is in before you offer to book; book only a place it lists, and pass it as visit_place. For any other place, don't offer to book: offer to take a message for {owner} or arrange a callback. If the visitor names the place anyway, pass it as visit_place. If they give a neighborhood or street address, pass the town they name with it, or ask which town it is in. Never repeat a ZIP code in your own words."
+"- If <desk_context> has a service_places fact, find out which town or ZIP code the visit is in before you offer to book; book only a place it lists, and pass it as visit_place. For any other place, don't offer to book: tell them {business} doesn't list that place, then offer to take a message for {owner} or arrange a callback. If the visitor names the place anyway, pass it as visit_place. If they give a neighborhood or street address, pass the town they name with it, or ask which town it is in. Never repeat a ZIP code in your own words."
 
 The ZIP code sentence keeps Claude inside the prompt's rule that prose carries no digits; a ZIP code in prose is blocked as a number.
 
