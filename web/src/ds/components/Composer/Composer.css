@@ -87,7 +87,9 @@
 /* On a touch screen the buttons' hit areas reach halfway across the gaps between them and the text
    box, and no further, so a tap between two controls lands on the nearer one. */
 @media (pointer: coarse) {
-  .cd-composer__tools > .cd-icon-button {
+  /* Only adjacent buttons share the 4 px gap; a sole Send keeps its full square. */
+  .cd-composer__tools > .cd-icon-button:has(+ .cd-icon-button),
+  .cd-composer__tools > .cd-icon-button + .cd-icon-button {
     --cd-touch-reach-inline: calc(var(--space-4) / 2);
   }
 

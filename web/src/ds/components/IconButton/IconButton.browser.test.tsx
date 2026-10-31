@@ -63,6 +63,34 @@ it('touch_hit_area_is_a_44_px_square_unseen', async () => {
   }
 });
 
+it('touch_hit_area_of_a_sole_composer_send_reaches_44_px', async () => {
+  const { host, unmount } = mount(
+    <div style={{ width: 358, padding: 40 }}>
+      <Composer
+        variant="owner"
+        label="Ask Claude about your rules"
+        placeholder="Ask Claude about your rules"
+        helper="Rule changes are shown to you before they apply."
+        onSend={() => {}}
+      />
+    </div>,
+  );
+  try {
+    const buttons = host.querySelectorAll<HTMLElement>('.cd-icon-button');
+    expect(buttons).toHaveLength(1);
+    const send = buttons[0] as HTMLElement;
+    const fine = send.getBoundingClientRect().toJSON();
+    await coarsePointer();
+    expect(send.getBoundingClientRect().toJSON(), 'Send keeps its visible box').toEqual(fine);
+    const area = hitArea(send);
+    expect([area.width, area.height], 'a sole Send has no neighbouring button to cap its reach').toEqual([44, 44]);
+    expectHitAreaLands(send, 'Send');
+    expectUnseen(send);
+  } finally {
+    unmount();
+  }
+});
+
 it('touch_hit_areas_in_the_composer_stay_apart', async () => {
   // The owner composer's speak and send buttons sit 4 px apart, and the visitor composer's controls
   // 8 px apart on one row with its text box: each hit area reaches halfway across its gap, and the
