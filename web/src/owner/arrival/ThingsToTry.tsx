@@ -1,14 +1,15 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
 import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Icon, Notice, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
+import { BREAK_IT_IDEAS, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
 import { VISION_PATHS } from '../../vision/data.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, useToday } from '../useDesks.ts';
-import { ATTACK_IDEAS, THINGS_TO_TRY } from './ideas.ts';
+import { THINGS_TO_TRY } from './ideas.ts';
 
 export interface ThingsToTryProps {
   /** The oldest held request, which "Answer a held request" waits for; null while nothing is held. */
@@ -19,13 +20,22 @@ export interface ThingsToTryProps {
 
 const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 
-/** What happened to the attack idea the owner picked. */
-type Pick =
-  | { idea: string; outcome: 'copied' }
-  /** Copied, but the browser kept the new tab from opening. */
-  | { idea: string; outcome: 'blocked' }
-  /** The clipboard refused: the idea is shown selected instead. */
-  | { idea: string; outcome: 'failed' };
+/** What happened to the "Try to break it" idea the owner picked, by its key. */
+interface Pick {
+  key: BreakItIdea['key'];
+  /**
+   * The token of the hand-off this pick made, which the blocked tab's link carries too; null when
+   * this browser's storage wouldn't keep it, and the page opens with nothing typed in.
+   */
+  token: string | null;
+  /** Counts the picks, so each one draws its line afresh and a screen reader hears it again. */
+  n: number;
+  /** `opened`: the public page opened in a new tab, the idea in its chat box. `blocked`: the browser kept the tab from opening. */
+  outcome: 'opened' | 'blocked';
+}
+
+/** The ideas' words, as the chips show them. */
+const IDEA_TEXTS = BREAK_IT_IDEAS.map((idea) => idea.text);
 
 /** "Held by your rule: {rule}." without doubling the rule's own full stop. */
 function heldLine(rule: string | null | undefined): ReactNode {
@@ -108,7 +118,7 @@ export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
               Open your public page
             </Button>
           </Thing>
-          <BreakIt link={link} ownerName={ownerName} />
+          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} />
           {firstHeld?.decision ? (
             <Thing icon="clock" title={ANSWER.title} held detail={heldLine(firstHeld.held_by)}>
               <Button variant="secondary" onClick={onFocusRequest}>
@@ -162,60 +172,60 @@ function Thing({ icon, title, held = false, detail, below, children }: ThingProp
 }
 
 /**
- * "Try to break it": the ideas, one of which is copied for the public page, which then opens in a
- * new tab. The tab is opened without `noopener` (with it the browser hides whether the tab opened),
- * and this page cuts the new tab's link back to it. A browser that blocks the tab gets a link to
- * open it by hand; a clipboard that refuses leaves the idea selected to copy by hand.
+ * "Try to break it": the fixed ideas. A pick hands the idea to the public page through this
+ * browser's storage (`handOffBreakItIdea`) and opens the page in a new tab with the hand-off's
+ * one-time token in its link (`?try=`), never the idea's key or words; the page types the idea into
+ * its chat box for the owner to send. Nothing is sent without their Send, and nothing is written to
+ * the owner's clipboard. The tab opens in the click itself, so the browser counts it as the owner's
+ * own. It is opened without `noopener` (with it the browser hides whether the tab opened), and this
+ * page cuts the new tab's link back to it. A browser that blocks the tab gets a link to open it by
+ * hand, with the same token. When this browser's storage won't keep the hand-off, there is no token
+ * to promise the idea by: the page opens with nothing typed in, and the line says to type it there.
  */
-function BreakIt({ link, ownerName }: { link: string; ownerName: string }) {
+/** The fallback when the browser blocked the new tab: the public page by hand, in a new tab. */
+function openByHand(href: string): ReactNode {
+  return (
+    <Button variant="secondary" href={href} external>
+      Open your public page
+    </Button>
+  );
+}
+
+function BreakIt({ slug, deskId, ownerName }: { slug: string; deskId: string; ownerName: string }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
-  const ideaRef = useRef<HTMLParagraphElement>(null);
 
-  useLayoutEffect(() => {
-    if (pick?.outcome !== 'failed' || !ideaRef.current) return;
-    window.getSelection()?.selectAllChildren(ideaRef.current);
-  }, [pick]);
-
-  const onPick = async (idea: string) => {
-    setPick(null);
-    try {
-      await navigator.clipboard.writeText(idea);
-    } catch {
-      setPick({ idea, outcome: 'failed' });
-      return;
-    }
+  const onPick = (text: string) => {
+    const idea = BREAK_IT_IDEAS.find((each) => each.text === text);
+    if (idea === undefined) return;
+    const n = (pick?.n ?? 0) + 1;
+    const token = handOffBreakItIdea(slug, idea.key);
+    const link = customerLink(slug, deskId, token ?? undefined);
     const tab = window.open(link, '_blank');
     if (tab === null) {
-      setPick({ idea, outcome: 'blocked' });
+      setPick({ key: idea.key, token, n, outcome: 'blocked' });
       return;
     }
     tab.opener = null;
-    setPick({ idea, outcome: 'copied' });
+    setPick({ key: idea.key, token, n, outcome: 'opened' });
   };
 
   const below = showing ? (
     <div className="cd-things__ideas">
-      <SuggestionChips label="Ideas to try" suggestions={ATTACK_IDEAS} onPick={(idea) => void onPick(idea)} />
-      {pick?.outcome === 'failed' ? (
-        <>
-          <p ref={ideaRef} className="cd-things__idea cd-type-meta">
-            {pick.idea}
-          </p>
-          <Notice tone="error">Copy didn't work. The idea is selected, so copy it yourself.</Notice>
-        </>
+      <SuggestionChips label="Ideas to try" suggestions={IDEA_TEXTS} onPick={onPick} />
+      {pick !== null && pick.token === null ? (
+        <Notice key={pick.n} tone="info" action={pick.outcome === 'blocked' ? openByHand(customerLink(slug, deskId)) : undefined}>
+          Your browser didn't let Today pass the idea on. Type it in the new tab.
+        </Notice>
       ) : null}
-      {pick?.outcome === 'copied' ? <Notice tone="info">Copied. Paste it into the chat.</Notice> : null}
-      {pick?.outcome === 'blocked' ? (
-        <Notice
-          tone="info"
-          action={
-            <Button variant="secondary" href={link} external>
-              Open your public page
-            </Button>
-          }
-        >
-          Copied. Paste it into the chat.
+      {pick?.outcome === 'opened' && pick.token !== null ? (
+        <Notice key={pick.n} tone="info">
+          The new tab opens with the idea in its chat box. Send it from there.
+        </Notice>
+      ) : null}
+      {pick?.outcome === 'blocked' && pick.token !== null ? (
+        <Notice key={pick.n} tone="info" action={openByHand(customerLink(slug, deskId, pick.token))}>
+          Your browser blocked the new tab. This link opens it with the idea typed in.
         </Notice>
       ) : null}
     </div>
