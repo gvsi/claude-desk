@@ -8,7 +8,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { http } from 'msw';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { cdp, page, userEvent } from 'vitest/browser';
-import type { RenderResult } from 'vitest-browser-react';
+import { cleanup, type RenderResult } from 'vitest-browser-react';
 
 import { ApiError, PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, newIdempotencyKey, observeRequests, ownerErrorCopy } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
@@ -737,6 +737,39 @@ describe('setup', () => {
     expect(field.getBoundingClientRect().height).toBe(cap);
     expect(field.scrollHeight).toBeGreaterThan(field.clientHeight);
     expect(field.style.height).toBe('');
+  });
+
+  it('the_fallback_start_box_refits_on_width_changes_only', async () => {
+    const supports = vi.spyOn(CSS, 'supports').mockReturnValue(false);
+    const observe = vi.spyOn(ResizeObserver.prototype, 'observe');
+    const disconnect = vi.spyOn(ResizeObserver.prototype, 'disconnect');
+    onTestFinished(() => {
+      supports.mockRestore();
+      observe.mockRestore();
+      disconnect.mockRestore();
+    });
+    const { screen } = await renderRoute('/app/setup', { viewport: 'desktop' });
+    const field = screen.getByRole('textbox', { name: 'Your business' }).element() as HTMLTextAreaElement;
+    field.style.setProperty('field-sizing', 'fixed');
+    await screen.getByRole('button', { name: 'A hair salon in Oakland' }).click();
+    const desktopHeight = field.getBoundingClientRect().height;
+    await page.viewport(390, 844);
+    await expect.poll(() => field.scrollHeight <= field.clientHeight).toBe(true);
+    expect(field.getBoundingClientRect().height).toBeGreaterThan(desktopHeight);
+    const cap = parseFloat(getComputedStyle(field).maxHeight);
+    expect(field.getBoundingClientRect().height).toBeLessThanOrEqual(cap);
+    // A height-only drag must survive the observer's notification and its following frame.
+    const draggedHeight = `${cap - 10}px`;
+    field.style.height = draggedHeight;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(field.style.height).toBe(draggedHeight);
+    await page.viewport(1440, 900);
+    await expect.poll(() => field.getBoundingClientRect().height).toBe(desktopHeight);
+    const observedAt = observe.mock.calls.findLastIndex(([target]) => target === field);
+    expect(observedAt).toBeGreaterThanOrEqual(0);
+    const observer = observe.mock.contexts[observedAt];
+    await cleanup();
+    expect(disconnect.mock.contexts).toContain(observer);
   });
 
   it('the_start_box_grows_after_picks_and_input_without_field_sizing', async () => {

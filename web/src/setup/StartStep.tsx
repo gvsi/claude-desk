@@ -79,8 +79,26 @@ export function StartStep() {
   useLayoutEffect(() => {
     const box = boxRef.current;
     if (box === null || CSS.supports('field-sizing', 'content')) return;
-    box.style.height = 'auto';
-    box.style.height = `${box.scrollHeight + 2}px`;
+    const fit = () => {
+      box.style.height = 'auto';
+      box.style.height = `${box.scrollHeight + 2}px`;
+    };
+    fit();
+    let width = box.getBoundingClientRect().width;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = box.getBoundingClientRect().width;
+      if (nextWidth === width) return;
+      width = nextWidth;
+      // Keep height writes outside observer delivery; height-only changes never schedule a fit.
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fit);
+    });
+    observer.observe(box);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [description, picks]);
   useEffect(() => {
     let controller = new AbortController();
