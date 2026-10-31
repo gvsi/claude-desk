@@ -2,9 +2,10 @@
  * Plays a figure once: the first time it is at least a third in view, its root is marked played, and its
  * stylesheet animates it from that mark. Until then it is marked ready, which hides the parts the animation
  * brings in. Both marks only take effect on screen with motion (`reader.css` keys them inside
- * `@media screen and (prefers-reduced-motion: no-preference)`), so the figure is complete by default.
+ * `@media screen and (prefers-reduced-motion: no-preference)`), so the figure is complete by default. Once it has
+ * played through, the mark comes off again, so a part drawn later is drawn complete instead of playing on its own.
  */
-import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 import type { FigureName } from '../documents.ts';
 
@@ -26,7 +27,8 @@ function reducedMotion(): boolean {
 
 /**
  * A ref for the figure's root, and the mark it sets as `data-play={play ?? undefined}`: `ready` until it is in
- * view, then `played`, and null for a figure that has already played in this page load.
+ * view, then `played` until every animation under it has finished, then null; and null throughout for a figure that
+ * has already played in this page load.
  */
 export function usePlayOnce<T extends Element>(name: FigureName): [ref: RefObject<T>, play: Play | null] {
   const ref = useRef<T>(null);
@@ -52,6 +54,28 @@ export function usePlayOnce<T extends Element>(name: FigureName): [ref: RefObjec
     observer.observe(figure);
     return () => observer.disconnect();
   }, [name]);
+
+  // Played through, the mark comes off and the figure is complete by default again. A layout switch redraws some
+  // parts (a phone moves the architecture figure's outcomes into their boxes, and keeps fewer of the chart's
+  // labels), and under a played mark a part drawn afresh would play on its own. The wait is on the animations
+  // themselves, so their timing lives only in the stylesheet: each one's `finished` settles whether it runs its
+  // course or is cancelled with its part, and any that started meanwhile, such as a redrawn part's, are waited for
+  // in turn.
+  useEffect(() => {
+    const figure = ref.current;
+    if (play !== 'played' || !figure) return;
+    let mounted = true;
+    void (async () => {
+      for (let running = figure.getAnimations({ subtree: true }); running.length > 0; running = figure.getAnimations({ subtree: true })) {
+        await Promise.allSettled(running.map((animation) => animation.finished));
+        if (!mounted) return;
+      }
+      setPlay(null);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [play]);
 
   return [ref, play];
 }

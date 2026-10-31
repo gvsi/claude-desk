@@ -55,6 +55,18 @@ function unfinishedParts(root: Element): string[] {
   });
 }
 
+/**
+ * What under a figure isn't at rest, as "tag (class): what": any element still animating, and any part of its drawing
+ * that is hidden, scaled or clipped. A figure at rest has none.
+ */
+function notAtRest(figure: Element): string[] {
+  const animating = figure.getAnimations({ subtree: true }).flatMap((animation) => {
+    const el = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+    return el ? [`${el.localName} (${el.getAttribute('class') ?? ''}${el.textContent ? `, ${el.textContent}` : ''}): animating`] : [];
+  });
+  return [...new Set([...animating, ...unfinishedParts(figure)])];
+}
+
 /** How one part is hidden, scaled, clipped or still animating; nothing for a part drawn in full and still. */
 function unfinished(part: Element): string[] {
   const style = getComputedStyle(part);
@@ -136,14 +148,18 @@ describe('Tau3Chart with motion', () => {
     await expect.poll(() => figure.dataset.play).toBe('played');
     await Promise.all(figure.getAnimations({ subtree: true }).map((animation) => animation.finished));
 
-    // Scrolled away and back, it stays played and doesn't play again.
+    // Played through, the mark comes off: the chart is complete by default again.
+    await expect.poll(() => figure.hasAttribute('data-play')).toBe(false);
+    expect(unfinishedParts(figure)).toEqual([]);
+
+    // Scrolled away and back, it doesn't play again.
     window.scrollTo(0, 0);
     await frames();
     expect(inView(figure)).toBe(false);
-    expect(figure.dataset.play).toBe('played');
+    expect(figure.hasAttribute('data-play')).toBe(false);
     figure.scrollIntoView({ block: 'center' });
     await frames();
-    expect(figure.dataset.play).toBe('played');
+    expect(figure.hasAttribute('data-play')).toBe(false);
     expect(figure.getAnimations({ subtree: true })).toEqual([]);
   });
 
@@ -259,6 +275,23 @@ describe('Tau3Chart with motion', () => {
     expect(fit.getAnimations()).toEqual([]);
   });
 
+  it('chart_stays_complete_across_a_layout_switch', async () => {
+    const screen = await render(<Tau3Chart />);
+    const figure = figureIn(screen.container);
+    await expect.poll(() => figure.dataset.play).toBe('played');
+    await Promise.all(figure.getAnimations({ subtree: true }).map((animation) => animation.finished));
+
+    // To the phone's layout and back, as a window resized or a tablet turned across the breakpoint redraws it. Some
+    // labels are drawn afresh (a phone keeps only the short ones), and none of them plays again or waits hidden.
+    for (const compact of [true, false]) {
+      const size = compact ? 'phone' : 'desktop again';
+      await page.viewport(compact ? 390 : 1440, compact ? 844 : 900);
+      await screen.rerender(<Tau3Chart compact={compact} />);
+      await frames();
+      expect(notAtRest(figure), size).toEqual([]);
+    }
+  });
+
   it('chart_is_complete_without_an_observer', async () => {
     // A browser with no IntersectionObserver, and a chart that hasn't played.
     vi.stubGlobal('IntersectionObserver', undefined);
@@ -368,6 +401,23 @@ describe('ArchitectureFigure with motion', () => {
       await again.unmount();
       forgetPlayedFigures();
       window.scrollTo(0, 0);
+    }
+  });
+
+  it('architecture_stays_at_rest_across_a_layout_switch', async () => {
+    const screen = await render(<ArchitectureFigure />);
+    const figure = figureIn(screen.container);
+    await expect.poll(() => figure.dataset.play).toBe('played');
+    await Promise.all(figure.getAnimations({ subtree: true }).map((animation) => animation.finished));
+
+    // To the phone's layout and back, as a window resized or a tablet turned across the breakpoint redraws it. Some
+    // parts are drawn afresh (on a phone each check's outcomes move inside its box), and none of them plays again.
+    for (const compact of [true, false]) {
+      const size = compact ? 'phone' : 'desktop again';
+      await page.viewport(compact ? 390 : 1440, compact ? 844 : 900);
+      await screen.rerender(<ArchitectureFigure compact={compact} />);
+      await frames();
+      expect(notAtRest(figure), size).toEqual([]);
     }
   });
 });
