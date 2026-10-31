@@ -65,7 +65,7 @@ function routerClick(go: () => void) {
  */
 export function ThingsToTry({ firstHeld, onFocusRequest }: ThingsToTryProps) {
   const { business, desk } = useOwnerDesk();
-  const today = useToday(desk.desk_id);
+  const today = useToday(desk.desk_id, { retryOnMount: false });
   const navigate = useNavigate();
   const titleId = useId();
   const [hidden, setHidden] = useState(() => readLocal('thingsToTryHidden') === 'true');

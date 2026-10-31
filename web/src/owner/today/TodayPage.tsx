@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { ownerErrorCopy } from '../../api/http.ts';
-import { Greeting, NAV_LABELS } from '../../ds/index.ts';
+import { Greeting, LoadingLine, NAV_LABELS } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
@@ -12,7 +12,7 @@ import { publicLink } from '../customerLink.ts';
 import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { firstName, heldOldestFirst, useNeedsYou, useToday } from '../useDesks.ts';
+import { firstName, heldOldestFirst, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
 import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem, type ReadFailure } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
@@ -36,17 +36,23 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
  * "Since last night" always; the right column has the public page a new tab away and the last 7
  * days. Today opens no visitor chat itself, and has no composer: changing a rule by asking Claude
  * lives on Rules. An address that names a held request (`#request-<id>`, as the Demo inbox links an
- * owner's alert) brings that request's card into view and focus.
+ * owner's alert) brings that request's card into view and focus. Until what the page first shows is
+ * read, it holds the loading line alone, so it opens drawn however the owner came to it.
  */
 export function TodayPage() {
-  const { business, desk } = useOwnerDesk();
+  const { business, desk, reachPlace } = useOwnerDesk();
   // The page's heading greets the owner, so the tab takes the sidebar's row.
   useDocumentTitle(inApp(NAV_LABELS.today));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const location = useLocation();
-  const today = useToday(deskId);
-  const needsYou = useNeedsYou(deskId);
+  const opening = useTodayOpening(deskId);
+  // Back to Today while it was still opening, one line high, couldn't reach the owner's place on it.
+  useLayoutEffect(() => {
+    if (!opening) reachPlace(location.key);
+  }, [opening, reachPlace, location.key]);
+  const today = useToday(deskId, { retryOnMount: false });
+  const needsYou = useNeedsYou(deskId, { retryOnMount: false });
   const answers = useAnswer(deskId);
   // An answered card moves to "Answered just now", and focus that fell to the page follows it.
   const answeredFocus = useAnsweredFocus(answers.answered);
@@ -98,11 +104,11 @@ export function TodayPage() {
   // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: on the held
   // request's card, or under "Answered just now" if it was answered here. It lands once the latest
   // read of Needs you has worked (a list kept from before a failed read may be missing the request),
-  // and once the Demo inbox's sheet, whose link it may be, has closed and handed focus back to its
-  // button. A request that isn't in the list gets one more read of Needs you, as it may have been
-  // held since the last; if it still isn't here (answered elsewhere, or another Desk's), focus stays
-  // as it is. Every change of address starts a new visit, Back and Forward included, each with one
-  // landing.
+  // once the page has drawn its sections, and once the Demo inbox's sheet, whose link it may be, has
+  // closed and handed focus back to its button. A request that isn't in the list gets one more read
+  // of Needs you, as it may have been held since the last; if it still isn't here (answered
+  // elsewhere, or another Desk's), focus stays as it is. Every change of address starts a new visit,
+  // Back and Forward included, each with one landing.
   const [visit, setVisit] = useState<{ key: string; spent: boolean; rereadAfter: number | null }>({
     key: location.key,
     spent: false,
@@ -114,7 +120,7 @@ export function TodayPage() {
   const { cardFor: answeredCardFor } = answeredFocus;
   const { refetch: readNeedsYou } = needsYou;
   useEffect(() => {
-    if (requested === null || inboxOpen || !readWorked) return;
+    if (opening || requested === null || inboxOpen || !readWorked) return;
     const key = location.key;
     const card = cards.current.get(requested) ?? answeredCardFor(requested);
     if (card === undefined && visit.rereadAfter === null) {
@@ -126,7 +132,7 @@ export function TodayPage() {
     if (card === undefined && visit.rereadAfter !== null && readAt <= visit.rereadAfter) return;
     setVisit((now) => (now.key === key ? { ...now, spent: true } : now));
     card?.focus();
-  }, [requested, inboxOpen, readWorked, readAt, visit.rereadAfter, location.key, answeredCardFor, readNeedsYou]);
+  }, [opening, requested, inboxOpen, readWorked, readAt, visit.rereadAfter, location.key, answeredCardFor, readNeedsYou]);
   // While it waits because Needs you can't be read, the owner's first pointer or key press spends
   // it: a read that works later doesn't pull focus from what they're doing by then.
   const readFailing = needsYou.errorUpdatedAt > needsYou.dataUpdatedAt;
@@ -152,6 +158,20 @@ export function TodayPage() {
         () => setLinkCopy('failed'),
       );
   };
+
+  // Where the greeting will be, and nothing in the right column, which stacks under the page on a
+  // narrow window and would be pushed down once the page is drawn. The heading, for assistive
+  // technology, names the page as the sidebar does until the greeting takes its place.
+  if (opening) {
+    return (
+      <div className="cd-today">
+        <div className="cd-today__main">
+          <h1 className="cd-sr-only">Today</h1>
+          <LoadingLine>Opening your Desk</LoadingLine>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="cd-today" onClick={followInAppLinks(navigate)}>

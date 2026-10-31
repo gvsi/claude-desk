@@ -134,7 +134,7 @@ function Attempts({ week, deskId }: { week: ThisWeekFigures; deskId: string }) {
  * API's; the page formats them and adds none up.
  */
 export function ThisWeek({ deskId }: { deskId: string }) {
-  const today = useToday(deskId);
+  const today = useToday(deskId, { retryOnMount: false });
   const titleId = useId();
   const week = today.data?.this_week;
   if (week === undefined) return null;
