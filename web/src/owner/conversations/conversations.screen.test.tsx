@@ -130,6 +130,16 @@ function danasChatWithThreeDecisions() {
   return { chat, refund, refunded, quote: quote as Decision, booking: booking as Decision };
 }
 
+/** Dana asks `question` in her chat, and Claude answers it with a quote: each event at once. */
+function priceTurn(chat: SessionRecord, question: string): void {
+  const world = mockStore.world;
+  const price = SCRIPT.find((rule) => rule.name === 'price');
+  if (!price) throw new Error('the script has its price row');
+  world.visitorText(chat, question);
+  const turn = world.context(chat, 'en', question);
+  for (const step of [...price.steps, turnEnd]) world.emit(chat, step(turn));
+}
+
 /** The owner's reads of the Desk's conversations, of one chat and of Needs you, as the mock answers them now. */
 async function served<T>(key: 'conversations' | 'conversation' | 'needsYou', params: Record<string, string>): Promise<T> {
   const answer = await mockStore.dispatch(key, { params });
@@ -782,6 +792,32 @@ describe('Conversations', () => {
     await expect.poll(() => quotes().length).toBe(before + 1);
     await readsMore('conversation', 2);
     expect(landed.rows()).toHaveLength(1);
+  });
+
+  it('a_reply_that_came_while_away_draws_still', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const landed = watchLandings();
+    const { screen, router } = await renderRoute(conversation(DANA_LIVE));
+    const quotes = () => log(screen).getByRole('article', { name: 'Quote' }).elements();
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    const before = quotes().length;
+
+    // The owner goes back to the list, and Dana asks and gets her answer meanwhile. Back on the
+    // chat, the page shows the read it had first, then the reply where it belongs, drawn still: it
+    // came while the owner was away.
+    await router.navigate(LIST);
+    await expect.element(screen.getByText('Choose a conversation to read it.', { exact: true })).toBeVisible();
+    priceTurn(chat, 'How much is drain clearing?');
+    await router.navigate(conversation(DANA_LIVE));
+    await expect.poll(() => quotes().length).toBe(before + 1);
+    await readsMore('conversation', 1);
+    expect(landed.rows()).toEqual([]);
+
+    // A reply that arrives while the owner reads lands.
+    priceTurn(chat, 'And for two drains?');
+    await expect.poll(() => quotes().length).toBe(before + 2);
+    expect(landed.rows()).toEqual([quotes().at(-1)?.closest('.cd-transcript-row')]);
   });
 
   it('a_recorded_chat_never_lands', async () => {

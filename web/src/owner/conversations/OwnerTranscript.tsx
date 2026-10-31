@@ -60,6 +60,12 @@ export interface OwnerTranscriptProps {
   renderHeld: (decisionId: string) => ReactNode;
   /** Recorded history replayed into this copy: no one adds to it, so nothing in it arrives live. */
   recorded?: boolean;
+  /**
+   * The conversation has been read since the chat was opened. Until then the page may show a read
+   * it kept from before (coming back to the chat), and what the next read adds came while the owner
+   * was away, so nothing arrives live.
+   */
+  readSinceOpened: boolean;
 }
 
 /** Cards that report something done: their executed receipt draws the check. */
@@ -117,17 +123,18 @@ function rowsOf(items: readonly TranscriptItem[]) {
 
 /**
  * Whether a row arrived while the owner had the chat open: a message from Claude, the Desk or the
- * owner that a read after the first brought. The first read shown (opening the chat, or coming back
- * to it) is what happened so far and draws still, as recorded history always does. A row is live
- * only in the render that first shows it; `TranscriptRow` keeps its motion from there.
+ * owner that a read after the first one taken since opening the chat brought. That first read is
+ * what happened so far and draws still, and so does any read the page kept from before and shows
+ * until then (coming back to the chat), as recorded history always does. A row is live only in the
+ * render that first shows it; `TranscriptRow` keeps its motion from there.
  */
-function useArrivals(rows: readonly OwnerRow[], recorded: boolean): (row: OwnerRow) => boolean {
-  // The newest item this view has shown, or null until it has shown a read.
+function useArrivals(rows: readonly OwnerRow[], recorded: boolean, readSinceOpened: boolean): (row: OwnerRow) => boolean {
+  // The newest item this view has shown from a read taken since it opened, or null until then.
   const shownUpTo = useRef<number | null>(null);
   const newest = rows.reduce((max, row) => Math.max(max, row.item.n), 0);
   useEffect(() => {
-    shownUpTo.current = Math.max(shownUpTo.current ?? 0, newest);
-  }, [newest]);
+    if (readSinceOpened) shownUpTo.current = Math.max(shownUpTo.current ?? 0, newest);
+  }, [newest, readSinceOpened]);
   const before = shownUpTo.current;
   return (row) => !recorded && before !== null && row.item.kind === 'message' && row.item.n > before;
 }
@@ -237,9 +244,19 @@ function useRecord(deskId: string, open: boolean) {
   return { ledger, devKey: health.data?.kernel?.dev_signing_key ?? false };
 }
 
-export function OwnerTranscript({ items, agentName, ownerName, timezone, deskId, heldIds, renderHeld, recorded = false }: OwnerTranscriptProps) {
+export function OwnerTranscript({
+  items,
+  agentName,
+  ownerName,
+  timezone,
+  deskId,
+  heldIds,
+  renderHeld,
+  recorded = false,
+  readSinceOpened,
+}: OwnerTranscriptProps) {
   const groups = useMemo(() => rowsOf(items), [items]);
-  const arrived = useArrivals(groups.rows, recorded);
+  const arrived = useArrivals(groups.rows, recorded, readSinceOpened);
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const traceBox = useRef<HTMLDivElement>(null);
