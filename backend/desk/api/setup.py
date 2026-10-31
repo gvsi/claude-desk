@@ -192,6 +192,7 @@ from desk.api.versions import (
     version_from_row,
 )
 from desk.contracts import (
+    AUTO_MONEY_HARD_CAP_CENTS,
     MCP_TOOLS,
     MONEY_TOOLS,
     BusinessSeed,
@@ -1653,15 +1654,17 @@ def situation_matches(planned: PlannedOutcome, result: ProbeResult, cards: dict[
 
 def safety_probes(answers: SetupAnswers, prices: dict[str, int]) -> list[tuple[SafetyProbe, Probe]]:
     """Each safety probe with the `Probe` built for it from the Desk's prices and the answered limits; a row whose
-    stand-in price the Desk lacks is left out."""
+    legal stand-in price the Desk lacks is left out."""
     largest = _largest(prices)
     built = []
     for number, spec in enumerate(SAFETY_PROBES, 1):
         item_id, amount = (largest if largest is not None else (None, None))
         if spec.stand_in == "over_mandate" and amount is not None:
             amount = max(amount, (spec.mandate_cents or 0) + 1)
-        elif spec.stand_in == "over_money_limit" and answers.payment_link_auto_max_cents is not None:
-            amount = min(answers.payment_link_auto_max_cents, answers.auto_money_cap_cents) + 1
+        elif spec.stand_in == "over_money_limit":
+            amount = (answers.auto_money_cap_cents // 1_000 + 1) * 1_000
+            if amount > AUTO_MONEY_HARD_CAP_CENTS:
+                continue
         if spec.stand_in is not None and amount is None:
             continue
         probe = Probe(actor=spec.actor, who=spec.who, agent_mandate_remaining_cents=spec.mandate_cents,
@@ -1680,11 +1683,20 @@ async def safety_check(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
         interview = await _load(conn, owner.copy_id, interview_id)
     desk_id = owner.desk(interview.desk_id)
     _require_step(interview, RULE_STEPS, drafted=True)
-    built = safety_probes(interview.answers, await _prices(owner, desk_id))
+    listed = await owner.ro.rows("price_items", desk_id=desk_id, order_by=("item_id",))
+    prices = {row["item_id"]: row["unit_cents"] for row in listed}
+    titles = {row["item_id"]: row["title"] for row in listed}
+    largest = _largest(prices)
+    title = titles[largest[0]] if largest is not None else ""
+    name = interview.answers.owner_display_name
+    built = safety_probes(interview.answers, prices)
     started = monotonic()
     results = await _run_probes(owner, desk_id, interview.draft_version, [probe for _, probe in built])
     seconds = round(monotonic() - started, 1)
-    rows = [SafetyRow(label=spec.label, tries=spec.tries, result=result,
+    rows = [SafetyRow(label=spec.label,
+                      tries=spec.tries.format(owner_intro=f"Hi, it's {name or 'the owner'}. ",
+                                              charge_item=title, payment_item=f" for {title}" if title else ""),
+                      result=result,
                       blocked=result.outcome in spec.blocked_by and not result.depends_on_review)
             for (spec, _), result in zip(built, results, strict=True)]
     await _update(engine, owner, interview_id,
