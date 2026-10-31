@@ -16,6 +16,10 @@ master plan's "Coverage and overlap (most specific wins)":
 - An auto unit `u` wins a request when it matches (covers the tool, and its `who` holds) within
   its limits and nothing in `Beats(u)` matches: every non-default card or auto unit of higher
   specificity, and every non-default ask card at the same specificity.
+- Verification is always on: a set that lacks the always-on card for `native.start_verification`
+  (`ALWAYS_ON_CARDS`: auto, for anyone, with no limits or review, the card every preset carries)
+  gets it, so a start never falls to a default ask. A card that differs from it only in its
+  `reason` counts as it.
 - Every tool that cards for `anyone` don't cover (alone or jointly, in any mode) gets a default
   ask for anyone.
 
@@ -40,15 +44,21 @@ from dataclasses import dataclass
 from datetime import time
 from typing import Any
 
-from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, MONEY_TOOLS, RuleCard
+from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, RuleCard, money_tool
 
 # Every string written into Cedar (card IDs, tool and effect names, person IDs, agent key IDs)
 # matches this, so none can end a string literal or carry Cedar syntax.
 _SAFE = re.compile(r"[A-Za-z0-9._:-]{1,80}")
 _DAYS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
-_MONEY_EFFECTS = frozenset({"charge", "pay_out"})
 _MAX_LONG = 2**63 - 1
 _DEFAULT_REASON = "Not covered by a rule yet, so it asks you."
+# The always-on baseline's card for starting a verification, stated here apart from the presets
+# and the compiler: whatever a set holds, anyone may ask for a code, which goes only to the contact
+# on record (the baseline's own forbids hold that).
+ALWAYS_ON_CARDS: tuple[RuleCard, ...] = (
+    RuleCard(card_id="preset-start-verification", applies_to="native.start_verification", mode="auto", who="anyone",
+             reason="Verification is always on."),
+)
 
 
 @dataclass(frozen=True)
@@ -79,11 +89,14 @@ def schema_tools(schema: Mapping[str, Any]) -> dict[str, frozenset[str]]:
 
 
 def reference_sets(cards: Iterable[RuleCard], schema: Mapping[str, Any]) -> RefSets:
-    """The reference sets for the owner's `cards` over every tool `schema` declares. Defaults in
-    `cards` are dropped and derived again. Raises ValueError rather than write a card it can't
-    express exactly (an unsafe string, a repeated ID, hours that aren't whole minutes)."""
+    """The reference sets for the owner's `cards` over every tool `schema` declares, with the
+    `ALWAYS_ON_CARDS` they lack. Defaults in `cards` are dropped and derived again. Raises
+    ValueError rather than write a card it can't express exactly (an unsafe string, a repeated ID,
+    another card under an always-on card's ID among them, hours that aren't whole minutes)."""
     tools = schema_tools(schema)
     owned = [card for card in cards if not card.is_default]
+    owned += [always for always in ALWAYS_ON_CARDS
+              if not any(card.model_copy(update={"reason": always.reason}) == always for card in owned)]
     _check(owned)
     defaults = [RuleCard(card_id=f"default:{tool}", applies_to=tool, mode="ask", who="anyone", is_default=True,
                          reason=_DEFAULT_REASON)
@@ -107,7 +120,7 @@ def reference_sets(cards: Iterable[RuleCard], schema: Mapping[str, Any]) -> RefS
             holds.append(_policy(f"ask.{card.card_id}", [card], "hold", "permit", covered, _who(card)))
     for unit, covered in unit_tools.values():
         name = "+".join(_ids(unit))
-        money = {tool in MONEY_TOOLS or bool(tools[tool] & _MONEY_EFFECTS) for tool in covered}
+        money = {money_tool(tool, tools[tool]) for tool in covered}
         if len(money) != 1:
             raise ValueError("an auto unit covers money tools or other tools, never both")
         beaten = _beaten_where(unit, covered, owned, tools, units_on)

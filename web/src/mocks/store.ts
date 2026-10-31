@@ -212,6 +212,10 @@ class SimulatedCookies implements Cookies {
   setVisitor(slug: string, sessionId: string): void {
     this.sessions.set(slug, sessionId);
   }
+
+  dropVisitor(slug: string): void {
+    this.sessions.delete(slug);
+  }
 }
 
 /** The owner cookie, as Plan 02a sets it (`Secure` left off: the dev server is plain http). */
@@ -464,6 +468,11 @@ export class MockStore {
       return { status: injection.status, body: wire(injection.body ?? faultBody(injection.status, key)) };
     }
     return { status: served.status, body: wire(served.body), ...(setCookie.length > 0 ? { setCookie: [...setCookie] } : {}) };
+  }
+
+  /** For tests: this browser's visitor cookie for `slug` is gone, as when its chat's session has ended. */
+  dropVisitorCookie(slug: string): void {
+    this.oneCopy().cookies.dropVisitor(slug);
   }
 
   /** The visitor session this browser's cookie names for `slug`, or null when there is none. */

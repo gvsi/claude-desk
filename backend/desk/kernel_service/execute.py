@@ -5,12 +5,25 @@ An execution takes up to three transactions, so that a crash leaves a record of 
 
 - T1 locks the decision (for an allow, once it holds the session row `FOR SHARE`), settles it as
   any read does (`refresh_decision`), re-checks it against the current rows (`recheck`, step 6
-  of "Evaluation"), runs the adapter's `prepare` and commits the `executions` row in state
-  `intent`, with whatever `prepare` reserved. Nothing outside the kernel has happened yet.
-- T2, for an allow, holds the session row `FOR SHARE` first, so a take-over waits for a running
-  execution and one that came first stops it (the fence); then it locks the decision and the
-  intent row. It runs the adapter's `execute`, then commits `succeeded` with the result and the
-  decision `executed`, ledgered and signed again.
+  of "Evaluation", against the active version at its money cap, which the `execute` entries that
+  follow name as `policy_version` and `auto_money_cap_cents`), makes sure the receipt it will end
+  on can be written (`_receipt_ready`),
+  runs the adapter's `prepare` and commits the `executions` row in state `intent`, with whatever
+  `prepare` reserved and the version and cap the re-check ran under. Nothing outside the kernel
+  has happened yet.
+- T2 first holds the session row (`_hold_session`), on either path: `FOR SHARE`, so a take-over,
+  or a Desk's deletion closing the session, waits for a running execution, and one that came
+  first stops it (the fence); `FOR UPDATE` for an adapter that writes the session's own rows
+  (`locks_session`). Then it locks the decision and the intent row and, before any side effect,
+  reads the session and the Desk afresh: a Desk deleted since T1, or an allow's session closed,
+  ends `refused_at_execution` (`_refused_in_t2`), and so does an approved hold that releases private
+  data whose session no longer stands for its person (`session_ended`), with the plain reason the
+  owner reads; an allow's session that no longer stands
+  otherwise (`auth.session_stands`: its person off the record, say) ends the same way and answers
+  409 `closed`, ledgered as at authentication (`_closed_in_t2`); and an allow's take-over or pause
+  is fenced. Otherwise it runs the adapter's `execute`, and commits `succeeded` with the result
+  and the decision `executed`, ledgered and signed again. That commit runs no recheck
+  (`KernelCtx.commit`): it records what the adapter did, whatever happens to the session after.
 - T3 runs after an `Exception` in T2, which rolled back: `AdapterFailure` (raised only before any
   external side effect) is `failed`, after the adapter's `on_failed`; anything else, a failed T2
   commit included, is `unknown`, left to reconciliation. A `BaseException` (the process dying, a
@@ -22,10 +35,15 @@ execution row, the rows the adapter's hooks lock, then the ledger head.
 Reconciliation (`reconcile_orphans`) settles an intent no execution is running (older than
 `ORPHAN_AFTER`, and its rows not locked) and an `unknown` action by asking the adapter what
 happened (`reconcile`, by `action_id`), on every read of the decision and at startup. Nothing is
-retried blindly.
+retried blindly. Its entries name the version and cap the execution row recorded in T1, never the
+ones active when it runs. What it settles is a record of what already happened, like a T2 or T3
+commit, so each action it settles commits at once, before a read goes on: no recheck of the read's
+session takes it back.
 
 Claude sees an execution only through its `model_view`: kept to the adapter's `model_view_keys`,
-and emptied when a fact the session can't read was dropped or a value carries a document canary.
+and emptied when a fact the session can't read was dropped or a value carries a document canary,
+which the `execute` entry records (`violation: "canary"`). This one check runs wherever a result
+is stored: an allow, an approved hold and a reconciled orphan.
 """
 
 import hashlib
@@ -33,16 +51,16 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import desk_kernel
 from fastapi import APIRouter, Request
 from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 
-from desk.contracts import ExecResult, LedgerEvent, NormalizedAction, Principal
+from desk.contracts import ExecResult, Fact, LedgerEvent, NormalizedAction, Principal
 from desk.db.models import Action as ActionRow
-from desk.db.models import Approval, Business, Desk, Document, Execution, Tool
+from desk.db.models import Approval, Business, Desk, Execution, Person, Tool
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_api import ExecuteRequest
 from desk.kernel_service import activation, adapters, auth, decide, labels, ledger, repo
@@ -76,6 +94,22 @@ async def _after_intent() -> None:
 
 # ---- The rows an execution works on --------------------------------------------------------------
 
+class UndeclaredPrivateData(AdapterFailure):
+    """An adapter declared not to release private data returned some (`undeclared_private_data`):
+    the action settles `failed`, ledgered with that reason, and nothing it returned is kept."""
+
+    def __init__(self) -> None:
+        super().__init__("undeclared_private_data")
+
+
+class Checked(NamedTuple):
+    """The rules version a re-check ran against, and its money cap: what the `execute` entries of
+    the execution it let through record ("Money cap")."""
+
+    policy_version: int
+    auto_money_cap_cents: int
+
+
 @dataclass
 class _Target:
     """A decision's action with the rows it runs on, read in the current transaction."""
@@ -88,6 +122,7 @@ class _Target:
     business: Business
     adapter: Adapter | None
     principal: Principal
+    checked: Checked | None = None       # the version and cap step 6 ran against, once it has
 
     def xctx(self, ctx: KernelCtx) -> ExecCtx:
         return ExecCtx(ctx=ctx, desk_row=self.desk_row, session_row=self.session_row, principal=self.principal)
@@ -115,7 +150,7 @@ async def _target(ctx: KernelCtx, decision: DecisionRow) -> _Target:
 
 
 async def _find_decision(ctx: KernelCtx, decision_id: str) -> DecisionRow | None:
-    if not decide._storable(decision_id):                # text Postgres can't hold names no decision
+    if not repo.storable(decision_id):                # text Postgres can't hold names no decision
         return None
     return (await ctx.db.scalars(ctx.repo.scoped(
         select(DecisionRow).where(DecisionRow.decision_id == decision_id)))).one_or_none()
@@ -126,11 +161,36 @@ async def _lock_decision(ctx: KernelCtx, decision_id: str) -> DecisionRow:
                       .execution_options(populate_existing=True))
 
 
-async def _share_session(ctx: KernelCtx, session_id: str) -> SessionRow:
+async def _share_session(ctx: KernelCtx, session_id: str, *, exclusive: bool = False) -> SessionRow:
     """The session row, held `FOR SHARE` until the transaction ends: a mode change (which takes it
-    `FOR UPDATE`) waits, so the mode and generation read here hold for the whole transaction."""
+    `FOR UPDATE`) waits, so the mode and generation read here hold for the whole transaction. With
+    `exclusive`, `FOR UPDATE` instead, which a mode change waits for too."""
     return await _one(ctx, select(SessionRow).where(SessionRow.session_id == session_id)
-                      .with_for_update(read=True).execution_options(populate_existing=True))
+                      .with_for_update(read=not exclusive).execution_options(populate_existing=True))
+
+
+async def _hold_session(ctx: KernelCtx, session_id: str, action_id: str) -> SessionRow:
+    """The session row T2 holds, on either path, taken first, before the decision and the intent
+    row (`repo.py`), and read afresh. It is held `FOR SHARE` (the fence): a take-over, a pause or a
+    Desk's deletion, each of which writes the row under `FOR UPDATE` (a deletion closes it),
+    either commits before T2 takes it, and T2 sees what it wrote, or waits until T2 commits. An
+    adapter that writes the session's own rows
+    (`locks_session`: a verification start) holds it `FOR UPDATE` instead, so two such executions
+    in one session take turns: each holding it shared and then asking for it outright, they would
+    wait on each other until Postgres ended one. Never None, since a missing row raises (and the
+    action ends `unknown`, never fenced). The action's tool is read without a lock, which waits
+    for nothing."""
+    tool = await _one(ctx, select(ActionRow.tool).where(ActionRow.action_id == action_id))
+    return await _share_session(ctx, session_id,
+                                exclusive=getattr(adapters.ADAPTERS.get(tool), "locks_session", False))
+
+
+def _checked(execution: Execution) -> Checked | None:
+    """The version and money cap the execution's T1 re-check ran under, as its row records them;
+    None for a row written before they were recorded."""
+    if execution.policy_version is None or execution.auto_money_cap_cents is None:
+        return None
+    return Checked(policy_version=execution.policy_version, auto_money_cap_cents=execution.auto_money_cap_cents)
 
 
 async def _execution(ctx: KernelCtx, action_id: str, *, lock: bool = False) -> Execution | None:
@@ -147,8 +207,11 @@ async def _note(ctx: KernelCtx, row: DecisionRow, summary: dict[str, Any]) -> No
 
 
 def _summary(target: _Target, state: str, **extra: Any) -> dict[str, Any]:
+    """An `execute` entry's summary; once step 6 has run, with the version and money cap it ran
+    against, so each entry can be judged by its own version."""
+    checked = target.checked._asdict() if target.checked is not None else {}
     return {"decision_id": target.decision.decision_id, "action_id": target.action.action_id, "state": state,
-            **extra}
+            **checked, **extra}
 
 
 def _no_result(action_id: str, state: Literal["failed", "unknown"]) -> ExecResult:
@@ -162,8 +225,21 @@ async def recheck(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) 
     the conditions `/decide` had (mode `ai` at the decision's generation, the tool given to the
     session) and the `auto` verdict with the stored review; on `approved` the approvable verdict
     and the approval's binding. Either way the Desk must stand, the tool must be registered and
-    enabled, and the adapter must normalize the stored args to exactly the stored action."""
-    return await _recheck(ctx, await _target(ctx, decision_row), path) is None
+    enabled, and the adapter must normalize the stored args to exactly the stored action. The rules
+    are the active version's, evaluated at its money cap, so a re-check after a confirm uses the
+    new version's cap."""
+    return isinstance(await recheck_under(ctx, decision_row, path=path), Checked)
+
+
+async def recheck_under(ctx: KernelCtx, decision_row: DecisionRow, *, path: ExecPath) -> Checked | str:
+    """`recheck`, answering with the version and money cap it passed under, or, when it fails, with
+    the part that failed (`desk`, `tool`, `session`, `args`, `profile`, `policy` or `binding`), the
+    `check` its refusal is ledgered with, as an allow's is. A pass that named no version fails as
+    `policy`, so the refusal never ledgers a null check."""
+    target = await _target(ctx, decision_row)
+    if (failed := await _recheck(ctx, target, path)) is not None:
+        return failed
+    return target.checked if target.checked is not None else "policy"
 
 
 async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | None:
@@ -197,11 +273,14 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
         return "args"
     if tool_row.profile_sha256 != action.profile_sha256:
         return "profile"
-    # (3) the current rules, for the principal as it stands now
+    # (3) the current rules at their money cap, for the principal as it stands now
     version_row = await activation.active_version(ctx, desk_row.desk_id)
     if version_row is None or ctx.policies.versions.use(version_row):
         return "policy"
-    request = decide.cedar_request(target.principal, action, tz=target.business.timezone, now=ctx.clock.now())
+    cap = activation.version_cap(version_row)
+    target.checked = Checked(policy_version=version_row.version, auto_money_cap_cents=cap)
+    request = decide.cedar_request(target.principal, action, tz=target.business.timezone, now=ctx.clock.now(),
+                                   auto_money_cap_cents=cap)
     if path == "allow":
         stored_review = Reviewed(review=decision.review, usage=None)
 
@@ -226,13 +305,45 @@ async def _recheck(ctx: KernelCtx, target: _Target, path: ExecPath) -> str | Non
 
 # ---- T1: the intent --------------------------------------------------------------------------------
 
-async def prepare_intent(ctx: KernelCtx, decision_row: DecisionRow) -> bool:
+async def prepare_intent(ctx: KernelCtx, decision_row: DecisionRow, *, checked: Checked) -> bool:
     """The adapter's `prepare`, then the intent row, in the caller's transaction, which commits them
-    together. False, with nothing written, when `prepare` refuses."""
-    return await _prepare_intent(ctx, await _target(ctx, decision_row))
+    together. False, with nothing written, when `prepare` refuses. Either path that runs an action
+    comes through here, so a tool whose receipt can't be written fails first (`_receipt_ready`).
+    `checked`, required, is the version and money cap the re-check passed under (`recheck_under`),
+    which the intent row records for every entry after it, reconciliation's included."""
+    target = await _target(ctx, decision_row)
+    target.checked = checked
+    return await _prepare_intent(ctx, target)
+
+
+def _receipt_ready(target: _Target) -> None:
+    """The status line the decision will end on once its action has run, made before anything is
+    written. A tool with no executed line ("Receipts") is 500 `internal`, ledgered on the decision,
+    with no intent row and no side effect, never the generic line and never an error after the
+    side effect: every language has a line for the same tools, so one that has a line now still
+    has one when the session's language has changed by the end. The refusal's `persist` only
+    appends, without locking the decision first: it takes no other lock, so it never holds the
+    ledger head while it waits for a row."""
+    try:
+        decide.status_line("executed", tool=target.action.tool, session=target.session_row,
+                           owner=target.business.owner_display_name)
+    except KeyError:
+        decision = target.decision
+        copy_id, desk_id, session_id = decision.copy_id, decision.desk_id, decision.session_id
+        summary = {"decision_id": decision.decision_id, "action_id": target.action.action_id,
+                   "refused": "no_receipt_line"}
+
+        async def persist(ctx: KernelCtx) -> None:
+            ctx.bind(copy_id)                            # the request's transaction has rolled back
+            await ledger.append(ctx, copy_id=copy_id, desk_id=desk_id, event=LedgerEvent(
+                kind="execute", origin="kernel", session_id=session_id, ref_id=summary["decision_id"],
+                summary=summary))
+
+        raise KernelFailure(500, "internal", "no_receipt_line", persist=persist) from None
 
 
 async def _prepare_intent(ctx: KernelCtx, target: _Target) -> bool:
+    _receipt_ready(target)
     prepare = getattr(target.adapter, "prepare", None)
     if prepare is not None:
         try:
@@ -240,8 +351,11 @@ async def _prepare_intent(ctx: KernelCtx, target: _Target) -> bool:
                 await prepare(target.xctx(ctx), target.action)
         except AdapterRefusal:
             return False
+    checked = target.checked
     ctx.db.add(Execution(action_id=target.action.action_id, copy_id=target.action.copy_id,
-                         decision_id=target.decision.decision_id, state="intent", started_at=ctx.clock.now()))
+                         decision_id=target.decision.decision_id, state="intent", started_at=ctx.clock.now(),
+                         policy_version=checked.policy_version if checked is not None else None,
+                         auto_money_cap_cents=checked.auto_money_cap_cents if checked is not None else None))
     await ctx.db.flush()
     return True
 
@@ -255,19 +369,25 @@ async def _refused_at_execution(ctx: KernelCtx, target: _Target, check: str) -> 
 
 
 async def _not_runnable(ctx: KernelCtx, row: DecisionRow, refused: str) -> KernelFailure:
-    """A decision in no state to run (409), ledgered, with what reading it settled committed."""
+    """A decision in no state to run (409), ledgered, with what reading it settled committed. A
+    reconciliation in the read may have committed, so the owner could close the session since its
+    check: a closed session is answered as closed first (`ctx.recheck`), never with the state."""
+    await ctx.recheck()
     await _note(ctx, row, {"decision_id": row.decision_id, "refused": refused})
     await ctx.db.commit()
     return KernelFailure(409, "conflict", f"not_runnable:{refused}")
 
 
 async def _repeat(ctx: KernelCtx, row: DecisionRow, execution: Execution) -> ExecResult:
-    """A decision that already ran: its stored result, ledgered as a repeat; 409 while it runs or
-    is unknown."""
+    """A decision that already ran: its stored result, ledgered as a repeat naming the version and
+    money cap the execution was checked under (`_checked`), when its row records them; 409 while it
+    runs or is unknown."""
     if execution.state not in ("succeeded", "failed") or execution.result is None:
         raise await _not_runnable(ctx, row, execution.state)
-    await _note(ctx, row, {"decision_id": row.decision_id, "action_id": execution.action_id, "repeat": True})
-    await ctx.db.commit()
+    checked = _checked(execution)
+    await _note(ctx, row, {"decision_id": row.decision_id, "action_id": execution.action_id, "repeat": True,
+                           **(checked._asdict() if checked is not None else {})})
+    await ctx.commit()                                   # the stored result, once its session still stands
     return execution.result
 
 
@@ -299,6 +419,9 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
                         route=EXECUTE_ROUTE, named=named)
     named = Named(copy_id=found.copy_id, desk_id=found.desk_id, session_id=found.session_id)
     session = await _share_session(ctx, found.session_id)          # the session row before the decision row
+    if session.closed_at is not None:
+        # closed since its token was proved (`auth.still_open`): refused as at authentication, nothing run
+        raise AuthError(409, "closed", "closed", route=EXECUTE_ROUTE, named=named)
     row = await _lock_decision(ctx, found.decision_id)
     if generation != session.generation or row.generation != session.generation:
         raise _stale(named, row.decision_id)
@@ -318,43 +441,51 @@ async def execute_allowed(ctx: KernelCtx, session_row: SessionRow, decision_id: 
     if not await _prepare_intent(ctx, target):
         raise await _refused_at_execution(ctx, target, "prepare")
     await ctx.db.commit()                                # T1: the intent row, before any side effect
-    return await _run(ctx, row.decision_id, target.action.action_id, row.session_id, path="allow")
+    return await _run(ctx, row.decision_id, target.action.action_id, row.session_id, path="allow",
+                      checked=target.checked)
 
 
-async def run_approved(ctx: KernelCtx, decision_row: DecisionRow) -> ExecResult:
+async def run_approved(ctx: KernelCtx, decision_row: DecisionRow, *, checked: Checked | None = None) -> ExecResult:
     """T2 and T3 for an approved hold whose intent row the answer has committed, as the held
-    session's principal; mode and generation aren't checked (step 6)."""
-    return await _run(ctx, decision_row.decision_id, decision_row.action_id, decision_row.session_id, path="approved")
+    session's principal; mode, generation and whether the session is closed aren't checked (step
+    6), but its Desk must still stand (`_refused_in_t2`). `checked` is the version and money cap
+    the answer's re-check passed under (`recheck_under`), which its entries record; given none,
+    they record the ones the intent row did (`_checked`)."""
+    return await _run(ctx, decision_row.decision_id, decision_row.action_id, decision_row.session_id, path="approved",
+                      checked=checked)
 
 
 # ---- T2 and T3: the side effect and its outcome -----------------------------------------------------
 
-async def _run(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str, *, path: ExecPath) -> ExecResult:
+async def _run(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str, *, path: ExecPath,
+               checked: Checked | None) -> ExecResult:
     await _after_intent()
     try:
-        outcome = await _side_effect(ctx, decision_id, action_id, session_id, path)
+        outcome = await _side_effect(ctx, decision_id, action_id, session_id, path, checked)
     except AdapterFailure as failure:
         await ctx.db.rollback()
-        return await _settle_failed(ctx, decision_id, action_id, failure)
+        return await _settle_failed(ctx, decision_id, action_id, failure, checked)
     except Exception as exc:
         # an outcome nobody knows, a failed commit included: never retried, left to reconciliation
         repo.log_error(log, exc, "execution_unknown action_id=%s", action_id)
         await ctx.db.rollback()
-        return await _settle_unknown(ctx, decision_id, action_id)
+        return await _settle_unknown(ctx, decision_id, action_id, checked)
     if isinstance(outcome, KernelFailure):
         raise outcome
     return outcome
 
 
-async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str,
-                       path: ExecPath) -> ExecResult | KernelFailure:
-    """T2: under the decision's and the intent row's locks (and, for an allow, the decision's
-    session's, `session_id`, taken first), the adapter's `execute`, then `succeeded` and
-    `executed`, committed. A failure answer comes back as a `KernelFailure`, already committed,
-    for `_run` to raise."""
-    session = None
-    if path == "allow":
-        session = await _share_session(ctx, session_id)
+async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session_id: str, path: ExecPath,
+                       checked: Checked | None) -> ExecResult | KernelFailure:
+    """T2: holding the decision's session row, `session_id`, taken first (`_hold_session`), then
+    under the decision's and the intent row's locks, the checks that need the rows as they are now
+    (`_gone`, then an allow's fence), then the adapter's `execute`, then `succeeded` and
+    `executed`, committed. The decision is locked before anything here takes the ledger head (an
+    adapter's own entry, such as a verification start's `verify`), as an answer or a read that
+    locks it and then ledgers does. A failure answer comes back as a `KernelFailure`, already
+    committed, for `_run` to raise. Its entry names `checked`, or, given none, the version and cap
+    the intent row recorded, as T3's do."""
+    session = await _hold_session(ctx, session_id, action_id)
     decision = await _lock_decision(ctx, decision_id)
     execution = await _execution(ctx, action_id, lock=True)
     if execution is None or execution.state != "intent":
@@ -363,7 +494,20 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
             return execution.result
         return KernelFailure(409, "conflict", "not_an_intent")
     target = await _target(ctx, decision)
-    if session is not None:
+    target.checked = checked if checked is not None else _checked(execution)
+    if session is None:                 # never: the session row is always held; `_run` ends it unknown
+        raise RuntimeError(f"{path}_without_session")
+    if (gone := _gone(target, session, path)) is not None:
+        return await _refused_in_t2(ctx, target, execution, gone, path)
+    if path == "approved" and releases_private_data(target.action.tool):
+        # step 6 runs an approved hold for a closed session, but never one that releases private data
+        if (ended := await session_ended(ctx, target.decision)) is not None:
+            return await _refused_in_t2(ctx, target, execution, ended, path, reason="session_ended")
+    if path == "allow":
+        # the request's own session check, before the adapter acts: the commit below records what
+        # it did whatever happens to the session after, so it runs no recheck of its own
+        if not await auth.session_stands(ctx, _named(target), session.person_id):
+            return await _closed_in_t2(ctx, target, execution)
         if session.generation != target.decision.generation:
             return await _fenced(ctx, target, execution, "stale_generation")
         if session.mode != "ai":
@@ -373,10 +517,61 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
         raise AdapterFailure("no_adapter")
     args = adapter.Args.model_validate(target.action_row.args_json)
     result = await adapter.execute(target.xctx(ctx), target.action, args)
-    visible = await _visible(ctx, target, result)
-    await _finish(ctx, target, execution, visible, "executed", _summary(target, "executed"))
-    await ctx.db.commit()
+    visible, flagged = await _visible(ctx, target, result)
+    await _finish(ctx, target, execution, visible, "executed", _summary(target, "executed", **flagged))
+    await ctx.db.commit()                                # what ran, recorded as T2 decided
     return visible
+
+
+def _gone(target: _Target, session: SessionRow, path: ExecPath) -> str | None:
+    """What T2 finds gone since T1, read afresh under the session row it holds: `desk` when the
+    Desk was deleted (on either path, as step 6 needs), `closed` when an allow's session was closed
+    (an approved hold still runs for a closed session, as step 6 lets it, unless it releases private
+    data: `session_ended`); None when neither. A
+    Desk's deletion closes its open visitor and agent sessions under their rows' locks, so for such
+    a session it either committed before T2 took the row, and T2 sees it here, or waits until T2
+    commits. An owner's session, or one closed already, isn't among those: for them the Desk's row
+    is read afresh, without that guarantee."""
+    if target.desk_row.deleted_at is not None:
+        return "desk"
+    if path == "allow" and session.closed_at is not None:
+        return "closed"
+    return None
+
+
+async def _refused_in_t2(ctx: KernelCtx, target: _Target, execution: Execution, check: str,
+                         path: ExecPath, *, reason: str = "rules_changed",
+                         status: str | None = None) -> ExecResult | KernelFailure:
+    """A Desk deleted, an allow's session closed, or an approved release of private data whose
+    session no longer stands (`session_ended`), after T1 and before the side effect: nothing runs.
+    Its intent is `failed` (after `on_failed`), the decision `refused_at_execution` (`reason`, "rules
+    changed" unless given, its status line the template `status` when given), its `execute` entry
+    naming the `check` that failed, committed. An allow answers 409 `conflict`, as a refusal in T1
+    does; an approved hold answers with its failed result, so the owner's answer reads the decision
+    as refused."""
+    await _undo(ctx, target)
+    result = _no_result(target.action.action_id, "failed")
+    await _finish(ctx, target, execution, result, "refused_at_execution",
+                  _summary(target, "refused_at_execution", reason=reason, check=check), status=status)
+    await ctx.db.commit()
+    if path == "allow":
+        return KernelFailure(409, "conflict", f"refused_at_execution:{check}")
+    return result
+
+
+async def _closed_in_t2(ctx: KernelCtx, target: _Target, execution: Execution) -> KernelFailure:
+    """An allow whose session no longer stands, read afresh under the row T2 holds and before the
+    side effect (`auth.session_stands`: its person off the record, say; a closed session or a deleted
+    Desk is `_gone`'s): nothing runs. It is settled as `_refused_in_t2` settles a closed session,
+    committed, and the answer is 409 `closed`, ledgered `auth` as at authentication."""
+    await _refused_in_t2(ctx, target, execution, "closed", "allow")
+    return AuthError(409, "closed", "closed", route=EXECUTE_ROUTE, named=_named(target))
+
+
+def _named(target: _Target) -> Named:
+    """The decision's session, on its Desk, which a refusal is ledgered on."""
+    decision = target.decision
+    return Named(copy_id=decision.copy_id, desk_id=decision.desk_id, session_id=decision.session_id)
 
 
 async def _fenced(ctx: KernelCtx, target: _Target, execution: Execution, code: str) -> KernelFailure:
@@ -401,16 +596,19 @@ async def _undo(ctx: KernelCtx, target: _Target) -> None:
 
 
 async def _finish(ctx: KernelCtx, target: _Target, execution: Execution, result: ExecResult, decision_state: str,
-                  summary: dict[str, Any]) -> None:
-    """The execution's final row and the decision's state, ledgered and signed, in the caller's
-    transaction, which holds the decision row (`target.decision`) and the execution row."""
-    execution.state = {"executed": "succeeded", "failed": "failed", "expired": "failed"}[decision_state]
+                  summary: dict[str, Any], *, status: str | None = None) -> None:
+    """The execution's final row and the decision's state (its status line the template `status`
+    when given), ledgered and signed, in the caller's transaction, which holds the decision row
+    (`target.decision`) and the execution row."""
+    execution.state = {"executed": "succeeded", "failed": "failed", "expired": "failed",
+                       "refused_at_execution": "failed"}[decision_state]
     execution.result = result
     execution.finished_at = ctx.clock.now()
-    await decide.set_state(ctx, target.decision, decision_state, kind="execute", summary=summary)
+    await decide.set_state(ctx, target.decision, decision_state, kind="execute", summary=summary, status=status)
 
 
-async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failure: AdapterFailure) -> ExecResult:
+async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failure: AdapterFailure,
+                         checked: Checked | None = None) -> ExecResult:
     """T3 after `AdapterFailure`, under the decision's and the execution's locks: `on_failed`,
     then `failed`. If `on_failed` itself fails, the reservation may still stand, so the action is
     `unknown` instead."""
@@ -419,13 +617,14 @@ async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failu
     if execution is None or execution.state != "intent":
         return await _settled_elsewhere(execution, action_id)
     target = await _target(ctx, decision)
+    target.checked = checked if checked is not None else _checked(execution)
     try:
         async with ctx.db.begin_nested():
             await _undo(ctx, target)
     except Exception as exc:
         repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
         await ctx.db.rollback()
-        return await _settle_unknown(ctx, decision_id, action_id)
+        return await _settle_unknown(ctx, decision_id, action_id, checked)
     code = failure.args[0] if failure.args and isinstance(failure.args[0], str) else "adapter_failure"
     result = _no_result(action_id, "failed")
     await _finish(ctx, target, execution, result, "failed", _summary(target, "failed", reason=ledger.safe_ref(code)))
@@ -433,7 +632,8 @@ async def _settle_failed(ctx: KernelCtx, decision_id: str, action_id: str, failu
     return result
 
 
-async def _settle_unknown(ctx: KernelCtx, decision_id: str, action_id: str) -> ExecResult:
+async def _settle_unknown(ctx: KernelCtx, decision_id: str, action_id: str,
+                          checked: Checked | None = None) -> ExecResult:
     """T3 after any other exception, under the decision's and the execution's locks: `unknown`,
     with `prepare`'s reservation kept."""
     decision = await _lock_decision(ctx, decision_id)
@@ -441,6 +641,7 @@ async def _settle_unknown(ctx: KernelCtx, decision_id: str, action_id: str) -> E
     if execution is None or execution.state != "intent":
         return await _settled_elsewhere(execution, action_id)
     target = await _target(ctx, decision)
+    target.checked = checked if checked is not None else _checked(execution)
     result = _no_result(action_id, "unknown")
     await _mark_unknown(ctx, target, execution, result)
     await ctx.db.commit()
@@ -464,26 +665,96 @@ async def _settled_elsewhere(execution: Execution | None, action_id: str) -> Exe
 
 # ---- What Claude may see ---------------------------------------------------------------------------
 
-async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> ExecResult:
-    """The adapter's result as the session may see it: the facts its readers can read, and a
-    `model_view` kept to the adapter's `model_view_keys`, or `{}` when a fact was dropped or a value
-    carries one of the copy's document canaries."""
+async def _visible(ctx: KernelCtx, target: _Target, result: AdapterResult) -> tuple[ExecResult, dict[str, Any]]:
+    """The adapter's result as the session may see it, and what its `execute` entry adds: the facts
+    its readers can read, and a `model_view` kept to the adapter's `model_view_keys`, or `{}` when a
+    fact was dropped or the kept view holds one of the copy's document canaries, even split by
+    spaces, in another case or width, accented or in lookalike letters (`labels.find_canaries_in`);
+    a canary adds `{violation: "canary"}` to the entry. The execution's state is the same either
+    way. Its `inbox` holds no notice addressed to the owner, whose alerts are read only from the
+    Demo inbox: one an adapter returns is dropped and logged by its kind alone.
+
+    An adapter declared not to release private data that returns some anyway
+    (`undeclared_private_data`) fails closed: logged by its tool and action alone, never the data,
+    and raised as `UndeclaredPrivateData`, so T2 rolls back everything the adapter wrote and settles
+    the action `failed` with nothing delivered, and a reconciliation settles it `failed` likewise,
+    for good (`_ask_adapter`)."""
+    if undeclared_private_data(target, result):
+        log.error("adapter_undeclared_private_data tool=%s action_id=%s", target.action.tool,
+                  target.action.action_id)
+        raise UndeclaredPrivateData()
     readers = labels.session_readers(target.session_row)
     facts = [fact for fact in result.facts if labels.can_read(fact.label, readers)]
     keys = target.adapter.model_view_keys if target.adapter is not None else frozenset()
     view = {key: value for key, value in result.model_view.items() if key in keys}
-    if len(facts) < len(result.facts) or await _holds_canary(ctx, view):
+    flagged = {"violation": "canary"} if labels.find_canaries_in(view, await labels.copy_canaries(ctx)) else {}
+    if len(facts) < len(result.facts) or flagged:
         view = {}
+    inbox = []
+    for notice in result.inbox:
+        if notice.to == "owner":
+            log.warning("inbox_notice_dropped to=owner tool=%s", target.action.tool)
+        else:
+            inbox.append(notice)
     return ExecResult(action_id=target.action.action_id, state="succeeded", facts=facts, model_view=view,
-                      inbox=list(result.inbox))
+                      inbox=inbox), flagged
 
 
-async def _holds_canary(ctx: KernelCtx, view: dict[str, Any]) -> bool:
-    canaries = [canary.lower() for canary in await ctx.db.scalars(ctx.repo.scoped(select(Document.canary)))
-                if canary]
-    text = json.dumps(view, default=str).lower()
-    return any(canary in text for canary in canaries)
 
+def releases_private_data(tool: str) -> bool:
+    """Whether the tool's adapter declares that its result gives the session data it reads only as
+    its verified person (`releases_private_data`); an unknown tool counts as one that does."""
+    adapter = adapters.ADAPTERS.get(tool)
+    return True if adapter is None else adapter.releases_private_data
+
+
+async def session_ended(ctx: KernelCtx, decision: DecisionRow) -> str | None:
+    """Why the decision's session no longer stands for the person an action that releases private
+    data would go to (`auth.session_stands`, read afresh): `person_removed` when its verified person
+    is off the record, `contact_changed` when it was closed with its person still on record (only a
+    new contact closes a session so), `session_closed` for any other close; None while it stands, or
+    when its Desk is deleted, which the Desk's own checks refuse first."""
+    named = Named(copy_id=decision.copy_id, desk_id=decision.desk_id, session_id=decision.session_id)
+    if await auth.session_stands(ctx, named, None):
+        return None
+    deleted = (await ctx.db.execute(ctx.repo.scoped(select(Desk.deleted_at).where(
+        Desk.desk_id == decision.desk_id)))).scalar_one()
+    if deleted is not None:
+        return None
+    session = (await ctx.db.execute(ctx.repo.scoped(select(SessionRow.closed_at, SessionRow.person_id).where(
+        SessionRow.session_id == decision.session_id)))).one()
+    if session.person_id is not None:
+        person = (await ctx.db.execute(ctx.repo.scoped(select(Person.removed_at).where(
+            Person.person_id == session.person_id)))).one_or_none()
+        if person is None or person.removed_at is not None:
+            return "person_removed"
+        if session.closed_at is not None:
+            return "contact_changed"
+    return "session_closed"
+
+
+def undeclared_private_data(target: _Target, result: AdapterResult) -> bool:
+    """Whether an adapter declared not to release private data returned some, for a visitor's or
+    agent's session: a document fact (a document's title or link), or a fact naming a person as a
+    reader or its record owner, unless that person is the session's own verified person and the
+    session reads the fact as itself (`labels.new_fact_label`: the label of a quote or a booking
+    made in a verified session). Another person's reader or ownership, or a fact the session reads
+    only as its person, is never the session's own. An owner session's own setup results aren't a
+    person's data."""
+    adapter, session = target.adapter, target.session_row
+    if adapter is None or adapter.releases_private_data or session.kind == "owner":
+        return False
+    own = labels.new_fact_label(session).record_owner              # the session's verified person, if any
+    as_itself = {"public", f"session:{session.session_id}"}
+
+    def private(fact: Fact) -> bool:
+        people = {reader for reader in fact.label.readers if reader.startswith("person:")}
+        if not people and fact.label.record_owner is None:
+            return False
+        return (own is None or people - {f"person:{own}"} != set() or fact.label.record_owner not in (None, own)
+                or not labels.can_read(fact.label, as_itself))
+
+    return any(fact.kind == "document" or private(fact) for fact in result.facts)
 
 # ---- Reconciliation ---------------------------------------------------------------------------------
 
@@ -493,21 +764,27 @@ def _orphaned(cutoff: datetime) -> Any:
 
 
 async def refresh_decision(ctx: KernelCtx, decision_row: DecisionRow) -> DecisionRow:
-    """A decision as a read settles it: its orphaned execution reconciled, then lazy expiry
-    ("Decision lifecycle"), in the caller's transaction. Returns the current row."""
+    """A decision as a read settles it: its orphaned execution reconciled, then lazy expiry, then a
+    held money decision's answers recomputed at the active version's money cap
+    (`decide.refresh_answers`; "Decision lifecycle"), in the caller's transaction, except that a
+    reconciliation commits at once (`reconcile_orphans`). That commit ends the caller's locks, so
+    the decision is then read again `FOR UPDATE`, as the caller may have held it, and the rest goes
+    on in a new transaction under it. Returns the current row."""
     decision_id, action_id = decision_row.decision_id, decision_row.action_id
     if action_id is not None and decision_row.state in ("allowed", "approved", "unknown"):
         if await reconcile_orphans(ctx, at_startup=False, action_id=action_id):
             decision_row = await _one(ctx, select(DecisionRow).where(DecisionRow.decision_id == decision_id)
-                                      .execution_options(populate_existing=True))
-    return await decide.expire_if_due(ctx, decision_row)
+                                      .with_for_update().execution_options(populate_existing=True))
+    return await decide.refresh_answers(ctx, await decide.expire_if_due(ctx, decision_row))
 
 
 async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str | None = None) -> list[str]:
     """Reconciles the orphaned executions of the copy `ctx` is bound to (`action_id`: that action's
-    alone) and returns the actions it settled or moved to `unknown`. On a read (`at_startup`
-    False) everything happens in the caller's transaction; at startup each action commits on its
-    own, and one that fails is logged and left for the next read."""
+    alone) and returns the actions it settled or moved to `unknown`. Each action it settles commits
+    at once with a plain commit, which runs none of the request's rechecks: it records what already
+    happened, so a read refused afterwards (its session closed meanwhile, say) leaves it standing,
+    and the reconciliation is never redone. On a read (`at_startup` False) a failure is raised and
+    the caller's transaction rolls back; at startup it is logged and left for the next read."""
     cutoff = ctx.clock.now() - ORPHAN_AFTER
     stmt = select(Execution.action_id, Execution.decision_id).where(_orphaned(cutoff))
     if action_id is not None:
@@ -517,9 +794,10 @@ async def reconcile_orphans(ctx: KernelCtx, *, at_startup: bool, action_id: str 
     reconciled = []
     for candidate, decision_id in candidates:
         try:
-            if await _reconcile(ctx, candidate, decision_id, cutoff):
+            settled = await _reconcile(ctx, candidate, decision_id, cutoff)
+            if settled:
                 reconciled.append(candidate)
-            if at_startup:
+            if settled or at_startup:
                 await ctx.db.commit()
         except Exception as exc:
             if not at_startup:
@@ -537,7 +815,18 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     that can't say leaves it `unknown`. A failure while recording is raised, and the rollback
     takes back the adapter's `on_failed` with the record. Rows another transaction holds (a
     running execution holds both) are skipped, never waited on; a lock this transaction holds
-    already is no wait."""
+    already is no wait. Each entry names the version and cap the row recorded in T1 (`_checked`).
+
+    An action that releases private data is recovered only into a session that still stands for
+    its person, as T2 runs it: the session's row is held `FOR SHARE` first, before the decision's
+    (`repo.py`), and if the session no longer stands (`auth.session_stands`, `session_ended`) the
+    adapter isn't asked and nothing it holds is exposed: the action is settled
+    `refused_at_execution` with the plain reason, once `on_failed` has run."""
+    tool = (await ctx.db.execute(ctx.repo.scoped(select(ActionRow.tool).where(
+        ActionRow.action_id == action_id)))).scalar_one_or_none()
+    private = tool is None or releases_private_data(tool)
+    if private and not await _hold_session_for(ctx, decision_id):
+        return False
     decision = (await ctx.db.scalars(ctx.repo.scoped(
         select(DecisionRow).where(DecisionRow.decision_id == decision_id)
         .with_for_update(skip_locked=True).execution_options(populate_existing=True)))).one_or_none()
@@ -549,21 +838,70 @@ async def _reconcile(ctx: KernelCtx, action_id: str, decision_id: str, cutoff: d
     if execution is None:
         return False
     target = await _target(ctx, decision)
+    target.checked = _checked(execution)
     orphaned = execution.state == "intent"
+    if private and not await auth.session_stands(ctx, _named(target), None):
+        ended = await session_ended(ctx, decision) or "session_closed"          # "session_closed": its Desk's gone
+        return await _refused_in_recovery(ctx, target, execution, ended, orphaned=orphaned)
     outcome = await _ask_adapter(ctx, target, action_id)
     if orphaned:
         await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
     if outcome is not None:
-        result, state = outcome
-        await _finish(ctx, target, execution, result, state, _summary(target, state, reconciled=True))
+        result, state, flagged = outcome
+        await _finish(ctx, target, execution, result, state, _summary(target, state, reconciled=True, **flagged))
     return True
 
 
-async def _ask_adapter(ctx: KernelCtx, target: _Target, action_id: str) -> tuple[ExecResult, str] | None:
-    """What the adapter's `reconcile` says happened to an orphan, as its result and the decision's
-    state, ledgering nothing: a result is `executed`, rebuilt as the session may see it; None is
-    `failed`, once `on_failed` has undone what `prepare` reserved. None when it can't say (no
-    adapter, `AdapterUnknown` or any error), with whatever its hooks wrote taken back."""
+
+async def _hold_session_for(ctx: KernelCtx, decision_id: str) -> bool:
+    """The decision's session row, held `FOR SHARE` before the decision's (`repo.py`), so no write
+    that closes it commits while a private result is recovered; False when another transaction
+    holds it outright (a closing write, a decision, an execution that writes the session), which
+    the reconciliation skips rather than waits for, as it does the decision and the execution."""
+    session_id = (await ctx.db.execute(ctx.repo.scoped(select(DecisionRow.session_id).where(
+        DecisionRow.decision_id == decision_id)))).scalar_one_or_none()
+    if session_id is None:
+        return False
+    return (await ctx.db.scalars(ctx.repo.scoped(select(SessionRow).where(SessionRow.session_id == session_id)
+                                                 .with_for_update(read=True, skip_locked=True)
+                                                 .execution_options(populate_existing=True)))).one_or_none() is not None
+
+
+async def _refused_in_recovery(ctx: KernelCtx, target: _Target, execution: Execution, ended: str, *,
+                               orphaned: bool) -> bool:
+    """A private action's outcome, recovered once its session no longer stands for its person: the
+    adapter isn't asked. `on_failed` runs first, before anything is ledgered, so the rows it locks
+    come before the ledger head (`repo.py`). Then the record: an intent is `unknown` (ledgered as
+    orphaned), then the action is `refused_at_execution` with the plain reason `ended` and nothing
+    in its result, ledgered as reconciled. If `on_failed` fails, what `prepare` reserved may stand,
+    so, with whatever it wrote taken back, the action stays `unknown` with nothing in its result,
+    for the next try."""
+    action_id = target.action.action_id
+    try:
+        async with ctx.db.begin_nested():
+            await _undo(ctx, target)
+        undone = True
+    except Exception as exc:                        # its writes and row locks taken back with the savepoint
+        repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
+        undone = False
+    if orphaned:
+        await _mark_unknown(ctx, target, execution, _no_result(action_id, "unknown"), orphaned=True)
+    if undone:
+        await _finish(ctx, target, execution, _no_result(action_id, "failed"), "refused_at_execution",
+                      _summary(target, "refused_at_execution", reason="session_ended", check=ended,
+                               reconciled=True))
+    return True
+
+async def _ask_adapter(ctx: KernelCtx, target: _Target,
+                       action_id: str) -> tuple[ExecResult, str, dict[str, Any]] | None:
+    """What the adapter's `reconcile` says happened to an orphan, as its result, the decision's
+    state and what its `execute` entry adds, ledgering nothing: a result is `executed`, rebuilt as
+    the session may see it (`_visible`, which flags a canary); None is `failed`, once `on_failed`
+    has undone what `prepare` reserved. A result an adapter declared not to release private data
+    mustn't carry (`UndeclaredPrivateData`) is `failed` too, for good, with nothing in it and its
+    reason in the entry, once whatever `reconcile` wrote is taken back and `on_failed` has run.
+    None when it can't say (no adapter, `AdapterUnknown` or any other error), with whatever its
+    hooks wrote taken back."""
     if target.adapter is None:
         log.warning("reconcile_no_adapter action_id=%s", action_id)
         return None
@@ -572,8 +910,17 @@ async def _ask_adapter(ctx: KernelCtx, target: _Target, action_id: str) -> tuple
             result = await target.adapter.reconcile(target.xctx(ctx), target.action)
             if result is None:
                 await _undo(ctx, target)
-                return _no_result(action_id, "failed"), "failed"
-            return await _visible(ctx, target, result), "executed"
+                return _no_result(action_id, "failed"), "failed", {}
+            visible, flagged = await _visible(ctx, target, result)
+            return visible, "executed", flagged
+    except UndeclaredPrivateData:                   # its writes taken back with the savepoint; terminal
+        try:
+            async with ctx.db.begin_nested():
+                await _undo(ctx, target)
+        except Exception as exc:                    # what `prepare` reserved may stand: still unknown
+            repo.log_error(log, exc, "on_failed_failed action_id=%s", action_id)
+            return None
+        return _no_result(action_id, "failed"), "failed", {"reason": "undeclared_private_data"}
     except AdapterUnknown:
         log.info("reconcile_still_unknown action_id=%s", action_id)
     except Exception as exc:                        # still unknown; the next read tries again
@@ -609,7 +956,7 @@ async def reconcile_approved(ctx: KernelCtx, session_row: SessionRow, decision_i
                         route=EXECUTE_ROUTE, named=named)
     row = await _lock_decision(ctx, found.decision_id)
     approval = (await ctx.db.scalars(ctx.repo.scoped(select(Approval).where(
-        Approval.approval_id == approval_id)))).one_or_none() if decide._storable(approval_id) else None
+        Approval.approval_id == approval_id)))).one_or_none() if repo.storable(approval_id) else None
     if approval is None or approval.decision_id != row.decision_id or row.state != "unknown" or row.action_id is None:
         raise await _not_runnable(ctx, row, row.state)
     action = decide.normalized_action(await _one(ctx, select(ActionRow).where(ActionRow.action_id == row.action_id)))

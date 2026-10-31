@@ -22,7 +22,9 @@ MOCKPAY_TABLES: tuple[str, ...] = ("checkouts", "charges", "refunds", "tool_defi
 # Each kernel_ro view selects these columns, in this order, from the kernel table of the same
 # name: the master plan's "Data model" table, which tests/test_db.py compares with this one. No
 # view exposes secret hashes, codes, Demo inbox entries, document bodies or canaries, agent or
-# wallet keys, approval nonces or raw args.
+# wallet keys, approval nonces or raw args. A view's column may be NULL where its table's isn't:
+# the knowledge view blanks the title and text of an item the kernel stored owner-only because it
+# held a document's canary.
 KERNEL_RO_COLUMNS: dict[str, tuple[str, ...]] = {
     "businesses": ("business_id", "copy_id", "name", "owner_display_name", "timezone", "brand"),
     "desks": ("desk_id", "copy_id", "business_id", "name", "slug", "hours", "answering", "created_at"),
@@ -46,7 +48,7 @@ KERNEL_RO_COLUMNS: dict[str, tuple[str, ...]] = {
                 "list_cents", "discount_bp", "amount_cents", "recipient", "starts_at", "created_at"),
     "policy_versions": ("copy_id", "desk_id", "version", "parent_version", "cards", "status", "proof",
                         "cedar_sha256", "schema_sha256", "baseline_sha256", "profiles_sha256", "invariants_sha256",
-                        "review_thresholds_version", "created_at"),
+                        "review_thresholds_version", "auto_money_cap_cents", "created_at"),
     "facts": ("fact_id", "copy_id", "desk_id", "kind", "status", "claims", "readers", "expires_at"),
     "knowledge_items": ("item_id", "copy_id", "desk_id", "source", "title", "text", "readers"),
     "quotes": ("quote_id", "copy_id", "desk_id", "session_id", "items", "list_cents", "discount_bp",

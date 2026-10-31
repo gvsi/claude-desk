@@ -22,13 +22,13 @@ from desk.contracts import (ApprovalResult, Decision, DecisionState, ExecResult,
                             RuleCard)
 from desk.db.models import Action, ActorSession, Approval, Booking, Execution, Person, Quote
 from desk.db.models import Decision as DecisionRow
-from desk.kernel_service import activation, adapters, approvals, compiler, demo_inbox, desks, execute
+from desk.kernel_service import activation, adapters, approvals, compiler, decide, demo_inbox, desks, execute, render
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown
 from desk.kernel_service.repo import new_id
 from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FakeAdapter
-from .helpers import CopyRows, activate_cards, kernel_ctx, ledger_rows, rows_of, verify_session
+from .helpers import TEST_CAP, CopyRows, activate_cards, compile_at, kernel_ctx, ledger_rows, rows_of, verify_session
 from .test_adapters import Rivera, add_slot, book, local, quote_args, rivera, visitor_of
 from .test_compiler import card
 from .test_decide import (Visitor, by_call, decided, desk_with, open_visitor, payment_link, priced, set_mode,
@@ -75,7 +75,8 @@ async def test_allow_once_executes_inside_the_answer(app, client, frozen_clock):
     result = await answered(client, copy.owner, held.decision_id, "allow_once")
 
     decision, execution = result.decision, result.execution
-    assert (decision.decision_id, decision.state, decision.visitor_plain) == (held.decision_id, "executed", "Done")
+    assert (decision.decision_id, decision.state, decision.visitor_plain) == (
+        held.decision_id, "executed", "Quoted from Maria Rivera's price list")
     assert result.card_diff is None                                       # allow_once drafts no rule
     [quote] = await rows_of(app, copy.copy_id, select(Quote))
     assert (quote.action_id, quote.session_id, quote.discount_bp, quote.amount_cents) == (
@@ -103,7 +104,8 @@ async def test_allow_once_executes_inside_the_answer(app, client, frozen_clock):
     base = {"decision_id": held.decision_id, "action_id": held.action_id}
     assert [(e.event.kind, e.event.session_id, e.event.ref_id, e.event.summary) for e in entries] == [
         ("approval", held.session_id, held.decision_id, {**base, "answer": "allow_once", "state": "approved"}),
-        ("execute", held.session_id, held.decision_id, {**base, "state": "executed"}),
+        ("execute", held.session_id, held.decision_id, {**base, "state": "executed", "policy_version": 1,
+                                                         "auto_money_cap_cents": 50_000}),
     ]
     assert decision.ledger_seq == entries[-1].seq
     verify_signature(await public_key(client), decision)
@@ -273,7 +275,7 @@ async def test_answers_after_a_rule_change_are_re_decided(app, client):
     [entry] = [e for e in await ledger_rows(app, copy) if e.seq > held.ledger_seq]
     assert (entry.seq, entry.event.kind, entry.event.summary) == (result.decision.ledger_seq, "approval", {
         "decision_id": held.decision_id, "action_id": held.action_id, "answer": "allow_once",
-        "state": "refused_at_execution", "reason": "rules_changed", "check": "recheck"})
+        "state": "refused_at_execution", "reason": "rules_changed", "check": "policy"})   # the new rules refused it
     assert await read_id(client, copy.owner, held.decision_id) == result.decision
     response = await post_answer(client, copy.owner, held.decision_id, "allow_once")   # and it stays refused
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
@@ -287,6 +289,24 @@ async def test_answers_after_a_rule_change_are_re_decided(app, client):
     assert result.decision.policy_version == 1                                 # decided under the old version
     [approval] = await approvals_of(app, copy.copy_id)
     assert approval.policy_version == 1
+
+
+async def test_a_re_check_that_names_no_version_is_refused_as_the_rules(app, client, monkeypatch):
+    """A re-check that fails nothing yet names no version and cap to run under can't run the
+    approval: it is refused at execution, and ledgered with `check: "policy"`, never a null check."""
+    copy, held = await seeded_hold(app, client)
+
+    async def passes_with_no_version(ctx, target, path) -> None:
+        return None                                    # leaves target.checked unset
+
+    monkeypatch.setattr(execute, "_recheck", passes_with_no_version)
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.execution, result.card_diff) == ("refused_at_execution", None, None)
+    assert await rows_of(app, copy.copy_id, select(Execution)) == []           # no intent, nothing ran
+    assert await rows_of(app, copy.copy_id, select(Quote)) == []
+    [entry] = [e.event.summary for e in await ledger_rows(app, copy) if e.seq == result.decision.ledger_seq]
+    assert entry == {"decision_id": held.decision_id, "action_id": held.action_id, "answer": "allow_once",
+                     "state": "refused_at_execution", "reason": "rules_changed", "check": "policy"}
 
 
 async def test_answers_execute_during_a_take_over(app, client):
@@ -377,8 +397,9 @@ async def test_allow_person_drafts_a_person_card(app, client):
         ctx.bind(copy.copy_id)
         people = await activation.desk_people(ctx, copy.desk_id)
         profiles = await desks.enabled_profiles(ctx, copy.desk_id)
-    assert compiler.validate_cards([*RIVERA_CARDS, *result.card_diff], people=people, agent_keys=()) == []
-    compiler.compile_cards([*RIVERA_CARDS, *result.card_diff], profiles)
+    assert compiler.validate_cards([*RIVERA_CARDS, *result.card_diff], people=people, agent_keys=(),
+                                   auto_money_cap_cents=TEST_CAP) == []
+    compile_at([*RIVERA_CARDS, *result.card_diff], profiles)
     response = await client.post("/policy/draft", headers=copy.owner, json={
         "desk_id": copy.desk_id, "cards": [c.model_dump(mode="json") for c in [*RIVERA_CARDS, *result.card_diff]],
         "expected_parent": 1})
@@ -392,7 +413,7 @@ async def test_allow_person_drafts_a_person_card(app, client):
     # a visiting agent's key scopes the card the same way (agent sessions arrive with Plan 01c)
     agent = Principal(kind="agent", session_id="agent-session", copy_id=copy.copy_id, desk_id=copy.desk_id,
                       agent_key_id="agentkey-1", assurance="none")
-    assert approvals.person_card(held, agent) == RuleCard(
+    assert approvals.person_card(held, agent, auto_money_cap_cents=TEST_CAP) == RuleCard(
         card_id="person-agentkey-1-native.quote", applies_to="native.quote", mode="auto", who="agent",
         agent_key_id="agentkey-1", max_amount_cents=15_300, max_discount_bp=1500,
         reason="Allowed for this visiting agent after you approved a request like this.")
@@ -412,8 +433,12 @@ async def add_person(app: FastAPI, rows: CopyRows, ref: str, name: str) -> str:
     return person
 
 
-async def test_allow_person_is_capped_for_money(app, client, registry):
-    link = payment_link(80_000)                                                # $800: past the $500 hard cap
+async def test_allow_person_is_capped_for_money(app, client, registry, monkeypatch):
+    # the stand-in runs with the receipt line the payments plan gives this tool, as every tool must
+    for language, line in (("en", "Payment link made for this quote"),
+                           ("es", "Enlace de pago creado para esta cotización")):
+        monkeypatch.setitem(render.EXECUTED[language], "native.payment_link", line)
+    link = payment_link(80_000)                                                # $800: past the version's $500 cap
     rows = await desk_with(app, [link], [])                                    # no card: money asks
     dana_id = await add_person(app, rows, "dana", "Dana Whitfield")
     dana = await open_visitor(client, rows)
@@ -424,23 +449,35 @@ async def test_allow_person_is_capped_for_money(app, client, registry):
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert "execute" not in link.calls and await approvals_of(app, rows.copy_id) == []
 
-    # an answers list that offered it anyway is no way past the cap: the answer checks again
+    # a stored answers list that offered it anyway is no way past the cap: with the refresh every read
+    # runs switched off, the stale offer reaches the answer, and the answer's own check of the card it
+    # would draft refuses it
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         row = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
             DecisionRow.decision_id == held.decision_id)))).one()
         row.answers = [*row.answers, "allow_person"]
-    response = await post_answer(client, rows.owner, held.decision_id, "allow_person")
+
+    async def unrefreshed(ctx, row: DecisionRow) -> DecisionRow:
+        return row
+
+    with monkeypatch.context() as patch:
+        patch.setattr(decide, "refresh_answers", unrefreshed)
+        assert "allow_person" in (await read_id(client, rows.owner, held.decision_id)).answers   # still offered
+        response = await post_answer(client, rows.owner, held.decision_id, "allow_person")
     assert (response.status_code, response.json()) == (422, {"code": "invalid"})
     assert "execute" not in link.calls and await approvals_of(app, rows.copy_id) == []
     assert (await read_id(client, rows.owner, held.decision_id)).state == "held"
-
-    # the cap follows the money, not the tool's name: a charge under another tool is capped too
+    # and the card it would draft is refused on its own too
     principal = Principal(kind="visitor", session_id=dana.session_id, copy_id=rows.copy_id, desk_id=rows.desk_id,
                           person_id=dana_id, assurance="demo_code")
+    with pytest.raises(ValueError, match="money cap"):
+        approvals.person_card(held, principal, auto_money_cap_cents=TEST_CAP)
+
+    # the cap follows the money, not the tool's name: a charge under another tool is capped too
     charged = held.model_copy(update={"action": held.action.model_copy(update={"tool": "native.quote"})})
-    with pytest.raises(ValueError, match="hard cap"):
-        approvals.person_card(charged, principal)
+    with pytest.raises(ValueError, match="money cap"):
+        approvals.person_card(charged, principal, auto_money_cap_cents=TEST_CAP)
 
     # within the cap, Dana can be allowed: the card is capped at what Maria approved
     link.script["normalize"] = payment_link(5_000).script["normalize"]
@@ -450,7 +487,7 @@ async def test_allow_person_is_capped_for_money(app, client, registry):
     [drafted] = result.card_diff
     assert (drafted.who, drafted.person_id, drafted.max_amount_cents, drafted.applies_to) == (
         "person", dana_id, 5_000, "native.payment_link")
-    assert compiler.validate_cards([drafted], people={dana_id}, agent_keys=()) == []
+    assert compiler.validate_cards([drafted], people={dana_id}, agent_keys=(), auto_money_cap_cents=TEST_CAP) == []
 
 
 # Maria's drafted card: every booking asks her first, whatever the booking cards' hours say.
@@ -498,8 +535,9 @@ async def test_deny_always_drafts_a_never_card(app, client, frozen_clock):
         people = await activation.desk_people(ctx, copy.desk_id)
         profiles = await desks.enabled_profiles(ctx, copy.desk_id)
     for drafted in (result.card_diff, [never]):
-        assert compiler.validate_cards([*ASK_BOOKING_CARDS, *drafted], people=people, agent_keys=()) == []
-        compiler.compile_cards([*ASK_BOOKING_CARDS, *drafted], profiles)
+        assert compiler.validate_cards([*ASK_BOOKING_CARDS, *drafted], people=people, agent_keys=(),
+                                       auto_money_cap_cents=TEST_CAP) == []
+        compile_at([*ASK_BOOKING_CARDS, *drafted], profiles)
 
 
 async def test_a_limit_hold_offers_no_deny_always(app, client):
@@ -688,6 +726,32 @@ async def test_the_approved_path_runs_prepare_with_the_intent(app, client, regis
     assert entry == {"decision_id": refused.decision_id, "action_id": refused.action.action_id,
                      "answer": "allow_once", "state": "refused_at_execution", "reason": "rules_changed",
                      "check": "prepare"}
+
+
+async def test_a_desk_deleted_after_the_answer_commits_runs_nothing(app, client, registry, monkeypatch):
+    """Maria approves a held request, and the Desk is deleted after her answer has committed its
+    intent and before the side effect. The approved path's T2 holds the session row and reads the
+    Desk afresh, so nothing runs: what `prepare` reserved is undone, the intent is `failed`, and
+    the decision `refused_at_execution`, its entry naming the deleted Desk; her answer reads it so."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], ASK_QUOTES)
+    visitor, held = await held_on(client, rows)
+
+    async def delete_the_desk() -> None:
+        response = await client.delete(f"/desks/{rows.desk_id}", headers=rows.owner)
+        assert response.status_code == 204, response.text
+
+    monkeypatch.setattr(execute, "_after_intent", delete_the_desk)
+    result = await answered(client, rows.owner, held.decision_id, "allow_once")
+    assert (result.decision.state, result.execution) == ("refused_at_execution", ExecResult(
+        action_id=held.action.action_id, state="failed", facts=[], model_view={}))
+    assert result.decision.visitor_plain == "The rules changed, so this didn't go ahead"
+    assert "execute" not in quote.calls and quote.calls[-1] == "on_failed"     # prepared, then undone
+    assert await committed(app, rows.copy_id, held.action.action_id) == ("failed", "refused_at_execution")
+    [entry] = [e.event.summary for e in await ledger_rows(app, rows) if e.seq == result.decision.ledger_seq]
+    assert entry == {"decision_id": held.decision_id, "action_id": held.action.action_id,
+                     "state": "refused_at_execution", "reason": "rules_changed", "check": "desk",
+                     "policy_version": 1, "auto_money_cap_cents": TEST_CAP}
 
 
 async def test_other_copy_cannot_answer_or_read(app, client, caplog):

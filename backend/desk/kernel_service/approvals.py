@@ -1,20 +1,25 @@
 """Approvals: the owner's answer to a held request, and the visitor's cancel.
 
 `POST /approvals/{decision_id}/answer` ("Decision lifecycle"). The answer locks the decision and
-settles it as any read does (`execute.refresh_decision`: lazy expiry first), so it answers only a
-request still `held`; anything else is 409, and an answer the request wasn't offered (`allow_person`
-for a stranger, or past the money cap; `deny_always` on a hold no `ask` card decided, see
-`decide.held_by_ask`) is 422. Either refusal is ledgered `approval`, and nothing runs. Then one
-`approvals` row records the answer, its single use enforced by the unique index on `decision_id`
-too:
+settles it as any read does (`execute.refresh_decision`: lazy expiry first, then the answers the
+active version's money cap offers), so it answers only a request still `held`; anything else is
+409, and an answer the request wasn't offered (`allow_person` for a request a stranger made, even
+once the session has confirmed who it is, or above the active version's money cap; `deny_always`
+on a hold no `ask` card decided, see `decide.held_by_ask`) is 422. Either refusal is ledgered
+`approval`, and nothing runs. Then one `approvals` row records the answer, its single use enforced
+by the unique index on `decision_id` too:
 
 - `deny_once`, `deny_always`: the decision is `denied`. A denial is bound to nothing, so it can
   never run anything.
 - `allow_once`, `allow_person`: the approval is bound to the exact action (`execute.binding_sha256`
   over the action and a fresh nonce) and re-checked on the `approved` path (step 6 of "Evaluation",
   which needs the binding and the current `approvable` verdict, not the session's mode or
-  generation: a take-over or a breaker pause doesn't cancel a held action). A failed re-check or a
-  `prepare` refusal ends `refused_at_execution` ("rules changed") with no intent row. Otherwise
+  generation: a take-over or a breaker pause doesn't cancel a held action). An action that releases
+  private data (`execute.releases_private_data`) is the exception: its session must still stand for
+  its person (`execute.session_ended`), or it ends `refused_at_execution` with the plain reason (the
+  person's session ended when their contact changed, or they were removed) and nothing runs; T2 asks
+  again under the session row. A failed re-check or a `prepare` refusal ends `refused_at_execution`
+  ("rules changed") with no intent row. Otherwise
   `approved`, `prepare`'s rows and the intent row commit together, and `execute.run_approved` runs
   the side effect as the session that asked, never the owner.
 
@@ -35,7 +40,6 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from desk.contracts import (
-    AUTO_MONEY_HARD_CAP_CENTS,
     ApprovalAnswer,
     ApprovalResult,
     Decision,
@@ -47,9 +51,9 @@ from desk.db.models import Action as ActionRow
 from desk.db.models import Approval, Person
 from desk.db.models import Decision as DecisionRow
 from desk.kernel_api import AnswerRequest, CancelRequest
-from desk.kernel_service import auth, decide, execute, ledger
+from desk.kernel_service import activation, auth, compiler, decide, execute, ledger
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
-from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id
+from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure, new_id, storable
 from desk.kernel_service.sessions import principal_for, verified
 
 PERSON_REASON = "Allowed for {name} after you approved a request like this."
@@ -69,19 +73,21 @@ def _scope(principal: Principal) -> tuple[str, str | None, str | None] | None:
     return None
 
 
-def person_card(decision: Decision, principal: Principal, *, name: str | None = None) -> RuleCard:
+def person_card(decision: Decision, principal: Principal, *, auto_money_cap_cents: int,
+                name: str | None = None) -> RuleCard:
     """`allow_person`'s draft ("Decision lifecycle"): an `auto` card for the decision's tool,
     scoped to the verified person or agent key that asked, whose limits are the action's own amount
     and discount, with no hours and no review, so it is no wider than what the owner just approved.
     `name` is how the owner knows them. Raises ValueError when there is no one to scope it to, or
-    when the action moves money past the hard cap (or without an amount)."""
+    when the action moves money above the active version's money cap `auto_money_cap_cents` (or
+    without an amount), so the draft fits the cap it will be drafted at."""
     action = decision.action
     scope = _scope(principal)
     if action is None or scope is None:
         raise ValueError("allow_person needs a verified person or an agent key")
     if decide.is_money(action.tool, action.effects) and (
-            action.amount_cents is None or action.amount_cents > AUTO_MONEY_HARD_CAP_CENTS):
-        raise ValueError("allow_person on money stops at the hard cap")
+            action.amount_cents is None or action.amount_cents > compiler.capped(auto_money_cap_cents)):
+        raise ValueError("allow_person on money stops at the money cap")
     who, person_id, agent_key_id = scope
     fallback = "this visiting agent" if who == "agent" else "this customer"
     return RuleCard(card_id=f"person-{person_id or agent_key_id}-{action.tool}", applies_to=action.tool, mode="auto",
@@ -104,7 +110,7 @@ def never_card(decision: Decision, principal: Principal) -> RuleCard:
 async def _locked(ctx: KernelCtx, decision_id: str) -> DecisionRow | None:
     """The copy's decision `decision_id`, locked `FOR UPDATE` until the transaction ends; None when
     the copy has none (text Postgres can't hold names none)."""
-    if not decide._storable(decision_id):
+    if not storable(decision_id):
         return None
     return (await ctx.db.scalars(ctx.repo.scoped(
         select(DecisionRow).where(DecisionRow.decision_id == decision_id).with_for_update()
@@ -126,13 +132,17 @@ async def _refused(ctx: KernelCtx, row: DecisionRow, answer: ApprovalAnswer, ref
     return KernelFailure(status, "conflict" if status == 409 else "invalid", f"answer_refused:{refused}")
 
 
-async def _refused_at_execution(ctx: KernelCtx, row: DecisionRow, answer: ApprovalAnswer,
-                                check: str) -> ApprovalResult:
-    """An approval that can't run ("rules changed"): the re-check failed or `prepare` refused. The
-    approval is used up all the same, nothing ran and no intent row was written."""
-    await decide.set_state(ctx, row, "refused_at_execution", kind="approval", summary={
+async def _refused_at_execution(ctx: KernelCtx, row: DecisionRow, answer: ApprovalAnswer, check: str, *,
+                                reason: str = "rules_changed", status: str | None = None) -> ApprovalResult:
+    """An approval that can't run: the re-check failed, and `check` names the part that did (a
+    deleted Desk is `desk`), or `prepare` refused (`prepare`), both "rules changed"; or it would
+    release private data into a session that no longer stands for its person
+    (`execute.session_ended`, ledgered as `reason="session_ended"` with the part in `check`). The
+    visitor's status line is the state's own, never why their session ended. The approval is used up
+    all the same, nothing ran and no intent row was written."""
+    await decide.set_state(ctx, row, "refused_at_execution", kind="approval", status=status, summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer,
-        "state": "refused_at_execution", "reason": "rules_changed", "check": check})
+        "state": "refused_at_execution", "reason": reason, "check": check})
     return ApprovalResult(decision=await decide.decision_contract(ctx, row), execution=None, card_diff=None)
 
 
@@ -161,8 +171,10 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
         if principal.person_id is not None:
             name = (await ctx.db.execute(ctx.repo.scoped(select(Person.display_name).where(
                 Person.person_id == principal.person_id)))).scalar_one_or_none()
+        cap = activation.version_cap(await activation.active_version(ctx, row.desk_id))
         try:
-            card_diff = [person_card(await decide.decision_contract(ctx, row), principal, name=name)]
+            card_diff = [person_card(await decide.decision_contract(ctx, row), principal, auto_money_cap_cents=cap,
+                                     name=name)]
         except ValueError:
             raise await _refused(ctx, row, answer, "not_offered", status=422) from None
     elif answer == "deny_always":
@@ -188,14 +200,18 @@ async def answer(ctx: KernelCtx, owner: OwnerCtx, decision_id: str, answer: Appr
         await decide.set_state(ctx, row, "denied", kind="approval", summary={
             "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer, "state": "denied"})
         return ApprovalResult(decision=await decide.decision_contract(ctx, row), execution=None, card_diff=card_diff)
-    if not await execute.recheck(ctx, row, path="approved"):
-        return await _refused_at_execution(ctx, row, answer, "recheck")
-    if not await execute.prepare_intent(ctx, row):
+    if execute.releases_private_data(row.tool) and (ended := await execute.session_ended(ctx, row)) is not None:
+        # private data goes only to a session that still stands for its person; T2 asks again under its lock
+        return await _refused_at_execution(ctx, row, answer, ended, reason="session_ended")
+    checked = await execute.recheck_under(ctx, row, path="approved")
+    if not isinstance(checked, execute.Checked):     # not a version: the part of the re-check that failed
+        return await _refused_at_execution(ctx, row, answer, checked)
+    if not await execute.prepare_intent(ctx, row, checked=checked):
         return await _refused_at_execution(ctx, row, answer, "prepare")
     await decide.set_state(ctx, row, "approved", kind="approval", summary={
         "decision_id": row.decision_id, "action_id": row.action_id, "answer": answer, "state": "approved"})
     await ctx.db.commit()
-    execution = await execute.run_approved(ctx, row)
+    execution = await execute.run_approved(ctx, row, checked=checked)
     final = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
         DecisionRow.decision_id == row.decision_id).execution_options(populate_existing=True)))).one()
     return ApprovalResult(decision=await decide.decision_contract(ctx, final), execution=execution, card_diff=card_diff)
@@ -211,6 +227,9 @@ async def cancel(ctx: KernelCtx, session_row: SessionRow, decision_id: str) -> D
                         named=named)
     row = await execute.refresh_decision(ctx, row)
     if row.state != "held":
+        # a reconciliation in the read may have committed, so the owner could close the session since its
+        # check: a closed session is answered as closed, never with the decision's state
+        await ctx.recheck()
         await ledger.append(ctx, copy_id=row.copy_id, desk_id=row.desk_id, event=LedgerEvent(
             kind="decide", origin="kernel", session_id=row.session_id, ref_id=row.decision_id,
             summary={"decision_id": row.decision_id, "cancel_refused": row.state}))

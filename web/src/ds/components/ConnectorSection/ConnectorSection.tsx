@@ -30,14 +30,14 @@ export interface ToolSummaryView {
   limit?: string;
   /** Its profile's status: a tool that needs review or is off says so in place of its outcome. */
   status: ToolStatus;
-  /** Its page. */
-  href: string;
+  /** Its page. Without one (the page isn't built yet), the row draws the same words with nothing to open. */
+  href?: string;
 }
 
 export interface ConnectorSectionProps {
   connector: ConnectorView;
-  /** The connector's page. */
-  href: string;
+  /** The connector's page. Without one, the header draws the same words with nothing to open. */
+  href?: string;
   tools: readonly ToolSummaryView[];
   /** A note beside the name right after the connector was added: "Added just now". */
   addedNote?: string;
@@ -66,46 +66,62 @@ function toolOutcome(tool: ToolSummaryView): { tone: StatusTone; words: string }
  * One connector on the Rules hub: a header that links to the connector's page, then a link row per
  * tool with its rule words and its outcome. Under 640 px of its own width the descriptions and the
  * count go, and each tool's words sit under its name, with its outcome on its own line under them.
+ * A header or a tool without an `href` draws the same words in the same type, with no link, no tab
+ * stop and no chevron, for a screen whose connector and tool pages aren't built yet.
  */
 export function ConnectorSection({ connector, href, tools, addedNote, aboveTools, linkComponent: Link = PlainLink }: ConnectorSectionProps) {
   const ids = useId();
   const count = tools.length === 1 ? '1 tool' : `${tools.length} tools`;
+  const heading = (
+    <>
+      <ConnectorIcon icon={connector.icon} size="section" />
+      <span className="cd-connector-section__identity">
+        <ConnectorName connector={connector} size="section" hideBuiltIn />{' '}
+        <span className="cd-connector-section__description cd-type-meta">{connector.description}</span>
+      </span>
+      {addedNote ? (
+        <>
+          {' '}
+          <span className="cd-connector-section__added cd-type-caption">{addedNote}</span>
+        </>
+      ) : null}{' '}
+      <span className="cd-connector-section__count cd-type-meta">{count}</span>
+    </>
+  );
   return (
     <Card as="section" label={connector.name} padding={0}>
       <div className="cd-connector-section">
-        <Link href={href} className="cd-connector-section__header">
-          <ConnectorIcon icon={connector.icon} size="section" />
-          <span className="cd-connector-section__identity">
-            <ConnectorName connector={connector} size="section" hideBuiltIn />{' '}
-            <span className="cd-connector-section__description cd-type-meta">{connector.description}</span>
-          </span>
-          {addedNote ? (
-            <>
-              {' '}
-              <span className="cd-connector-section__added cd-type-caption">{addedNote}</span>
-            </>
-          ) : null}{' '}
-          <span className="cd-connector-section__count cd-type-meta">{count}</span>
-          <Icon name="chevron-right" size={16} className="cd-connector-section__chevron" />
-        </Link>
+        {href === undefined ? (
+          <div className="cd-connector-section__header">{heading}</div>
+        ) : (
+          <Link href={href} className="cd-connector-section__header">
+            {heading}
+            <Icon name="chevron-right" size={16} className="cd-connector-section__chevron" />
+          </Link>
+        )}
         {aboveTools ? <div className="cd-connector-section__above">{aboveTools}</div> : null}
         {tools.length > 0 ? (
           <ul role="list" className="cd-connector-section__tools">
             {tools.map((tool, index) => {
               const outcome = toolOutcome(tool);
               const descriptionId = `${ids}-tool-${index}`;
+              const linked = tool.href !== undefined;
               return (
                 // The tool's name is its link, and the link's overlay covers the row, so the whole row
                 // opens the tool while the link's own text stays its name's first words.
-                <li key={tool.key} className="cd-connector-section__tool">
-                  <Link
-                    href={tool.href}
-                    className="cd-connector-section__tool-link cd-type-body"
-                    aria-label={`${tool.name}: ${tool.summary}, ${outcome.words}. Open`}
-                    aria-describedby={descriptionId}
-                  >
-                    {tool.name}
-                  </Link>
+                <li key={tool.key} className={`cd-connector-section__tool${linked ? '' : ' cd-connector-section__tool--plain'}`}>
+                  {tool.href === undefined ? (
+                    <span className="cd-connector-section__tool-name cd-type-body">{tool.name}</span>
+                  ) : (
+                    <Link
+                      href={tool.href}
+                      className="cd-connector-section__tool-name cd-connector-section__tool-link cd-type-body"
+                      aria-label={`${tool.name}: ${tool.summary}, ${outcome.words}. Open`}
+                      aria-describedby={descriptionId}
+                    >
+                      {tool.name}
+                    </Link>
+                  )}
                   <span id={descriptionId} className="cd-connector-section__tool-description cd-type-meta">
                     {tool.description}
                   </span>
@@ -113,7 +129,7 @@ export function ConnectorSection({ connector, href, tools, addedNote, aboveTools
                   <span className="cd-connector-section__tool-outcome cd-type-meta">
                     <StatusLabel tone={outcome.tone}>{outcome.words}</StatusLabel>
                   </span>
-                  <Icon name="chevron-right" size={16} className="cd-connector-section__chevron" />
+                  {linked ? <Icon name="chevron-right" size={16} className="cd-connector-section__chevron" /> : null}
                 </li>
               );
             })}

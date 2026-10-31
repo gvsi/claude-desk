@@ -6,7 +6,8 @@ import { isValidElement, type ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 
 import { rivera } from '../../ds/fixtures/index.ts';
-import { AGENTS_COPY } from './copy.ts';
+import { AGENT_START_LOST_COPY, AGENT_START_RETRY_COPY } from '../../ds/index.ts';
+import { AGENTS_COPY, agentStartLostLine } from './copy.ts';
 
 /** The words a node reads as, its elements' children included. */
 function textOf(node: ReactNode): string {
@@ -22,6 +23,15 @@ function centsIn(line: string): number[] {
 }
 
 describe('agents page copy', () => {
+  it('lost_start_line_says_trying_again_is_safe', () => {
+    // A lost start is retried with its key, so its line is the design system's retry-safe one, never
+    // the reload line, which says a retry may run the agent twice and stays the reload fallback's.
+    for (const language of ['en', 'es'] as const) {
+      expect(agentStartLostLine(language), language).toBe(AGENT_START_RETRY_COPY[language]);
+      expect(agentStartLostLine(language), language).not.toBe(AGENT_START_LOST_COPY[language]);
+    }
+  });
+
   it('limits_line_matches_the_seed', () => {
     const { mandate } = rivera.demoAgentIssued;
     for (const language of ['en', 'es'] as const) {

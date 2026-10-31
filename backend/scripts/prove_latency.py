@@ -4,7 +4,8 @@
     uv run python -m scripts.prove_latency --json    # {rivera: {p50_ms, p95_ms}, cards_30: {p50_ms, p95_ms}}
 
 The proof inputs are written here with `activation.write_prove_files`, over a profile for every
-native tool the schema declares (what a Desk with all its native tools enabled proves), and
+native tool the schema declares (what a Desk with all its native tools enabled proves), at the
+money cap the Rivera seed is proved at (`activation.SHIPPED_CAPS`, as `make proofs` uses), and
 mounted read-only into the image (`desk-kernel:dev` by default, built as `kernel/Dockerfile`
 says; it holds no backend code). Inside it, `desk-prove` runs on each set `--runs` times in a row,
 timed by the image's own Python, so container start-up isn't counted. A run that doesn't prove
@@ -93,11 +94,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     profiles = schema_profiles()
     schema = compiler.desk_schema(profiles)
+    cap = activation.SHIPPED_CAPS["rivera"]
     sets = {"rivera": RIVERA_CARDS, "cards_30": thirty_cards()}
     with tempfile.TemporaryDirectory(prefix="desk-prove-latency-") as directory:
         for name, cards in sets.items():
             (Path(directory) / name).mkdir()
-            activation.write_prove_files(activation.build_proof_inputs(cards, profiles, schema), Path(directory) / name)
+            inputs = activation.build_proof_inputs(cards, profiles, schema, auto_money_cap_cents=cap)
+            activation.write_prove_files(inputs, Path(directory) / name)
         run = subprocess.run(
             ["docker", "run", "--rm", "--network", "none", "-v", f"{directory}:/inputs:ro", args.image,
              "python", "-c", TIMER, ",".join(sets), str(args.runs), str(activation.PROVE_TIMEOUT_MS)],

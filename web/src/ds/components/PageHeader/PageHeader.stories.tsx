@@ -1,10 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import { useRef } from 'react';
 import { expect, fn, within } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
 import { PresetMenu } from '../PresetMenu/PresetMenu.tsx';
-import { PageHeader } from './PageHeader.tsx';
+import { PageHeader, type PageHeaderProps } from './PageHeader.tsx';
 
 const runCheck = fn();
 
@@ -52,6 +53,8 @@ export const WithAction: Story = {
       marginTop: '0px',
     });
     await expect(canvas.getAllByRole('heading')).toEqual([title]);
+    // With no `titleRef`, the title takes no focus at all.
+    await expect(title).not.toHaveAttribute('tabindex');
 
     const subtitle = canvas.getByText('Every attempt to get around your rules, and what stopped it.');
     expectComputed(subtitle, { fontFamily: /Hanken Grotesk/, fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
@@ -144,5 +147,52 @@ export const RulesOnALaptop: Story = {
     await expect(button.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     await expect(button.getBoundingClientRect().top).toBeLessThan(title.getBoundingClientRect().bottom);
     await expect(canvas.getByText(RULES_LINE)).toBeVisible();
+  },
+};
+
+/** A page that moves focus to its title from a script, as setup's start does when "Try again" goes. */
+function TitleTakesFocus(props: PageHeaderProps) {
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  return (
+    <>
+      <PageHeader {...props} titleRef={titleRef} />
+      <Button variant="secondary" onClick={() => titleRef.current?.focus({ preventScroll: true })}>
+        Try again
+      </Button>
+    </>
+  );
+}
+
+export const FocusableTitle: Story = {
+  name: 'Focusable title',
+  args: {
+    title: 'Tell me about your business',
+    subtitle: 'A few sentences is enough. You’ll see everything before anything goes live.',
+  },
+  render: (args) => <TitleTakesFocus {...args} />,
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'No board draws focus on a page’s title. Setup’s start moves focus to its title when “Try again” goes with its line (plan 04, Task 12); the nearest boards are the setup frame’s, such as N-R2-Setup-04-Answer-Failed.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    const title = canvas.getByRole('heading', { level: 1, name: 'Tell me about your business' });
+    const tryAgain = canvas.getByRole('button', { name: 'Try again' });
+    // Given a `titleRef`, the title takes focus from a script only: `tabIndex={-1}`.
+    await expect(title).toHaveAttribute('tabindex', '-1');
+
+    // Tab from the page passes over it to the first control.
+    await userEvent.tab();
+    await expect(tryAgain).toHaveFocus();
+
+    // A script moves focus to it.
+    await userEvent.click(tryAgain);
+    await expect(title).toHaveFocus();
+
+    // Tab goes on from it to the next control, and Shift+Tab back never stops on it.
+    await userEvent.tab();
+    await expect(tryAgain).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    await expect(title).not.toHaveFocus();
   },
 };

@@ -108,6 +108,7 @@ export const LEXICON: readonly LexiconEntry[] = [
   { language: 'es', category: 'promise', pattern: String.raw`gratis|gratuit[oa]s?|descuentos?|descont[a-z]*|reembols[a-z]*` },
   { language: 'es', category: 'promise', pattern: String.raw`sin[\s-]+(?:ningun[\s-]+)?(?:costos?|costes?|cargos?)|de[\s-]+regalo` },
   { language: 'es', category: 'promise', pattern: String.raw`sin[\s-]+recargos?` },
+  { language: 'es', category: 'promise', pattern: String.raw`no[\s-]+(?:hay|tienen?|llevan?)[\s-]+(?:[^\W\d_]+[\s-]+){0,2}(?:cargos?|costos?|costes?|recargos?)` },
   { language: 'es', category: 'promise', pattern: String.raw`sin[\s-]+(?:ninguna[\s-]+)?comision(?:es)?` },
   { language: 'es', category: 'promise', pattern: String.raw`por[\s-]+nuestra[\s-]+cuenta|(?:por[\s-]+)?cuenta[\s-]+de[\s-]+la[\s-]+casa` },
   { language: 'es', category: 'promise', pattern: String.raw`entradas?[\s-]+libres?` },

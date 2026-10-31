@@ -23,6 +23,7 @@ import {
   type NoticeTone,
   type RulesLinkProps,
 } from '../../ds/index.ts';
+import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { useReadFailure } from '../useReadFailure.ts';
@@ -77,7 +78,8 @@ interface LimitField {
 
 /**
  * `rules` (N-Conn-17-Presets; N-Conn-22-Phone-Presets at 390 px): the Desk's outcomes grouped by
- * connector, each group and tool linking to its page under Connectors; Ask Claude under the
+ * connector, each group and tool linking to its page under Connectors once those pages are built
+ * (`connectorPageHref`), and drawn without a link until then; Ask Claude under the
  * header; "Start from a preset", which drafts a preset as one change; the payment limit atop
  * Payments and Stripe; the always-on rules. Every change opens its proved review first.
  */
@@ -180,8 +182,8 @@ export function RulesPage() {
               <ConnectorSection
                 key={section.connector.id}
                 connector={section.connector}
-                href={`${deskPath(deskId)}/${section.href}`}
-                tools={section.tools.map((tool) => ({ ...tool, href: `${deskPath(deskId)}/${tool.href}` }))}
+                href={connectorPageHref(deskId, section.href)}
+                tools={section.tools.map((tool) => ({ ...tool, href: connectorPageHref(deskId, tool.href) }))}
                 linkComponent={RouterLink}
                 {...(section.moneyLimit
                   ? {

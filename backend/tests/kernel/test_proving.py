@@ -14,6 +14,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import desk_kernel
 import httpx
@@ -28,10 +29,11 @@ from desk.db.session import database_url, dispose_engines, libpq_url
 from desk.kernel_service import activation, compiler, seed
 from desk.kernel_service.app import create_app
 from desk.kernel_service.seed import RIVERA_CARDS
+from scripts import prove_latency
 
 from .conftest import BACKEND
 from .fakes import FrozenClock
-from .helpers import kernel_ctx, make_copy_rows, rows_of
+from .helpers import TEST_CAP, compile_at, context, kernel_ctx, make_copy_rows, rows_of
 from .test_compiler import A_MIX_OF_CARDS, NATIVE, card, native_profile
 
 STUBS = Path(__file__).parent / "stubs"
@@ -66,7 +68,7 @@ async def test_selftest_failure_reports_bounded(monkeypatch, frozen_clock, caplo
 
 @pytest.mark.solver
 async def test_prove_runs_every_obligation(desk_prove):
-    inputs = activation.build_proof_inputs(A_MIX_OF_CARDS, NATIVE, compiler.desk_schema(NATIVE))
+    inputs = activation.build_proof_inputs(A_MIX_OF_CARDS, NATIVE, compiler.desk_schema(NATIVE), auto_money_cap_cents=TEST_CAP)
     report = await activation.prove(inputs)
     assert report.ok and report.method == "symcc" and not report.timed_out, report
     assert [check.name for check in report.checks] == list(activation.PROOF_CHECKS)
@@ -82,7 +84,7 @@ def printed_report(*, ok: bool, failing: tuple[str, ...] = (), names=None) -> st
 
 
 async def test_prover_tool_error_rejects(monkeypatch, tmp_path):
-    inputs = activation.build_proof_inputs(A_MIX_OF_CARDS, NATIVE, compiler.desk_schema(NATIVE))
+    inputs = activation.build_proof_inputs(A_MIX_OF_CARDS, NATIVE, compiler.desk_schema(NATIVE), auto_money_cap_cents=TEST_CAP)
     monkeypatch.setenv("DESK_PROVE", str(STUBS / "desk_prove_exit2.sh"))
     report = await activation.prove(inputs)
     assert not report.ok and report.timed_out and report.method == "symcc"
@@ -119,7 +121,7 @@ async def test_prover_tool_error_rejects(monkeypatch, tmp_path):
 async def test_prover_timeout_rejects_and_kills(monkeypatch):
     monkeypatch.setenv("DESK_PROVE", str(STUBS / "desk_prove_sleep.sh"))
     monkeypatch.setattr(activation, "PROVE_KILL_AFTER_S", 0.5)
-    inputs = activation.build_proof_inputs(A_MIX_OF_CARDS, NATIVE, compiler.desk_schema(NATIVE))
+    inputs = activation.build_proof_inputs(A_MIX_OF_CARDS, NATIVE, compiler.desk_schema(NATIVE), auto_money_cap_cents=TEST_CAP)
     started = time.monotonic()
     report = await activation.prove(inputs)
     assert time.monotonic() - started < 3
@@ -135,9 +137,11 @@ def test_shipped_reports_match_the_current_build():
     same commit: here every shipped report has to match what the kernel compiles today."""
     profiles = activation.shipped_profiles()
     assert set(activation.SHIPPED_PRESETS) == {"rivera", "ask_first", "auto"}
+    assert activation.SHIPPED_CAPS == {"rivera": 50_000, "ask_first": 0, "auto": 0}
     for preset, cards in activation.SHIPPED_PRESETS.items():
-        schema = compiler.desk_schema(profiles)
-        hashes = activation.version_hashes(compiler.compile_cards(cards, profiles), schema, profiles, cards=cards)
+        schema, cap = compiler.desk_schema(profiles), activation.SHIPPED_CAPS[preset]
+        hashes = activation.version_hashes(compile_at(cards, profiles, cap=cap), schema, profiles, cards=cards,
+                                           auto_money_cap_cents=cap)
         shipped = json.loads((activation.PROOFS_DIR / f"{preset}.json").read_text())
         assert shipped["preset"] == preset
         assert {field: shipped[field] for field in hashes._fields} == hashes._asdict(), preset
@@ -191,15 +195,16 @@ async def test_copy_activates_from_the_cache_without_proving(outside_repo, app, 
     assert row.proof == report.proof and row.proof.ok and row.proof.method == "symcc"
     assert activation.VersionHashes(*(getattr(row, f) for f in activation.VersionHashes._fields)) == report.hashes
     profiles = activation.shipped_profiles()
-    compiled = compiler.compile_cards(RIVERA_CARDS, profiles)
-    assert row.cards == compiled.cards
-    assert row.cedar == {**compiled.sets(), "A0": compiler.compile_cards(RIVERA_CARDS, profiles, review=False).A}
+    compiled = compile_at(RIVERA_CARDS, profiles, cap=seed.RIVERA_MONEY_CAP_CENTS)
+    assert row.cards == compiled.cards and row.auto_money_cap_cents == seed.RIVERA_MONEY_CAP_CENTS
+    assert row.cedar == {**compiled.sets(), "A0": compile_at(RIVERA_CARDS, profiles, review=False).A}
     assert json.loads(row.schema_json) == compiler.desk_schema(profiles)
     assert row.created_at == app.state.kernel.clock.now()
     assert calls == []                                            # activated from the shipped report alone
     entries = [e for e in await rows_of(app, copy_id, select(LedgerEntry)) if e.event.kind == "policy"]
-    assert [(e.desk_id, e.event.summary) for e in entries] == [(desk_id, {"version": 1, "status": "active",
-                                                                          "preset": "rivera"})]
+    assert [(e.desk_id, e.event.summary) for e in entries] == [(desk_id, {
+        "version": 1, "status": "active", "preset": "rivera", "activated": True, "from": None,
+        "auto_money_cap_cents": 50_000})]
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy_id)
         active = await activation.active_version(ctx, desk_id)
@@ -244,7 +249,8 @@ def test_a_cached_proof_answers_only_the_cards_it_was_proved_for(monkeypatch):
     never_changes = [card("no-changes", "effect:change", mode="never"), card("book", "native.book")]
 
     def hashes(cards):
-        return activation.version_hashes(compiler.compile_cards(cards, profiles), schema, profiles, cards=cards)
+        return activation.version_hashes(compile_at(cards, profiles), schema, profiles, cards=cards,
+                                         auto_money_cap_cents=TEST_CAP)
 
     sound = hashes(auto_book)
     cache = activation.ProofCache()
@@ -345,7 +351,7 @@ def slots_request(copy_id: str, desk_id: str) -> str:
     """A stranger asking for open times on the copy's Desk, as a request_json."""
     visitor, desk = {"type": "Visitor", "id": "session-1"}, {"type": "Desk", "id": desk_id}
     return json.dumps({"principal": visitor, "action": "native.find_slots", "resource": desk,
-                       "context": {"record_owner_match": False, "local_dow": 1, "local_minute": 600},
+                       "context": context(record_owner_match=False, local_dow=1, local_minute=600),
                        "entities": [{"uid": visitor, "attrs": {"verified": False, "assurance": "none", "copy": copy_id},
                                      "parents": []},
                                     {"uid": desk, "attrs": {"copy": copy_id}, "parents": []}]})
@@ -394,9 +400,11 @@ async def test_versions_load_lazily_and_report_errors(app, client, monkeypatch):
     errors = versions.use(broken)
     assert errors and f"{desk_id}:2" not in versions
     assert not_loaded(engine, f"{desk_id}:2", request) and not_loaded(engine, f"{desk_id}:2:approvable", request)
-    # and so does one whose Cedar or schema isn't what its hashes say was proved
+    # and so does one whose Cedar or schema isn't what its hashes say was proved, or one proved
+    # under a baseline other than the one this kernel enforces (an earlier kernel's, not rebuilt)
     for changed in ({"cedar": {**row.cedar, "A": row.cedar["A"] + "\n"}},
-                    {"schema_json": json.dumps({"": {"entityTypes": {}, "actions": {}}})}, {"cedar": None}):
+                    {"schema_json": json.dumps({"": {"entityTypes": {}, "actions": {}}})}, {"cedar": None},
+                    {"baseline_sha256": "0" * 64}):
         errors = versions.use(detached(row, version=3, **changed))
         assert errors, changed
         assert not_loaded(engine, f"{desk_id}:3", request), changed
@@ -406,14 +414,14 @@ async def test_versions_load_lazily_and_report_errors(app, client, monkeypatch):
 async def store_active_version(app: FastAPI, rows, cards, profiles) -> None:
     """Version 1 of the copy's Desk, active, compiled from `cards` over `profiles`, with no proof."""
     schema = compiler.desk_schema(profiles)
-    compiled = compiler.compile_cards(cards, profiles)
+    compiled = compile_at(cards, profiles)
     async with kernel_ctx(app) as ctx:
         ctx.bind(rows.copy_id)
         ctx.db.add(activation.version_row(
             copy_id=rows.copy_id, desk_id=rows.desk_id, version=1, parent_version=None, compiled=compiled,
-            a0=compiler.compile_cards(cards, profiles, review=False).A, schema=schema,
-            hashes=activation.version_hashes(compiled, schema, profiles, cards=cards), status="active", proof=None,
-            created_at=ctx.clock.now()))
+            a0=compile_at(cards, profiles, review=False).A, schema=schema,
+            hashes=activation.version_hashes(compiled, schema, profiles, cards=cards, auto_money_cap_cents=TEST_CAP),
+            auto_money_cap_cents=TEST_CAP, status="active", proof=None, created_at=ctx.clock.now()))
 
 
 async def decide_on_active(app: FastAPI, rows, request: str) -> dict:
@@ -423,6 +431,24 @@ async def decide_on_active(app: FastAPI, rows, request: str) -> dict:
         row = await activation.active_version(ctx, rows.desk_id)
     assert app.state.loaded_versions.use(row) == []
     return verdict(app.state.engine, f"{rows.desk_id}:1", request)
+
+
+async def test_a_version_written_again_under_its_number_loads_again(app, client):
+    # a rebuild (`activation.rebuild_version`) writes a version again in place: its key decides on
+    # what was written, never on what the engine loaded before
+    engine, versions = app.state.engine, app.state.loaded_versions
+    created = await post_copy(client)
+    copy_id, [desk_id] = created["copy_id"], created["desk_ids"]
+    key, request = f"{desk_id}:1", slots_request(copy_id, desk_id)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy_id)
+        row = await activation.active_version(ctx, desk_id)
+    assert versions.use(row) == [] and verdict(engine, key, request)["outcome"] == "allow"
+    without_autos = {**row.cedar, "A": ""}
+    written = detached(row, cedar=without_autos, cedar_sha256=compiler.cedar_sha256(without_autos))
+    assert versions.use(written) == [] and len(versions) == 1
+    assert verdict(engine, key, request)["outcome"] == "hold"          # no auto permit: the card's hold twin
+    assert versions.use(row) == [] and verdict(engine, key, request)["outcome"] == "allow"
 
 
 async def test_loaded_versions_are_capped(app, monkeypatch):
@@ -456,6 +482,36 @@ def test_prove_presets_check_passes(desk_prove):
                                                      for preset in activation.SHIPPED_PRESETS)
 
 
+def test_prove_latency_writes_its_inputs_at_the_rivera_cap(monkeypatch, capsys):
+    """The latency script up to the image: it writes `desk-prove`'s inputs for both of its sets at
+    the money cap the Rivera seed is proved at (`make proofs`), then hands them to docker, which is
+    stubbed here, so nothing is proved."""
+    mounted = {}
+
+    def docker(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+        directory = Path(argv[argv.index("-v") + 1].removesuffix(":/inputs:ro"))
+        for name in ("rivera", "cards_30"):
+            mounted[name] = {part: json.loads((directory / name / f"{part}.json").read_text())
+                             for part in ("schema", "sets", "checks")}
+        times = {"rivera": [2.0, 1.0], "cards_30": [3.0, 4.0]}
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(times), stderr="")
+
+    monkeypatch.setattr(prove_latency, "subprocess", SimpleNamespace(run=docker))
+    assert subprocess.run is not docker                  # the stub reaches the script alone
+    assert prove_latency.main(["--json", "--runs", "2"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"rivera": {"p50_ms": 1.0, "p95_ms": 2.0},
+                                                   "cards_30": {"p50_ms": 3.0, "p95_ms": 4.0}}
+    cap = activation.SHIPPED_CAPS["rivera"]
+    profiles = prove_latency.schema_profiles()
+    rivera = activation.build_proof_inputs(RIVERA_CARDS, profiles, compiler.desk_schema(profiles),
+                                           auto_money_cap_cents=cap)
+    assert mounted["rivera"]["sets"] == {**rivera.sets, "always": rivera.always, "auto": rivera.auto}
+    invariants = compiler.invariants(cap)
+    assert mounted["cards_30"]["sets"]["always"] == list(invariants["always"].values())
+    assert mounted["cards_30"]["sets"]["auto"] == list(invariants["auto"].values())
+    assert all(files["checks"]["checks"] == list(activation.PROOF_CHECKS) for files in mounted.values())
+
+
 @pytest.mark.parametrize("mode", [pytest.param("symcc", marks=pytest.mark.solver), "bounded"])
 async def test_dropped_never_card_is_rejected_by_proof(mode, monkeypatch, request):
     if mode == "symcc":
@@ -463,13 +519,15 @@ async def test_dropped_never_card_is_rejected_by_proof(mode, monkeypatch, reques
     monkeypatch.setattr(activation, "_proof_mode", mode)                    # as the startup selftest left it
     cards = [card("no-changes", "effect:change", mode="never"), card("book", "native.book")]
     engine = desk_kernel.PolicyEngine(compiler.BASELINE)
-    control = await activation.prove_or_check(engine, cards, NATIVE, key_prefix="desk-test:control")
+    control = await activation.prove_or_check(engine, cards, NATIVE, key_prefix="desk-test:control",
+                                              auto_money_cap_cents=TEST_CAP)
     assert control.ok and control.method == mode, control                  # as compiled, the never card wins
 
     # a compiler that emits no forbid for the never card: the booking it should stop is auto-allowed
     compile_cards = compiler.compile_cards
     monkeypatch.setattr(compiler, "compile_cards", lambda *a, **k: dataclasses.replace(compile_cards(*a, **k), F=""))
-    report = await activation.prove_or_check(engine, cards, NATIVE, key_prefix="desk-test:dropped")
+    report = await activation.prove_or_check(engine, cards, NATIVE, key_prefix="desk-test:dropped",
+                                             auto_money_cap_cents=TEST_CAP)
     assert not report.ok and report.method == mode and not report.timed_out
     failing = {c.name: c for c in report.checks if not c.ok}
     assert {"auto_within_cards", "hold_within_cards"} <= set(failing), report

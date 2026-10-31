@@ -4,14 +4,17 @@ These tests run against the local Postgres (`docker compose up -d db`) after
 `cd backend && uv run alembic upgrade head && cd .. && make db-roles`. Introspection runs as
 desk_admin; privilege checks connect as the role under test. Every write is rolled back, except
 the rows `committed_copies` commits as desk_admin (another role sees only committed rows) and
-removes afterwards. A migration taken down and up runs in a scratch database of its own, dropped
-afterwards; the suite's database is never downgraded.
+removes afterwards. A migration taken down and up runs in a scratch database of its own, made
+next to the suite's and dropped afterwards (`new_scratch`, under the `scratch` and
+`scratch_database` fixtures); the suite's database is never downgraded.
 """
 
 import hashlib
 import re
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
@@ -22,6 +25,7 @@ import psycopg
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from psycopg.sql import SQL, Identifier
 from pydantic import ValidationError
 from sqlalchemy import cast, create_engine, exists, func, literal, literal_column, select, text, update
@@ -639,6 +643,203 @@ STATE_COLUMNS = {   # each kernel state column admits exactly its contract's val
 }
 
 
+MONEY_CAP_REVISION = "01b_3b_money_cap"
+
+
+def alembic_config() -> Config:
+    config = Config()                                     # no file, so alembic's env.py leaves logging alone
+    config.set_main_option("script_location", str(Path(__file__).resolve().parents[1] / "alembic"))
+    return config
+
+
+@dataclass
+class Scratch:
+    """A database of a migration test's own, next to the suite's and dropped once it has run: a test
+    migrates it down and back up, never the suite's database, which a local kernel and API run on."""
+
+    url: URL                              # a `URL`, whose repr masks the password; rendered with it only where used
+    conn: psycopg.Connection              # as desk_admin, autocommitted
+
+    def migrate(self, step: Callable[[Config, str], None], revision: str) -> None:
+        """Alembic's `step` (`command.upgrade`, `downgrade` or `stamp`) to `revision` on this
+        database, in one transaction on a connection of its own, which env.py migrates on
+        (`config.attributes["connection"]`). A lock it can't get fails the test, never hangs it."""
+        engine = create_engine(self.url, poolclass=NullPool)
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SET lock_timeout = '5s'"))
+                connection.commit()
+                config = alembic_config()
+                config.attributes["connection"] = connection
+                with connection.begin():                              # alembic runs inside it; it commits here
+                    step(config, revision)
+        finally:
+            engine.dispose()
+
+
+@contextmanager
+def new_scratch(admin: psycopg.Connection) -> Iterator[Scratch]:
+    """An empty scratch database, dropped afterwards with any connection still open to it."""
+    suite = make_url(database_url("ADMIN"))
+    name = f"{suite.database}_migrate_{uuid4().hex[:8]}"
+    admin.execute(SQL("CREATE DATABASE {}").format(Identifier(name)))
+    try:
+        url = suite.set(database=name)
+        with psycopg.connect(libpq_url(url.render_as_string(hide_password=False)), autocommit=True) as conn:
+            yield Scratch(url, conn)
+    finally:
+        admin.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(name)))
+
+
+@pytest.fixture(scope="module")
+def scratch(admin) -> Iterator[Scratch]:
+    """A scratch database at head, shared by the module's migration tests: each leaves it at head."""
+    with new_scratch(admin) as made:
+        made.migrate(command.upgrade, "head")
+        yield made
+
+
+@pytest.fixture
+def scratch_database(admin) -> Iterator[Scratch]:
+    """An empty scratch database of the test's own, for a test that migrates it up from nothing."""
+    with new_scratch(admin) as made:
+        yield made
+
+
+def test_the_scratch_database_never_shows_its_password(scratch):
+    # a failure under --showlocals may print the fixture, never the password
+    password = make_url(database_url("ADMIN")).password
+    shown = bool(password) and password in repr(scratch)     # a bool, so a failure can't print it either
+    assert password and not shown, "the scratch database's repr holds the admin password"
+
+
+def test_migration_keeps_existing_versions_at_five_hundred(scratch):
+    """A version written before the money cap's revision keeps the $500 it was held to; one written
+    after it without a cap is at 0, so every charge and payout asks."""
+    admin = scratch.conn
+
+    def insert(desk_id: str) -> None:
+        admin.execute(
+            "INSERT INTO kernel.policy_versions (desk_id, version, copy_id, cards, status, cedar_sha256, schema_sha256,"
+            " baseline_sha256, profiles_sha256, invariants_sha256, review_thresholds_version)"
+            " VALUES (%s, 1, 'copy-cap', '[]', 'active', 'c', 's', 'b', 'p', 'i', 1)", (desk_id,))
+
+    def cap(desk_id: str) -> int:
+        return admin.execute("SELECT auto_money_cap_cents FROM kernel.policy_versions WHERE desk_id = %s",
+                             (desk_id,)).fetchone()[0]
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(MONEY_CAP_REVISION).down_revision
+    try:
+        scratch.migrate(command.downgrade, before)
+        assert "auto_money_cap_cents" not in columns(admin, "kernel", "policy_versions")
+        insert("desk-before-cap")
+        scratch.migrate(command.upgrade, "head")
+        assert cap("desk-before-cap") == 50_000
+        insert("desk-after-cap")
+        assert cap("desk-after-cap") == 0
+        for refused in (-1, 1_000_001):
+            with pytest.raises(psycopg.errors.CheckViolation):
+                admin.execute("UPDATE kernel.policy_versions SET auto_money_cap_cents = %s WHERE desk_id = %s",
+                              (refused, "desk-after-cap"))
+    finally:
+        admin.execute("DELETE FROM kernel.policy_versions WHERE copy_id = 'copy-cap'")
+        scratch.migrate(command.upgrade, "head")
+
+
+MONEY_CAP_EDGES_REVISION = "01b_3e_money_cap_edges"
+
+
+def test_rows_from_before_the_cap_edges_claim_nothing(scratch):
+    """A decision written before the money cap's edges revision is taken as one whose asker could
+    not be given allow_person, since its standing then wasn't recorded: it fails closed. An
+    execution from then names no version or cap; from now on one names both or neither, and the cap
+    stays within the platform ceiling."""
+    admin = scratch.conn
+
+    def insert_execution(action_id: str, *checked: int | None) -> None:
+        """An intent row, with `(policy_version, auto_money_cap_cents)` when `checked` is given."""
+        names, values = (", policy_version, auto_money_cap_cents", ", %s, %s") if checked else ("", "")
+        admin.execute(f"INSERT INTO kernel.executions (action_id, copy_id, decision_id, state, started_at{names})"
+                      f" VALUES (%s, 'copy-edges', 'dec-edges', 'intent', now(){values})", (action_id, *checked))
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(MONEY_CAP_EDGES_REVISION).down_revision
+    try:
+        scratch.migrate(command.downgrade, before)
+        assert "allow_person_eligible" not in columns(admin, "kernel", "decisions")
+        assert "policy_version" not in columns(admin, "kernel", "executions")
+        admin.execute(
+            "INSERT INTO kernel.decisions (decision_id, copy_id, desk_id, session_id, generation, call_id, call_sha256,"
+            " tool, outcome, state, answers, policy_version, reason_plain, visitor_plain, expires_at, ledger_seq)"
+            " VALUES ('dec-before-edges', 'copy-edges', 'desk-edges', 'session-edges', 0, 'call-1', 'c',"
+            " 'native.payment_link', 'hold', 'held', '[\"allow_once\", \"deny_once\", \"allow_person\"]', 1, 'r',"
+            " 'v', now() + interval '1 day', 1)")
+        insert_execution("act-before-edges")
+        scratch.migrate(command.upgrade, "head")
+        assert admin.execute("SELECT allow_person_eligible FROM kernel.decisions"
+                             " WHERE decision_id = 'dec-before-edges'").fetchone() == (False,)
+        assert nullable_columns(admin, "kernel", "decisions")["allow_person_eligible"] is False
+        assert admin.execute("SELECT policy_version, auto_money_cap_cents FROM kernel.executions"
+                             " WHERE action_id = 'act-before-edges'").fetchone() == (None, None)
+        insert_execution("act-checked", 1, 50_000)
+        for refused in ((1, None), (None, 50_000), (1, -1), (1, 1_000_001)):
+            with pytest.raises(psycopg.errors.CheckViolation):
+                insert_execution("act-refused", *refused)
+    finally:
+        admin.execute("DELETE FROM kernel.decisions WHERE copy_id = 'copy-edges'")
+        admin.execute("DELETE FROM kernel.executions WHERE copy_id = 'copy-edges'")
+        scratch.migrate(command.upgrade, "head")
+
+
+def test_the_cap_edges_revision_runs_again_over_what_it_added(scratch):
+    """Like the revisions before it, the money cap's edges revision runs again on a database that
+    already has what it adds: its columns are added only if missing, and its check is dropped if
+    there and added again, so it is never added twice and still holds."""
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(MONEY_CAP_EDGES_REVISION).down_revision
+    scratch.migrate(command.downgrade, MONEY_CAP_EDGES_REVISION)   # the revisions after it go down first
+    scratch.migrate(command.stamp, before)
+    try:
+        scratch.migrate(command.upgrade, MONEY_CAP_EDGES_REVISION)  # again, over its own columns
+    finally:
+        scratch.migrate(command.stamp, MONEY_CAP_EDGES_REVISION)
+        scratch.migrate(command.upgrade, "head")
+    admin = scratch.conn
+    assert admin.execute("SELECT count(*) FROM pg_constraint WHERE conname = 'executions_checked_pair'"
+                         " AND conrelid = 'kernel.executions'::regclass").fetchone() == (1,)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        admin.execute("INSERT INTO kernel.executions (action_id, copy_id, decision_id, state, started_at,"
+                      " policy_version) VALUES ('act-again', 'copy-again', 'dec-again', 'intent', now(), 1)")
+
+
+DOCUMENT_LINKS_REVISION = "01b_6_document_links"
+
+
+def test_a_downgrade_below_document_links_leaves_no_link_behind(scratch):
+    """Below the document links' revision a link would keep only its key and copy, and the upgrade
+    couldn't add its NOT NULL columns back: the downgrade empties the table first. Back at head,
+    a link's token hash is 64 lowercase hex digits."""
+    admin = scratch.conn
+
+    def insert(link_id: str, token: str, digest: str) -> None:
+        admin.execute(
+            "INSERT INTO kernel.document_links (link_id, copy_id, desk_id, document_id, session_id, person_id, token,"
+            " token_sha256, created_at, expires_at)"
+            " VALUES (%s, 'copy-links', 'desk-links', 'doc-links', 'session-links', 'person-1', %s, %s, now(),"
+            " now() + interval '1 day')", (link_id, token, digest))
+
+    insert("link-downgraded", "token-downgraded", hashlib.sha256(b"token-downgraded").hexdigest())
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(DOCUMENT_LINKS_REVISION).down_revision
+    try:
+        scratch.migrate(command.downgrade, before)
+        assert columns(admin, "kernel", "document_links") == ["link_id", "copy_id"]
+        assert admin.execute("SELECT count(*) FROM kernel.document_links").fetchone() == (0,)
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    assert "token_sha256" in columns(admin, "kernel", "document_links")
+    for digest in ("A" * 64, "0" * 63, "token-upgraded"):
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("link-upgraded", "token-upgraded", digest)
+
+
 def test_state_columns_admit_only_contract_values(admin):
     for (table, column), literal in STATE_COLUMNS.items():
         checks = admin.execute(
@@ -668,8 +869,10 @@ def test_only_an_owner_alert_names_a_decision(kernel_tx):
     # a held request's alert links to its decision; a code, a checkpoint or an alert to anyone but the owner never
     # names one, so no session's own Demo inbox can show a decision
     def entry(entry_id: str, kind: str, to: str, decision_id: str | None) -> DemoInboxRow:
+        challenge_id = "challenge-1" if kind == "verification_code" else None
         return DemoInboxRow(entry_id=entry_id, copy_id="copy-a", desk_id="desk-a", to=to, person_id=None, kind=kind,
-                            body="-", preview="-", created_at=SLOT_TIME, decision_id=decision_id)
+                            body="-", preview="-", created_at=SLOT_TIME, decision_id=decision_id,
+                            challenge_id=challenge_id)
 
     masked = "d•••@example.com"
     kernel_tx.add_all([entry("inbox-1", "alert", "owner", "decision-1"), entry("inbox-2", "alert", "owner", None),
@@ -685,25 +888,59 @@ def test_only_an_owner_alert_names_a_decision(kernel_tx):
         kernel_tx.expunge_all()
 
 
-ALEMBIC_DIR = Path(__file__).resolve().parents[1] / "alembic"
+def test_a_code_entry_and_only_a_code_entry_names_its_challenge(kernel_tx):
+    # a session reads the codes of its own challenges, so every code names the challenge it was sent for
+    def entry(entry_id: str, kind: str, to: str, challenge_id: str | None) -> DemoInboxRow:
+        return DemoInboxRow(entry_id=entry_id, copy_id="copy-a", desk_id="desk-a", to=to, person_id=None, kind=kind,
+                            body="-", preview="-", created_at=SLOT_TIME, challenge_id=challenge_id)
+
+    masked = "d•••@example.com"
+    kernel_tx.add_all([entry("inbox-1", "verification_code", masked, "challenge-1"),
+                       entry("inbox-2", "alert", "owner", None), entry("inbox-3", "head_checkpoint", "owner", None)])
+    kernel_tx.flush()
+    for n, (kind, to, challenge_id) in enumerate((("verification_code", masked, None),
+                                                  ("alert", "owner", "challenge-1"),
+                                                  ("head_checkpoint", "owner", "challenge-1"))):
+        savepoint = kernel_tx.begin_nested()
+        kernel_tx.add(entry(f"inbox-refused-{n}", kind, to, challenge_id))
+        with pytest.raises(IntegrityError):
+            kernel_tx.flush()
+        savepoint.rollback()
+        kernel_tx.expunge_all()
 
 
-@pytest.fixture
-def scratch_database(admin) -> Iterator[URL]:
-    """An empty database next to the suite's, for a migration test to take up and down; its admin URL.
+INBOX_CHALLENGE_REVISION = "01b_1b_inbox_challenge"
 
-    The suite's own database is the one a local kernel and API run on, so no test ever downgrades it.
-    Dropped afterwards, with any connection still open to it. The URL stays a `URL`, whose repr masks
-    the password, and is rendered with it only where it is used, so a failure under `--showlocals`
-    never prints it.
-    """
-    suite = make_url(database_url("ADMIN"))
-    name = f"{suite.database}_migrate_{uuid4().hex[:8]}"
-    admin.execute(SQL("CREATE DATABASE {}").format(Identifier(name)))
+
+def test_a_code_entry_from_before_the_inbox_challenge_revision_names_none(scratch):
+    """A code entry written before the revision names no challenge, so no session's read finds it:
+    the upgrade keeps it as it is, with its check holding every row written from then on."""
+    admin = scratch.conn
+
+    def insert(entry_id: str, *challenge: str | None) -> None:
+        names, values = (", challenge_id", ", %s") if challenge else ("", "")
+        admin.execute(f"INSERT INTO kernel.demo_inbox (entry_id, copy_id, desk_id, \"to\", person_id, kind, body,"
+                      f" preview, created_at{names}) VALUES (%s, 'copy-inbox', 'desk-inbox', 'd•••@example.com',"
+                      f" 'person-1', 'verification_code', '-', '-', now(){values})", (entry_id, *challenge))
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(INBOX_CHALLENGE_REVISION).down_revision
     try:
-        yield suite.set(database=name)
+        scratch.migrate(command.downgrade, before)
+        assert "challenge_id" not in columns(admin, "kernel", "demo_inbox")
+        insert("inbox-before")
+        scratch.migrate(command.upgrade, "head")
+        assert admin.execute("SELECT challenge_id FROM kernel.demo_inbox"
+                             " WHERE entry_id = 'inbox-before'").fetchone() == (None,)
+        insert("inbox-after", "challenge-1")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("inbox-unnamed", None)
+        scratch.migrate(command.stamp, before)              # the revision runs again over what it added
+        scratch.migrate(command.upgrade, INBOX_CHALLENGE_REVISION)
+        assert admin.execute("SELECT count(*) FROM pg_constraint WHERE conname = 'demo_inbox_challenge_id_check'"
+                             " AND conrelid = 'kernel.demo_inbox'::regclass").fetchone() == (1,)
     finally:
-        admin.execute(SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(Identifier(name)))
+        admin.execute("DELETE FROM kernel.demo_inbox WHERE copy_id = 'copy-inbox'")
+        scratch.migrate(command.upgrade, "head")
 
 
 def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:
@@ -716,31 +953,15 @@ def migrated(conn: psycopg.Connection) -> tuple[bool, bool]:
 def test_inbox_decision_id_migration_goes_down_and_up(admin, scratch_database):
     # 0012_inbox_decision_id adds the column and its check; its downgrade takes both away, and head brings them back.
     # It all happens in a scratch database: the suite's own stays at head throughout
-    config = Config()                                     # no file, so alembic's env.py leaves logging alone
-    config.set_main_option("script_location", str(ALEMBIC_DIR))
-    engine = create_engine(scratch_database, poolclass=NullPool)
-    try:
-        with (engine.connect() as connection,
-              psycopg.connect(libpq_url(scratch_database.render_as_string(hide_password=False)),
-                              autocommit=True) as scratch):
-            connection.execute(text("SET lock_timeout = '5s'"))     # a lock it can't get fails the test, never hangs it
-            connection.commit()
-            config.attributes["connection"] = connection             # env.py migrates on this connection
-
-            def migrate(step, revision: str) -> None:
-                with connection.begin():                              # alembic runs inside it; it commits here
-                    step(config, revision)
-
-            migrate(command.upgrade, "head")
-            assert migrated(scratch) == (True, True)
-            migrate(command.downgrade, "0012_inbox_decision_id-1")   # to whatever 0012 revises
-            assert migrated(scratch) == (False, False)
-            assert migrated(admin) == (True, True)                   # the suite's own database never went down
-            migrate(command.upgrade, "head")
-            assert migrated(scratch) == (True, True)
-            assert nullable_columns(scratch, "kernel", "demo_inbox")["decision_id"] is True
-    finally:
-        engine.dispose()
+    scratch = scratch_database.conn
+    scratch_database.migrate(command.upgrade, "head")
+    assert migrated(scratch) == (True, True)
+    scratch_database.migrate(command.downgrade, "0012_inbox_decision_id-1")   # to whatever 0012 revises
+    assert migrated(scratch) == (False, False)
+    assert migrated(admin) == (True, True)                                    # the suite's own never went down
+    scratch_database.migrate(command.upgrade, "head")
+    assert migrated(scratch) == (True, True)
+    assert nullable_columns(scratch, "kernel", "demo_inbox")["decision_id"] is True
 
 
 def assert_refused_before_the_database(session: Session, row: Base) -> None:
@@ -832,9 +1053,13 @@ def test_visitor_payloads_validate_against_contracts(api_tx):
 
 
 COPY_POLICY = "(copy_id = NULLIF(current_setting('desk.copy_id'::text, true), ''::text))"
-# What the copy resolvers' role may read: the copy and the lookup key of each table, in every copy.
+# What each kernel_ro view's owner reads beyond its copy: kernel_ro.people skips removed people (01b_3_people)
+COPY_READ_POLICY = {"people": f"({COPY_POLICY} AND (removed_at IS NULL))"}
+# What the copy resolvers' role may read: the copy and the lookup key of each table, in every copy,
+# each key a hash or an ID that is no secret, never a token.
 RESOLVER_READS = {"copies": {"copy_id"}, "sessions": {"copy_id", "secret_hash", "session_id"},
-                  "desks": {"copy_id", "slug"}, "decisions": {"copy_id", "decision_id"}}
+                  "desks": {"copy_id", "slug"}, "decisions": {"copy_id", "decision_id"},
+                  "document_links": {"copy_id", "token_sha256"}}
 
 
 def test_every_kernel_table_forces_copy_row_security(admin):
@@ -859,7 +1084,8 @@ def test_every_kernel_table_forces_copy_row_security(admin):
         if name == "copy_scope":
             assert policy == [["desk_kernel"], "ALL", "PERMISSIVE", COPY_POLICY, COPY_POLICY], table
         elif name == "copy_read":
-            assert policy == [["desk_ro_owner"], "SELECT", "PERMISSIVE", COPY_POLICY, None], table
+            qual = COPY_READ_POLICY.get(table, COPY_POLICY)
+            assert policy == [["desk_ro_owner"], "SELECT", "PERMISSIVE", qual, None], table
         else:   # every copy, but only the columns in RESOLVER_READS (test_copy_resolvers_are_narrow)
             assert policy == [["desk_resolver"], "SELECT", "PERMISSIVE", "true", None], table
 
@@ -1036,6 +1262,11 @@ def token_hash(copy_id: str) -> str:
     return hashlib.sha256(f"token-{copy_id}".encode()).hexdigest()
 
 
+def link_token(copy_id: str) -> str:
+    """The token of the document link a test writes in a copy."""
+    return f"link-token-{copy_id}"
+
+
 @pytest.fixture
 def committed_copies(admin):
     """Two new copies, each with a Desk, a visitor session and a document, removed afterwards.
@@ -1055,7 +1286,7 @@ def committed_copies(admin):
                           (f"doc-{copy_id}", copy_id, f"desk-{copy_id}"))
         yield copies
     finally:
-        for table in ("decisions", "documents", "sessions", "desks", "copies"):
+        for table in ("decisions", "document_links", "documents", "sessions", "desks", "copies"):
             admin.execute(f"DELETE FROM kernel.{table} WHERE copy_id = ANY(%s)", (list(copies),))
 
 
@@ -1106,7 +1337,8 @@ def test_api_reads_kernel_ro_for_its_copy_only(committed_copies, api):
 # may call them.
 
 COPY_RESOLVERS = ("kernel.copy_of_session(text)", "kernel.copy_of_session_id(text)",
-                  "kernel.copy_of_desk_slug(text)", "kernel.copy_of_decision_id(text)", "kernel.copy_ids()")
+                  "kernel.copy_of_desk_slug(text)", "kernel.copy_of_decision_id(text)",
+                  "kernel.copy_of_document_link(text)", "kernel.copy_ids()")
 
 
 def test_copy_resolvers_are_narrow(admin):
@@ -1137,16 +1369,27 @@ async def test_copy_resolvers_find_a_copy_before_it_is_bound(admin, committed_co
             " call_sha256, tool, outcome, state, policy_version, reason_plain, visitor_plain, expires_at, ledger_seq)"
             " VALUES (%s, %s, %s, %s, 0, 'call-1', '', 'native.quote', 'refuse', 'refused', 1, '', '', now(), 1)",
             (f"dec-{copy_id}", copy_id, f"desk-{copy_id}", f"session-{copy_id}"))
+        admin.execute(   # and a link that released its document
+            "INSERT INTO kernel.document_links (link_id, copy_id, desk_id, document_id, session_id, person_id, token,"
+            " token_sha256, created_at, expires_at)"
+            " VALUES (%s, %s, %s, %s, %s, 'person-1', %s, %s, now(), now() + interval '1 day')",
+            (f"link-{copy_id}", copy_id, f"desk-{copy_id}", f"doc-{copy_id}", f"session-{copy_id}",
+             link_token(copy_id), hashlib.sha256(link_token(copy_id).encode()).hexdigest()))
     try:
         for copy_id in committed_copies:
             assert await resolve_copy("copy_of_session", token_hash(copy_id)) == copy_id
             assert await resolve_copy("copy_of_session_id", f"session-{copy_id}") == copy_id
             assert await resolve_copy("copy_of_desk_slug", f"slug-{copy_id}") == copy_id
             assert await resolve_copy("copy_of_decision_id", f"dec-{copy_id}") == copy_id
+            # a link by its token's sha256, never by the token itself
+            assert await resolve_copy("copy_of_document_link",
+                                      hashlib.sha256(link_token(copy_id).encode()).hexdigest()) == copy_id
+            assert await resolve_copy("copy_of_document_link", link_token(copy_id)) is None
         assert await resolve_copy("copy_of_session", "0" * 64) is None
         assert await resolve_copy("copy_of_session_id", "no-such-session") is None
         assert await resolve_copy("copy_of_desk_slug", "no-such-desk") is None
         assert await resolve_copy("copy_of_decision_id", "no-such-decision") is None
+        assert await resolve_copy("copy_of_document_link", "0" * 64) is None
         assert set(committed_copies) <= set(await copy_ids())
         with pytest.raises(ValueError):
             await resolve_copy("copy_of_anything", "x")
@@ -1164,7 +1407,8 @@ def test_only_the_kernel_runs_the_copy_resolvers(committed_copies):
     for prefix in ("API", "MOCKPAY"):
         with connect(prefix) as conn:
             for call in ("kernel.copy_of_session(%s)", "kernel.copy_of_session_id(%s)",
-                         "kernel.copy_of_desk_slug(%s)", "kernel.copy_of_decision_id(%s)"):
+                         "kernel.copy_of_desk_slug(%s)", "kernel.copy_of_decision_id(%s)",
+                         "kernel.copy_of_document_link(%s)"):
                 with pytest.raises(psycopg.errors.InsufficientPrivilege):
                     conn.execute(f"SELECT {call}", (token_hash(committed_copies[0]),))
             with pytest.raises(psycopg.errors.InsufficientPrivilege):

@@ -7,6 +7,7 @@ orphaned intent as a read does.
 """
 
 import asyncio
+import inspect
 import logging
 
 import httpx
@@ -15,16 +16,17 @@ from fastapi import FastAPI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from desk.contracts import Claim, Decision, ExecResult, Fact, Label, Review
+from desk.contracts import Claim, Decision, ExecResult, Fact, InboxNotice, Label, Review
+from desk.db import logs
 from desk.db.models import Decision as DecisionRow
-from desk.db.models import DemoInboxEntry, Document, Execution, PriceItem, Quote, Tool
+from desk.db.models import DemoInboxEntry, Document, Execution, NotificationPref, Person, PriceItem, Quote, Tool
 from desk.kernel_service import demo_inbox, execute, ledger
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown
 from desk.kernel_service.app import create_app
 from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FakeAdapter
-from .helpers import CopyRows, activate_cards, kernel_ctx, ledger_rows, make_copy_rows, rows_of
+from .helpers import CopyRows, activate_cards, kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
 from .test_adapters import Rivera, book, quote_args, visitor_of
 from .test_compiler import card
 from .test_decide import PASS, Visitor, decided, desk_with, open_visitor, owner_decide, set_mode, verify_signature
@@ -72,13 +74,14 @@ async def test_an_allow_executes_once_within_a_minute(app, client, frozen_clock)
 
     # the decision is executed, ledgered and signed again
     decision = await read(client, visitor.headers, allowed)
-    assert (decision.state, decision.visitor_plain) == ("executed", "Done")
+    assert (decision.state, decision.visitor_plain) == ("executed", "Quoted from Maria Rivera's price list")
     assert decision.ledger_seq > allowed.ledger_seq
     verify_signature((await client.get("/health")).json()["public_key_hex"], decision)
     [entry] = [e for e in await ledger_rows(app, copy) if e.seq == decision.ledger_seq]
     assert (entry.event.kind, entry.event.session_id, entry.event.ref_id, entry.event.summary) == (
         "execute", visitor.session_id, allowed.decision_id,
-        {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "executed"})
+        {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "executed",
+         "policy_version": 1, "auto_money_cap_cents": 50_000})                # the rules step 6 checked it against
 
 
 async def test_an_allow_expires_after_sixty_seconds(app, client, frozen_clock):
@@ -127,8 +130,10 @@ async def test_a_repeat_returns_the_stored_result(app, client, reviewer):
     assert again == first and len(await rows_of(app, copy.copy_id, select(Quote))) == 1
     assert await read(client, visitor.headers, allowed) == settled              # the decision didn't change
     [repeat] = [e.event for e in await ledger_rows(app, copy) if e.seq > settled.ledger_seq]
-    assert (repeat.kind, repeat.summary) == ("execute", {"decision_id": allowed.decision_id,
-                                                         "action_id": allowed.action.action_id, "repeat": True})
+    # the repeat names the version and money cap the execution was checked under, as its row has them
+    assert (repeat.kind, repeat.summary) == ("execute", {
+        "decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "repeat": True,
+        "policy_version": 1, "auto_money_cap_cents": 50_000})
 
     # a failed execution repeats its failure: two visitors were allowed one slot, the second lost it
     reviewer.answer = PASS
@@ -139,6 +144,40 @@ async def test_a_repeat_returns_the_stored_result(app, client, reviewer):
     assert failed == ExecResult(action_id=lost.action.action_id, state="failed", facts=[], model_view={})
     assert await executed(client, second, lost) == failed
     assert (await read(client, second.headers, lost)).state == "failed"
+
+
+async def test_a_bookings_owner_alert_reaches_only_the_owners_inbox(app, client, reviewer):
+    """An owner alert never rides in the visitor's result, whose `inbox` holds only a code notice:
+    the owner reads it from `GET /demo_inbox`."""
+    reviewer.answer = PASS
+    copy, visitor = await visitor_of(app, client)
+    async with kernel_ctx(app) as ctx:                                          # Maria wants bookings at once
+        ctx.bind(copy.copy_id)
+        prefs = (await ctx.db.scalars(ctx.repo.scoped(select(NotificationPref)))).one()
+        prefs.now = [*prefs.now, "booking"]
+    result = await executed(client, visitor, await book(client, visitor, "S-20261102-1000"))
+    assert (result.state, result.inbox) == ("succeeded", [])
+    response = await client.get("/demo_inbox", headers=copy.owner)
+    assert response.status_code == 200, response.text
+    assert [(entry["to"], entry["kind"], entry["body"]) for entry in response.json()
+            if " booked " in entry["body"]] == [
+        ("owner", "alert", "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm.")]
+
+
+async def test_an_owner_notice_never_rides_in_the_result(app, client, registry, caplog):
+    """Whatever an adapter returns, the result a session reads holds no notice addressed to the
+    owner: it is dropped, and logged by its kind alone, never its entry or preview."""
+    caplog.set_level(logging.INFO, logger="desk.kernel_service")
+    quote, rows, visitor, allowed = await fake_quote_desk(app, client)
+    code = InboxNotice(entry_id="inbox-code", to="d•••@example.com", preview="New verification code")
+    alert = InboxNotice(entry_id="inbox-alert", to="owner", preview="A stranger booked Monday at 10:00 am")
+    quote.script["execute"] = AdapterResult(model_view={"ok": True}, inbox=[alert, code])
+    result = await executed(client, visitor, allowed)
+    assert (result.state, result.model_view, result.inbox) == ("succeeded", {"ok": True}, [code])
+    assert await executed(client, visitor, allowed) == result                   # stored as the session saw it
+    assert [record.getMessage() for record in caplog.records if "notice" in record.getMessage()] == [
+        "inbox_notice_dropped to=owner tool=native.quote"]
+    assert "inbox-alert" not in caplog.text and "booked" not in caplog.text
 
 
 async def activate(app: FastAPI, copy: Rivera, cards) -> None:
@@ -164,7 +203,7 @@ async def test_rules_changed_refuses_at_execution(app, client):
     [entry] = [e.event for e in await ledger_rows(app, copy) if e.seq == decision.ledger_seq]
     assert (entry.kind, entry.summary) == ("execute", {
         "decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "refused_at_execution",
-        "reason": "rules_changed", "check": "policy"})
+        "reason": "rules_changed", "check": "policy", "policy_version": 2, "auto_money_cap_cents": 50_000})
     # it stays refused
     response = await post_execute(client, visitor, allowed)
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
@@ -263,8 +302,11 @@ async def test_an_orphaned_intent_reconciles_to_failed(app, client, registry, fr
     entries = [e.event.summary for e in await ledger_rows(app, rows)
                if e.event.kind == "execute"]
     base = {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id}
-    assert entries == [{**base, "state": "unknown", "orphaned": True}, {**base, "state": "failed", "reconciled": True},
-                       {**base, "repeat": True}]
+    # an intent T1 wrote names the version its re-check ran under, and so does a repeat of it; one
+    # written without it (as before the executions row recorded it) names none
+    checked = {"policy_version": 1, "auto_money_cap_cents": 50_000} if how == "crash" else {}
+    assert entries == [{**base, **checked, "state": "unknown", "orphaned": True},
+                       {**base, **checked, "state": "failed", "reconciled": True}, {**base, **checked, "repeat": True}]
 
 
 async def test_an_orphan_with_its_side_effect_reconciles_to_executed(app, client, registry, frozen_clock):
@@ -284,11 +326,86 @@ async def test_an_orphan_with_its_side_effect_reconciles_to_executed(app, client
     assert await committed(app, rows.copy_id, allowed.action.action_id) == ("intent", "allowed")
     frozen_clock.advance(31)
     decision = await read(client, visitor.headers, allowed)
-    assert (decision.state, decision.visitor_plain) == ("executed", "Done")
+    assert (decision.state, decision.visitor_plain) == ("executed", "Quoted from Maria Rivera's price list")
     expected = ExecResult(action_id=allowed.action.action_id, state="succeeded", facts=[], model_view={"ok": True})
     assert await executed(client, visitor, allowed) == expected                 # rebuilt as the session may see it
     assert effects == [allowed.action.action_id] and "on_failed" not in quote.calls
     assert quote.calls.count("reconcile") == 1                                  # settled once
+
+
+@pytest.mark.parametrize("outcome", ["executed", "failed", "unknown"])
+@pytest.mark.parametrize("how", ["crash", "error"])
+@pytest.mark.parametrize("path", ["allow", "approved"])
+async def test_reconciled_entries_name_the_version_their_check_ran_under(app, client, registry, frozen_clock, path,
+                                                                         how, outcome):
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote", mode="auto" if path == "allow" else "ask")])
+    visitor = await open_visitor(client, rows)
+    decision = await decided(client, visitor, "native.quote", {"qty": 1})       # under version 1, at $500
+    assert decision.state == ("allowed" if path == "allow" else "held")
+
+    def side_effect_then_lost(xctx, action, args):
+        # the kernel dies after the side effect (an intent is left), or loses the provider's answer (unknown)
+        raise Crash("the kernel died") if how == "crash" else RuntimeError("the provider's answer was lost")
+
+    def what_happened(xctx, action) -> AdapterResult | None:
+        if outcome == "unknown":
+            raise AdapterUnknown("the provider can't say yet")
+        return AdapterResult(model_view={"ok": True}) if outcome == "executed" else None
+
+    quote.script.update(execute=side_effect_then_lost, reconcile=what_happened)
+    run = (post_execute(client, visitor, decision) if path == "allow" else
+           client.post(f"/approvals/{decision.decision_id}/answer", headers=rows.owner, json={"answer": "allow_once"}))
+    if how == "crash":
+        with pytest.raises(Crash):
+            await run
+    else:
+        assert (await run).status_code == 200
+    [execution] = await executions_of(app, rows.copy_id)
+    assert (execution.policy_version, execution.auto_money_cap_cents) == (1, 50_000)   # what T1 checked against
+
+    # the rules change, at another cap, before anything reconciles it
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        await activate_cards(ctx, rows.desk_id, [card("quote", "native.quote")], auto_money_cap_cents=10_000)
+    frozen_clock.advance(31)
+    assert (await read(client, visitor.headers, decision)).state == outcome
+    # every entry names the version and cap the execution was checked under, not the ones active now
+    base = {"decision_id": decision.decision_id, "action_id": decision.action.action_id, "policy_version": 1,
+            "auto_money_cap_cents": 50_000}
+    lost = {**base, "state": "unknown", "orphaned": True} if how == "crash" else {**base, "state": "unknown"}
+    settled = [] if outcome == "unknown" else [{**base, "state": outcome, "reconciled": True}]
+    assert [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"] == [lost, *settled]
+
+
+def test_an_intent_is_never_written_without_the_check_it_passed():
+    """`prepare_intent` takes the version and money cap its re-check passed under as a required
+    keyword, so a caller can't write an intent row that names none by leaving them out."""
+    checked = inspect.signature(execute.prepare_intent).parameters["checked"]
+    assert (checked.kind, checked.default) == (inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.empty)
+
+
+@pytest.mark.parametrize("outcome", ["executed", "failed", "unknown"])
+async def test_an_approved_run_given_no_check_names_its_rows(app, client, registry, monkeypatch, outcome):
+    """T2 and T3 name the version and money cap the execution row recorded at T1 when the caller
+    passes none, so no entry goes without them while its row holds them."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote", mode="ask")])
+    visitor = await open_visitor(client, rows)
+    held = await decided(client, visitor, "native.quote", {"qty": 1})            # under version 1, at $500
+    quote.script["execute"] = {"executed": AdapterResult(model_view={"ok": True}), "failed": AdapterFailure("declined"),
+                               "unknown": RuntimeError("the provider's answer was lost")}[outcome]
+    run_approved = execute.run_approved
+
+    async def given_no_check(ctx, decision_row, *, checked=None) -> ExecResult:
+        return await run_approved(ctx, decision_row)
+
+    monkeypatch.setattr(execute, "run_approved", given_no_check)
+    response = await client.post(f"/approvals/{held.decision_id}/answer", headers=rows.owner,
+                                 json={"answer": "allow_once"})
+    assert response.status_code == 200, response.text
+    [entry] = [e.event.summary for e in await ledger_rows(app, rows) if e.event.kind == "execute"]
+    assert (entry["state"], entry["policy_version"], entry["auto_money_cap_cents"]) == (outcome, 1, 50_000), entry
 
 
 async def test_a_fresh_intent_is_left_alone(app, client, registry, frozen_clock, monkeypatch):
@@ -411,7 +528,7 @@ async def test_execution_hooks_follow_the_seam(app, client, registry, frozen_clo
     [entry] = [e.event.summary for e in await ledger_rows(app, rows)
                if e.event.kind == "execute" and e.event.summary.get("state") == "failed"]
     assert entry == {"decision_id": failing.decision_id, "action_id": failing.action.action_id, "state": "failed",
-                     "reason": "slot_taken"}
+                     "reason": "slot_taken", "policy_version": 1, "auto_money_cap_cents": 50_000}
 
     # a T2 commit that fails after the side effect: unknown, then reconciled to executed, once
     effects, armed = [], []
@@ -537,9 +654,109 @@ async def test_a_take_over_after_the_intent_stops_the_allow(app, client, registr
     assert entries == [
         ("takeover", {"from": "ai", "to": "owner", "generation": 1}),
         ("execute", {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id, "state": "expired",
-                     "fenced": True}),
+                     "fenced": True, "policy_version": 1, "auto_money_cap_cents": 50_000}),
         ("auth", {"route": "POST /execute", "reason": "stale_generation"}),
     ]
+
+
+async def put_people(client: httpx.AsyncClient, rows: CopyRows, body: dict) -> None:
+    response = await client.put(f"/desks/{rows.desk_id}/people", headers=rows.owner, json=body)
+    assert response.status_code == 200, response.text
+
+
+async def test_a_session_closed_after_the_intent_runs_nothing(app, client, registry, monkeypatch):
+    """Maria removes Dana after an allow's intent commits in a session verified as her, and before
+    its side effect: the removal closes that session, and the Desk still stands. T2 reads the
+    session afresh once it holds the row and finds it closed, so nothing runs: the decision ends
+    `refused_at_execution`, its intent `failed` after `on_failed`, and its `execute` entry names
+    the closed session as the check that failed, with the version and cap T1 checked under."""
+    quote = FakeAdapter("native.quote")
+    rows = await desk_with(app, [quote], [card("quote", "native.quote")])
+    await put_people(client, rows, {"upsert": [{"ref": "dana", "display_name": "Dana Whitfield",
+                                                "contact": "dana@example.com"}]})
+    [dana] = await rows_of(app, rows.copy_id, select(Person).where(Person.ref == "dana"))
+    visitor = await open_visitor(client, rows)
+    await verify_session(app, rows.copy_id, visitor.session_id, dana.person_id)
+    allowed = await decided(client, visitor, "native.quote", {"qty": 1})
+    assert allowed.outcome == "allow", allowed.reason_plain
+
+    async def remove_dana() -> None:                                # Maria removes Dana as the intent commits
+        await put_people(client, rows, {"remove": ["dana"]})
+
+    monkeypatch.setattr(execute, "_after_intent", remove_dana)
+    response = await post_execute(client, visitor, allowed)
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert "execute" not in quote.calls and quote.calls[-1] == "on_failed"     # prepare undone, nothing run
+    assert await committed(app, rows.copy_id, allowed.action.action_id) == ("failed", "refused_at_execution")
+    entries = [(e.event.kind, e.event.summary) for e in await ledger_rows(app, rows)
+               if e.event.kind in ("session", "execute", "auth")]
+    assert entries == [
+        ("session", {"kind": "visitor", "session_id": visitor.session_id}),
+        ("session", {"session_id": visitor.session_id, "closed": True, "reason": "person_removed"}),
+        ("execute", {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id,
+                     "state": "refused_at_execution", "reason": "rules_changed", "check": "closed",
+                     "policy_version": 1, "auto_money_cap_cents": 50_000}),
+    ]
+
+
+async def test_an_allow_holding_no_session_row_ends_unknown_before_its_side_effect(app, client, registry, monkeypatch,
+                                                                                   caplog):
+    """T2 runs an allow only while it holds the session row (the fence). If it ever held none, an
+    explicit check, not an `assert` that `python -O` strips, ends the action `unknown` before the
+    adapter's `execute`: never fenced, and with no `on_failed`, as any outcome nobody knows."""
+    quote, rows, visitor, allowed = await fake_quote_desk(app, client)
+
+    async def no_session(ctx, session_id, action_id) -> None:
+        return None
+
+    monkeypatch.setattr(execute, "_hold_session", no_session)
+    assert await executed(client, visitor, allowed) == ExecResult(
+        action_id=allowed.action.action_id, state="unknown", facts=[], model_view={})
+    assert "execute" not in quote.calls and "on_failed" not in quote.calls
+    assert await committed(app, rows.copy_id, allowed.action.action_id) == ("unknown", "unknown")
+    entries = [(e.event.kind, e.event.summary) for e in await ledger_rows(app, rows)
+               if e.event.kind in ("execute", "auth")]
+    assert entries == [("execute", {"decision_id": allowed.decision_id, "action_id": allowed.action.action_id,
+                                    "state": "unknown", "policy_version": 1, "auto_money_cap_cents": 50_000})]
+    [logged] = [record for record in caplog.records if record.getMessage().startswith("execution_unknown")]
+    # logged by its kind and frames (`repo.log_error`), never its text: the frames end at the explicit check
+    message = logged.getMessage()
+    assert "kind=RuntimeError\n" in message and 'raise RuntimeError(f"{path}_without_session")' in message
+
+
+class OddError(Exception):
+    """An error whose `exceptions` attribute is no list of members, as an exception group's is."""
+
+    exceptions = None
+
+
+@pytest.mark.parametrize("how", ["odd_error", "failing_redaction"])
+async def test_a_log_line_that_cannot_be_redacted_still_ends_unknown(app, client, registry, caplog, monkeypatch,
+                                                                     how):
+    """The log line an unknown outcome writes is redacted as it is made (`desk.db.logs`), inside
+    the handler that rolls back and settles the action. Writing that line never raises, so the
+    rollback and `unknown` still follow: an error with an `exceptions` attribute that isn't an
+    exception group's is read as an error like any other, and a redaction that fails anyway leaves
+    a record saying only `log_redaction_failed`."""
+    quote, rows, visitor, allowed = await fake_quote_desk(app, client)
+    quote.script["execute"] = OddError("the provider's answer was lost")
+    if how == "failing_redaction":
+        def fails(record: logging.LogRecord) -> None:
+            raise RuntimeError("the redaction failed")
+
+        monkeypatch.setattr(logs, "redact", fails)
+    assert await executed(client, visitor, allowed) == ExecResult(
+        action_id=allowed.action.action_id, state="unknown", facts=[], model_view={})
+    assert await committed(app, rows.copy_id, allowed.action.action_id) == ("unknown", "unknown")
+    unknown = [record for record in caplog.records if record.getMessage().startswith("execution_unknown")]
+    if how == "odd_error":
+        [logged] = unknown
+        assert "kind=OddError\n" in logged.getMessage()            # it holds no database error: logged by its class
+    else:
+        # nothing of the line is kept, and nothing of the error: a fixed message alone
+        failed = [record for record in caplog.records if record.getMessage() == "log_redaction_failed"]
+        assert unknown == [] and failed
+        assert all((record.args, record.exc_info, record.exc_text) == ((), None, None) for record in failed)
 
 
 async def change_records(app: FastAPI, copy: Rivera, change: str) -> None:
@@ -646,3 +863,6 @@ async def test_execute_needs_the_decisions_own_session(app, client, registry):
     assert own.outcome == "allow"
     result = await executed(client, visitor, own, headers=rows.owner, session_id=rows.owner_session_id)
     assert (result.state, result.model_view) == ("succeeded", {"ok": True})
+    # and its own setup action ends on the generic line, not a receipt written for a visitor
+    own = await read(client, rows.owner, own)
+    assert (own.state, own.visitor_plain) == ("executed", "Done")

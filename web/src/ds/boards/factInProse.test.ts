@@ -59,7 +59,15 @@ describe('fact_in_prose', () => {
       ['That one is free.', 'lex.en.promise'],
       ['Te damos un descuento.', 'lex.es.promise'],
       ['It comes at no extra charge.', 'lex.en.promise'],
+      // Any word after "no" but "matter", "one", "way" or "doubt" can start a waiver or sit in one ("set", "standard",
+      // "worries"), so a charge, cost or fee after it blocks.
+      ['There’s no set cost until Maria sees the leak.', 'lex.en.promise'],
+      ['No standard fees will be charged.', 'lex.en.promise'],
+      ['No worries about costs; you pay nothing.', 'lex.en.promise'],
+      ['There’s no set up fee.', 'lex.en.promise'],
+      ['There’s no set up charge.', 'lex.en.promise'],
       ['Sin recargos.', 'lex.es.promise'],
+      ['No hay cargo extra.', 'lex.es.promise'],
       ['Your appointment is confirmed.', 'lex.en.booking'],
       ['You’re all set.', 'lex.en.booking'],
       ['Booking confirmed.', 'lex.en.booking'],
@@ -71,7 +79,7 @@ describe('fact_in_prose', () => {
   });
 
   it('passes_what_the_kernel_passes', () => {
-    // The modal "may", a booking claim with a condition straight before it, and one beside its card.
+    // The modal "may", a booking claim with a condition straight before it, and a booking claim beside its card.
     for (const text of ['You may call Maria.', 'Once your visit is confirmed, Maria texts you.', 'Cuando tu cita está confirmada, te escribimos.']) {
       expect(rules(text), text).toEqual([]);
     }

@@ -1015,6 +1015,13 @@
           "title": "Charter",
           "type": "array"
         },
+        "auto_money_cap_cents": {
+          "default": 0,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Auto Money Cap Cents",
+          "type": "integer"
+        },
         "hours": {
           "items": {
             "$ref": "#/$defs/HoursWindow"
@@ -2615,6 +2622,20 @@
             }
           ],
           "title": "Expected Parent"
+        },
+        "auto_money_cap_cents": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auto Money Cap Cents"
         }
       },
       "required": [
@@ -2697,6 +2718,13 @@
         },
         "review_thresholds_version": {
           "title": "Review Thresholds Version",
+          "type": "integer"
+        },
+        "auto_money_cap_cents": {
+          "default": 0,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Auto Money Cap Cents",
           "type": "integer"
         },
         "status": {

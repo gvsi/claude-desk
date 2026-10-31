@@ -17,7 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from sqlalchemy import BigInteger, Boolean, DateTime, Integer, Text, text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -130,6 +130,7 @@ class Person(Base):
     ref: Mapped[str] = mapped_column(Text)                   # the seed's handle, unique per Desk
     contact: Mapped[str] = mapped_column(Text)               # on record; verification codes go only here; never in a view
     contact_norm: Mapped[str] = mapped_column(Text)          # normalized for lookup; never in a view
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # on record for no one once set
 
 
 class Lead(Base):
@@ -170,11 +171,22 @@ class ActorSession(Base):
 
 
 class VerificationChallenge(Base):
+    """A demo code sent to a person on record; never in a view. At most one is live per person
+    and per session (01b_1_verification)."""
+
     __tablename__ = "verification_challenges"
     __table_args__ = {"schema": "kernel"}
     challenge_id: Mapped[str] = mapped_column(Text, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
-    code_hash: Mapped[str] = mapped_column(Text)
+    code_hash: Mapped[str] = mapped_column(Text)             # sha256 of canonical JSON {challenge_id, code}
+    desk_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[str] = mapped_column(Text)            # the session that asked; only it may check the code
+    person_id: Mapped[str] = mapped_column(Text)             # the person on record the code went to
+    status: Mapped[str] = mapped_column(Text)                # live, consumed, cancelled, expired, failed
+    failed_at: Mapped[list[datetime]] = mapped_column(ARRAY(DateTime(timezone=True)),
+                                                      server_default=text("'{}'"))   # one per wrong code
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class AgentKey(Base):
@@ -255,6 +267,8 @@ class PolicyVersion(Base):
     profiles_sha256: Mapped[str] = mapped_column(Text)
     invariants_sha256: Mapped[str] = mapped_column(Text)
     review_thresholds_version: Mapped[int] = mapped_column(Integer)
+    # the money cap this version is compiled and proved at; the active version's is the Desk's cap
+    auto_money_cap_cents: Mapped[int] = mapped_column(Cents, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     cards_sha256: Mapped[str | None] = mapped_column(Text)
     draft_key_sha256: Mapped[str | None] = mapped_column(Text)        # what makes /policy/draft idempotent
@@ -313,6 +327,9 @@ class Decision(Base):
     policy_ids: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=EMPTY_LIST)
     signature: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # whether the asker could be given allow_person when it was decided (a verified person or an
+    # agent key); a hold's answers follow the active money cap, never a later change of standing
+    allow_person_eligible: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
 
 class Approval(Base):
@@ -342,6 +359,10 @@ class Execution(Base):
     result: Mapped[c.ExecResult | None] = mapped_column(ContractJSON(c.ExecResult))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # the rules version and money cap T1's re-check ran under, which every later entry names;
+    # both null only on a row written before they were recorded
+    policy_version: Mapped[int | None] = mapped_column(Integer)
+    auto_money_cap_cents: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class Fact(Base):
@@ -372,6 +393,7 @@ class KnowledgeItem(Base):
     title: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)
     readers: Mapped[list[str]] = mapped_column(ContractJSON(list[str]), server_default=OWNER_ONLY)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # first added (01b_5_knowledge)
 
 
 class PriceItem(Base):
@@ -441,10 +463,23 @@ class Document(Base):
 
 
 class DocumentLink(Base):
+    """A document released to its verified record owner, opened once by its token within a day;
+    never in a view (01b_6_document_links)."""
+
     __tablename__ = "document_links"
     __table_args__ = {"schema": "kernel"}
     link_id: Mapped[str] = mapped_column(Text, primary_key=True)
     copy_id: Mapped[str] = mapped_column(Text)
+    desk_id: Mapped[str] = mapped_column(Text)
+    document_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[str] = mapped_column(Text)            # the session that asked for it
+    person_id: Mapped[str] = mapped_column(Text)             # the verified record owner it was released to
+    token: Mapped[str] = mapped_column(Text)                 # unique; the link's one credential, only ever here
+    token_sha256: Mapped[str] = mapped_column(Text)          # unique; what the copy resolver looks the link up by
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # opened
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))     # its Desk or person gone
 
 
 class PaymentLink(Base):
@@ -461,6 +496,9 @@ class PaymentLink(Base):
 
 
 class Handoff(Base):
+    """A callback a visitor asked for: one per `native.request_callback` action, `open` until the
+    owner marks it `done` (01b_2_handoffs)."""
+
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}
     handoff_id: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -470,6 +508,9 @@ class Handoff(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     callback_window: Mapped[str | None] = mapped_column(Text)    # ISO 8601 "<start>/<end>", or None
     status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
+    action_id: Mapped[str] = mapped_column(Text)
+    window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # null without a window
+    window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class NotificationPref(Base):
@@ -496,6 +537,7 @@ class DemoInboxEntry(Base):
     preview: Mapped[str] = mapped_column(Text)               # code-free kernel template
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     decision_id: Mapped[str | None] = mapped_column(Text)    # only on an owner alert: the held decision's own id
+    challenge_id: Mapped[str | None] = mapped_column(Text)   # only on a code: the challenge it was sent for
 
 
 class LedgerHead(Base):

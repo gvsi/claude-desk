@@ -15,6 +15,7 @@
 The master plan's "Global Constraints" apply as written, and so do Plan 01a's plan-specific constraints. Specific to this plan:
 
 - **Plans 01a and 01b** change only where a task names them, never weakening a check, test or fixture.
+- **Receipts** (owner sign-off, 2026-10-29; Plan 01b Task 6b): the task that registers each visitor or agent tool adds its executed receipt line to `render/{en,es}.py`, so Plan 01b's `test_every_visitor_tool_has_receipt_lines` stays green: Task 2 `native.payment_link` "Payment link made for this quote" / "Enlace de pago creado para esta cotización"; Task 5 `payments.list_charges` "Charges read from {owner}'s payments" / "Cargos tomados de los pagos de {owner}" and `payments.create_refund` "Refunded to the original payment" / "Reembolsado al pago original"; Task 7 `native.charge_mandate` "Charged within the limit of your mandate" / "Cobrado dentro del límite de tu mandato". Owner setup tools (Task 8) get none.
 - **Deadlines** (below the API client's 6 s timeout): MCP re-list and calls `MCP_DEADLINE_S = 2.0`; provider writes `PROVIDER_DEADLINE_S = 2.0`; provider reads at normalize `READ_DEADLINE_S = 1.0` (normalize plus the 4 s reviewer stays under 6 s); website fetch `FETCH_TOTAL_TIMEOUT_S = 4.0`. An execution path stays within 5 s (re-normalize, re-list, call).
 - **Execution outcomes** (01a's seam): a spend reservation is written in `prepare`. `AdapterFailure` only when the request never reached the provider, the provider refused it (4xx, MCP `isError`), or the tool only reads; any other exception after the intent row is `unknown`. Reconciliation never trusts a lookup miss: it settles the key at the provider (`void`, or `cancel` for a checkout), so a delayed request fails instead of landing after a release.
 - **Payment-link tokens** follow Plan 01b's link-token rule (24 hours, only in `kernel.payment_links`, redacted from the access log); facts name the `link_id`; a visitor sees the token only in the card's `href` (`href_for`).
@@ -74,6 +75,14 @@ Revisions use `ADD COLUMN IF NOT EXISTS` and set `down_revision` to `main`'s hea
 Tasks 1–7 and Task 10's money and agent rows are the Friday-gate content. If 18:00 arrives first, they land as PR 1 on `plan/01c`, and Tasks 8–9 with their rows follow on Saturday morning as PR 2 (setup is third in Saturday's order); within PR 2, Task 9 is cut before Task 8. PR 1 adds `01c` to `landed.toml`, PR 2 adds `01c-setup`, and a single PR adds both.
 
 ---
+
+### Task 0: Withhold, never fail, what an adapter outside the kernel already did
+
+Before any adapter that acts outside the kernel (the mock payments server's tools, an MCP refund), kernel verification's private data guard and its private recovery change shape, since recording such an action as not run would be false: a charge or refund that went through would read as never made, and its mandate reservation would be released.
+- A result the always-on private data guard refuses (`execute._visible`, `UndeclaredPrivateData`) is withheld, not failed: the action stays `executed`, the session gets an empty view, the violation is ledgered on its entry, and no `on_failed` runs.
+- A refused recovery of a private action (`execute._refused_in_recovery`) asks the adapter (`reconcile`) first and delivers nothing, rather than recording a refusal and running `on_failed` without it.
+- An adapter's `releases_private_data` is checked against its profile's `private_data` effect at registration, so the two can't disagree.
+- Tests, each failing first: a misdeclared adapter's refused result stays executed with nothing delivered and no `on_failed`; a refused private recovery calls `reconcile` once and delivers nothing; registering an adapter whose declaration contradicts its profile raises.
 
 ### Task 1: Mock payments server
 

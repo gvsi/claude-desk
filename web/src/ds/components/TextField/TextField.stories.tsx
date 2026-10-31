@@ -167,3 +167,41 @@ export const Multiline: Story = {
     await expect(field).toHaveAccessibleDescription(`${hint} 1500 / 1500`);
   },
 };
+
+export const ReadOnly: Story = {
+  name: 'Read only',
+  args: {
+    label: 'Your business',
+    multiline: true,
+    value: "Rivera Plumbing. I'm Maria, a licensed plumber in Oakland.",
+    hint: 'Include your first name as customers should see it.',
+    maxLength: 1500,
+    readOnly: true,
+  },
+  parameters: {
+    canvasNote:
+      'No board draws a read-only field. Setup’s description is read-only while a start whose answer was lost is tried again with its words as they were (plan 04, Task 12), and it keeps the editable field’s look; the nearest boards are the setup frame’s, such as N-R2-Setup-04-Answer-Failed.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const field = canvas.getByRole('textbox', { name: 'Your business' }) as HTMLTextAreaElement;
+    await expect(field).toHaveAttribute('readonly');
+    await expect(field).not.toBeDisabled();
+
+    // Typing and pasting change nothing, and nothing is reported.
+    await userEvent.click(field);
+    await userEvent.keyboard('{End} We clear drains.');
+    await userEvent.paste(' And water heaters.');
+    await expect(field).toHaveValue(args.value);
+    await expect(args.onChange).not.toHaveBeenCalled();
+
+    // The text stays selectable, to read or copy.
+    await expect(getComputedStyle(field).userSelect).not.toBe('none');
+    field.select();
+    await expect([field.selectionStart, field.selectionEnd]).toEqual([0, args.value.length]);
+
+    // It stays in the tab order: Tab from the page lands on it.
+    field.blur();
+    await userEvent.tab();
+    await expect(field).toHaveFocus();
+  },
+};
