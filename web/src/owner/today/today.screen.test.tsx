@@ -21,6 +21,7 @@ import { worker } from '../../mocks/browser.ts';
 import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { holdReads } from '../../test/holdReads.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import {
   aPollPasses,
@@ -104,26 +105,6 @@ async function expectWaiting(button: Locator, words: string): Promise<void> {
   expect(el.querySelector('.cd-button__spinner')).toBeNull();
 }
 
-/**
- * Holds every read of `path` until the test lets them through to the mock: `held()` counts the
- * reads waiting, and `release()` sends them on.
- */
-function holdReads(path: string): { held: () => number; release: () => void } {
-  let waiting = 0;
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  worker.use(
-    http.get(path, async () => {
-      waiting += 1;
-      await released;
-      return undefined;
-    }),
-  );
-  return { held: () => waiting, release };
-}
-
 /** The main Desk's Needs you, as the app reads it. */
 const needsYouPath = ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId);
 
@@ -141,12 +122,14 @@ function delayNextRead(path: string, ms: number): void {
   );
 }
 
-/** The owner's loading page, "Opening your Desk", with nothing of the Desk's frame or of Today yet. */
+/** The full-page shapes, with the real heading and no exposed navigation or Today yet. */
 function expectLoadingPage(): void {
-  const state = document.querySelector('.cd-owner-state');
-  expect(state, "the owner's loading page").not.toBeNull();
-  expect(state!.textContent).toContain('Opening your Desk');
-  expect(document.querySelector('.cd-today')).toBeNull();
+  const layer = document.querySelector('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
+  expect(layer, "the owner's loading shapes").not.toBeNull();
+  const status = layer!.closest('.cd-skeleton-screen')!.querySelector('[role="status"]')!;
+  expect(status.classList.contains('cd-sr-only')).toBe(true);
+  expect(status.textContent).toBe(layer!.getAttribute('data-state') === 'shown' ? 'Opening your Desk' : '');
+  expect(document.querySelector('.cd-today:not(.cd-today--skeleton)')).toBeNull();
   expect(document.querySelector('nav[aria-label="Main"]')).toBeNull();
 }
 
@@ -325,7 +308,7 @@ describe('Today', () => {
     await expect.element(region(screen, 'Live now').getByRole('link')).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
-    expect(pages()).toEqual(['loading', 'today']);
+    await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today']));
   });
 
   it('reload_with_slow_reads_shows_one_loading_step', async () => {
@@ -339,7 +322,7 @@ describe('Today', () => {
     const { screen } = await renderRoute(TODAY);
     await expect.element(heldCard(screen, SEEDED_REASON), { timeout: 4_000 }).toBeVisible();
     expect(performance.now() - started).toBeGreaterThan(1_400);
-    expect(pages()).toEqual(['loading', 'today']);
+    await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today']));
   });
 
   it('reload_reads_today_beside_the_desks', async () => {
@@ -351,8 +334,8 @@ describe('Today', () => {
     await vi.waitFor(() => expect(desks.held()).toBe(1));
     await vi.waitFor(() => expect(needsYou.held()).toBe(1));
     await expect.poll(() => requests('today').length).toBeGreaterThan(0);
-    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toBeVisible();
-    expect(document.querySelector('.cd-owner-state')).not.toBeNull();
+    await expect.element(screen.getByText('Opening your Desk', { exact: true })).toHaveClass('cd-sr-only');
+    expectLoadingPage();
 
     desks.release();
     needsYou.release();
@@ -392,7 +375,7 @@ describe('Today', () => {
 
     needsYou.release();
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    expect(pages()).toEqual(['loading', 'today without its held request', 'today']);
+    await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today without its held request', 'today']));
   });
 
   it('switching_desks_opens_today_drawn', async () => {
@@ -417,7 +400,7 @@ describe('Today', () => {
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByText('A quiet night', { exact: true })).toBeVisible();
     expect(since()).toHaveLength(1);
-    expect(pages()).toEqual(['today', 'today opening', 'today']);
+    await vi.waitFor(() => expect(pages()).toEqual(['today', 'today opening', 'today']));
   });
 
   it('a_failed_today_read_keeps_its_error_once_today_opens', async () => {
@@ -465,7 +448,7 @@ describe('Today', () => {
     const pages = watchPages();
     await switchDesk(screen, 'Emergencies', 'Main line');
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    expect(pages()).toEqual(['today without its held request', 'today']);
+    await vi.waitFor(() => expect(pages()).toEqual(['today without its held request', 'today']));
     today.release();
     needsYou.release();
   });
@@ -605,7 +588,7 @@ describe('Today', () => {
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     // Time for a read on mount to go out, had Today sent one.
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(pages()).toEqual(['loading', 'today']);
+    await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today']));
     expect(requests('today')).toHaveLength(2);
   });
 
@@ -619,7 +602,7 @@ describe('Today', () => {
     await expect.element(line, { timeout: 5_000 }).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(pages()).toEqual(['loading', 'today without its held request']);
+    await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today without its held request']));
     expect(requests('needsYou')).toHaveLength(2);
   });
 

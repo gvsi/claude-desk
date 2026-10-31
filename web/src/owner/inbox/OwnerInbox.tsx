@@ -26,10 +26,11 @@ import { formatWhen } from '../../lib/format.ts';
 import { decisionQuery } from '../conversations/ownerReceipt.ts';
 import { requestPath } from '../today/requestLink.ts';
 import { useReadFailure } from '../useReadFailure.ts';
+import { FRESH_MS, OWNER_INBOX_KEY } from '../useDesks.ts';
 
 import './OwnerInbox.css';
 
-export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
+export { OWNER_INBOX_KEY } from '../useDesks.ts';
 
 export interface OwnerInboxProps {
   /** The business's IANA time zone: each entry's time is on its clock. */
@@ -54,9 +55,12 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
   const inbox = useQuery({
     queryKey: OWNER_INBOX_KEY,
     queryFn: () => request('ownerInbox'),
+    // A reload already read this beside Today. Land its data or failure without starting over.
+    staleTime: FRESH_MS,
+    retryOnMount: false,
     // Once as Today opens; after that, only while the sheet is open.
-    refetchOnWindowFocus: () => openNow.current,
-    refetchOnReconnect: () => openNow.current,
+    refetchOnWindowFocus: () => (openNow.current ? 'always' : false),
+    refetchOnReconnect: () => (openNow.current ? 'always' : false),
   });
   const failure = useReadFailure(inbox);
 

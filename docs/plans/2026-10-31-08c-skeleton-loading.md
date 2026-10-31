@@ -671,6 +671,8 @@ Two stacked design PRs, in order of value, so the signed boards ship first:
 
 ## Review Ledger
 
+Ruling (Task 2): the link pill's width is data-dependent (random slug); its position and height land, its width changes once.
+
 **Plan review, round 1** (Opus 5.5 and GPT-6.1 Sol; the Fable seat is paused). Changes:
 - **The sweep lines up on every browser** by each shape's measured offset, not a fixed background, which iOS Safari ignores (decision 10). Task 1's `Sweep` story checks it in WebKit too. The ancestor rule about transforms and containment is gone.
 - **The band's ends are transparent** (decision 16), named in the design PR as the one correction to the boards.

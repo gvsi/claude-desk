@@ -15,6 +15,7 @@ import {
   Notice,
   ReviewerBar,
   Sidebar,
+  SkeletonScreen,
   SwitcherMenu,
   Wordmark,
   type NavKey,
@@ -24,6 +25,7 @@ import {
   type SwitcherPick,
 } from '../ds/index.ts';
 import { writeLocal } from '../lib/storage.ts';
+import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
 import { connectorPageHref } from './connectors/pages.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { DESKS_KEY, desksQuery, findDesk, invalidateCopy, lastOrFirst, todayPath, useDesks, useToday, useTodayReadAhead, withAnswering } from './useDesks.ts';
@@ -71,10 +73,10 @@ const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'rules'
  * concept footer in the column its boards put it in. Settings centers the content column itself,
  * with the footer at the window's foot.
  */
-const FILL_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['conversations', 'settings']);
+export const FILL_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['conversations', 'settings']);
 
 /** Of those, the pages that center the content column: a notice above one keeps to that column. */
-const CENTERED_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['settings']);
+export const CENTERED_PAGES: ReadonlySet<NavKey> = new Set<NavKey>(['settings']);
 
 /**
  * Every row a page can be: the rows above and Connectors, which the sidebar draws only once its
@@ -147,13 +149,32 @@ function DeskGate({ deskId }: { deskId: string }) {
   const shown = found ?? held;
   const readingAhead = useTodayReadAhead(deskId, found === null && opensToday(location.pathname));
 
-  if (shown) {
-    if (readingAhead) return <OwnerState />;
-    return <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />;
-  }
-  if (desks.isError) return <OwnerState error={desks.error} onRetry={() => void desks.refetch()} />;
-  if (desks.data && !desks.isFetching) return <NotFound />;
-  return <OwnerState />;
+  const titleId = useId();
+  const loading = shown ? readingAhead : !desks.isError && !(desks.data && !desks.isFetching);
+  const next = shown ? (
+    <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />
+  ) : desks.isError ? (
+    <OwnerState error={desks.error} onRetry={() => void desks.refetch()} />
+  ) : (
+    <NotFound />
+  );
+  return (
+    <div className="cd-owner-gate">
+      {loading ? (
+        <main aria-labelledby={titleId} className="cd-sr-only">
+          <h1 id={titleId}>Claude Desk</h1>
+        </main>
+      ) : null}
+      <SkeletonScreen
+        loading={loading}
+        status="Opening your Desk"
+        className="cd-owner-opening"
+        skeleton={<OwnerFrameSkeleton pathname={location.pathname} />}
+      >
+        {loading ? null : next}
+      </SkeletonScreen>
+    </div>
+  );
 }
 
 /**
@@ -456,8 +477,8 @@ function BesideTheBusinessRow({ container, children }: { container: RefObject<HT
   );
 }
 
-/** While the copy's Desks load, or when they can't be read: the product's name, a line and a next step. */
-function OwnerState({ error, onRetry }: { error?: unknown; onRetry?: () => void }) {
+/** When the copy's Desks cannot be read: the product's name, an error and a next step. */
+function OwnerState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const titleId = useId();
   return (
     <div className="cd-owner-state">
@@ -469,22 +490,16 @@ function OwnerState({ error, onRetry }: { error?: unknown; onRetry?: () => void 
         <h1 id={titleId} className="cd-sr-only">
           Claude Desk
         </h1>
-        {error === undefined ? (
-          <p className="cd-owner-state__line cd-type-meta" role="status">
-            Opening your Desk
-          </p>
-        ) : (
-          <Notice
-            tone="error"
-            action={
-              <Button variant="secondary" onClick={onRetry}>
-                Try again
-              </Button>
-            }
-          >
-            {ownerErrorCopy(error)}
-          </Notice>
-        )}
+        <Notice
+          tone="error"
+          action={
+            <Button variant="secondary" onClick={onRetry}>
+              Try again
+            </Button>
+          }
+        >
+          {ownerErrorCopy(error)}
+        </Notice>
       </main>
       <footer>
         <ConceptFooter />

@@ -17,8 +17,9 @@ const NOT_FOUND = "This page doesn't exist";
  */
 export function pageNow(): string {
   const held = `article[aria-label="Held for you: ${rivera.decisions.held.reason_plain}"]`;
+  if (document.querySelector('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer') !== null) return 'loading';
   const state = document.querySelector('.cd-owner-state');
-  if (state !== null) return state.querySelector('[role="alert"]') === null ? 'loading' : 'error';
+  if (state !== null) return 'error';
   const standalone = document.querySelector('.cd-standalone-page');
   if (standalone !== null) return standalone.textContent?.includes(NOT_FOUND) ? 'not found' : 'an error page';
   if (document.querySelector('.cd-today-preview') !== null) return 'preview';

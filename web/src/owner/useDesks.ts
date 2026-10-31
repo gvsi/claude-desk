@@ -13,6 +13,7 @@ import { readLocal } from '../lib/storage.ts';
 
 export const DESKS_KEY = ['desks'] as const;
 export const ME_KEY = ['me'] as const;
+export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 export const todayKey = (deskId: string) => ['today', deskId] as const;
 export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
 
@@ -86,7 +87,7 @@ function deadlinesOf(queryClient: QueryClient): Map<string, number> {
 }
 
 /**
- * Reads what a Desk's Today first shows (the copy's Desks, its Today and Needs you) at once, for up
+ * Reads what a Desk's Today first shows (the copy's Desks, its Today, Needs you and Demo inbox) at once, for up
  * to `capMs`, so a page can open onto a Today that is already drawn. A read that fails or runs long
  * is left to Today, which shows and retries it as it always does; this never throws. The Desk's
  * Today, opened next, waits no later than this does (`useTodayOpening`).
@@ -107,6 +108,7 @@ async function readTodayUntil(queryClient: QueryClient, deskId: string, deadline
     queryClient.prefetchQuery(desksQuery()),
     queryClient.prefetchQuery(todayQuery(deskId)),
     queryClient.prefetchQuery(needsYouQuery(deskId)),
+    queryClient.prefetchQuery({ queryKey: OWNER_INBOX_KEY, queryFn: () => request('ownerInbox') }),
   ]);
   await Promise.race([reads, cap]);
   clearTimeout(timer);

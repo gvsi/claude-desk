@@ -243,14 +243,14 @@ describe('Arrival', () => {
     const { screen, router } = await renderRoute('/');
     const pages = watchPages();
     // Today itself, not the still preview of it behind the intro dialog.
-    const todayDrawn = () => document.querySelector('.cd-today') !== null && document.querySelector('.cd-today-preview') === null;
+    const todayDrawn = () => document.querySelector('.cd-today:not(.cd-today--skeleton)') !== null && document.querySelector('.cd-today-preview') === null;
     await expect.poll(todayDrawn, { timeout: 10_000, interval: 50 }).toBe(true);
     const drawnAt = performance.now() - started;
     expect(router.state.location.pathname).toBe(TODAY);
     // Once the Desks were in, at 3.4 s; a second full wait would draw Today at 6 s or later.
     expect(drawnAt).toBeGreaterThan(3_400);
     expect(drawnAt).toBeLessThan(5_000);
-    expect(pages()).toEqual(['preview', 'loading', 'today without its held request']);
+    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today without its held request']));
     expect(heldCard(screen).elements()).toHaveLength(0);
   });
 
