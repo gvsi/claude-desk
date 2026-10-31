@@ -40,6 +40,18 @@
   padding-left: var(--space-8);
 }
 
+/* Off: dimmed well down, as a disabled Button is, with no hover and no press. */
+.cd-chip:disabled {
+  cursor: default;
+  opacity: 0.4;
+  transform: none;
+}
+
+.cd-chip:disabled:not(.cd-chip--selected):hover {
+  background: transparent;
+  border-color: var(--line-control);
+}
+
 .cd-chip__check {
   flex: none;
 }
