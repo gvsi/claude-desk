@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 from sqlalchemy import text as sql
 
+from desk.api import owner_reads
 from desk.api.kernel_client import CredentialView, KernelFailed
 from desk.api.main import create_app
 from desk.api.owner_reads import (
@@ -868,13 +869,167 @@ async def test_safety_lists_refusals_with_origin(scene, clock):
         {"ref_id": str(replayed_seq), "kind": "reply_blocked",
          "reason_plain": "A reply was stopped before it was shown, because it wrote a number outside a checked card.",
          "card_ids": [], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 20)), "triage": None,
-         "ledger_seq": replayed_seq},
+         "ledger_seq": replayed_seq, "cause": None},
         {"ref_id": refused.decision_id, "kind": "refused", "reason_plain": refused.reason_plain,
          "card_ids": ["never-native.find_slots"], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 19)),
-         "triage": None, "ledger_seq": refused.ledger_seq}]
+         "triage": None, "ledger_seq": refused.ledger_seq, "cause": "owner_rule"}]
     # the replayed entry is listed at the time it was recorded, in the briefing too, not when it was written
     newest = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]["newest"]["blocked"]
     assert (newest["ref_id"], newest["at"], newest["line"]) == (str(replayed_seq), stamp(local(2026, 10, 29, 20)), None)
+
+
+@pytest.mark.parametrize(("tool", "args", "cause"), [
+    ("native.book", {"slot_id": "S-20990101-0000"}, "no_such_slot"),
+    ("native.quote", {"items": [{"item_id": "missing", "qty": 1}]}, "unknown_item"),
+    ("native.quote", None, "over_quote_ceiling"),
+    ("native.release_document", {"document_id": "missing"}, "no_such_document"),
+    ("payments.create_refund", {"charge_id": "missing"}, "no_such_charge"),
+])
+async def test_safety_cause_from_adapter_check(scene, tool, args, cause):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    if tool in ("native.release_document", "payments.create_refund"):
+        scene.fake.verify(who.session_id, "dana")
+    if args is None:
+        desk = scene.fake.desks[scene.owner.desk_id]
+        item_id = item_ids(scene.fake, scene.owner)
+        desk.prices[item_id] = desk.prices[item_id].model_copy(update={"unit_cents": 600_000})
+        args = {"items": [{"item_id": item_id, "qty": 2}]}
+    refusal = await who.decide(tool, args)
+    assert refusal.outcome == "refuse"
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] == cause
+
+
+async def test_verification_commits_between_owner_reads(scene, monkeypatch):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    rows = KernelRO.rows
+    refusal = None
+
+    async def interleaved(ro, view, **filters):
+        nonlocal refusal
+        found = await rows(ro, view, **filters)
+        if view == "sessions" and refusal is None:
+            scene.fake.verify(who.session_id, "dana")
+            desk = scene.fake.desks[scene.owner.desk_id]
+            person = scene.fake.sessions[who.session_id].person_id
+            document = next(doc for doc in desk.documents.values() if doc.record_owner_person_id != person)
+            refusal = await who.decide("native.release_document", {"document_id": document.document_id})
+            assert refusal.outcome == "refuse"
+            assert refusal.policy_ids == ["B.private_data_record_owner"]
+        return found
+
+    monkeypatch.setattr(KernelRO, "rows", interleaved)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200
+    # Both the verification and decision committed after the snapshot started: neither belongs in this read.
+    assert all(item["ref_id"] != refusal.decision_id for item in listed.json())
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] == "not_their_record"
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("summary", 1), ("summary", "malformed"), ("summary", None), ("summary", []),
+    ("event", 1), ("event", "malformed"), ("event", None), ("event", []),
+])
+async def test_malformed_summary_keeps_safety_available(scene, monkeypatch, field, value):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    refusal = await who.decide("native.book", {"slot_id": "S-20990101-0000"})
+    rows = KernelRO.rows
+    stopped = []
+    original_stopped = owner_reads._stopped_attempts
+
+    def capture_stopped(*args):
+        found = original_stopped(*args)
+        stopped.extend(found)
+        return found
+
+    async def malformed(ro, view, **filters):
+        found = await rows(ro, view, **filters)
+        if view == "ledger_entries":
+            for row in found:
+                if row["seq"] == refusal.ledger_seq:
+                    if field == "event":
+                        row["event"] = value
+                    else:
+                        row["event"]["summary"] = value
+        return found
+
+    monkeypatch.setattr(KernelRO, "rows", malformed)
+    monkeypatch.setattr(owner_reads, "_stopped_attempts", capture_stopped)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] is None
+    (attempt,) = [attempt for attempt in stopped if attempt.ref_id == refusal.decision_id]
+    assert attempt.replayed is True
+
+
+@pytest.mark.parametrize("summary", [
+    {"reason": {"withheld": True}},
+    {"reason": "adapter_refused", "check": {"withheld": True}},
+])
+async def test_safety_keeps_other_entries_when_a_code_is_withheld(scene, monkeypatch, summary):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    withheld = await who.decide("native.book", {"slot_id": "S-20990101-0000"})
+    scene.fake.never(scene.owner.desk_id, "native.find_slots")
+    other = await who.decide("native.find_slots", {})
+    blocked_seq = await scene.blocked_reply(who, local(2026, 10, 29, 20))
+    rows = KernelRO.rows
+
+    async def with_withheld_code(ro, view, **filters):
+        found = await rows(ro, view, **filters)
+        if view == "ledger_entries":
+            for row in found:
+                if row["seq"] == withheld.ledger_seq:
+                    row["event"]["summary"].update(summary)
+        return found
+
+    monkeypatch.setattr(KernelRO, "rows", with_withheld_code)
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200, listed.text
+    causes = {item["ref_id"]: item["cause"] for item in listed.json()}
+    assert causes[withheld.decision_id] is None
+    assert causes[other.decision_id] == "owner_rule"
+    assert causes[str(blocked_seq)] is None
+
+
+@pytest.mark.parametrize(("source", "cause"), [
+    ("early_reason", "incomplete_request"), ("baseline_verified", "not_their_record"),
+    ("baseline_unverified", "not_verified"), ("plain_deny", "no_rule"),
+])
+async def test_safety_cause_from_decision_source(scene, monkeypatch, source, cause):
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    tool, args = "native.book", {}
+    if source.startswith("baseline_"):
+        if source == "baseline_verified":
+            scene.fake.verify(who.session_id, "dana")
+        else:
+            # Exercise the baseline independently of the tool-discovery gate.
+            monkeypatch.setattr(scene.fake, "tools_given", lambda session, desk: ("native.release_document",))
+        desk = scene.fake.desks[scene.owner.desk_id]
+        person = scene.fake.sessions[who.session_id].person_id
+        document = next(doc for doc in desk.documents.values() if doc.record_owner_person_id != person)
+        tool, args = "native.release_document", {"document_id": document.document_id}
+    elif source == "plain_deny":
+        # An evaluated Cedar deny with no deciding policies (no permit covers this request).
+        monkeypatch.setattr(scene.fake, "_rule", lambda session, desk, action: ("refuse", [], None))
+        tool, args = "native.find_slots", {}
+    refusal = await who.decide(tool, args)
+    assert refusal.outcome == "refuse"
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200
+    (item,) = [item for item in listed.json() if item["ref_id"] == refusal.decision_id]
+    assert item["cause"] == cause
 
 
 STOPPED = "A reply was stopped before it was shown, because "

@@ -240,6 +240,14 @@ class Refusal(Exception):
         self.status, self.code = status, code
 
 
+class AdapterCheckRefused(Exception):
+    """A normalization refusal whose fixed adapter check is ledgered by decide."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
 def sha256_hex(value: str | bytes) -> str:
     return hashlib.sha256(value.encode() if isinstance(value, str) else value).hexdigest()
 
@@ -2160,7 +2168,11 @@ class FakeKernelState:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="not_given")
         if not matches(desk.tools[call.tool].input_schema, call.args):
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="invalid_args")
-        action = self._normalize(session, desk, call)
+        try:
+            action = self._normalize(session, desk, call)
+        except AdapterCheckRefused as refusal:
+            return self._new_decision(session, desk, call, digest, None, "refuse", [],
+                                      why="adapter_refused", check=refusal.code)
         if action is None:
             return self._new_decision(session, desk, call, digest, None, "refuse", [], why="adapter_refused")
         outcome, card_ids, baseline = self._rule(session, desk, action)
@@ -2173,27 +2185,27 @@ class FakeKernelState:
 
     def _normalize(self, session: Session, desk: Desk, call: ToolCall) -> NormalizedAction | None:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
-        args; None refuses."""
+        args; a known adapter refusal carries its check code, otherwise None refuses."""
         tool, args = call.tool, call.args
         resource = ResourceRef(kind="desk", id=desk.desk_id, owner_person_id=None)
         list_cents = discount_bp = amount_cents = recipient = starts_at = None
         if tool == "native.quote":
             if any(item["item_id"] not in desk.prices for item in args["items"]):
-                return None
+                raise AdapterCheckRefused("unknown_item")
             list_cents = sum(desk.prices[item["item_id"]].unit_cents * item["qty"] for item in args["items"])
             if list_cents > 1_000_000:
-                return None
+                raise AdapterCheckRefused("over_limit")
             discount_bp = args.get("requested_discount_bp", 0)
             amount_cents = list_cents - list_cents * discount_bp // 10_000
         elif tool == "native.book":
             slot = desk.slots.get(args["slot_id"])
             if slot is None or slot.starts_at <= self.now:
-                return None
+                raise AdapterCheckRefused("no_such_slot")
             resource, starts_at = ResourceRef(kind="slot", id=slot.slot_id, owner_person_id=None), slot.starts_at
         elif tool == "native.release_document":
             document = desk.documents.get(args["document_id"])
             if document is None:
-                return None
+                raise AdapterCheckRefused("no_such_document")
             resource = ResourceRef(kind="document", id=document.document_id,
                                    owner_person_id=document.record_owner_person_id)
             recipient = "verified_contact"
@@ -2212,7 +2224,8 @@ class FakeKernelState:
             resource = ResourceRef(kind="quote", id=quote["quote_id"], owner_person_id=None)
             amount_cents = quote["amount_cents"]
         elif tool == "payments.create_refund":
-            return None                         # charges to refund arrive with Plan 01c
+            # The fake has no provider charge records to resolve during refund normalization.
+            raise AdapterCheckRefused("no_such_charge")
         profile = desk.tools[tool]
         return NormalizedAction(
             action_id=new_id("act"), copy_id=desk.copy_id, desk_id=desk.desk_id, session_id=session.session_id,
@@ -2256,7 +2269,8 @@ class FakeKernelState:
 
     def _new_decision(self, session: Session, desk: Desk, call: ToolCall, digest: str,
                       action: NormalizedAction | None, outcome: str, card_ids: list[str], *,
-                      why: str | None = None, scripted: bool = False, baseline: str | None = None) -> Decision:
+                      why: str | None = None, check: str | None = None, scripted: bool = False,
+                      baseline: str | None = None) -> Decision:
         state = {"allow": "allowed", "hold": "held", "refuse": "refused"}[outcome]
         decision_id = new_id("dec")
         tool = call.tool[:64]
@@ -2264,6 +2278,8 @@ class FakeKernelState:
                    "outcome": outcome, "card_ids": card_ids, "policy_version": desk.policy_version, "reviewed": False}
         if why is not None:
             summary["reason"] = why
+        if check is not None:
+            summary["check"] = check
         entry = self.append(desk, "decide", summary, session_id=session.session_id, ref_id=decision_id)
         expires_at = self.now + {"allow": ALLOW_FOR, "hold": HOLD_FOR, "refuse": timedelta(0)}[outcome]
         answers, inbox = [], []
