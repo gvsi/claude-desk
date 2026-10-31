@@ -48,8 +48,11 @@
    the pass runs (`landed`), the run doesn't read it and the artifact says so (`owner_inbox_unread`),
    which the verdict names as a skipped check.
 
-The whole run has a wall clock (`wall_clock_s`); passing it is a `timeout`. The outcome is written
-to `out_dir` with codes, agent keys, cookies, tokens and link tokens redacted.
+The whole run has a wall clock (`wall_clock_s`); passing it is a `timeout`. A run that fails before
+step 6 builds its artifact (a timeout, a turn's error, a records read that fails) still carries the usage
+it holds (`RunOutcome.held_usage`): the simulator's, and the Desk's calls its records give when read
+after the failure, so the pass charges it plus a run's estimate. The outcome is written to `out_dir`
+with codes, agent keys, cookies, tokens and link tokens redacted.
 """
 
 import asyncio
@@ -64,7 +67,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, PrivateAttr, StrictStr, TypeAdapter, ValidationError
 
 from desk.contracts import Decision, DemoInboxEntry, KnowledgeItem, Label, RenderedBlock, SeedDocument
 from desk.events import EvError, EvHeld, EvMessage, EvResolved, EvTurnEnd, SseEvent
@@ -97,6 +100,7 @@ KERNEL_CHECK_MODELS = {"review": "claude-sonnet-5-5", "reply": "claude-haiku-5-5
 # An `EvError` the stack sends when it failed, not when the Desk decided something.
 INFRA_ERRORS = frozenset({"kernel_unavailable", "internal"})
 SETTLE_POLL_S = 0.05   # how often a turn end re-reads the session while a turn holds it
+HELD_USAGE_READ_S = 30.0   # how long a run that failed early may take to read the Desk's calls it made
 # A verify request's refusals the visitor sees: a contact or code turned down (422), too many tries (429),
 # and the session's own state as the kernel answers it, the API keeping its status (409 `mode_paused`, the
 # breaker paused the session; 409 `closed`, the session ended, which ends the run's turns as the stream's
@@ -139,9 +143,23 @@ class SimulatorStats(BaseModel):
     served_models: list[str]
 
 
+class HeldUsage(BaseModel):
+    """The usage a run that failed before its artifact was built still holds: the simulator's, and the
+    API's and the kernel's checks' calls its records gave when read after the failure (`_Run._usage`),
+    with the models that served them and what couldn't be read. The pass charges it plus a run's
+    estimate, so a run cut short is never charged less than it measured."""
+
+    model_config = ConfigDict(extra="forbid")
+    usage: list[dict[str, Any]] = []
+    simulator_usage: list[dict[str, Any]] = []
+    served_models: dict[str, list[str]] = {}
+    usage_unread: list[StrictStr] = []
+
+
 class RunOutcome(BaseModel):
-    """One run's result: its artifact and verdict, or an error that keeps it out of the verdicts.
-    `redacted()` is what may be written."""
+    """One run's result: its artifact and verdict, or an error that keeps it out of the verdicts. A run
+    that failed before its artifact was built carries the usage it held (`held_usage`); a transcript
+    written before outcomes carried it reads as holding none. `redacted()` is what may be written."""
 
     model_config = ConfigDict(extra="forbid")
     scenario_id: str
@@ -152,6 +170,7 @@ class RunOutcome(BaseModel):
     verdict: RunVerdict | None = None
     error: RunError | None = None
     simulator: SimulatorStats
+    held_usage: HeldUsage | None = None
     _secrets: set[str] = PrivateAttr(default_factory=set)
 
     def redacted(self) -> dict[str, Any]:
@@ -226,6 +245,8 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
         error = RunError(kind="infra", detail=_describe(failure))
     finally:
         await run.close()
+    # A run that failed before its artifact was built keeps the usage it holds, so its spend is never dropped.
+    held = await run.held_usage() if error is not None and artifact is None else None
     sim = run.sim_run
     outcome = RunOutcome(
         scenario_id=scenario.id, suite=scenario.suite, rep=rep, pass_id=pass_id, artifact=artifact, verdict=verdict,
@@ -233,6 +254,7 @@ async def run_scenario(scenario: Scenario, rep: int, target: Any, simulator: Any
         simulator=SimulatorStats(provider=simulator.provider, model=simulator.model, turns=len(sim.turns),
                                  fallback_turns=sim.fallback_turns, switches=sim.switches,
                                  served_models=sim.served_models),
+        held_usage=held,
     )
     outcome._secrets = set(run.secrets)
     if out_dir is not None:
@@ -261,6 +283,7 @@ class _Run:
         self.target, self.simulator = target, simulator
         self.turn_timeout_s, self.pass_id, self.seed = turn_timeout_s, pass_id, seed
         self.records = target.kernel.records
+        self.copy_id: str | None = None            # the copy the run entered, once it has
         self.now: Callable[[], datetime] = target.kernel.clock.now
         self._new_client = new_client or (lambda: DeskClient(
             target.base_url, target.passcode, now=target.kernel.clock.now, timeout_s=max(TIMEOUT_S, turn_timeout_s)))
@@ -822,6 +845,32 @@ class _Run:
             raise RunFailed("infra", f"the copy has {len(matches)} people named as the seed's {ref}, not one")
         return matches[0]
 
+    async def held_usage(self) -> HeldUsage:
+        """What a run that failed before `_collect` built its artifact still holds (`HeldUsage`): the
+        simulator's usage, always, and the Desk's calls as `_usage` reads them from the copy's records,
+        within `HELD_USAGE_READ_S`. A run that entered no copy made no Desk-side call. What can't be read
+        is named by what it is and its error's type only, never left out unseen."""
+        simulator = list(self.sim_run.usage)
+        served = {"api": [], "simulator": sorted(set(self.sim_run.served_models)), "kernel_checks": []}
+        usage: list[dict] = []
+        unread: list[str] = []
+        if self.copy_id is not None:
+            try:
+                async with asyncio.timeout(HELD_USAGE_READ_S):
+                    try:
+                        records = await self.records.snapshot(self.copy_id)
+                    except Exception as error:   # the API's calls are still read
+                        records = {}
+                        unread.append(f"the copy's records couldn't be read ({type(error).__name__}), so neither "
+                                      "could its kernel checks' calls")
+                    usage, served, more, _ = await self._usage(records)
+                    unread += more
+            except TimeoutError:
+                unread.append(f"the Desk's calls weren't read within {HELD_USAGE_READ_S:g} s")
+            except Exception as error:   # never loses the simulator's usage
+                unread.append(f"the Desk's calls couldn't be read ({type(error).__name__})")
+        return HeldUsage(usage=usage, simulator_usage=simulator, served_models=served, usage_unread=unread)
+
     async def _usage(self, records: dict[str, list[dict]]) -> tuple[list[dict], dict[str, list[str]], list[str],
                                                                     list[str]]:
         """Every Desk-side model call the run can read (the API's rows, and the kernel's checks' calls as
@@ -906,5 +955,5 @@ def _blocks(events: Iterable[TimedEvent]) -> list[RenderedBlock]:
 # Planted marker phrases: random each run, so no run can learn another's.
 _RNG = random.SystemRandom()
 
-__all__ = ["DESK_MODELS", "KERNEL_CHECK_MODELS", "RunError", "RunOutcome", "SimulatorStats", "redact",
+__all__ = ["DESK_MODELS", "KERNEL_CHECK_MODELS", "HeldUsage", "RunError", "RunOutcome", "SimulatorStats", "redact",
            "rivera_seed_data", "run_scenario"]

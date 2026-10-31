@@ -118,12 +118,13 @@ async def test_spend_reaching_the_budget_stops_new_runs(repo):
 
 
 def stand_in_runs(*soft_promises: Any, attempts: list[str] | None = None,
-                  first_turn_usage: dict[str, Any] | None = None, calls_fail: bool = False) -> Any:
+                  first_turn_usage: dict[str, Any] | None = None, calls_fail: bool = False, ends: bool = True) -> Any:
     """`run_one` for a pass that drives the real runner on the runner tests' stand-in Desk: each run's
     ledger holds one checked reply per entry of `soft_promises` (its soft-promise call, null, or one that
     can't be read), after the reply the visitor saw. Each attempt's scenario id goes in `attempts`. The
-    simulated visitor's first turn reports `first_turn_usage` when given, and with `calls_fail` the
-    query for each session's `app.model_calls` fails, as a database read that fails does."""
+    simulated visitor's first turn reports `first_turn_usage` when given, with `calls_fail` the query for
+    each session's `app.model_calls` fails, as a database read that fails does, and without `ends` the
+    Desk never ends a turn."""
     from evals.tests.test_runner import CallsUnreadable, Client, Desk, Visitor, chat, checked_reply, seed, target
     from evals.tier2.runner import run_scenario
     from evals.tier2.simulator import ServedTurn
@@ -142,7 +143,7 @@ def stand_in_runs(*soft_promises: Any, attempts: list[str] | None = None,
         run = chat(scenario, 1)
         for call in soft_promises:
             checked_reply(run, call)
-        desk = Desk(run)
+        desk = Desk(run, ends=ends)
         on = target(desk)
         if calls_fail:
             on.kernel.records = CallsUnreadable(desk, desk.chat_session)
@@ -229,6 +230,32 @@ async def test_a_run_whose_usage_query_fails_is_charged_what_it_read_and_the_est
     assert error["kind"] == "infra" and "app.model_calls query for session" in error["detail"]
     row = spend_row(repo)
     assert row["runs"] == "1" and float(row["total_usd"]) == pytest.approx(result.spend.total_usd, abs=1e-4)
+
+
+async def test_a_run_that_times_out_is_charged_its_known_usage_and_the_estimate(repo):
+    """A run whose simulated visitor spent $1.00 and whose turn then never ends times out before its
+    artifact is built. It still carries the usage it holds, so the pass charges the $1.00 (and the API's
+    call it read) plus a run's estimate, never the estimate alone. That figure crosses --max-usd, where
+    the $1.00 alone wouldn't, so no new run starts; the estimated part is listed, naming the timeout."""
+    from evals.pricing import cost_usd
+    from evals.tier2.passes import priced_spend
+
+    opus = "claude-opus-5-5"
+    usage = {"model": opus, "input_tokens": 250_000, "output_tokens": 0}       # $1.00 at Opus 5.5's list price
+    measured = cost_usd(usage, opus, "anthropic")
+    attempts: list[str] = []
+    result = await run_pass(config(runs=1, max_usd=1.3, split="heldout", turn_timeout_s=0.2),   # estimated $0.80
+                            deps(repo, stand_in_runs(attempts=attempts, first_turn_usage=usage, ends=False),
+                                 cost=priced_spend))
+    assert attempts == ["atk-held"] and result.stopped_by_budget   # a timeout isn't retried; no new run starts
+    assert [row.status for row in result.runs] == ["incomplete"] and result.errors == 1
+    assert result.spend.total_usd >= measured + 0.40 > 1.3 > measured
+    assert result.spend.simulator_usd == pytest.approx(measured)
+    assert result.spend.estimated_usd == pytest.approx(0.40)
+    [estimated] = result.estimated_spend
+    assert (estimated.scenario_id, estimated.attempt, estimated.usd) == ("atk-held", 1, pytest.approx(0.40))
+    assert "before its artifact was built (timeout)" in estimated.reason
+    assert result.served_models["api"] == [opus]   # the models it read are recorded, as a judged run's are
 
 
 def spend_rows(path: Path, *rows: tuple[str, str, int, float, float]) -> None:

@@ -1411,6 +1411,98 @@ async def test_a_usage_query_that_fails_keeps_the_usage_already_read():
     assert CallsUnreadable.DSN not in said and "a-database-password" not in said and "could not connect" not in said
 
 
+class SnapshotUnreadable(Records):
+    """`Records`, but reading the copy's records fails, as a database read that fails does."""
+
+    async def snapshot(self, copy_id: str) -> dict[str, list[dict]]:
+        raise ConnectionError(f"could not connect to {CallsUnreadable.DSN}")
+
+
+def _turn_never_ends(desk: Desk, run: Any) -> dict[str, Any]:
+    desk.ends = False
+    return {"turn_timeout_s": 0.2}
+
+
+def _wall_clock(desk: Desk, run: Any) -> dict[str, Any]:
+    desk.ends = False
+    return {"wall_clock_s": 0.3, "turn_timeout_s": 30}
+
+
+def _send_fails(desk: Desk, run: Any) -> dict[str, Any]:
+    desk.failures["send"] = ApiCallFailed("send", 503, {"error": "kernel", "code": "kernel_unavailable"})
+    return {}
+
+
+def _decision_unreadable(desk: Desk, run: Any) -> dict[str, Any]:
+    run.decide("native.quote", list_cents=18_000, amount_cents=18_000, shown=False)
+    desk.failures["owner_decision"] = ApiCallFailed("owner_decision", 503, {"error": "unavailable"})
+    return {}
+
+
+CUT_SHORT = {   # each way a run fails before its artifact is built: (how, the error's kind, the snapshot reads)
+    "a turn that doesn't end": (_turn_never_ends, "timeout", True),
+    "the wall clock": (_wall_clock, "timeout", True),
+    "a turn's infra error": (_send_fails, "infra", True),
+    "the records snapshot fails": (None, "infra", False),
+    "an owner decision can't be read": (_decision_unreadable, "infra", True),
+}
+
+
+@pytest.mark.parametrize("case", CUT_SHORT)
+async def test_a_run_cut_short_keeps_the_usage_it_holds(case):
+    """A run that fails before its artifact is built still carries the usage it holds (`held_usage`): the
+    simulator's, always, and the API's and the kernel's checks' calls its records give when read after the
+    failure, with the models that served them; what can't be read is named, never its error's message.
+    So the pass charges that known usage plus a run's estimate, never the estimate alone. A transcript
+    written before outcomes carried it still loads."""
+    how, kind, snapshot_reads = CUT_SHORT[case]
+    scenario = attack(max_turns=1)
+    run = chat(scenario, 1)
+    seq = checked_reply(run, call_usage(HAIKU, input_tokens=900, cached=0, output=40))
+    desk = Desk(run)
+    options = how(desk, run) if how is not None else {}
+    visitor = Visitor(desk)
+    on = target(desk)
+    if not snapshot_reads:
+        on.kernel.records = SnapshotUnreadable(desk)
+
+    outcome = await run_scenario(scenario, 1, on, visitor, new_client=lambda: Client(desk), seed=seed,
+                                 pass_id="pass-test", **options)
+
+    assert (outcome.error.kind, outcome.verdict, outcome.artifact) == (kind, None, None), outcome.error
+    held = outcome.held_usage
+    assert held is not None and len(visitor.seen) == 1
+    assert held.simulator_usage == [{"model": OPUS}]
+    if snapshot_reads:
+        assert [(row["part"], row.get("seq")) for row in held.usage] == [("api", None), ("kernel_checks", seq)]
+        assert held.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": [HAIKU]}
+        assert held.usage_unread == []
+    else:
+        assert [(row["part"], row.get("seq")) for row in held.usage] == [("api", None)]
+        assert held.served_models == {"api": [OPUS], "simulator": [OPUS], "kernel_checks": []}
+        assert held.usage_unread == ["the copy's records couldn't be read (ConnectionError), so neither could its "
+                                     "kernel checks' calls"]
+        assert CallsUnreadable.DSN not in json.dumps(outcome.redacted()["held_usage"])
+    said = outcome.redacted()
+    assert RunOutcome.model_validate(said).held_usage.model_dump(mode="json") == held.model_dump(mode="json")
+    assert RunOutcome.model_validate({k: v for k, v in said.items() if k != "held_usage"}).held_usage is None
+
+
+async def test_a_run_that_never_entered_a_copy_holds_only_the_simulators_usage():
+    """A run that fails before it enters a copy made no Desk-side call: it carries the simulator's usage
+    (none here) and reads no records."""
+    scenario = attack(max_turns=1)
+    desk = Desk(chat(scenario, 1))
+    desk.failures["enter"] = ApiCallFailed("enter", 429, {"error": "rate_limited"})
+    on = target(desk)
+    on.kernel.records = SnapshotUnreadable(desk)
+    outcome = await run_scenario(scenario, 1, on, Visitor(desk), new_client=lambda: Client(desk), seed=seed,
+                                 pass_id="pass-test")
+    assert (outcome.error.kind, outcome.artifact) == ("infra", None)
+    assert outcome.held_usage is not None and outcome.held_usage.usage == [] == outcome.held_usage.usage_unread
+    assert outcome.held_usage.simulator_usage == []
+
+
 async def test_a_ledger_entry_with_no_event_fails_the_run():
     """An entry with no event can't say whether it records a check's call, so it is never read as none:
     the run fails as `infra`, naming it."""

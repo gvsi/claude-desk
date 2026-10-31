@@ -44,7 +44,8 @@ pass appends one spend row (`pass_id, date, provider, runs, desk_usd, simulator_
 total_usd, estimated_usd`); only `claude_api_usd` counts against the monthly limit, since a Bedrock
 pass bills AWS credits except for the kernel's checks. Each attempt is charged its priced usage, or a
 run's estimate (listed in `estimated_spend`) when it left no usage or its usage can't be priced; an
-attempt whose runner couldn't read every call (`RunArtifact.usage_unread`) is charged what it read plus
+attempt whose runner couldn't read every call (`RunArtifact.usage_unread`), or that failed before its
+artifact was built and carries the usage it held (`RunOutcome.held_usage`), is charged what it read plus
 a run's estimate, never less than it measured. `estimated_usd` says how much of the total is estimated,
 so it never reads as measured. A pass that fails or is cancelled cancels its other runs, each charged
 its estimate, and awaits them before the stack closes and the spend row is written, so the row counts
@@ -510,21 +511,23 @@ def _priced(prices: Mapping[str, Mapping[str, Any]], provider: str, name: str) -
 
 def priced_spend(outcome: RunOutcome, providers: PassProviders, *,
                  cost_usd: Callable[[Mapping[str, int], str, str], float] | None = None) -> Spend | None:
-    """A run's spend from its usage at each provider's list prices (`evals.pricing.cost_usd`), or None
-    when the run left no usage to price (the pass then charges a run's estimate instead)."""
+    """A run's spend from its usage at each provider's list prices (`evals.pricing.cost_usd`): its
+    artifact's, or for a run that failed before its artifact was built the usage it held (`held_usage`),
+    or None when the run left no usage to price (the pass then charges a run's estimate instead)."""
     if providers.api == "fake":
         return Spend()
-    if outcome.artifact is None:
+    held = outcome.artifact if outcome.artifact is not None else outcome.held_usage
+    if held is None:
         return None
     cost_usd = cost_usd or importlib.import_module("evals.pricing").cost_usd
     api_provider = "anthropic" if providers.api == "unknown" else providers.api   # a deployment runs on the Claude API
     api = kernel = simulator = 0.0
-    for usage in outcome.artifact.usage:
+    for usage in held.usage:
         if usage.get("part") == "api":
             api += cost_usd(_tokens(usage), str(usage.get("model")), api_provider)
         else:
             kernel += cost_usd(_tokens(usage), str(usage.get("model")), "anthropic")
-    for usage in outcome.artifact.simulator_usage:
+    for usage in held.simulator_usage:
         simulator += cost_usd(_tokens(usage), str(usage.get("model")), providers.simulator)
     claude_api = kernel + (api if api_provider == "anthropic" else 0) + (
         simulator if providers.simulator == "anthropic" else 0)
@@ -758,9 +761,10 @@ class _Pass:
         return outcome
 
     def _cost(self, outcome: RunOutcome, attempt: int) -> Spend:
-        """The attempt's priced spend, plus a run's estimate when the runner couldn't read all its calls,
-        else a run's estimate: an attempt that left no usage to price, or whose usage can't be priced, is
-        never charged nothing, and one whose usage couldn't all be read never less than it measured."""
+        """The attempt's priced spend, plus a run's estimate when the runner couldn't read all its calls
+        or the run failed before its artifact was built (`held_usage`), else a run's estimate: an attempt
+        that left no usage to price, or whose usage can't be priced, is never charged nothing, and one
+        whose usage couldn't all be read, or that was cut short, never less than it measured."""
         if self.config.dry_run:
             return Spend()
         try:
@@ -773,6 +777,11 @@ class _Pass:
         if outcome.artifact is not None and (unread := outcome.artifact.usage_unread):
             spend = spend + self._estimate(outcome.scenario_id, outcome.rep, attempt,
                                            f"part of its usage couldn't be read ({'; '.join(unread)})"[:300])
+        elif outcome.artifact is None and (held := outcome.held_usage) is not None:
+            kind = outcome.error.kind if outcome.error is not None else "infra"
+            why = "; ".join([f"it ended before its artifact was built ({kind}), so part of its usage may be unread",
+                             *held.usage_unread])
+            spend = spend + self._estimate(outcome.scenario_id, outcome.rep, attempt, why[:300])
         return spend
 
     def _estimate(self, scenario_id: str, rep: int, attempt: int, reason: str) -> Spend:
@@ -784,8 +793,9 @@ class _Pass:
                         estimated_usd=self.per_run)
 
     def _note_served(self, outcome: RunOutcome) -> None:
-        if outcome.artifact is not None:
-            for part, models in outcome.artifact.served_models.items():
+        held = outcome.artifact if outcome.artifact is not None else outcome.held_usage
+        if held is not None:
+            for part, models in held.served_models.items():
                 self.served.setdefault(part, set()).update(models)
         self.served["simulator"].update(outcome.simulator.served_models)
         self.fallbacks["turns"] += outcome.simulator.fallback_turns
