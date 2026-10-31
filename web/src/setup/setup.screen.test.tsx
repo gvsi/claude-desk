@@ -1311,7 +1311,7 @@ describe('setup', () => {
       const finish = holdNextConsent(mockStore.world, state.interview_id);
       const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
       await screen.getByRole('button', { name: 'Yes, use it' }).click();
-      const writing = screen.getByText('Claude is writing', { exact: true });
+      const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
       const wait = screen.getByText(words, { exact: true });
       await expect.element(writing).toBeVisible();
       await expect.element(wait).toBeVisible();

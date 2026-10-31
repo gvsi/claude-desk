@@ -80,7 +80,7 @@ const meta = {
   parameters: {
     layout: 'padded',
     canvas: 'none',
-    canvasNote: 'No board shows Claude writing; the indicator follows "Dana is typing" on N-Conv-Run1, in the meta type the plan sets.',
+    canvasNote: 'Claude writing is three dots on Claude’s side, where its reply will appear, with the words for screen readers only. A person’s typing line stays in the meta type.',
   },
 } satisfies Meta<typeof WritingIndicator>;
 
@@ -156,23 +156,47 @@ async function expectOnVisitorSide(root: HTMLElement, status: HTMLElement) {
 }
 
 export const Claude: Story = {
+  name: 'Claude writing dots',
+  parameters: {
+    docs: { description: { story: 'Three dots on Claude’s side read as a reply coming. “Claude is writing” is announced once, for screen readers only.' } },
+  },
   play: async ({ canvas, canvasElement }) => {
     const status = canvas.getByRole('status');
     await expectOnlyLabel(canvasElement, status, 'Claude is writing');
-    expectComputed(status, { fontFamily: /Hanken Grotesk/, fontSize: '13px', lineHeight: '18px' });
-    // writing_indicator_animates: it pulses, so the reduced-motion check has something to stop.
-    expectComputed(status, { animationName: /^(?!none$).+/, animationDuration: '1.6s', animationIterationCount: 'infinite' });
+    await expectClaudeDots(status, 'Claude is writing');
+    const dots = [...status.querySelectorAll<HTMLElement>('.cd-writing-indicator__dot')];
+    // The existing dot pulse animates the drawing, never the live region's words.
+    for (const [index, dot] of dots.entries()) {
+      expectComputed(dot, { animationName: 'cd-typing-dot', animationDuration: '1.6s', animationDelay: `${index * 0.15}s`, animationIterationCount: 'infinite' });
+    }
+    await expectAnnouncedOnce(status, dots);
   },
 };
 
 export const ClaudeEs: Story = {
+  name: 'Claude writing dots in Spanish',
   args: { language: 'es' },
   play: async ({ canvas }) => {
     const status = canvas.getByRole('status');
-    await expect(status.textContent).toBe('Claude está escribiendo');
+    await expectClaudeDots(status, 'Claude está escribiendo');
     await expect(status).toHaveAttribute('lang', 'es');
   },
 };
+
+/** Claude's words are only for screen readers; the drawing takes exactly one reply line. */
+async function expectClaudeDots(status: HTMLElement, label: string) {
+  await expect(status).toHaveTextContent(label);
+  await expect(status).toHaveClass('cd-writing-indicator--claude', 'cd-type-reply');
+  const words = status.querySelector<HTMLElement>('.cd-sr-only');
+  await expect(words).toHaveTextContent(label);
+  const dots = status.querySelector<HTMLElement>('.cd-writing-indicator__dots') as HTMLElement;
+  await expect(dots).toHaveAttribute('aria-hidden', 'true');
+  await expect(dots.textContent).toBe('');
+  await expect(dots.children).toHaveLength(3);
+  expectComputed(status, { fontFamily: /Source Serif 4/, fontSize: '15px', lineHeight: '23px', animationName: 'none' });
+  await expect(dots.getBoundingClientRect().height).toBe(Number.parseFloat(getComputedStyle(status).lineHeight));
+  await expect(dots.getBoundingClientRect().left).toBe(status.getBoundingClientRect().left);
+}
 
 export const VisitorTyping: Story = {
   args: { who: danaFirstName },

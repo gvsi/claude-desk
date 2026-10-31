@@ -1,8 +1,10 @@
 /* WritingIndicator: someone is writing.
 
-   The line: one quiet line that pulses while someone writes. The pulse moves the words between the
-   secondary and primary text colors, so every moment of it keeps the contrast of the two tokens it
-   moves between.
+   Claude's line: three dots where Claude's first line of words will start, one reply line tall,
+   centered on it, with no indent, fill or bubble. The words are for screen readers only.
+
+   A person's line: one quiet line that pulses while they type. The pulse moves the words between
+   the secondary and primary text colors, keeping the contrast of the two tokens it moves between.
 
    The bubble: a visitor typing, as three dots in a small bubble on their side, the right, where
    their next message will appear. It has the visitor bubble's fill and radius and is one message
@@ -13,8 +15,8 @@
    own frame, their initials and name, with three dots where their first line of words will start,
    one message line tall, with no fill and no bubble, so their message takes its place in place.
 
-   In both, the dots pulse one after another over the same writing loop, motion-stagger apart,
-   between the secondary and primary text colors. */
+   In all three dot forms, the dots pulse one after another over the same writing loop,
+   motion-stagger apart, between the secondary and primary text colors. */
 
 .cd-writing-indicator {
   margin: 0;
@@ -38,7 +40,7 @@
   min-width: 0;
 }
 
-/* The dots where a person's first line of words will start: one message line, the dots centered
+/* The dots where Claude's or a person's first line of words will start: one line, the dots centered
    on it, from the line's start. */
 .cd-writing-indicator__dots {
   display: flex;

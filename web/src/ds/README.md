@@ -58,7 +58,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 - Keep transitions between 60 and 200 ms: `motion-instant` for color, `motion-fast` for press feedback, `motion-base` for a check that draws once or a reveal. Ease with `motion-ease`, or `motion-ease-emphasis` for a screen's one small moment. Results that arrive one by one are `motion-stagger` apart.
 - A drawn check goes short arm first, as a hand writes one. The check icon's path starts at the long arm's tip, so its dash offset runs from minus its dash length to 0. `expectDrawsShortArmFirst` (`test/`) pins it in a story.
-- The only loops are `motion-breathe` for presence glyphs, `motion-writing` for the writing indicator's line and typing dots, and `motion-spin` for a busy button's spinner.
+- The only loops are `motion-breathe` for presence glyphs, `motion-writing` for the writing indicator's dots and a person's typing line, and `motion-spin` for a busy button's spinner.
 - Allow at most one small moment per screen. Motion explains a change; it never decorates.
 - Under `prefers-reduced-motion: reduce` nothing animates or transitions; the base stylesheet enforces it on every element.
 
@@ -149,7 +149,7 @@ On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illu
 ## Empty, waiting, error and refusal states
 
 - Empty: say what will appear and what to do next. "No conversations yet. Share your Desk link to get the first one."
-- Waiting: say what is happening in plain words, "Claude is writing" or "Sending your answer". Never show draft text.
+- Waiting: show it, don't say it, when Claude is writing: three dots where its reply will appear, with "Claude is writing" for screen readers only. Other waits say what is happening in plain words, "Sending your answer". Never show draft text.
 - Error: say what happened and the next step, never a code. "We couldn't confirm your answer. Try again, or reload to see where it stands."
 - Refusal: be kind and specific, and offer a way forward. "I can't share that here, but I can ask Maria to get back to you." Never scold or lecture.
 

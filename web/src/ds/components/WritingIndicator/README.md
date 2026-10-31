@@ -1,10 +1,10 @@
 # WritingIndicator
 
-`WritingIndicator` says that someone is writing, "Claude is writing" or "Dana is typing", and nothing more: as one line, as a typing bubble on a visitor's side, or as a person's initials and name with three dots on theirs.
+`WritingIndicator` shows Claude writing as three dots on Claude's side, with "Claude is writing" for screen readers only. It reads as a reply coming, not a status message. A person's typing can be a line of words, a bubble on a visitor's side, or their initials and name with three dots on theirs.
 
 ## When to use
 
-- The line, while a visitor's turn is between `EvWriting` and the delivered message or the turn's end: "Claude is writing", on Claude's side.
+- The line, while a visitor's turn is between `EvWriting` and the delivered message or the turn's end: three dots where Claude's reply will appear, with "Claude is writing" for screen readers only.
 - In the setup interview while Claude prepares its next question.
 - The bubble (`variant="bubble"`) when the visitor is typing, with their name, on the owner's conversation screen: at the right, where their next bubble will appear.
 - The person form (`variant="person"`) when the owner or another person is typing on their side, at the left: on the public page after a take-over, with the name their messages show ("Maria Rivera").
@@ -26,11 +26,16 @@ It takes no message text. Claude's draft is checked by the kernel before anyone 
 | Claude | Claude is writing | Claude está escribiendo |
 | A person | {who} is typing | {who} está escribiendo |
 
-The name is someone's own words: it is set off as user text (`.cd-user-name`, `data-copy="user"`) at the start of the line, so a visitor who calls themselves "Claude" reads as a name, never as Claude writing. The rest is interface copy. The bubble says the whole line to screen readers, visually hidden; the person form shows the name and says the rest, visually hidden, after it.
+Claude's copy is for screen readers only (`.cd-sr-only`). A person's name is their own words: it is set off as user text (`.cd-user-name`, `data-copy="user"`) at the start of the line, so a visitor who calls themselves "Claude" reads as a name, never as Claude writing. The rest is interface copy. The bubble says the whole line to screen readers, visually hidden; the person form shows the name and says the rest, visually hidden, after it.
 
 ## Look and motion
 
-The line:
+Claude's line:
+
+- Three `size-dot` round dots, `space-4` apart, at the left where Claude's first line of words will start. No indent, bubble or fill.
+- The dots' box uses `cd-type-reply` and is one Claude reply line tall (`1lh`, 23 px), with the dots centered on it, so the reply takes their place without moving anything.
+
+A person's line (`who` provided):
 
 - One line in the meta type, in `text-secondary`, aligned where the consumer places it.
 - It pulses over `motion-writing` (1.6 s): the words move between `text-secondary` and `text-primary` and back. Every moment of the pulse keeps the contrast of those two tokens.
@@ -45,9 +50,9 @@ The person form:
 - `PersonMessage`'s own frame (`PersonFrame`): the 28 px initials circle (`size-avatar`, `bg-selected`) and the name in the meta type, `space-10` apart, at the left of the row. Under the name, `space-4` down, three `size-dot` dots, `space-4` apart, in one message line (21 px), starting where the name starts: where the first line of their words will start. No fill and no bubble: on the public page a bubble on that side could read as Claude typing.
 - Their message takes its place in place: the initials, the name and the first line of words sit exactly where the initials, the name and the dots were, so nothing jumps.
 
-The dots of both pulse one after another over the same `motion-writing` loop, `motion-stagger` apart, between `text-secondary` and `text-primary` (6.6:1 and 12.0:1 on `fill-bubble` over `bg-app`; 7.3:1 and 13.9:1 on `bg-app`).
+The dots of all three forms pulse one after another over the same `motion-writing` loop, `motion-stagger` apart, between `text-secondary` and `text-primary` (6.6:1 and 12.0:1 on `fill-bubble` over `bg-app`; 7.3:1 and 13.9:1 on `bg-app`).
 
-All three:
+All forms:
 
 - A `role="status"` line, so a screen reader announces "{who} is typing" (or "Claude is writing") once, politely, when it appears: the indicator itself for the line and the bubble, and the line that names the person in the person form. The dots and the initials are `aria-hidden`, and the pulse is drawn by the stylesheet alone, so nothing in the live region changes while it pulses and it is never announced again.
 - Under `prefers-reduced-motion: reduce` they stay still: the line in `text-secondary`, the dots in `text-secondary`.
