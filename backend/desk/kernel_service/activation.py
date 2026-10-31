@@ -706,9 +706,10 @@ async def active_version(ctx: KernelCtx, desk_id: str) -> PolicyVersionRow | Non
 # What a rebuild rewrites: the compiled sets, what they were proved against and the proof.
 _REBUILT_COLUMNS = ("cards", "cedar", "schema_json", *VersionHashes._fields, "proof")
 # How long startup starts finding and bringing Desks up to date before the kernel serves
-# (`rebuild_at_startup`). It proves nothing live, so it ends within this and one copy's lookup or
-# one Desk's compile: with the selftest's 30 s backstop, inside the kernel container's 60 s health
-# check start period.
+# (`rebuild_at_startup`). It proves nothing live, and its lookups and lock waits are cut off at
+# what is left of it, so it ends within this and one Desk's compile; with startup reconciliation's
+# own `STARTUP_RECONCILE_S` (app.py) and the selftest's 30 s backstop, inside the kernel
+# container's 60 s health check start period.
 STARTUP_REBUILD_S = 15.0
 # A rebuild startup leaves to the background, since only a live proof would answer it.
 NEEDS_PROOF = "needs_proof"

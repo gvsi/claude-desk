@@ -76,6 +76,14 @@ Tasks 1–7 and Task 10's money and agent rows are the Friday-gate content. If 1
 
 ---
 
+### Task 0: Withhold, never fail, what an adapter outside the kernel already did
+
+Before any adapter that acts outside the kernel (the mock payments server's tools, an MCP refund), kernel verification's private data guard and its private recovery change shape, since recording such an action as not run would be false: a charge or refund that went through would read as never made, and its mandate reservation would be released.
+- A result the always-on private data guard refuses (`execute._visible`, `UndeclaredPrivateData`) is withheld, not failed: the action stays `executed`, the session gets an empty view, the violation is ledgered on its entry, and no `on_failed` runs.
+- A refused recovery of a private action (`execute._refused_in_recovery`) asks the adapter (`reconcile`) first and delivers nothing, rather than recording a refusal and running `on_failed` without it.
+- An adapter's `releases_private_data` is checked against its profile's `private_data` effect at registration, so the two can't disagree.
+- Tests, each failing first: a misdeclared adapter's refused result stays executed with nothing delivered and no `on_failed`; a refused private recovery calls `reconcile` once and delivers nothing; registering an adapter whose declaration contradicts its profile raises.
+
 ### Task 1: Mock payments server
 
 **Files:**
