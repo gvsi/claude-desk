@@ -3,7 +3,7 @@
  * Desk ·" pages that the project owner signed off, and run 2's boards while they are in review,
  * each listed once. Each is rebuilt by one `Boards/*` story and compared by eye with its render at
  * the board's own size: 1280×820, a 14-inch laptop's 1512×982 or a phone's 390×844, a tall
- * connectors board at its full height (`reference/README.md`). A story names its board in
+ * connectors board or the city office's resident page at its full height (`reference/README.md`). A story names its board in
  * `parameters.canvas`, or says `'none'` and explains in `parameters.canvasNote` (usually naming the
  * nearest board).
  */
@@ -98,7 +98,8 @@ export const REFERENCE_BOARDS = [
   'N-R2-Vision-Channels',
   // The vision pages, signed on 2026-10-30, each under the vision bar: a team Desk's conversations;
   // a returning visitor signed in with a Claude account; Today and the public chat as phone apps;
-  // and a resident on a city permits office's public page, longer than the window.
+  // and a resident on a city permits office's public page, longer than the window and captured at
+  // its full height.
   'N-R2-Vision-TeamDesk',
   'N-R2-Vision-ClaudeAccount',
   'N-R2-Vision-Phone',
@@ -172,12 +173,16 @@ export function boardViewport(board: ReferenceBoard): BoardViewport {
   return BOARD_WINDOWS[board] ?? (board.startsWith('N-Conn-') ? 'laptop' : 'canvas');
 }
 
+/** The boards besides the `N-Conn-*` ones whose render is captured at its full height. */
+const FULL_HEIGHT: ReadonlySet<ReferenceBoard> = new Set<ReferenceBoard>(['N-R2-Vision-CityOffice-Resident']);
+
 /**
  * Whether `board`'s render is captured at its full height: the Connectors tab and Rules boards are,
- * so a tall one is as wide as its window and at least as tall. Every other render is its window's size.
+ * and so is the city office's resident page (`FULL_HEIGHT`), so a tall one is as wide as its window
+ * and at least as tall. Every other render is its window's size.
  */
 export function capturedAtFullHeight(board: ReferenceBoard): boolean {
-  return board.startsWith('N-Conn-');
+  return board.startsWith('N-Conn-') || FULL_HEIGHT.has(board);
 }
 
 export function isReferenceBoard(value: unknown): value is ReferenceBoard {

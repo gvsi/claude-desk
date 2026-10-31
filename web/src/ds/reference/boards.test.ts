@@ -105,6 +105,17 @@ describe('reference boards', () => {
     expect(problems).toEqual([]);
   });
 
+  it('tall_boards_are_captured_at_full_height', () => {
+    // The Connectors tab and Rules boards, and the city office's resident page, which runs past the
+    // window, are captured at their full height; every other board at its window's size.
+    const full = REFERENCE_BOARDS.filter(capturedAtFullHeight);
+    expect(full.filter((board) => !board.startsWith('N-Conn-'))).toEqual(['N-R2-Vision-CityOffice-Resident']);
+    expect(full).toEqual(REFERENCE_BOARDS.filter((board) => board.startsWith('N-Conn-') || board === 'N-R2-Vision-CityOffice-Resident'));
+    // So its 1512 × 1491 render is its window's width and at least its height.
+    expect(sizeProblem('N-R2-Vision-CityOffice-Resident', { width: 1512, height: 1491 })).toBeNull();
+    expect(sizeProblem('N-R2-Vision-ClaudeAccount', { width: 1512, height: 1491 })).not.toBeNull();
+  });
+
   it('board_stories_name_reference_boards', () => {
     expect(stories.length).toBeGreaterThan(0);
     const unnamed = stories.filter(({ canvas }) => !(REFERENCE_BOARDS as readonly unknown[]).includes(canvas));
