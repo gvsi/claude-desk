@@ -382,6 +382,29 @@ async def test_a_deploy_that_changes_the_prompt_mid_turn_lets_claude_read_what_r
     assert len(fake.called("/decide")) == 1 and len(fake.desks[caller.desk_id].booked) == 1
 
 
+async def test_a_fresh_context_carries_the_results_claude_had_not_read(api_conn, engine, locks, caller, visitor,
+                                                                       fake):
+    """A conversation under way before contexts froze their prompt can't stay in its context, so the turn that
+    recovers a call that ran opens a fresh one. The summary carries the result Claude hadn't read, one line, escaped
+    inside <conversation_so_far> like any untrusted text, so Claude learns the booking ran."""
+    decision_id = await interrupted_after_booking(api_conn, engine, locks, caller, visitor, fake)
+    await api_conn.execute(text("UPDATE app.messages SET model_content = model_content - 'system'"
+                                " WHERE session_id = :s AND kind = 'context_start'"), {"s": caller.session_id})
+    await api_conn.commit()
+
+    model = ScriptedModel([response(reply("You're booked.", id="toolu_done"))])
+    assert await pending(caller, model, engine, locks) == "done"
+    (fresh,) = model.requests
+    assert fresh.system == conversation_system(RIVERA) and thinking_blocks(fresh) == []
+    opens_from_the_summary(fresh, "visitor: Book me the earliest visit.", "result of native__book: {")
+    (line,) = [line for line in fresh.messages[0]["content"][0]["text"].splitlines()
+               if line.startswith("result of native__book: ")]
+    result = json.loads(line.removeprefix("result of native__book: "))
+    assert (result["outcome"], result["decision_id"]) == ("done", decision_id)
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
+    assert len(fake.called("/decide")) == 1 and len(fake.desks[caller.desk_id].booked) == 1
+
+
 def failing_statuses(times: int) -> tuple[list[str], Callable]:
     """A `deliver` whose first `times` statuses fail as a dropped connection would, after the kernel acted; it records
     each failed phase. Replies are delivered as usual."""

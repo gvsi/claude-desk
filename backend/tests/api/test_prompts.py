@@ -68,7 +68,7 @@ def test_system_prompt_is_stable():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-30.14"                    # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-30.15"                    # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     for rule in (
         "You are Claude, an AI",                                  # who is answering
@@ -147,7 +147,7 @@ PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation
                 "TriageCategory", "TRIAGE_SYSTEM", "Triage", "TRANSLATION_SYSTEM", "Translation",
                 # the wrappers and the summary's labels
                 "wrap", "ROW_TAGS", "wrap_action_update", "wrap_website", "SUMMARY_LABELS", "SHOWN_LABELS",
-                "SHOWN_SUFFIX", "summary_line", "conversation_so_far"}
+                "SHOWN_SUFFIX", "summary_line", "conversation_so_far", "RESULT_LABEL", "result_line"}
 SETUP_OUTPUTS = (SetupStart, *SETUP_TURNS.values(), HoursAnswer, PriceAnswer)
 ANNOTATION_OUTPUTS = (Triage, Translation)
 

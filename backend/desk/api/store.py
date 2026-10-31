@@ -74,6 +74,7 @@ from desk.api.prompts import (
     SUMMARY_LABELS,
     Triage,
     conversation_so_far,
+    result_line,
     summary_line,
     wrap,
     wrap_action_update,
@@ -480,16 +481,31 @@ def _summary_line(row: Any) -> str:
     return summary_line(SUMMARY_LABELS[row.kind], row.text or "")
 
 
-async def _summary(conn: AsyncConnection, session_id: str) -> str:
+def _result_text(block: dict) -> str:
+    """A `tool_result` block's content as text: the JSON string the loop writes, or its text blocks'."""
+    content = block.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(item.get("text", "") for item in content if isinstance(item, dict))
+    return json.dumps(content, ensure_ascii=False)
+
+
+async def _summary(conn: AsyncConnection, session_id: str, unread: UnreadResults | None) -> str:
     """The conversation so far, by code: texts, delivered blocks (says included) and action updates, each on one
-    labelled, escaped line. Rows still waiting for the model are left out; they follow it in full. Recorded history
-    is never in it."""
-    rows = await conn.execute(select(MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.text, MESSAGES.c.blocks).where(
+    labelled, escaped line, and, where they were written, the results Claude hadn't read (`unread`), one line each,
+    labelled by tool: the context they were written in is closing, and Claude must not lose what its calls did. Rows
+    still waiting for the model are left out; they follow it in full. Recorded history is never in it."""
+    rows = await conn.execute(select(MESSAGES.c.n, MESSAGES.c.kind, MESSAGES.c.author, MESSAGES.c.text,
+                                     MESSAGES.c.blocks).where(
         MESSAGES.c.session_id == session_id,
         MESSAGES.c.kind.in_(("visitor_text", "agent_text", "delivered", "action_update")),
         ~and_(MESSAGES.c.model_seq.is_(None), MESSAGES.c.model_content.is_not(None)), NOT_REPLAYED,
     ).order_by(MESSAGES.c.n))
-    return conversation_so_far([_summary_line(row) for row in rows])
+    lines = [(row.n, _summary_line(row)) for row in rows]
+    if unread is not None:
+        lines += [(unread.n, result_line(tool, _result_text(block))) for tool, block in unread.results]
+    return conversation_so_far([line for _, line in sorted(lines, key=lambda item: item[0])])
 
 
 async def start_fresh_context(conn: AsyncConnection, ids: Ids, tools: list[dict], *, system: list[dict]) -> int:
@@ -497,8 +513,9 @@ async def start_fresh_context(conn: AsyncConnection, ids: Ids, tools: list[dict]
     context sends) and, after the first context, the code-built summary.
 
     What the old context was still waiting for closes it unsent: tool changes (the new tools supersede them)
-    and says (the summary carries them, from their delivered rows). The last desk context is stated again,
-    since the facts Claude cites must be in the context it answers from."""
+    and says (the summary carries them, from their delivered rows). Results of Claude's calls it hadn't read go
+    into the summary too (`_summary`). The last desk context is stated again, since the facts Claude cites must be
+    in the context it answers from."""
     if not system:
         raise ValueError("a model context freezes the system prompt its calls send")
     await _lock_transcript(conn, ids.session_id)
@@ -506,9 +523,10 @@ async def start_fresh_context(conn: AsyncConnection, ids: Ids, tools: list[dict]
     current = await _current_context(conn, ids.session_id)
     summary = None
     if current is not None:
+        unread = await unread_results(conn, ids.session_id)
         closing = [row.n for row in await _pending(conn, ids.session_id) if row.kind in ("tool_change", "owner_say")]
         await _place(conn, closing, current, await _next_seq(conn, ids.session_id))
-        summary = await _summary(conn, ids.session_id)
+        summary = await _summary(conn, ids.session_id, unread)
         facts = (await conn.execute(select(MESSAGES.c.text, MESSAGES.c.model_seq).where(
             MESSAGES.c.session_id == ids.session_id, MESSAGES.c.kind == "desk_context")
             .order_by(MESSAGES.c.n.desc()).limit(1))).first()

@@ -24,7 +24,16 @@ from desk.api.tools import Caller
 from desk.contracts import AgentAuth
 from desk.events import SseEvent
 from tests.api.conftest import new_visitor
-from tests.api.fakes import FINISHED_AT, FakeMessagesApi, ScriptedModel, response, thinking, tool_use, unavailable
+from tests.api.fakes import (
+    FINISHED_AT,
+    FakeMessagesApi,
+    ScriptedModel,
+    bound_elsewhere,
+    response,
+    thinking,
+    tool_use,
+    unavailable,
+)
 from tests.api.test_model import USAGE as STREAM_USAGE
 from tests.api.test_model import BOUND_ELSEWHERE_TEXT, bad_request, stream_events
 from tests.kernel_contract.fake_kernel import fake_kernel_app
@@ -831,6 +840,35 @@ async def test_a_second_binding_400_or_any_other_400_hands_off(api_conn, kernel_
         assert len(server.requests) == calls, name
         await assert_handed_off(api_conn, fake, caller, checks=2)
         assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == contexts, name
+
+
+async def test_a_binding_400_on_the_turns_last_call_hands_off(api_conn, caller, fake):
+    """The retry is a model call like any other: on the turn's last allowed call there is none left, so the turn
+    hands off."""
+    await said(api_conn, caller, "Keep checking for a free slot.")
+    model = ScriptedModel([*(response(tool_use("native__find_slots", {"days": 3})) for _ in range(MAX_MODEL_CALLS - 1)),
+                           bound_elsewhere()])
+    assert await run_turn(api_conn, caller, model) == "handoff"
+    assert len(model.requests) == MAX_MODEL_CALLS == 6
+    await assert_handed_off(api_conn, fake, caller)
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0]
+
+
+async def test_a_binding_400_after_a_call_retries_from_a_summary_that_carries_its_result(api_conn, caller, fake):
+    """A binding 400 after a call in the same turn: the fresh context's summary carries the call's result, which the
+    refused call was to read, so Claude goes on from it instead of calling again."""
+    await said(api_conn, caller, "When can someone come?")
+    model = ScriptedModel([response(thinking(), tool_use("native__find_slots", {"days": 3}, id="toolu_slots")),
+                           bound_elsewhere(), response(reply("Here are the open times."))])
+    assert await run_turn(api_conn, caller, model) == "done"
+
+    found, refused, again = model.requests
+    (slots,) = [block for block in refused.messages[-1]["content"] if block["type"] == "tool_result"]
+    assert slots["tool_use_id"] == "toolu_slots" and json.loads(slots["content"])["outcome"] == "done"
+    assert len(thinking_blocks(refused)) == 1 and again.system == refused.system and thinking_blocks(again) == []
+    opens_from_the_summary(again, "visitor: When can someone come?", "result of native__find_slots: " + html.escape(
+        slots["content"], quote=False))
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
 
 
 async def metric_rows(conn, session_id: str) -> list[tuple[str, dict]]:

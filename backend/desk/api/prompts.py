@@ -46,7 +46,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, create_model, mode
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-30.14"
+PROMPT_VERSION = "2026-10-30.15"
 # The clause templates Claude may draft, by name: a template the contracts gain reaches Claude only once it is listed
 # here. `KERNEL_ONLY_TEMPLATES` are the kernel's own, which Claude's replies can't name; every `ClauseTemplate` is in
 # one list or the other.
@@ -194,6 +194,8 @@ ROW_TAGS = {"visitor_text": VISITOR_MESSAGE_TAG, "agent_text": AGENT_MESSAGE_TAG
 SUMMARY_LABELS = {"visitor_text": "visitor", "agent_text": "agent", "action_update": "action_update"}
 SHOWN_SUFFIX = " (shown to the visitor)"
 SHOWN_LABELS = {author: author + SHOWN_SUFFIX for author in ("claude", "owner", "desk")}
+# A result of one of Claude's calls that it hadn't read when its context closed, labelled by the call's tool.
+RESULT_LABEL = "result of {tool}"
 
 
 def wrap_action_update(text: str, decision_id: str, state: str) -> str:
@@ -205,6 +207,12 @@ def wrap_action_update(text: str, decision_id: str, state: str) -> str:
 def summary_line(label: str, text: str) -> str:
     """One line of the summary: its label, then the text on one line, escaped as wrapped text is."""
     return f"{label}: {_escape(' '.join(text.splitlines()))}"
+
+
+def result_line(tool: str, result: str) -> str:
+    """A summary line for a tool result Claude hadn't read when its context closed: the tool's API name, then the
+    result on one line, both escaped as wrapped text is."""
+    return summary_line(RESULT_LABEL.format(tool=_escape(" ".join(tool.split()))), result)
 
 
 def conversation_so_far(lines: Sequence[str]) -> str:
