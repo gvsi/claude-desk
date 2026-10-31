@@ -1183,11 +1183,13 @@ async def test_two_keys_start_two_interviews(app, browser, fake, kernel_http, mo
 async def test_a_start_without_a_key_is_refused_and_makes_nothing(app, browser, fake, kernel_http, model, engine,
                                                                   monkeypatch):
     # The key is required: a start without one is 422, as for any missing field, before the setup turn limit counts
-    # it, Claude is asked or the kernel makes a Desk, and no row is written. Sent twice, it is refused twice.
+    # it, Claude is asked or the kernel makes a Desk, and no row is written. Sent twice, it is refused twice, and a
+    # null key is refused the same way.
     owner = await new_owner(app, browser, kernel_http)
     asked, _ = held_limits(app, monkeypatch)
-    for _ in range(2):
-        refused = await start_keyed(owner, None)
+    null_key = {"description": DESCRIPTION, "timezone": TIMEZONE, "idempotency_key": None}
+    for refused in (await start_keyed(owner, None), await start_keyed(owner, None),
+                    await owner.browser.post("/api/owner/setup", json=null_key)):
         assert (refused.status_code, refused.json()) == (422, {"error": "invalid"})
     assert asked == [] and model.requests == [] and fake.called("POST /desks") == []
     assert await interviews(engine) == []

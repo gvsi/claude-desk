@@ -609,12 +609,13 @@ async def test_two_keys_start_two_runs(app, browser, fake, kernel_http, agent_mo
 async def test_a_send_without_a_key_is_refused_and_starts_nothing(app, browser, fake, kernel_http, agent_model,
                                                                   monkeypatch):
     # The key is required: a send without one is 422, as for any missing field, before the limit counts it, the kernel
-    # mints an agent or a run starts. Sent twice, it is refused twice.
+    # mints an agent or a run starts. Sent twice, it is refused twice, and a null key is refused the same way.
     slug = await new_slug(kernel_http, fake)
     client, _, _ = await open_session(app, browser, slug)
     asked = asked_limits(app, monkeypatch)
-    for _ in range(2):
-        refused = await send_keyed(client, slug, key=None)
+    null_key = {"task": "book_visit", "idempotency_key": None}
+    for refused in (await send_keyed(client, slug, key=None), await send_keyed(client, slug, key=None),
+                    await client.post(f"/api/public/desks/{slug}/send_agent", json=null_key)):
         assert (refused.status_code, refused.json()) == (422, {"error": "invalid"})
     assert asked == [] and fake.called("POST /agents/demo") == [] and agent_model.requests == []
     assert app.state.runtime.agents._runs == {}
