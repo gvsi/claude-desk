@@ -127,9 +127,10 @@ function offsetOf(anchor: string): number {
 
 /** Turns the browser's scroll anchoring off for the test, so nothing but the page puts the window back. */
 function withoutScrollAnchoring(): void {
-  document.documentElement.style.overflowAnchor = 'none';
+  // Chromium on Linux keeps anchoring unless the body is opted out too.
+  for (const element of [document.documentElement, document.body]) element.style.overflowAnchor = 'none';
   onTestFinished(() => {
-    document.documentElement.style.overflowAnchor = '';
+    for (const element of [document.documentElement, document.body]) element.style.overflowAnchor = '';
   });
 }
 
@@ -628,37 +629,68 @@ describe('ReaderPage', () => {
     withoutScrollAnchoring();
     const title = () => flat(document.querySelector('h1')?.textContent);
 
-    let loaded = typeStillLoading();
-    const screen = await renderReader('prediction', { hash: '#characteristics' });
-    await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
-    swapType();
-    expect(offsetOf('characteristics'), 'the swap moved the page').toBeGreaterThan(20);
-    loaded();
-    await expect.poll(() => Math.abs(offsetOf('characteristics')), { message: 'once the type has loaded' }).toBeLessThanOrEqual(1);
-    await screen.unmount();
+    let loaded = () => {};
+    for (const size of [DESKTOP, PHONE]) {
+      loaded = typeStillLoading();
+      const screen = await renderReader('prediction', { size, hash: '#characteristics' });
+      await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+      swapType();
+      expect(offsetOf('characteristics'), `the swap moved the page at ${size.width}`).toBeGreaterThan(20);
+      loaded();
+      await expect
+        .poll(() => Math.abs(offsetOf('characteristics')), { message: `once the type has loaded at ${size.width}` })
+        .toBeLessThanOrEqual(1);
+      await screen.unmount();
+    }
 
-    // A reader who has moved on before the type loads is left where they are.
+    /** Scrolls the window as a reader does, through to the scroll event the page hears, and returns where it is. */
+    const scrollOn = async () => {
+      const scrolled = new Promise((resolve) => window.addEventListener('scroll', resolve, { once: true }));
+      window.scrollTo(0, window.scrollY + 300);
+      await scrolled;
+      return Math.round(window.scrollY);
+    };
+
+    // A reader who has moved on before the type loads is left where they are, whatever they moved with.
+    for (const kind of ['wheel', 'touchmove', 'pointerdown', 'keydown', 'popstate']) {
+      loaded = typeStillLoading();
+      const again = await renderReader('prediction', { hash: '#characteristics' });
+      await expect.poll(() => Math.abs(offsetOf('characteristics')), { message: kind }).toBeLessThanOrEqual(1);
+      window.dispatchEvent(new Event(kind));
+      const where = await scrollOn();
+      swapType();
+      loaded();
+      await twoFrames();
+      expect(Math.round(window.scrollY), `where the reader is after a ${kind}`).toBe(where);
+      await again.unmount();
+    }
+
+    // Back returns to the reader's place and keeps no section, though the address names one.
     loaded = typeStillLoading();
-    const again = await renderReader('prediction', { hash: '#characteristics' });
+    const back = await renderReader('prediction', { hash: '#characteristics' });
     await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
-    window.dispatchEvent(new WheelEvent('wheel', { deltaY: 300 }));
-    const scrolled = new Promise((resolve) => window.addEventListener('scroll', resolve, { once: true }));
-    window.scrollTo(0, window.scrollY + 300);
-    await scrolled;
-    const where = Math.round(window.scrollY);
+    window.dispatchEvent(new Event('wheel'));
+    const place = await scrollOn();
+    at.navigate?.('/about/proposal');
+    await expect.poll(title).toBe('Product proposal');
+    at.navigate?.(-1);
+    await expect.poll(title).toBe('Capability prediction');
+    await expect.poll(() => Math.round(window.scrollY), { message: 'Back returns to the place' }).toBe(place);
     swapType();
     loaded();
     await twoFrames();
-    expect(Math.round(window.scrollY), 'where the reader is').toBe(where);
-    await again.unmount();
+    expect(Math.round(window.scrollY), 'the place Back returned to').toBe(place);
+    await back.unmount();
 
     // Once the document has gone, its section isn't kept: the other document opens at its top and stays there. The
     // other document's "v1" is drawn in the very heading that was "Limitations", at the same place in its document.
     loaded = typeStillLoading();
     const third = await renderReader('prediction', { hash: '#limitations' });
     await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
+    const heading = document.getElementById('limitations');
     at.navigate?.('/about/proposal');
     await expect.poll(title).toBe('Product proposal');
+    expect(document.getElementById('v1'), 'the same heading element').toBe(heading);
     await expect.poll(() => window.scrollY).toBe(0);
     swapType();
     loaded();
