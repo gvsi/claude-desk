@@ -14,6 +14,7 @@ import { request } from '../../api/http.ts';
 import { pollMs } from '../../app/poll.ts';
 import { conversationsKey } from '../conversations/ConversationsPage.tsx';
 import { conversationKey } from '../conversations/useTakeOver.ts';
+import { attemptsQuery, ledgerQuery } from '../safety/queries.ts';
 import { useDesks } from '../useDesks.ts';
 import {
   NOTHING_DONE,
@@ -96,15 +97,13 @@ export function useDoneSignals({ enabled, deskId, answered }: UseDoneSignalsOpti
     })),
   });
   const attempts = useQuery({
-    queryKey: ['safety', seeded ?? ''],
-    queryFn: () => request('safety', { params: { desk_id: seeded ?? '' } }),
+    ...attemptsQuery(seeded ?? ''),
     enabled: reading && previews.length > 0 && seen.break === undefined,
     ...polled(),
   });
   // The signed record, verified on every read, so it isn't read for a list nobody sees.
   const ledger = useQuery({
-    queryKey: ['ledger', seeded ?? ''],
-    queryFn: () => request('ledger', { params: { desk_id: seeded ?? '' }, query: { verify: true } }),
+    ...ledgerQuery(seeded ?? ''),
     enabled: reading && (seen.answer === undefined || (previews.length > 0 && seen.break === undefined)),
     ...polled(),
   });
