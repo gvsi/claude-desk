@@ -1128,7 +1128,9 @@
   color: var(--text-secondary);
 }
 
+/* "Save and exit" keeps its one line: on a narrow bar the business's name gives way, not the button. */
 .board-setup__end {
+  flex: none;
   margin-left: auto;
 }
 
