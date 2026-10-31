@@ -16,7 +16,7 @@ import { PRESETS, RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
-import { renderRoute } from '../../test/renderRoute.tsx';
+import { renderRoute, type RenderRouteOptions } from '../../test/renderRoute.tsx';
 import { expectScreenBasics } from '../../test/screen.ts';
 import type { AnswerDraftState } from '../approvals/useAnswer.ts';
 import { draftFromDiff, draftFromVersion } from './drafts.ts';
@@ -36,9 +36,9 @@ function desk(): DeskRecord {
 }
 
 /** The review of draft `version`, opened from another page with `state`, as a screen hands it over, or with none, as a reload opens it. */
-async function openDraft(version: number, state?: unknown) {
+async function openDraft(version: number, state?: unknown, opts?: RenderRouteOptions) {
   // A page that reads nothing, so every request recorded is the review's.
-  const rendered = await renderRoute('/a-page-that-does-not-exist');
+  const rendered = await renderRoute('/a-page-that-does-not-exist', opts);
   await rendered.router.navigate(`${DESK}/rules/drafts/${version}`, state === undefined ? undefined : { state });
   return rendered;
 }
@@ -101,6 +101,15 @@ async function expectConfirmed(screen: Awaited<ReturnType<typeof openDraft>>['sc
   expect(text).not.toContain('No rules change.');
   expect(text).not.toContain('Nothing changes until you confirm.');
   expect(text).not.toContain("isn't open anymore");
+}
+
+/** A version that isn't open, which says so and where to ask again, with nothing to confirm or keep and no claim that it applied. */
+async function expectNotOpen(screen: Awaited<ReturnType<typeof openDraft>>['screen']) {
+  await expect.element(screen.getByText("This draft isn't open anymore. Ask for the change again from Rules.", { exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('link', { name: 'Go to Rules' })).toHaveAttribute('href', `${DESK}/rules`);
+  expect(screen.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
+  expect(screen.getByRole('button', { name: 'Keep my rules' }).elements()).toHaveLength(0);
+  expect(screen.container.textContent).not.toContain('Your rules are updated.');
 }
 
 /** True when `first` comes before `second` in the page. */
@@ -217,7 +226,7 @@ describe('rule draft review', () => {
     await expectScreenBasics(reopened.screen.container, { owner: true });
   });
 
-  it('replaced_draft_reopens_confirmed', async () => {
+  it('replaced_draft_reopens_not_open', async () => {
     // The owner confirms a draft, then a later one that replaces it.
     const first = mockStore.world.draft(desk(), [DANA_NEVER_REFUND]);
     const { screen, router } = await openDraft(first.version, { cardDiff: [DANA_NEVER_REFUND], draft: first } satisfies AnswerDraftState);
@@ -230,10 +239,11 @@ describe('rule draft review', () => {
     await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
     expect(desk().policy.version).toBe(later.version);
 
-    // Back to the first: it was confirmed and has been replaced since, so it reads confirmed too.
+    // Back to the first: older than the rules in force and no longer a draft. A 404 can't say it
+    // applied, so it says only that it isn't open, with nothing to confirm or keep.
     await router.navigate(-1);
     await expect.poll(() => requests('ruleDraft').map((r) => r.path)).toEqual([apiPath('ruleDraft', { desk_id: RIVERA.deskId, version: String(first.version) })]);
-    await expectConfirmed(screen);
+    await expectNotOpen(screen);
     // Forward to the later one, in force.
     await router.navigate(1);
     await expectConfirmed(screen);
@@ -241,7 +251,45 @@ describe('rule draft review', () => {
 
     // Opened again with no router state, as a new tab opens it: the same.
     const reopened = await openDraft(first.version);
-    await expectConfirmed(reopened.screen);
+    await expectNotOpen(reopened.screen);
+  });
+
+  it('version_that_never_applied_is_not_open', async () => {
+    // Version 0, which never existed, and version 5, older than the rules in force and no draft:
+    // the API answers both 404, which never says a change applied.
+    for (const version of [0, 5]) {
+      const { screen } = await openDraft(version);
+      await expectNotOpen(screen);
+    }
+  });
+
+  it('older_draft_read_failure_offers_no_confirm', async () => {
+    // Two drafts from the rules in force; the owner confirms the second, then goes Back to the
+    // first, now older than the rules in force.
+    const quoteAsks = { ...rivera.ruleCards['rv-quote'], mode: 'ask' as const };
+    const bookAsks = { ...rivera.ruleCards['rv-book-sat'], mode: 'ask' as const };
+    const first = mockStore.world.draft(desk(), [quoteAsks]);
+    const second = mockStore.world.draft(desk(), [bookAsks]);
+    const { screen, router } = await openDraft(first.version, { cardDiff: [quoteAsks], draft: first } satisfies AnswerDraftState, { retryScale: 0 });
+    await expect.element(screen.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+    await router.navigate(`${DESK}/rules/drafts/${second.version}`, { state: { cardDiff: [bookAsks], draft: second } satisfies AnswerDraftState });
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByText('Your rules are updated.', { exact: true })).toBeVisible();
+
+    // Its read fails, and its retry: the read's failure and a way to try again, never its confirm.
+    mockStore.inject({ route: 'ruleDraft', status: 'network', times: 2 });
+    await router.navigate(-1);
+    await expect.element(screen.getByText("We couldn't reach Claude Desk. Check your connection, then try again.", { exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Keep my rules' }).elements()).toHaveLength(0);
+    expect(screen.container.textContent).not.toContain('Your rules are updated.');
+
+    // Tried again, it reads as still open, drafted from rules that changed since: its review, whose
+    // confirm the API refuses as it does any draft from rules that changed.
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.element(screen.getByRole('alert')).toHaveTextContent('Your rules changed since this was drafted. Ask for the change again.');
+    expect(desk().policy.version).toBe(second.version);
   });
 
   it('diff_shows_the_enforced_limit', async () => {

@@ -103,8 +103,8 @@ export interface RuleDraftReviewProps {
    */
   onConfirmError?: (err: unknown) => Promise<string | null>;
   /**
-   * The draft has applied already: its version is in force, or was and has been replaced since. The
-   * review then says so, as it does once confirmed, with nothing to confirm or keep.
+   * The draft has applied already: its version is in force. The review then says so, as it does once
+   * confirmed, with nothing to confirm or keep.
    */
   alreadyApplied?: boolean;
 }
@@ -273,9 +273,10 @@ function handedOver(state: unknown, version: number): { kind: 'built'; draft: Ru
 
 /**
  * `rules/drafts/:version`, for card drafts: the review a screen handed over in router state, or,
- * after a reload, the draft read again by its version and its rows built the same way. A draft that
- * has applied says so in place of its review however the page is opened again (Back and Forward
- * after confirming it, or a new tab), so it is never offered to confirm twice.
+ * after a reload, the draft read again by its version and its rows built the same way. A draft whose
+ * version is in force says it has applied however the page is opened again (Back and Forward after
+ * confirming it, or a new tab), and one older than the rules in force is offered to confirm only once
+ * a read finds it still open, so no change is offered to confirm twice.
  */
 export function RuleDraftPage() {
   const { desk } = useOwnerDesk();
@@ -288,10 +289,11 @@ export function RuleDraftPage() {
   // The rules in force say whether the draft has applied; the review reads them as well.
   const rules = useQuery({ ...rulesQuery(deskId), ...READ_ONCE });
   const active = rules.data?.active;
-  // A draft stays open until it is confirmed: its version is then in force, and superseded once a
-  // later one is. The API reads only open drafts, so it answers either with 404. A draft older than
-  // the rules in force was drafted from rules that changed since, and stays open, or was confirmed
-  // and replaced since. Neither changes again (a draft confirms only from the rules in force), so a
+  // A draft stays open until it is confirmed, so only the one whose version is in force is known to
+  // have applied. The API reads only open drafts and answers 404 for any other version (in force,
+  // replaced since, never checked or never made), so a 404 never says a change applied. A draft
+  // older than the rules in force was drafted from rules that changed since, and stays open, or isn't
+  // a draft any more. Neither changes again (a draft confirms only from the rules in force), so a
   // read then is final, and kept apart from one made before.
   const inForce = version !== null && active?.version === version;
   const older = version !== null && active !== undefined && active.version > version;
@@ -304,9 +306,8 @@ export function RuleDraftPage() {
     refetchOnWindowFocus: false,
   });
   const gone = read.error instanceof ApiError && read.error.kind === 'not_found';
-  const alreadyApplied = inForce || (older && gone);
-  // Nothing is offered to confirm until that read says the draft is still open.
-  const checking = older && read.isPending;
+  // One older than the rules in force is offered to confirm only once that read finds it still open.
+  const confirmable = !older || read.isSuccess;
 
   const built = useMemo((): { draft: RuleDraft; title?: string } | null => {
     if (handed?.kind === 'built') return handed.title === undefined ? { draft: handed.draft } : { draft: handed.draft, title: handed.title };
@@ -315,22 +316,22 @@ export function RuleDraftPage() {
     return read.data === undefined ? null : { draft: draftFromDiff(read.data, active) };
   }, [handed, active, read.data]);
 
-  // A draft that isn't open is one that hasn't applied either, which only the rules in force can say.
-  const notOpen = version === null || (gone && !alreadyApplied && (rules.data !== undefined || rules.isError));
+  // Whether a draft that isn't open is in force, only the rules in force can say.
+  const notOpen = version === null || (gone && !inForce && (rules.data !== undefined || rules.isError));
   const failed = read.isError && !gone ? read.error : rules.isError ? rules.error : null;
   // A built review names the tab itself. Without one, the tab follows the title this page shows; while
   // the draft is read, the page shows none (a change to the payment limit alone has its own), so the
   // tab names Rules, the page the review is under.
-  const shownTitle = alreadyApplied || notOpen || failed !== null ? REVIEW_TITLE : RULES_TITLE;
-  const showsReview = built !== null && !checking;
+  const shownTitle = inForce || notOpen || failed !== null ? REVIEW_TITLE : RULES_TITLE;
+  const showsReview = built !== null && confirmable;
   useDocumentTitle(showsReview ? null : inApp(shownTitle));
 
   if (showsReview) {
-    return <RuleDraftReview key={built.draft.version} deskId={deskId} draft={built.draft} {...(built.title === undefined ? {} : { title: built.title })} alreadyApplied={alreadyApplied} />;
+    return <RuleDraftReview key={built.draft.version} deskId={deskId} draft={built.draft} {...(built.title === undefined ? {} : { title: built.title })} alreadyApplied={inForce} />;
   }
 
   let body;
-  if (alreadyApplied) {
+  if (inForce) {
     body = <Updated deskId={deskId} />;
   } else if (notOpen) {
     body = (
@@ -370,7 +371,7 @@ export function RuleDraftPage() {
       <div className="cd-rule-draft__header">
         <Breadcrumb items={[{ label: RULES_TITLE, href: rulesPath(deskId) }, { label: REVIEW_TITLE }]} linkComponent={RouterLink} />
         {/* Once the change applied, nothing still says it waits for the owner. */}
-        <PageHeader title={REVIEW_TITLE} {...(alreadyApplied ? {} : { subtitle: SUBTITLE })} />
+        <PageHeader title={REVIEW_TITLE} {...(inForce ? {} : { subtitle: SUBTITLE })} />
       </div>
       {body}
     </div>
