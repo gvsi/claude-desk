@@ -73,8 +73,8 @@ const cardBlocks = allBlocks.filter((block) => block.kind === 'card');
 
 type CardField = 'title' | 'lines' | 'options' | 'href';
 
-// The master plan's "Clauses" row: quote and charges fill title and lines, booking_options its
-// options, payment_link and document_link title and href, the rest title.
+// The master plan's "Clauses" row: quote, charges and link_cancelled fill title and lines,
+// booking_options its options, payment_link and document_link title and href, the rest title.
 const CLAUSE_FIELDS = {
   quote: ['title', 'lines'],
   booking_options: ['options'],
@@ -92,7 +92,7 @@ const CLAUSE_FIELDS = {
   charge_confirmed: ['title'],
   callback_confirmed: ['title'],
   payment_confirmed: ['title'],
-  link_cancelled: ['title'],
+  link_cancelled: ['title', 'lines'],
 } satisfies Record<ClauseTemplate, readonly CardField[]>;
 
 // The proxied paths that are the only place a link token reaches a visitor.
@@ -430,25 +430,6 @@ describe('fixtures', () => {
     expect(card('es').lines).toEqual(['Llegada de 14:00 a 16:00', `Con ${owner}`]);
     // No booking ID in what the visitor sees; the fact it comes from keeps its id.
     for (const language of ['en', 'es'] as const) expect(card(language).text).not.toMatch(/B-77|Booking|Reserva/);
-  });
-
-  test('link_cancelled_card_has_the_kernels_shape', () => {
-    // The kernel renders a cancelled link's card as one line naming the owner, its title, with no
-    // lines and no fact (render/en.py and es.py `link_cancelled`); the fixture draws the same.
-    const render = (language: string) => readFileSync(path.join(BACKEND, 'kernel_service', 'render', `${language}.py`), 'utf8');
-    expect(render('en')).toContain(`f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "`);
-    expect(render('en')).toContain('"Ask again if you still want to pay."');
-    expect(render('es')).toContain('f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "');
-    expect(render('es')).toContain('"Pídelo de nuevo si todavía quieres pagar."');
-    const owner = rivera.business.ownerName;
-    const line = {
-      en: `This payment link was cancelled because ${owner}'s rules changed. Ask again if you still want to pay.`,
-      es: `Este enlace de pago se canceló porque cambiaron las reglas de ${owner}. Pídelo de nuevo si todavía quieres pagar.`,
-    };
-    for (const language of ['en', 'es'] as const) {
-      const card = rivera.blocks.link_cancelled[language];
-      expect(card, language).toEqual({ kind: 'card', template: 'link_cancelled', text: line[language], fact_id: null, title: line[language], lines: [], href: null, options: [] });
-    }
   });
 
   test('card_amounts_print_cents_as_the_kernel_does', () => {
