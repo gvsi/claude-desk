@@ -16,9 +16,12 @@ An execution takes up to three transactions, so that a crash leaves a record of 
   first stops it (the fence); `FOR UPDATE` for an adapter that writes the session's own rows
   (`locks_session`). Then it locks the decision and the intent row and, before any side effect,
   reads the session and the Desk afresh: a Desk deleted since T1, or an allow's session closed,
-  ends `refused_at_execution` (`_refused_in_t2`), and an allow's take-over or pause is fenced.
-  Otherwise it runs the adapter's `execute`, and commits `succeeded` with the result and the
-  decision `executed`, ledgered and signed again.
+  ends `refused_at_execution` (`_refused_in_t2`); an allow's session that no longer stands
+  otherwise (`auth.session_stands`: its person off the record, say) ends the same way and answers
+  409 `closed`, ledgered as at authentication (`_closed_in_t2`); and an allow's take-over or pause
+  is fenced. Otherwise it runs the adapter's `execute`, and commits `succeeded` with the result
+  and the decision `executed`, ledgered and signed again. That commit runs no recheck
+  (`KernelCtx.commit`): it records what the adapter did, whatever happens to the session after.
 - T3 runs after an `Exception` in T2, which rolled back: `AdapterFailure` (raised only before any
   external side effect) is `failed`, after the adapter's `on_failed`; anything else, a failed T2
   commit included, is `unknown`, left to reconciliation. A `BaseException` (the process dying, a
@@ -482,6 +485,10 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
     if (gone := _gone(target, session, path)) is not None:
         return await _refused_in_t2(ctx, target, execution, gone, path)
     if path == "allow":
+        # the request's own session check, before the adapter acts: the commit below records what
+        # it did whatever happens to the session after, so it runs no recheck of its own
+        if not await auth.session_stands(ctx, _named(target), session.person_id):
+            return await _closed_in_t2(ctx, target, execution)
         if session.generation != target.decision.generation:
             return await _fenced(ctx, target, execution, "stale_generation")
         if session.mode != "ai":
@@ -493,7 +500,7 @@ async def _side_effect(ctx: KernelCtx, decision_id: str, action_id: str, session
     result = await adapter.execute(target.xctx(ctx), target.action, args)
     visible, flagged = await _visible(ctx, target, result)
     await _finish(ctx, target, execution, visible, "executed", _summary(target, "executed", **flagged))
-    await ctx.commit()                                   # under the session row T2 holds, so it stands
+    await ctx.db.commit()                                # what ran, recorded as T2 decided
     return visible
 
 
@@ -527,6 +534,21 @@ async def _refused_in_t2(ctx: KernelCtx, target: _Target, execution: Execution, 
     if path == "allow":
         return KernelFailure(409, "conflict", f"refused_at_execution:{check}")
     return result
+
+
+async def _closed_in_t2(ctx: KernelCtx, target: _Target, execution: Execution) -> KernelFailure:
+    """An allow whose session no longer stands, read afresh under the row T2 holds and before the
+    side effect (`auth.session_stands`: its person off the record, say; a closed session or a deleted
+    Desk is `_gone`'s): nothing runs. It is settled as `_refused_in_t2` settles a closed session,
+    committed, and the answer is 409 `closed`, ledgered `auth` as at authentication."""
+    await _refused_in_t2(ctx, target, execution, "closed", "allow")
+    return AuthError(409, "closed", "closed", route=EXECUTE_ROUTE, named=_named(target))
+
+
+def _named(target: _Target) -> Named:
+    """The decision's session, on its Desk, which a refusal is ledgered on."""
+    decision = target.decision
+    return Named(copy_id=decision.copy_id, desk_id=decision.desk_id, session_id=decision.session_id)
 
 
 async def _fenced(ctx: KernelCtx, target: _Target, execution: Execution, code: str) -> KernelFailure:

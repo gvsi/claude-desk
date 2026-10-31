@@ -16,6 +16,11 @@ commits the owner's change, and lets it go on. Every route a session's token is 
 called with the session closed right after its token, and two static guards keep new code on the
 shared path: a session's token is read only where the session is watched, and a commit that ends
 what a request answers runs the rechecks.
+
+No recheck takes back the record of something that already happened. An execution's T2 checks its
+session before the adapter acts, under the session row it holds, and commits what the adapter did
+as it decided; the API's own ledger entries commit as sent. The session's next read answers its
+close.
 """
 
 import ast
@@ -29,12 +34,13 @@ from fastapi import FastAPI
 from sqlalchemy import select
 
 from desk import kernel_service
-from desk.contracts import Decision
-from desk.db.models import ActorSession, Person
+from desk.contracts import Decision, ExecResult
+from desk.db.models import ActorSession, Execution, Person, Quote
+from desk.db.models import Decision as DecisionRow
 from desk.kernel_api import KERNEL_ROUTES
-from desk.kernel_service import auth, context
+from desk.kernel_service import adapters, auth, context, execute, ledger
 
-from .helpers import kernel_ctx, ledger_rows
+from .helpers import connections_of, kernel_ctx, ledger_rows, rows_of, until_waiting
 from .test_adapters import Rivera, quote_args, rivera, visitor_of
 from .test_approvals import held_quote, post_cancel
 from .test_context import get_context
@@ -177,10 +183,11 @@ SESSION_ROUTES: dict[str, Setup] = {
     "POST /verify/start": plain(lambda client, copy, v: start(client, v, DANA)),
     "POST /verify/check": plain(lambda client, copy, v: check(client, v, "000000")),
     "POST /check_reply": plain(lambda client, copy, v: post_check(client, v, "I can help with that.")),
-    "POST /ledger/append": plain(lambda client, copy, v: append_api(
-        client, copy.desk_id, v.headers, kind="rate_limit", origin="api", session_id=v.session_id,
-        summary={"limit": "visitor_message"})),
 }
+
+# Rows a session's token is proved on that record something which already happened and answer only
+# that record: no recheck takes the record back (`test_a_record_commits_whatever_happens_to_its_session`).
+RECORD_ROUTES = {"POST /ledger/append": "the API's own entry (a rate limit, say), answered as stored"}
 
 # Every other row, and why no session's token is proved on it.
 NO_SESSION_ROUTES: dict[str, str] = {
@@ -202,8 +209,9 @@ NO_SESSION_ROUTES: dict[str, str] = {
 
 
 def test_every_kernel_route_is_classified():
-    assert not set(SESSION_ROUTES) & set(NO_SESSION_ROUTES)
-    assert set(SESSION_ROUTES) | set(NO_SESSION_ROUTES) == set(KERNEL_ROUTES)
+    classes = [set(SESSION_ROUTES), set(RECORD_ROUTES), set(NO_SESSION_ROUTES)]
+    assert sum(map(len, classes)) == len(set().union(*classes))                   # each row in one class
+    assert set().union(*classes) == set(KERNEL_ROUTES)
 
 
 @pytest.mark.parametrize("route", sorted(SESSION_ROUTES))
@@ -244,7 +252,9 @@ PLAIN_COMMITS = {
     ("verification.py", "_refused"): "a code that verified nobody: its attempt, then 422",
     ("execute.py", "_refused_at_execution"): "a refusal's record, then 409",
     ("execute.py", "_not_runnable"): "a refusal's record, then 409",
-    ("execute.py", "execute_allowed"): "T1's intent row: T2's commit, which answers, runs them",
+    ("execute.py", "execute_allowed"): "T1's intent row, before any side effect; T2 checks the session again",
+    ("execute.py", "_side_effect"): "T2: what the adapter did, recorded as T2 decided; the session was "
+                                    "checked before the adapter ran, under the row T2 holds through this commit",
     ("execute.py", "_refused_in_t2"): "a refusal's record, then 409 or the failed result",
     ("execute.py", "_fenced"): "a fence's record, then 409",
     ("execute.py", "_settle_failed"): "T3: a failed result, which holds nothing read",
@@ -282,7 +292,8 @@ def test_a_commit_that_answers_runs_the_rechecks():
 
 def test_a_session_token_is_proved_only_where_the_session_is_watched():
     """The only reads of a session's token are in the two functions that prove it, and both watch
-    the session, so no route admits a session the recheck doesn't see."""
+    the session, so no route admits a session the recheck doesn't see; only the record routes ask
+    `require_session_token` not to."""
     def reads_the_session_token(call: ast.Call) -> bool:
         return (isinstance(call.func, ast.Attribute) and call.func.attr == "get" and len(call.args) == 1
                 and "SESSION_HEADER" in ast.unparse(call.args[0]))
@@ -290,3 +301,133 @@ def test_a_session_token_is_proved_only_where_the_session_is_watched():
                                                              ("auth.py", "require_session_token")}
     watching = _calls_in_functions(lambda call: ast.unparse(call.func) == "watch_session")
     assert {("auth.py", "authenticate_session"), ("auth.py", "require_session_token")} <= watching
+    unwatched = _calls_in_functions(lambda call: any(keyword.arg == "watch" for keyword in call.keywords))
+    assert unwatched == {("app.py", "append_api_entry")} and set(RECORD_ROUTES) == {"POST /ledger/append"}
+
+
+# ---- Executions ----------------------------------------------------------------------------------------
+#
+# An execution's adapter acts on the world, which a rollback can't undo. So its session is checked
+# again in T2, under the session row T2 holds, before the adapter runs (`auth.session_stands`, as
+# `still_open` reads it); and the commit that records what the adapter did runs no recheck, whatever
+# happens to the session after the check: the session's next read answers it.
+
+async def person_off_the_record(app: FastAPI, copy: Rivera, ref: str = "dana") -> None:
+    """The person's row marked removed, straight to the row: the session verified as them stays open."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [person] = await ctx.db.scalars(ctx.repo.scoped(select(Person).where(Person.ref == ref)))
+        person.removed_at = ctx.clock.now()
+
+
+async def allowed_quote(app: FastAPI, client: httpx.AsyncClient) -> tuple[Rivera, Visitor, Decision]:
+    """A Rivera copy, a visitor verified as Dana, and her quote at list price, allowed."""
+    copy = await rivera(app, client)
+    dana = await confirmed(client, copy, DANA)
+    allowed = await decided(client, dana, "native.quote", quote_args(("drain", 1)))
+    assert allowed.outcome == "allow", allowed.reason_plain
+    return copy, dana, allowed
+
+
+async def execution_of(app: FastAPI, copy: Rivera, decision: Decision) -> tuple[str, str]:
+    """The execution's state and its decision's, as committed."""
+    [execution] = await rows_of(app, copy.copy_id, select(Execution).where(
+        Execution.decision_id == decision.decision_id))
+    [row] = await rows_of(app, copy.copy_id, select(DecisionRow).where(DecisionRow.decision_id == decision.decision_id))
+    return execution.state, row.state
+
+
+async def test_an_execution_whose_person_leaves_before_its_side_effect_runs_nothing(app, client, monkeypatch):
+    """Dana's person row is marked removed after T1 committed the intent: T2, holding her session's
+    row, reads her off the record before the adapter runs. Nothing runs; the execution is settled
+    refused (not unknown) and the answer is 409 `closed`, ledgered as at authentication."""
+    copy, dana, allowed = await allowed_quote(app, client)
+    quote, calls = adapters.ADAPTERS["native.quote"], []
+    run_quote = quote.execute
+
+    async def counted(*args, **kwargs):
+        calls.append(args)
+        return await run_quote(*args, **kwargs)
+
+    async def dana_leaves() -> None:
+        await person_off_the_record(app, copy)
+
+    monkeypatch.setattr(quote, "execute", counted)
+    monkeypatch.setattr(execute, "_after_intent", dana_leaves)
+    response = await post_execute(client, dana, allowed)
+
+    assert (response.status_code, response.json()) == (409, {"code": "closed"}), response.text[:300]
+    assert calls == []                                                  # the adapter never ran
+    assert await rows_of(app, copy.copy_id, select(Quote)) == []
+    assert await execution_of(app, copy, allowed) == ("failed", "refused_at_execution")
+    last = (await ledger_rows(app, copy))[-1].event
+    assert (last.kind, last.session_id, last.summary) == (
+        "auth", dana.session_id, {"route": "POST /execute", "reason": "closed"})
+
+
+@pytest.mark.parametrize("change", ["removal", "person_off_the_record"])
+async def test_an_execution_that_ran_is_recorded_whatever_happens_to_its_session(app, client, monkeypatch, change):
+    """The adapter has run and T2 is about to commit when the owner removes Dana (her removal waits
+    for the session row T2 holds) or her person row is marked removed: the execution and its
+    `execute` entry still commit as T2 decided, the answer is the result, and her session's next
+    read is 409 `closed`."""
+    copy, dana, allowed = await allowed_quote(app, client)
+    finished, go_on = asyncio.Event(), asyncio.Event()
+    finish = execute._finish
+
+    async def finish_then_wait(ctx, target, execution, result, decision_state, summary):
+        await finish(ctx, target, execution, result, decision_state, summary)
+        finished.set()                                       # the adapter ran, T2 not yet committed
+        await go_on.wait()
+
+    monkeypatch.setattr(execute, "_finish", finish_then_wait)
+    running = asyncio.create_task(post_execute(client, dana, allowed))
+    await asyncio.wait_for(finished.wait(), timeout=5)
+    if change == "removal":
+        with connections_of(app) as pids:
+            removing = asyncio.create_task(client.put(f"/desks/{copy.desk_id}/people", headers=copy.owner,
+                                                      json={"remove": ["dana"]}))
+            await until_waiting(app, removing, pids)            # for Dana's session row, which T2 holds
+        go_on.set()
+        response, removed = await asyncio.wait_for(asyncio.gather(running, removing), timeout=5)
+        assert removed.status_code == 200, removed.text
+    else:
+        await person_off_the_record(app, copy)
+        go_on.set()
+        response = await asyncio.wait_for(running, timeout=5)
+
+    assert response.status_code == 200, response.text[:300]
+    assert ExecResult.model_validate(response.json()).state == "succeeded"
+    assert await execution_of(app, copy, allowed) == ("succeeded", "executed")
+    assert len(await rows_of(app, copy.copy_id, select(Quote))) == 1
+    executed = [entry.event.summary for entry in await ledger_rows(app, copy) if entry.event.kind == "execute"
+                and entry.event.summary.get("decision_id") == allowed.decision_id]
+    assert [summary["state"] for summary in executed] == ["executed"]
+    after = await get_context(client, dana.session_id, dana.headers)
+    assert (after.status_code, after.json()) == (409, {"code": "closed"})
+
+
+async def test_a_record_commits_whatever_happens_to_its_session(app, client, monkeypatch, frozen_clock):
+    """`POST /ledger/append` records something that already happened in the API and answers only
+    that entry, so no recheck takes it back: with the session closed right after its token was
+    proved, the entry still commits and is answered, and the session's next read is 409 `closed`."""
+    copy, visitor = await visitor_of(app, client)
+    append, closing = ledger.append, {"armed": True}
+
+    async def close_then_append(ctx, **kwargs):
+        if closing["armed"]:
+            closing["armed"] = False
+            await set_session(app, copy, visitor.session_id, closed_at=frozen_clock.now())
+        return await append(ctx, **kwargs)
+
+    monkeypatch.setattr(ledger, "append", close_then_append)
+    response = await append_api(client, copy.desk_id, visitor.headers, kind="rate_limit", origin="api",
+                                session_id=visitor.session_id, summary={"limit": "visitor_message"})
+
+    assert not closing["armed"]
+    assert response.status_code == 200, response.text[:300]
+    last = (await ledger_rows(app, copy))[-1].event
+    assert (last.kind, last.session_id, last.summary) == ("rate_limit", visitor.session_id,
+                                                         {"limit": "visitor_message"})
+    after = await get_context(client, visitor.session_id, visitor.headers)
+    assert (after.status_code, after.json()) == (409, {"code": "closed"})

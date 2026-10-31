@@ -374,7 +374,9 @@ async def append_api_entry(body: ApiEntry, ctx: Ctx, request: Request) -> Ledger
         owner = await auth.require_owner(ctx, request, desk_id=body.desk_id)
         copy_id, session_id = owner.copy_id, owner.session_id
     elif auth.SESSION_HEADER in request.headers and auth.OWNER_HEADER not in request.headers:
-        row = await auth.require_session_token(ctx, request)
+        # the API's record of something that already happened, answered as stored: a session that
+        # closes once its token is proved still gets it, and its next read answers the close
+        row = await auth.require_session_token(ctx, request, watch=False)
         copy_id, session_id = row.copy_id, row.session_id
         if body.desk_id != row.desk_id:
             raise AuthError(404, "not_found", "wrong_copy", route=route,

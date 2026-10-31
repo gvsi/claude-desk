@@ -189,9 +189,11 @@ async def lock_session(ctx: KernelCtx, session_id: str) -> SessionRow:
         .execution_options(populate_existing=True)))).one()
 
 
-async def require_session_token(ctx: KernelCtx, request: Request) -> SessionRow:
+async def require_session_token(ctx: KernelCtx, request: Request, *, watch: bool = True) -> SessionRow:
     """The open visitor or agent session `X-Session-Token` hashes to (`GET /whoami`, which names no
-    session). Binds the request's transaction to the session's copy."""
+    session). Binds the request's transaction to the session's copy. The session is watched
+    (`watch_session`) unless `watch` is False, which only a route that records something already
+    done and answers nothing else passes (`POST /ledger/append`): no recheck may take a record back."""
     route = route_template(request)
     token = request.headers.get(SESSION_HEADER)
     token_hash = hash_token(token) if token else None
@@ -202,7 +204,8 @@ async def require_session_token(ctx: KernelCtx, request: Request) -> SessionRow:
     row = (await ctx.db.scalars(copy.scoped(select(SessionRow).where(SessionRow.secret_hash == token_hash)))).one()
     if row.kind == "owner" or not hmac.compare_digest(row.secret_hash, token_hash):
         raise AuthError(401, "auth", "bad_token", route=route)      # the owner token goes in X-Owner-Session
-    await watch_session(ctx, request, row)
+    if watch:
+        await watch_session(ctx, request, row)
     require_open(ctx, request, row)
     row.last_seen_at = ctx.clock.now()
     return row
@@ -240,24 +243,30 @@ async def watch_session(ctx: KernelCtx, request: Request, row: SessionRow) -> No
 
 
 async def still_open(ctx: KernelCtx, request: Request, named: Named, person_id: str | None) -> None:
-    """The session `named` as the database has it now, read afresh in the request's transaction:
-    open, verified as `person_id` when it was so when its token was proved (a session that a right
-    code verifies in this request gains a person, which is never changed or dropped), that person
-    still on record, and its Desk not deleted. Otherwise 409 `closed`, ledgered on the session as
-    `require_open` ledgers it."""
+    """The session `named` still stands (`session_stands`), or 409 `closed`, ledgered on the session
+    as `require_open` ledgers it."""
+    if not await session_stands(ctx, named, person_id):
+        raise AuthError(409, "closed", "closed", route=route_template(request), named=named)
+
+
+async def session_stands(ctx: KernelCtx, named: Named, person_id: str | None) -> bool:
+    """Whether the session `named`, as the database has it now, read afresh in the request's
+    transaction, is open, verified as `person_id` when it was so when its token was proved (a
+    session that a right code verifies in this request gains a person, which is never changed or
+    dropped), that person still on record, and its Desk not deleted. An execution's T2 asks it too,
+    before its adapter runs (`execute._side_effect`)."""
     session = (await ctx.db.execute(ctx.repo.scoped(select(SessionRow.closed_at, SessionRow.person_id).where(
         SessionRow.session_id == named.session_id)))).one_or_none()
-    open_now = session is not None and session.closed_at is None and person_id in (None, session.person_id)
-    if open_now and session.person_id is not None:
+    if session is None or session.closed_at is not None or person_id not in (None, session.person_id):
+        return False
+    if session.person_id is not None:
         person = (await ctx.db.execute(ctx.repo.scoped(select(Person.removed_at).where(
             Person.person_id == session.person_id)))).one_or_none()
-        open_now = person is not None and person.removed_at is None
-    if open_now:
-        desk = (await ctx.db.execute(ctx.repo.scoped(select(Desk.deleted_at).where(
-            Desk.desk_id == named.desk_id)))).one_or_none()
-        open_now = desk is not None and desk.deleted_at is None
-    if not open_now:
-        raise AuthError(409, "closed", "closed", route=route_template(request), named=named)
+        if person is None or person.removed_at is not None:
+            return False
+    desk = (await ctx.db.execute(ctx.repo.scoped(select(Desk.deleted_at).where(
+        Desk.desk_id == named.desk_id)))).one_or_none()
+    return desk is not None and desk.deleted_at is None
 
 
 async def owner_session(ctx: KernelCtx, request: Request, copy_id: str | None = None) -> SessionRow | None:

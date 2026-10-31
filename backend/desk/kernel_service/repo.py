@@ -94,9 +94,13 @@ proves is watched (`auth.watch_session`), and after the request's last read, as 
 statements before it answers, `auth.still_open` reads the session, its person and its Desk afresh:
 closed, or no longer the person it read as, is 409 `closed`, and nothing the request read is
 answered. Those reads lock nothing, so they wait for nothing and add no step to the order above.
-They run in `KernelCtx.commit`, which a commit that ends what a request answers goes through (an
-execution's T2, a repeated execution's stored result), and when the request's transaction ends
-having read anything since its last commit.
+They run in `KernelCtx.commit`, which a commit that ends what a request answers goes through (a
+repeated execution's stored result), and when the request's transaction ends having read anything
+since its last commit. A commit that records what an adapter did runs none: a rollback can't undo
+an act on the world, so an execution's T2 asks the same of its session (`auth.session_stands`)
+before the adapter runs, under the session row it holds until that commit, and records what ran
+whatever happens to the session after; the session's next read answers that. The API's own ledger
+entries (`POST /ledger/append`) are records too, and their session isn't watched.
 
 A route refuses with `KernelFailure`. Its answer is always a `KernelError{code}`; when the refusal
 must be on record (a ledgered auth failure, an allow that expired), `persist` writes that record
@@ -192,8 +196,9 @@ class KernelCtx:
     async def commit(self) -> None:
         """Commits the transaction once the request's rechecks pass. A commit that ends what a request
         answers with, data a session reads, comes through here, and so does the end of every request
-        transaction (`kernel_transaction`); `db.commit()` is kept for a refusal's own record, which
-        answers nothing read (tests/kernel/test_session_recheck.py lists those)."""
+        transaction (`kernel_transaction`). `db.commit()` is kept for a refusal's own record, which
+        answers nothing read, and for the record of what an adapter did, which no recheck may undo
+        (tests/kernel/test_session_recheck.py lists each)."""
         await self.recheck()
         await self.db.commit()
 
