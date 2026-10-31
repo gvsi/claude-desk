@@ -68,7 +68,8 @@ is refused or measured nothing it can report.
 `spend.csv`, and the latest results in `docs/evals.md`. It reads the pass's runs and transcripts, the
 gate over its rows, the current recorded rate, the usage of its judged legitimate runs, the latest local
 and hosted latency runs whose `--pass` named it (never a dry run's; without one the report says latency
-wasn't measured), the thresholds' calibration at the pass's commit and, with `--null-baseline`, a
+wasn't measured; each part names its run, and a hosted run's provider stays unknown, as it recorded it),
+the thresholds' calibration at the pass's commit and, with `--null-baseline`, a
 null-baseline pass that judged exactly the held-out legitimate tasks the pass ran (no `--only`, no stop
 at its budget). Only a whole `--results` pass becomes the latest report: `--suite all --split all`
 with no `--only`, not stopped by its budget, gating evidence (on the Claude API with the production
@@ -76,7 +77,9 @@ with no `--only`, not stopped by its budget, gating evidence (on the Claude API 
 less the pending ones, its rows reconciled one by one with the suite at its commit
 (`evals.results.selection_problems`), and standing for its commit by what it recorded before its
 runs: no uncommitted gated change, the kernel built from that tree and its commit's gated inputs
-(`evals.results.unchecked_refusal`). Its null baseline must be gating evidence too. Any other pass,
+(`evals.results.unchecked_refusal`). Its null baseline must be gating evidence too, and it reads a
+local latency run only when the run measured the API on the Claude API at the pass's commit; it
+leaves out any other and says why (`evals.report.latency_left_out`). Any other pass,
 such as a pass on Bedrock, a held-out-split pass or one with an errored run, gets its report alone,
 under `evals/out/reports/`, and the command says why. A dry run, a null-baseline pass, a pass with no
 run, a null baseline that isn't gating evidence for a report that would become the latest, or anything
@@ -97,7 +100,7 @@ from evals.tier1.harness import SUMMARY_FILE, TARGETS, TIER1_DIR
 
 if TYPE_CHECKING:
     from evals.latency import LatencyConfig, LatencyDeps
-    from evals.report import Calibration, Latency, NullBaseline, ReportRun, SpendRow
+    from evals.report import Calibration, NullBaseline, ReportLatency, ReportRun, SpendRow
     from evals.tier2.artifact import RunArtifact
     from evals.tier2.passes import PassConfig, PassResult
     from evals.tier2.suite import Suite
@@ -449,12 +452,12 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
     except ValidationError as error:
         raise ReportRefused(f"pass {pass_id} doesn't read as a report's pass ({error.error_count()} problems: "
                             f"{error.errors()[0]['msg']})") from None
+    latest = not kept_out(summary)
     return {
         "pass_result": summary, "gate_result": gate(result, rates), "metrics": metrics,
-        "latency": _pass_latency(root, result.pass_id), "calibration": _calibration_at(root, result.git_sha),
+        "latency": _pass_latency(root, result, latest=latest), "calibration": _calibration_at(root, result.git_sha),
         "recorded": rates.current,
-        "null_baseline": (_null_baseline(root, null_baseline_id, result, latest=not kept_out(summary))
-                          if null_baseline_id else None),
+        "null_baseline": _null_baseline(root, null_baseline_id, result, latest=latest) if null_baseline_id else None,
         "spend_month": spend_month, "budget": budget,
     }
 
@@ -531,18 +534,22 @@ def _month_spend(root: Path, day: date) -> list["SpendRow"]:
     return rows
 
 
-def _pass_latency(root: Path, pass_id: str) -> "Latency | None":
+def _pass_latency(root: Path, result: "PassResult", *, latest: bool) -> "ReportLatency | None":
     """The latency measured for the pass: of the latency runs whose file names it (`latency --pass`), the
-    latest local one and the latest hosted one. A dry run's scripted numbers are never read; None when no
-    run was measured for the pass, which the report shows as not measured. A file that can't be read, or
-    names the pass but isn't a latency run, refuses."""
+    latest local one and the latest hosted one, each with the run it came from. A dry run's scripted
+    numbers are never read. When the report may become the latest (`latest`), a local run is read only
+    when it measured the API on the Claude API at the pass's commit; each other one is left out, and the
+    report says why (`report.latency_left_out`). A hosted run keeps its API's provider as it recorded it,
+    unknown. None when no run was measured for the pass and none was left out, which the report shows as
+    not measured. A file that can't be read, or names the pass but isn't a latency run, refuses."""
     from pydantic import ValidationError
 
     from evals.latency import LatencyRun
-    from evals.report import Latency
+    from evals.report import LatencySource, ReportLatency, latency_left_out
 
     directory = root / "evals" / "out" / "latency"
-    latest: dict[str, LatencyRun] = {}
+    chosen: dict[str, tuple[LatencyRun, LatencySource]] = {}
+    left_out: list[str] = []
     for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
         try:
             data = json.loads(path.read_text())
@@ -550,20 +557,27 @@ def _pass_latency(root: Path, pass_id: str) -> "Latency | None":
             raise ReportRefused(f"latency file {path.name} can't be read ({type(error).__name__})") from None
         if not isinstance(data, dict):
             raise ReportRefused(f"latency file {path.name} isn't a latency run")
-        if data.get("pass_id") != pass_id:
+        if data.get("pass_id") != result.pass_id:
             continue
         try:
             measured = LatencyRun.model_validate(data)
         except ValidationError:
-            raise ReportRefused(f"latency file {path.name} names pass {pass_id} but isn't a latency run") from None
+            raise ReportRefused(f"latency file {path.name} names pass {result.pass_id} but isn't a latency "
+                                "run") from None
         if measured.provider == "fake":
             continue
-        if measured.where not in latest or measured.created_at > latest[measured.where].created_at:
-            latest[measured.where] = measured
-    if not latest:
+        source = LatencySource(latency_id=measured.latency_id, provider=measured.provider, git_sha=measured.git_sha)
+        if latest and measured.where == "local" and (line := latency_left_out(source, result.git_sha)):
+            left_out.append(line)
+            continue
+        if measured.where not in chosen or measured.created_at > chosen[measured.where][0].created_at:
+            chosen[measured.where] = (measured, source)
+    if not chosen and not left_out:
         return None
-    return Latency(local=latest["local"].latency.local if "local" in latest else None,
-                   hosted=latest["hosted"].latency.hosted if "hosted" in latest else None)
+    local, hosted = chosen.get("local"), chosen.get("hosted")
+    return ReportLatency(local=local[0].latency.local if local else None, local_source=local[1] if local else None,
+                         hosted=hosted[0].latency.hosted if hosted else None,
+                         hosted_source=hosted[1] if hosted else None, local_left_out=left_out)
 
 
 def _calibration_at(root: Path, git_sha: str) -> "Calibration | None":
@@ -660,9 +674,12 @@ def report_command(argv: list[str], *, root: Path | None = None) -> int:
     except (ReportRefused, PassRefused, OSError, ValueError) as refused:   # ValueError: the guide's markers
         print(f"report: {refused}")
         return 1
-    judged = inputs["gate_result"]
+    judged, latency = inputs["gate_result"], inputs["latency"]
+    measured = latency is not None and (latency.local is not None or latency.hosted is not None)
     print(f"report: pass {options.pass_id}: the gate {'passed' if judged.passed else 'failed'}; latency "
-          f"{'measured' if inputs['latency'] is not None else 'not measured'}")
+          f"{'measured' if measured else 'not measured'}")
+    for line in latency.local_left_out if latency is not None else []:
+        print(f"report: {line}")
     kept = "so the latest report, evals/reports/spend.csv and the latest results in docs/evals.md stay as they were"
     summary = inputs["pass_result"]
     left_out, explores = partial(summary), exploratory(summary)

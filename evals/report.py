@@ -9,7 +9,9 @@ models, by `results.gating_refusal`), whose rows hold one judged run of every sc
 repetition it selected (`PassSummary.uncovered`, from `results.selection_problems`) and that stood
 for its commit by what it recorded before its runs (`PassSummary.unchecked`, from
 `results.unchecked_refusal`); any other pass's report stays under `evals/out/reports/` and says why
-(`kept_out`).
+(`kept_out`). Each latency part names the latency run it came from and that run's provider as it
+recorded it (`ReportLatency`), and a report that may become the latest shows a local run only when it
+measured the API on the Claude API at the pass's commit (`latency_left_out`).
 
 The inputs are the report's own models, built from what the pass runner, the usage and latency
 measurements and the calibration leave. The report judges nothing: whether the pass passed comes
@@ -135,9 +137,61 @@ class HostedLatency(BaseModel):
 
 
 class Latency(BaseModel):
+    """A latency run's numbers, as its file holds them."""
+
     model_config = _STRICT
     local: LocalLatency | None = None
     hosted: HostedLatency | None = None
+
+
+# A provider, as the report names it in a sentence.
+PROVIDER_WORDS: dict[str, str] = {"anthropic": "the Claude API", "bedrock": "Amazon Bedrock",
+                                  "fake": "scripted models", "unknown": "a provider recorded as unknown"}
+
+
+class LatencySource(BaseModel):
+    """The latency run a part of the report's latency came from: its id, the provider of the API it
+    measured as the run recorded it (`unknown` for a deployment, whose setting the harness can't see),
+    and the commit it was made at."""
+
+    model_config = _STRICT
+    latency_id: StrictStr
+    provider: ReportProvider
+    git_sha: StrictStr
+
+
+class ReportLatency(BaseModel):
+    """The latency a report shows: each part's numbers with the latency run they came from, and a line
+    for each local run named for the pass that a report which may become the latest leaves out
+    (`latency_left_out`)."""
+
+    model_config = _STRICT
+    local: LocalLatency | None = None
+    local_source: LatencySource | None = None
+    hosted: HostedLatency | None = None
+    hosted_source: LatencySource | None = None
+    local_left_out: list[StrictStr] = []
+
+    @model_validator(mode="after")
+    def _each_part_names_its_run(self) -> Self:
+        if (self.local is None) != (self.local_source is None) or (self.hosted is None) != (self.hosted_source is None):
+            raise ValueError("each latency part comes with the latency run it came from, and each source with its part")
+        return self
+
+
+def latency_left_out(source: LatencySource, git_sha: str) -> str | None:
+    """Why a report that may become the latest leaves out the local latency run `source`, given the
+    pass's commit `git_sha`, or None when it may read it: only a run that measured the API on the Claude
+    API at the pass's commit stands beside numbers that are gating evidence."""
+    reasons = []
+    if source.provider != "anthropic":
+        reasons.append(f"measured the API on {PROVIDER_WORDS[source.provider]}")
+    if source.git_sha != git_sha:
+        reasons.append(f"was made at commit `{source.git_sha[:12]}`, not the pass's `{git_sha[:12]}`")
+    if not reasons:
+        return None
+    return (f"Latency run `{source.latency_id}` is left out: it {' and '.join(reasons)}, and a report that may "
+            "become the latest reads a local run only on the Claude API at the pass's commit.")
 
 
 class CostSpread(BaseModel):
@@ -468,7 +522,7 @@ def load_budget(path: Path = BUDGET_FILE) -> Budget:
 
 # The numbers
 
-def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
+def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: ReportLatency | None,
                 calibration: Calibration | None, *, recorded: RecordedRate | None = None,
                 null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow]) -> dict[str, Any]:
     """The report's numbers as data (`evals/reports/latest.json`). A number this report didn't
@@ -530,6 +584,11 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
         "reviewer_ms": {"local": _ms(local.reviewer) if local else None,
                         "hosted": _ms(hosted.reviewer) if hosted else None},
         "proving_ms": _ms(local.proving) if local else None,
+        # The latency run each part came from, with the API's provider as it recorded it (unknown for the
+        # deployment) and, for the local part, its commit; a hosted run's is the checkout's, not the deployment's.
+        "latency_runs": {"local": latency.local_source.model_dump() if latency and latency.local_source else None,
+                         "hosted": (latency.hosted_source.model_dump(exclude={"git_sha"})
+                                    if latency and latency.hosted_source else None)},
         "measured_cost_per_run_usd": _round(p.spend.total_usd / p.spend.runs) if p.spend.runs else None,
         "eval_spend_month_usd": _round(sum(row.total_usd for row in month)),          # every provider
         "eval_spend_month_claude_api_usd": _round(sum(row.claude_api_usd for row in month)),   # what the guard counts
@@ -642,7 +701,7 @@ def _tokens(value: float) -> str:
 
 # The report
 
-def render_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
+def render_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: ReportLatency | None,
                   calibration: Calibration | None, *, recorded: RecordedRate | None = None,
                   null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow],
                   budget: Budget | None = None) -> str:
@@ -949,12 +1008,15 @@ def _cost(p: PassSummary, metrics: Metrics | None, spend_month: Sequence[SpendRo
     return out
 
 
-def _latency(latency: Latency | None) -> list[str]:
+def _latency(latency: ReportLatency | None) -> list[str]:
     out = ["## Latency", "### Local"]
     local = latency.local if latency else None
     if local is not None:
-        out.append("In-process against the API target: the full turn from the visitor's message to Claude's reply, "
-                   "as the client sees it, and the server-side intervals from the API's and kernel's records.")
+        source = latency.local_source
+        out.append(f"Latency run `{source.latency_id}`, at commit `{source.git_sha[:12]}`, measured the API on "
+                   f"{PROVIDER_WORDS[source.provider]}. In-process against the API target: the full turn from the "
+                   "visitor's message to Claude's reply, as the client sees it, and the server-side intervals from "
+                   "the API's and kernel's records.")
         out.append(_table(("Measure", "Samples", "p50", "p95"), [
             _latency_row("Full turn, warm", local.full_turn.warm),
             _latency_row("Full turn, cold first turn", local.full_turn.cold),
@@ -967,12 +1029,17 @@ def _latency(latency: Latency | None) -> list[str]:
         out.append(_errored_turns(local.errored_turns))
     else:
         out.append("Not measured in this report.")
+    if latency is not None and latency.local_left_out:
+        out.append("\n".join(f"- {line}" for line in latency.local_left_out))
     out.append("### Hosted")
     hosted = latency.hosted if latency else None
     if hosted is not None:
-        out.append("Against the hosted deployment: the full turn as the client sees it, and the reviewer's timing "
-                   "from the owner's ledger. The reveal delay, reply check, decide and proving are measured locally "
-                   "only.")
+        source = latency.hosted_source
+        provider = ("the deployment's provider is recorded as unknown, since the harness can't see its setting"
+                    if source.provider == "unknown" else f"it measured the API on {PROVIDER_WORDS[source.provider]}")
+        out.append(f"Latency run `{source.latency_id}`: {provider}. Against the hosted deployment: the full turn as "
+                   "the client sees it, and the reviewer's timing from the owner's ledger. The reveal delay, reply "
+                   "check, decide and proving are measured locally only.")
         out.append(_table(("Measure", "Samples", "p50", "p95"), [
             _latency_row("Full turn, warm", hosted.full_turn.warm),
             _latency_row("Full turn, cold first turn", hosted.full_turn.cold),
@@ -1166,7 +1233,7 @@ def kept_out(p: PassSummary) -> bool:
     return bool(partial(p)) or exploratory(p) is not None or bool(p.uncovered) or p.unchecked is not None
 
 
-def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: Latency | None,
+def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | None, latency: ReportLatency | None,
                  calibration: Calibration | None, *, recorded: RecordedRate | None = None,
                  null_baseline: NullBaseline | None = None, spend_month: Sequence[SpendRow],
                  budget: Budget | None = None, reports_dir: Path = REPORTS_DIR, evals_doc: Path = EVALS_DOC,
@@ -1177,12 +1244,18 @@ def write_report(pass_result: PassSummary, gate_result: Any, metrics: Metrics | 
     a judged run of every scenario and repetition it selected, or can't stand for its commit) writes only
     its report, under `out_dir`, and none of the rest. A dry run or a null-baseline pass is refused
     before anything is written: neither measures a Desk. So is a report that would become the latest
-    with a null baseline that isn't gating evidence; a report kept out says why it isn't."""
+    with a null baseline that isn't gating evidence, or with a local latency run that didn't measure
+    the API on the Claude API at the pass's commit (`latency_left_out`); a report kept out says why
+    it isn't, and names the run each latency part came from."""
     p = PassSummary.model_validate(pass_result)
     if refusal := latest_refusal(p.pass_id, dry_run=p.dry_run, null_baseline=p.null_baseline):
         raise ValueError(refusal)
     if null_baseline is not None and null_baseline.gating_refusal and not kept_out(p):
         raise ValueError(null_baseline_refusal(p.pass_id, null_baseline.gating_refusal))
+    if latency is not None and latency.local_source is not None and not kept_out(p) and (
+            left_out := latency_left_out(latency.local_source, p.git_sha)):
+        raise ValueError(f"pass {p.pass_id}'s report would become the latest, so it can't show this local latency "
+                         f"run: {left_out}")
     inputs = {"recorded": recorded, "null_baseline": null_baseline, "spend_month": spend_month}
     latest = latest_json(p, gate_result, metrics, latency, calibration, **inputs)
     text = render_report(p, gate_result, metrics, latency, calibration, **inputs, budget=budget)

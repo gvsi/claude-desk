@@ -28,10 +28,12 @@ from evals.report import (
     CostSpread,
     HostedLatency,
     Latency,
+    LatencySource,
     LocalLatency,
     Metrics,
     NullBaseline,
     PassSummary,
+    ReportLatency,
     ReportRun,
     SpendRow,
     Spread,
@@ -54,7 +56,7 @@ from evals.tests.eval_repo import commit, make_repo, set_landed, write
 from evals.tests.test_calibrate import THRESHOLDS_FILE, THRESHOLDS_PATH
 from evals.tests.test_passes import NOW, config, deps
 from evals.tests.test_usage_and_latency import model_call
-from evals.tier2.passes import append_spend, run_pass, shared_spend_file
+from evals.tier2.passes import append_spend, load_pass, run_pass, shared_spend_file
 from evals.tier2.runner import RunError, RunOutcome, SimulatorStats
 from evals.tier2.schema import ATTACK_CATEGORIES, RecordedRate, wilson_lower_95
 from evals.tier2.verdict import ORACLES, RunViolation, judge_run
@@ -134,17 +136,20 @@ def metrics() -> Metrics:
     )
 
 
-def latency() -> Latency:
-    return Latency(
+def latency() -> ReportLatency:
+    """Local latency measured on the Claude API at the pass's commit, and hosted latency from the deployment."""
+    return ReportLatency(
         local=LocalLatency(
             full_turn=TurnSpread(warm=Spread(n=57, p50=6420.0, p95=11870.0), cold=Spread(n=3, p50=9310.0, p95=9950.0)),
             reveal_delay=Spread(n=60, p50=512.0, p95=941.0), check_reply=Spread(n=60, p50=488.0, p95=903.0),
             decide=Spread(n=40, p50=21.0, p95=63.0), reviewer=Spread(n=9, p50=1140.0, p95=1720.0),
             proving=Spread(n=20, p50=2310.0, p95=3480.0), errored_turns=1,
         ),
+        local_source=LatencySource(latency_id="l-20261101-c3d4", provider="anthropic", git_sha=GIT_SHA),
         hosted=HostedLatency(full_turn=TurnSpread(warm=Spread(n=57, p50=7210.0, p95=13050.0),
                                                   cold=Spread(n=3, p50=12400.0, p95=14100.0)),
                              reviewer=Spread(n=8, p50=1260.0, p95=1910.0), errored_turns=0),
+        hosted_source=LatencySource(latency_id="l-20261101-e5f6", provider="unknown", git_sha=GIT_SHA),
     )
 
 
@@ -765,15 +770,16 @@ def calibrated(version: int, pass_id: str) -> str:
 
 
 def latency_file(root: Path, pass_id: str | None, *, where: str = "local", provider: str = "anthropic",
-                 reveal_p50: float = 512.0, minutes: int = 60) -> None:
-    """A finished latency run for `pass_id`, as `python -m evals.run latency --pass` leaves it."""
+                 reveal_p50: float = 512.0, minutes: int = 60, git_sha: str = GIT_SHA) -> str:
+    """A finished latency run for `pass_id`, made at commit `git_sha`, as `python -m evals.run latency
+    --pass` leaves it; returns its id."""
     turns = TurnSpread(warm=Spread(n=57, p50=6420.0, p95=11870.0), cold=Spread(n=3, p50=9310.0, p95=9950.0))
     measured = (Latency(local=LocalLatency(full_turn=turns, reveal_delay=Spread(n=60, p50=reveal_p50, p95=941.0),
                                            check_reply=Spread(n=60, p50=488.0, p95=903.0), errored_turns=0))
                 if where == "local" else Latency(hosted=HostedLatency(full_turn=turns, errored_turns=0)))
     created = NOW + timedelta(minutes=minutes)
     latency_id = f"{created:%Y%m%d-%H%M%S}-{minutes:06x}"
-    done = LatencyRun(latency_id=latency_id, created_at=created, git_sha=GIT_SHA, pass_id=pass_id, where=where,
+    done = LatencyRun(latency_id=latency_id, created_at=created, git_sha=git_sha, pass_id=pass_id, where=where,
                       base_url=None if where == "local" else "https://desk.example.invalid",
                       provider=provider if where == "local" else "unknown", turns_per_kind=20, kinds=list(KINDS),
                       estimate_usd=3.0, spend_usd=None, spend_estimated=False, stopped_by_budget=False,
@@ -781,6 +787,7 @@ def latency_file(root: Path, pass_id: str | None, *, where: str = "local", provi
     out = root / "evals" / "out" / "latency" / f"{latency_id}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(done.model_dump_json(indent=1) + "\n")
+    return latency_id
 
 
 @pytest.fixture
@@ -815,7 +822,7 @@ async def test_report_command_writes_the_report_of_a_finished_pass(report_repo, 
                               "provider": "anthropic", "runs": 0, "desk_usd": "2.4000", "simulator_usd": "0.0000",
                               "claude_api_usd": "2.4000", "total_usd": "2.4000", "estimated_usd": "0.0000"})
     pass_id = await report_pass(root, results=True)
-    latency_file(root, pass_id)
+    latency_file(root, pass_id, git_sha=load_pass(pass_id, root).git_sha)        # on the Claude API at its commit
     latency_file(root, pass_id, provider="fake", reveal_p50=7.0, minutes=90)      # a dry run's: never read
     latency_file(root, "20261030-200000-0c0c0c", reveal_p50=9.0, minutes=30)     # another pass's
     write(root, THRESHOLDS_PATH, calibrated(3, "20261030-230000-d00d00"))         # calibrated after the pass
@@ -1069,6 +1076,55 @@ async def test_report_command_keeps_an_exploratory_pass_out_of_the_latest_result
     assert evals_run.report_command(["--pass", gating], root=root) == 0
     assert f"report: wrote evals/reports/2026-10-30-{gating}.md" in capsys.readouterr().out
     assert json.loads((reports / "latest.json").read_text())["pass_id"] == gating and gating in doc.read_text()
+
+
+async def test_the_latest_report_reads_a_local_latency_run_only_on_the_claude_api_at_the_pass_commit(
+        report_repo, capsys):
+    """A report that may become the latest reads a local latency run only when it measured the API on the
+    Claude API at the pass's commit. A newer run on Bedrock, or one made at another commit, is left out,
+    and the report and the command say which and why; `write_report` refuses one, so no caller can skip
+    the check. A hosted run keeps its provider as it recorded it, unknown, and the report says so. A
+    report kept under `evals/out/reports/` reads the latest local run and names its provider and commit."""
+    root = report_repo
+    pass_id = await report_pass(root, results=True)
+    sha = load_pass(pass_id, root).git_sha
+    read = latency_file(root, pass_id, git_sha=sha, minutes=60)
+    bedrock = latency_file(root, pass_id, git_sha=sha, provider="bedrock", reveal_p50=42.0, minutes=90)
+    elsewhere = latency_file(root, pass_id, git_sha="0" * 40, reveal_p50=77.0, minutes=120)
+    hosted = latency_file(root, pass_id, where="hosted", git_sha=sha, minutes=30)
+
+    assert evals_run.report_command(["--pass", pass_id], root=root) == 0
+
+    printed = capsys.readouterr().out
+    latest = json.loads((root / "evals" / "reports" / "latest.json").read_text())
+    assert latest["reveal_delay_ms"] == {"n": 60, "p50": 512.0, "p95": 941.0}
+    assert latest["latency_runs"] == {"local": {"latency_id": read, "provider": "anthropic", "git_sha": sha},
+                                      "hosted": {"latency_id": hosted, "provider": "unknown"}}
+    text = (root / "evals" / "reports" / f"2026-10-30-{pass_id}.md").read_text()
+    local, hosted_part = (text.split(f"\n### {part}\n", 1)[1].split("\n#", 1)[0] for part in ("Local", "Hosted"))
+    assert f"Latency run `{read}`, at commit `{sha[:12]}`, measured the API on the Claude API." in local
+    rule = "and a report that may become the latest reads a local run only on the Claude API at the pass's commit."
+    for line in (f"Latency run `{bedrock}` is left out: it measured the API on Amazon Bedrock, {rule}",
+                 f"Latency run `{elsewhere}` is left out: it was made at commit `000000000000`, not the pass's "
+                 f"`{sha[:12]}`, {rule}"):
+        assert line in local and f"report: {line}" in printed, line
+    assert (f"Latency run `{hosted}`: the deployment's provider is recorded as unknown, since the harness can't "
+            "see its setting.") in hosted_part
+
+    inputs = all_inputs()
+    on_bedrock = inputs["latency"].model_copy(
+        update={"local_source": inputs["latency"].local_source.model_copy(update={"provider": "bedrock"})})
+    with pytest.raises(ValueError, match="measured the API on Amazon Bedrock"):
+        write_report(**{**inputs, "latency": on_bedrock}, reports_dir=root / "elsewhere",
+                     evals_doc=root / "docs" / "evals.md", out_dir=root / "elsewhere")
+    assert not (root / "elsewhere").exists()
+
+    explored = await report_pass(root)   # not a --results pass, so its report is kept out
+    kept = latency_file(root, explored, git_sha="0" * 40, provider="bedrock", minutes=150)
+    assert evals_run.report_command(["--pass", explored], root=root) == 0
+    text = (root / "evals" / "out" / "reports" / f"2026-10-30-{explored}.md").read_text()
+    assert f"Latency run `{kept}`, at commit `000000000000`, measured the API on Amazon Bedrock." in text
+    assert "is left out" not in text
 
 
 async def test_report_command_counts_the_fallbacks_of_every_attempt(report_repo):
