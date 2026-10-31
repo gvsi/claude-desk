@@ -73,6 +73,14 @@ REPLY_WHY = {
     "canary": "it quoted a private document",
     "unsupported_language": "it wasn't in English or Spanish",
 }
+ATTEMPT_VIOLATIONS = frozenset({"canary", "unentitled_fact"})
+"""The reply check's violation kinds that make a draft of Claude's it stopped an attempt the last 7 days count, beside
+the requests the kernel refused (owner decision, 2026-10-31, #216). Each is a deterministic sign that someone tried for
+private data: a private document's text about to leak (`canary`), or a fact the person isn't entitled to
+(`unentitled_fact`). The other kinds are about Claude's own wording (a number, a promise, an unknown or stale fact, the
+language), which a plain question can lead to, so a draft stopped only for them isn't counted; Safety and the
+briefing still list it. The AI triage isn't used: it is written later, may be missing, and what the visitor wrote can
+steer it."""
 
 
 def utc(moment: datetime) -> datetime:
@@ -239,6 +247,13 @@ class Stopped(Timed):
     card_ids: tuple[str, ...] = ()
     origin: Literal["kernel", "api"] = "kernel"
     ledger_seq: int = 0
+    violations: tuple[str, ...] = ()           # a blocked reply's violation kinds, as its ledger entry records them
+
+    @property
+    def counts_as_attempt(self) -> bool:
+        """Whether the last 7 days count it: a refused request, or a blocked reply with a kind in `ATTEMPT_VIOLATIONS`
+        among its violations, counted once however many it has."""
+        return self.kind == "refused" or not ATTEMPT_VIOLATIONS.isdisjoint(self.violations)
 
 
 def reply_violations(summary: dict) -> list[tuple[str, str | None]]:
@@ -282,7 +297,8 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
     """Stopped attempts in `sessions` (the Desk's visitor and agent sessions): a decision refused when decided
     (`outcome = "refuse"`, at its `created_at`), or a `reply` entry of Claude's with a violation other than
     `session_paused`. A refusal at execution, a denial, an expiry, an owner's say and a paused chat's handoff aren't
-    attempts. A refusal is recorded history as on its tool's page (`decision_replayed`, failing closed)."""
+    attempts. A refusal is recorded history as on its tool's page (`decision_replayed`, failing closed). A blocked
+    reply carries its violation kinds, for `week_counts` to tell which ones count."""
     entries = {entry["seq"]: entry for entry in ledger}
     found = []
     for row in decisions:
@@ -305,7 +321,7 @@ def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[
         found.append(Stopped(at=entry_time(entry), session_id=event.get("session_id"), ref_id=str(entry["seq"]),
                              line=None, replayed=replayed(entry), kind="reply_blocked",
                              reason_plain=reply_reason(violations), origin=event.get("origin", "kernel"),
-                             ledger_seq=entry["seq"]))
+                             ledger_seq=entry["seq"], violations=tuple(kind for kind, _ in violations)))
     return found
 
 
@@ -482,10 +498,11 @@ def briefing(done: Activity, frame: Windows) -> Briefing:
 @dataclass(frozen=True)
 class WeekCounted:
     """What a span of days counts from `start` to `end`, Today's last 7 days and the reports alike: the conversations'
-    text rows, the bookings, the requests the kernel refused, and the owner stepping into those conversations; and
+    text rows, the bookings, the attempts the checkpoint stopped, and the owner stepping into those conversations; and
     from them, how many conversations there were, how many the owner stepped into and how many Claude handled alone.
-    `stopped` holds the refused requests only: a draft of Claude's the reply check stopped is no attempt anyone made,
-    so it is listed on Safety and in the briefing but never counted here."""
+    `stopped` holds the requests the kernel refused and the drafts of Claude's the reply check stopped for a sign that
+    someone tried for private data (`ATTEMPT_VIOLATIONS`): a draft stopped only for its wording is no attempt anyone
+    made, so it is listed on Safety and in the briefing but never counted here."""
 
     texts: list[Timed]
     bookings: list[Timed]
@@ -513,14 +530,14 @@ def week_counts(done: Activity, start: datetime, end: datetime) -> WeekCounted:
     texts = _within(done.texts, start, end)
     conversations = _sessions(texts)
     return WeekCounted(texts=texts, bookings=_within(done.bookings, start, end),
-                       stopped=[attempt for attempt in _within(done.stopped, start, end) if attempt.kind == "refused"],
+                       stopped=[attempt for attempt in _within(done.stopped, start, end) if attempt.counts_as_attempt],
                        stepped=[thing for thing in _within(done.stepped, start, end)
                                 if thing.session_id in conversations])
 
 
 def this_week(done: Activity, frame: Windows) -> ThisWeek:
-    """The last 7 days: totals from `start` to now, and each local date's conversations, bookings and refused
-    requests (`week_counts`). A conversation the owner stepped into (inside the window) isn't one Claude handled.
+    """The last 7 days: totals from `start` to now, and each local date's conversations, bookings and stopped
+    attempts (`week_counts`). A conversation the owner stepped into (inside the window) isn't one Claude handled.
     Each booking's amount is taken over all the Desk's bookings, so a quote a booking before the window took backs
     none in it."""
     counted = week_counts(done, frame.start, frame.now)
@@ -528,13 +545,13 @@ def this_week(done: Activity, frame: Windows) -> ThisWeek:
     for text in counted.texts:
         talked.setdefault(frame.local_date(text.at), set()).add(text.session_id)
     booked = Counter(frame.local_date(booking.at) for booking in counted.bookings)
-    refused = Counter(frame.local_date(attempt.at) for attempt in counted.stopped)
+    stopped = Counter(frame.local_date(attempt.at) for attempt in counted.stopped)
     return ThisWeek(
         timezone=frame.zone.key, start=frame.dates[0], end=frame.dates[-1], bookings=len(counted.bookings),
         booked_cents=sum(done.booked[booking.ref_id] for booking in counted.bookings),
         conversations=counted.conversations, handled=counted.handled, stepped_in=counted.stepped_in,
         stopped=len(counted.stopped),
-        days=[WeekDay(date=day, conversations=len(talked[day]), bookings=booked[day], stopped=refused[day])
+        days=[WeekDay(date=day, conversations=len(talked[day]), bookings=booked[day], stopped=stopped[day])
               for day in frame.dates])
 
 

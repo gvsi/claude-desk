@@ -764,9 +764,11 @@ export interface Suggestion {
  * "Last 7 days": the seven local dates ending today, in `timezone`. Totals run from 00:00 on `start` to now;
  * `booked_cents` adds, for each booking, the newest quote of its conversation made at or before it that no earlier
  * booking took (none: 0); `handled + stepped_in == conversations`; `days` holds all seven, oldest first, the last
- * one `end`. `stopped` counts the visitors' and agents' requests the kernel refused, not Claude's own drafts the
- * reply check stopped, which nobody tried: Safety's attempts list both, and the briefing's blocked items keep the
- * drafts.
+ * one `end`. `stopped` counts the visitors' and agents' requests the kernel refused, and the drafts of Claude's the
+ * reply check stopped for a sign that someone tried for private data: a private document's text (`canary`) or a fact
+ * the person isn't entitled to (`unentitled_fact`), each draft once. A draft stopped only for its wording (a number,
+ * a promise, an unknown or stale fact, the language) is no attempt anyone made and isn't counted: Safety's attempts
+ * list every stopped draft, and the briefing's blocked items keep them (owner decision, 2026-10-31, #216).
  */
 export interface ThisWeek {
   timezone: string;
@@ -781,8 +783,10 @@ export interface ThisWeek {
   days: WeekDay[];
 }
 /**
- * One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` is the requests the kernel refused that day,
- * not Claude's own drafts the reply check stopped.
+ * One date of "Last 7 days", counted as `ThisWeek` counts: `stopped` is that day's requests the kernel refused and
+ * drafts of Claude's the reply check stopped for quoting a private document (`canary`) or citing a fact the person
+ * isn't entitled to (`unentitled_fact`), not drafts stopped only for their wording (owner decision, 2026-10-31,
+ * #216).
  */
 export interface WeekDay {
   date: string;

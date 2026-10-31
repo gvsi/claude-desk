@@ -12,6 +12,7 @@ import itertools
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import get_args
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -23,6 +24,7 @@ from sqlalchemy import text as sql
 from desk.api.kernel_client import CredentialView, KernelFailed
 from desk.api.main import create_app
 from desk.api.owner_reads import (
+    ATTEMPT_VIOLATIONS,
     BOOKING_CLAIM,
     REPLY_WHY_BY_RULE,
     Activity,
@@ -44,7 +46,7 @@ from desk.api.store import (
     prepare_model_input,
     start_fresh_context,
 )
-from desk.contracts import Decision, ExecResult, RenderedBlock, ReplyDraft, ToolCall
+from desk.contracts import Decision, ExecResult, RenderedBlock, ReplyDraft, ToolCall, Violation
 from desk.kernel_api import (
     AnswerRequest,
     CancelRequest,
@@ -697,8 +699,8 @@ async def test_this_week_handled_versus_stepped_in(app, browser, fake, kernel_ht
     this_week = (await owner.get(f"desks/{owner.desk_id}/today")).json()["this_week"]
 
     # The replayed take-over counts at the time it was recorded, before the window, so the chat stays handled: timed
-    # by when it was written, it would make `stepped_in` 6. The replayed blocked reply, a draft of Claude's, isn't
-    # counted as stopped.
+    # by when it was written, it would make `stepped_in` 6. The replayed blocked reply, a draft of Claude's stopped for
+    # a number in its prose, isn't counted as stopped.
     assert {key: this_week[key] for key in ("conversations", "stepped_in", "handled", "stopped")} == {
         "conversations": 11, "stepped_in": 5, "handled": 6, "stopped": 0}
     assert by_day(this_week, "stopped") == {f"2026-10-{day}": 0 for day in range(24, 31)}
@@ -798,17 +800,18 @@ async def test_stopped_counts_only_attempts(scene, clock):
     today = (await owner.get(f"desks/{owner.desk_id}/today")).json()
     safety = await owner.get(f"desks/{owner.desk_id}/safety")
 
-    # Safety and the briefing list the refusal and the blocked reply; the last 7 days count the refusal alone
+    # Safety and the briefing list the refusal and the blocked reply; the last 7 days count the refusal alone, since
+    # the reply was stopped for its wording (a number in its prose)
     assert (today["this_week"]["stopped"], today["briefing"]["blocked"]) == (1, 2)
     assert safety.status_code == 200, safety.text
     assert [(attempt["kind"], attempt["ref_id"]) for attempt in safety.json()] == [
         ("reply_blocked", str(blocked_seq)), ("refused", refused.decision_id)]
 
 
-async def test_stopped_counts_refused_requests_not_claudes_drafts(scene, clock):
-    """The last 7 days count as stopped only the requests the kernel refused: a draft of Claude's the reply check
-    stopped is no attempt anyone made. Safety still lists both kinds, and the briefing still shows each draft among
-    its blocked items, whose words claim no attempt."""
+async def test_stopped_counts_refused_requests_not_claudes_wording_drafts(scene, clock):
+    """The last 7 days don't count as stopped a draft of Claude's the reply check stopped for its wording (here a
+    number in its prose): it is no attempt anyone made. Safety still lists both kinds, and the briefing still shows
+    each draft among its blocked items, whose words claim no attempt."""
     pushy = await scene.visitor(local(2026, 10, 29, 19))
     refused = await scene.refusal(pushy, local(2026, 10, 29, 19))
     first = await scene.blocked_reply(pushy, local(2026, 10, 29, 19, 10))
@@ -833,20 +836,91 @@ async def test_stopped_counts_refused_requests_not_claudes_drafts(scene, clock):
         ("blocked", str(second)), ("blocked", str(first)), ("blocked", refused.decision_id)]
 
 
-def test_the_week_and_the_reports_count_only_refused_requests():
-    """`week_counts`, the one count Today's last 7 days and the reports share, takes only refused requests as stopped:
-    a replayed draft of Claude's the reply check stopped neither counts nor flags the week as recorded history, while
-    "since last night", which lists it among its blocked items, is flagged."""
+async def test_stopped_counts_drafts_that_reached_for_private_data(scene, clock):
+    """The last 7 days also count as stopped a draft of Claude's the reply check stopped for a sign that someone tried
+    for private data: a private document's text about to leak (`canary`) or a fact the person may not see
+    (`unentitled_fact`). A draft stopped only for its wording, such as a promise the rules don't back, still isn't
+    counted. Safety lists all four, and the briefing still shows each among its blocked items (owner decision,
+    2026-10-31, #216)."""
+    pushy = await scene.visitor(local(2026, 10, 29, 19))
+    refused = await scene.refusal(pushy, local(2026, 10, 29, 19))
+    leaked = scene.blocked_reply_with(pushy, local(2026, 10, 29, 19, 10), ["canary"], ["labels.canary"])
+    unentitled = scene.blocked_reply_with(pushy, local(2026, 10, 29, 19, 20), ["unentitled_fact"], ["not_a_reader"])
+    faucet = await scene.visitor(local(2026, 10, 29, 20))
+    await scene.text(faucet, local(2026, 10, 29, 20), "My kitchen faucet drips, can you come today?")
+    promised = scene.blocked_reply_with(faucet, local(2026, 10, 29, 20), ["soft_promise"], ["soft.promise"])
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    today = (await owner.get(f"desks/{owner.desk_id}/today")).json()
+    safety = await owner.get(f"desks/{owner.desk_id}/safety")
+    listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
+
+    assert today["this_week"]["stopped"] == 3
+    assert by_day(today["this_week"], "stopped") == {**{f"2026-10-{day}": 0 for day in range(24, 31)},
+                                                     "2026-10-29": 3}
+    assert safety.status_code == 200, safety.text
+    assert [(attempt["kind"], attempt["ref_id"]) for attempt in safety.json()] == [
+        ("reply_blocked", str(promised)), ("reply_blocked", str(unentitled)), ("reply_blocked", str(leaked)),
+        ("refused", refused.decision_id)]
+    assert today["briefing"]["blocked"] == 4
+    assert [(item["kind"], item["ref_id"], item["line"]) for item in listed] == [
+        ("blocked", str(promised), None), ("blocked", str(unentitled), None), ("blocked", str(leaked), None),
+        ("blocked", refused.decision_id, refused.reason_plain)]
+
+
+async def test_a_stopped_draft_counts_once(scene, clock):
+    """A draft of Claude's counts as one attempt however many violations stopped it: a promise the rules don't back
+    beside a private document's text, or two facts the person may not see."""
+    who = await scene.visitor(local(2026, 10, 29, 19))
+    scene.blocked_reply_with(who, local(2026, 10, 29, 19), ["soft_promise", "canary"],
+                             ["soft.promise", "labels.canary"])
+    scene.blocked_reply_with(who, local(2026, 10, 29, 19, 5), ["unentitled_fact", "unentitled_fact"],
+                             ["not_a_reader", "not_a_reader"])
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    this_week = (await owner.get(f"desks/{owner.desk_id}/today")).json()["this_week"]
+
+    assert this_week["stopped"] == 2
+    assert by_day(this_week, "stopped")["2026-10-29"] == 2
+
+
+def stopped_only(*stopped: Stopped) -> Activity:
+    """A Desk's activity holding nothing but these stopped attempts."""
+    return Activity(people=People([], [], []), bookings=[], booked={}, leads=[], holds=[], callbacks=[], stepped=[],
+                    texts=[], replies=[], stopped=list(stopped))
+
+
+def test_the_week_and_the_reports_count_refusals_and_private_data_drafts():
+    """`week_counts`, the one count Today's last 7 days and the reports share, takes as stopped the refused requests
+    and the drafts of Claude's stopped for a sign that someone tried for private data. A replayed draft stopped for its
+    wording alone neither counts nor flags the week as recorded history, while "since last night", which lists it
+    among its blocked items, is flagged; a replayed private-data draft flags both."""
     frame = windows(local(2026, 10, 30, 9), "America/Los_Angeles")
     at = local(2026, 10, 29, 19)
-    done = Activity(people=People([], [], []), bookings=[], booked={}, leads=[], holds=[], callbacks=[], stepped=[],
-                    texts=[], replies=[], stopped=[
-                        Stopped(at=at, session_id="sess-a", ref_id="dec-refused", kind="refused"),
-                        Stopped(at=at, session_id="sess-a", ref_id="7", kind="reply_blocked", replayed=True),
-                        Stopped(at=at, session_id="sess-b", ref_id="9", kind="reply_blocked")])
+    done = stopped_only(
+        Stopped(at=at, session_id="sess-a", ref_id="dec-refused", kind="refused"),
+        Stopped(at=at, session_id="sess-a", ref_id="7", kind="reply_blocked", replayed=True,
+                violations=("number_in_prose",)),
+        Stopped(at=at, session_id="sess-b", ref_id="9", kind="reply_blocked", violations=("soft_promise", "canary")),
+        Stopped(at=at, session_id="sess-b", ref_id="11", kind="reply_blocked", violations=("unentitled_fact",)),
+        Stopped(at=at, session_id="sess-b", ref_id="12", kind="reply_blocked",
+                violations=("unknown_fact", "stale_fact", "promise_word", "unsupported_language")))
 
-    assert [attempt.ref_id for attempt in week_counts(done, frame.start, frame.now).stopped] == ["dec-refused"]
+    counted = week_counts(done, frame.start, frame.now)
+    assert [attempt.ref_id for attempt in counted.stopped] == ["dec-refused", "9", "11"]
     assert recorded_history(done, frame) == RecordedHistory(needs_you=False, briefing=True, this_week=False)
+    leaked = stopped_only(Stopped(at=at, session_id="sess-c", ref_id="13", kind="reply_blocked", replayed=True,
+                                  violations=("canary",)))
+    assert recorded_history(leaked, frame) == RecordedHistory(needs_you=False, briefing=True, this_week=True)
+
+
+def test_attempt_violations_are_kinds_the_reply_check_gives():
+    # the kinds that make a stopped draft an attempt are the owner's two (#216), and both are kinds the kernel's reply
+    # check gives: a kind renamed there can't leave a draft that reached for private data silently uncounted
+    assert ATTEMPT_VIOLATIONS == {"canary", "unentitled_fact"}
+    assert ATTEMPT_VIOLATIONS <= set(get_args(Violation.model_fields["kind"].annotation))
 
 
 
