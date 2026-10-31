@@ -368,6 +368,9 @@ describe('the scripted Desk', () => {
       [asked.decision_id, { decision_id: asked.decision_id, action_id: asked.action?.action_id, answer: 'deny_once', state: 'denied' }],
     ]);
     expect(seeded.action?.action_id).toEqual(expect.any(String));
+    // The allow's run, as `execute.py` records it: the decision, its action and the state it ran to.
+    const runs = ledger.entries.filter((e) => e.event.kind === 'execute' && e.event.ref_id === seeded.decision_id);
+    expect(runs.map((e) => e.event.summary)).toEqual([{ decision_id: seeded.decision_id, action_id: seeded.action?.action_id, state: 'executed' }]);
   });
 
   it('held_discount_is_the_one_asked_for', async () => {
