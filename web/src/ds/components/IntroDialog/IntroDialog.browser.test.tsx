@@ -6,7 +6,7 @@
 import { composeStory } from '@storybook/react-vite';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
 import { CAPS_BADGE } from '../../test/copy.ts';
@@ -17,7 +17,7 @@ import meta, { Default } from './IntroDialog.stories.tsx';
 const story = composeStory({ ...Default, play: undefined }, meta, undefined, 'Default');
 
 /** The Default story with other args, rendered without its play. */
-async function runWith(args: Partial<Omit<IntroDialogProps, 'onSubmit'>>): Promise<HTMLDialogElement> {
+async function runWith(args: Partial<Omit<IntroDialogProps, 'onSubmit' | 'onClosed'>>): Promise<HTMLDialogElement> {
   await composeStory({ ...Default, args, play: undefined }, meta, undefined, 'Default').run();
   expect(document.querySelectorAll('dialog.cd-intro')).toHaveLength(1);
   const dialog = document.querySelector<HTMLDialogElement>('dialog.cd-intro');
@@ -98,6 +98,60 @@ it('a_real_press_on_the_scrim_changes_nothing', async () => {
   expect(dialog.open).toBe(true);
   expect(dialog.isConnected).toBe(true);
   expect(document.activeElement).toBe(field);
+});
+
+it('the_illustration_is_whole_from_the_start_under_reduced_motion', async () => {
+  // This project emulates reduced motion: the panel, the two cards, the booking's check and the
+  // receipts show at rest from the first frame, and the check is drawn rather than waiting to be.
+  expect(window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+  const { dialog } = await openDialog();
+  const art = dialog.querySelector('.cd-intro__illustration') as HTMLElement;
+  const still = [
+    dialog.querySelector('.cd-intro__panel'),
+    ...art.querySelectorAll(':scope > .cd-intro__card'),
+    ...art.querySelectorAll('.cd-intro__receipt'),
+  ] as HTMLElement[];
+  expect(still).toHaveLength(5);
+  for (const el of still) {
+    const style = getComputedStyle(el);
+    expect([style.animationName, style.opacity, style.transform]).toEqual(['none', '1', 'none']);
+  }
+  const check = getComputedStyle(art.querySelector('.cd-intro__check path') as Element);
+  expect([check.animationName, check.strokeDasharray, check.strokeDashoffset]).toEqual(['none', 'none', '0px']);
+  expect(dialog.getAnimations({ subtree: true })).toEqual([]);
+});
+
+it('the_exit_closes_at_once_under_reduced_motion', async () => {
+  // Under reduced motion there is no exit to wait for: as the page says the passcode worked, the
+  // dialog closes before the browser draws a frame of it leaving, and says so once. It says so to
+  // the page as that render left it: the `onClosed` passed with `leaving`, never an earlier one,
+  // which a page like Arrival's would read with no Desk to go on to, leaving the visitor on the
+  // preview.
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const onClosedBefore = vi.fn();
+  const onClosed = vi.fn();
+  const props = meta.args as IntroDialogProps;
+  try {
+    flushSync(() => root.render(<IntroDialog {...props} onClosed={onClosedBefore} busy />));
+    const dialog = host.querySelector('dialog') as HTMLDialogElement;
+    expect(dialog.open).toBe(true);
+    flushSync(() => root.render(<IntroDialog {...props} onClosed={onClosed} leaving />));
+    expect(dialog.classList.contains('cd-intro--leaving')).toBe(true);
+    expect(dialog.open).toBe(false);
+    expect(onClosedBefore).not.toHaveBeenCalled();
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    const panel = dialog.querySelector('.cd-intro__panel') as HTMLElement;
+    expect([getComputedStyle(dialog).animationName, getComputedStyle(panel).animationName]).toEqual(['none', 'none']);
+    // Nothing was left waiting to close it again.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(onClosedBefore).not.toHaveBeenCalled();
+    expect(onClosed).toHaveBeenCalledTimes(1);
+  } finally {
+    root.unmount();
+    host.remove();
+  }
 });
 
 it('an_item_without_icon_or_detail_shows_neither', async () => {
