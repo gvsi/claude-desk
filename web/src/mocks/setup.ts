@@ -108,50 +108,105 @@ const INVALID = fail(422, 'invalid');
 const CONFLICT = fail(409, 'conflict');
 
 /**
- * A phrase naming the business: "I run X", "I own X", "We run X" or "We own X", the name ending at
- * " in ", " on ", a comma or the sentence's end. A name starts with a capital and isn't a day, so
- * "We run a small crew", "We run Monday to Friday" and "I own 3 vans" name nothing.
+ * A phrase naming the business: "I run X", "I own X", "We run X" or "We own X", the name ending at a
+ * comma or where `NAME_END` says. A name starts with a capital, so "We run a small crew" and "I own
+ * 3 vans" name nothing.
  */
-const RUNS = /\b(?:I|[Ww]e)\s+(?:run|own)\s+((?!(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)days?\b)[A-ZÀ-Ý][^,.!?\n]*)/;
-/** The other phrase naming it: a sentence that starts "X is my shop" (or "our business", "my café", …). */
-const IS_MY =
-  /(?:^|[.\n!?])\s*([A-ZÀ-Ý0-9][^.\n!?]*?)\s+is\s+(?:my|our)\s+(?:business|shop|store|company|bakery|caf[eé]|restaurant|salon|studio|firm|practice|clinic)(?![A-Za-zÀ-ÿ])/;
+const RUNS = /\b(?:I|[Ww]e)\s+(?:run|own)\s+([A-ZÀ-Ý][^,]*)/;
+/** The words for a business in "my shop is X" and "X is my shop". */
+const SHOP = String.raw`(?:business|shop|store|company|bakery|caf[eé]|restaurant|salon|studio|firm|practice|clinic)`;
+/** "a bakery called X" or "named X". */
+const CALLED = /\b(?:called|named)\s+([A-ZÀ-Ý0-9][^,]*)/;
+/** "My shop is X" or "Our business is called X". */
+const MY_SHOP_IS = new RegExp(String.raw`\b(?:[Mm]y|[Oo]ur)\s+${SHOP}\s+is\s+(?:(?:called|named)\s+)?([A-ZÀ-Ý0-9][^,]*)`);
+/** A sentence that starts "X is my shop" (or "our business", "my café", …). */
+const IS_MY = new RegExp(String.raw`^([A-ZÀ-Ý0-9].*?)\s+is\s+(?:my|our)\s+${SHOP}(?![A-Za-zÀ-ÿ])`);
 
+/** A greeting that can open an introduction ("Hi, I'm Ana"). */
+const GREETING = String.raw`(?:[Hh]i|[Hh]ello|[Hh]ey)\b[\s,]*`;
+/** The words the owner introduces themselves with: "I'm", "I am", "My name is". */
+const INTRODUCING = String.raw`(?:I(?:'|’)?m|I\s+am|[Mm]y\s+name\s+is)`;
 /** A sentence of the owner introducing themselves ("I'm Ana", "My name is Ana", "Hi, I'm Ana"), or a greeting alone. */
-const INTRODUCTION = /^(?:(?:[Hh]i|[Hh]ello|[Hh]ey)\b[\s,]*)?(?:I(?:'|’)?m\b|I am\b|[Mm]y name is\b|$)/;
+const INTRODUCTION = new RegExp(String.raw`^(?:${GREETING})?(?:${INTRODUCING}\b|$)`);
+/** The owner's first name where they introduce themselves. */
+const OWNER = new RegExp(String.raw`\b${INTRODUCING}\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ'’-]{0,39})`);
+/** A sentence about the owner or the work, not a name: it starts "I", "We", "My", "Our", "This" or "It". */
+const FIRST_PERSON = /^(?:I|We|My|Our|This|It)\b/;
+
+/** What follows an introduction in its sentence: "Hi, I'm Ana and Ana's Bakery is my shop" → "Ana's Bakery is my shop". */
+const AFTER_INTRODUCTION = /(?:,\s*|\s+)and\s+(.*)$/;
+/** A word that points at the business without naming it ("This is my bakery"). */
+const PRONOUN = /^(?:This|That|It|Here|There)\b/;
+/** A day of the week, in full or short ("Monday", "Sundays", "Mon", "Thurs"). */
+const DAY = String.raw`(?:(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)days?|Mon|Tues?|Wed|Thu(?:rs?)?|Fri|Sat|Sun)`;
+/**
+ * A schedule rather than a name: days alone or as a range or a time ("Sundays", "Monday to Friday",
+ * "Mon-Fri", "Saturday mornings"). A day followed by more of a name ("Sunday Bakery") is a name.
+ */
+const SCHEDULE = new RegExp(
+  String.raw`^${DAY}(?:$|\s*(?:-|–|&|\d)|\s+(?:to|through|thru|till|until|and|or|mornings?|afternoons?|evenings?|nights?)\b)`,
+);
+
+/**
+ * Where a name in a phrase ends: before " in ", " with ", " since " and the like, or before an "and"
+ * that starts a new clause ("and we bake …"); an "and" inside the name stays ("Rivera Plumbing and Heating").
+ */
+const NAME_END = /\s(?:in|on|at|near|with|for|since|from|out\s+of)\s|,?\s+and\s+(?:I|[Ww]e|[Mm]y|[Oo]ur)\b/;
+const nameEnd = (name: string): string => name.split(NAME_END)[0] ?? name;
+
+/** The name a sentence gives the business with a phrase naming it, or null. */
+function namedIn(sentence: string): string | null {
+  const names = [...[RUNS, CALLED, MY_SHOP_IS].map((phrase) => phrase.exec(sentence)?.[1]).map((name) => name && nameEnd(name)), IS_MY.exec(sentence)?.[1]];
+  return names.find((name): name is string => name !== undefined && !PRONOUN.test(name) && !SCHEDULE.test(name)) ?? null;
+}
 
 /**
  * The business's name, as the API's structured read of the description takes it: here, the way a
- * reader would, cut to 60 characters. First a phrase naming it ("I'm Ana. I run Ana's Bakery in
- * Oakland." or "Ana's Bakery is my shop" → "Ana's Bakery"), else the first sentence that isn't the
- * owner introducing themselves ("Rivera Plumbing. I'm Maria, …" → "Rivera Plumbing"), else
- * "Your business" ("I'm Ana." alone).
+ * reader would, cut to 60 characters. The sentences are read in order, and the first that names the
+ * business gives its name: with a phrase naming it ("I'm Ana. I run Ana's Bakery in Oakland." or
+ * "Ana's Bakery is my shop" → "Ana's Bakery"), or as a sentence that is only the name ("Rivera
+ * Plumbing. I'm Maria, …" → "Rivera Plumbing"). The owner's introduction and a sentence about the
+ * owner or the work ("I run a small bakery") name nothing, so "I'm Ana." alone gives "Your business".
  */
 function businessNameOf(description: string): string {
-  const named =
-    RUNS.exec(description)?.[1]?.split(/\s(?:in|on)\s/)[0] ??
-    IS_MY.exec(description)?.[1] ??
-    description
-      .split(/[.\n!?]/)
-      .map((sentence) => sentence.trim())
-      .find((sentence) => sentence !== '' && !INTRODUCTION.test(sentence));
-  const name = named?.trim() ?? '';
-  return name === '' ? 'Your business' : name.slice(0, 60).trim();
+  return naming(sentencesOf(description))?.name ?? 'Your business';
 }
 
-/** The owner's first name, from "I'm Maria" in the description; null when it gives none. */
+/** The description's sentences, each with its closing punctuation. */
+const sentencesOf = (description: string): string[] =>
+  description
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence !== '');
+/** A sentence without its closing punctuation. */
+const words = (sentence: string): string => sentence.replace(/[.!?]+$/, '').trim();
+
+/** The first sentence that names the business, and the name it gives (`businessNameOf`); null when none does. */
+function naming(sentences: readonly string[]): { at: number; name: string } | null {
+  for (const [at, sentence] of sentences.entries()) {
+    const text = words(sentence);
+    // In the owner's introduction, only a phrase after it can name the business ("I'm Lee and I own Acme Bakery").
+    const introduction = INTRODUCTION.test(text);
+    const rest = introduction ? AFTER_INTRODUCTION.exec(text)?.[1] : text;
+    const named = (rest === undefined ? null : namedIn(rest)) ?? (introduction || FIRST_PERSON.test(text) ? null : text);
+    if (named !== null) return { at, name: named.trim().slice(0, 60).trim() };
+  }
+  return null;
+}
+
+/** The owner's first name, from "I'm Maria", "I am Maria" or "My name is Maria" in the description; null when it gives none. */
 function ownerNameOf(description: string): string | null {
-  const match = /\bI(?:'|’)?m\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ'-]{0,39})/.exec(description);
-  return match?.[1] ?? null;
+  return OWNER.exec(description)?.[1] ?? null;
 }
 
 /**
- * A line about the business for its public page: the description after its first sentence, leaving
- * out the owner's own "I'm …" sentence, cut to 200 characters; null when nothing is left.
+ * A line about the business for its public page: the description without the sentence that names
+ * the business and without the owner's introduction, cut to 200 characters; null when nothing is left.
  */
 function aboutOf(description: string): string | null {
-  const sentences = description.split(/(?<=[.!?])\s+/).slice(1).filter((sentence) => !/^I(?:'|’)?m\b/.test(sentence));
-  const line = sentences.join(' ').trim().slice(0, 200).trim();
+  const sentences = sentencesOf(description);
+  const named = naming(sentences)?.at;
+  const line = sentences.filter((sentence, at) => at !== named && !INTRODUCTION.test(words(sentence))).join(' ').slice(0, 200).trim();
   return line === '' ? null : line;
 }
 
