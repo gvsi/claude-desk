@@ -1494,16 +1494,19 @@ describe("Today's Demo inbox", () => {
     expect(closedReads()).toBe(0);
   });
 
-  it('inbox_polls_a_whole_poll_after_each_answer', async () => {
-    // As React Query's own polls do, the open sheet's poll counts again from each read's answer, so a
-    // read that answers late isn't followed by another at once.
-    const { screen } = await renderRoute(TODAY);
+  it.each(['read', 'failed'] as const)('inbox_polls_a_whole_poll_after_each_answer_%s', async (answer) => {
+    // As React Query's own polls do, the open sheet's poll counts again from each read's answer, read
+    // or failed, so a read that answers late isn't followed by another at once. A failed read is
+    // tried once more at once, and the answer that counts is that try's.
+    const tries = answer === 'read' ? 1 : 2;
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
     const open = inboxButton(screen);
     await expect.element(open).toBeVisible();
-    // When the read as it opens answers: the first answer from here on.
-    let answeredAt = 0;
+    if (answer === 'failed') mockStore.inject({ route: 'ownerInbox', status: 503, times: 2 });
+    // When each try of the read as it opens answers, from here on.
+    const answeredAt: number[] = [];
     const stop = observeRequests((outcome) => {
-      if (outcome.key === 'ownerInbox' && answeredAt === 0) answeredAt = performance.now();
+      if (outcome.key === 'ownerInbox') answeredAt.push(performance.now());
     });
     onTestFinished(stop);
 
@@ -1522,10 +1525,11 @@ describe("Today's Demo inbox", () => {
     onTestFinished(() => sending.mockRestore());
     opening.release();
 
-    // The next read goes a whole poll after that answer.
-    await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(1));
-    expect(answeredAt).toBeGreaterThan(0);
-    expect((sent[0] ?? 0) - answeredAt).toBeGreaterThanOrEqual(pollMs('inbox') - 2);
+    // The next read, the poll's, goes a whole poll after the last try's answer. A failed read's own
+    // try once more is sent before it.
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(tries));
+    expect(answeredAt.length).toBeGreaterThanOrEqual(tries);
+    expect((sent[tries - 1] ?? 0) - (answeredAt[tries - 1] ?? 0)).toBeGreaterThanOrEqual(pollMs('inbox') - 2);
   });
 
   it('inbox_poll_counts_from_an_answer_as_it_comes', async () => {
