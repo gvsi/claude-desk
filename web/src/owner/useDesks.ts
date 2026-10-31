@@ -1,7 +1,8 @@
 /**
  * The owner's reads that every owner screen shares: the copy's businesses and Desks (`desks`),
- * and a Desk's Today and its held requests, polled. Query keys start with the route key, so a
- * screen invalidates every Desk's read of a route by that key alone.
+ * a Desk's Today and its held requests, polled, and the copy's Demo inbox, which Today shows. Query
+ * keys start with the route key, so a screen invalidates every Desk's read of a route by that key
+ * alone.
  */
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -15,6 +16,7 @@ export const DESKS_KEY = ['desks'] as const;
 export const ME_KEY = ['me'] as const;
 export const todayKey = (deskId: string) => ['today', deskId] as const;
 export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
+export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 
 // The reads, which go out whenever they are asked for (a read ahead, a `fetchQuery`); only the hooks wait out `FRESH_MS`.
 export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
@@ -22,6 +24,7 @@ const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
 const needsYouQuery = (deskId: string) =>
   queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
+export const ownerInboxQuery = () => queryOptions({ queryKey: OWNER_INBOX_KEY, queryFn: () => request('ownerInbox') });
 
 /** How long a page waits for a Desk's Today to be read ahead before it opens Today anyway, still loading. */
 export const READ_AHEAD_MS = 3_000;
@@ -86,10 +89,11 @@ function deadlinesOf(queryClient: QueryClient): Map<string, number> {
 }
 
 /**
- * Reads what a Desk's Today first shows (the copy's Desks, its Today and Needs you) at once, for up
- * to `capMs`, so a page can open onto a Today that is already drawn. A read that fails or runs long
- * is left to Today, which shows and retries it as it always does; this never throws. The Desk's
- * Today, opened next, waits no later than this does (`useTodayOpening`).
+ * Reads what a Desk's Today first shows (the copy's Desks, its Today and Needs you, and the copy's
+ * Demo inbox) at once, for up to `capMs`, so a page can open onto a Today that is already drawn,
+ * with nothing in it still to come in and push what is under it. A read that fails or runs long is
+ * left to Today, which shows and retries it as it always does; this never throws. The Desk's Today,
+ * opened next, waits no later than this does (`useTodayOpening`).
  */
 export async function readTodayAhead(queryClient: QueryClient, deskId: string, capMs: number): Promise<void> {
   const deadline = Date.now() + capMs;
@@ -107,6 +111,7 @@ async function readTodayUntil(queryClient: QueryClient, deskId: string, deadline
     queryClient.prefetchQuery(desksQuery()),
     queryClient.prefetchQuery(todayQuery(deskId)),
     queryClient.prefetchQuery(needsYouQuery(deskId)),
+    queryClient.prefetchQuery(ownerInboxQuery()),
   ]);
   await Promise.race([reads, cap]);
   clearTimeout(timer);
@@ -177,9 +182,13 @@ export function useTodayOpening(deskId: string): boolean {
   return !open;
 }
 
-/** The copy changed (a new copy, a Desk added or deleted): read the businesses and the copy again. */
+/** The copy changed (a new copy, a Desk added or deleted): read the businesses, the copy and its Demo inbox again. */
 export async function invalidateCopy(queryClient: QueryClient): Promise<void> {
-  await Promise.all([queryClient.invalidateQueries({ queryKey: DESKS_KEY }), queryClient.invalidateQueries({ queryKey: ME_KEY })]);
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: DESKS_KEY }),
+    queryClient.invalidateQueries({ queryKey: ME_KEY }),
+    queryClient.invalidateQueries({ queryKey: OWNER_INBOX_KEY }),
+  ]);
 }
 
 /** A Desk's own address in the owner app, which its pages sit under. */

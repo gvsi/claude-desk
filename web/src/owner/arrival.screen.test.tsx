@@ -198,7 +198,7 @@ describe('Arrival', () => {
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
     // Each of Today's reads had been answered, once and successfully, before it started to leave.
-    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1 });
+    expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 1 });
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
   });
 
@@ -281,8 +281,8 @@ describe('Arrival', () => {
     // Time for a read on mount to go out, had Today sent one.
     await new Promise((resolve) => setTimeout(resolve, 500));
     // Read once each, ahead of Today, and not again when it mounts.
-    const reads = (['desks', 'today', 'needsYou'] as const).map((key) => [key, requests(key).length]);
-    expect(Object.fromEntries(reads)).toEqual({ desks: 1, today: 1, needsYou: 1 });
+    const reads = (['desks', 'today', 'needsYou', 'ownerInbox'] as const).map((key) => [key, requests(key).length]);
+    expect(Object.fromEntries(reads)).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 1 });
   });
 
   it('start_the_demo_reads_a_slow_today_once', async () => {
@@ -1003,6 +1003,19 @@ describe('OwnerLayout', () => {
     expect(sawNotFound()).toBe(false);
   });
 
+  it('start_over_reads_the_new_copys_inbox', async () => {
+    // Polls far apart, so only the reads that open a page land.
+    const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
+    await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+    expect(requests('ownerInbox')).toHaveLength(1);
+
+    // Straight away, while this copy's inbox was just read: the new copy's Today reads its own.
+    await screen.getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${mockStore.world.ids.deskId}/today`);
+    await expect.poll(() => requests('ownerInbox').length).toBe(2);
+  });
+
   it('late_answering_failure_keeps_the_fresh_copy', async () => {
     const { screen, router } = await renderRoute(TODAY);
     const sawNotFound = watchFor("This page doesn't exist");
@@ -1228,8 +1241,8 @@ function delayNextRead(path: string, ms: number): void {
   );
 }
 
-/** Today's first reads: the copy's Desks, Today and Needs you. */
-type TodaysReads = Record<'desks' | 'today' | 'needsYou', number>;
+/** Today's first reads: the copy's Desks, Today and Needs you, and the copy's Demo inbox. */
+type TodaysReads = Record<'desks' | 'today' | 'needsYou' | 'ownerInbox', number>;
 
 /**
  * The intro dialog's hand-off to Today, from now until the test ends, each step named once: the
@@ -1242,7 +1255,7 @@ function watchTheHandOff(dialog: HTMLDialogElement): {
   answeredAsItLeft: () => TodaysReads | null;
 } {
   const steps: string[] = [];
-  const answered: TodaysReads = { desks: 0, today: 0, needsYou: 0 };
+  const answered: TodaysReads = { desks: 0, today: 0, needsYou: 0, ownerInbox: 0 };
   let answeredAsItLeft: TodaysReads | null = null;
   const stopCounting = observeRequests((outcome) => {
     if (outcome.ok && Object.hasOwn(answered, outcome.key)) answered[outcome.key as keyof TodaysReads] += 1;
