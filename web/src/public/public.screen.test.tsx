@@ -721,6 +721,36 @@ describe('public chat page', () => {
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
   });
 
+  it('short_window_keeps_the_disclosure_and_the_composer_in_view', async () => {
+    // A phone on its side (568x320) or with its keyboard open (360x380) is too short to keep the
+    // business's header pinned as well, so the header scrolls away with the conversation; the chat's
+    // head with the AI disclosure and the composer stay on screen, neither covering the other, and
+    // the page itself never scrolls. As the chat goes on the newest row is pinned above the
+    // composer, and it stays there as the window grows tall again and goes short again, whichever
+    // part of the page scrolls the conversation.
+    for (const [width, height] of [
+      [568, 320],
+      [360, 380],
+    ] as const) {
+      const where = `${width}x${height}`;
+      const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+      await page.viewport(width, height);
+      await ready(screen);
+      expectDisclosureAndComposerUncovered(screen, `${where}, a new chat`);
+      for (const text of LONG_CHAT.slice(0, 4)) {
+        await say(screen, text);
+        await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+      }
+      expectDisclosureAndComposerUncovered(screen, `${where}, after four turns`);
+
+      await page.viewport(VIEWPORTS.phone.width, VIEWPORTS.phone.height);
+      await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+      await page.viewport(width, height);
+      await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+      expectDisclosureAndComposerUncovered(screen, `${where}, short again`);
+    }
+  }, 60_000);
+
   it('newest_row_follows_a_phone_turned_smaller', async () => {
     const { screen } = await renderRoute(PAGE, { viewport: 'phone', seed: 'rivera' });
     await ready(screen);
@@ -1291,8 +1321,8 @@ describe('public chat page', () => {
 
 /**
  * The end of the conversation (its last row, receipt or notice) sits right above the composer that
- * stays at the bottom of the window: in view, and not hidden under it, nor above the top of the
- * conversation's scroll region, under the chat's head.
+ * stays at the bottom of the window: in view, and not hidden under it, nor under the chat's head
+ * that stays at the top.
  */
 function expectEndAboveTheComposer(screen: RenderResult): void {
   const { composer, conversation } = conversationAndComposer(screen);
@@ -1303,12 +1333,14 @@ function expectEndAboveTheComposer(screen: RenderResult): void {
   const rows = conversation.querySelectorAll('.cd-transcript-row');
   const last = rows[rows.length - 1]?.getBoundingClientRect();
   expect(last?.bottom ?? 0).toBeLessThanOrEqual(top);
-  expect(last?.bottom ?? 0).toBeGreaterThan(Math.max(0, chatScroller().getBoundingClientRect().top));
+  const head = document.querySelector('.cd-public-shell__chat-head')?.getBoundingClientRect();
+  expect(last?.bottom ?? 0).toBeGreaterThan(Math.max(0, head?.bottom ?? 0));
 }
 
 /**
  * The element whose own scrolling moves the conversation: the shell's scroll region, between the
- * chat's head and the composer. Never the page, which doesn't scroll.
+ * chat's head and the composer, or on a short window the shell itself. Never the page, which
+ * doesn't scroll.
  */
 function chatScroller(): HTMLElement {
   for (let node = document.querySelector('[role="log"]')?.parentElement; node && node !== document.body; node = node.parentElement) {
@@ -1349,6 +1381,33 @@ function expectHeaderAndDisclosureInView(screen: RenderResult, where: string): v
     header: true,
     disclosure: true,
   });
+}
+
+/** Whether what is drawn at the top, the middle and the bottom of `el`, at its horizontal center, is `el` itself. */
+function uncovered(el: Element): boolean {
+  const { left, width, top, bottom } = el.getBoundingClientRect();
+  const x = left + width / 2;
+  return [top + 2, (top + bottom) / 2, bottom - 2].every((y) => {
+    const hit = document.elementFromPoint(x, y);
+    return hit !== null && el.contains(hit);
+  });
+}
+
+/**
+ * The page is no taller than the window, and the line with the AI disclosure and the composer's
+ * text box are wholly on screen, with nothing drawn over them.
+ */
+function expectDisclosureAndComposerUncovered(screen: RenderResult, where: string): void {
+  const disclosure = screen.getByText(DISCLOSURE, { exact: true }).element();
+  const box = screen.getByRole('textbox', { name: 'Message Rivera Plumbing' }).element();
+  expect(
+    {
+      pageFits: document.documentElement.scrollHeight <= innerHeight,
+      disclosure: inWindow(disclosure) && uncovered(disclosure),
+      composer: inWindow(box) && uncovered(box),
+    },
+    where,
+  ).toEqual({ pageFits: true, disclosure: true, composer: true });
 }
 
 /** Whether `el` is wholly in the part of `region` on screen. */

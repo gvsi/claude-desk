@@ -195,16 +195,21 @@ function scrollerOf(el: Element): Element {
   return document.scrollingElement ?? document.documentElement;
 }
 
-/** Where the conversation is scrolled: the element whose scrolling moves it, and how far down. */
+/**
+ * Where the conversation is scrolled: the element whose scrolling moves it, how far down, and the
+ * size of the shell around it ("390x844"), which tells whether the page has changed size since.
+ */
 interface ScrollerAt {
   scroller: Element;
   top: number;
+  shellSize: string;
 }
 
 /** Where the element whose scrolling moves `el` stands now. */
 function scrollerAt(el: Element): ScrollerAt {
   const scroller = scrollerOf(el);
-  return { scroller, top: scroller.scrollTop };
+  const shell = el.closest(SHELL)?.getBoundingClientRect();
+  return { scroller, top: scroller.scrollTop, shellSize: shell ? `${Math.round(shell.width)}x${Math.round(shell.height)}` : '' };
 }
 
 /** The design system's classes for the shell around the page and its composer area, which stays at the bottom of the window. */
@@ -259,10 +264,13 @@ interface NewestInView {
  * the page makes at once, such as focus moving up with the keyboard, sends its event only with the
  * next frame, and a reply arriving in between would otherwise take the visitor back down to the
  * end. The page changing size moves the end under the composer, and doesn't count as the visitor
- * moving away. It can scroll the conversation too: when the window narrows and the rows rewrap
- * taller, the browser's scroll anchoring moves the conversation down to keep the rows on screen
- * where they were. So while the visitor is at the end, only a move up counts as them leaving it;
- * once they have moved back, any move counts.
+ * moving away. It can scroll the conversation too, and that scroll's event can come before the page
+ * sees the new size: when the window narrows or widens the rows rewrap, and the browser's scroll
+ * anchoring moves the conversation down or up to keep the rows on screen where they were; when the
+ * shell goes short or tall, the part of it that scrolls changes. So while the visitor is at the
+ * end, a scroll while the shell isn't the size the page last saw is left to the resize that
+ * follows, and otherwise only a move up counts as them leaving it; once they have moved back, any
+ * move counts.
  *
  * Until the conversation has `started` there is no newest message to keep in view, so nothing is
  * pinned and the conversation's scroll region stays at its start: on a phone, where the about
@@ -306,26 +314,33 @@ function useNewestInView(
   // Whether the conversation has scrolled since the page last knew where the visitor was, in a way
   // that may have moved them. Its scroller changing is not the visitor moving: setup's preview
   // scrolls the page until the conversation overflows the panel around it, and the panel from then
-  // on. While the visitor is at the end, only a move up counts: nothing lies below the end, and the
-  // browser's scroll anchoring moves the conversation down when the rows above grow.
+  // on. While the visitor is at the end, a scroll while the shell has changed size is the browser's
+  // (the resize that follows decides), and only a move up counts: nothing lies below the end, and
+  // the browser's scroll anchoring moves the conversation down when the rows above grow.
   const scrolledSinceSeen = useCallback((): boolean => {
     const seen = seenAt.current;
     if (!seen || !end.current) return false;
     const now = scrollerAt(end.current);
     if (now.scroller !== seen.scroller) return false;
-    return atTheEnd.current ? now.top < seen.top : now.top !== seen.top;
+    if (!atTheEnd.current) return now.top !== seen.top;
+    return now.shellSize === seen.shellSize && now.top < seen.top;
   }, [end]);
 
-  // A scroll event, which can come before the page sees the shell change size: when the window
-  // narrows and shortens in one step, the browser's scroll anchoring moves the conversation down as
-  // the rows rewrap, and its event arrives with the end still hidden under the composer. So while
-  // the visitor is at the end, a move down (or none) keeps them there, as `scrolledSinceSeen` holds,
-  // and only a move up, or the scroller changing, is weighed by where the end now is.
+  // A scroll event. While the visitor is at the end, a scroll that comes before the page sees the
+  // shell's new size is left to the resize that follows (which brings the end back), and a move
+  // down, or none, keeps them there, as `scrolledSinceSeen` holds; anything else is weighed by where
+  // the end now is.
   const noteScroll = useCallback(() => {
     const seen = seenAt.current;
     const now = end.current ? scrollerAt(end.current) : null;
-    if (atTheEnd.current && seen !== null && now !== null && now.scroller === seen.scroller && now.top >= seen.top) noteSeen();
-    else notePlace();
+    if (atTheEnd.current && seen !== null && now !== null) {
+      if (now.shellSize !== seen.shellSize) return;
+      if (now.scroller === seen.scroller && now.top >= seen.top) {
+        noteSeen();
+        return;
+      }
+    }
+    notePlace();
   }, [end, noteSeen, notePlace]);
 
   useEffect(() => {
