@@ -117,6 +117,38 @@ async def test_spend_reaching_the_budget_stops_new_runs(repo):
     assert not unstopped.stopped_by_budget and len(unstopped.runs) == 4
 
 
+async def test_the_kernels_soft_promise_spend_alone_stops_a_pass_at_its_budget(repo):
+    """Each run is the real runner on the stand-in Desk, priced at list prices, and its checked reply's
+    soft-promise call on Haiku is nested in its `reply` ledger entry as the kernel writes it. That spend
+    takes the pass to --max-usd and no new run starts, as any other spend does; the same runs without
+    the call spend a fraction of the cap and all four run."""
+    from evals.pricing import cost_usd
+    from evals.tests.test_runner import Client, Desk, Visitor, chat, checked_reply, seed, target
+    from evals.tests.test_usage_and_latency import HAIKU, call_usage
+    from evals.tier2.passes import priced_spend
+    from evals.tier2.runner import run_scenario
+
+    soft = call_usage(HAIKU, input_tokens=4_000_000, cached=0, output=1_000_000)   # outsized: $0.90 a check
+
+    def checked(call: dict[str, Any] | None) -> Any:
+        async def run_one(scenario: Any, rep: int, _target: Any, _simulator: Any, **options: Any) -> RunOutcome:
+            run = chat(scenario, 1)
+            checked_reply(run, call)
+            desk = Desk(run)
+            return await run_scenario(scenario, rep, target(desk), Visitor(desk), new_client=lambda: Client(desk),
+                                      seed=seed, **options)
+        return run_one
+
+    result = await run_pass(config(runs=2, max_usd=1.6, split="heldout"), deps(repo, checked(soft), cost=priced_spend))
+    assert [row.status for row in result.runs] == ["scored", "scored"] and result.estimated_spend == []
+    assert result.stopped_by_budget and result.served_models["kernel_checks"] == [HAIKU]
+    haiku = 2 * cost_usd(soft, HAIKU, "anthropic")
+    assert result.spend.total_usd >= 1.6 > result.spend.total_usd - haiku   # the checks took it past the cap
+    unchecked = await run_pass(config(runs=2, max_usd=1.6, split="heldout"),
+                               deps(repo, checked(None), cost=priced_spend, spend_file=repo / "other-spend.csv"))
+    assert not unchecked.stopped_by_budget and len(unchecked.runs) == 4 and unchecked.spend.total_usd < 0.1
+
+
 def spend_rows(path: Path, *rows: tuple[str, str, int, float, float]) -> None:
     """Spend rows (date, provider, runs, claude_api_usd, total_usd), as earlier passes appended them."""
     from evals.tier2.passes import append_spend
