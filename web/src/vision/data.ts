@@ -1,4 +1,8 @@
 /**
+ * Mirrors the design system's vision board stories word for word: `ds/boards/vision.tsx`, drawn by
+ * `VisionTeamDesk.stories.tsx`, `VisionClaudeAccount.stories.tsx` and `VisionPhone.stories.tsx`.
+ * Those import Storybook, so the app can't import them; change both together.
+ *
  * What the vision pages show, in the signed boards' words (the "Run 2 · vision" boards,
  * N-R2-Vision-*): Rivera Plumbing's team Desk, a returning visitor signed in with a Claude account,
  * and the app on a phone. Fixed data only: no page reads anything from the API. Rivera's own facts

@@ -9,20 +9,16 @@
   color: var(--text-secondary);
 }
 
-/* An owner page on a vision Desk: it fills the main area under the vision bar and pads itself as
-   the main area pads a page, its parts 20 px apart, the footer at its foot. */
+/* An owner page on a vision Desk (the team Desk's): it fills the main area under the vision bar and
+   pads itself as the main area pads a page, its parts 16 px apart. */
 .cd-vision-page {
   display: flex;
   flex: 1 0 auto;
   flex-direction: column;
-  gap: var(--space-20);
+  gap: var(--space-16);
   box-sizing: border-box;
   min-width: 0;
   padding: var(--space-24) var(--space-40) var(--space-20);
-}
-
-.cd-vision-page > .cd-concept-footer {
-  margin-top: auto;
 }
 
 /* Claude's words and the fact card under them, 8 px apart, as one message. */
@@ -35,10 +31,6 @@
 
 /* The team Desk: the title and its line, then the teammates (220 px), Luis's conversation and his
    access (260 px), 28 px apart; the day's line and the footer at the foot, 16 px apart. */
-.cd-vision-page.cd-vision-team {
-  gap: var(--space-16);
-}
-
 .cd-vision-team__lead {
   margin: var(--space-8) 0 0;
 }

@@ -1,7 +1,7 @@
 import { useLayoutEffect, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
-import { AppShell, ClaudeMessage, Sidebar, VisionBar, type CopyLanguage } from '../ds/index.ts';
+import { AppShell, ClaudeMessage, Sidebar, VisionBar } from '../ds/index.ts';
 import { followInAppLinks } from '../owner/inAppLinks.ts';
 import { proseOf, VISION_BACK_HREF, VISION_SIDEBAR_HREFS, type VisionOwner } from './data.ts';
 
@@ -84,7 +84,7 @@ export function VisionOwnerShell({ bar, business, owner, desks, currentDeskId, c
   );
 }
 
-/** Claude's words in a conversation, in serif, as a checked reply's prose block. */
-export function ClaudeWords({ text, language = 'en', ownerName }: { text: string; language?: CopyLanguage; ownerName: string }) {
-  return <ClaudeMessage blocks={proseOf(text)} language={language} ownerName={ownerName} />;
+/** Claude's words in a conversation, in serif, as a checked reply's prose block, in English. */
+export function ClaudeWords({ text, ownerName }: { text: string; ownerName: string }) {
+  return <ClaudeMessage blocks={proseOf(text)} language="en" ownerName={ownerName} />;
 }

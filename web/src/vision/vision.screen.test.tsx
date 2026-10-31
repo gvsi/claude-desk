@@ -1,8 +1,8 @@
 /**
  * The vision pages in a real browser against the mock API: a team Desk, a returning visitor signed
- * in with a Claude account, and the app on a phone. Each says it is vision
- * under the vision bar, with the way back to the owner's Desk; each is static, so it asks the API
- * for nothing; and each is drawn as its signed board draws it.
+ * in with a Claude account, and the app on a phone. Each says it is vision under the vision bar,
+ * with the way back to the owner's Desk; each is static, so it asks the API for nothing; and each
+ * is drawn as its signed board draws it.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
