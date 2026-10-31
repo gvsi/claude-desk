@@ -11,7 +11,7 @@ import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 
 import type { KnowledgeItem } from '../../api/contracts.ts';
-import { ApiError, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
+import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../../api/http.ts';
 import type { KnowledgeListItem } from '../../api/views.ts';
 import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, Notice, type KnowledgeRowView } from '../../ds/index.ts';
 import { formatDate } from '../../lib/format.ts';
@@ -110,9 +110,12 @@ function titleOf(text: string): string {
   return [...text].slice(0, TITLE_LENGTH).join('');
 }
 
-/** A fresh id for an item: `note-<uuid>` or `file-<uuid>`. */
+/**
+ * A fresh id for an item: `note-<uuid>` or `file-<uuid>`, a random UUID even on a page not served
+ * securely, which has no `crypto.randomUUID`.
+ */
 function newId(kind: 'note' | 'file'): string {
-  return `${kind}-${crypto.randomUUID()}`;
+  return `${kind}-${newIdempotencyKey()}`;
 }
 
 /** Whether `a` and `b` are the same thing to add: the same source, title and words. */

@@ -128,6 +128,19 @@ describe('knowledge', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('knowledge_adds_on_a_page_served_without_random_uuid', async () => {
+    // A page not served securely (http on a LAN address, say) has no `crypto.randomUUID`: a note is
+    // still added, under a version 4 UUID made from random bytes.
+    Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true });
+    try {
+      await addNote();
+    } finally {
+      delete (crypto as { randomUUID?: unknown }).randomUUID;
+    }
+    expect(typeof crypto.randomUUID).toBe('function');
+    expect(posts()[0]?.item_id).toMatch(/^note-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
   it('knowledge_switch_follows_the_returned_label', async () => {
     const screen = await addNote();
     const [item] = posts();
