@@ -1,4 +1,4 @@
-"""Hold setup's consent work until it lands, or cancel it before the database pools close."""
+"""Hold setup's owner turns until they land, or cancel them before the database pools close."""
 
 import asyncio
 import contextlib
@@ -6,7 +6,7 @@ from collections.abc import Coroutine
 from typing import Any
 
 
-class ConsentRuns:
+class TurnRuns:
     """Only live runs are kept here; the interview row holds their durable outcome."""
 
     def __init__(self) -> None:
@@ -16,7 +16,7 @@ class ConsentRuns:
         return interview_id in self._tasks
 
     def start(self, interview_id: str, work: Coroutine[Any, Any, Any]) -> asyncio.Task:
-        task = asyncio.create_task(work, name="desk-setup-consent")
+        task = asyncio.create_task(work, name="desk-setup-turn")
         self._tasks[interview_id] = task
         task.add_done_callback(lambda done: self._settled(interview_id, done))
         return task
