@@ -324,7 +324,10 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
         return "owner_rule"
     for policy, cause in BASELINE_CAUSES.items():
         if policy in policies:
-            # A verified person's private-data refusal means the record belongs to someone else.
+            # tools_given gives private-data tools only after verification; an unverified caller gets
+            # not_given before evaluation. Verification binds a person once and never clears/rebinds them,
+            # so a historical private-data refusal cannot predate that binding. Reading verified in the same
+            # snapshot as the decision is safe: this verified person's refusal means another person's record.
             if policy == "B.private_data_record_owner" and verified:
                 return "not_their_record"
             return cause
@@ -775,7 +778,8 @@ async def today(ctx: OwnerCtx, desk_id: str, now: datetime) -> Today:
 async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
     """The Desk's refused requests and Claude's stopped drafts, newest first, each with its AI-written triage once
     written (Plan 02b, Task 10), else None. Only refusals count in Today; their nullable `cause` maps the decision's
-    `policy_ids` and its already-read ledger decide summary's `reason`/`check` through `refusal_cause`.
+    `policy_ids`, its already-read ledger decide summary's `reason`/`check` and the session's verified state
+    through `refusal_cause`.
     Sessions, decisions and ledger entries share one snapshot so a newly verified session's refusal cannot be
     labelled with an older verification state. No kernel call runs while the snapshot is open."""
     conn = ctx.ro.conn

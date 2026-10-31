@@ -517,7 +517,8 @@ class Attempt(BaseModel):
     `decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the
     kernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;
     `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a
-    closed code for a refused request, from the decision's `policy_ids` or its ledger summary's `reason`/`check`;
+    closed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`
+    and the session's verified state;
     the web holds its words. It is null for held requests, stopped drafts and unmapped refusals."""
 
     ref_id: str

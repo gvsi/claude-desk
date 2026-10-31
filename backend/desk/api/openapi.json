@@ -1648,7 +1648,7 @@
     "/api/owner/desks/{desk_id}/safety": {
       "get": {
         "summary": "Safety",
-        "description": "The Desk's refused requests and Claude's stopped drafts, newest first. Today and Safety count refused requests\nonly (owner decision, 2026-10-31). Each refusal's nullable `cause` comes from its decision's `policy_ids` and\nits ledger decide summary's `reason`/`check`; drafts have no cause.",
+        "description": "The Desk's refused requests and Claude's stopped drafts, newest first. Today and Safety count refused requests\nonly (owner decision, 2026-10-31). Each refusal's nullable `cause` comes from its decision's `policy_ids` and\nits ledger decide summary's `reason`/`check` and the session's verified state; drafts have no cause.",
         "operationId": "owner_safety",
         "parameters": [
           {
@@ -7203,7 +7203,7 @@
           "cause"
         ],
         "title": "Attempt",
-        "description": "A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a\nclosed code for a refused request, from the decision's `policy_ids` or its ledger summary's `reason`/`check`;\nthe web holds its words. It is null for held requests, stopped drafts and unmapped refusals."
+        "description": "A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a\nclosed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`\nand the session's verified state;\nthe web holds its words. It is null for held requests, stopped drafts and unmapped refusals."
       },
       "Briefing": {
         "properties": {

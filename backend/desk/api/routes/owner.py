@@ -429,7 +429,7 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
 async def safety(desk_id: DeskId, ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[Attempt]:
     """The Desk's refused requests and Claude's stopped drafts, newest first. Today and Safety count refused requests
     only (owner decision, 2026-10-31). Each refusal's nullable `cause` comes from its decision's `policy_ids` and
-    its ledger decide summary's `reason`/`check`; drafts have no cause."""
+    its ledger decide summary's `reason`/`check` and the session's verified state; drafts have no cause."""
     return await owner_reads.attempts(ctx, ctx.desk(desk_id))
 
 
