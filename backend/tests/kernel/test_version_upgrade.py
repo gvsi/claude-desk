@@ -560,6 +560,74 @@ async def test_a_kernel_starts_and_rebuilds_while_the_copies_table_is_locked(app
                 assert await rebuilding == {(copy.desk_id, 1): None}
 
 
+async def test_a_desk_whose_rebuild_fails_is_rebuilt_on_a_later_pass(app, client, monkeypatch):
+    # a rebuild that fails (a dropped connection) is tried again after a wait, as a failed lookup is,
+    # so the owner told it is being checked isn't left with a Desk that refuses until the next start
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    rebuild, calls, waits = activation.rebuild_version, [], []
+
+    async def failing_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("the rebuild's connection dropped")
+        return await rebuild(*args, **kwargs)
+
+    async def waiting(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(activation, "rebuild_version", failing_once)
+    monkeypatch.setattr(activation, "wait_to_retry", waiting)
+    startup = activation.StartupRebuild(results={}, left=[(copy.copy_id, copy.desk_id)], unscanned=[])
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
+    assert (len(calls), waits) == (2, [5.0])
+
+
+async def test_a_desk_whose_rebuild_fails_at_startup_is_left_to_the_background(app, client, monkeypatch):
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    rebuild, calls = activation.rebuild_version, []
+
+    async def failing_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("the rebuild's connection dropped")
+        return await rebuild(*args, **kwargs)
+
+    monkeypatch.setattr(activation, "rebuild_version", failing_once)
+    startup = await activation.rebuild_at_startup(app.state.kernel)
+    assert (startup.results, startup.left, startup.pending) == ({}, [(copy.copy_id, copy.desk_id)], True)
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
+
+
+async def test_no_rebuild_runs_over_the_old_tools_when_adding_the_new_ones_fails(app, client, monkeypatch):
+    # a Desk that couldn't be given the native tools isn't rebuilt over its old tool set; the next pass gives it
+    # the tools and then rebuilds it
+    copy = await rivera(app, client)
+    await seed_from_an_earlier_kernel(app, copy)
+    add, rebuild, steps = desks.add_native_tools, activation.rebuild_version, []
+
+    async def adding_fails_once(*args, **kwargs):
+        steps.append("tools")
+        if steps.count("tools") == 1:
+            raise RuntimeError("the tools write's connection dropped")
+        return await add(*args, **kwargs)
+
+    async def rebuilding(*args, **kwargs):
+        steps.append("rebuild")
+        return await rebuild(*args, **kwargs)
+
+    async def waiting(seconds):
+        steps.append("wait")
+
+    monkeypatch.setattr(desks, "add_native_tools", adding_fails_once)
+    monkeypatch.setattr(activation, "rebuild_version", rebuilding)
+    monkeypatch.setattr(activation, "wait_to_retry", waiting)
+    startup = activation.StartupRebuild(results={}, left=[(copy.copy_id, copy.desk_id)], unscanned=[])
+    assert await activation.rebuild_in_background(app.state.kernel, startup) == {(copy.desk_id, 1): None}
+    assert steps == ["tools", "wait", "tools", "rebuild"]
+
+
 async def test_startup_leaves_a_live_proof_to_the_background(app, client, registry, monkeypatch):
     # in symcc mode no shipped report covers the kernel core's tools, so only a live proof answers its version
     copy = await rivera(app, client)

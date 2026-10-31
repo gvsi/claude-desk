@@ -712,6 +712,7 @@ _REBUILT_COLUMNS = ("cards", "cedar", "schema_json", *VersionHashes._fields, "pr
 STARTUP_REBUILD_S = 15.0
 # A rebuild startup leaves to the background, since only a live proof would answer it.
 NEEDS_PROOF = "needs_proof"
+FAILED = "failed"                  # `_bring_up` hit an error: the Desk is tried again, as a failed lookup is
 # The owner's alert when a version can't be rebuilt (owner-only, in English, like every alert).
 REBUILD_ALERT = ("After an update, Claude couldn't check your rules again, so it won't act on any request until "
                  "they're checked. Confirm your rules again to turn them back on.")
@@ -794,7 +795,7 @@ async def rebuild_at_startup(runtime: KernelRuntime) -> StartupRebuild:
                 left.append((copy_id, desk_id))
                 continue
             done = await _bring_up(runtime, copy_id, desk_id, prove=False)
-            if done is not None and done[1] == NEEDS_PROOF:
+            if done == FAILED or (done is not None and done[1] == NEEDS_PROOF):
                 left.append((copy_id, desk_id))
             elif done is not None:
                 results[(desk_id, done[0])] = done[1]
@@ -846,16 +847,20 @@ async def rebuild_in_background(runtime: KernelRuntime, startup: StartupRebuild)
         for copy_id, desk_id in found:
             await _alert_waiting(runtime, copy_id, desk_id)
         work += found
+        again: list[tuple[str, str]] = []
         for copy_id, desk_id in work:
             done = await _bring_up(runtime, copy_id, desk_id, prove=True)
-            if done is not None:
+            if done == FAILED:
+                again.append((copy_id, desk_id))
+            elif done is not None:
                 results[(desk_id, done[0])] = done[1]
-        if failed == []:
+        if failed == [] and not again:
             break
         attempt += 1
-        log.info("rebuild_retry attempt=%s copies=%s", attempt, "unlisted" if failed is None else ",".join(failed))
+        log.info("rebuild_retry attempt=%s copies=%s desks=%s", attempt,
+                 "unlisted" if failed is None else len(failed), len(again))
         await wait_to_retry(RETRY_WAITS_S[min(attempt, len(RETRY_WAITS_S)) - 1])
-        pending, work = failed, []
+        pending, work = failed, again
     log.info("background_rebuild_done desks=%s", len(results))
     return results
 
@@ -920,19 +925,21 @@ async def _alert_waiting(runtime: KernelRuntime, copy_id: str, desk_id: str) -> 
 
 
 async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *,
-                    prove: bool) -> tuple[int, str | None] | None:
+                    prove: bool) -> tuple[int, str | None] | str | None:
     """Gives the Desk the native tools it has no row for (`desks.add_native_tools`), then rebuilds
     its active version if it is outdated (`rebuild_version`, proving live only when `prove`), each
-    in a transaction of its own. Returns the outdated version and what became of it, or None when
-    the Desk's version is current or the rebuild failed. A failure is logged and the Desk is left
-    as it was: without a tool, it can't be called on it; with a version left as stored, it decides
-    nothing."""
+    in a transaction of its own. Returns the outdated version and what became of it, None when the
+    Desk's version is current, or `FAILED` when either step raised: that is logged, the Desk is left
+    as it was (without a tool, it can't be called on it; with a version left as stored, it decides
+    nothing), and its callers try it again. A Desk that couldn't be given its tools isn't rebuilt
+    over the old ones."""
     try:
         async with kernel_transaction(runtime) as ctx:
             ctx.bind(copy_id)
             await desks.add_native_tools(ctx, desk_id)
     except Exception as exc:
         log_error(log, exc, "native_tools_failed copy_id=%s desk_id=%s", copy_id, desk_id)
+        return FAILED
     version = None
     try:
         async with kernel_transaction(runtime) as ctx:
@@ -945,7 +952,7 @@ async def _bring_up(runtime: KernelRuntime, copy_id: str, desk_id: str, *,
         return done
     except Exception as exc:
         log_error(log, exc, "version_rebuild_failed copy_id=%s desk_id=%s version=%s", copy_id, desk_id, version)
-        return None
+        return FAILED
 
 
 async def rebuild_version(ctx: KernelCtx, desk_id: str, version: int, *, prove: bool = True) -> str | None:
