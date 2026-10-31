@@ -820,6 +820,22 @@ describe('Conversations', () => {
     expect(landed.rows()).toEqual([quotes().at(-1)?.closest('.cd-transcript-row')]);
   });
 
+  it('the_owners_own_words_never_land', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const landed = watchLandings();
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 1);
+
+    // The owner takes over and writes: her words show in her own view as she sent them, still.
+    const words = 'I can come by at four today.';
+    mockStore.world.takeOver(chat);
+    mockStore.world.say(chat, words);
+    await expect.element(log(screen).getByText(words, { exact: true })).toBeVisible();
+    expect(landed.rows()).toEqual([]);
+  });
+
   it('a_recorded_chat_never_lands', async () => {
     // The seeded visitor's chat, replayed from the recorded history, whose next read has one more reply.
     const read = await served<OwnerTranscript>('conversation', { session_id: SEEDED_HOLD });

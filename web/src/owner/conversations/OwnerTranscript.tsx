@@ -122,8 +122,9 @@ function rowsOf(items: readonly TranscriptItem[]) {
 }
 
 /**
- * Whether a row arrived while the owner had the chat open: a message from Claude, the Desk or the
- * owner that a read after the first one taken since opening the chat brought. That first read is
+ * Whether a row arrived while the owner had the chat open: a message from Claude or the Desk that a
+ * read after the first one taken since opening the chat brought. The owner's own words show still,
+ * as she sent them. That first read is
  * what happened so far and draws still, and so does any read the page kept from before and shows
  * until then (coming back to the chat), as recorded history always does. A row is live only in the
  * render that first shows it; `TranscriptRow` keeps its motion from there.
@@ -136,7 +137,7 @@ function useArrivals(rows: readonly OwnerRow[], recorded: boolean, readSinceOpen
     if (readSinceOpened) shownUpTo.current = Math.max(shownUpTo.current ?? 0, newest);
   }, [newest, readSinceOpened]);
   const before = shownUpTo.current;
-  return (row) => !recorded && before !== null && row.item.kind === 'message' && row.item.n > before;
+  return (row) => !recorded && before !== null && row.item.kind === 'message' && row.item.ev.author !== 'owner' && row.item.n > before;
 }
 
 /** The decisions held under `receipts`: the ones whose hold is among them. */
