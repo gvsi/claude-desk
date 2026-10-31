@@ -125,8 +125,8 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
 /**
  * A visitor who wants the owner, a way into the chat, and a way to close it. A call-back request
  * says their name, contact and reason as they typed them, and the callback they were promised; a
- * conversation the handoff card handed over says the Desk's reason alone, since no call back was
- * promised.
+ * conversation the handoff card handed over says the Desk's reason and the visitor's last words,
+ * and promises no call back.
  */
 function CallbackCard({ item }: { item: CallbackItem }) {
   const { business, desk } = useOwnerDesk();
@@ -188,6 +188,12 @@ function CallbackCard({ item }: { item: CallbackItem }) {
         <p className="cd-callback__reason cd-type-body" data-copy="user">
           {handoff.reason}
         </p>
+        {/* The card's reason is the Desk's own: the visitor's last words, as a held request quotes them, say what it's about. */}
+        {handoff.kind === 'card' && item.from_the_visitor !== null && item.from_the_visitor !== '' ? (
+          <p className="cd-callback__context cd-type-meta">
+            From the visitor: “<span data-copy="user">{item.from_the_visitor}</span>”
+          </p>
+        ) : null}
         {/* A call back is promised only on a call-back request: one the API names so, or sends with no kind yet. */}
         {handoff.kind === undefined || handoff.kind === 'callback' ? (
           <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>

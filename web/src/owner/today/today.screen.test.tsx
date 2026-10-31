@@ -1752,6 +1752,33 @@ describe('Today', () => {
     expect(wants.elements()).toHaveLength(1);
   });
 
+  it('card_handoff_quotes_the_visitor', async () => {
+    // As a held request's card does: the visitor's last words, set off as theirs, under the Desk's
+    // reason. A call-back request's reason is already what they typed, so it quotes nothing more.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can I talk to Maria?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    const words = wants.getByText('Can I talk to Maria?', { exact: true });
+    await expect.element(words, { timeout: 2_000 }).toBeVisible();
+    expect(words.element().closest('[data-copy="user"]')).not.toBeNull();
+    expect(words.element().parentElement?.textContent).toBe('From the visitor: “Can I talk to Maria?”');
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Nothing to quote: no line.
+    const items = await needsYouRead();
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: items.map((item) => ({ ...item, from_the_visitor: null })) });
+    const quiet = await renderRoute(TODAY);
+    await expect.element(quiet.screen.getByRole('article', { name: 'Wants you' }).getByText(CARD_REASON, { exact: true })).toBeVisible();
+    expect(quiet.screen.getByRole('article', { name: 'Wants you' }).element().textContent).not.toContain('From the visitor');
+
+    // A call-back request quotes nothing more.
+    const callback = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can you call me back?');
+    const asked = callback.screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(asked.getByText(CALLBACK_REASON, { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(asked.element().textContent).not.toContain('From the visitor');
+  });
+
   it('callback_without_a_kind_keeps_its_line', async () => {
     // An API that doesn't send `kind` yet: a handoff without one is a call-back request, and still
     // says when Maria will call back.
