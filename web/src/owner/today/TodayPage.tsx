@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { ownerErrorCopy } from '../../api/http.ts';
@@ -40,13 +40,17 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
  * read, it holds the loading line alone, so it opens drawn however the owner came to it.
  */
 export function TodayPage() {
-  const { business, desk } = useOwnerDesk();
+  const { business, desk, reachPlace } = useOwnerDesk();
   // The page's heading greets the owner, so the tab takes the sidebar's row.
   useDocumentTitle(inApp(NAV_LABELS.today));
   const deskId = desk.desk_id;
   const navigate = useNavigate();
   const location = useLocation();
   const opening = useTodayOpening(deskId);
+  // Back to Today while it was still opening, one line high, couldn't reach the owner's place on it.
+  useLayoutEffect(() => {
+    if (!opening) reachPlace(location.key);
+  }, [opening, reachPlace, location.key]);
   const today = useToday(deskId);
   const needsYou = useNeedsYou(deskId);
   const answers = useAnswer(deskId);
@@ -156,11 +160,13 @@ export function TodayPage() {
   };
 
   // Where the greeting will be, and nothing in the right column, which stacks under the page on a
-  // narrow window and would be pushed down once the page is drawn.
+  // narrow window and would be pushed down once the page is drawn. The heading, for assistive
+  // technology, names the page as the sidebar does until the greeting takes its place.
   if (opening) {
     return (
       <div className="cd-today">
         <div className="cd-today__main">
+          <h1 className="cd-sr-only">Today</h1>
           <LoadingLine>Opening your Desk</LoadingLine>
         </div>
       </div>

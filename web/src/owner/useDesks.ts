@@ -45,9 +45,14 @@ export function useDesks(deskId: string) {
   });
 }
 
-/** A Desk's Today, polled while the tab is shown. */
-export function useToday(deskId: string) {
-  return useQuery({ ...todayQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('today') });
+/**
+ * A Desk's Today, polled while the tab is shown. A part of the Today page passes `retryOnMount:
+ * false`: it mounts once the page has read Today (`useTodayOpening`), and a read that failed isn't
+ * sent again just because it mounted, which would show it loading again; the part shows the failure
+ * until a poll or "Try again" reads Today again.
+ */
+export function useToday(deskId: string, { retryOnMount = true }: { retryOnMount?: boolean } = {}) {
+  return useQuery({ ...todayQuery(deskId), staleTime: FRESH_MS, refetchInterval: pollMs('today'), retryOnMount });
 }
 
 /** What waits for the owner on a Desk: held requests and open callbacks, polled. */
@@ -58,8 +63,9 @@ export function useNeedsYou(deskId: string) {
 /**
  * When the last read ahead of each Desk's Today gives up (a `Date.now()` time), per app (its query
  * client, so a reload starts afresh), until the Desk's Today next opens and takes it: the first
- * visit's page reads ahead and then opens Today, which waits no longer than that, so a visit has
- * one deadline however many pages wait on it.
+ * visit's page, or the owner's loading page on a reload (`readTodayEarly`), starts reading and then
+ * opens Today, which waits no longer than that, so a visit has one deadline however many pages wait
+ * on it.
  */
 const readAheadDeadlines = new WeakMap<QueryClient, Map<string, number>>();
 
@@ -86,9 +92,13 @@ export async function readTodayAhead(queryClient: QueryClient, deskId: string, c
 
 /**
  * Sends what a Desk's Today first shows besides the copy's Desks (its Today and Needs you) now,
- * without waiting on them, so a page about to open Today has them sooner; this never throws.
+ * without waiting on them, so a page about to open Today has them sooner; this never throws. Today
+ * waits for them `READ_AHEAD_MS` from now at most, however long the Desks take, unless a read ahead
+ * already set when it gives up (a first visit's page).
  */
 export function readTodayEarly(queryClient: QueryClient, deskId: string): void {
+  const deadlines = deadlinesOf(queryClient);
+  if (!deadlines.has(deskId)) deadlines.set(deskId, Date.now() + READ_AHEAD_MS);
   void queryClient.prefetchQuery(todayQuery(deskId));
   void queryClient.prefetchQuery(needsYouQuery(deskId));
 }
