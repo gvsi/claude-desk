@@ -24,6 +24,7 @@ import { capOf } from '../owner/rules/drafts.ts';
 import { peopleQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { moneyLimitLine, ruleWords } from '../owner/rules/ruleWords.ts';
 import { SETUP_COPY } from './copy.ts';
+import { aroundBusiness } from './ToolsStep.tsx';
 
 const copy = SETUP_COPY.rules;
 
@@ -185,7 +186,7 @@ export function RulesStep({ state, business, onNext }: RulesStepProps) {
     }
     return (
       <div className="cd-setup-step">
-        <PageHeader title={s.title} subtitle={s.subtitle(business || 'your business')} />
+        <PageHeader title={s.title} subtitle={aroundBusiness(s.subtitle, business)} />
         {body}
       </div>
     );

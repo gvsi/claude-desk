@@ -26,17 +26,18 @@ const DESCRIPTION =
 const requests = (key: RouteKey, from = 0) => mockStore.requests.slice(from).filter((r) => r.key === key);
 
 /** A new interview in the mock, made the way the start page makes one; with consent given unless `consent` is false. */
-async function startInterview(consent: boolean | null = true): Promise<SetupState> {
-  const started = await mockStore.dispatch('startSetup', { body: { description: DESCRIPTION, timezone: 'America/Los_Angeles' } });
-  if ('network' in started || started.status !== 200) throw new Error('the mock starts a setup');
+async function startInterview(consent: boolean | null = true, description = DESCRIPTION): Promise<SetupState> {
+  const started = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles' } });
+  // A new interview is created: 201, as the API answers.
+  if ('network' in started || started.status !== 201) throw new Error('the mock starts a setup');
   const state = started.body as SetupState;
   if (consent !== null) await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: consent } });
   return state;
 }
 
 /** An interview whose questions are all answered, at the tools step; the money limit answered as $500. */
-async function interviewAtTools(): Promise<SetupState> {
-  const state = await startInterview();
+async function interviewAtTools(description = DESCRIPTION): Promise<SetupState> {
+  const state = await startInterview(true, description);
   const id = state.interview_id;
   for (const question of SETUP_QUESTIONS) {
     const text = question.key === 'money_limit' ? '$500 is fine. Anything bigger, ask me.' : 'Yes, that works.';
@@ -46,24 +47,24 @@ async function interviewAtTools(): Promise<SetupState> {
 }
 
 /** An interview at its rules step, with its draft made. */
-async function interviewAtRules(): Promise<{ state: SetupState; draft: RulesDraft }> {
-  const state = await interviewAtTools();
+async function interviewAtRules(description = DESCRIPTION): Promise<{ state: SetupState; draft: RulesDraft }> {
+  const state = await interviewAtTools(description);
   const drafted = await mockStore.dispatch('setupRules', { params: { id: state.interview_id } });
   if ('network' in drafted || drafted.status !== 200) throw new Error('the mock drafts setup rules');
   return { state, draft: drafted.body as RulesDraft };
 }
 
 /** An interview at its safety check, its situations tried. */
-async function interviewAtSafety(): Promise<{ state: SetupState; draft: RulesDraft }> {
-  const at = await interviewAtRules();
+async function interviewAtSafety(description = DESCRIPTION): Promise<{ state: SetupState; draft: RulesDraft }> {
+  const at = await interviewAtRules(description);
   await mockStore.dispatch('setupSituations', { params: { id: at.state.interview_id } });
   await mockStore.dispatch('setupSafetyCheck', { params: { id: at.state.interview_id } });
   return at;
 }
 
 /** An interview whose rules are confirmed, at the owner's preview. */
-async function interviewAtPreview(): Promise<SetupState> {
-  const { state } = await interviewAtSafety();
+async function interviewAtPreview(description = DESCRIPTION): Promise<SetupState> {
+  const { state } = await interviewAtSafety(description);
   await mockStore.dispatch('setupConfirm', { params: { id: state.interview_id } });
   return state;
 }
@@ -491,16 +492,19 @@ describe('setup', () => {
     // The proving give-up: the API kept answering that it was still checking, and a minute after the
     // first post the screen stops asking and says so (the clock the retries are timed by moves only
     // when the test moves it).
-    vi.useFakeTimers({ toFake: ['Date'] });
     const slow = await interviewAtTools();
     const retry = { retry: { path: `/api/owner/policy/setup/${slow.interview_id}/rules`, body: null } };
-    mockStore.inject({ route: 'setupRules', status: 202, body: retry, delayMs: 500 });
+    mockStore.inject({ route: 'setupRules', status: 202, body: retry, times: 5 });
     const waiting = (await renderRoute(`/app/setup/${slow.interview_id}`)).screen;
+    await expect.element(waiting.getByRole('button', { name: 'Continue' })).toBeVisible();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout'], shouldAdvanceTime: true });
     await waiting.getByRole('button', { name: 'Continue' }).click();
     const posts = () => requests('setupRules').filter((r) => r.path.includes(slow.interview_id));
     await expect.poll(() => posts().length).toBe(1);
-    vi.setSystemTime(Date.now() + PROVING_GIVE_UP_MS + 1_000);
+    vi.setSystemTime(Date.now() + PROVING_GIVE_UP_MS);
+    await vi.advanceTimersByTimeAsync(3_000);
     await expect.element(waiting.getByText(CANT_CHECK, { exact: true })).toBeVisible();
+    vi.useRealTimers();
     expect(waiting.getByRole('button', { name: 'Check real situations' }).elements()).toHaveLength(0);
     expect(posts()).toHaveLength(1);
 
@@ -532,7 +536,12 @@ describe('setup', () => {
     expect(deposit.getByText('Not what we planned', { exact: true }).elements()).toHaveLength(0);
     const answered = (await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } })) as { body: SituationResult[] };
     const planned = answered.body.find((r) => r.situation.title === 'An agent pays the service call deposit');
-    expect([planned?.result.outcome, planned?.result.depends_on_review, planned?.matches]).toEqual(['hold', true, true]);
+    expect([planned?.situation.expected, planned?.result.outcome, planned?.result.depends_on_review, planned?.matches]).toEqual([
+      'allow_if_reviewed',
+      'hold',
+      true,
+      true,
+    ]);
     const refused = rows.filter({ hasText: "Someone asks for another customer's address" });
     await expect.element(refused.getByText('Never', { exact: true })).toBeVisible();
 
@@ -592,6 +601,40 @@ describe('setup', () => {
     expect(screen.getByRole('button', { name: 'Confirm rules' }).elements()).toHaveLength(0);
     await expect.element(screen.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
     expect(requests('setupConfirm')).toHaveLength(0);
+  });
+
+  it('setup_gives_the_new_business_its_own_name', async () => {
+    const bakery = "Acme Bakery. I'm Lee, a baker in Fresno. Sourdough, pastries and cakes to order, Tuesday to Sunday.";
+    const state = await interviewAtPreview(bakery);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    // The preview is the new business's public page, never another's.
+    await expect.element(screen.getByText(/You're chatting with Claude, an AI answering for Acme Bakery\. Ask for Lee anytime\./)).toBeVisible();
+    await expect.element(screen.getByText('Acme Bakery', { exact: true }).first()).toBeVisible();
+    expect(screen.getByText(/Rivera|Maria/).elements()).toHaveLength(0);
+    // The owner's own reads name it too: its business and owner.
+    const desks = (await mockStore.dispatch('desks')) as { body: { name: string; owner_display_name: string; desks: { desk_id: string }[] }[] };
+    const mine = desks.body.find((b) => b.desks.some((d) => d.desk_id === state.desk_id));
+    expect([mine?.name, mine?.owner_display_name]).toEqual(['Acme Bakery', 'Lee']);
+
+    // Live, its public page says the same.
+    await mockStore.dispatch('goLive', { params: { id: state.interview_id } });
+    const page = (await renderRoute(`/d/${state.slug}`)).screen;
+    await expect.element(page.getByText(/answering for Acme Bakery/)).toBeVisible();
+    expect(page.getByText(/Rivera|Maria/).elements()).toHaveLength(0);
+  });
+
+  it('business_names_are_the_owners_words', async () => {
+    // A name that reads as a technical word is the owner's own: the subtitles show it as theirs.
+    const named = "Kernel Plumbing. I'm Sam, a plumber in Reno.";
+    const tools = await interviewAtTools(named);
+    const atTools = (await renderRoute(`/app/setup/${tools.interview_id}`)).screen;
+    await expect.element(atTools.getByText(/Add the ones that fit/)).toBeVisible();
+    assertNoJargon(atTools.container);
+    const { state } = await interviewAtRules(named);
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const atSituations = (await renderRoute(`/app/setup/${state.interview_id}`)).screen;
+    await expect.element(atSituations.getByRole('list', { name: 'Real situations' })).toBeVisible();
+    assertNoJargon(atSituations.container);
   });
 
   it('safety_check_lists_outcomes', async () => {

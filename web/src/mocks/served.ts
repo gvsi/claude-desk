@@ -40,7 +40,7 @@ import {
 } from './readModels.ts';
 import { AFTER_VERIFY, EVENT_GAP_MS, afterAnswer, allows, cardDiffFor, matchRule, turnEnd, type Language, type Step } from './script.ts';
 import { seedWorld, type MockSeed } from './seed.ts';
-import { SETUP_ROUTES } from './setup.ts';
+import { SETUP_ROUTES, setupPublicDesk, withSetupBusinesses } from './setup.ts';
 import { MockWorld, isoTime, type DeskRecord, type LinkRecord, type SessionRecord } from './world.ts';
 
 /** Plan 02's limit on a visitor's message and on the owner's words. */
@@ -315,7 +315,7 @@ const SERVED: ServedRoutes = {
     return req.cookies.owner ? ok(copyOut(sv.world)) : NO_OWNER;
   },
   desks(sv, req) {
-    return req.cookies.owner ? ok([businessOut(sv.world)]) : NO_OWNER;
+    return req.cookies.owner ? ok(withSetupBusinesses(sv.world, [businessOut(sv.world)])) : NO_OWNER;
   },
   setAnswering(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -504,7 +504,8 @@ const SERVED: ServedRoutes = {
   publicDesk(sv, req) {
     const desk = sv.world.deskBySlug(req.params.slug);
     if (!desk) return NOT_FOUND;
-    return ok(publicDesk(desk, req.query.get('lang') === 'es' ? 'es' : 'en'));
+    const language = req.query.get('lang') === 'es' ? 'es' : 'en';
+    return ok(setupPublicDesk(sv.world, desk, language) ?? publicDesk(desk, language));
   },
   openSession(sv, req) {
     const slug = req.params.slug ?? '';

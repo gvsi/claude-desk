@@ -422,13 +422,17 @@ export interface Situation {
   title: string;
   who: 'public' | 'verified' | 'agent' | 'after_hours';
   probe: Probe;
-  expected: Outcome;
+  /** What the answers planned; `allow_if_reviewed` is "does it if Claude's second look agrees". */
+  expected: Outcome | 'allow_if_reviewed';
 }
 
 export interface SituationResult {
   situation: Situation;
   result: ProbeResult;
-  /** False on another outcome or when the outcome depends on the reviewer. */
+  /**
+   * Whether the result is what was planned: a plan to do it after Claude's second look matches a
+   * result that depends on the reviewer; any other plan, the same outcome without the reviewer.
+   */
   matches: boolean;
 }
 

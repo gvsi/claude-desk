@@ -43,6 +43,8 @@ export const QUESTION_ORDER: readonly QuestionKey[] = [
 
 export const SETUP_COPY = {
   stepsLabel: 'Set up your Desk',
+  /** Stands in for the business's name until the API names it. */
+  yourBusiness: 'your business',
   saveAndExit: 'Save and exit',
 
   start: {
@@ -70,8 +72,11 @@ export const SETUP_COPY = {
 
   tools: {
     title: 'What Claude can use',
-    subtitle: (business: string) =>
-      `Built-in connectors are part of Claude Desk. Add the ones that fit ${business}; each tool starts at Ask me first unless one of your rules covers it, and you review it before it turns on.`,
+    /** Around the business's name, which is the owner's own words. */
+    subtitle: [
+      'Built-in connectors are part of Claude Desk. Add the ones that fit ',
+      '; each tool starts at Ask me first unless one of your rules covers it, and you review it before it turns on.',
+    ],
     on: 'On',
     alwaysOn: 'Always on',
     continue: 'Continue',
@@ -97,7 +102,8 @@ export const SETUP_COPY = {
 
   situations: {
     title: 'Real situations',
-    subtitle: (business: string) => `How your draft rules handle things that really happen at ${business}. Nothing here is real.`,
+    /** Around the business's name, which is the owner's own words. */
+    subtitle: ['How your draft rules handle things that really happen at ', '. Nothing here is real.'],
     loading: 'Trying real situations on your draft rules',
     empty: 'No situations to show',
     emptyBody: 'Your draft rules are still checked against tricks people use in the next step.',

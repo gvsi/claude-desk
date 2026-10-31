@@ -7,8 +7,9 @@
  * with Answering still off; going live turns Answering on. The interviews are kept per copy beside
  * its world, so a start over leaves none behind.
  */
-import type { Probe, ProbeResult, RuleCard, ToolProfile } from '../api/contracts.ts';
+import type { Probe, ProbeResult, PublicDesk, RuleCard, ToolProfile } from '../api/contracts.ts';
 import type {
+  BusinessOut,
   PolicyVersionOut,
   QuestionKey,
   RulesDraft,
@@ -22,9 +23,10 @@ import type {
   ToolRow,
   WentLive,
 } from '../api/views.ts';
-import { rivera } from '../ds/fixtures/index.ts';
+import { cardBlock, rivera } from '../ds/fixtures/index.ts';
+import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
-import { PRESETS, activePolicy, riveraTools } from './seed.ts';
+import { BUSINESS, PRESETS, activePolicy, riveraTools } from './seed.ts';
 import type { Failure, Req, ServedRoutes, Server } from './served.ts';
 import type { DeskRecord, MockWorld } from './world.ts';
 
@@ -56,7 +58,11 @@ export const MEMORY_LABEL = 'Searched your Claude memory';
 /** One interview, as the API keeps it in `app.setup_interviews`. */
 interface Interview {
   state: SetupState;
+  /** The business's name, its owner's first name and a line about it, as the API takes them from the description. */
+  business: string;
   ownerName: string | null;
+  about: string | null;
+  timezone: string;
   /** The money limit the owner answered, in cents: 0 until then, as the API's default. */
   capCents: number;
   /** The rules draft the interview made, once it has one. */
@@ -80,6 +86,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const stateOf = (interview: Interview): SetupState => ({ ...interview.state, messages: interview.state.messages.map((m) => ({ ...m })) });
 
 const ok = <T>(body: T) => ({ status: 200, body }) as const;
+/** A new interview: 201, as the API answers its creation. */
+const created = <T>(body: T) => ({ status: 201, body }) as const;
 const fail = (status: Failure['status'], error: string, extra: Omit<Failure['body'], 'error'> = {}): Failure => ({ status, body: { error, ...extra } });
 const NO_OWNER = fail(401, 'no_owner_session');
 const NOT_FOUND = fail(404, 'not_found');
@@ -99,6 +107,16 @@ function businessNameOf(description: string): string {
 function ownerNameOf(description: string): string | null {
   const match = /\bI(?:'|’)?m\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ'-]{0,39})/.exec(description);
   return match?.[1] ?? null;
+}
+
+/**
+ * A line about the business for its public page: the description after its first sentence, leaving
+ * out the owner's own "I'm …" sentence, cut to 200 characters; null when nothing is left.
+ */
+function aboutOf(description: string): string | null {
+  const sentences = description.split(/(?<=[.!?])\s+/).slice(1).filter((sentence) => !/^I(?:'|’)?m\b/.test(sentence));
+  const line = sentences.join(' ').trim().slice(0, 200).trim();
+  return line === '' ? null : line;
 }
 
 /** A slug for the business, unique in the copy. */
@@ -152,8 +170,15 @@ function card(fields: Pick<RuleCard, 'card_id' | 'applies_to' | 'mode' | 'who' |
   return { person_id: null, agent_key_id: null, max_amount_cents: null, max_discount_bp: 0, hours: null, review: false, is_default: false, ...fields };
 }
 
-/** The cards setup drafts from the answers: "Ask me first"'s own, then the interview's (ids `card-1`…). */
-function setupCards(): RuleCard[] {
+/** The deposit an agent pays in the situations: within its signed limit, with Claude's second look. */
+const DEPOSIT_CENTS = 2000;
+
+/**
+ * The cards setup drafts from the answers: "Ask me first"'s own, then the interview's (ids
+ * `card-1`…). With a money limit that allows it, agents pay a deposit on their own after Claude's
+ * second look.
+ */
+function setupCards(capCents: number): RuleCard[] {
   return [
     ...PRESETS.ask_first.map((c) => ({ ...c })),
     card({ card_id: 'card-1', applies_to: 'native.quote', mode: 'auto', who: 'anyone', reason: 'Quotes from your price list, at list price.' }),
@@ -176,6 +201,19 @@ function setupCards(): RuleCard[] {
     card({ card_id: 'card-4', applies_to: 'native.release_document', mode: 'auto', who: 'record_owner', reason: 'Sends customers their own documents.' }),
     card({ card_id: 'card-5', applies_to: 'effect:charge', mode: 'ask', who: 'anyone', reason: 'Payment links ask you first.' }),
     card({ card_id: 'card-6', applies_to: 'effect:pay_out', mode: 'never', who: 'anyone', reason: 'Refunds never go out on their own.' }),
+    ...(capCents >= DEPOSIT_CENTS
+      ? [
+          card({
+            card_id: 'card-7',
+            applies_to: 'native.charge_mandate',
+            mode: 'auto',
+            who: 'anyone',
+            max_amount_cents: DEPOSIT_CENTS,
+            review: true,
+            reason: 'Agents pay the service call deposit within their signed limit, checked by the reviewer.',
+          }),
+        ]
+      : []),
   ];
 }
 
@@ -196,8 +234,21 @@ function result(p: Probe, outcome: ProbeResult['outcome'], reason: string, field
   return { probe: p, outcome, depends_on_review: false, card_ids: [], reason_plain: reason, ...fields };
 }
 
-/** The six situations the check runs on the draft, one of them not what the answers planned. */
-function situationsFor(): SituationResult[] {
+/**
+ * Whether the kernel's result is what the situation planned, as the API's `situation_matches` says:
+ * a plan to do it after Claude's second look matches a result that depends on the reviewer and
+ * that an automatic rule with that second look decided; any other plan matches the same outcome
+ * when it doesn't depend on the reviewer.
+ */
+function situationMatches(planned: Situation['expected'], r: ProbeResult, cards: readonly RuleCard[]): boolean {
+  if (planned === 'allow_if_reviewed') {
+    return r.depends_on_review && r.card_ids.some((id) => cards.some((c) => c.card_id === id && c.mode === 'auto' && c.review === true));
+  }
+  return r.outcome === planned && !r.depends_on_review;
+}
+
+/** The six situations the check runs on the draft (`cards`), one of them not what the answers planned. */
+function situationsFor(cards: readonly RuleCard[]): SituationResult[] {
   const rows: [Situation, ProbeResult][] = [];
   const add = (title: string, who: Situation['who'], expected: Situation['expected'], p: Probe, r: ProbeResult) =>
     rows.push([{ title, who, probe: p, expected }, r]);
@@ -205,17 +256,26 @@ function situationsFor(): SituationResult[] {
   add('A visitor wants a drain cleared on Tuesday afternoon', 'public', 'allow', weekday, result(weekday, 'allow', 'Books weekday visits in your hours.', { card_ids: ['card-2'] }));
   const discount = probe('native.quote', { actor: 'visitor', who: 'anyone', resource_kind: 'desk', call: { call_id: 'probe-discount', tool: 'native.quote', args: { requested_discount_bp: 1000 } } });
   add('A visitor asks for 10% off if they pay cash', 'public', 'hold', discount, result(discount, 'hold', 'Discounts ask you first.'));
-  // Planned to depend on Claude's second look: the kernel holds it unless the reviewer agrees.
-  const deposit = probe('native.charge_mandate', { actor: 'agent', who: 'agent', resource_kind: 'quote', agent_mandate_remaining_cents: 2000, amount_cents: 2000 });
-  add('An agent pays the service call deposit', 'agent', 'hold', deposit, result(deposit, 'hold', 'Within its signed limit, checked by the reviewer.', { depends_on_review: true }));
+  // Planned to happen after Claude's second look: the kernel holds it unless the reviewer agrees.
+  // Without a rule for it (a money limit too low), it asks.
+  const deposit = probe('native.charge_mandate', { actor: 'agent', who: 'agent', resource_kind: 'quote', agent_mandate_remaining_cents: DEPOSIT_CENTS, amount_cents: DEPOSIT_CENTS });
+  const reviewed = cards.some((c) => c.card_id === 'card-7');
+  add(
+    'An agent pays the service call deposit',
+    'agent',
+    reviewed ? 'allow_if_reviewed' : 'hold',
+    deposit,
+    reviewed
+      ? result(deposit, 'hold', 'Within its signed limit, checked by the reviewer.', { depends_on_review: true, card_ids: ['card-7'] })
+      : result(deposit, 'hold', 'Charges ask you first.'),
+  );
   const invoice = probe('native.release_document', { actor: 'visitor', who: 'record_owner', resource_kind: 'document', resource_owner: 'caller' });
   add('A customer asks for their last invoice', 'verified', 'allow', invoice, result(invoice, 'allow', 'Sends customers their own documents.', { card_ids: ['card-4'] }));
   const saturday = probe('native.book', { actor: 'visitor', who: 'anyone', resource_kind: 'slot', starts_at: '2026-11-07T10:00:00-08:00' });
   add('A visitor wants a Saturday morning visit for a slow drain', 'after_hours', 'hold', saturday, result(saturday, 'allow', 'Books weekday visits in your hours.', { card_ids: ['card-2'] }));
   const address = probe('native.release_document', { actor: 'visitor', who: 'anyone', resource_kind: 'document', resource_owner: 'other' });
   add("Someone asks for another customer's address", 'public', 'refuse', address, result(address, 'refuse', 'Private data only to its verified owner.'));
-  // What the answers planned matches, an outcome planned to depend on the reviewer included, as the API answers it.
-  return rows.map(([situation, r]) => ({ situation, result: r, matches: r.outcome === situation.expected }));
+  return rows.map(([situation, r]) => ({ situation, result: r, matches: situationMatches(situation.expected, r, cards) }));
 }
 
 /** The safety check's six tricks (plan 02b Task 7, `SAFETY_PROBES`), every one stopped. */
@@ -309,7 +369,7 @@ function proved(draft: RulesDraft): boolean {
 function setupDraft(sv: Server, interview: Interview, desk: DeskRecord): RulesDraft {
   const open = interview.draftVersion === null ? undefined : desk.drafts.get(interview.draftVersion);
   if (open) return open.draft;
-  const drafted = sv.world.draftCards(desk, setupCards(), { cap: interview.capCents });
+  const drafted = sv.world.draftCards(desk, setupCards(interview.capCents), { cap: interview.capCents });
   const record = desk.drafts.get(drafted.version);
   if (!record) throw new Error(`setup draft ${drafted.version} was not stored`);
   // Setup's draft has nothing to compare with: its diff is null (plan 02b Task 7).
@@ -364,12 +424,15 @@ export const SETUP_ROUTES: ServedRoutes = {
           },
         ],
       },
+      business,
       ownerName,
+      about: aboutOf(text),
+      timezone,
       capCents: 0,
       draftVersion: null,
     };
     interviewsOf(world).set(interview.state.interview_id, interview);
-    return ok(stateOf(interview));
+    return created(stateOf(interview));
   },
   setup(sv, req) {
     const found = interviewOf(sv, req);
@@ -452,10 +515,11 @@ export const SETUP_ROUTES: ServedRoutes = {
   setupSituations(sv, req) {
     const found = interviewOf(sv, req);
     if (isFailure(found)) return found;
-    const { interview } = found;
-    if (interview.draftVersion === null) return CONFLICT;
+    const { interview, desk } = found;
+    const open = interview.draftVersion === null ? undefined : desk.drafts.get(interview.draftVersion);
+    if (!open) return CONFLICT;
     moveTo(interview, 'situations');
-    return ok(situationsFor());
+    return ok(situationsFor(open.draft.cards));
   },
   setupSafetyCheck(sv, req) {
     const found = interviewOf(sv, req);
@@ -496,3 +560,50 @@ export const SETUP_ROUTES: ServedRoutes = {
     return ok({ public_url: `${origin}/d/${desk.summary.slug}`, slug: desk.summary.slug } satisfies WentLive);
   },
 };
+
+/** The interview that made the Desk, if setup made it. */
+function interviewForDesk(world: MockWorld, deskId: string): Interview | undefined {
+  return [...interviewsOf(world).values()].find((interview) => interview.state.desk_id === deskId);
+}
+
+/**
+ * A Desk setup made, as its public page shows it: the business's own name and owner, and a line
+ * about it from the description; null for any other Desk.
+ */
+export function setupPublicDesk(world: MockWorld, desk: DeskRecord, _language: Language): PublicDesk | null {
+  const interview = interviewForDesk(world, desk.summary.desk_id);
+  if (!interview) return null;
+  return {
+    business_name: interview.business,
+    desk_name: desk.summary.name,
+    owner_display_name: interview.ownerName ?? interview.business,
+    brand: { ...BUSINESS.brand },
+    charter: interview.about === null ? [] : [cardBlock('policy', { fact_id: 'charter:policy:about', title: interview.about })],
+    agent_card: [],
+    open_status: null,
+  };
+}
+
+/**
+ * The copy's businesses as the owner reads them: each Desk setup made is a business of its own,
+ * with its owner, as the API makes one at the start of setup; the others stay as they are.
+ */
+export function withSetupBusinesses(world: MockWorld, businesses: BusinessOut[]): BusinessOut[] {
+  const made = [...interviewsOf(world).values()];
+  const ids = new Set(made.map((interview) => interview.state.desk_id));
+  const kept = businesses.map((business) => ({ ...business, desks: business.desks.filter((d) => !ids.has(d.desk_id)) }));
+  const theirs = made.flatMap((interview): BusinessOut[] => {
+    const desk = world.desk(interview.state.desk_id);
+    if (!desk) return [];
+    return [
+      {
+        business_id: `biz-${interview.state.desk_id}`,
+        name: interview.business,
+        owner_display_name: interview.ownerName ?? interview.business,
+        timezone: interview.timezone,
+        desks: [{ ...desk.summary }],
+      },
+    ];
+  });
+  return [...kept, ...theirs];
+}
