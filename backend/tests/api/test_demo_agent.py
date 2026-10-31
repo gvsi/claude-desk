@@ -629,8 +629,8 @@ async def two_desks_of_a_copy(kernel_http, fake) -> tuple[str, str]:
 
 
 async def test_a_key_answers_only_the_session_and_desk_that_sent_it(app, browser, fake, kernel_http, agent_model):
-    # The key holds the session that sent it and the Desk it went to: the same key from another session of the copy,
-    # or sent to another of the copy's Desks, is 409 and starts nothing.
+    # The key holds the session that sent it and the Desk it went to: the same key from another session of the copy
+    # is 409 and starts nothing, and so is a send to the copy's other Desk, which has a session of its own.
     slug, other_slug = await two_desks_of_a_copy(kernel_http, fake)
     client, _, _ = await open_session(app, browser, slug)
     agent_model.add(step("", done=True))

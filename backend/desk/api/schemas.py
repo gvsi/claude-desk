@@ -63,7 +63,8 @@ from desk.presets import PresetName
 
 class ApiError(BaseModel):
     """Every error answer: `error` names what went wrong; `code` is the kernel's, when `error` is "kernel";
-    `retry_after` is the seconds to wait, on a 429. Fields that don't apply are left out."""
+    `retry_after` is the seconds to wait before sending again: on a 429, and on a 409 `in_progress` that names one.
+    Fields that don't apply are left out."""
 
     error: str
     code: str | None = None

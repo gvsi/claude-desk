@@ -103,7 +103,8 @@ class KeysFull(Exception):
 @dataclass(frozen=True)
 class HeldKey:
     """An idempotency key a request took in its copy: the run it started, the request's hash, the session that sent
-    it, the Desk it went to and when it was claimed."""
+    it, the Desk it went to and when it was claimed. A visitor session belongs to one Desk, so the session alone
+    already ties the key to its Desk; `slug` is kept as defence in depth."""
 
     run_id: str
     request_sha256: str
