@@ -408,6 +408,32 @@ describe('rules page', () => {
     await expectTurnOpensAtTheOwnersWords(log, 'Quote water heater installs up to $600', 'the next change');
   });
 
+  it('rule_chat_returns_focus_to_a_suggestion_the_click_did_not_focus', async () => {
+    // Safari focuses no button a click presses, so when a suggestion opens Ask Claude beside the
+    // page (1440 px), focus is still on the page's body. Closing the panel still returns focus to
+    // the suggestion that opened it.
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const chip = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Stop quoting on weekends' });
+    await expect.element(chip).toBeVisible();
+    const chipEl = chip.element();
+    // What Safari does: the press moves no focus to the button.
+    chipEl.addEventListener('mousedown', (event) => event.preventDefault());
+    const opened: { focus: Element | null } = { focus: null };
+    chipEl.addEventListener('click', () => {
+      opened.focus = document.activeElement;
+    });
+    (document.activeElement as HTMLElement | null)?.blur();
+
+    await userEvent.click(chip);
+    expect(opened.focus, 'the click left focus on the body').toBe(document.body);
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+
+    await userEvent.keyboard('{Escape}');
+    await expect.element(panel).not.toBeInTheDocument();
+    await expect.element(chip).toHaveFocus();
+  });
+
   it('rules_header_keeps_its_title_whole_beside_ask_claude', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Why was this quote held?' }).click();
