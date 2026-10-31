@@ -67,6 +67,9 @@ const sign = (label: string) => placeholderHex(`signature:${label}`, 64);
 const sha256 = (label: string) => placeholderHex(`sha256:${label}`, 32);
 export const LEDGER_KEY = { key_id: rivera.ledger.verified.key_id, public_key_hex: rivera.ledger.verified.public_key_hex };
 
+/** The reason the kernel gives a handoff the handoff card opened: its own words, never the visitor's or Claude's. */
+export const CARD_REASON = 'The Desk handed this to you.';
+
 type Listener = (seq: number, ev: SseEvent) => void;
 
 /** How long a typing signal shows, and how often one counts (plan 02b Task 1). */
@@ -255,6 +258,8 @@ export class MockWorld {
   private counter = 0;
   private itemN = 0;
   private fixedNow: number | null = null;
+  /** Above 0 while `replay` writes history. */
+  private replaying = 0;
 
   constructor(
     readonly seed: MockSeed,
@@ -753,9 +758,15 @@ export class MockWorld {
     return record.decision;
   }
 
+  /**
+   * A reply of Claude's, checked and recorded. One that shows the handoff card opens the owner's
+   * handoff first, as the kernel's check does (`openCardHandoff`), except in history the seed or a
+   * test writes: the kernel's seed holds its request without checking a reply.
+   */
   reply(session: SessionRecord, blocks: RenderedBlock[], language: Language, opts: { blocked?: boolean } = {}): EvMessage {
     const blocked = opts.blocked ?? false;
     const messageId = this.id('msg');
+    if (this.replaying === 0 && blocks.some((block) => block.template === 'handoff')) this.openCardHandoff(session);
     const checked = this.appendLedger(this.deskOf(session), {
       kind: 'reply',
       origin: 'kernel',
@@ -932,6 +943,7 @@ export class MockWorld {
         reason: fields.reason,
         callback_window: fields.callbackWindow,
         status: 'open',
+        kind: 'callback',
       },
       deskId: session.deskId,
       createdAt: this.now(),
@@ -947,6 +959,43 @@ export class MockWorld {
       createdAt: this.now(),
     });
     session.displayName ??= fields.lead;
+  }
+
+  /**
+   * The owner's handoff for a reply of Claude's that shows the handoff card, as the kernel opens
+   * one (plan 01b, `reply_check.open_card_handoff`): none while the chat has an open handoff of
+   * either kind; otherwise an open one of kind `card`, with the kernel's own reason, no call-back
+   * window and no lead, an alert to the owner saying who is waiting and nothing of what was said,
+   * and a `desk_data` entry on the chat.
+   */
+  private openCardHandoff(session: SessionRecord): void {
+    const sessionId = session.state.session_id;
+    const open = [...this.handoffs.values()].some((h) => h.handoff.session_id === sessionId && h.handoff.status === 'open');
+    if (open) return;
+    const desk = this.deskOf(session);
+    const handoffId = this.id('handoff');
+    this.handoffs.set(handoffId, {
+      handoff: { handoff_id: handoffId, session_id: sessionId, reason: CARD_REASON, callback_window: null, status: 'open', kind: 'card' },
+      deskId: session.deskId,
+      createdAt: this.now(),
+      fromTheVisitor: session.lastVisitorText,
+    });
+    const entry: DemoInboxEntry = {
+      entry_id: this.id('inbox'),
+      to: 'owner',
+      kind: 'alert',
+      body: `${session.person?.name ?? 'A visitor'} is waiting in a conversation the Desk handed to you.`,
+      created_at: isoTime(this.now()),
+      decision_id: null,
+    };
+    this.inbox.push({ entry, deskId: session.deskId, sessionId: null });
+    this.appendLedger(desk, {
+      kind: 'desk_data',
+      origin: 'kernel',
+      session_id: sessionId,
+      ref_id: null,
+      summary: { part: 'handoffs', refs: [handoffId], kind: 'card' },
+    });
   }
 
   /** The owner closes a callback request, as the kernel records it. */
@@ -1181,20 +1230,25 @@ export class MockWorld {
 
   /** Writes seeded turns into history from `from`, each step `EVENT_GAP_MS` apart and turns `gap` apart. */
   replay(session: SessionRecord, from: number, turns: ReplayTurn[], gap = MINUTE): void {
-    let t = from;
-    for (const turn of turns) {
-      this.at(t, () => this.visitorText(session, turn.text));
-      const { whisper } = turn;
-      if (whisper !== undefined) {
-        t += 20_000;
-        this.at(t, () => this.whisper(session, whisper));
+    this.replaying += 1;
+    try {
+      let t = from;
+      for (const turn of turns) {
+        this.at(t, () => this.visitorText(session, turn.text));
+        const { whisper } = turn;
+        if (whisper !== undefined) {
+          t += 20_000;
+          this.at(t, () => this.whisper(session, whisper));
+        }
+        const language = turnLanguage(turn.text);
+        for (const step of [...turn.steps, turnEnd]) {
+          t += EVENT_GAP_MS;
+          this.at(t, () => this.emit(session, step(this.context(session, language, turn.text))));
+        }
+        t += gap;
       }
-      const language = turnLanguage(turn.text);
-      for (const step of [...turn.steps, turnEnd]) {
-        t += EVENT_GAP_MS;
-        this.at(t, () => this.emit(session, step(this.context(session, language, turn.text))));
-      }
-      t += gap;
+    } finally {
+      this.replaying -= 1;
     }
   }
 }

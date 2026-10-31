@@ -12,7 +12,7 @@ import { conversationPath, type ConversationArrival } from '../conversations/sta
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, needsYouKey, todayKey } from '../useDesks.ts';
 
-/** An open callback as Needs you lists it. */
+/** An open handoff as Needs you lists it: a call-back request, or a conversation the handoff card handed over. */
 export type CallbackItem = Extract<NeedsYouItem, { handoff: object }>;
 
 /** Why the latest read of what needs the owner failed, in owner words, and a way to read it again. */
@@ -31,7 +31,7 @@ function countLabel(n: number): string {
 export interface NeedsYouProps {
   /** Held requests still waiting for the owner, oldest first. */
   held: readonly HeldItem[];
-  /** Open callbacks, in the order Needs you lists them. */
+  /** Open handoffs, in the order Needs you lists them. */
   callbacks: readonly CallbackItem[];
   answers: UseAnswer;
   /** When Needs you was last read (its `dataUpdatedAt`), which tells whether `held` shows a request as it stands since a conflict. */
@@ -51,7 +51,7 @@ export interface NeedsYouProps {
 /**
  * Today's "Needs you": a failed read first, when the latest one failed; then one list of the held
  * requests and those answered here, oldest first, each an approval card answered in place, then
- * each open callback. A request answered here stays where it was answered, with its final line and
+ * each open handoff. A request answered here stays where it was answered, with its final line and
  * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
  */
 export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, sectionRef, onDismiss }: NeedsYouProps) {
@@ -123,8 +123,10 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
 }
 
 /**
- * A visitor who asked for the owner: their name, contact and reason as they typed them, the
- * callback they were promised, a way into the chat, and a way to close it.
+ * A visitor who wants the owner, a way into the chat, and a way to close it. A call-back request
+ * says their name, contact and reason as they typed them, and the callback they were promised; a
+ * conversation the handoff card handed over says the Desk's reason alone, since no call back was
+ * promised.
  */
 function CallbackCard({ item }: { item: CallbackItem }) {
   const { business, desk } = useOwnerDesk();
@@ -186,7 +188,7 @@ function CallbackCard({ item }: { item: CallbackItem }) {
         <p className="cd-callback__reason cd-type-body" data-copy="user">
           {handoff.reason}
         </p>
-        <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>
+        {handoff.kind === 'card' ? null : <p className="cd-callback__when cd-type-meta">{callbackLine(handoff.callback_window, business.timezone)}</p>}
         {/* Only the pressed button spins; the other waits, its words shown, until its request settles. */}
         <div className="cd-callback__actions">
           <Button variant="secondary" busy={joining} waiting={closing} onClick={() => void join()}>

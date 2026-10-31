@@ -35,6 +35,7 @@ import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
 import {
+  CALLBACK_WINDOW,
   DECISIONS,
   DEMO_CODE,
   EVENT_GAP_MS,
@@ -872,6 +873,50 @@ describe('the scripted Desk', () => {
     // Its amount reads as render/cards.py `money` writes it: grouped dollars, then two cents digits.
     expect(linkCancelledBlock({ title: 'Leak repair', amount_cents: 123_456 }, 'en').title).toBe('$1,234.56');
     expect(linkCancelledBlock({ title: 'Leak repair', amount_cents: 5 }, 'es').title).toBe('$0.05');
+  });
+
+  it('handoff_card_opens_an_owner_handoff_as_the_kernel_does', async () => {
+    // As the kernel's reply check does (plan 01b): a reply of Claude's that shows the handoff card
+    // opens an owner handoff of kind `card` for the chat, unless one of either kind is open there.
+    // It has the kernel's own reason and no call-back window, alerts the owner, and is recorded on
+    // the chat just before the reply. The seeded history's stopped reply opened none: the kernel's
+    // seed holds its request without checking a reply.
+    expect(mockStore.world.handoffs.size).toBe(0);
+    const { session } = await openChat();
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has its main Desk');
+    const mine = () => [...mockStore.world.handoffs.values()].map((h) => h.handoff).filter((h) => h.session_id === session.session_id);
+    const inbox = mockStore.world.inbox.length;
+
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toEqual([
+      { handoff_id: expect.any(String), session_id: session.session_id, reason: 'The Desk handed this to you.', callback_window: null, status: 'open', kind: 'card' },
+    ]);
+    const card = mine()[0]?.handoff_id;
+    const [opened, reply] = desk.ledger.slice(-2).map((entry) => entry.event);
+    expect(opened).toEqual({ kind: 'desk_data', origin: 'kernel', session_id: session.session_id, ref_id: null, summary: { part: 'handoffs', refs: [card], kind: 'card' } });
+    expect(reply).toMatchObject({ kind: 'reply', session_id: session.session_id });
+    expect(mockStore.world.inbox.slice(inbox).map(({ entry, sessionId }) => [entry.to, entry.kind, entry.body, entry.decision_id, sessionId])).toEqual([
+      ['owner', 'alert', 'A visitor is waiting in a conversation the Desk handed to you.', null, null],
+    ]);
+
+    // One at a time: the card shown again opens no second handoff while this one is open.
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toHaveLength(1);
+
+    // Once the owner marks it done, a call back opens one of its own kind, which the card waits on too.
+    expect((await call('handoffDone', { params: { handoff_id: card ?? '' } })).status).toBe(200);
+    await send('Can you call me back?');
+    await drain();
+    expect(mine().map((h) => [h.kind, h.status, h.callback_window])).toEqual([
+      ['card', 'done', null],
+      ['callback', 'open', CALLBACK_WINDOW],
+    ]);
+    await send('Can I talk to Maria?');
+    await drain();
+    expect(mine()).toHaveLength(2);
   });
 
   it('events_replay_after_seq', async () => {

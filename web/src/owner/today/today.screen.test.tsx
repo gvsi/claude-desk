@@ -23,6 +23,7 @@ import { CALLBACK_REASON } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
+import { CARD_REASON } from '../../mocks/world.ts';
 import { START_EXAMPLES } from '../../setup/copy.ts';
 import { expectLandedInPlace, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
@@ -1722,6 +1723,26 @@ describe('Today', () => {
     await expect.poll(() => requests('handoffDone').length).toBe(2);
     await expect.poll(() => requests('needsYou').length).toBeGreaterThan(reads);
     expect(screen.getByRole('alert').elements()).toHaveLength(0);
+  });
+
+  it('card_handoff_draws_no_callback_line', async () => {
+    // The handoff card handed the chat to Maria: no call back was promised, so its card says the
+    // Desk's own reason and no call-back time, and joins and closes as a call-back request does.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    await visitorSays('Can I talk to Maria?');
+    const wants = screen.getByRole('article', { name: 'Wants you' });
+    await expect.element(wants, { timeout: 2_000 }).toBeVisible();
+    await expect.element(wants.getByText(CARD_REASON, { exact: true })).toBeVisible();
+    expect(wants.element().textContent).not.toMatch(/call back/i);
+    await expect.element(wants.getByRole('button', { name: 'Join the chat' })).toBeVisible();
+    await expect.element(wants.getByRole('button', { name: 'Mark done' })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Once it's done, a call-back request in its place still says when.
+    await mockStore.dispatch('handoffDone', { params: { handoff_id: [...mockStore.world.handoffs.keys()][0] ?? '' } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    await expect.element(wants.getByText("You'll call back on Monday, between 8:00 am and 9:00 am.", { exact: true }), { timeout: 2_000 }).toBeVisible();
+    expect(wants.elements()).toHaveLength(1);
   });
 
   it('allow_person_above_the_limit_says_so', async () => {
