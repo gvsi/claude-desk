@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DecisionState, EvMessage, LedgerPage, PublicDesk, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type {
+  ApprovalAnswerOut,
   BriefingList,
   ConversationSummary,
   CopyOut,
@@ -24,7 +25,7 @@ import type {
 import { rivera } from '../ds/fixtures/index.ts';
 import { executedLine } from '../ds/fixtures/receipts.ts';
 import { chatReducer, initialChatState, type ChatState } from '../public/chatReducer.ts';
-import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, matchRule, turnLanguage, type RuleName } from './script.ts';
+import { DECISIONS, DEMO_CODE, EVENT_GAP_MS, HELD_PROSE, VISITOR_PLAIN, askedDiscountBp, matchRule, turnLanguage, type RuleName } from './script.ts';
 import { RIVERA } from './seed.ts';
 import { mockStore, streamAfter, type MockAnswer, type MockRequestInit } from './store.ts';
 
@@ -336,6 +337,126 @@ describe('the scripted Desk', () => {
     const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
     expect(needsYou.map((item) => item.decision?.decision_id)).not.toContain(decisionId);
     expect(needsYou).toHaveLength(1);
+  });
+
+  it('held_discount_is_the_one_asked_for', async () => {
+    // The held quote carries the percent the visitor named, with its price worked out from the
+    // $180.00 list price as the kernel does, and Maria's card says so; once she allows it, the
+    // visitor's quote card has that percent. A discount asked with no percent is the fixtures' 15%.
+    const { events } = await openChat();
+    const asked = [
+      'Can I get 10% off a drain clearing?',
+      '¿Me hacen un 20 por ciento de descuento?',
+      'Is 12.5 % off possible?',
+      'Is there a discount for seniors?',
+    ];
+    const held: { action: unknown; reason: string | undefined }[] = [];
+    const quotes: unknown[] = [];
+    for (const text of asked) {
+      const before = events.length;
+      await send(text);
+      await drain();
+      const status = events.slice(before).find(([, ev]) => ev.type === 'held')?.[1];
+      const decisionId = status?.type === 'held' ? status.decision_id : '';
+      const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+      const decision = needsYou.find((item) => item.decision?.decision_id === decisionId)?.decision;
+      held.push({ action: decision?.action, reason: decision?.reason_plain });
+      expect((await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_once' } })).status, text).toBe(200);
+      await drain();
+      const followUp = events.slice(before).findLast(([, ev]) => ev.type === 'message')?.[1];
+      const card = followUp?.type === 'message' ? followUp.blocks.find((b) => b.template === 'quote') : undefined;
+      quotes.push([card?.title, card?.lines]);
+    }
+    expect(held).toEqual([
+      {
+        action: expect.objectContaining({ list_cents: 18_000, discount_bp: 1000, amount_cents: 16_200 }),
+        reason: 'A visitor not on record asked for a drain clearing quote at 10% off, $162.00 instead of $180.00.',
+      },
+      {
+        action: expect.objectContaining({ list_cents: 18_000, discount_bp: 2000, amount_cents: 14_400 }),
+        reason: 'A visitor not on record asked for a drain clearing quote at 20% off, $144.00 instead of $180.00.',
+      },
+      {
+        action: expect.objectContaining({ list_cents: 18_000, discount_bp: 1250, amount_cents: 15_750 }),
+        reason: 'A visitor not on record asked for a drain clearing quote at 12.5% off, $157.50 instead of $180.00.',
+      },
+      {
+        action: expect.objectContaining({ list_cents: 18_000, discount_bp: 1500, amount_cents: 15_300 }),
+        reason: rivera.decisions.held.reason_plain,
+      },
+    ]);
+    const fixtureQuote = rivera.events.resolvedTurn.flatMap((ev) => (ev.type === 'message' ? ev.blocks : [])).find((b) => b.template === 'quote');
+    expect(quotes).toEqual([
+      ['$162.00', ['Drain clearing', 'Includes 10% off $180.00', 'Good until Tuesday, November 3, 2:00 pm']],
+      ['$144.00', ['Drain clearing', 'Incluye 20 % de descuento sobre $180.00', 'Válido hasta martes 3 de noviembre, 14:00']],
+      ['$157.50', ['Drain clearing', 'Includes 12.5% off $180.00', 'Good until Tuesday, November 3, 2:00 pm']],
+      [fixtureQuote?.title, fixtureQuote?.lines],
+    ]);
+
+    // Only a percentage standing on its own, from above 0 up to 100, counts; anything else is 15%.
+    const read: [text: string, bp: number][] = [
+      ['20 % off?', 2000],
+      ['¿Un 10 por ciento de descuento?', 1000],
+      ['12,5 % de descuento', 1250],
+      ['10 percent off', 1000],
+      ['1000% off', 1500],
+      ['0% off', 1500],
+      ['Any discount?', 1500],
+    ];
+    for (const [text, bp] of read) expect(askedDiscountBp(text), text).toBe(bp);
+  });
+
+  it('verified_discount_names_the_person_and_drafts_its_percent', async () => {
+    // Dana confirms it's her, then asks for 20% off: Maria's card names her, and "Only for Dana
+    // Whitfield, always" drafts a rule for her at that percent and its price. Once that rule is
+    // active, another percent is a change the draft's review shows; the same percent changes nothing.
+    const { events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    const allowForDana = async (text: string) => {
+      const before = events.length;
+      await send(text);
+      await drain();
+      const status = events.slice(before).find(([, ev]) => ev.type === 'held')?.[1];
+      const decisionId = status?.type === 'held' ? status.decision_id : '';
+      const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+      const decision = needsYou.find((item) => item.decision?.decision_id === decisionId)?.decision;
+      const answered = await call('answer', { params: { decision_id: decisionId }, body: { answer: 'allow_person' } });
+      expect(answered.status, text).toBe(200);
+      await drain();
+      return { decision, cards: (answered.body as ApprovalAnswerOut).card_diff ?? [] };
+    };
+    const review = async (cards: unknown[]) => {
+      const drafted = await call('draftRules', { params: { desk_id: deskId }, body: { add: cards } });
+      expect(drafted.status).toBe(200);
+      return drafted.body as RulesDraft;
+    };
+    const limits = (card: { max_discount_bp?: number; max_amount_cents?: number | null } | undefined) => [card?.max_discount_bp, card?.max_amount_cents];
+
+    const twenty = await allowForDana('Can I get 20% off?');
+    expect(twenty.decision).toMatchObject({
+      reason_plain: 'Dana Whitfield, verified with a code, asked for a drain clearing quote at 20% off, $144.00 instead of $180.00.',
+      answers: ['allow_once', 'deny_once', 'allow_person'],
+      action: { list_cents: 18_000, discount_bp: 2000, amount_cents: 14_400 },
+    });
+    expect(twenty.cards).toMatchObject([{ card_id: 'person-per-dana-native.quote', who: 'person', person_id: 'per-dana', mode: 'auto' }]);
+    const first = await review(twenty.cards);
+    expect(first.diff?.added.map((card) => [card.card_id, ...limits(card)])).toEqual([['person-per-dana-native.quote', 2000, 14_400]]);
+    expect((await call('confirmRules', { params: { desk_id: deskId }, body: { version: first.version } })).status).toBe(200);
+
+    const ten = await allowForDana('What about 10% off?');
+    expect(ten.decision?.reason_plain).toBe('Dana Whitfield, verified with a code, asked for a drain clearing quote at 10% off, $162.00 instead of $180.00.');
+    const lowered = await review(ten.cards);
+    expect(lowered.diff?.added).toEqual([]);
+    expect(lowered.diff?.removed).toEqual([]);
+    expect(lowered.diff?.changed.map(([before, after]) => [before.card_id, limits(before), limits(after)])).toEqual([
+      ['person-per-dana-native.quote', [2000, 14_400], [1000, 16_200]],
+    ]);
+
+    const again = await allowForDana('20% off again, please?');
+    expect((await review(again.cards)).diff).toEqual({ added: [], removed: [], changed: [] });
   });
 
   it('executed_receipts_say_what_ran', async () => {

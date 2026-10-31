@@ -113,19 +113,40 @@ export function statusLine(language: Language, state: DecisionState, tool: ToolN
 
 const { blocks } = rivera;
 
-/** The held quote after Maria allows it: 15% off the $180.00 list price. */
-const discountedQuote: Record<Language, CardBlock> = {
-  en: cardBlock('quote', {
-    fact_id: 'quote:Q-1043',
-    title: '$153.00',
-    lines: ['Drain clearing', 'Includes 15% off $180.00', 'Good until Tuesday, November 3, 2:00 pm'],
-  }),
-  es: cardBlock('quote', {
-    fact_id: 'quote:Q-1043',
-    title: '$153.00',
-    lines: ['Drain clearing', 'Incluye 15 % de descuento sobre $180.00', 'Válido hasta martes 3 de noviembre, 14:00'],
-  }),
-};
+/** Money as the kernel's cards write it, in both languages: "$1,234.56". */
+function moneyText(cents: number): string {
+  const dollars = Math.floor(cents / 100).toLocaleString('en-US');
+  return `$${dollars}.${String(cents % 100).padStart(2, '0')}`;
+}
+
+/** Basis points as the kernel's cards write a percentage, with no trailing zeros: 1500 is "15", 1250 "12.5" ("12,5" in Spanish). */
+function percentText(bp: number, decimalMark: '.' | ','): string {
+  const whole = Math.floor(bp / 100);
+  const rest = bp % 100;
+  return rest === 0 ? String(whole) : `${whole}${decimalMark}${String(rest).padStart(2, '0')}`.replace(/0+$/, '');
+}
+
+/** A price after a discount, as the kernel works it out (the master plan's "Discounts"): the discount's cents round down. */
+function discountedCents(listCents: number, discountBp: number): number {
+  return listCents - Math.floor((listCents * discountBp) / 10_000);
+}
+
+/**
+ * The quote card for a drain clearing at a discount Maria allowed, as the kernel renders its quote
+ * fact: the price, the job, the discount off the list price (only when there is one) and how long
+ * the quote holds. At 15% it is the fixtures' card.
+ */
+function discountedQuote(language: Language, quote: { listCents: number; discountBp: number; amountCents: number }): CardBlock {
+  const { listCents, discountBp, amountCents } = quote;
+  const discount =
+    discountBp === 0
+      ? []
+      : language === 'es'
+        ? [`Incluye ${percentText(discountBp, ',')} % de descuento sobre ${moneyText(listCents)}`]
+        : [`Includes ${percentText(discountBp, '.')}% off ${moneyText(listCents)}`];
+  const expires = language === 'es' ? 'Válido hasta martes 3 de noviembre, 14:00' : 'Good until Tuesday, November 3, 2:00 pm';
+  return cardBlock('quote', { fact_id: 'quote:Q-1043', title: moneyText(amountCents), lines: ['Drain clearing', ...discount, expires] });
+}
 
 /** The callback window the script offers: Monday 8 to 9 am in the business's time zone. */
 export const CALLBACK_WINDOW = '2026-11-02T08:00:00-08:00/2026-11-02T09:00:00-08:00';
@@ -261,7 +282,10 @@ const heldFixture = rivera.decisions.held;
 const refundFixture = rivera.heldRefund;
 
 export const DECISIONS = {
-  /** The seeded hold: a visitor not on record wants the drain clearing at 15% off, past the quote card's limit. */
+  /**
+   * The seeded hold: a visitor not on record wants the drain clearing at 15% off, past the quote
+   * card's limit. Every held discount is built from it (`heldDiscount`).
+   */
   heldQuote: {
     tool: 'native.quote',
     effects: heldFixture.action?.effects ?? ['change'],
@@ -352,6 +376,47 @@ export const DECISIONS = {
   },
 } as const satisfies Record<string, DecisionSpec>;
 
+/** The discount a visitor gets held at when they ask for one without naming a percent: the fixtures' 15%. */
+const DEFAULT_DISCOUNT_BP = DECISIONS.heldQuote.discountBp;
+
+/**
+ * A percentage the visitor wrote: "10% off", "20 %", "12.5 %", "10 por ciento", "10 percent". The
+ * number stands on its own (not the tail of a longer one), with at most two decimals.
+ */
+const PERCENT = /(?<![\p{L}\p{N}.,])(\d{1,3}(?:[.,]\d{1,2})?)\s*(?:%|por\s*ciento(?![\p{L}\p{N}])|percent(?![\p{L}\p{N}]))/giu;
+
+/**
+ * The discount the visitor asked for, in basis points: the first percentage in their words above
+ * 0 and up to 100, else the fixtures' 15%. Untrusted text, read only for a number, as the kernel
+ * takes a requested discount (master plan, "Discounts").
+ */
+export function askedDiscountBp(text: string): number {
+  for (const match of text.matchAll(PERCENT)) {
+    const bp = Math.round(Number((match[1] ?? '').replace(',', '.')) * 100);
+    if (bp > 0 && bp <= 10_000) return bp;
+  }
+  return DEFAULT_DISCOUNT_BP;
+}
+
+/**
+ * The held quote for a discount the visitor asked for: the percent they named (15% when none), the
+ * drain clearing's price at it, and Maria's line, in the fixtures' words, naming the verified
+ * person when the chat has one ("Dana Whitfield, verified with a code,"), else "A visitor not on
+ * record". At 15% from a visitor not on record it is the fixtures' seeded hold.
+ */
+export function heldDiscount(text: string, person: { name: string } | null): DecisionSpec {
+  const { listCents } = DECISIONS.heldQuote;
+  const discountBp = askedDiscountBp(text);
+  const amountCents = discountedCents(listCents, discountBp);
+  const who = person === null ? 'A visitor not on record' : `${person.name}, verified with a code,`;
+  return {
+    ...DECISIONS.heldQuote,
+    discountBp,
+    amountCents,
+    reasonPlain: `${who} asked for a drain clearing quote at ${percentText(discountBp, '.')}% off, ${moneyText(amountCents)} instead of ${moneyText(listCents)}.`,
+  };
+}
+
 /** The effects that move money: a request with one is a money request. */
 const MONEY_EFFECTS: ReadonlySet<Effect> = new Set<Effect>(['charge', 'pay_out']);
 
@@ -382,6 +447,8 @@ export interface TurnContext {
   readonly language: Language;
   /** The visitor's words that started the turn (empty for a follow-up). Untrusted. */
   readonly text: string;
+  /** The verified person on record the chat is with, once the visitor confirmed it's them; else null. */
+  readonly person: { personId: string; name: string } | null;
   /** Records a decision with its ledger entries. */
   decide(spec: DecisionSpec): Decision;
   /** The signed status event for a decision as it now stands. */
@@ -456,7 +523,8 @@ export const SCRIPT: readonly ScriptRule[] = [
     words: ['off', 'discount', 'descuento'],
     steps: [
       writing,
-      (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
+      // The percent the visitor asked for, held past the quote card's limit for Maria.
+      (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
       // Claude's checked words say Maria decides; the held receipt under them says what waits.
       (ctx) => ctx.reply([proseBlock(HELD_PROSE[ctx.language])]),
     ],
@@ -586,7 +654,7 @@ export const AFTER_VERIFY: readonly Step[] = [
  * Safety and the briefing show; a discount asked in a live chat gets the discount row's reply.
  */
 export const SEEDED_HOLD_STEPS: readonly Step[] = [
-  (ctx) => ctx.status('held', ctx.decide(DECISIONS.heldQuote)),
+  (ctx) => ctx.status('held', ctx.decide(heldDiscount(ctx.text, ctx.person))),
   writing,
   (ctx) => ctx.reply([blocks.handoff[ctx.language]], { blocked: true }),
 ];
@@ -628,7 +696,11 @@ export function afterAnswer(answer: ApprovalAnswer, decision: Decision): Step[] 
   if (decision.action?.tool === 'payments.create_refund') {
     return [resolved, writing, (ctx) => ctx.reply([blocks.prose.details[ctx.language], blocks.refund_issued[ctx.language]])];
   }
-  return [resolved, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote[ctx.language]])];
+  // The quote at the discount Maria allowed, the one the visitor asked for.
+  const listCents = decision.action?.list_cents ?? DECISIONS.heldQuote.listCents;
+  const discountBp = decision.action?.discount_bp ?? DEFAULT_DISCOUNT_BP;
+  const quote = { listCents, discountBp, amountCents: decision.action?.amount_cents ?? discountedCents(listCents, discountBp) };
+  return [resolved, writing, (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], discountedQuote(ctx.language, quote)])];
 }
 
 /**
