@@ -67,8 +67,8 @@ export const LEXICON: readonly LexiconEntry[] = [
   { language: 'en', category: 'promise', pattern: String.raw`free(?=[\s-]+to[\s-]+(?:members?|customers?|clients?|guests?|patrons?|subscribers?|visitors?|locals|residents?)\b)` },
   { language: 'en', category: 'promise', pattern: String.raw`free(?=[\s-]+to[\s-]+(?:students?|seniors?|kids|children|famil(?:y|ies)|patients?)\b)` },
   { language: 'en', category: 'promise', pattern: String.raw`discount(?:s|ed|ing)?|refund(?:s|ed|ing|able)?|waiv(?:e|es|ed|er|ing)|complimentary` },
-  { language: 'en', category: 'promise', pattern: String.raw`no[\s-]+charge|on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back` },
-  { language: 'en', category: 'promise', pattern: String.raw`(?:at[\s-]+)?no[\s-]+(?:extra[\s-]+|additional[\s-]+)?cost` },
+  { language: 'en', category: 'promise', pattern: String.raw`on[\s-]+the[\s-]+house|warrant(?:y|ies)|money[\s-]+back` },
+  { language: 'en', category: 'promise', pattern: String.raw`no[\s-]+(?!(?:matter|one|way|doubt)(?![\w-]))(?:[^\W\d_]+[\s-]+){0,2}(?:charges?|costs?)` },
   { language: 'en', category: 'promise', pattern: String.raw`(?<!count )(?<!counts )(?<!counted )(?<!counting )(?<!rely )(?<!relies )(?<!relied )(?<!relying )(?<!depend )(?<!depends )(?<!depended )(?<!depending )on[\s-]+us` },
   { language: 'en', category: 'promise', pattern: String.raw`no[\s-]+(?:[^\W\d_]+[\s-]+){0,2}fees?` },
   { language: 'en', category: 'booking', pattern: String.raw`(?:(?:your|the|this|that|my|our|[^\W\d_]+['’]s)[\s-]+(?:(?:(?<=-)|(?!(?:once|whenever|when|[il]f|after|before|unt[il]l|t[il]ll|unless|as|of|for|with|to|at|on|in|from|about|by|and|or|but)\s))[^\W\d_]+[\s-]+){0,3}|(?<![^\W_] ))(?:booking|appointment|visit|reservation|slot|spot)s?(?:['’]s(?:[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been)?|['’]re|[\s-]+(?:is|are|was|were|ha(?:s|ve)[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+)?been))[\s-]+(?:(?:all|now|already|just|also|officially|successfully|finally)[\s-]+){0,2}(?:booked|confirmed|scheduled|reserved|set)` },
@@ -106,7 +106,8 @@ export const LEXICON: readonly LexiconEntry[] = [
   { language: 'es', category: 'date', pattern: String.raw`(?:a[\s-]+)?primera[\s-]+hora` },
   { language: 'es', category: 'promise', pattern: String.raw`garantias?|garantiz[a-z]*|promet[a-z]*|promesas?` },
   { language: 'es', category: 'promise', pattern: String.raw`gratis|gratuit[oa]s?|descuentos?|descont[a-z]*|reembols[a-z]*` },
-  { language: 'es', category: 'promise', pattern: String.raw`sin[\s-]+(?:ningun[\s-]+)?(?:costo|coste|cargo)|de[\s-]+regalo` },
+  { language: 'es', category: 'promise', pattern: String.raw`sin[\s-]+(?:ningun[\s-]+)?(?:costos?|costes?|cargos?)|de[\s-]+regalo` },
+  { language: 'es', category: 'promise', pattern: String.raw`sin[\s-]+recargos?` },
   { language: 'es', category: 'promise', pattern: String.raw`sin[\s-]+(?:ninguna[\s-]+)?comision(?:es)?` },
   { language: 'es', category: 'promise', pattern: String.raw`por[\s-]+nuestra[\s-]+cuenta|(?:por[\s-]+)?cuenta[\s-]+de[\s-]+la[\s-]+casa` },
   { language: 'es', category: 'promise', pattern: String.raw`entradas?[\s-]+libres?` },
@@ -189,6 +190,7 @@ export function toJavaScript(pattern: string): RegExp {
   const translated = fold(pattern)
     .reading.replaceAll(String.raw`[^\W\d_]`, String.raw`\p{L}`)
     .replaceAll(String.raw`[^\W_]`, String.raw`[\p{L}\p{N}]`)
+    .replaceAll(String.raw`[\w-]`, String.raw`[\p{L}\p{N}_-]`)   // \w inside a class can't take WORD's brackets
     .replaceAll(String.raw`\w`, WORD)
     .replaceAll(String.raw`\W`, NOT_WORD)
     .replaceAll(String.raw`\b`, BOUNDARY)
