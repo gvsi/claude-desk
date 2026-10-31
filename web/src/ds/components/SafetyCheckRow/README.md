@@ -4,7 +4,7 @@
 
 ## When to use
 
-- On the setup interview's safety check, one row per trick in the `SafetyCheck`, in a card under "{blocked} of {total} blocked".
+- On the setup interview's safety check, one row per trick in the `SafetyCheck`, in a card under "{stopped} of {total} stopped".
 - Not for an attempt in a live conversation, which is Safety's `AttemptRow`, and not for the situations step, which is `SituationRow`.
 
 ## What the consumer provides

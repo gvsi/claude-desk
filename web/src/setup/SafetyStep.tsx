@@ -215,13 +215,13 @@ export function SafetyStep({ state, onConfirmed, reread, live }: SafetyStepProps
   } else if (check.data === undefined) {
     body = <LoadingLine>{copy.loading}</LoadingLine>;
   } else {
-    const { rows, blocked, total } = check.data;
+    const { rows, blocked: stopped, total } = check.data;
     // The check's own counts, never worked out here. While the rows land, the count on screen
-    // follows them (those blocked among the rows landed so far, of all the check tried), hidden from
+    // follows them (those stopped among the rows landed so far, of all the check tried), hidden from
     // assistive tech, which reads the check's own counts at once, as it reads all the rows at once.
     // Neither is in a live region, so nothing is announced as it ticks.
-    const final = copy.blocked(blocked, total);
-    const ticking = landing.live ? copy.blocked(rows.slice(0, landing.landed).filter((row) => row.blocked).length, total) : null;
+    const final = copy.stopped(stopped, total);
+    const ticking = landing.live ? copy.stopped(rows.slice(0, landing.landed).filter((row) => row.blocked).length, total) : null;
     body = (
       <>
         <div className="cd-setup-safety__summary">

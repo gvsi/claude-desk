@@ -201,7 +201,7 @@ async function openConflictReview(): Promise<{ state: SetupState; screen: Render
   if (typeof turnedOn === 'string' || turnedOn.draft === null) throw new Error('the mock drafts the tools');
   mockStore.world.confirmDraft(desk, turnedOn.draft.version);
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-  await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
   await screen.getByRole('button', { name: 'Confirm rules' }).click();
   await expect.element(screen.getByRole('button', { name: 'Confirm change' })).toBeVisible();
   return { state, screen };
@@ -337,8 +337,8 @@ function textOf(el: Element): { shown: string; spoken: string } {
   return { shown: without('.cd-sr-only'), spoken: without('[aria-hidden="true"]') };
 }
 
-/** The safety check's count, "6 of 6 blocked", by what it shows; null when it isn't drawn. */
-const countElement = () => [...document.querySelectorAll('main p')].find((p) => /^\d+ of \d+ blocked$/.test(textOf(p).shown)) ?? null;
+/** The safety check's count, "6 of 6 stopped", by what it shows; null when it isn't drawn. */
+const countElement = () => [...document.querySelectorAll('main p')].find((p) => /^\d+ of \d+ stopped$/.test(textOf(p).shown)) ?? null;
 
 /**
  * Every text the safety check's count shows from now until the test ends (or, with `spoken`, what a
@@ -1522,24 +1522,24 @@ describe('setup', () => {
   it('failed_safety_rerun_drops_the_old_result', async () => {
     const { state } = await interviewAtSafety();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
 
     // A rerun that fails for another reason: its line with "Try again", and no confirm on the old rows.
     mockStore.inject({ route: 'setupSafetyCheck', status: 503 });
     await screen.getByRole('button', { name: 'Run again' }).click();
     const unreachable = ownerErrorCopy(new ApiError('unavailable', { route: 'setupSafetyCheck', method: 'POST', status: 503, code: 'kernel_unavailable' }));
     await expect.element(screen.getByText(unreachable, { exact: true })).toBeVisible();
-    expect(screen.getByText('6 of 6 blocked', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('6 of 6 stopped', { exact: true }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Confirm rules' }).elements()).toHaveLength(0);
     await screen.getByRole('button', { name: 'Try again' }).click();
-    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Confirm rules' })).toBeVisible();
 
     // A rerun the rules can't be checked for: the can't-check line, and only "Save and exit".
     mockStore.inject({ route: 'setupSafetyCheck', status: 409, body: { error: 'rules_cannot_be_checked' } });
     await screen.getByRole('button', { name: 'Run again' }).click();
     await expect.element(screen.getByText(CANT_CHECK, { exact: true })).toBeVisible();
-    expect(screen.getByText('6 of 6 blocked', { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('6 of 6 stopped', { exact: true }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Confirm rules' }).elements()).toHaveLength(0);
     await expect.element(screen.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
     expect(requests('setupConfirm')).toHaveLength(0);
@@ -1595,7 +1595,7 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety check' })).toBeVisible();
 
     // The check's own counts, in Claude's serif, and what it was.
-    const count = screen.getByText('6 of 6 blocked', { exact: true });
+    const count = screen.getByText('6 of 6 stopped', { exact: true });
     await expect.element(count).toBeVisible();
     expect(inSerif(count.element())).toBe(true);
     await expect.element(screen.getByText('I tried 6 tricks people really use, on your draft rules. Nothing was real, and no one was contacted.', { exact: true })).toBeVisible();
@@ -1655,7 +1655,7 @@ describe('setup', () => {
     }
 
     // The count ticks with the rows, from the first row's to the check's own count, and never back.
-    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 stopped');
     const ticks = counts().map((text) => Number(text.split(' ')[0]));
     expect(ticks[0]).toBe(1);
     expect(ticks.length).toBeGreaterThan(1);
@@ -1664,11 +1664,11 @@ describe('setup', () => {
     // Once landed, nothing lingers: the rows are drawn still, and the count is the check's own.
     await expect.poll(() => moving(list.element())).toEqual([]);
     for (const row of list.element().querySelectorAll(':scope > li > *')) expect(getComputedStyle(row).animationName).toBe('none');
-    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
 
     // A screen reader reads the check's own count from the first, never the ticks, all six rows
     // being there from the start; and the count sits in no live region, so nothing announces it.
-    expect(spoken()).toEqual(['6 of 6 blocked']);
+    expect(spoken()).toEqual(['6 of 6 stopped']);
     expect(countElement()?.closest('[aria-live],[role="status"],[role="log"],[role="alert"]')).toBeNull();
   });
 
@@ -1689,7 +1689,7 @@ describe('setup', () => {
     expect(drawn()).toHaveLength(6);
     for (const row of drawn()) expect([row.animation.name, row.dot.name]).toEqual(['none', 'none']);
     expect(moving(list.element())).toEqual([]);
-    expect(counts()).toEqual(['6 of 6 blocked']);
+    expect(counts()).toEqual(['6 of 6 stopped']);
   });
 
   /** An interview at Real situations, opened on this page, with "Looks right" ready to press. */
@@ -1723,9 +1723,9 @@ describe('setup', () => {
     await expect.element(list).toBeInTheDocument();
 
     // The count reaches the last row only when it lands, five beats after the first.
-    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
-    expect(counts()[0]).toBe('1 of 6 blocked');
-    const beats = ((at.get('6 of 6 blocked') ?? 0) - (at.get('1 of 6 blocked') ?? 0)) / ms(token('--motion-stagger'));
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 stopped');
+    expect(counts()[0]).toBe('1 of 6 stopped');
+    const beats = ((at.get('6 of 6 stopped') ?? 0) - (at.get('1 of 6 stopped') ?? 0)) / ms(token('--motion-stagger'));
     expect(beats).toBeGreaterThanOrEqual(4);
     // And once the rows have landed they are drawn still, whatever else moves in them.
     await expect.poll(() => [...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName)).toEqual(Array(6).fill('none'));
@@ -1745,7 +1745,7 @@ describe('setup', () => {
     const list = screen.getByRole('list', { name: 'Tricks tried' });
     await expect.element(list).toBeInTheDocument();
     expect([...list.element().querySelectorAll(':scope > li > *')].map((row) => getComputedStyle(row).animationName)).toEqual(Array(6).fill('none'));
-    expect(counts()).toEqual(['6 of 6 blocked']);
+    expect(counts()).toEqual(['6 of 6 stopped']);
   });
 
   it('safety_check_opened_with_results_draws_them_still', async () => {
@@ -1760,7 +1760,7 @@ describe('setup', () => {
     expect(drawn()).toHaveLength(6);
     for (const row of drawn()) expect([row.animation.name, row.dot.name]).toEqual(['none', 'none']);
     expect(moving(list.element())).toEqual([]);
-    expect(counts()).toEqual(['6 of 6 blocked']);
+    expect(counts()).toEqual(['6 of 6 stopped']);
 
     // "Run again" runs the check again as the owner watches: its results land, the count with them.
     await screen.getByRole('button', { name: 'Run again' }).click();
@@ -1769,8 +1769,8 @@ describe('setup', () => {
     expect(again.map((row) => row.animation.delayMs)).toEqual(again.map((_, index) => index * ms(token('--motion-stagger'))));
     for (const row of again) expect([row.animation.name, row.dot.name]).not.toContain('none');
     await expect.poll(() => counts().length).toBeGreaterThan(2);
-    await expect.poll(() => counts().at(-1)).toBe('6 of 6 blocked');
-    expect(counts().slice(0, 2)).toEqual(['6 of 6 blocked', '1 of 6 blocked']);
+    await expect.poll(() => counts().at(-1)).toBe('6 of 6 stopped');
+    expect(counts().slice(0, 2)).toEqual(['6 of 6 stopped', '1 of 6 stopped']);
   });
 
   it('real_situations_land_one_by_one', async () => {
@@ -1810,7 +1810,7 @@ describe('setup', () => {
   it('confirm_then_preview_then_go_live', async () => {
     const { state } = await interviewAtSafety();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
     const mark = mockStore.requests.length;
 
     // A confirm whose answer was lost, and which didn't apply: the interview is read again, it says
@@ -1862,7 +1862,7 @@ describe('setup', () => {
     mockStore.world.confirmDraft(desk, turnedOn.draft.version);
 
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
     const mark = mockStore.requests.length;
     await screen.getByRole('button', { name: 'Confirm rules' }).click();
 
@@ -2216,7 +2216,7 @@ describe('setup', () => {
     // again, the API answers 409 (setup is past the safety check), which is read: the preview opens.
     const first = await interviewAtSafety();
     const { screen } = await renderRoute(`/app/setup/${first.state.interview_id}`);
-    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
     const mark = mockStore.requests.length;
     mockStore.inject({ route: 'setupConfirm', status: 'network', afterCommit: true });
     mockStore.inject({ route: 'setup', status: 503 });
@@ -2234,7 +2234,7 @@ describe('setup', () => {
     // the work still running.
     const second = await interviewAtSafety();
     const page = (await renderRoute(`/app/setup/${second.state.interview_id}`)).screen;
-    await expect.element(page.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
     const from = mockStore.requests.length;
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout'], shouldAdvanceTime: true });
     const retry = { retry: { path: `/api/owner/policy/setup/${second.state.interview_id}/confirm`, body: null } };
@@ -2305,7 +2305,7 @@ describe('setup', () => {
     if (typeof turnedOn === 'string' || turnedOn.draft === null) throw new Error('the mock drafts the tools');
     mockStore.world.confirmDraft(desk, turnedOn.draft.version);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Confirm rules' }).click();
     await expect.element(screen.getByText('Your rules changed since this was drafted. Check the new version.', { exact: true })).toBeVisible();
 
@@ -2315,7 +2315,7 @@ describe('setup', () => {
     const checks = requests('setupSafetyCheck').length;
     await screen.getByRole('button', { name: 'Back' }).click();
     await expect.poll(() => requests('setupSafetyCheck').length).toBeGreaterThan(checks);
-    await expect.element(screen.getByText('6 of 6 blocked', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Confirm rules' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Try it as a customer before anyone else can' })).toBeVisible();
     expect(desk.summary.answering).toBe(false);
@@ -2336,7 +2336,7 @@ describe('setup', () => {
       { name: 'questions', path: `/app/setup/${questions.interview_id}`, ready: `Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}` },
       { name: 'tools', path: `/app/setup/${tools.interview_id}`, ready: 'Stripe' },
       { name: 'rules', path: `/app/setup/${rules.interview_id}`, ready: moneyLimitLine(50_000) },
-      { name: 'safety', path: `/app/setup/${safety.interview_id}`, ready: '6 of 6 blocked' },
+      { name: 'safety', path: `/app/setup/${safety.interview_id}`, ready: '6 of 6 stopped' },
       { name: 'preview', path: `/app/setup/${preview.interview_id}`, ready: DISCLOSURE },
       { name: 'live', path: `/app/setup/${live.interview_id}`, ready: 'Customers and their agents can reach your Desk at this link, day or night.' },
     ];
