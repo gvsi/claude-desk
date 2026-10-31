@@ -9,7 +9,7 @@
  * Desk.
  */
 import type { DecisionState } from '../api/contracts.ts';
-import { cardBlock, proseBlock, rivera } from '../ds/fixtures/index.ts';
+import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import type { CopyLanguage, FactCardProps, NavCount, NavKey, PhoneTab, ReceiptSource, SidebarHrefs, StatusTone } from '../ds/index.ts';
 
 /** Where each vision page lives. Today's "Things to try" leads to the city office. */
@@ -332,18 +332,24 @@ export const PHONE_TODAY = {
   ] satisfies readonly { name: string; kind: string; tone: StatusTone }[],
 } as const;
 
+/** The booking's card: its day and time, which Claude's words never state. */
+const PHONE_BOOKED: FactCardProps = {
+  label: 'Booked',
+  icon: 'clock',
+  title: 'Tuesday, November 3',
+  lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'],
+};
+
 /** A visitor's chat on a phone: the booking, confirmed only next to its card. */
 export const PHONE_CHAT = {
   disclosureUnderName: 'Claude, an AI, answers for Maria Rivera',
   asked: 'Can someone come Tuesday afternoon?',
   reply: 'Maria will text you when she’s on her way.',
-  booked: { label: 'Booked', icon: 'clock', title: 'Tuesday, November 3', lines: ['Arriving 2:00 pm to 4:00 pm', 'With Maria Rivera'] },
-  receipt: { source: decided('executed'), plain: 'Booked on Maria Rivera’s calendar' },
+  booked: PHONE_BOOKED,
+  receipt: { source: decided('executed'), plain: 'Booked on Maria Rivera’s calendar' } satisfies VisionReceipt,
   composer: 'Message Rivera Plumbing',
   disclosure: 'This chat is with Claude, an AI.',
-} as const satisfies Record<string, unknown> & { booked: FactCardProps; receipt: VisionReceipt };
+} as const;
 
 /** Claude's words as a checked reply's one prose block. */
 export const proseOf = (text: string) => [proseBlock(text)];
-
-export { cardBlock };
