@@ -142,7 +142,7 @@ export function KnowledgePage() {
   /** The list is read again after anything is added or changed. */
   const listChanged = async () => {
     await queryClient.cancelQueries({ queryKey: knowledgeKey(deskId) });
-    await queryClient.invalidateQueries({ queryKey: knowledgeKey(deskId) });
+    void queryClient.invalidateQueries({ queryKey: knowledgeKey(deskId) });
   };
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<Busy | undefined>(undefined);
