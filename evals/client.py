@@ -48,33 +48,32 @@ _PAYMENT_LINK = re.compile(r"(?:/api)?/pay/([^/?#\s]+)")
 # A proving route answers 202 `ProvingPending{retry: {path, body}}` once its kernel call passes 25 s; the
 # owner app re-sends `retry` every 3 s ("How proofs run"), and so does the client, for at most two minutes.
 PROVING_RETRY_S, PROVING_LIMIT_S = 3.0, 120.0
-SHOWN_UNREADABLE = 80   # the characters an `AnswerUnreadable` shows of what came
+SHOWN_UNREADABLE = 80   # the characters shown of a body or event that isn't JSON
 
 
 class ApiCallFailed(AssertionError):
-    """An operation that needs a 2xx answer got another. Carries the status and the body the API
-    sent, never what the request carried."""
+    """An operation that needs a 2xx answer got another. Carries the status and the body the API sent,
+    never what the request carried: a JSON body as it came, for the caller to judge; one that isn't
+    JSON as its first 80 characters, named by its `content_type` (None for a JSON body)."""
 
-    def __init__(self, op: str, status: int, body: Any):
-        self.op, self.status, self.body = op, status, body
-        super().__init__(self._message())
-
-    def _message(self) -> str:
-        shown = json.dumps(self.body) if not isinstance(self.body, str) else self.body
-        return f"{self.op} answered {self.status}: {shown[:500]}"
+    def __init__(self, op: str, status: int, body: Any, *, content_type: str | None = None, what: str = "a body"):
+        self.op, self.status, self.content_type = op, status, content_type
+        self.body = body if content_type is None else body[:SHOWN_UNREADABLE]
+        if content_type is None:
+            shown = json.dumps(body) if not isinstance(body, str) else body
+            message = f"{op} answered {status}: {shown[:500]}"
+        else:
+            message = f"{op} answered {status} ({content_type}) with {what} that isn't JSON: {self.body!r}"
+        super().__init__(message)
 
 
 class AnswerUnreadable(ApiCallFailed):
-    """A 2xx answer the operation reads as JSON, or an event of the chat's stream, that isn't JSON. Names
-    the operation, the status, the content type and the first 80 characters of what came (its `body`),
-    never a header, a cookie or anything the request carried."""
+    """A 2xx answer the operation reads as JSON, or an event of the chat's stream, that isn't JSON, named the
+    way a refusal whose body isn't JSON is. It is never the API turning the call down, so no caller reads it
+    as one: the stack failed."""
 
     def __init__(self, op: str, response: httpx.Response, what: str, text: str):
-        self.content_type, self.what = response.headers.get("content-type") or "no content type", what
-        super().__init__(op, response.status_code, text[:SHOWN_UNREADABLE])
-
-    def _message(self) -> str:
-        return f"{self.op} answered {self.status} ({self.content_type}) with {self.what} that isn't JSON: {self.body!r}"
+        super().__init__(op, response.status_code, text, content_type=_content_type(response), what=what)
 
 
 @dataclass(frozen=True)
@@ -189,12 +188,17 @@ def _no_jar() -> CookieJar:
     return CookieJar(policy=DefaultCookiePolicy(allowed_domains=[]))
 
 
-def _body(response: httpx.Response) -> Any:
-    """A refusal's body, as JSON or else as text, for the caller to judge."""
+def _content_type(response: httpx.Response) -> str:
+    return response.headers.get("content-type") or "no content type"
+
+
+def _refused(op: str, response: httpx.Response) -> ApiCallFailed:
+    """A non-2xx answer as the `ApiCallFailed` it raises, with its status, for the caller to judge."""
     try:
-        return response.json()
+        body = response.json()
     except ValueError:
-        return response.text
+        return ApiCallFailed(op, response.status_code, response.text, content_type=_content_type(response))
+    return ApiCallFailed(op, response.status_code, body)
 
 
 def _json(op: str, response: httpx.Response) -> Any:
@@ -290,7 +294,7 @@ class DeskClient:
     async def _ok(self, op: str, **kwargs: Any) -> Any:
         response = await self.request(op, **kwargs)
         if not 200 <= response.status_code < 300:
-            raise ApiCallFailed(op, response.status_code, _body(response))
+            raise _refused(op, response)
         return _json(op, response)
 
     def _chat(self) -> dict[str, str]:
@@ -341,7 +345,7 @@ class DeskClient:
             response = source.response
             if response.status_code != 200:
                 await response.aread()
-                raise ApiCallFailed("events", response.status_code, _body(response))
+                raise _refused("events", response)
             async for sse in source.aiter_sse():
                 if not sse.data:   # a keep-alive
                     continue
@@ -479,7 +483,7 @@ class DeskClient:
             await asyncio.sleep(PROVING_RETRY_S)
             response = await self.http.request(ROUTES[op].method, path, json=retry.get("body"))
         if not 200 <= response.status_code < 300:
-            raise ApiCallFailed(op, response.status_code, _body(response))
+            raise _refused(op, response)
         return _json(op, response)
 
 

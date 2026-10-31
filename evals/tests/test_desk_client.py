@@ -403,6 +403,46 @@ async def test_an_event_that_isnt_json_raises_naming_the_stream_status_and_conte
         assert value not in str(refused.value)
 
 
+async def test_a_refusal_whose_body_isnt_json_names_its_content_type_and_shows_80_characters():
+    """A refusal keeps its status, so every caller judges it as before. A JSON body is kept and shown as it came,
+    since callers read its error code; one that isn't JSON is named by its content type with at most its first
+    80 characters shown, and never a header or anything the request carried."""
+    error = {"error": "kernel", "code": "invalid", "detail": "That code isn't the one sent to the contact on record."}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/verify/check"):
+            return httpx.Response(422, json=error)
+        return httpx.Response(502, headers={"content-type": "text/html; charset=utf-8"}, text=NOT_JSON)
+
+    said = secrets.token_urlsafe(12)
+    refusals = {}
+    async with DeskClient("http://127.0.0.1:8700", PASSCODE, transport=httpx.MockTransport(handler)) as client:
+        held = request_headers(client)
+        client.desk_slug = SLUG
+
+        async def read_events() -> None:
+            async for _ in client.events():
+                pass
+
+        for op, call in (("send", lambda: client.send(said)), ("events", read_events),
+                         ("owner_whisper", lambda: client.owner_whisper("s-1", said)),
+                         ("verify_check", lambda: client.verify_check("482913"))):
+            with pytest.raises(ApiCallFailed) as refused:
+                await call()
+            refusals[op] = refused.value
+    for op in ("send", "events", "owner_whisper"):
+        refused = refusals[op]
+        assert (type(refused), refused.op, refused.status, refused.body) == (ApiCallFailed, op, 502, NOT_JSON[:80])
+        assert str(refused) == (f"{op} answered 502 (text/html; charset=utf-8) with a body that isn't JSON: "
+                                f"{NOT_JSON[:80]!r}")
+        for value in (*held, said, "the tail"):
+            assert value not in str(refused), op
+    refused = refusals["verify_check"]
+    assert (type(refused), refused.status, refused.body) == (ApiCallFailed, 422, error)
+    assert str(refused) == f"verify_check answered 422: {json.dumps(error)}"
+    assert "482913" not in str(refused)
+
+
 async def test_a_refused_call_raises_with_its_status_and_body(stand_in):
     """An operation that needs success fails with the API's status and body, and never shows a cookie."""
     api, server = stand_in
