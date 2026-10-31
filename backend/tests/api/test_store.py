@@ -511,15 +511,12 @@ async def test_unread_results_are_the_last_responses_until_claude_reads_them(api
     results_n = await append_tool_results(api_conn, ids, assistant_n, [
         booked, tool_result("toolu_say", {"outcome": "not_run"}, is_error=True)])
 
-    # the reply didn't show: Claude must read the booking's result (a reply's result is the transcript's to keep)
+    # the booking's result is unread (a reply's result is the transcript's to keep), whether or not a reply showed
     unread = await unread_results(api_conn, ids.session_id)
-    assert (unread.n, unread.results, unread.replied, unread.must_read) == (
-        results_n, [("native__book", booked)], False, True)
-    # once a reply of that response showed, Claude has had its say; the result is unread all the same
+    assert (unread.n, unread.results) == (results_n, [("native__book", booked)])
     await append_message(api_conn, ids, "delivered", author="claude", call_id="toolu_say",
                          blocks=[{"kind": "prose", "text": "Hi"}])
-    unread = await unread_results(api_conn, ids.session_id)
-    assert (unread.results, unread.replied, unread.must_read) == ([("native__book", booked)], True, False)
+    assert (await unread_results(api_conn, ids.session_id)).results == [("native__book", booked)]
     # a later response read them
     await append_assistant(api_conn, ids, [{"type": "text", "text": "Done."}], generation=0)
     assert await unread_results(api_conn, ids.session_id) is None

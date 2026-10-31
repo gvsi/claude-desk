@@ -121,18 +121,11 @@ class OpenToolUse:
 @dataclass(frozen=True)
 class UnreadResults:
     """The results row answering Claude's last response, which Claude hasn't read (no assistant row follows it, in
-    any context): its `n`, each call's result but `send_reply`'s (whose replies the transcript keeps) as
-    (tool name, `tool_result` block) in block order, and whether a `send_reply` call of that response put a reply on
-    screen."""
+    any context): its `n`, and each call's result but `send_reply`'s (whose replies the transcript keeps) as
+    (tool name, `tool_result` block) in block order."""
 
     n: int
     results: list[tuple[str, dict]]
-    replied: bool
-
-    @property
-    def must_read(self) -> bool:
-        """Claude still has to read them: a call other than a reply ran, and no reply of that response showed."""
-        return bool(self.results) and not self.replied
 
 
 @dataclass(frozen=True)
@@ -454,11 +447,7 @@ async def unread_results(conn: AsyncConnection, session_id: str) -> UnreadResult
         return None
     results, assistant = last
     names = {block["id"]: block["name"] for block in assistant.model_content if block.get("type") == "tool_use"}
-    replies = [call_id for call_id, name in names.items() if name == SEND_REPLY]
-    replied = bool(replies) and (await conn.execute(select(func.count()).where(
-        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "delivered",
-        MESSAGES.c.call_id.in_(replies)))).scalar_one() > 0
-    return UnreadResults(n=results.n, replied=replied, results=[
+    return UnreadResults(n=results.n, results=[
         (names[block["tool_use_id"]], block) for block in results.model_content
         if names.get(block["tool_use_id"]) not in (None, SEND_REPLY)])
 

@@ -61,7 +61,6 @@ from desk.api.store import (
     prepare_model_input,
     start_fresh_context,
     unanswered_tool_use,
-    unread_results,
 )
 from desk.api.tools import (
     DELIVERED_HANDOFF,
@@ -193,6 +192,7 @@ class _Turn:
     context: SessionContext | None = None              # the session's tools and facts, as `/context` gave them
     system: list[dict] = field(default_factory=list)   # the system prompt this turn rendered
     rebound: bool = False                              # a thinking-binding 400 started a fresh context this turn
+    recovered: bool = False                            # the turn `_drain` runs so Claude reads recovered results
 
     @property
     def visitor(self) -> bool:
@@ -247,9 +247,10 @@ class _Turn:
         before contexts froze their prompt. Each thinking block is bound to the prompt it was made under, so this
         is a deliberate boundary: the new prompt applies from the summary, and no earlier thinking is replayed.
 
-        The boundary waits for a turn edge: while Claude has tool results still to read (a turn stopped after a call
-        ran, `UnreadResults.must_read`) and the context froze a prompt, this turn runs on that prompt, so Claude reads
-        them where it made the calls; the next turn opens the new one."""
+        Only the recovery turn waits (`recovered`: the turn `_drain` runs so Claude reads the results of calls a stopped
+        turn left open): when the context froze a prompt, it runs on that prompt, so Claude reads them where it made the
+        calls, and the next turn opens the new one. Any other turn opens it at once, its summary carrying the results
+        Claude hadn't read, so the wait is at most that one turn."""
         conn, ids = self.conn, self.caller.ids
         body = context_text(context.facts, context.knowledge)
         if context_hash(body) != await last_context_hash(conn, ids.session_id):
@@ -263,9 +264,8 @@ class _Turn:
         fresh = delta.fresh
         frozen = None if fresh else await context_system(conn, ids.session_id)
         if not fresh and frozen != system:
-            unread = await unread_results(conn, ids.session_id) if frozen is not None else None
-            if unread is not None and unread.must_read:
-                logger.info("session %s: the system prompt changed; it applies once Claude has read its tool results",
+            if self.recovered and frozen is not None:
+                logger.info("session %s: the system prompt changed; it applies after this recovery turn",
                             ids.session_id)
             else:
                 logger.info("session %s: the system prompt changed since the model context opened: a fresh context "
@@ -518,9 +518,12 @@ class _Turn:
 
 async def run_turn(conn: AsyncConnection, caller: Caller, model: ModelClient, *, end_on_reply: bool = False,
                    production: bool = False, clock: Callable[[], datetime] = _utc_now,
-                   jobs: procrastinate.App | None = None, limiter: RateLimiter | None = None) -> TurnOutcome:
-    """Answer what is waiting in the caller's session, as the module docstring says; returns how the turn ended."""
-    turn = _Turn(conn, caller, model, end_on_reply, production, clock, jobs=jobs, limiter=limiter)
+                   jobs: procrastinate.App | None = None, limiter: RateLimiter | None = None,
+                   recovered: bool = False) -> TurnOutcome:
+    """Answer what is waiting in the caller's session, as the module docstring says; returns how the turn ended.
+    `recovered` marks the turn `_drain` runs so Claude reads the results it recovered (`_bring_up_to_date`)."""
+    turn = _Turn(conn, caller, model, end_on_reply, production, clock, jobs=jobs, limiter=limiter,
+                 recovered=recovered)
     try:
         outcome = await turn.run()
     except Exception as error:                             # anything unexpected: the static error, never a silent end
@@ -674,9 +677,9 @@ async def _drain(conn: AsyncConnection, caller: Caller, model: ModelClient, end_
         return "not_ai", None                             # the owner has the conversation: work waits for hand-back
     outcome: PendingOutcome = "idle"
     while must_call or waiting is not None:
-        must_call = False
+        recovered, must_call = must_call, False          # only the first turn reads what was recovered
         outcome = await run_turn(conn, caller, model, end_on_reply=end_on_reply, production=production, clock=clock,
-                                 jobs=jobs, limiter=limiter)
+                                 jobs=jobs, limiter=limiter, recovered=recovered)
         if outcome not in GO_ON or end_on_reply:
             return outcome, None
         before, waiting = waiting, await _waiting(conn, caller.session_id)

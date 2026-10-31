@@ -790,6 +790,27 @@ async def test_a_context_opened_before_prompts_were_frozen_starts_a_fresh_one(ap
     assert await frozen_systems(api_conn, caller.session_id) == [(0, None), (1, conversation_system(RIVERA))]
 
 
+async def test_after_a_deploy_a_turn_past_the_call_cap_opens_the_new_prompt_at_once(api_conn, caller, fake,
+                                                                                     monkeypatch):
+    """A turn that hit the call cap ended with results Claude hadn't read. That isn't a recovery, so after a deploy the
+    next turn opens a fresh context with the new prompt at once, its summary carrying the unread result, instead of
+    waiting on the old prompt for as long as turns keep hitting the cap."""
+    opened_with = conversation_system(RIVERA)
+    await said(api_conn, caller, "Keep checking for a free slot.")
+    model = ScriptedModel([response(thinking(), tool_use("native__find_slots", {"days": 3}))
+                           for _ in range(MAX_MODEL_CALLS)])
+    assert await run_turn(api_conn, caller, model) == "handoff"
+    monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + "\n- Mention our new rule.")
+
+    await said(api_conn, caller, "Any luck?")
+    model = ScriptedModel([response(reply("Here are the open times."))])
+    assert await run_turn(api_conn, caller, model) == "done"
+    (fresh,) = model.requests
+    assert fresh.system == conversation_system(RIVERA) != opened_with and thinking_blocks(fresh) == []
+    opens_from_the_summary(fresh, "visitor: Keep checking for a free slot.", "result of native__find_slots: ")
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
+
+
 async def test_two_prompt_changes_before_claude_answers_keep_the_unread_result(api_conn, caller, monkeypatch):
     """Claude found open times beside a reply, then two deploys changed the prompt before it answered again (the
     model was unavailable in between): each fresh context's summary carries the result it hadn't read."""

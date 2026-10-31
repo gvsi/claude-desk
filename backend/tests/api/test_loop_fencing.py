@@ -24,7 +24,7 @@ from desk.api.tools import Caller, send_reply
 from desk.contracts import ToolCall
 from desk.db.session import API_CONNECT_OPTIONS, database_url
 from desk.kernel_api import DecideRequest, KernelError
-from tests.api.fakes import ScriptedModel, gated, response, thinking, tool_use
+from tests.api.fakes import ScriptedModel, gated, response, thinking, tool_use, unavailable
 from tests.api.test_deliver import waiting_for_lock
 from tests.api.test_loop_turns import (
     DRAIN,
@@ -404,6 +404,69 @@ async def test_a_fresh_context_carries_the_results_claude_had_not_read(api_conn,
     assert (result["outcome"], result["decision_id"]) == ("done", decision_id)
     assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
     assert len(fake.called("/decide")) == 1 and len(fake.desks[caller.desk_id].booked) == 1
+
+
+async def test_a_recovered_turn_whose_reply_showed_only_as_the_handoff_still_waits(
+        api_conn, engine, locks, caller, visitor, fake, monkeypatch):
+    """Claude booked and replied in one response; the reply showed only as the handoff (it carried a canary), and the
+    worker stopped before the results row. The next request recovers the calls and asks Claude to read them: that
+    recovery turn runs in the context that made them, on its prompt, though a deploy changed the prompt; the turn after
+    it opens the new one."""
+    opened_with = conversation_system(RIVERA)
+    await said(api_conn, caller, "Book me the earliest visit.")
+    fake.violation("canary")                         # the reply carries a document canary: the handoff in its place
+    stopped, write = asyncio.Event(), loop.append_tool_results
+
+    async def stop_before_the_results(*args, **kwargs):  # the worker stops (a deploy) after the handoff showed
+        stopped.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(loop, "append_tool_results", stop_before_the_results)
+    model = ScriptedModel([response(thinking(), tool_use("native__book", {"slot_id": open_slot(fake, caller)},
+                                                         id="toolu_book"), reply("Booking you in.", id="toolu_say"))])
+    run = asyncio.create_task(pending(caller, model, engine, locks))
+    await asyncio.wait_for(stopped.wait(), 5)
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    monkeypatch.setattr(loop, "append_tool_results", write)
+    assert [blocks[0]["template"] for (blocks,) in await rows(api_conn, caller.session_id, "delivered", "blocks")] == [
+        "handoff"]
+
+    monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + "\n- Mention our new rule.")
+    model = ScriptedModel([response(reply("You're booked.", id="toolu_done"))])
+    assert await pending(caller, model, engine, locks) == "done"
+    (request,) = model.requests
+    assert request.system == opened_with and len(thinking_blocks(request)) == 1
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0]
+
+    await said(api_conn, caller, "Thanks!")
+    model = ScriptedModel([response(reply("You're welcome."))])
+    assert await pending(caller, model, engine, locks) == "done"
+    assert model.requests[0].system == conversation_system(RIVERA) != opened_with
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1]
+
+
+async def test_a_carried_result_survives_a_second_fresh_context_before_claude_answers(
+        api_conn, engine, locks, caller, visitor, fake, monkeypatch):
+    """The fresh context that carried the recovered booking never got an answer (the model was unavailable), and a
+    deploy changed the prompt before the next turn: the next summary carries the booking again."""
+    decision_id = await interrupted_after_booking(api_conn, engine, locks, caller, visitor, fake)
+    await api_conn.execute(text("UPDATE app.messages SET model_content = model_content - 'system'"
+                                " WHERE session_id = :s AND kind = 'context_start'"), {"s": caller.session_id})
+    await api_conn.commit()
+    failed = ScriptedModel([unavailable()])
+    assert await pending(caller, failed, engine, locks) == "handoff"
+    assert decision_id in failed.requests[0].messages[0]["content"][0]["text"]
+
+    monkeypatch.setattr(prompts, "SYSTEM_PROMPT", prompts.SYSTEM_PROMPT + "\n- Mention our new rule.")
+    await said(api_conn, caller, "Did that go through?")
+    model = ScriptedModel([response(reply("Your visit is booked."))])
+    assert await pending(caller, model, engine, locks) == "done"
+    (fresh,) = model.requests
+    opens_from_the_summary(fresh, "result of native__book: ")
+    assert decision_id in fresh.messages[0]["content"][0]["text"]
+    assert [context for context, _ in await frozen_systems(api_conn, caller.session_id)] == [0, 1, 2]
 
 
 def failing_statuses(times: int) -> tuple[list[str], Callable]:
