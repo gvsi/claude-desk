@@ -1905,7 +1905,8 @@ def a_new_desk(**business) -> CreateDeskRequest:
 @pytest.mark.kernel_plan("01b")
 async def test_owner_creates_a_desk_with_the_starter_preset(kernel, ro_read):
     """`POST /desks` adds a Desk to the owner's own copy, with its business, native tools only and the `ask_first`
-    preset active (auto for the utility and setup tools); a `connections` list, an owner name outside the pattern
+    preset active (auto for the utility and setup tools; the setup tools' own rows come with Plan 01c, which
+    `test_owner_setup_tool_runs_on_the_owners_desk` checks); a `connections` list, an owner name outside the pattern
     or an unknown time zone is 422 `invalid`, and another copy's business 404."""
     http, ro_schema, _ = kernel
     copy, other = await new_copy(http), await new_copy(http)
@@ -1924,7 +1925,7 @@ async def test_owner_creates_a_desk_with_the_starter_preset(kernel, ro_read):
                                                    " WHERE business_id = %s", (desk["business_id"],))
     assert business == {"name": "Okafor Electric", "owner_display_name": "Bob Okafor", "timezone": "America/New_York"}
     tools_rows = rows("SELECT tool, source, status FROM {ro}.tools WHERE desk_id = %s")
-    assert {row["source"] for row in tools_rows} == {"native"} and SETUP_TOOLS <= {row["tool"] for row in tools_rows}
+    assert {row["source"] for row in tools_rows} == {"native"}
     (active,) = rows("SELECT version, cards FROM {ro}.policy_versions WHERE desk_id = %s AND status = 'active'")
     owner_cards = [card for card in active["cards"] if not card["is_default"]]
     assert {card["applies_to"] for card in owner_cards} == ASK_FIRST_AUTO
@@ -2057,13 +2058,17 @@ async def test_no_demo_agent_for_a_deleted_desk(kernel):
 
 @pytest.mark.kernel_plan("01c")
 async def test_owner_setup_tool_runs_on_the_owners_desk(kernel, ro_read):
-    """The owner session has the setup tools, and only them, on its own Desks: a memory read is decided and
-    executed as the owner on the Desk it names, storing owner-only knowledge. A visitor tool asked by the owner, a
-    setup tool asked by a visitor, or the owner of another copy naming this Desk is refused."""
+    """A Desk `POST /desks` makes has the setup tools among its native tools, and the owner session has them, and
+    only them, on its own Desks: a memory read is decided and executed as the owner on the Desk it names, storing
+    owner-only knowledge. A visitor tool asked by the owner, a setup tool asked by a visitor, or the owner of another
+    copy naming this Desk is refused."""
     http, ro_schema, _ = kernel
     copy, other = await new_copy(http), await new_copy(http)
     owner = http.owner(copy.owner_token)
     created = await owner.call("POST /desks", a_new_desk())
+    tools_rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, source FROM {ro}.tools WHERE desk_id = %s",
+                         (created.desk_id,))
+    assert {row["source"] for row in tools_rows} == {"native"} and SETUP_TOOLS <= {row["tool"] for row in tools_rows}
     session = (await owner.whoami()).session
     assert tools(await context(owner, session.session_id, created.desk_id)) == (SETUP_TOOLS, SETUP_TOOLS)
 
