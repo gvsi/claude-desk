@@ -9,13 +9,15 @@ from sqlalchemy import select
 from desk.db.models import ActorSession, Document
 from desk.db.models import KnowledgeItem as KnowledgeRow
 from desk.kernel_service import auth
-from desk.kernel_service.decisions import OfflineDecisions, SearchHit
+from desk.kernel_service.decisions import AnthropicDecisions, OfflineDecisions, SearchHit
+from .fakes import FakeAnthropicClient
 from .helpers import kernel_ctx, rows_of
 from .test_adapters import visitor_of
 from .test_agent_auth import mint, open_agent, turn
 from .test_context import context_of, tools
 from .test_decide import decided
 from .test_setup_tools import entries, owner_of
+from .test_web_search_decisions import search_message
 
 
 async def test_search_is_owner_only(app, client, frozen_clock):
@@ -169,3 +171,24 @@ async def test_search_arguments_are_strict_and_bounded(app, client, reviewer, ar
     refused = await owner.decide("native.web_search", args)
     assert (refused.outcome, refused.state, refused.action) == ("refuse", "refused", None)
     assert reviewer.search_inputs == []
+
+
+async def test_parser_citation_canary_after_view_limit_is_dropped(app, client, reviewer, monkeypatch):
+    copy, _ = await visitor_of(app, client)
+    owner = await owner_of(client, copy.owner, copy.desk_id)
+    [document] = (await rows_of(app, copy.copy_id, select(Document)))[:1]
+    url = "https://trade.example/tainted"
+    model = FakeAnthropicClient(search_message(content=[
+        {"type": "web_search_tool_result", "tool_use_id": "srv-1", "content": [
+            {"type": "web_search_result", "title": "Services", "url": url, "encrypted_content": "opaque"}]},
+        {"type": "text", "text": "Model prose is not a source", "citations": [
+            {"type": "web_search_result_location", "url": url, "title": "Services",
+             "cited_text": "x" * 600 + document.canary, "encrypted_index": "opaque"}]}]))
+    monkeypatch.setattr(reviewer, "web_search", AnthropicDecisions(model).web_search)
+
+    _, result = await owner.run("native.web_search", {"query": "plumber services"})
+
+    assert result.state == "succeeded"
+    assert result.model_view == {"results": [], "simulated": False, "kind": "cited_excerpts"}
+    assert await rows_of(app, copy.copy_id, select(KnowledgeRow).where(KnowledgeRow.source == "web_search")) == []
+    assert len(model.requests) == 1
