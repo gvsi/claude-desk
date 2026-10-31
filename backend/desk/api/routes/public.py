@@ -404,6 +404,12 @@ def _keyed(agents: DemoAgents, ctx: VisitorCtx, body: SendAgentIn, slug: str, *,
         raise RateLimited(full.retry_after) from None
 
 
+async def _admit_agent(request: Request, ctx: VisitorCtx) -> None:
+    """Count the send on the copy's demo agent limit, once today's model budget allows it."""
+    await runtime(request).started().limiter.enforce("demo_agent", ctx.ids.copy_id, ledger=ctx.ledger())
+    await require_model_budget(request)
+
+
 @router.post("/desks/{slug}/send_agent", status_code=202, response_model=AgentRunStarted,
              responses=error_responses(401, 404, 409, 422, 429, 503))
 async def send_agent(slug: str, body: SendAgentIn, request: Request,
@@ -413,27 +419,31 @@ async def send_agent(slug: str, body: SendAgentIn, request: Request,
     here. Five demo agents a copy an hour; 503 `demo_budget` once today's model budget is spent.
 
     With an `idempotency_key` (one per click), a repeat in the copy within the hour answers the run the first started
-    (its ID; poll it for its state) and starts nothing, without counting on the limit; one with another task, or from
-    another session or to another Desk than the key's, is 409 `conflict`. The key is claimed once the limit and the budget let the request through, before the kernel mints the
-    agent, so a request they refuse claims nothing; a run whose agent couldn't be minted stays `failed`, and a new
-    click sends a new key. Keys live in this process's memory, like the runs, each for its run's hour; while 1000 are
-    held, a new one is 429 `rate_limited` until the oldest one's hour ends. Without a key, each request starts its own
-    run."""
+    (its ID; poll it for its state) and starts nothing; a repeat that finds the key never counts on the limit. One
+    with another task, or from another session or to another Desk than the key's, is 409 `conflict`. The key is
+    claimed once the limit and the budget let the request through, before the kernel mints the agent, so a request
+    they refuse claims nothing; a run whose agent couldn't be minted stays `failed`, and a new click sends a new key.
+    A request is admitted (looked up, counted and claimed) under its key's lock in this process, so a repeat sent
+    meanwhile waits for that admission, then answers the run; another process admits on its own, so during a deploy's
+    overlap a repeat routed to the other task can be counted twice. Keys live in this process's memory, like the
+    runs, each for its run's hour; while 1000 are held, a new one is 429 `rate_limited` until the oldest one's hour
+    ends. Without a key, each request starts its own run."""
     state = runtime(request).started()
-    if body.idempotency_key is not None:
-        run_id, _ = _keyed(state.agents, ctx, body, slug, claim=False)
-        if run_id is not None:
-            return AgentRunStarted(run_id=run_id)
-        wait = state.agents.key_wait()
-        if wait is not None:                            # the key map is full: refused before the limit counts it
-            raise RateLimited(wait)
-    await state.limiter.enforce("demo_agent", ctx.ids.copy_id, ledger=ctx.ledger())
-    await require_model_budget(request)
     claimed = None
-    if body.idempotency_key is not None:
-        run_id, claimed = _keyed(state.agents, ctx, body, slug, claim=True)
-        if claimed is None:                             # another request took the key meanwhile
-            return AgentRunStarted(run_id=run_id)
+    if body.idempotency_key is None:
+        await _admit_agent(request, ctx)
+    else:
+        async with state.agents.admissions.admitting(ctx.ids.copy_id, body.idempotency_key):
+            run_id, _ = _keyed(state.agents, ctx, body, slug, claim=False)
+            if run_id is not None:
+                return AgentRunStarted(run_id=run_id)
+            wait = state.agents.key_wait()
+            if wait is not None:                        # the key map is full: refused before the limit counts it
+                raise RateLimited(wait)
+            await _admit_agent(request, ctx)
+            run_id, claimed = _keyed(state.agents, ctx, body, slug, claim=True)
+            if claimed is None:                         # held already (not by this process's other requests)
+                return AgentRunStarted(run_id=run_id)
     try:
         issued = await _mint_agent(ctx)
     except BaseException:

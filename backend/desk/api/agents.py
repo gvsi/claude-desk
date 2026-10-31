@@ -48,6 +48,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from desk.api.idempotency import Admissions
 from desk.api.metrics import over_daily_budget, record_model_call
 from desk.api.model import CONVERSATION_MODEL, ModelClient, ModelRequest, ModelResponse, ModelUnavailable
 from desk.api.prompts import (
@@ -250,6 +251,7 @@ class DemoAgents:
         self._production = production
         self._runs: dict[str, tuple[DemoAgentRun, datetime]] = {}      # oldest first
         self._keys: dict[tuple[str, str], HeldKey] = {}                # by (copy, idempotency key), oldest first
+        self.admissions = Admissions()                                  # a keyed send's lookup, limits and claim
         self._tasks: set[asyncio.Task] = set()
 
     def _new_run(self, task: DemoTask, slug: str, launcher: Ids) -> DemoAgentRun:

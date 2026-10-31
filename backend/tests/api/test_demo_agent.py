@@ -675,6 +675,40 @@ async def test_a_repeat_while_the_first_is_minting_answers_the_same_run(app, bro
     assert (await read_run(client, slug, first.json()["run_id"])).json()["state"] == "done"
 
 
+async def test_a_repeat_during_the_first_ones_admission_waits_for_it_and_is_never_charged(app, browser, fake,
+                                                                                        kernel_http, agent_model,
+                                                                                        monkeypatch):
+    # The first request is still being admitted (here, held inside the limit's check) when its repeat arrives. The
+    # repeat waits for that admission, finds the claim and answers the same run, never counted on the limit itself.
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    limiter = app.state.runtime.limiter
+    enforce, asked, entered, release = limiter.enforce, [], asyncio.Event(), asyncio.Event()
+
+    async def held(name, key, **options):
+        asked.append(name)
+        if name == "demo_agent":
+            entered.set()
+            await release.wait()
+        return await enforce(name, key, **options)
+
+    monkeypatch.setattr(limiter, "enforce", held)
+    agent_model.add(step("", done=True))
+    first = asyncio.create_task(send_keyed(client, slug))
+    await asyncio.wait_for(entered.wait(), 5)
+    repeat = asyncio.create_task(send_keyed(client, slug))
+    await asyncio.sleep(0.3)
+    assert not repeat.done()
+    release.set()
+    first, repeat = await asyncio.wait_for(asyncio.gather(first, repeat), 5)
+    assert (first.status_code, repeat.status_code) == (202, 202), (first.text, repeat.text)
+    assert repeat.json() == first.json()
+    await app.state.runtime.agents.drain()
+    assert asked.count("demo_agent") == 1
+    assert len(fake.called("POST /agents/demo")) == 1 and len(agent_model.requests) == 1
+    assert len(app.state.runtime.agents.admissions) == 0                # each key's lock goes once nothing holds it
+
+
 async def test_the_same_key_for_another_task_is_a_conflict(app, browser, fake, kernel_http, agent_model):
     slug = await new_slug(kernel_http, fake)
     client, _, _ = await open_session(app, browser, slug)
