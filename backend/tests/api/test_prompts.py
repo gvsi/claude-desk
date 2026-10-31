@@ -68,7 +68,7 @@ def test_system_prompt_is_stable():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.1"                     # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.6"                     # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     for rule in (
         "You are Claude, an AI",                                  # who is answering
@@ -162,7 +162,24 @@ def test_drafting_prompts_leave_verification_to_the_built_in_rule():
     assert "keep any card on native.start_verification exactly as it is, and never add one" in RULES_CHAT_SYSTEM
 
 
+def test_reply_correction_uses_fixed_codes_and_the_same_plain_text_instruction():
+    from desk.api.prompts import NOTES, REPLY_DIAGNOSTICS, REPLY_RULE_IDS
+
+    assert REWRITE_INSTRUCTION in NOTES["prose_blocked"]
+    assert "or use the handoff clause" not in REWRITE_INSTRUCTION
+    assert "soft.unavailable" not in REWRITE_INSTRUCTION
+    assert "harness" not in REWRITE_INSTRUCTION
+    assert "write at least one full sentence in English or Spanish beside the cards" in REWRITE_INSTRUCTION
+    assert "don't repeat the flagged words" in REWRITE_INSTRUCTION
+    assert "Do not repeat a business action" in REWRITE_INSTRUCTION
+    assert "soft.unavailable" not in REPLY_RULE_IDS
+    assert "lex.en.untrusted" not in REPLY_RULE_IDS
+    assert "soft.handoff_closed" in REPLY_RULE_IDS
+    assert REPLY_DIAGNOSTICS["language_uncertain"].startswith("Write at least one full sentence")
+
+
 PROMPT_NAMES = {"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_system", "SEND_REPLY_TOOL",
+                "REPLY_DIAGNOSTICS", "REPLY_RULE_IDS", "INVALID_REPLY_DIAGNOSTIC", "INVALID_REPLY_SHAPES",
                 "REPLY_EXAMPLES",
                 "REWRITE_INSTRUCTION", "NOTES", "DEMO_TASKS", "DemoTask", "VISITING_AGENT_SYSTEM", "AGENT_TASK",
                 "RECEIPT_LINE", "agent_task", "AgentStep", "desk_reply_text",
@@ -204,7 +221,10 @@ def _from_prompts(tree: ast.Module) -> set[str]:
 
 def _fixed() -> set[str]:
     """The fixed strings a model reads, as prompts.py holds them: no other module may hold one."""
+    from desk.api.prompts import INVALID_REPLY_DIAGNOSTIC, REPLY_DIAGNOSTICS
+
     return {REWRITE_INSTRUCTION, *NOTES.values(), *DEMO_TASKS.values(), SEND_REPLY_TOOL["description"],
+            INVALID_REPLY_DIAGNOSTIC, *REPLY_DIAGNOSTICS.values(),
             *(line for line in conversation_system(RIVERA)[0]["text"].splitlines() if len(line) > 20),
             *(line for line in VISITING_AGENT_SYSTEM.splitlines() if len(line) > 20),
             *AGENT_TASK.split("{task}"), RECEIPT_LINE,

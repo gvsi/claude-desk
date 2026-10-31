@@ -7,6 +7,7 @@ import itertools
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import replace
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -14,18 +15,18 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from desk.api import loop, prompts, tools
-from desk.api.deliver import Status, run_lock
+from desk.api.deliver import Reply, Status, deliver, run_lock
 from desk.api.kernel_client import KernelHttp
 from desk.api.loop import TURN_LOCK_POOL_SIZE, run_pending, turn_lock
 from desk.api.prompts import conversation_system
 from desk.api.runner import TurnRunner
 from desk.api.sse import emit
-from desk.api.store import append_assistant, append_message, has_pending, lock_key, prepare_model_input
+from desk.api.store import append_assistant, append_message, has_pending, lock_key, prepare_model_input, transcript
 from desk.api.tools import Caller, send_reply
-from desk.contracts import ToolCall
+from desk.contracts import Clause, RenderedBlock, ReplyDraft, ToolCall
 from desk.db.session import API_CONNECT_OPTIONS, database_url
 from desk.events import EvOwnerJoined
-from desk.kernel_api import DecideRequest, KernelError
+from desk.kernel_api import CheckReplyRequest, DecideRequest, KernelError
 from tests.api.conftest import new_visitor
 from tests.api.fakes import ScriptedModel, gated, response, thinking, tool_use, unavailable
 from tests.api.test_deliver import waiting_for_lock
@@ -49,6 +50,15 @@ from tests.api.test_loop_turns import (
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 Hook = Callable[[httpx.Request], Awaitable[None]]
+
+
+@pytest.mark.parametrize("handoff", [True, False])
+def test_recovered_reply_reads_the_delivered_handoff_flag(handoff):
+    shown = SimpleNamespace(ref_id="msg-recovered", handoff=handoff, blocks=[
+        SimpleNamespace(template="quote"), SimpleNamespace(template="handoff")])
+    outcome = loop._recovered_reply(shown)
+    assert outcome.delivered == ("handoff" if handoff else "reply")
+    assert outcome.result["outcome"] == ("delivered_handoff" if handoff else "delivered")
 
 
 @pytest.fixture
@@ -926,6 +936,33 @@ async def test_new_visitor_message_joins_the_next_call(api_conn, engine, locks, 
     assert not await has_pending(api_conn, caller.session_id)
 
 
+async def test_recovered_cards_plus_handoff_ends_the_request_without_another_call(api_conn, engine, locks, caller, fake):
+    await said(api_conn, caller, "Hello")
+    assert await pending(caller, ScriptedModel([response(reply("Hello, how can I help?"))]), engine, locks) == "done"
+    await said(api_conn, caller, "When are you open?")
+    await prepare_model_input(api_conn, caller.session_id)
+    block = reply("Here is $89.", HOURS, id="toolu_crashed")
+    await append_assistant(api_conn, caller.ids, [block], generation=0)
+    await api_conn.commit()
+    verdict = await caller.kernel.call("POST /check_reply", CheckReplyRequest(draft=ReplyDraft(
+        session_id=caller.session_id, generation=0, prose=block["input"]["prose"],
+        clauses=[Clause(**HOURS)])))
+    # Exercise a signed recovery shape that can carry cards above the handoff clause.
+    verdict = verdict.model_copy(update={"blocks": [*verdict.blocks,
+        RenderedBlock(kind="card", template="handoff", text="Let me check with Maria Rivera.")]})
+    await deliver(api_conn, caller.ids, Reply(verdict, "claude", "model", call_id=block["id"]),
+                  ro_schema=caller.ro_schema)
+    await api_conn.commit()
+    model = ScriptedModel()
+    assert await pending(caller, model, engine, locks, end_on_reply=True) == "idle"
+    assert model.requests == [] and len(fake.called("/check_reply")) == 2
+    results = (await rows(api_conn, caller.session_id, "model_tool_results", "model_content"))[-1][0]
+    assert json.loads(results[0]["content"]) == {"outcome": "delivered_handoff"}
+    item = next(item for item in await transcript(api_conn, caller.ids, "owner")
+                if item.kind == "delivered" and item.event.message_id == verdict.message_id)
+    assert item.event.handoff and [b.template for b in item.event.blocks] == ["hours", "handoff"]
+
+
 async def test_recovered_replies_answer_from_what_was_delivered(api_conn, engine, locks, caller, fake):
     await said(api_conn, caller, "Hello!")
     assert await pending(caller, ScriptedModel([response(reply("Hi, how can I help?"))]), engine, locks) == "done"
@@ -951,9 +988,11 @@ async def test_recovered_replies_answer_from_what_was_delivered(api_conn, engine
     *_, (results,) = await rows(api_conn, caller.session_id, "model_tool_results", "model_content")
     (message_id,) = [ref for ref, call in await rows(api_conn, caller.session_id, "delivered", "ref_id", "call_id")
                      if call == "toolu_shown"]
+    (fallback_id,) = [ref for ref, call in await rows(api_conn, caller.session_id, "delivered", "ref_id", "call_id")
+                      if call == "toolu_bad"]
     assert [(result["tool_use_id"], json.loads(result["content"]), result["is_error"]) for result in results] == [
         ("toolu_shown", {"outcome": "delivered", "message_id": message_id}, False),
-        ("toolu_bad", {"outcome": "delivered_handoff"}, True),
+        ("toolu_bad", {"outcome": "delivered", "message_id": fallback_id}, False),
         ("toolu_lost", {"outcome": "not_run"}, True)]
 
     # a reply that never showed leaves the visitor unanswered: Claude is asked again, and reads why

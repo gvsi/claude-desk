@@ -25,6 +25,8 @@ from tests.kernel_contract.test_contract import (
     ledger_page,
     new_copy,
     new_visitor,
+    issue_payment_link,
+    item_id,
     session_handoffs,
 )
 
@@ -124,3 +126,37 @@ async def test_a_first_draft_no_rewrite_fixes_opens_the_handoff_the_visitor_sees
         ("card", "open")]
     assert await handed_to_you(http, copy) == 1
     assert await delivered(conn, session_id) == [["handoff"]]
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_payment_caption_rewrites_through_the_api_and_keeps_final_cards(kernel, ro_read, conn):
+    """The combined API/kernel path: one uncertain-language correction, retained checked cards, and a hard control."""
+    http, ro_schema, state = kernel
+    copy = await new_copy(http)
+    visitor = await new_visitor(http, desk_slug(ro_read, ro_schema, copy))
+    caller, session_id = caller_of(http, ro_schema, copy, visitor), visitor.state.session_id
+    _, issued = await issue_payment_link(http.session(visitor.session_token), session_id,
+        item_id(ro_read, ro_schema, copy, "Service call deposit"), 1,
+        owner=http.owner(copy.owner_token) if state is None else None)
+    clauses = [{"template": "payment_link", "fact_id": issued.facts[0].fact_id}]
+    draft = {"prose": "Absolutely. Payment link below.", "clauses": clauses}
+    first = await tools.send_reply(conn, caller, 0, draft, 1, call_id="toolu_uncertain")
+    assert first.result["delivered"] is False
+    assert first.result["violations"] == [{"kind": "uncertain_language", "rule_id": "language_uncertain"}]
+    assert await delivered(conn, session_id) == []
+    assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
+
+    corrected = await tools.send_reply(conn, caller, 0, {**draft, "prose": "Here is the link to pay."}, 2,
+                                       call_id="toolu_corrected")
+    assert corrected.result["outcome"] == "delivered" and corrected.delivered == "reply"
+    assert [check["final"] for check in caller.kernel.checks] == [False, True]
+    final = await tools.send_reply(conn, caller, 0, draft, 2, call_id="toolu_kept")
+    assert final.result["outcome"] == "delivered" and final.delivered == "reply" and not final.is_error
+    assert await delivered(conn, session_id) == [[None, "payment_link"], ["payment_link"]]
+    assert session_handoffs(ro_read, ro_schema, copy, session_id) == []
+    stored = await conn.execute(text("SELECT payload FROM app.run_events WHERE session_id = :s AND type = 'message'"
+                                    " ORDER BY seq"), {"s": session_id})
+    assert all(not payload["handoff"] for (payload,) in stored)
+    control = await tools.send_reply(conn, caller, 0, {**draft, "prose": "Bonjour, je peux vous aider."}, 1,
+                                      call_id="toolu_unsupported")
+    assert control.result == {"outcome": "delivered_handoff"} and control.delivered == "handoff"

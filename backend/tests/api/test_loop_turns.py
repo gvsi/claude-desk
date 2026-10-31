@@ -63,6 +63,69 @@ def reply(prose: str, *clauses: dict, id: str | None = None) -> dict:
     return tool_use("send_reply", {"prose": prose, "clauses": list(clauses)}, id=id)
 
 
+async def test_uncertain_caption_gets_one_cause_specific_final_rewrite(api_conn, caller, fake):
+    await said(api_conn, caller, "When are you open?")
+    model = ScriptedModel([response(reply("Absolutely. Payment link below.", HOURS)),
+                           response(reply("Here is the information.", HOURS))])
+    assert await run_turn(api_conn, caller, model) == "done"
+    assert len(model.requests) == 2
+    feedback = tool_results(model.requests[1])[0]["content"]
+    assert feedback["violations"] == [{"kind": "uncertain_language", "rule_id": "language_uncertain"}]
+    assert "write at least one full sentence in English or Spanish" in feedback["instruction"]
+    assert [call.body["final"] for call in fake.called("/check_reply")] == [False, True]
+    assert [e.blocks[0].text for e in await events(api_conn, caller.session_id) if e.type == "message"] == [
+        "Here is the information."]
+
+
+@pytest.mark.parametrize("recheck", ["flag", "error"])
+async def test_kernel_soft_recheck_stays_inside_one_check(api_conn, caller, fake, recheck):
+    await said(api_conn, caller, "When are you open?")
+    fake.soft_checks("error", recheck)
+    model = ScriptedModel([response(reply("Here is the information.", HOURS)),
+                           response(reply("Here is the information.", HOURS))])
+    assert await run_turn(api_conn, caller, model) == "done"
+    checks = fake.called("/check_reply")
+    if recheck == "flag":
+        assert len(checks) == len(model.requests) == 2
+        assert tool_results(model.requests[1])[0]["content"]["violations"] == [
+            {"kind": "soft_promise", "rule_id": "soft.promise"}]
+        assert checks[1].body["final"] is True
+    else:
+        assert len(checks) == len(model.requests) == 1
+        message = next(e for e in await events(api_conn, caller.session_id) if e.type == "message")
+        assert not message.handoff and [b.template for b in message.blocks] == ["hours"]
+
+
+async def test_digit_correction_keeps_the_quote_and_never_repeats_its_sibling_action(api_conn, caller, fake):
+    await said(api_conn, caller, "How much is a drain clearing?")
+    def corrected(request):
+        results = tool_results(request)
+        quote = next(r["content"] for r in results if r["tool_use_id"] == "toolu_quote_once")
+        feedback = next(r["content"] for r in results if r["tool_use_id"] == "toolu_digit")
+        assert feedback["violations"][0] == {"kind": "number_in_prose", "rule_id": "digit"}
+        assert feedback["instruction"] == REWRITE_INSTRUCTION
+        return response(reply("Here is the quote.", {"template": "quote", "fact_id": quote["fact_ids"][0]}))
+    model = ScriptedModel([response(tool_use("native__quote", DRAIN, id="toolu_quote_once"),
+                                    reply("Here is $89.", id="toolu_digit")), corrected])
+    assert await run_turn(api_conn, caller, model) == "done"
+    assert [c.body["call"]["call_id"] for c in fake.called("/decide")] == ["toolu_quote_once"]
+    assert len(fake.called("/execute")) == 1
+    assert [c.body["final"] for c in fake.called("/check_reply")] == [False, True]
+    assert [[b.template for b in e.blocks] for e in await events(api_conn, caller.session_id)
+            if e.type == "message"] == [[None, "quote"]]
+
+
+async def test_malformed_reply_names_field_and_spends_the_correction(api_conn, caller, fake):
+    await said(api_conn, caller, "When are you open?")
+    model = ScriptedModel([response(tool_use("send_reply", {"prose": "Hello", "clauses": [
+        {"template": "hours", "fact_id": 42}]})), response(reply("Here is $89.", HOURS))])
+    assert await run_turn(api_conn, caller, model) == "done"
+    feedback = tool_results(model.requests[1])[0]["content"]
+    assert feedback["violations"][0]["field"] == "clauses.0.fact_id"
+    assert feedback["violations"][0]["code"] == "string_type"
+    assert len(fake.called("/check_reply")) == 1 and fake.called("/check_reply")[0].body["final"] is True
+
+
 async def events(conn, session_id: str) -> list:
     rows = await conn.execute(text("SELECT payload FROM app.run_events WHERE session_id = :s AND kind = 'sse'"
                                    " ORDER BY seq"), {"s": session_id})
@@ -234,6 +297,7 @@ async def test_blocked_prose_gets_one_rewrite_then_the_handoff(api_conn, kernel_
     assert outcome == "done" and len(model.requests) == 2
     (note,) = [block["text"] for block in model.requests[1].messages[-1]["content"]]
     assert note.startswith("<note>") and NOTES["prose_blocked"] in note and "number_in_prose" in note
+    assert REWRITE_INSTRUCTION in note and '"rule_id": "digit"' in note and '"diagnostics"' in note
     writing, message, end = await events(api_conn, caller.session_id)
     assert (writing.type, message.type, end.type) == ("writing", "message", "turn_end")
     assert not message.handoff and message.blocks[0].text == "Let me get you a quote card for that."
@@ -492,7 +556,9 @@ async def test_reply_only_response_ends_the_turn(api_conn, caller, fake):
     (blocked,) = tool_results(model.requests[1])
     assert blocked["is_error"] and blocked["content"] == {
         "outcome": "blocked", "instruction": REWRITE_INSTRUCTION,
-        "violations": [{"kind": "number_in_prose", "span": "180."}, {"kind": "number_in_prose", "span": "$180."}]}
+        "violations": [{"kind": "number_in_prose", "rule_id": "digit"},
+                       {"kind": "number_in_prose", "rule_id": "currency"}], "delivered": False,
+        "diagnostics": [prompts.REPLY_DIAGNOSTICS["digit"]]}
     writing, message, end = await events(api_conn, caller.session_id)
     assert (message.type, message.handoff, message.blocks[0].text) == ("message", False, "Happy to quote that for you.")
     assert await rows(api_conn, caller.session_id, "delivered", "call_id") == [("toolu_second",)]

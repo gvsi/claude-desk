@@ -33,7 +33,7 @@ from desk.api.tools import (
     to_api_name,
     tool_delta,
 )
-from desk.contracts import ClauseTemplate, Decision, ToolCall, ToolName
+from desk.contracts import Clause, ClauseTemplate, Decision, ToolCall, ToolName, Violation
 from desk.events import EvHeld, EvReceipt, SseEvent
 from desk.kernel_api import DecideRequest, ExecuteRequest, SessionContext
 from tests.api.conftest import new_visitor
@@ -41,6 +41,27 @@ from tests.api.fakes import ScriptedModel, tool_use
 from tests.kernel_contract.fake_kernel import fake_kernel_app, route_keys
 
 EVENT = TypeAdapter(SseEvent)
+
+
+def test_feedback_never_echoes_checker_payloads_or_untrusted_validation_keys():
+    from types import SimpleNamespace
+
+    secret = "private-claim-canary-span"
+    clauses = [Clause(template="quote", fact_id="quote:known")] * 2
+    verdict = SimpleNamespace(violations=[
+        Violation(kind="soft_promise", rule_id=secret, span=secret, fact_ids=[secret]),
+        Violation(kind="unknown_fact", rule_id="template_mismatch", span="quote", fact_ids=["quote:known"]),
+        Violation(kind="unknown_fact", rule_id="no_such_fact", span=secret, fact_ids=[secret])])
+    feedback = tools._feedback(verdict, clauses)
+    assert secret not in json.dumps(feedback)
+    assert feedback[0] == {"kind": "soft_promise", "rule_id": "other"}
+    assert feedback[1] == {"kind": "unknown_fact", "rule_id": "template_mismatch", "template": "quote",
+                           "fact_id": "quote:known"}
+    assert "clause_index" not in feedback[1]
+    invalid = tools._draft({"prose": "Hello", "clauses": [{"template": "quote", "fact_id": 9}]})
+    assert invalid == [{"kind": "invalid_input", "rule_id": "other", "field": "clauses.0.fact_id",
+                        "code": "string_type", "expected": "a string"}]
+    assert secret not in json.dumps(tools._draft({"prose": "Hello", secret: True}))
 
 
 def test_tool_names_round_trip():
@@ -553,13 +574,45 @@ async def test_checked_reply_is_delivered(api_conn, caller, fake):
     assert await delivered_rows(api_conn, caller.session_id) == [("claude", "toolu_reply", message.message_id, 1)]
 
 
+async def test_template_feedback_names_the_clause_then_corrects(api_conn, caller, fake):
+    draft = {"prose": "Here is the information.", "clauses": [
+        {"template": "quote", "fact_id": "charter:hours"}]}
+    first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_bad_template")
+    assert first.result["delivered"] is False
+    assert first.result["violations"] == [{"kind": "unknown_fact", "rule_id": "template_mismatch",
+                                           "clause_index": 0, "template": "quote", "fact_id": "charter:hours"}]
+    assert first.result["diagnostics"] and first.result["instruction"] == REWRITE_INSTRUCTION
+    assert await events(api_conn, caller.session_id) == []
+    assert await delivered_rows(api_conn, caller.session_id) == []
+    fixed = await send_reply(api_conn, caller, 0, {**draft, "clauses": [
+        {"template": "hours", "fact_id": "charter:hours"}]}, 2, call_id="toolu_right_template")
+    assert fixed.result["outcome"] == "delivered"
+    assert [call.body["final"] for call in fake.called("/check_reply")] == [False, True]
+
+
+async def test_final_prose_failure_delivers_checked_cards_without_handoff(api_conn, caller, fake):
+    quote = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN, id="toolu_quote"))
+    clauses = [{"template": "quote", "fact_id": quote.result["fact_ids"][0]}]
+    draft = {"prose": "Here is $89.", "clauses": clauses}
+    first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_first")
+    assert first.result["violations"][0] == {"kind": "number_in_prose", "rule_id": "digit"}
+    assert [e for e in await events(api_conn, caller.session_id) if e.type == "message"] == []
+    second = await send_reply(api_conn, caller, 0, draft, 2, call_id="toolu_final")
+    assert second.result["outcome"] == "delivered" and second.delivered == "reply" and not second.is_error
+    message = (await events(api_conn, caller.session_id))[-1]
+    assert not message.handoff and [b.template for b in message.blocks] == ["quote"]
+    assert len(await stopped_drafts(api_conn, caller.session_id)) == 1
+    assert fake.handoffs == {}
+
+
 async def test_reply_blocked_once_then_handoff(api_conn, caller, fake):
     draft = {"prose": "It comes to $89 for the visit.", "clauses": []}
     first = await send_reply(api_conn, caller, 0, draft, 1, call_id="toolu_1")
 
     assert first.result == {"outcome": "blocked", "instruction": REWRITE_INSTRUCTION, "violations": [
-        {"kind": "number_in_prose", "span": "89 for the visit."},
-        {"kind": "number_in_prose", "span": "$89 for the visit."}]}
+        {"kind": "number_in_prose", "rule_id": "digit"},
+        {"kind": "number_in_prose", "rule_id": "currency"}], "delivered": False,
+        "diagnostics": [tools.REPLY_DIAGNOSTICS["digit"]]}
     assert (first.is_error, first.delivered, first.status) == (True, None, None)
     assert await events(api_conn, caller.session_id) == []                  # nothing is shown
     # The owner keeps the draft and each violation in full. The outcome carries them, with the verdict's message ID and
@@ -592,8 +645,12 @@ async def test_immediate_handoff_kinds_skip_the_rewrite(api_conn, kernel_http, f
     async def paused(visitor):
         fake.set_mode(visitor.ids.session_id, "paused")
 
+    async def unavailable_check(visitor):
+        fake.soft_checks("error", "error")
+
     cases = [("canary", canary, "Here's what the invoice says."),
              ("unsupported_language", None, "Bonjour, je peux vous aider."),
+             ("check_unavailable", unavailable_check, "Here is the information."),
              ("session_paused", paused, "Happy to help.")]
     for kind, arrange, prose in cases:
         visitor = await new_visitor(kernel_http, fake)
@@ -665,14 +722,17 @@ async def test_reply_rejects_owner_said_and_bad_input(api_conn, caller, fake):
     ]
     for tool_input, violations in cases:
         outcome = await send_reply(api_conn, caller, 0, tool_input, 1, call_id="toolu_bad")
-        assert outcome.result == {"outcome": "blocked", "violations": violations,
-                                  "instruction": REWRITE_INSTRUCTION}, tool_input
+        assert outcome.result["outcome"] == "blocked" and outcome.result["delivered"] is False
+        assert outcome.result["instruction"] == REWRITE_INSTRUCTION and outcome.result["diagnostics"]
+        assert [v["kind"] for v in outcome.result["violations"]] == [v["kind"] for v in violations]
+        assert all("span" not in v and "rule_id" in v for v in outcome.result["violations"])
         assert (outcome.is_error, outcome.delivered) == (True, None)
     assert fake.called("/check_reply") == [] and await events(api_conn, caller.session_id) == []
 
     # wrong twice: the handoff, checked as the API's own draft and recorded as what the call put on screen
     twice = await send_reply(api_conn, caller, 0, cases[0][0], 2, call_id="toolu_bad")
-    assert (twice.result, twice.is_error, twice.delivered) == ({"outcome": "delivered_handoff"}, True, "handoff")
+    assert (twice.result, twice.is_error, twice.delivered) == (
+        {"outcome": "delivered", "message_id": twice.message_id}, False, "reply")
     assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
                                    "clauses": [{"template": "handoff", "fact_id": None}]}]
     (message,) = await events(api_conn, caller.session_id)
@@ -685,7 +745,8 @@ async def test_bad_input_on_the_turns_last_call_hands_off_at_once(api_conn, call
     # checked as the API's own (final) draft and recorded as what the call put on screen
     bad = {"prose": "Maria says yes.", "clauses": [{"template": "owner_said", "fact_id": "owner:S-1"}]}
     outcome = await send_reply(api_conn, caller, 0, bad, 1, call_left=False, call_id="toolu_bad")
-    assert (outcome.result, outcome.is_error, outcome.delivered) == ({"outcome": "delivered_handoff"}, True, "handoff")
+    assert (outcome.result, outcome.is_error, outcome.delivered) == (
+        {"outcome": "delivered", "message_id": outcome.message_id}, False, "reply")
     assert check_drafts(fake) == [{"session_id": caller.session_id, "generation": 0, "prose": "",
                                    "clauses": [{"template": "handoff", "fact_id": None}]}]
     assert [call.body.get("final", True) for call in fake.called("/check_reply")] == [True]

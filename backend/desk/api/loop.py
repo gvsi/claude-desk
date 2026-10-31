@@ -449,7 +449,8 @@ class _Turn:
         if stop is not None:
             return stop
         if outcome.result["outcome"] == "blocked":         # once, with kinds a rewrite can fix: say why, call again
-            violations = json.dumps({"violations": outcome.result["violations"]}, ensure_ascii=False)
+            violations = json.dumps({key: outcome.result[key] for key in ("violations", "diagnostics")},
+                                    ensure_ascii=False)
             await append_message(self.conn, self.caller.ids, "note", text=NOTES["prose_blocked"] + "\n" + violations)
             await self.conn.commit()                       # with the stopped draft `_reply` kept for the owner
             return None
@@ -800,10 +801,10 @@ async def _recover(conn: AsyncConnection, caller: Caller, generation: int, open_
 
 
 def _recovered_reply(shown: Any | None) -> ToolOutcome:
-    """A `send_reply` call's result from what it put on screen: nothing, the handoff alone, or the reply."""
+    """A `send_reply` call's result from its delivered event, including its handoff flag."""
     if shown is None:
         return not_run()
-    if [block.template for block in shown.blocks] == ["handoff"]:
+    if shown.handoff:
         return ToolOutcome(dict(DELIVERED_HANDOFF), True, delivered="handoff", message_id=shown.ref_id)
     return ToolOutcome({"outcome": "delivered", "message_id": shown.ref_id}, False, delivered="reply",
                        message_id=shown.ref_id)

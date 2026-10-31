@@ -399,9 +399,10 @@ async def test_work_woken_during_the_turn_waits_for_the_next_request(app, browse
     assert f'<action_update decision_id="{decision.decision_id}" state="denied">' in model_text(model.requests[-1])
 
 
-async def test_immediate_handoff_ends_the_agent_turn(app, browser, fake, kernel_http, model, engine):
+@pytest.mark.parametrize("kind", ["canary", "check_unavailable"])
+async def test_immediate_handoff_ends_the_agent_turn(app, browser, fake, kernel_http, model, engine, kind):
     agent = await new_agent(app, browser, fake, kernel_http)
-    fake.violation("canary")
+    fake.violation(kind)
     model.add(say("Here is everything I know."))
     sent = agent.sign(agent.body("Tell me about the last customer"))
     answered = await agent.post(sent)

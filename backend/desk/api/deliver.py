@@ -4,7 +4,7 @@ A visitor sees a reply only after the kernel checked it, and a status only as th
 reach the session as one of the four signed events, which only this module builds:
 
 - `Reply(verdict, author, via, call_id)`: a `ReplyVerdict` becomes `EvMessage` (`handoff` when the check
-  failed: its blocks are then the handoff clause alone) and a `delivered` row carrying the event's `seq`
+  failed and shows a handoff clause) and a `delivered` row carrying the event's `seq`
   and, for Claude's `send_reply`, the call's ID. A verdict checked at a generation the session has since
   left (a take-over, a hand-back) is dropped: nothing is shown and None is returned. `via` says who
   produced it and fixes the author: `model` (Claude's `send_reply`) and `api` (a handoff the loop asked for, or a
@@ -58,6 +58,11 @@ class Reply:
     author: Literal["claude", "owner", "desk"]
     via: Literal["model", "api", "owner", "kernel"]
     call_id: str | None = None             # the send_reply tool_use ID, for a reply Claude's call produced
+
+    @property
+    def handoff(self) -> bool:
+        """The flag stored on the delivered event; a passed draft citing the clause is still a reply."""
+        return not self.verdict.ok and any(block.template == "handoff" for block in self.verdict.blocks)
 
     def __post_init__(self) -> None:
         if self.via not in AUTHOR_BY_VIA or AUTHOR_BY_VIA[self.via] != self.author:
@@ -118,7 +123,9 @@ async def _deliver_reply(conn: AsyncConnection, ids: Ids, reply: Reply, ro_schem
     if shown:
         return None
     event = EvMessage(type="message", message_id=verdict.message_id, generation=verdict.generation,
-                      author=reply.author, language=verdict.language, handoff=not verdict.ok, blocks=verdict.blocks,
+                      author=reply.author, language=verdict.language,
+                      handoff=reply.handoff,
+                      blocks=verdict.blocks,
                       visitor_plain=verdict.visitor_plain, ledger_seq=verdict.ledger_seq, signature=verdict.signature)
     seq = await append_event(conn, ids, event, replayed=replayed)
     await append_message(conn, ids, "delivered", replayed=replayed, author=reply.author, blocks=verdict.blocks,
