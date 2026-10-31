@@ -116,8 +116,46 @@ export const Spanish: Story = {
   },
 };
 
-/** Each field left blank or only spaces, one panel per case: none of them draws. */
-const BLANKS: { field: keyof typeof LIMIT.en; value: string }[] = (['perCharge', 'total', 'duration', 'source'] as const).flatMap((field) => [
+export const Used: Story = {
+  args: { used: '$20' },
+  parameters: {
+    canvas: 'N-Conv-Agent-Run1',
+    canvasNote: 'The panel as the agent’s conversation draws it for the owner, with what the agent has used so far after In total; here it sits in a card at the agents page’s width.',
+  },
+  play: async ({ canvas }) => {
+    // signed_limit_shows_used: the screen's words for what the agent has used, a term like the others,
+    // after In total and before how long the limit lasts.
+    const panel = canvas.getByRole('region', { name: 'Signed limit' });
+    await expect(terms(panel)).toEqual([
+      ['Per charge', '$20'],
+      ['In total', '$100'],
+      ['Used', '$20'],
+      ['For', 'One hour'],
+    ]);
+    const used = [...panel.querySelectorAll<HTMLElement>('dl > div')][2] as HTMLElement;
+    expectComputed(used.querySelector('dt') as HTMLElement, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
+    expectComputed(used.querySelector('dd') as HTMLElement, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
+    await expect(Math.round(panel.getBoundingClientRect().height)).toBe(63);
+    await expect(within(panel).getByText(LIMIT.en.source)).toBeVisible();
+  },
+};
+
+export const UsedInSpanish: Story = {
+  args: { ...LIMIT.es, used: '$20', language: 'es' },
+  parameters: { canvas: 'none', canvasNote: 'N-Conv-Agent-Run1’s panel with what was used, in Spanish: the design system’s label in Spanish, the screen’s words as given.' },
+  play: async ({ canvas }) => {
+    const panel = canvas.getByRole('region', { name: 'Límite firmado' });
+    await expect(terms(panel)).toEqual([
+      ['Por cargo', '$20'],
+      ['En total', '$100'],
+      ['Usado', '$20'],
+      ['Durante', 'Una hora'],
+    ]);
+  },
+};
+
+/** Each field left blank or only spaces, one panel per case: none of them draws, `used` included when it is given. */
+const BLANKS: { field: keyof typeof LIMIT.en | 'used'; value: string }[] = (['perCharge', 'total', 'duration', 'source', 'used'] as const).flatMap((field) => [
   { field, value: '' },
   { field, value: '   ' },
 ]);
@@ -136,7 +174,7 @@ export const BlankFields: Story = {
       })}
     </div>
   ),
-  parameters: { canvas: 'none', canvasNote: 'A guard for N-R2-Agents-03’s panel: a blank or whitespace field, any of the four, draws no panel at all.' },
+  parameters: { canvas: 'none', canvasNote: 'A guard for N-R2-Agents-03’s panel: a blank or whitespace field, any of the four or a given `used`, draws no panel at all.' },
   play: async ({ canvasElement }) => {
     // signed_limit_fails_closed: a limit it can't show whole isn't shown.
     const cases = [...canvasElement.querySelectorAll<HTMLElement>('[data-case]')];

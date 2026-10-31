@@ -7,6 +7,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest';
 
+import { Breadcrumb } from '../components/Breadcrumb/Breadcrumb.tsx';
 import { ChangeReview } from '../components/ChangeReview/ChangeReview.tsx';
 import { ConnectionPanel } from '../components/ConnectionPanel/ConnectionPanel.tsx';
 import { ConnectorReview } from '../components/ConnectorReview/ConnectorReview.tsx';
@@ -96,5 +97,18 @@ it('connector_review_coverage_keeps_a_key_each', () => {
     ),
   );
   expect(itemsReading(`Covered by your always-on rule: ${text}`)).toHaveLength(2);
+  expect(sameKeyWarnings()).toEqual([]);
+});
+
+it('breadcrumb_keeps_a_step_by_its_key', () => {
+  // A trail whose steps carry their own keys: when a step is added above them, each keeps its own
+  // element, so React never hands one step's element to another.
+  const page = { key: 'page', label: 'Change your payment limit' };
+  act(() => root.render(<Breadcrumb items={[{ key: 'rules', label: 'Rules', href: '/rules' }, page]} />));
+  const before = container.querySelector('[aria-current="page"]')?.closest('li');
+  act(() => root.render(<Breadcrumb items={[{ key: 'desk', label: 'Rivera Plumbing', href: '/' }, { key: 'rules', label: 'Rules', href: '/rules' }, page]} />));
+  const after = container.querySelector('[aria-current="page"]')?.closest('li');
+  expect(after?.textContent).toContain('Change your payment limit');
+  expect(after).toBe(before);
   expect(sameKeyWarnings()).toEqual([]);
 });

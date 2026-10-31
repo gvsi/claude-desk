@@ -23,6 +23,7 @@ export {
 export { Notice, type NoticeProps, type NoticeTone } from './components/Notice/Notice.tsx';
 export {
   AGENT_START_LOST_COPY,
+  AGENT_START_RETRY_COPY,
   CHANGED_REFRESHED,
   CHAT_ENDED_COPY,
   DEMO_BUDGET_COPY,
@@ -30,6 +31,9 @@ export {
   RATE_LIMITED_COPY,
   RELOAD_PAGE_LABEL,
   SETUP_START_LOST_COPY,
+  SETUP_START_RETRY_COPY,
+  SETUP_START_SLOW_COPY,
+  SETUP_START_SPENT_COPY,
   UNREACHABLE_COPY,
   errorCopy,
   evErrorCopy,

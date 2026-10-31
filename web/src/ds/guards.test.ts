@@ -10,7 +10,8 @@
  *
  * Each guard first proves its matcher on a known-bad sample, so it can't pass by matching nothing.
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -38,9 +39,20 @@ function isScanned(file: string): boolean {
   );
 }
 
+/**
+ * The files under `dir`, at any depth, as paths relative to it with "/" between parts. Folders are
+ * left out whatever their names, such as the `__traces__/X.browser.test.tsx/` folders Vitest's trace
+ * viewer leaves behind, so a guard never tries to read one as a file.
+ */
+function filesUnder(dir: string): string[] {
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.relative(dir, path.join(entry.parentPath, entry.name)).split(path.sep).join('/'))
+    .sort();
+}
+
 function scannedSources(): Source[] {
-  return readdirSync(DS, { recursive: true, encoding: 'utf8' })
-    .map((file) => file.split(path.sep).join('/'))
+  return filesUnder(DS)
     .filter(isScanned)
     .sort()
     .map((file) => ({ file, text: readFileSync(path.join(DS, file), 'utf8') }));
@@ -48,8 +60,8 @@ function scannedSources(): Source[] {
 
 /** The canvas boards' code and styles (`boards/`), which the clay and mark guards read too. */
 function boardSources(): Source[] {
-  return readdirSync(path.join(DS, 'boards'), { recursive: true, encoding: 'utf8' })
-    .map((file) => `boards/${file.split(path.sep).join('/')}`)
+  return filesUnder(path.join(DS, 'boards'))
+    .map((file) => `boards/${file}`)
     .filter((file) => /\.(ts|tsx|css)$/.test(file))
     .sort()
     .map((file) => ({ file, text: readFileSync(path.join(DS, file), 'utf8') }));
@@ -228,8 +240,7 @@ const INVISIBLE = /[\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u
 
 /** Every text file under `src/ds/`, tests, stories and fixtures included. */
 function everyTextFile(): Source[] {
-  return readdirSync(DS, { recursive: true, encoding: 'utf8' })
-    .map((file) => file.split(path.sep).join('/'))
+  return filesUnder(DS)
     .filter((file) => /\.(ts|tsx|mjs|css|md|json|html)$/.test(file))
     .sort()
     .map((file) => ({ file, text: readFileSync(path.join(DS, file), 'utf8') }));
@@ -238,8 +249,7 @@ function everyTextFile(): Source[] {
 /** Every TypeScript file under `web/src/`, paths relative to it, so a guard can read the whole app. */
 function webSources(): Source[] {
   const src = path.join(DS, '..');
-  return readdirSync(src, { recursive: true, encoding: 'utf8' })
-    .map((file) => file.split(path.sep).join('/'))
+  return filesUnder(src)
     .filter((file) => /\.tsx?$/.test(file))
     .sort()
     .map((file) => ({ file, text: readFileSync(path.join(src, file), 'utf8') }));
@@ -300,6 +310,21 @@ function readmeProblem(name: string, readme: string | undefined): string | null 
 }
 
 describe('design system source guards', () => {
+  it('guards_read_files_only', () => {
+    // Vitest's trace viewer leaves folders named like test files (`__traces__/X.browser.test.tsx/`):
+    // the guards list files, never folders, whatever a folder is called.
+    const dir = mkdtempSync(path.join(tmpdir(), 'ds-guards-'));
+    try {
+      writeFileSync(path.join(dir, 'a.ts'), '');
+      mkdirSync(path.join(dir, '__traces__', 'b.browser.test.tsx'), { recursive: true });
+      mkdirSync(path.join(dir, 'c.css'));
+      writeFileSync(path.join(dir, 'c.css', 'd.css'), '');
+      expect(filesUnder(dir)).toEqual(['a.ts', 'c.css/d.css']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   const sources = scannedSources();
 
   it('no_raw_colors_outside_tokens', () => {

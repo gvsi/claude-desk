@@ -8,7 +8,7 @@ import { ShareCard } from './ShareCard.tsx';
  * A stand-in for the web app's QR code (plan 04 draws the real one from the Desk's link): a fixed
  * pattern of squares on a light ground, so the story shows the slot filled. It encodes nothing.
  */
-function QrPlaceholder() {
+function QrPlaceholder({ url = 'desk.example/rivera' }: { url?: string }) {
   const cells: [number, number][] = [];
   for (let y = 0; y < 21; y += 1) {
     for (let x = 0; x < 21; x += 1) {
@@ -18,7 +18,7 @@ function QrPlaceholder() {
     }
   }
   return (
-    <svg viewBox="-1 -1 23 23" width="152" height="152" role="img" aria-label="QR code for desk.example/rivera" style={{ display: 'block', background: '#faf9f5' }}>
+    <svg viewBox="-1 -1 23 23" width="152" height="152" role="img" aria-label={`QR code for ${url}`} style={{ display: 'block', background: '#faf9f5' }}>
       {cells.map(([x, y]) => (
         <rect key={`${x}-${y}`} x={x} y={y} width="1" height="1" fill="#141413" />
       ))}
@@ -101,5 +101,52 @@ export const Phone: Story = {
     await expect(Math.round(print.left - box.left)).toBe(Math.round(box.right - print.right));
     await expect(Math.round(print.top - box.bottom)).toBe(12);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const MarkedName: Story = {
+  name: 'A business name marked as theirs',
+  args: { name: 'AAA Plumbing', url: 'desk.example/aaa', ownerName: 'JJ Okafor', qr: <QrPlaceholder url="desk.example/aaa" /> },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'N-Run2-Share’s card for a business whose name has capitals: the name, the link and the owner are theirs, marked as user text, and the card is named by the marked name.',
+  },
+  play: async ({ canvas }) => {
+    // share_card_names_are_user_text: the card's name comes from the marked business name, not a
+    // label of its own, so nothing the business wrote is read as the card's words.
+    const card = canvas.getByRole('figure', { name: 'AAA Plumbing' });
+    await expect(card).not.toHaveAttribute('aria-label');
+    const name = card.ownerDocument.getElementById(card.getAttribute('aria-labelledby') ?? '');
+    await expect(name).toHaveTextContent(/^AAA Plumbing$/);
+    await expect(name).toHaveAttribute('data-copy', 'user');
+    await expect(within(card).getByText('desk.example/aaa')).toHaveAttribute('data-copy', 'user');
+    await expect(within(card).getByText('JJ Okafor')).toHaveAttribute('data-copy', 'user');
+  },
+};
+
+export const OwnerNameWithDirectionOverride: Story = {
+  name: 'An owner name with a direction override',
+  args: { ownerName: 'Maria \u202ERivera', onPrint: undefined },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'N-Run2-Share’s card for an owner whose name holds a right-to-left override (U+202E): the name is isolated in its sentence, so it can’t reorder the words after it.',
+  },
+  play: async ({ canvas }) => {
+    // share_card_owner_name_is_isolated: "any time." stays after the owner's name, at its right.
+    const caption = canvas.getByRole('figure', { name: 'Rivera Plumbing' }).querySelector('figcaption');
+    const owner = caption?.querySelector<HTMLElement>('[data-copy="user"]');
+    const after = caption?.lastChild;
+    if (!caption || !owner || !after || after.textContent !== ' any time.') throw new Error('No owner name and the words after it');
+    const range = document.createRange();
+    range.setStart(after, 1);
+    range.setEnd(after, 4);
+    const any = range.getBoundingClientRect();
+    // The name may wrap over the caption's two lines: "any" follows its last line box.
+    const rects = [...owner.getClientRects()];
+    const name = rects[rects.length - 1];
+    if (!name) throw new Error('The owner name has no box');
+    await expect(Math.round(any.top), '"any" is on the name’s last line').toBe(Math.round(name.top));
+    await expect(any.left, '"any" after the name').toBeGreaterThanOrEqual(name.right - 0.5);
+    expectComputed(owner, { unicodeBidi: 'isolate' });
   },
 };

@@ -1,4 +1,13 @@
-import { useContext, useId, useLayoutEffect, useRef, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  useContext,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useSyncExternalStore,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from 'react';
 
 import { AppShellPanelContext } from '../AppShell/AppShell.tsx';
 import { Composer } from '../Composer/Composer.tsx';
@@ -9,7 +18,7 @@ import { WritingIndicator } from '../WritingIndicator/WritingIndicator.tsx';
 import './AskClaudePanel.css';
 
 export interface AskClaudePanelProps {
-  /** "Close" and Escape inside the panel. Beside the page, the screen returns focus to what opened it; as a phone's sheet, the panel and the shell do. */
+  /** "Close" and Escape inside the panel. Beside the page, the screen returns focus to what opened it; as a sheet, the panel and the shell do. */
   onClose: () => void;
   /** Called with the owner's trimmed words from the panel's composer. */
   onSend: (text: string) => void;
@@ -19,8 +28,12 @@ export interface AskClaudePanelProps {
   children: ReactNode;
 }
 
-/** Below this width the panel is a modal sheet over the whole window, as AskClaudePanel.css draws it. */
-const NARROW = '(max-width: 639.98px)';
+/**
+ * Below this width the panel is a modal sheet, as AskClaudePanel.css draws it (docked at the right
+ * over the scrim, or the whole window on a phone): beside the sidebar's column (264 px) and the
+ * panel (400 px), the page would have under 360 px.
+ */
+const NARROW = '(max-width: 1023.98px)';
 
 function subscribeNarrow(onChange: () => void): () => void {
   const query = window.matchMedia(NARROW);
@@ -38,7 +51,7 @@ function isNarrow(): boolean {
  * Whatever else happens, focus stays inside: a focus that lands outside it, by Tab or by a script,
  * is pulled back to the last control inside it, so it holds with or without a shell. When the
  * panel is removed with focus inside it, focus returns to what opened it: the shell does that once
- * the page is live again. Leaving the phone width with the panel still open lifts the inert page and
+ * the page is live again. Widening to 1024 px with the panel still open lifts the inert page and
  * leaves focus where it is.
  */
 function useModalSheet(panelRef: { current: HTMLElement | null }, modal: boolean): void {
@@ -98,9 +111,10 @@ function useModalSheet(panelRef: { current: HTMLElement | null }, modal: boolean
 /**
  * The owner's conversation with Claude about rules and connectors: a header with "Close", the
  * conversation in a polite log, and a composer at the bottom. Beside the page it is a complementary
- * panel; under 640 px it is a modal sheet over the whole window. Render it as `AppShell`'s `panel`,
- * so the shell can make the rest of the app inert while it is a sheet. Nothing changes from here:
- * Claude's cards lead into the same reviews as the page.
+ * panel; under 1024 px, where the page beside it would be under 360 px wide, it is a modal sheet,
+ * docked at the window's right edge over the scrim, or over the whole window under 640 px. Render it
+ * as `AppShell`'s `panel`, so the shell can make the rest of the app inert while it is a sheet.
+ * Nothing changes from here: Claude's cards lead into the same reviews as the page.
  */
 export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskClaudePanelProps) {
   const headingId = useId();
@@ -119,6 +133,13 @@ export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskC
     onClose();
   };
 
+  // A press on the sheet itself, outside its content (the scrim, which is the sheet's own backdrop,
+  // or its padding), changes nothing: the sheet stays open, keeping a half-written question, and
+  // focus stays on the control that had it.
+  const onMouseDown = (event: MouseEvent<HTMLElement>) => {
+    if (modal && event.target === event.currentTarget) event.preventDefault();
+  };
+
   // One element at every width, so crossing the breakpoint keeps the composer's draft; only its
   // role changes, from a complementary panel to a modal dialog.
   return (
@@ -127,8 +148,12 @@ export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskC
       role={modal ? 'dialog' : 'complementary'}
       aria-modal={modal ? 'true' : undefined}
       aria-labelledby={headingId}
+      // As a sheet it can take focus itself, so a press on text inside it (the heading, the
+      // conversation) lands on it rather than on the page, and Escape and Tab still reach it.
+      tabIndex={modal ? -1 : undefined}
       className={`cd-ask-claude${modal ? ' cd-ask-claude--sheet' : ''}`}
       onKeyDown={onKeyDown}
+      onMouseDown={onMouseDown}
     >
       <div className="cd-ask-claude__header">
         <h2 id={headingId} className="cd-ask-claude__title cd-type-section">

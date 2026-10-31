@@ -17,22 +17,24 @@ function tabbables(dialog: HTMLElement): HTMLElement[] {
 
 /**
  * Keeps Tab and Shift+Tab inside `container`: from its last control Tab goes to its first, and
- * Shift+Tab from its first goes to its last; with nothing to reach, Tab stays put. Call it from the
- * container's `keydown` for a Tab.
+ * Shift+Tab from its first goes to its last; with nothing to reach, Tab stays put. Focus on the
+ * container itself (a press on text inside it) counts as outside its controls, so Tab goes to the
+ * first and Shift+Tab to the last. Call it from the container's `keydown` for a Tab.
  */
 export function keepTabInside(event: KeyboardEvent<HTMLElement>, container: HTMLElement): void {
   const order = tabbables(container);
   const first = order[0];
   const last = order[order.length - 1];
   const active = container.ownerDocument.activeElement;
+  const outside = active === container || !container.contains(active);
   if (!first || !last) {
     event.preventDefault();
     return;
   }
-  if (event.shiftKey && (active === first || !container.contains(active))) {
+  if (event.shiftKey && (active === first || outside)) {
     event.preventDefault();
     last.focus();
-  } else if (!event.shiftKey && (active === last || !container.contains(active))) {
+  } else if (!event.shiftKey && (active === last || outside)) {
     event.preventDefault();
     first.focus();
   }

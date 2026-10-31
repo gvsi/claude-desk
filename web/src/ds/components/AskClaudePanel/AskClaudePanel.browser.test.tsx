@@ -1,8 +1,10 @@
 /**
  * The Ask Claude panel beside the Rules page, as the signed board draws it (N-Conn-12-Chat), across
- * the phone breakpoint. Under 640 px it is a modal sheet: whatever the app draws behind it, the
- * top bar that replaces the sidebar included, stays out of reach until the sheet goes or the window
- * widens again. And the sheet's keyboard walk holds at the narrowest phone, 320 px.
+ * its breakpoints. Under 1024 px, where the page beside it would be under 360 px wide, it is a modal
+ * sheet: whatever the app draws behind it, the sidebar's column or the top bar that replaces it,
+ * stays out of reach until the sheet goes or the window widens again. From 640 px it keeps the
+ * panel's 400 px, docked at the right over the scrim; under 640 px it is the whole window. The
+ * sheet's keyboard walk holds at an upright tablet and at the narrowest phone, 320 px.
  */
 import { composeStories } from '@storybook/react-vite';
 import { act } from 'react';
@@ -11,6 +13,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
 import * as boards from '../../boards/ConnectorsHub.stories.tsx';
+import { chen } from '../../fixtures/index.ts';
+import { AppShell } from '../AppShell/AppShell.tsx';
 import { AskClaudePanel } from './AskClaudePanel.tsx';
 import * as panelStories from './AskClaudePanel.stories.tsx';
 
@@ -25,6 +29,16 @@ const { Phone } = composeStories(panelStories);
 const DESKTOP = { width: 1512, height: 982 };
 const PHONE = { width: 390, height: 844 };
 const NARROWEST = { width: 320, height: 700 };
+/** An upright tablet, the narrowest window that shows the sidebar's column. */
+const TABLET = { width: 768, height: 1024 };
+/** The narrowest window with room for the page beside the panel: 264 px of sidebar, 360 px of page, 400 px of panel. */
+const BESIDE = 1024;
+/** The narrowest the page beside the panel may be. */
+const PAGE_MIN = 360;
+/** The panel's own width, `size-side-panel`. */
+const PANEL = 400;
+/** The `scrim` token. */
+const SCRIM = 'rgba(0, 0, 0, 0.5)';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -59,12 +73,59 @@ function behind(): HTMLElement[] {
   return controls as HTMLElement[];
 }
 
+/** How many lines an element's text takes: the distinct tops of its line boxes. */
+function lineCount(element: Element): number {
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  const rects = [...range.getClientRects()].filter((rect) => rect.width > 0);
+  return new Set(rects.map((rect) => Math.round(rect.top))).size;
+}
+
+/** Nothing scrolls sideways: not the document, and not the page inside the shell. */
+function expectNoSidewaysScroll(width: number): void {
+  expect(document.documentElement.scrollWidth, `${width} px: the document doesn't scroll sideways`).toBeLessThanOrEqual(width);
+  const main = container.querySelector<HTMLElement>('main');
+  if (!main) throw new Error('No main');
+  expect(main.scrollWidth, `${width} px: the page doesn't scroll sideways`).toBeLessThanOrEqual(main.clientWidth);
+}
+
+/**
+ * From 640 px to 1023 px: the sheet is the panel's own 400 px, flush with the window's right edge at
+ * its full height, and the scrim covers the rest of the window. The scrim is the panel's own
+ * backdrop, so any point left of the panel lands on the panel; the page behind is inert.
+ */
+function expectDockedOverTheScrim(width: number, height: number): void {
+  const box = panel().getBoundingClientRect();
+  expect([box.left, box.top, box.width, box.height], `${width} px: 400 px, flush right, full height`).toEqual([width - PANEL, 0, PANEL, height]);
+  const scrim = getComputedStyle(panel(), '::before');
+  expect(scrim.backgroundColor, `${width} px: the scrim`).toBe(SCRIM);
+  expect([scrim.position, scrim.top, scrim.left, scrim.bottom, scrim.right], `${width} px: the scrim covers the rest of the window`).toEqual([
+    'fixed',
+    '0px',
+    '0px',
+    '0px',
+    `${PANEL}px`,
+  ]);
+  for (const [x, y] of [
+    [1, 1],
+    [width - PANEL - 1, height / 2],
+    [1, height - 1],
+  ] as const) {
+    expect(document.elementFromPoint(x, y), `${width} px: the scrim at ${x}, ${y}`).toBe(panel());
+  }
+}
+
+/** No scrim: beside the page, and as the phone's whole-window sheet. */
+function expectNoScrim(width: number): void {
+  expect(getComputedStyle(panel(), '::before').content, `${width} px: no scrim`).toBe('none');
+}
+
 /** The sheet is modal: nothing behind it takes focus, by Tab or from a script, and Tab stays in it. */
-async function expectModal(): Promise<void> {
+async function expectModal(controls: HTMLElement[] = behind()): Promise<void> {
   await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
   expect(panel().getAttribute('aria-modal')).toBe('true');
   expect(panel().contains(document.activeElement), 'focus is in the sheet').toBe(true);
-  for (const control of behind()) {
+  for (const control of controls) {
     control.focus();
     expect(document.activeElement, `${control.className} can't take focus`).not.toBe(control);
   }
@@ -84,14 +145,19 @@ it('ask_claude_sheet_keeps_the_page_inert_across_the_breakpoint', async () => {
   expect(panel().getAttribute('role')).toBe('complementary');
   expect(container.querySelector('[inert]')).toBeNull();
 
-  // Down to a phone: the top bar replaces the sidebar behind the sheet, and stays out of reach.
+  // Down to a phone: the top bar replaces the sidebar behind the sheet, and stays out of reach. Under
+  // 640 px the sheet is the whole window, with no scrim.
   await page.viewport(PHONE.width, PHONE.height);
   await vi.waitFor(() => expect(container.querySelector('.cd-app-shell__menu')).not.toBeNull());
   await expectModal();
+  const phone = panel().getBoundingClientRect();
+  expect([phone.left, phone.top, phone.width, phone.height], 'the whole window').toEqual([0, 0, PHONE.width, PHONE.height]);
+  expectNoScrim(PHONE.width);
 
   // And to the narrowest phone.
   await page.viewport(NARROWEST.width, NARROWEST.height);
   await expectModal();
+  expectNoScrim(NARROWEST.width);
 });
 
 it('leaving_the_phone_lifts_the_inert_page', async () => {
@@ -112,8 +178,107 @@ it('leaving_the_phone_lifts_the_inert_page', async () => {
   }
 });
 
-it('ask_claude_sheet_keyboard_walk_at_320', async () => {
-  await page.viewport(NARROWEST.width, NARROWEST.height);
+it('ask_claude_is_a_sheet_while_the_page_beside_it_would_be_under_360_px', async () => {
+  // At an upright tablet the sidebar's column (264 px) and the panel (400 px) would leave the page
+  // 104 px; just under 1024 px, 359 px. Both get the sheet, docked at the right over the scrim. At
+  // 1024 px the page has its 360 px.
+  await page.viewport(TABLET.width, TABLET.height);
+  act(() => root.render(<AskClaude />));
+  const widths = [
+    { width: TABLET.width, role: 'dialog' },
+    { width: BESIDE - 1, role: 'dialog' },
+    { width: BESIDE, role: 'complementary' },
+  ] as const;
+  for (const { width, role } of widths) {
+    await page.viewport(width, TABLET.height);
+    await vi.waitFor(() => expect(panel().getAttribute('role'), `${width} px`).toBe(role));
+    // The sidebar's column shows at every one of these widths.
+    expect(container.querySelector('.cd-app-shell__column'), `${width} px: the sidebar's column`).not.toBeNull();
+    const main = container.querySelector<HTMLElement>('main');
+    if (!main) throw new Error('No main');
+    if (role === 'dialog') {
+      // A modal sheet, 400 px at the right over the scrim, focus inside, and the shell behind it inert.
+      expect(panel().getAttribute('aria-modal'), `${width} px`).toBe('true');
+      expectDockedOverTheScrim(width, TABLET.height);
+      expect(panel().contains(document.activeElement), `${width} px: focus is in the sheet`).toBe(true);
+      expect(main.closest('[inert]'), `${width} px: the page is inert`).not.toBeNull();
+      expect(container.querySelector('.cd-app-shell__column')?.closest('[inert]'), `${width} px: the sidebar is inert`).not.toBeNull();
+    } else {
+      // Beside the page, which keeps its 360 px, and nothing is inert.
+      expect(panel().hasAttribute('aria-modal'), `${width} px`).toBe(false);
+      expect(panel().getBoundingClientRect().width, `${width} px: the panel`).toBe(PANEL);
+      expect(main.getBoundingClientRect().width, `${width} px: the page beside it`).toBeGreaterThanOrEqual(PAGE_MIN);
+      expectNoScrim(width);
+      expect(container.querySelector('[inert]'), `${width} px: nothing is inert`).toBeNull();
+    }
+    expectNoSidewaysScroll(width);
+    const title = container.querySelector('h1');
+    if (!title) throw new Error('No title');
+    expect(title.textContent).toBe('Rules');
+    expect(lineCount(title), `${width} px: the title on one line`).toBe(1);
+  }
+});
+
+it('crossing_1024_px_keeps_the_draft', async () => {
+  // The same element at every width, so the composer's draft survives the breakpoint both ways.
+  await page.viewport(BESIDE, TABLET.height);
+  act(() => root.render(<AskClaude />));
+  expect(panel().getAttribute('role')).toBe('complementary');
+  const box = panel().querySelector<HTMLTextAreaElement>('textarea');
+  if (!box) throw new Error('No composer');
+  await act(async () => {
+    await userEvent.type(box, 'Turn off Payments');
+  });
+  expect(box.value).toBe('Turn off Payments');
+  await page.viewport(BESIDE - 1, TABLET.height);
+  await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
+  expect(panel().querySelector('textarea'), 'the same composer').toBe(box);
+  expect(box.value).toBe('Turn off Payments');
+  await page.viewport(BESIDE, TABLET.height);
+  await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('complementary'));
+  expect(panel().querySelector('textarea'), 'the same composer').toBe(box);
+  expect(box.value).toBe('Turn off Payments');
+
+  // And across the sheet's own breakpoint: docked over the scrim at 768, the whole window at 639,
+  // docked again at 640. The same composer keeps the draft and the focus all the way.
+  for (const { width, docked } of [
+    { width: TABLET.width, docked: true },
+    { width: 639, docked: false },
+    { width: 640, docked: true },
+  ]) {
+    await page.viewport(width, TABLET.height);
+    await vi.waitFor(() => expect(window.innerWidth).toBe(width));
+    await vi.waitFor(() => expect(panel().getAttribute('role'), `${width} px`).toBe('dialog'));
+    expect(panel().querySelector('textarea'), `${width} px: the same composer`).toBe(box);
+    expect(box.value, `${width} px: the draft`).toBe('Turn off Payments');
+    expect(document.activeElement, `${width} px: focus stays on the composer`).toBe(box);
+    if (docked) {
+      expectDockedOverTheScrim(width, TABLET.height);
+    } else {
+      const whole = panel().getBoundingClientRect();
+      expect([whole.left, whole.top, whole.width, whole.height], `${width} px: the whole window`).toEqual([0, 0, width, TABLET.height]);
+      expectNoScrim(width);
+    }
+    expectNoSidewaysScroll(width);
+  }
+});
+
+it('docked_over_the_scrim_with_the_top_bar', async () => {
+  // At 700 px the top bar replaces the sidebar's column, and the sheet is still the panel's 400 px
+  // at the window's right edge, over the scrim, with everything behind it out of reach.
+  await page.viewport(700, TABLET.height);
+  act(() => root.render(<AskClaude />));
+  await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
+  expect(container.querySelector('.cd-app-shell__menu'), 'the top bar').not.toBeNull();
+  expect(container.querySelector('.cd-app-shell__column'), 'no sidebar column').toBeNull();
+  expectDockedOverTheScrim(700, TABLET.height);
+  expectNoSidewaysScroll(700);
+  await expectModal();
+});
+
+/** Open the sheet from the page, walk it from the keyboard, close it with Escape: focus returns to the opener. */
+async function walkTheSheet(width: number, height: number): Promise<void> {
+  await page.viewport(width, height);
   act(() => root.render(<Phone />));
   const opener = page.getByRole('button', { name: 'Ask Claude to change a rule' });
   await userEvent.click(opener);
@@ -126,11 +291,80 @@ it('ask_claude_sheet_keyboard_walk_at_320', async () => {
   }
   await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
   expect(panel().contains(document.activeElement)).toBe(true);
-  for (const control of container.querySelectorAll<HTMLElement>('.cd-app-shell__menu, a[href="#quotes"]')) {
+  // The controls behind: Menu or the sidebar's link, whichever the shell draws, and the page's link.
+  const behindControls = container.querySelectorAll<HTMLElement>('.cd-app-shell__menu, .cd-app-shell__column a, a[href="#quotes"]');
+  expect(behindControls.length, 'the navigation and the page each have a control behind the sheet').toBe(2);
+  for (const control of behindControls) {
     control.focus();
     expect(document.activeElement).not.toBe(control);
   }
   // Escape closes it, focus returns to what opened it, and nothing is left inert.
+  await userEvent.keyboard('{Escape}');
+  await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude')).toBeNull());
+  expect(document.activeElement).toBe(opener.element());
+  expect(container.querySelector('[inert]')).toBeNull();
+}
+
+it('ask_claude_sheet_keyboard_walk_at_a_tablet', async () => {
+  await walkTheSheet(TABLET.width, TABLET.height);
+});
+
+it('ask_claude_sheet_keyboard_walk_at_320', async () => {
+  await walkTheSheet(NARROWEST.width, NARROWEST.height);
+});
+
+it('a_click_on_text_in_the_sheet_keeps_focus_in_it', async () => {
+  // Text that can't take focus (the heading, the conversation) hands a press to the sheet itself, so
+  // focus never falls to the page: Shift+Tab wraps to the sheet's last control, and Escape closes it
+  // and returns focus to what opened it. On a tablet's docked sheet and on a phone's.
+  for (const { width, height } of [TABLET, PHONE]) {
+    await page.viewport(width, height);
+    act(() => root.render(<Phone />));
+    const opener = page.getByRole('button', { name: 'Ask Claude to change a rule' });
+    await userEvent.click(opener);
+    await vi.waitFor(() => expect(panel().getAttribute('role'), `${width} px`).toBe('dialog'));
+    const heading = panel().querySelector<HTMLElement>('h2');
+    if (!heading) throw new Error('No heading');
+
+    await userEvent.click(heading);
+    expect(panel().contains(document.activeElement), `${width} px: focus stays in the sheet`).toBe(true);
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    const controls = [...panel().querySelectorAll<HTMLElement>('button:not([disabled]), textarea')];
+    expect(document.activeElement, `${width} px: Shift+Tab wraps to the last control`).toBe(controls[controls.length - 1]);
+
+    await userEvent.click(heading);
+    await userEvent.keyboard('{Escape}');
+    await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude'), `${width} px: Escape closes it`).toBeNull());
+    expect(document.activeElement, `${width} px: focus returns to the opener`).toBe(opener.element());
+    expect(container.querySelector('[inert]')).toBeNull();
+    act(() => root.render(<div />));
+  }
+});
+
+it('a_click_on_the_scrim_keeps_the_sheet_and_its_focus', async () => {
+  // Closing on a scrim click would throw away a half-written question, so the click changes
+  // nothing: the sheet stays open, focus stays on the composer, and Escape still closes it.
+  await page.viewport(TABLET.width, TABLET.height);
+  act(() => root.render(<Phone />));
+  const opener = page.getByRole('button', { name: 'Ask Claude to change a rule' });
+  await userEvent.click(opener);
+  await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
+  const composer = panel().querySelector('textarea');
+  if (!composer) throw new Error('No composer');
+  expect(document.activeElement).toBe(composer);
+  await act(async () => {
+    await userEvent.type(composer, 'Can verified clients book');
+  });
+
+  // A point left of the panel is the scrim, the sheet's own backdrop. The click lands there as a
+  // person's would, wherever the point is.
+  const [x, y] = [10, TABLET.height / 2];
+  expect(document.elementFromPoint(x, y), 'the point is the scrim').toBe(panel());
+  await userEvent.click(document.documentElement, { position: { x, y }, force: true });
+  expect(panel().getAttribute('role'), 'the sheet stays open').toBe('dialog');
+  expect(document.activeElement, 'focus stays on the composer').toBe(composer);
+  expect(composer.value, 'the half-written question is kept').toBe('Can verified clients book');
+
   await userEvent.keyboard('{Escape}');
   await vi.waitFor(() => expect(container.querySelector('.cd-ask-claude')).toBeNull());
   expect(document.activeElement).toBe(opener.element());
@@ -166,22 +400,49 @@ it('standalone_sheet_keeps_focus_inside', async () => {
   expect(panel().contains(document.activeElement)).toBe(true);
 });
 
+/**
+ * A shell that always shows the top bar (`layout="compact"`), so Menu shows while the window is wide
+ * enough for the panel beside the page.
+ */
+function CompactScreen() {
+  return (
+    <AppShell
+      layout="compact"
+      business={chen.business.name}
+      sidebar={
+        <nav aria-label="Main">
+          <a href="#rules">Rules</a>
+        </nav>
+      }
+      panel={
+        <AskClaudePanel onClose={() => {}} onSend={() => {}}>
+          <p>Conversation</p>
+        </AskClaudePanel>
+      }
+    >
+      <h1>Rules</h1>
+      <p>
+        <a href="#quotes">Quotes</a>
+      </p>
+    </AppShell>
+  );
+}
+
 it('open_menu_closes_when_the_panel_becomes_a_sheet', async () => {
-  // A compact screen with the panel beside the page: the navigation sheet is open. Narrowing to a
-  // phone makes the panel a modal sheet, so the navigation sheet closes and focus moves into the panel.
-  await page.viewport(700, 900);
-  act(() => root.render(<AskClaude />));
+  // A compact shell with the panel beside the page: the navigation sheet is open. Narrowing under
+  // 1024 px makes the panel a modal sheet, so the navigation sheet closes and focus moves into the panel.
+  await page.viewport(BESIDE + 76, 900);
+  act(() => root.render(<CompactScreen />));
   expect(panel().getAttribute('role')).toBe('complementary');
   await userEvent.click(page.getByRole('button', { name: 'Menu' }));
   await vi.waitFor(() => expect(container.querySelector('dialog.cd-app-shell__sheet[open]')).not.toBeNull());
 
-  await page.viewport(PHONE.width, PHONE.height);
+  await page.viewport(BESIDE - 24, 900);
   await vi.waitFor(() => expect(panel().getAttribute('role')).toBe('dialog'));
   await vi.waitFor(() => expect(container.querySelector('dialog.cd-app-shell__sheet[open]')).toBeNull());
   expect(panel().contains(document.activeElement), 'focus moved into the panel').toBe(true);
-  for (const link of container.querySelectorAll<HTMLElement>('.cd-sidebar a, .cd-app-shell__menu')) {
-    link.focus();
-    expect(document.activeElement, `${link.textContent ?? ''} can't take focus`).not.toBe(link);
-  }
-  await expectModal();
+  const menu = container.querySelector<HTMLElement>('.cd-app-shell__menu');
+  const quotes = container.querySelector<HTMLElement>('a[href="#quotes"]');
+  if (!menu || !quotes) throw new Error('A control behind the sheet is missing');
+  await expectModal([menu, quotes]);
 });

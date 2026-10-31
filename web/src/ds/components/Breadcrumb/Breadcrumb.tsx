@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 import type { RulesLinkProps } from '../ToolRulesCard/ToolRulesCard.tsx';
 
@@ -6,8 +6,15 @@ import './Breadcrumb.css';
 
 /** One step back up the trail: its name and, for every step but the page itself, where it goes. */
 export interface BreadcrumbItem {
-  label: string;
+  /**
+   * The step's name: "Stripe", "Refund". A node when it holds a name someone chose (a customer's, a
+   * business's), so the screen can mark that name as user text and isolate it:
+   * `<bdi data-copy="user">`, so a direction mark in the name can't reorder the words around it.
+   */
+  label: ReactNode;
   href?: string;
+  /** A stable key for the step, such as its route. Without one, the step's place in the trail is its key. */
+  key?: string;
 }
 
 export interface BreadcrumbProps {
@@ -32,7 +39,8 @@ export function Breadcrumb({ items, linkComponent: Link = PlainLink }: Breadcrum
     <nav aria-label="Breadcrumb" className="cd-breadcrumb">
       <ol role="list" className="cd-breadcrumb__list cd-type-meta">
         {items.map((item, index) => (
-          <li key={`${index}-${item.label}`} className="cd-breadcrumb__item">
+          // A step's own key when the screen gives one; otherwise its place in the trail.
+          <li key={item.key ?? index} className="cd-breadcrumb__item">
             {index > 0 ? (
               <span className="cd-breadcrumb__separator" aria-hidden="true">
                 /

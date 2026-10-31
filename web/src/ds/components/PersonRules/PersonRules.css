@@ -68,10 +68,14 @@
 }
 
 /* The outcome keeps its words on one line where it can, and wraps them inside the row where it
-   can't: "Automatic up to $10,000; over $10,000, ask me first" on a narrow phone. */
+   can't: "Automatic up to $10,000; over $10,000, ask me first" on a narrow phone. It wraps between
+   words, never inside one, so it shrinks only to its longest word: the card's overflow-wrap would
+   otherwise let a long rule squeeze "Automatic" onto two lines. */
 .cd-person-rules__row > .cd-outcome {
   flex: 0 1 auto;
+  min-width: min-content;
   max-width: 100%;
+  overflow-wrap: normal;
 }
 
 .cd-person-rules__none {

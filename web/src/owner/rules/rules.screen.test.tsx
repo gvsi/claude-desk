@@ -273,7 +273,7 @@ describe('rules page', () => {
       await expect.poll(() => screen.container.querySelector('.cd-app-shell')?.classList.contains('cd-app-shell--compact')).toBe(width < 768);
       const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
       const header = title.closest('.cd-page-header') as HTMLElement;
-      // The panel stays beside the page at every width here.
+      // From 1024 px up the panel stays beside the page.
       expect(box(panel.element()).left, `${width}`).toBeGreaterThan(box(header).right);
       return { title, header, text: title.closest('.cd-page-header__text') as HTMLElement, menu: screen.getByRole('button', { name: 'Start from a preset' }).element() };
     };
@@ -285,15 +285,29 @@ describe('rules page', () => {
       expect(box(menu).left, `${width}`).toBeGreaterThan(box(title).right);
       expect(Math.round(box(menu).top - box(title).top), `${width}`).toBe(4);
     }
-    // In a narrower column the menu goes under the title and its subtitle, which keep the
-    // column's whole width, and the title stays on one line.
-    for (const width of [1024, 960, 940, 660, 640]) {
-      const { title, header, text, menu } = await at(width);
-      expect(lines(title), `${width}`).toBe(1);
-      expect(Math.round(box(text).width), `${width}`).toBe(Math.round(box(header).width));
-      expect(Math.round(box(menu).top - box(text).bottom), `${width}`).toBe(16);
+    // In the narrowest column beside the panel, 360 px at 1024 px, the menu goes under the title and
+    // its subtitle, which keep the column's whole width, and the title stays on one line.
+    {
+      const { title, header, text, menu } = await at(1024);
+      expect(lines(title)).toBe(1);
+      expect(Math.round(box(text).width)).toBe(Math.round(box(header).width));
+      expect(Math.round(box(menu).top - box(text).bottom)).toBe(16);
     }
-    expectNoHorizontalScroll();
+    // Under 1024 px the page beside the panel would be under 360 px, so the panel is a modal sheet,
+    // docked at the window's right edge over the page from 640 px. The page keeps its own width
+    // behind it, its title on one line, and nothing scrolls sideways.
+    for (const width of [960, 940, 660, 640]) {
+      await page.viewport(width, 900);
+      await expect.poll(() => window.innerWidth).toBe(width);
+      await expect.poll(() => screen.container.querySelector('.cd-app-shell')?.classList.contains('cd-app-shell--compact')).toBe(width < 768);
+      const sheet = screen.container.querySelector<HTMLElement>('.cd-ask-claude');
+      await expect.poll(() => sheet?.getAttribute('role')).toBe('dialog');
+      expect(Math.round(box(sheet as HTMLElement).left), `${width}`).toBe(width - 400);
+      const title = screen.container.querySelector('h1') as HTMLElement;
+      expect(title.textContent).toBe('Rules');
+      expect(lines(title), `${width}`).toBe(1);
+      expectNoHorizontalScroll();
+    }
   });
 
   it('rule_chat_without_change_drafts_nothing', async () => {
