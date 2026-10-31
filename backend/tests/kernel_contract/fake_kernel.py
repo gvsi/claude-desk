@@ -1584,11 +1584,9 @@ class FakeKernelState:
             auto_money_cap_cents=RIVERA_MONEY_CAP_CENTS)
         desk = self._create_desk(copy_id, business, seed, tools=tuple(TOOL_FACTS), cards=RIVERA_CARDS)
         for index, item in enumerate(RIVERA_KNOWLEDGE):
-            # Each real insert reads the clock. Move the shared clock forward between seeds so later
-            # writes cannot predate them.
-            if index:
-                self.now += timedelta(microseconds=1)
-            self._store_knowledge(desk, item.model_copy(deep=True))
+            # Preserve insertion order without moving the shared clock used by other fake activity.
+            self._store_knowledge(desk, item.model_copy(deep=True),
+                                  created_at=self.now + timedelta(microseconds=index))
         return desk
 
     def _create_desk(self, copy_id: str, business: BusinessSeed, seed: DeskSeed, *, tools: tuple[str, ...],
@@ -2702,10 +2700,11 @@ class FakeKernelState:
             self._put_fact(desk, fact)
         return facts, view, inbox
 
-    def _store_knowledge(self, desk: Desk, item: KnowledgeItem) -> KnowledgeItem:
+    def _store_knowledge(self, desk: Desk, item: KnowledgeItem, *,
+                         created_at: datetime | None = None) -> KnowledgeItem:
         """Upsert a knowledge item by its ID, mirrored and ledgered `desk_data` (no text in the entry)."""
         desk.knowledge[item.item_id] = item
-        created_at = desk.knowledge_created_at.setdefault(item.item_id, self.now)
+        created_at = desk.knowledge_created_at.setdefault(item.item_id, self.now if created_at is None else created_at)
         self._put("knowledge_items", (desk.desk_id, item.item_id), {
             "item_id": item.item_id, "copy_id": desk.copy_id, "desk_id": desk.desk_id, "source": item.source,
             "title": item.title, "text": item.text, "readers": list(item.label.readers), "created_at": created_at})
