@@ -18,6 +18,7 @@ import {
 } from '../../ds/index.ts';
 import { aboveMoneyCapCopy, formatCents, listWords } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, connectorOn, toolState, type ConnectorKey } from '../connectors/catalog.ts';
+import { coveredTools } from './changeRows.ts';
 import { PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
 
 /** The rules a tool is read against: the active version's cards. */
@@ -98,30 +99,24 @@ function toolLine(row: Pick<ToolRow, 'tool' | 'effects' | 'reversible'>): string
   }
 }
 
-/**
- * The tools of `tools` (in the catalog's order) that the shared rule `card` covers among the
- * shared rules of `cards`, under the master plan's "Coverage and overlap": every tool with its
- * effect, and an automatic rule on a tool with several effects only jointly with an automatic rule
- * on each of the others. A tool's own rules don't take a shared rule's tools away from it.
- */
-function coveredTools(card: RuleCard, cards: readonly RuleCard[], tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): ToolName[] {
-  const shared = cards.filter((c) => c.is_default !== true && isShared(c));
-  const order = CONNECTORS.flatMap((connector) => connector.tools);
-  return tools
-    .filter((row) => order.includes(row.tool) && rulesForTool({ tool: row.tool, effects: row.effects }, shared).some((rule) => rule.card_id === card.card_id))
-    .map((row) => row.tool)
-    .sort((a, b) => order.indexOf(a) - order.indexOf(b));
+/** Every tool the connectors list, in their order: the tools Rules shows, never the setup interview's own. */
+const CONNECTOR_TOOLS: readonly ToolName[] = CONNECTORS.flatMap((connector) => connector.tools);
+
+/** The Desk's tools on its connectors, in the connectors' order: the tools a shared rule's line can name. */
+function onConnectors(tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): Pick<ToolRow, 'tool' | 'effects'>[] {
+  return tools.filter((row) => CONNECTOR_TOOLS.includes(row.tool)).sort((a, b) => CONNECTOR_TOOLS.indexOf(a.tool) - CONNECTOR_TOOLS.indexOf(b.tool));
 }
 
 /**
- * A shared rule's line under each tool it governs: its group and the tools it covers on this Desk,
- * "Applies to every tool that charges money: Payment link and Charge within a signed limit.", or
- * its group alone when the caller lists no tools it covers.
+ * A shared rule's line under each tool it governs: its group and the tools it covers on this Desk
+ * (`coveredTools`, among the Desk's tools on its connectors), "Applies to every tool that charges
+ * money: Payment link and Charge within a signed limit.", or its group alone when the caller lists
+ * no tools it covers.
  */
 function sharedWords(card: RuleCard, cards: readonly RuleCard[], tools: readonly Pick<ToolRow, 'tool' | 'effects'>[]): string {
   const group = targetWords(card.applies_to);
   const lower = `${group.charAt(0).toLowerCase()}${group.slice(1)}`;
-  const names = coveredTools(card, cards, tools).map((tool) => TOOL_NAMES[tool].name);
+  const names = coveredTools(card, cards, onConnectors(tools)).map((tool) => TOOL_NAMES[tool].name);
   return names.length === 0 ? `Applies to ${lower}.` : `Applies to ${lower}: ${listWords(names)}.`;
 }
 
